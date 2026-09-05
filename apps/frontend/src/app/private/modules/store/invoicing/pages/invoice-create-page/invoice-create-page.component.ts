@@ -184,7 +184,10 @@ import type {
  * tiene dos plantillas internas por contexto en vez de una sola con banderas
  * de campo. Ver su docblock.
  */
-import { InvoiceSectionLineasComponent } from '../../../../../../shared/components/invoice-sections/index';
+import {
+  InvoiceSectionLineasComponent,
+  resolveAiuLineComponent,
+} from '../../../../../../shared/components/invoice-sections/index';
 import type {
   LineasRowErrors,
   LineasRowPaths,
@@ -271,6 +274,7 @@ import {
   CONFIG_LIMITS,
   PERCENT_TOTAL_SCALED,
   formatPercentScaled,
+  isAiuLineTaxable,
   parsePercentScaled,
   regimeFromTaxableBasis,
   resolveAccountingModel,
@@ -419,14 +423,29 @@ export function splitAiuContratoAmount(
   }
 
   if (split.basis === 'contract' && sum <= PERCENT_TOTAL_SCALED) {
+    // EL RESIDUO CAE EN UTILIDAD, NO EN COSTO, y no es indiferente: es la
+    // única porción que la base `'utilidad'` grava. Si el centavo del
+    // truncamiento se fuera al costo, SALDRÍA de la base gravable en vez de
+    // entrar, y el sesgo sistemático sería a sub-declarar IVA.
+    //
+    // Es además, literalmente, el reparto de `explodeAiuContratoLine` en el
+    // backend: se truncan Administración, Imprevistos y COSTO, y Utilidad es
+    // lo que sobra. Cualquier otro orden hace que esta pantalla y el XML que
+    // se emite discrepen un centavo en casi todo importe con decimales — y la
+    // base gravable la valida la DIAN, no la pantalla.
     let assigned = 0;
     for (const component of AIU_COMPONENTS) {
+      if (component === 'utilidad') continue;
       const percent = Number(split.percentsScaled[component]) || 0;
       const cents = Math.floor((baseCents * percent) / PERCENT_TOTAL_SCALED);
       out[component] = cents / 100;
       assigned += cents;
     }
-    out.costo = (baseCents - assigned) / 100;
+    const costoCents = Math.floor(
+      (baseCents * (PERCENT_TOTAL_SCALED - sum)) / PERCENT_TOTAL_SCALED,
+    );
+    out.costo = costoCents / 100;
+    out.utilidad = (baseCents - assigned - costoCents) / 100;
     return out;
   }
 
@@ -483,6 +502,32 @@ export function splitAiuLine(
  * Fuera del Modelo 1 devuelve 1 o 0, que es exactamente lo que la lectura
  * histórica hacía con su `includes`: el Modelo 2 no cambia ni un centavo.
  */
+export function aiuLineTaxableAmount(
+  component: string,
+  base: number,
+  taxableBuckets: ReadonlyArray<string>,
+  split: AiuContratoSplit | null,
+): number {
+  const amount = Number(base) || 0;
+  if (amount <= 0) return 0;
+  const portions = splitAiuLine(component, amount, split);
+  let taxable = 0;
+  for (const bucket of AIU_BUCKETS) {
+    if (taxableBuckets.includes(bucket)) taxable += portions[bucket];
+  }
+  return Math.min(Math.max(taxable, 0), amount);
+}
+
+/**
+ * La misma respuesta expresada como FRACCIÓN de la línea, para escalar el
+ * impuesto que la barra de totales previsualiza.
+ *
+ * Se deriva de {@link aiuLineTaxableAmount} y no al revés: el importe es el
+ * valor legal —el que viaja en `cbc:TaxableAmount`— y la fracción sólo un
+ * instrumento de presentación. Derivar el importe multiplicando por la
+ * fracción reintroduciría el error de coma flotante que el reparto en
+ * centavos existe para evitar.
+ */
 export function aiuLineTaxableShare(
   component: string,
   base: number,
@@ -491,12 +536,10 @@ export function aiuLineTaxableShare(
 ): number {
   const amount = Number(base) || 0;
   if (amount <= 0) return taxableBuckets.includes(component || 'costo') ? 1 : 0;
-  const portions = splitAiuLine(component, amount, split);
-  let taxable = 0;
-  for (const bucket of AIU_BUCKETS) {
-    if (taxableBuckets.includes(bucket)) taxable += portions[bucket];
-  }
-  return Math.min(Math.max(taxable / amount, 0), 1);
+  return Math.min(
+    Math.max(aiuLineTaxableAmount(component, amount, taxableBuckets, split) / amount, 0),
+    1,
+  );
 }
 
 export function deriveAiuTotals(
@@ -809,6 +852,11 @@ export function applyAiuMarkingToRows(
 export interface AiuAutoApplyState {
   isAiu: boolean;
   planReady: boolean;
+  /**
+   * Qué FORMA tendría la aplicación: `'marcado'` no mueve importes, `'creacion'`
+   * inventa renglones. `null` cuando todavía no hay plan.
+   */
+  planMode: AiuApplyMode | null;
   /** ¿Ya se aplicó una vez en esta sesión del formulario? */
   applied: boolean;
   lineCount: number;
@@ -834,6 +882,14 @@ export interface AiuAutoApplyState {
 export function shouldAutoApplyAiuBase(state: AiuAutoApplyState): boolean {
   return (
     state.isAiu &&
+    // SÓLO el marcado se aplica solo. La creación de renglones NO, y el motivo
+    // es que su plan queda `ready` en cuanto hay un peso capturado: el operador
+    // teclea el primer dígito de 2.328.800, el plan lee 2 pesos de costo y el
+    // automatismo escribiría tres líneas de AIU que suman veintidós centavos y
+    // daría el reparto por hecho. El marcado no puede equivocarse así porque no
+    // inventa importes —sólo dice qué porción declara lo que YA está escrito— y
+    // se recalcula solo cuando la línea cambia.
+    state.planMode === 'marcado' &&
     state.planReady &&
     !state.applied &&
     state.lineCount > 0 &&
@@ -2504,8 +2560,20 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 >
                   {{ aiuUnassigned() }} linea(s) sin componente: se facturan como
                   <strong>costo reembolsable</strong> del contrato. Suman al valor
-                  del contrato y quedan fuera de la base gravable. Márcalas si
-                  alguna es administración, imprevistos o utilidad.
+                  del contrato y quedan fuera de la base gravable.
+                  <!--
+                    LA INSTRUCCIÓN DEPENDE DEL MODELO. Bajo el Modelo 1 el AIU
+                    no es un renglón, así que mandar a marcar administración,
+                    imprevistos o utilidad construiría el documento híbrido que
+                    el backend rechaza con INVOICING_AIU_007.
+                  -->
+                  @if (documentAccountingModel() === 'no_sumada') {
+                    Márcalas como <strong>Contrato (AIU incluido)</strong> si el
+                    AIU ya va dentro de su importe.
+                  } @else {
+                    Márcalas si alguna es administración, imprevistos o
+                    utilidad.
+                  }
                 </app-alert-banner>
               }
 
@@ -4786,6 +4854,34 @@ export class InvoiceCreatePageComponent implements OnInit {
    * declarada admite. Sin este escalado la barra de totales enseñaría el IVA
    * del contrato entero sobre un documento que declara el de la utilidad.
    */
+  /**
+   * El IMPORTE gravable de cada línea bajo el Modelo 1 — lo que viaja en
+   * `taxable_amount` y termina en `cbc:TaxableAmount`.
+   *
+   * Va aparte de {@link aiuTaxableShares} porque el payload no puede derivarlo
+   * multiplicando el importe por la fracción: `base × (base_gravable / base)`
+   * vuelve a pasar por coma flotante y devuelve un centavo distinto del que el
+   * reparto en centavos ya calculó exacto. Arreglo vacío fuera del Modelo 1,
+   * igual que su hermano.
+   */
+  readonly aiuTaxableAmounts = computed<number[]>(() => {
+    const split = this.aiuContratoSplit();
+    const settings = this.effectiveAiu();
+    if (!split || !settings) return [];
+    const items = this.itemsValue();
+    if (!items.some((item) => item?.aiu_component === 'contrato')) return [];
+    const buckets = AIU_TAXABLE_BUCKETS_BY_BASIS[settings.taxable_basis];
+    const math = this.lineMath();
+    return items.map((item, index) =>
+      aiuLineTaxableAmount(
+        String(item?.aiu_component ?? '').trim(),
+        math[index]?.base ?? 0,
+        buckets,
+        split,
+      ),
+    );
+  });
+
   readonly aiuTaxableShares = computed<number[]>(() => {
     const split = this.aiuContratoSplit();
     const settings = this.effectiveAiu();
@@ -4989,6 +5085,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     const items = this.itemsValue();
     return {
       isAiu: this.isAiu(),
+      planMode: this.aiuApplyPlan()?.mode ?? null,
       planReady: this.aiuApplyPlan()?.ready === true,
       applied: this.aiuBaseApplied(),
       lineCount: items.length,
@@ -6268,12 +6365,20 @@ export class InvoiceCreatePageComponent implements OnInit {
     // así que bajo `'subtotal'` —donde gravan los cuatro buckets— caía en la
     // rama del Decreto y avisaba únicamente por la utilidad, callando el IVA
     // faltante de administración e imprevistos.
-    const taxableBuckets = AIU_TAXABLE_BUCKETS_BY_BASIS[settings.taxable_basis];
+    //
+    // Se pregunta con `isAiuLineTaxable` y NO con `includes` sobre la tabla:
+    // `'contrato'` no es una cubeta, así que un `includes` lo da por NO
+    // gravable bajo las tres bases y la línea del Modelo 1 —la única que este
+    // documento tiene— jamás entraría al aviso. Sería la misma divergencia que
+    // `isAiuLineTaxable` existe para cerrar, reabierta dos archivos más allá.
     const isTaxable = (component: string): boolean =>
-      taxableBuckets.includes(component as AiuComponentLiteral);
+      isAiuLineTaxable(resolveAiuLineComponent(component), settings.taxable_basis);
 
+    // Las etiquetas salen de las opciones DEL MODELO, no de la lista base de
+    // tres: bajo el Modelo 1 la porción se llama «Contrato (AIU incluido)», y
+    // con el catálogo de tres el aviso la rotularía con la sigla cruda.
     const labels = new Map(
-      AIU_COMPONENT_OPTIONS.map((option) => [
+      this.aiuComponentOptions().map((option) => [
         String(option.value),
         option.label,
       ]),
@@ -8508,7 +8613,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     // escala la barra de totales: si el payload y la pantalla derivaran la base
     // gravable por su cuenta, el operador emitiría una cifra distinta de la que
     // leyó.
-    const shares = this.aiuTaxableShares();
+    const taxableAmounts = this.aiuTaxableAmounts();
 
     const items: InvoiceCreateItemPayload[] = (
       raw['items'] as InvoiceItemFormValue[]
@@ -8545,8 +8650,10 @@ export class InvoiceCreatePageComponent implements OnInit {
         // lo que hacía este `round2(base)` para todas— declararía una base
         // treinta veces mayor que la que el calculador persiste. Fuera del
         // Modelo 1 el factor es 1 y el valor es el de siempre, al centavo.
-        const taxableShare = shares[index] ?? 1;
-        const taxableAmount = round2(base * taxableShare);
+        // El importe sale del reparto en centavos, NO de `base × fracción`:
+        // ese producto reintroduce el error de coma flotante y manda a la DIAN
+        // un centavo distinto del que el calculador deriva por su cuenta.
+        const taxableAmount = taxableAmounts[index] ?? round2(base);
         payload.taxes = taxes.map((tax) => ({
           // Sólo un identificador REAL de `tax_rates` viaja: el catálogo marca
           // con negativo la categoría legada que no tiene fila de tarifa, y esa

@@ -4558,14 +4558,15 @@ export class InvoicingService {
     // contado dos veces y el piso del 10 % sin saber contra qué contrato
     // compararse.
     //
-    // La mezcla se deriva de `items` y no de `result.divergences` por dos
-    // razones. Primera: el calculador sigue emitiendo
-    // `aiu_contrato_mutually_exclusive` para el conteo >1, y leer esa
-    // divergencia volvería a rechazar lo que el negocio ahora admite. Segunda:
-    // ese chequeo corta al detectar el conteo sin llegar a evaluar la mezcla,
-    // así que un documento con dos `'contrato'` MÁS una línea por componente no
-    // produce la divergencia de mezcla — mirarla dejaría pasar justo el caso
-    // que hay que frenar.
+    // La mezcla se deriva de `items` y no de `result.divergences` para que la
+    // regla de negocio —qué documento se rechaza— viva en el flujo de emisión y
+    // no dependa de cómo el calculador decida reportar. El calculador ya no
+    // cuenta líneas `'contrato'` ni corta antes de evaluar la mezcla
+    // (`checkAiuContratoMutualExclusion`), así que su divergencia señala hoy el
+    // mismo índice que este escaneo; leerla funcionaría, pero ataría el
+    // rechazo a un detalle de reporte que puede cambiar sin que nadie mire
+    // aquí. El `logger.warn` de más abajo es el que vigila que las dos
+    // lecturas no se separen.
     const contrato_line_index = items.findIndex(
       (item) => item.aiu_component === 'contrato',
     );

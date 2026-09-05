@@ -25,10 +25,11 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
  * AIU dos veces.
  *
  * Por eso `recalculateDocument` deriva la mezcla de los `items` y ya no de la
- * divergencia `'aiu_contrato_mutually_exclusive'`: el calculador sigue
- * emitiéndola por el conteo >1 —donde ahora sólo se registra en el log— y corta
- * ahí sin llegar a evaluar la mezcla, así que leerla dejaría pasar justo el
- * documento que hay que frenar.
+ * divergencia `'aiu_contrato_mutually_exclusive'`: la regla de negocio vive en
+ * el flujo de emisión y no queda atada a cómo el calculador decida reportar.
+ * El calculador ya no cuenta líneas `'contrato'` ni corta antes de evaluar la
+ * mezcla, así que hoy las dos lecturas coinciden —y el `logger.warn` del
+ * servicio es justamente el centinela de que no se separen.
  *
  * Se instancia por prototipo, igual que
  * `invoicing.service.aiu-matrix.spec.ts`: `recalculateDocument` sólo toca

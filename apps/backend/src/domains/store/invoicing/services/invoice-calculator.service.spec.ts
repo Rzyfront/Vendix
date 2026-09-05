@@ -2091,6 +2091,68 @@ describe('InvoiceCalculatorService', () => {
         expect(result.totals.total_amount).toBe('2342074.16');
       });
 
+      /**
+       * LA BASE DE UNA LÍNEA MODELO 1 NO SE NEGOCIA CON EL CLIENTE.
+       *
+       * `taxable_amount` en el payload existe para las bases disímiles —una
+       * línea cuyo IVA se liquida sobre un importe que el servidor no puede
+       * derivar—, y en cualquier otra línea el servidor lo acepta tal cual. En
+       * una línea `'contrato'` no: el servidor YA explotó la línea en sus
+       * cuatro porciones y sabe cuáles grava la base declarada.
+       *
+       * Aceptarlo dejaría que el navegador fijara el `cbc:TaxableAmount` que la
+       * DIAN valida, y basta que su reparto trunque en otro orden para que el
+       * documento se contradiga a sí mismo: `aiu_taxable_matrix` y el piso del
+       * 10 % contarían una base y `invoice_taxes` otra. La divergencia
+       * `line_tax` sólo vigila la CUOTA, así que el desacuerdo en la BASE
+       * pasaría callado hasta el rechazo de la DIAN.
+       */
+      it('ignora el taxable_amount del cliente en una línea de contrato', () => {
+        const result = service.calculate(
+          noSumada('utilidad', [
+            {
+              tax_name: 'IVA',
+              tax_rate: 19,
+              tax_type: 'iva',
+              // El contrato entero, treinta y tres veces la porción gravable.
+              taxable_amount: NO_SUMADA_AMOUNT,
+            },
+          ]),
+        );
+
+        expect(result.lines[0].taxes[0].taxable_amount).toBe('69864.00');
+        expect(result.lines[0].taxes[0].tax_amount).toBe('13274.16');
+        expect(result.totals.total_amount).toBe('2342074.16');
+      });
+
+      /**
+       * La contrapartida: fuera del Modelo 1 el seam sigue intacto. Una línea
+       * corriente con base disímil declarada la conserva, que es para lo que
+       * el campo se creó.
+       */
+      it('fuera del Modelo 1 el taxable_amount declarado sigue mandando', () => {
+        const result = service.calculate({
+          items: [
+            {
+              description: 'Línea con base disímil declarada',
+              quantity: 1,
+              unit_price: 1000000,
+              taxes: [
+                {
+                  tax_name: 'IVA',
+                  tax_rate: 19,
+                  tax_type: 'iva',
+                  taxable_amount: 400000,
+                },
+              ],
+            },
+          ],
+        });
+
+        expect(result.lines[0].taxes[0].taxable_amount).toBe('400000.00');
+        expect(result.lines[0].taxes[0].tax_amount).toBe('76000.00');
+      });
+
       // ─── Piso del 10 % y resumen sobre N líneas ───────────────────────────
 
       it('el AIU declarado de una línea Modelo 1 es A+I+U, no su importe entero', () => {

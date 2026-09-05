@@ -958,9 +958,20 @@ export class InvoiceCalculatorService {
       // base neta de la línea — o, en una línea 'contrato', la Σ de sus
       // porciones gravables (`contrato_taxable_base`). El IVA y el INC de un
       // mismo renglón comparten base salvo que se diga lo contrario.
-      const taxable = this.hasTaxableBase(tax.taxable_amount)
-        ? toDecimal(dianAmount(tax.taxable_amount))
-        : contrato_taxable_base;
+      //
+      // EN UNA LÍNEA MODELO 1 LA BASE NO SE NEGOCIA CON EL CLIENTE. El
+      // servidor ya explotó la línea en sus cuatro porciones y sabe cuáles
+      // grava la base declarada; aceptar aquí el `taxable_amount` del payload
+      // dejaría que el navegador fije el `cbc:TaxableAmount` que la DIAN
+      // valida, y basta que su reparto trunque en otro orden para que el
+      // documento se contradiga a sí mismo: `aiu_taxable_matrix` y el piso del
+      // 10 % contarían una base y `invoice_taxes` otra. La divergencia
+      // `line_tax` sólo vigila la CUOTA, así que un desacuerdo en la base
+      // pasaría callado.
+      const taxable =
+        contrato_split === null && this.hasTaxableBase(tax.taxable_amount)
+          ? toDecimal(dianAmount(tax.taxable_amount))
+          : contrato_taxable_base;
       const amount = taxable.times(fraction);
       const computed = dianAmount(amount);
 
@@ -1167,9 +1178,15 @@ export class InvoiceCalculatorService {
    * resultado que ya producía el binario 0/completo anterior a D.4— y nunca
    * un reparto que sub-declare IVA por defecto.
    *
-   * Un `Σpct > 100` bajo `'contract'` es una configuración imposible que
-   * `validateAiuSection` rechaza al guardar el perfil; si aun así llegara, el
-   * costo se recorta a cero antes que emitir una porción negativa.
+   * Un `Σpct > 100` bajo `'contract'` es una configuración imposible: el
+   * costo se recorta a cero —`costo_pct` sólo toma el remanente cuando es
+   * positivo— y entonces el residuo empuja UTILIDAD a negativo. No hay caso
+   * vivo: `validateAiuSection` rechaza ese reparto al guardar el perfil con
+   * `AIU_PERCENT_SUM_OF_CONTRACT`, que no es una advertencia sino un bloqueo,
+   * y `components_basis` nació en el mismo commit que ese validador, así que
+   * no puede existir un snapshot heredado con la combinación. Se documenta
+   * porque el recorte protege al costo, NO a la porción que recibe el
+   * residuo.
    */
   private explodeAiuContratoLine(
     line_amount: Prisma.Decimal,

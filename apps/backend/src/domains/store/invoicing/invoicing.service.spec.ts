@@ -361,11 +361,12 @@ describe('InvoicingService · N líneas Modelo 1 en un documento (D.4)', () => {
     // Instancia REAL: el motor es puro y mockearlo dejaría sin cubrir las
     // divergencias que esta regla decide ignorar o traducir.
     service.calculator = new InvoiceCalculatorService();
-    // El logger SÍ hace falta: el calculador sigue reportando
-    // `aiu_contrato_mutually_exclusive` cuando hay más de una línea «contrato»
-    // y `recalculateDocument` la registra al final. Ya no bloquea —esa es la
-    // regla que cambió— pero queda auditada, y sin el doble la traza tumbaría
-    // el caso que debe pasar.
+    // El logger SÍ hace falta: `recalculateDocument` avisa por él cuando su
+    // lectura de la mezcla y la del calculador no coinciden, y sin el doble esa
+    // traza tumbaría el caso que debe pasar. El calculador ya NO reporta
+    // `aiu_contrato_mutually_exclusive` por el mero conteo de líneas
+    // «contrato» —esa es la regla que cambió—: sólo cuando de verdad se
+    // mezclan los dos modelos.
     service.logger = { warn: jest.fn() };
     return service;
   };

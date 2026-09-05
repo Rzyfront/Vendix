@@ -405,6 +405,29 @@ describe('invoice-create-page · splitAiuContratoAmount (paso 6)', () => {
     ).toBeCloseTo(1000.01, 2);
   });
 
+  /**
+   * EL RESIDUO ATERRIZA EN UTILIDAD, Y ESTE CASO LO FIJA CONTRA EL BACKEND.
+   *
+   * Es el mismo importe que custodia `invoice-calculator.service.spec.ts` para
+   * `explodeAiuContratoLine`, y tiene que dar las mismas cuatro cifras: la
+   * pantalla y el XML declaran la misma base gravable o la DIAN valida una
+   * cifra que el operador nunca vio. Con el residuo en el costo —como se
+   * repartía antes— la utilidad daba 30.000,00 y la base gravable bajo
+   * `'utilidad'` salía un centavo corta: el sesgo era sistemáticamente a
+   * sub-declarar IVA.
+   */
+  it("con 'contract' el residuo va a UTILIDAD, igual que el calculador", () => {
+    const out = splitAiuContratoAmount(1000000.07, REPARTO_523);
+
+    expect(out.administracion).toBe(50000);
+    expect(out.imprevistos).toBe(20000);
+    expect(out.utilidad).toBe(30000.01);
+    expect(out.costo).toBe(900000.06);
+    expect(
+      out.administracion + out.imprevistos + out.utilidad + out.costo,
+    ).toBeCloseTo(1000000.07, 2);
+  });
+
   it("un reparto imposible bajo 'contract' (Σ > 100 %) NO produce un costo negativo", () => {
     const out = splitAiuContratoAmount(1000, {
       percentsScaled: { administracion: 8000, imprevistos: 4000, utilidad: 3000 },
@@ -700,6 +723,7 @@ describe('invoice-create-page · buildAiuSummaryRows (paso 7)', () => {
 describe('invoice-create-page · auto-aplicación de la base AIU (paso 8)', () => {
   const virgen: AiuAutoApplyState = {
     isAiu: true,
+    planMode: 'marcado',
     planReady: true,
     applied: false,
     lineCount: 1,
@@ -732,6 +756,41 @@ describe('invoice-create-page · auto-aplicación de la base AIU (paso 8)', () =
     expect(shouldAutoApplyAiuBase({ ...virgen, lineCount: 0 })).toBe(false);
     expect(shouldAutoApplyAiuBase({ ...virgen, planReady: false })).toBe(false);
     expect(shouldAutoApplyAiuBase({ ...virgen, isAiu: false })).toBe(false);
+  });
+
+  /**
+   * EL MODELO 2 NO SE APLICA SOLO, y no es una omisión: su plan queda `ready`
+   * en cuanto hay un peso capturado. Con el operador a medio teclear el importe
+   * del contrato —2 pesos leídos de 2.328.800— el automatismo escribiría tres
+   * renglones de AIU que suman veintidós centavos y daría el reparto por hecho,
+   * dejando el documento en 2.328.800,22 en vez de 2.587.555,56. El marcado no
+   * puede equivocarse así porque no inventa importes.
+   */
+  it('bajo el Modelo 2 (creación de renglones) NUNCA se aplica sola', () => {
+    expect(shouldAutoApplyAiuBase({ ...virgen, planMode: 'creacion' })).toBe(
+      false,
+    );
+  });
+
+  it('sin plan todavía no hay forma que aplicar: no se aplica', () => {
+    expect(shouldAutoApplyAiuBase({ ...virgen, planMode: null })).toBe(false);
+  });
+
+  /**
+   * El aviso de re-aplicación SÍ vive en los dos modelos: es la contrapartida
+   * de no sobrescribir, y un documento del Modelo 2 al que le editaron un
+   * importe después de aplicar a mano tiene exactamente el mismo problema.
+   */
+  it('el aviso de re-aplicación no distingue el modelo', () => {
+    expect(
+      shouldOfferAiuReapply({
+        ...virgen,
+        planMode: 'creacion',
+        applied: true,
+        fingerprint: '2500000.00:administracion',
+        appliedFingerprint: '2328800.00:administracion',
+      }),
+    ).toBe(true);
   });
 
   it('tras aplicar y NO tocar nada: ni se re-aplica ni avisa', () => {
