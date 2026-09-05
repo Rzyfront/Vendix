@@ -83,25 +83,41 @@ import {
             Carrito ({{ cartState().items.length }})
           </h2>
 
-          <!--
-            Staff-only order note. Small state icon-button: gray when empty,
-            green when a note exists. Opens a modal to edit it. The note is
-            internal (set at creation), never shown to the customer.
-          -->
-          <button
-            type="button"
-            (click)="orderNoteModalOpen.set(true)"
-            class="staff-note-btn relative px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors border text-xs font-semibold shadow-2xs"
-            [class]="
-              hasStaffNote()
-                ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
-                : 'text-text-secondary border-border/80 hover:text-text-primary hover:bg-muted/40'
-            "
-            aria-label="Nota de la orden"
-          >
-            <app-icon name="notebook-pen" [size]="14"></app-icon>
-            <span>Nota</span>
-          </button>
+          <div class="flex items-center gap-1.5">
+            <!-- Vaciar carrito (desktop): el modal móvil ya lo tiene; el
+                 sidebar no lo exponía. Reusa clearCart() con confirmación. -->
+            @if (!isEmpty()) {
+              <button
+                type="button"
+                (click)="clearCart()"
+                class="px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors border text-xs font-semibold shadow-2xs text-red-600 border-red-200 bg-red-50/80 hover:bg-red-100"
+                aria-label="Vaciar carrito"
+                title="Vaciar carrito"
+              >
+                <app-icon name="trash-2" [size]="14"></app-icon>
+                <span>Vaciar</span>
+              </button>
+            }
+            <!--
+              Staff-only order note. Small state icon-button: gray when empty,
+              green when a note exists. Opens a modal to edit it. The note is
+              internal (set at creation), never shown to the customer.
+            -->
+            <button
+              type="button"
+              (click)="orderNoteModalOpen.set(true)"
+              class="staff-note-btn relative px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors border text-xs font-semibold shadow-2xs"
+              [class]="
+                hasStaffNote()
+                  ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
+                  : 'text-text-secondary border-border/80 hover:text-text-primary hover:bg-muted/40'
+              "
+              aria-label="Nota de la orden"
+            >
+              <app-icon name="notebook-pen" [size]="14"></app-icon>
+              <span>Nota</span>
+            </button>
+          </div>
         </div>
 
         <!-- Totals Row (High Contrast) -->
