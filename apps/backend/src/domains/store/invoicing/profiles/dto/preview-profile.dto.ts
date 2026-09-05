@@ -3,6 +3,7 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsNumber,
   IsOptional,
@@ -217,4 +218,17 @@ export class PreviewProfileDto {
   @ValidateNested()
   @Type(() => PreviewCustomerDto)
   customer?: PreviewCustomerDto;
+
+  /**
+   * Pide la representación gráfica del documento además del XML.
+   *
+   * Ausente o `false` ⇒ la respuesta es byte a byte la de siempre (sin clave
+   * `html`): el flag no puede cambiar el contrato existente. En `true`, la
+   * respuesta gana `html: string | null` —el papel compuesto con los datos
+   * capturados, o `null` si no se pudo componer— sin escribir nada en base
+   * ni tomar consecutivo.
+   */
+  @IsOptional()
+  @IsBoolean({ message: 'include_render debe ser un booleano.' })
+  include_render?: boolean;
 }

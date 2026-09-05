@@ -280,6 +280,7 @@ export interface LineasRowErrors {
             <vendix-invoice-line-taxes
               [formControl]="rowControl(row, rowPaths().taxes!)"
               [taxes]="availableTaxes()"
+              [aiuCostLine]="isAiu() && !carriesAiu()(row, i)"
             />
           </div>
         } @else {

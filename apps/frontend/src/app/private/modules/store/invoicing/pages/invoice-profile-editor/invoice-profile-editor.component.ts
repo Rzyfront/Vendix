@@ -2389,7 +2389,14 @@ export class InvoiceProfileEditorComponent {
         // Porciones ausentes al hidratar (perfil viejo parcial o matriz
         // vacía): se completan derivadas de la base, sin marcar `dirty`.
         // Es lo que hace que «Nuevo perfil» se comporte como «Usar plantilla».
-        {
+        //
+        // SÓLO PARA PERFILES AIU. `config.aiu` es el discriminante y no
+        // `isAiu()`: ese `computed` se despierta con `form_value()`, que se
+        // actualiza por `valueChanges` DESPUÉS de esta hidratación síncrona, así
+        // que acá leería el tipo de operación del perfil anterior. Sin el
+        // guardián, abrir un perfil Estándar —que no tiene reparto AIU— le
+        // empujaba hasta tres filas A/I/U al `jsonb` en cuanto se guardara.
+        if (config.aiu) {
             const present = new Set(
                 this.taxRules.controls.map((control) =>
                     String(control.get('bucket')?.value ?? ''),

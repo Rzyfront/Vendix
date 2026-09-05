@@ -577,6 +577,11 @@ export interface PreviewPlatformProfilePayload {
     document_number?: string;
     document_type?: string;
   };
+  /**
+   * Pide la representación gráfica (`html`) además del XML. El riel
+   * plataforma siempre la pide: es lo que alimenta el `iframe` del modal.
+   */
+  include_render?: boolean;
 }
 
 /**
@@ -595,6 +600,13 @@ export interface PlatformProfilePreviewResult {
     persisted: boolean;
   };
   xml: string;
+  /**
+   * Representación gráfica compuesta con los datos capturados (paso 6 del
+   * plan AIU). Viaja porque el cuerpo pide `include_render`; `null` cuando no
+   * se pudo componer —el modal muestra el XML como respaldo—. Opcional para
+   * no romper lectores de respuestas pedidas sin el flag.
+   */
+  html?: string | null;
   breakdown: {
     lines: {
       index: number;
