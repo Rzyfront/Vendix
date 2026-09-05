@@ -30,10 +30,10 @@ Backlog → Todo → In Progress → Code Review → In Review → Done
 | 1 | Ticket creado                    | —       | `Backlog`               | —                            |
 | 2 | Priorizado para trabajarse       | —       | `Todo`                  | —                            |
 | 3 | Dev arranca                      | dev     | `In Progress`           | —                            |
-| 4 | Abre PR contra `dev`             | dev     | `Code Review`           | —                            |
-| 5 | PR aprobado + merge a `dev`      | revisor | `Code Review` (sin cambio) | `+Aprobado`               |
+| 4 | Abre PR contra `develop`         | dev     | `Code Review`           | —                            |
+| 5 | PR aprobado + merge a `develop`  | revisor | `Code Review` (sin cambio) | `+Aprobado`               |
 | 6 | PR rechazado (`--request-changes`) | revisor | `Code Review` (sin cambio) | `+Requiere cambios`     |
-| 7 | Release: merge del PR `dev`→`main` | revisor | `In Review`           | **limpiar las tres**         |
+| 7 | Release: merge del PR `develop`→`main` | revisor | `In Review`           | **limpiar las tres**         |
 | 8 | QA verifica en prod y pasa       | QA      | `Done`                  | —                            |
 | 9 | QA verifica en prod y falla      | QA      | `Todo`                  | `+Devuelto` · prioridad Alta |
 

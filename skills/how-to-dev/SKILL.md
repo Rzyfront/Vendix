@@ -24,7 +24,7 @@ Use this skill to execute development work safely and consistently after the req
 - Load every relevant skill before editing code.
 - **Mobile detection:** If the task involves `apps/mobile/`, load `mobile-dev` first — all edits are exclusive to `apps/mobile/`; other projects are read-only reference.
 - **Git workflow gates (load `git-workflow` before any branch/commit/push):**
-  - Work only on a branch that is up to date with `origin/dev` (RULE 5).
+  - Work only on a branch that is up to date with `origin/develop` (RULE 5).
   - Pull the latest Engram memories before starting work (RULE 6).
   - Save a new Engram memory before pushing non-trivial changes (RULE 7).
   - Every PR must pass the `pr-code-review` skill at >= 80% before merge (RULE 8).

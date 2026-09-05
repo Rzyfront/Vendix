@@ -379,7 +379,7 @@ After the `## Approval Request` is satisfied, execution moves to `how-to-dev`. T
 
 Before declaring the work complete, the developer must also satisfy the `git-workflow` skill (RULES 5–8):
 
-- The branch is up to date with `origin/dev` (RULE 5).
+- The branch is up to date with `origin/develop` (RULE 5).
 - The latest Engram memories have been pulled at the start of work (RULE 6).
 - A new Engram memory has been saved for any non-trivial decision, gotcha, or pattern introduced by this plan (RULE 7).
 - The resulting PR has been reviewed by the `pr-code-review` skill and passed the 80% threshold (RULE 8).

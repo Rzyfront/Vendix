@@ -12,13 +12,13 @@ metadata:
     - "git commit, git push, create PR, create branch"
     - "resolve merge conflicts"
     - "changes with database migrations"
-    - "Branching off or rebasing onto origin/dev before work"
+    - "Branching off or rebasing onto origin/develop before work"
     - "Pulling the latest Engram memories (engram sync --import) before starting work"
     - "Saving an Engram memory before pushing non-trivial changes"
     - "Running an automated code review (pr-code-review) on a PR before merging"
-    - "Linking a PR to its Linear issue when opening a PR to dev"
-    - "Moving a Linear issue to Code Review when opening a PR to dev"
-    - "Releasing to prod by merging dev into main and moving tickets to In Review"
+    - "Linking a PR to its Linear issue when opening a PR to develop"
+    - "Moving a Linear issue to Code Review when opening a PR to develop"
+    - "Releasing to prod by merging develop into main and moving tickets to In Review"
 ---
 
 ## When to Use
@@ -141,27 +141,27 @@ git checkout main
 git merge feature/my-branch  # Do NOT do this directly
 ```
 
-### RULE 5: Branches Must Be Up to Date With `dev` (origin) Before Work
+### RULE 5: Branches Must Be Up to Date With `develop` (origin) Before Work
 
-**Always work on a branch that is up to date with `origin/dev`.** No work on stale branches, no work branched off `main` directly, no work on a branch that has diverged from `dev` by more than the current sprint.
+**Always work on a branch that is up to date with `origin/develop`.** No work on stale branches, no work branched off `main` directly, no work on a branch that has diverged from `develop` by more than the current sprint.
 
 ```bash
-# CORRECT: branch off origin/dev, rebase/merge frequently
+# CORRECT: branch off origin/develop, rebase/merge frequently
 git fetch origin
-git checkout dev
-git pull --rebase origin dev
+git checkout develop
+git pull --rebase origin develop
 git checkout -b feature/my-change
 
-# CORRECT: keep your branch current with dev while you work
+# CORRECT: keep your branch current with develop while you work
 git fetch origin
-git rebase origin/dev   # or: git merge origin/dev
+git rebase origin/develop   # or: git merge origin/develop
 
-# FORBIDDEN: branching off main, branching off a local dev that has not been pulled,
-# or pushing a feature branch that is 50 commits behind origin/dev
+# FORBIDDEN: branching off main, branching off a local develop that has not been pulled,
+# or pushing a feature branch that is 50 commits behind origin/develop
 git checkout -b feature/my-change main   # NO
 ```
 
-**Why:** Vendix's CI and PR review pipeline run against `dev`. A branch that has drifted will accumulate merge conflicts and re-trigger reviews, wasting cycle time.
+**Why:** Vendix's CI and PR review pipeline run against `develop`. A branch that has drifted will accumulate merge conflicts and re-trigger reviews, wasting cycle time.
 
 ### RULE 6: Engram Memory — Pull Before Working
 
@@ -233,7 +233,7 @@ gh pr merge <N>   # without a prior pr-code-review pass and APPROVE
 
 ### RULE 9: Link the PR to its Linear Issue (SUGGESTED — ask, don't block)
 
-**At the end of the PR flow** (right after opening — or just before opening — a PR to `dev`), check whether the change maps to a Linear issue and, if so, document it in the PR. This is a **suggestion with confirmation**, never a blocker: if the user says no, continue normally.
+**At the end of the PR flow** (right after opening — or just before opening — a PR to `develop`), check whether the change maps to a Linear issue and, if so, document it in the PR. This is a **suggestion with confirmation**, never a blocker: if the user says no, continue normally.
 
 **Flow:**
 
@@ -273,21 +273,21 @@ Backlog → Todo → In Progress → Code Review ───────→ In Rev
                      │         git-workflow         git-workflow  QA
                      │         RULE 9               RULE 10   verify-ticket-prod
                      │         (abrir PR)           (release   
-                     │                               dev→main)
+                     │                               develop→main)
                      └──── +Devuelto, prioridad Alta ─────┘  (QA falla)
 ```
 
 `Code Review` and `In Review` are different gates and must not be conflated: `Code Review` is **pre-merge** (revisión técnica del diff), `In Review` is **post-release** (el cambio ya está en **producción** y QA lo verifica contra el requerimiento).
 
-Merging the PR to `dev` does **not** move the issue — it only adds the `Aprobado` label (`pr-code-review`). The issue stays in `Code Review` through every review round trip.
+Merging the PR to `develop` does **not** move the issue — it only adds the `Aprobado` label (`pr-code-review`). The issue stays in `Code Review` through every review round trip.
 
 **Why:** Linking the PR to its issue closes the loop — reviewers see the context, and each stage updates Linear on its own trigger. Separating state (where the ticket is) from label (what the last reviewer decided) is what lets `Code Review` absorb N review iterations without the ticket bouncing between states on every push. Without the `Code Review` stage, an issue waiting days on a reviewer is indistinguishable from one still being coded.
 
 ### RULE 10: Release to Prod Moves Tickets to In Review (SUGGESTED — ask, don't block)
 
-**A release is the merge of a PR from `dev` into `main`.** That is the only trigger — there is no release tag or separate release branch in this repo.
+**A release is the merge of a PR from `develop` into `main`.** That is the only trigger — there is no release tag or separate release branch in this repo.
 
-When the reviewer merges `dev` → `main`, every ticket shipped in that release moves to **`In Review`** and gets its workflow labels **cleared**. Suggest it, confirm the list with the user, never apply it silently.
+When the reviewer merges `develop` → `main`, every ticket shipped in that release moves to **`In Review`** and gets its workflow labels **cleared**. Suggest it, confirm the list with the user, never apply it silently.
 
 **Flow (after `gh pr merge <N>` where base is `main`):**
 
@@ -306,7 +306,7 @@ When the reviewer merges `dev` → `main`, every ticket shipped in that release 
    - A ticket already in `In Review`, `Done`, `Canceled` or `Duplicate` → skip it, report it, do not move it backwards.
 4. **Report what moved and what was skipped.** A release touching 20 tickets where 3 were skipped must say which 3 and why. Silent partial application is how tickets get lost.
 
-**Why:** `In Review` is the QA queue. Filling it at release time — not at merge-to-dev time — is what makes the state mean "this is live in production, go verify it". QA picks the queue up from there with `verify-ticket-prod`.
+**Why:** `In Review` is the QA queue. Filling it at release time — not at merge-to-develop time — is what makes the state mean "this is live in production, go verify it". QA picks the queue up from there with `verify-ticket-prod`.
 
 ---
 
@@ -317,8 +317,8 @@ When the reviewer merges `dev` → `main`, every ticket shipped in that release 
 ```
 Where am I making the change?
   → On main/master          → STOP. Create a branch first.
-  → On a development branch → Is it up to date with origin/dev?
-      → No  → git fetch && git rebase origin/dev (or merge) first.
+  → On a development branch → Is it up to date with origin/develop?
+      → No  → git fetch && git rebase origin/develop (or merge) first.
       → Yes → Continue.
 
 Did I pull the latest Engram memories for this project?
@@ -334,7 +334,7 @@ Does the change introduce new knowledge (decision / gotcha / pattern)?
           then ensure the chunk is committed (manual or via pre-push hook).
   → No  → Continue.
 
-Are there conflicts with dev?
+Are there conflicts with develop?
   → Yes, they are clear    → Resolve in development branch in favor of the new changes without breaking existing ones.
   → Yes, they are ambiguous → Ask the user which resolution option they prefer.
   → No                      → Continue normally.
@@ -344,7 +344,7 @@ About to push or open a PR?
   → If the review posts findings → address them in the branch, re-review.
   → If the review is >= 80% clean → APPROVE → merge.
 
-Did I just open a PR to dev?  (RULE 9 — suggested)
+Did I just open a PR to develop?  (RULE 9 — suggested)
   → Ask: "¿Este cambio corresponde a un issue/ticket de Linear?"
       → Yes → linear-issues (search) → confirm match → document it in the
               PR body (## Linear: QUI-XXX — title — url) via gh pr edit.
@@ -410,9 +410,9 @@ Valid types: `feat`, `fix`, `refactor`, `chore`, `docs`, `test`, `style`, `perf`
 ```bash
 # Branch hygiene
 git fetch origin                                       # Update remote refs
-git checkout dev && git pull --rebase origin dev       # Refresh local dev
-git checkout -b feature/name origin/dev                # Branch off origin/dev
-git rebase origin/dev                                  # Keep current branch current
+git checkout develop && git pull --rebase origin develop       # Refresh local develop
+git checkout -b feature/name origin/develop                # Branch off origin/develop
+git rebase origin/develop                              # Keep current branch current
 
 # Engram memory lifecycle
 ./scripts/engram-import.sh                             # Pull team memories (start of work)
@@ -435,6 +435,6 @@ gh pr edit <N> --repo OWNER/REPO --body "$(gh pr view <N> --json body --jq .body
 # Day-to-day
 git checkout -b feature/name                           # Create new branch
 git push origin feature/name                           # Push to branch (never to main)
-git merge origin/dev                                   # Bring dev into your branch to resolve conflicts
+git merge origin/develop                               # Bring develop into your branch to resolve conflicts
 git log --oneline -10                                  # View latest commits
 ```

@@ -121,7 +121,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Auditing what Vexi changed in a store | `vendix-vexi-agent` |
 | Binding form controls in Angular templates | `vendix-angular-forms` |
 | Bootstrapping local Linear credentials for Vendix | `linear-connect` |
-| Branching off or rebasing onto origin/dev before work | `git-workflow` |
+| Branching off or rebasing onto origin/develop before work | `git-workflow` |
 | Building a customer-modal that captures address in crear-mode | `vendix-address-geocoding` |
 | Building a granular functional inventory of a web module for mobile replication | `mobile-parity-audit` |
 | Building an HTML slide-deck of bugs found and tickets validated in a sprint window | `qa-report` |
@@ -299,7 +299,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Invoking an ai_engine_applications vision app as a sub-agent from the agent loop | `vendix-vexi-agent` |
 | Killing orphan ng serve, ng build, prerender or nest start processes | `buildcheck-dev` |
 | Leyendo la IP del cliente en un controlador, guard, middleware o log | `vendix-trust-proxy-chain` |
-| Linking a PR to its Linear issue when opening a PR to dev | `git-workflow` |
+| Linking a PR to its Linear issue when opening a PR to develop | `git-workflow` |
 | Linking a Vexi attachment to the record it originated | `vendix-vexi-agent` |
 | Listing Vendix issues in Linear | `linear-issues` |
 | Managing Routes | `vendix-frontend-routing` |
@@ -320,7 +320,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Modifying the Vexi dock or panel | `vendix-ai-chat` |
 | Modifying the planillas-rutas frontend module | `vendix-dispatch-routes` |
 | Modifying the storefront's `?mesa=` deep-link, mesa token hydration, or localStorage mesaToken guard | `vendix-restaurant-table-qr` |
-| Moving a Linear issue to Code Review when opening a PR to dev | `git-workflow` |
+| Moving a Linear issue to Code Review when opening a PR to develop | `git-workflow` |
 | Non-destructive production verification with the demo account | `verify-ticket-prod` |
 | Normalizing product names, volumes, prices, categories or brands for bulk upload | `product-catalog-normalizer` |
 | Onboarding a new developer to the team's Engram memory | `vendix-engram` |
@@ -345,7 +345,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo | `linear-connect` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
 | Registering a component as a VexiUiHost | `vendix-vexi-agent` |
-| Releasing to prod by merging dev into main and moving tickets to In Review | `git-workflow` |
+| Releasing to prod by merging develop into main and moving tickets to In Review | `git-workflow` |
 | Removing a frontend envelope unwrapper that reads success === false | `vendix-error-handling` |
 | Reporting QA results with charts and a critical/urgent section | `qa-report` |
 | Reserving or releasing stock | `vendix-inventory-stock` |
@@ -377,7 +377,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
 | Summarizing Linear bugs and validated tickets for a sprint into a visual report | `qa-report` |
-| Tagging a Linear issue Aprobado after merging a PR to dev | `pr-code-review` |
+| Tagging a Linear issue Aprobado after merging a PR to develop | `pr-code-review` |
 | Tagging a Linear issue Requiere cambios after requesting changes on a PR | `pr-code-review` |
 | Transitioning products between simple and variant modes | `vendix-inventory-stock` |
 | Troubleshoot why a skill is missing from AGENTS.md auto-invoke | `skill-sync` |
@@ -532,7 +532,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | --------------------------------- | ----------------------------- | ------------ | --------------------------------------------------------------------------- |
 | **`how-to-dev`**                  | **ALWAYS**                    | **CRITICAL** | Mandatory ultra-obligatory dev flow                                         |
 | **`Vendix-core`**                  | **ALWAYS**                    | **CRITICAL** | Core patterns and conventions                                               |
-| **`git-workflow`**                | **ALWAYS**                    | **CRITICAL** | Git commit, PR, branching, conflict rules, and the 4 hard gates: branches current with `origin/dev` (R5), Engram memories pulled at start of work (R6), Engram memory saved before push (R7), 80% PR review gate (R8) |
+| **`git-workflow`**                | **ALWAYS**                    | **CRITICAL** | Git commit, PR, branching, conflict rules, and the 4 hard gates: branches current with `origin/develop` (R5), Engram memories pulled at start of work (R6), Engram memory saved before push (R7), 80% PR review gate (R8) |
 | **`vendix-zoneless-signals`**     | **ANY FRONTEND FILE**         | **CRITICAL** | Zoneless + Signals (Angular 20) — violaciones producen bugs silenciosos     |
 | **`knowledge-gap`**               | **UNKNOWN PATTERN**           | **HIGH**     | Protocol for new/undefined patterns                                         |
 
