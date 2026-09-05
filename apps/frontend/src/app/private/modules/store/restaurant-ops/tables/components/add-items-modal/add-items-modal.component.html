@@ -109,7 +109,11 @@
             simetría con los platos sin variantes.
           -->
           @if (hasVariants(row)) {
-            <div class="variant-picker" (click)="$event.stopPropagation()">
+            <div
+              class="variant-picker"
+              [class.needs-variant]="variantAlertId() === row.id"
+              (click)="$event.stopPropagation()"
+            >
               <span class="variant-picker__label">Variante</span>
               <div class="variant-picker__options">
                 @for (variant of (row.product_variants ?? []); track variant.id) {

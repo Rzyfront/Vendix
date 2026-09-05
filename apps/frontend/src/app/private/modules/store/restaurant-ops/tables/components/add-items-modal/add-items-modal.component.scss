@@ -255,32 +255,49 @@
 .variant-picker {
   grid-area: picker;
   min-width: 0;
+  border-radius: var(--radius-sm, 6px);
 
   .variant-picker__label {
     display: block;
-    font-size: 0.65rem;
-    font-weight: 600;
+    font-size: 0.72rem;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.02em;
-    color: var(--color-text-secondary, #6b7280);
-    margin-bottom: 0.2rem;
+    letter-spacing: 0.03em;
+    color: var(--color-primary, #3b82f6);
+    margin-bottom: 0.3rem;
   }
 
   .variant-picker__options {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.3rem;
+    gap: 0.4rem;
+  }
+
+  /* QA variantes: parpadeo cuando se intenta agregar sin elegir variante
+     (incluso clickeando el cuerpo de la card). Lo activa el HTML con
+     [class.needs-variant] y lo retira el TS tras ~1.4s. */
+  &.needs-variant {
+    animation: variant-shake 0.45s ease;
+    background: var(--color-warning-100, #fef3c7);
+    border: 1.5px solid var(--color-warning, #fb923c);
+    padding: 0.4rem 0.5rem;
+
+    .variant-picker__label {
+      color: var(--color-warning-700, #b45309);
+    }
   }
 }
 
 .variant-option {
-  padding: 0.15rem 0.5rem;
+  padding: 0.45rem 0.8rem;
   border: 1px solid var(--color-border, #e5e7eb);
   border-radius: 0.75rem;
-  background: transparent;
+  background: var(--color-surface, #fff);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   color: var(--color-text-secondary, #6b7280);
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: 0.82rem;
+  font-weight: 700;
+  min-height: 2.25rem;
   cursor: pointer;
   transition:
     background-color 0.15s ease,
@@ -471,5 +488,25 @@
   }
   100% {
     transform: scale(1);
+  }
+}
+
+/* QA variantes: sacudida del picker cuando se intenta agregar sin variante. */
+@keyframes variant-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-4px);
+  }
+  40% {
+    transform: translateX(4px);
+  }
+  60% {
+    transform: translateX(-3px);
+  }
+  80% {
+    transform: translateX(3px);
   }
 }
