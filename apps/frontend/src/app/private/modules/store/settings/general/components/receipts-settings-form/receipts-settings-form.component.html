@@ -468,9 +468,8 @@
       <div class="block-head">
         <h4 class="block-title">Impresión encadenada</h4>
         <p class="block-subtitle">
-          Disparadores del tiquete de despacho (cliente + dirección + productos
-          por línea + cantidades). El formato y las copias se editan en
-          <strong>Formatos de Impresión</strong>.
+          Qué tiquete sale solo y qué tiquete sale a mano. El formato y las
+          copias se editan en <strong>Formatos de Impresión</strong>.
         </p>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -478,7 +477,7 @@
           <app-setting-toggle
             [formControl]="printDispatchTicketEnabledControl"
             label="Habilitar tiquete de despacho"
-            description="Master switch: apagado, ni el POS ni el botón manual imprimen el tiquete"
+            description="Prendido: el tiquete se puede imprimir (auto + botón manual). Apagado: no sale ningún tiquete en toda la tienda"
             (changed)="onFieldChange()"
           ></app-setting-toggle>
           <div class="setting-cell__meta">
@@ -486,14 +485,14 @@
               Logistica
             </app-badge>
             <app-tooltip
-              content="El tiquete de despacho lista el cliente, la dirección de envío, las líneas pedidas y las despachadas. Sin totales fiscales ni QR. Apagado, ni el POS auto ni el botón del detalle de orden lo emiten."
+              content="Papel logístico con cliente, dirección y cantidades pedida / despachada por línea. Sin totales ni validez fiscal."
               position="top"
               size="sm"
               color="default"
             >
               <span class="help-chip">
                 <app-icon name="help-circle" size="12"></app-icon>
-                Qué hace
+                Qué es
               </span>
             </app-tooltip>
           </div>
@@ -502,8 +501,8 @@
         <div class="setting-cell">
           <app-setting-toggle
             [formControl]="printDispatchTicketAutoWithPosControl"
-            label="Auto-imprimir con POS o factura"
-            description="Cuando la venta incluye envío, encadena el tiquete de despacho junto con el ticket POS o la factura"
+            label="Auto-imprimir en POS"
+            description="Prendido: en ventas CON envío sale solo junto al ticket o factura. Apagado: solo sale con el botón manual"
             (changed)="onFieldChange()"
           ></app-setting-toggle>
           <div class="setting-cell__meta">
@@ -511,14 +510,14 @@
               Disparador POS
             </app-badge>
             <app-tooltip
-              content="Solo aplica a ventas con envío (no a mostrador) y nunca cuando el método de envío es direct_delivery (el operador marca ship_status=sent sin imprimir). El botón manual del detalle de la orden sigue funcionando aunque esto esté apagado."
+              content="Solo ventas con envío (domicilio). En mostrador no sale, salvo que actives el tiquete de reclamo."
               position="top"
               size="sm"
               color="default"
             >
               <span class="help-chip">
                 <app-icon name="alert-triangle" size="12"></app-icon>
-                Cuándo aplica
+                Consecuencia
               </span>
             </app-tooltip>
           </div>
@@ -527,8 +526,8 @@
         <div class="setting-cell">
           <app-setting-toggle
             [formControl]="printDispatchTicketAutoOnPostventaControl"
-            label="Auto-imprimir el tiquete de despacho al confirmar"
-            description="Al confirmar una venta postventa, encadena el tiquete de despacho junto con el documento de venta"
+            label="Auto-imprimir en postventa"
+            description="Prendido: al confirmar la postventa sale solo junto al documento. Apagado: solo sale con el botón manual"
             (changed)="onFieldChange()"
           ></app-setting-toggle>
           <div class="setting-cell__meta">
@@ -536,14 +535,14 @@
               Disparador postventa
             </app-badge>
             <app-tooltip
-              content="Al confirmar una venta postventa se imprime el tiquete de despacho junto con el documento de venta. Default false (opt-in por admin); el botón manual del detalle de la orden sigue funcionando aunque esto esté apagado."
+              content="Solo al confirmar la postventa. El botón manual del detalle sigue disponible aunque esté apagado."
               position="top"
               size="sm"
               color="default"
             >
               <span class="help-chip">
                 <app-icon name="alert-triangle" size="12"></app-icon>
-                Cuándo aplica
+                Consecuencia
               </span>
             </app-tooltip>
           </div>
@@ -552,8 +551,8 @@
         <div class="setting-cell">
           <app-setting-toggle
             [formControl]="printDispatchTicketOnCounterControl"
-            label="Tiquete de reclamo en mostrador y para llevar"
-            description="Cuando la venta es de mostrador o para llevar, el cliente paga, espera a que le preparen la comida y reclama con el tiquete"
+            label="Tiquete de reclamo (mostrador y para llevar)"
+            description="Prendido: mostrador y para llevar también imprimen para reclamar. Apagado: esos pedidos no imprimen"
             (changed)="onFieldChange()"
           ></app-setting-toggle>
           <div class="setting-cell__meta">
@@ -561,14 +560,14 @@
               Mostrador
             </app-badge>
             <app-tooltip
-              content="Activa el tiquete de despacho como tiquete de reclamo para ventas de mostrador (direct_delivery) y para llevar (pickup). El cliente paga en caja, espera y se identifica con el tiquete al retirar. Default false (opt-in por admin). No aplica a comer en el local (la comanda de cocina cubre ese caso) ni a tipos de entrega no definidos."
+              content="El cliente paga, espera y reclama con el tiquete. No aplica a comer en el local (usa comanda de cocina)."
               position="top"
               size="sm"
               color="default"
             >
               <span class="help-chip">
                 <app-icon name="help-circle" size="12"></app-icon>
-                Cuándo aplica
+                Consecuencia
               </span>
             </app-tooltip>
           </div>

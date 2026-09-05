@@ -815,7 +815,10 @@ export class PrintLayoutComposerService {
                     val = item.total_price_formatted || `$${Number(item.total_price).toLocaleString('es-CO')}`;
                     break;
                   default:
-                    val = (item as any)[col.key] || '';
+                    // Cantidades logísticas (dispatched_qty) llegan en 0 antes del
+                    // despacho: `??` preserva el 0 para que pinte "0" en vez de
+                    // celda vacía (`|| ''` lo borraba y parecía "dato faltante").
+                    val = (item as any)[col.key] ?? '';
                 }
                 return `<td data-column-id="${col.id}" data-element-id="col_${col.id}" style="text-align: ${col.align};">${this.compiler.escapeHtml(val)}</td>`;
               })
