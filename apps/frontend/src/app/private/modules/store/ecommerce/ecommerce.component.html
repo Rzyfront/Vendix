@@ -780,6 +780,27 @@
                       "
                       size="sm"
                     ></app-input>
+                    <app-textarea
+                      label="Pitch recomendado"
+                      [formControl]="whatsappPitchControl"
+                      [placeholder]="resolvedDefaultPitch()"
+                      helperText="Encabeza el mensaje de pedido por WhatsApp, con el nombre y la web ya puestos. {tienda} y {web} también funcionan como plantillas."
+                      [rows]="4"
+                    ></app-textarea>
+                    <div class="flex justify-end">
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        (clicked)="copyWhatsappPitch()"
+                      >
+                        <app-icon
+                          slot="icon"
+                          name="copy"
+                          [size]="16"
+                        ></app-icon>
+                        Copiar pitch
+                      </app-button>
+                    </div>
                   </div>
                 </div>
               }

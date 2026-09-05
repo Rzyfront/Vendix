@@ -938,6 +938,33 @@
     }
 }
 
+// Botonera debajo de la card de resumen: vive en la columna sticky de 360px.
+// Volver/Anterior y Continuar/Confirmar reparten 50/50 a lo ancho, en tamaño
+// grande (size lg + fullWidth en el template) para quedar simétricos.
+.checkout-actions--summary {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    flex-direction: row;
+    align-items: stretch;
+    gap: 12px;
+
+    > * {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+
+    .checkout-actions__left {
+        align-items: stretch;
+    }
+
+    app-button {
+        width: 100%;
+    }
+}
+
 .summary-items {
     max-height: 200px;
     overflow-y: auto;
@@ -1142,5 +1169,194 @@
     // Apilado en móvil, el sticky con top:120px no aporta; lo neutralizamos.
     .checkout-summary {
         position: static;
+    }
+}
+
+// ========== ENTREGA delivery-first (CP-tienda-checkout-whatsapp) ==========
+.delivery-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+
+    @media (max-width: 576px) {
+        grid-template-columns: 1fr;
+    }
+}
+
+.delivery-subhead {
+    margin-top: 1.5rem;
+}
+
+// C.3: mapa enmarcado tipo teléfono + formulario. En escritorio el marco
+// estira a lo alto de la fila y el mapa llena el espacio disponible; en
+// ≤992px (una columna) conserva alto fijo.
+.delivery-address-grid {
+    display: grid;
+    grid-template-columns: 5fr 6fr;
+    gap: 1rem;
+    align-items: start;
+    margin-top: 1rem;
+
+    @media (max-width: 992px) {
+        grid-template-columns: 1fr;
+    }
+
+    @media (min-width: 993px) {
+        align-items: stretch;
+    }
+}
+
+.map-phone-frame {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    aspect-ratio: 9 / 16;
+    max-height: 560px;
+    width: 100%;
+    background: var(--color-surface);
+
+    // El picker llena el marco; el mapa nunca empuja el formulario.
+    app-address-map-picker {
+        display: block;
+        height: 100%;
+    }
+
+    @media (max-width: 992px) {
+        aspect-ratio: 16 / 10;
+        max-height: 320px;
+    }
+
+    // Escritorio: el marco ocupa todo el alto disponible de la fila y el
+    // mapa (flex: 1) crece con él; el hint queda fijo abajo. Scoped al
+    // checkout para no afectar otros usos del picker.
+    @media (min-width: 993px) {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 480px;
+        aspect-ratio: auto;
+        max-height: none;
+
+        app-address-map-picker {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .address-map-picker {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            min-height: 0;
+            margin-bottom: 0;
+        }
+
+        .amp-map {
+            flex: 1;
+            height: auto;
+            min-height: 320px;
+        }
+
+        .amp-skeleton,
+        .amp-error {
+            height: 100%;
+        }
+    }
+}
+
+.delivery-address-grid .address-form {
+    margin-top: 0;
+}
+
+// C.7: tarjeta de la dirección de la tienda para "recoger".
+.store-pickup-card {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+    padding: 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    margin-top: 1rem;
+
+    @media (max-width: 576px) {
+        flex-direction: column;
+    }
+}
+
+.store-pickup-card__body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.store-pickup-card__line {
+    margin: 0;
+    color: var(--color-text-primary);
+    font-size: var(--fs-sm);
+}
+
+.store-pickup-card__actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+// C.4: resumen de la entrega elegida en el paso de pago (solo lectura).
+.delivery-summary {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.875rem 1rem;
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    margin-bottom: 1.5rem;
+}
+
+.delivery-summary__body {
+    flex: 1;
+}
+
+.delivery-summary__title {
+    margin: 0;
+    font-weight: var(--fw-medium);
+    color: var(--color-text-primary);
+}
+
+.delivery-summary__hint {
+    margin: 0;
+    font-size: var(--fs-sm);
+    color: var(--color-text-secondary);
+}
+
+// Botonera fija abajo en móvil/tablet, como el footer del carrito
+// (app-cart-mobile-footer): Volver/Continuar siempre visibles sin bajar
+// hasta el resumen. Mismo breakpoint (1023px) y z-index (40).
+@media (max-width: 1023px) {
+    .checkout-page {
+        // Clearance para la botonera fija: que nunca tape el final del
+        // resumen ni las ofertas.
+        padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .checkout-actions--summary {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 40;
+        margin-top: 0;
+        border-radius: 0;
+        border-left: 0;
+        border-right: 0;
+        border-bottom: 0;
+        background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.92);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
     }
 }

@@ -120,6 +120,7 @@ interface ActiveOrderPromotion {
             size="sm"
             placeholder="Buscar productos..."
             [debounceTime]="300"
+            [autofocus]="true"
             [ngModel]="searchQuery()"
             (ngModelChange)="searchQuery.set($event)"
             (searchChange)="onSearch($event)"

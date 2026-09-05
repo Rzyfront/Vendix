@@ -313,7 +313,7 @@
       <div class="table-banner-actions">
         <!-- Secundarias: llamar, pedir, dividir, comensales, salir. -->
         <div class="table-banner-actions__secondary">
-          @if (table_context.isOpenTab() || table_context.isRequireStaff() || table_context.isMarkOccupied()) {
+          @if (canCallTableWaiter()) {
           <app-button variant="ghost" size="sm" [loading]="table_context.calling_waiter()" (clicked)="callWaiter()">
             <app-icon slot="icon" name="concierge-bell" [size]="16"></app-icon>
             Llamar al mesero
@@ -366,7 +366,7 @@
       </div>
 
       <!-- Fila de acción compacta — sólo móvil (< lg): CTA primaria + Acciones -->
-      @if (table_context.isOpenTab() || table_context.isRequireStaff() || table_context.isMarkOccupied()) {
+      @if (canCallTableWaiter()) {
       <div class="table-banner-mobile">
         @if (table_context.isOpenTab() && table_context.enableTableCheckout()) {
         <app-button variant="primary" size="sm" [fullWidth]="true" class="table-banner-mobile__cta"
@@ -426,7 +426,7 @@
         </button>
       </div>
       <div class="table-action-sheet__body">
-        @if (table_context.isOpenTab() || table_context.isRequireStaff() || table_context.isMarkOccupied()) {
+        @if (canCallTableWaiter()) {
         <button type="button" class="table-action-row" [disabled]="table_context.calling_waiter()" (click)="callWaiter(); closeActionsSheet()">
           <app-icon name="concierge-bell" [size]="20"></app-icon>
           <span>Llamar al mesero</span>

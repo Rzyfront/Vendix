@@ -7,6 +7,7 @@
   class="kds-board"
   #boardRoot
   [class.is-fullscreen]="fixedFallback()"
+  [attr.data-ticket-size]="display.ticketSize()"
 >
   <!-- Header -->
   <app-sticky-header
@@ -168,7 +169,7 @@
   } @else {
     <!-- Columns -->
     <div class="kds-board__columns">
-      @for (column of columns; track column) {
+      @for (column of visibleColumns(); track column) {
         <section class="kds-column" [attr.data-column]="column">
           <header class="kds-column__header">
             <app-icon

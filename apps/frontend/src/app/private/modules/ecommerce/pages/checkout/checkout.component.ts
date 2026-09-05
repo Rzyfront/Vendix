@@ -13,7 +13,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom, debounceTime, distinctUntilChanged, filter } from 'rxjs';
 import { CommonModule } from '@angular/common';
-import { RouterModule, Router } from '@angular/router';
+import { RouterModule, Router, ActivatedRoute } from '@angular/router';
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -33,7 +33,9 @@ import {
   BookingSelection,
   WompiWidgetConfig,
   BankAccountOption,
+  DeliveryOption,
 } from '../../services/checkout.service';
+import { EcommerceBookingService } from '../../services/ecommerce-booking.service';
 import { WompiService } from '../../../../../shared/services/wompi.service';
 import { AccountService, Address } from '../../services/account.service';
 import { CustomerAddressPickerComponent } from '../../../../../shared/components/customer-address-picker/customer-address-picker.component';
@@ -143,6 +145,11 @@ export class CheckoutComponent implements OnInit {
    */
   readonly canProceedFromAddress = computed(() => {
     if (this.cartHasOnlyServices) return true;
+    // Paso 1 delivery-first: sin modo elegido no se avanza.
+    if (this.selected_delivery() == null) return false;
+    // Recoger: la opción de retiro se autocotiza al elegir el modo; el click
+    // de Continuar espera la promesa si sigue en vuelo (ver `nextStep`).
+    if (this.selected_delivery() === 'pickup') return true;
     if (!this.use_new_address()) return this.selected_address_id() != null;
     return this.addressFormValid();
   });
@@ -191,6 +198,14 @@ export class CheckoutComponent implements OnInit {
   readonly is_submitting = signal(false);
   readonly error_message = signal('');
   readonly invoicingEnabled = signal(false);
+
+  /**
+   * CP-tienda-checkout-whatsapp (anotación 2): `true` cuando se llega con
+   * `?channel=whatsapp` desde "Finalizar por WhatsApp". El flujo es el MISMO
+   * (misma validación, cálculo y orden); solo el post-éxito cambia: resumen
+   * + deep-link a `wa.me` con automensaje de la compra.
+   */
+  readonly is_whatsapp_channel = signal(false);
 
   // Wompi Widget
   readonly isWompiPayment = signal(false);
@@ -371,6 +386,7 @@ export class CheckoutComponent implements OnInit {
   // QR dine-in (Step 8): slider must NOT re-add in mesa-mode — the
   // originating product-card has already routed via the mesa chokepoint.
   private tableContext = inject(TableContextService);
+  private booking_service = inject(EcommerceBookingService);
   readonly guestDataModal = viewChild(GuestCheckoutDataModalComponent);
   private guest_data_decision_made = false;
   private guest_checkout_data: GuestCheckoutData | null = null;
@@ -380,8 +396,13 @@ export class CheckoutComponent implements OnInit {
     private checkout_service: CheckoutService,
     private account_service: AccountService,
     private router: Router,
+    private route: ActivatedRoute,
     private fb: FormBuilder,
   ) {
+    // Limpieza del debounce de recotización al salir del checkout.
+    this.destroyRef.onDestroy(() => {
+      if (this.shipping_fetch_timer) clearTimeout(this.shipping_fetch_timer);
+    });
     this.initForm();
 
     // Offer location capture ONCE — the first time the customer is on the
@@ -409,11 +430,48 @@ export class CheckoutComponent implements OnInit {
         }
       });
     });
+
+    // CP-tienda-checkout-whatsapp (C.2): recotización de fondo del domicilio.
+    // Cuando el modo es domicilio y hay una dirección válida, cotiza con
+    // debounce para que la lista de opciones viva en el paso 1 (donde el
+    // comprador la elige) y no en el paso de pago. Lee como deps reactivas
+    // solo signals; el valor del formulario se lee untracked vía la clave.
+    effect(() => {
+      const mode = this.selected_delivery();
+      const valid = this.addressFormValid();
+      const savedId = this.selected_address_id();
+      const fresh = this.use_new_address();
+      const onStep1 = this.step() === 1;
+      untracked(() => {
+        if (mode !== 'home' || this.cartHasOnlyServices || !onStep1) return;
+        void valid;
+        void savedId;
+        void fresh;
+        const key = this.currentAddressKey();
+        if (!key || key === this.shipping_quote_key) return;
+        // Anti-carrera A→B→A (auditoría D.3): solo la última clave programa;
+        // al disparar se revalida que siga vigente antes de cotizar.
+        if (this.shipping_fetch_timer) clearTimeout(this.shipping_fetch_timer);
+        this.shipping_fetch_timer = setTimeout(() => {
+          if (this.currentAddressKey() !== key) return;
+          void this.refreshShippingQuote(key);
+        }, 600);
+      });
+    });
   }
 
   ngOnInit(): void {
     // Asegurar que la moneda esté cargada para mostrar precios correctamente
     this.currencyService.loadCurrency();
+
+    // Canal reactivo (no solo snapshot): si el componente se reutiliza entre
+    // navegaciones carrito→checkout, el snapshot quedaría obsoleto y el
+    // wa.me se abriría (o no) en el flujo equivocado (auditoría D.3).
+    this.route.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((params) => {
+        this.is_whatsapp_channel.set(params.get('channel') === 'whatsapp');
+      });
 
     this.auth_facade.isAuthenticated$
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -780,6 +838,11 @@ export class CheckoutComponent implements OnInit {
 
     // Load payment methods (initially without shipping type filter)
     this.loadPaymentMethods();
+
+    // Paso 1 delivery-first: tipos de entrega de la tienda. La dirección
+    // para "recoger" es lazy (la carga `preparePickupQuote` al elegir el
+    // modo) para no pagar un HTTP que la mayoría no usa (auditoría D.3).
+    this.loadDeliveryOptions();
 
     if (!isAuthenticated) {
       this.is_loading.set(false);
@@ -1289,6 +1352,206 @@ export class CheckoutComponent implements OnInit {
   );
   loading_payment_methods = false;
 
+  // ========== ENTREGA delivery-first (CP-tienda-checkout-whatsapp) ==========
+  /** Tipos de entrega que la tienda expone (FB-13 `delivery-options`). */
+  readonly delivery_options = signal<DeliveryOption[]>([]);
+  readonly loading_delivery_options = signal(false);
+  /** 'home' = envío a domicilio · 'pickup' = recoger en tienda. */
+  readonly selected_delivery = signal<'home' | 'pickup' | null>(null);
+  /** Dirección de la tienda para "recoger" (endpoint público de reservas). */
+  readonly store_address = signal<any | null>(null);
+  readonly loading_store_address = signal(false);
+
+  /** ¿La tienda expone domicilio? (`other`/custom cotiza como domicilio.) */
+  readonly offersHomeDelivery = computed(() =>
+    this.delivery_options().some((o) => o.delivery_type !== 'pickup'),
+  );
+  /** ¿La tienda expone recoger en tienda? */
+  readonly offersPickup = computed(() =>
+    this.delivery_options().some((o) => o.delivery_type === 'pickup'),
+  );
+
+  /**
+   * Clave de la dirección con la que se cotizó lo que hoy muestra
+   * `shipping_options`. Si el comprador la cambia, la cotización queda
+   * obsoleta y hay que recotizar antes de avanzar (ver `nextStep`).
+   */
+  private shipping_quote_key: string | null = null;
+  private shipping_fetch_promise: Promise<void> | null = null;
+  private shipping_fetch_timer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Identidad de la dirección activa de domicilio, o null si no hay. */
+  private currentAddressKey(): string | null {
+    if (this.selected_delivery() !== 'home') return null;
+    if (this.use_new_address()) {
+      if (!this.address_form.valid) return null;
+      const v = this.address_form.value;
+      return `new:${v.country_code}|${v.state_province}|${v.city}|${v.address_line1}|${v.postal_code}`;
+    }
+    const id = this.selected_address_id();
+    return id != null ? `saved:${id}` : null;
+  }
+
+  /** Elige el modo de entrega. Recoger limpia la dirección del comprador. */
+  selectDelivery(mode: 'home' | 'pickup'): void {
+    if (this.selected_delivery() === mode) return;
+    this.selected_delivery.set(mode);
+    this.error_message.set('');
+    // Toda selección de envío anterior queda obsoleta al cambiar de modo.
+    this.shipping_quote_key = null;
+    this.shipping_options.set([]);
+    this.selected_shipping_method_id = null;
+    this.selected_shipping_option_id = null;
+    this.selected_shipping_method_type = null;
+    this.shipping_cost.set(0);
+    if (mode === 'pickup') {
+      this.selected_address_id.set(null);
+      // Se rastrea la promesa para que Continuar la espere si sigue en vuelo.
+      this.shipping_fetch_promise = this.preparePickupQuote();
+    }
+  }
+
+  /** Carga los tipos de entrega de la tienda y preselecciona si hay uno solo. */
+  private loadDeliveryOptions(): void {
+    if (this.cartHasOnlyServices) return;
+    this.loading_delivery_options.set(true);
+    this.checkout_service.getDeliveryOptions().subscribe({
+      next: (response) => {
+        this.loading_delivery_options.set(false);
+        if (!response.success) return;
+        this.delivery_options.set(response.data ?? []);
+        if (this.delivery_options().length === 0) {
+          // Tienda sin métodos de envío activos: el paso 0 quedaría vacío
+          // sin explicación (auditoría D.3).
+          this.error_message.set(
+            'Esta tienda aún no tiene formas de entrega configuradas. Comunícate con la tienda para coordinar.',
+          );
+          return;
+        }
+        const hasHome = this.offersHomeDelivery();
+        const hasPickup = this.offersPickup();
+        if (hasHome && !hasPickup) this.selectDelivery('home');
+        else if (hasPickup && !hasHome) this.selectDelivery('pickup');
+      },
+      error: (err) => {
+        this.loading_delivery_options.set(false);
+        // Telemetría como el resto del checkout (patrón QUI-728).
+        // eslint-disable-next-line no-console
+        console.error('[checkout] getDeliveryOptions() failed:', err);
+        // Paso 0 vacío sin mensaje = comprador bloqueado sin acción
+        // (auditoría D.3): se informa y se puede reintentar al reentrar.
+        this.error_message.set(
+          'No pudimos cargar las formas de entrega. Revisa tu conexión e intenta de nuevo.',
+        );
+        this.toast.error(
+          'No pudimos cargar las formas de entrega',
+          'Error de entrega',
+        );
+      },
+    });
+  }
+
+  /** Vuelo único de la dirección de la tienda (single-flight por sesión). */
+  private store_address_request: Promise<any | null> | null = null;
+
+  /** Dirección de la tienda (tarjeta "recoger"). Resuelve null sin reintentar. */
+  private loadStoreAddress(): Promise<any | null> {
+    if (this.store_address()) return Promise.resolve(this.store_address());
+    if (!this.store_address_request) {
+      this.loading_store_address.set(true);
+      this.store_address_request = firstValueFrom(
+        this.booking_service.getStoreAddress(),
+      )
+        .then((addr) => {
+          this.store_address.set(addr ?? null);
+          return addr ?? null;
+        })
+        .catch(() => null)
+        .finally(() => this.loading_store_address.set(false));
+    }
+    return this.store_address_request;
+  }
+
+  /**
+   * Cotiza el retiro con la dirección de LA TIENDA y autoselecciona la opción
+   * `pickup` (o la primera si no hay). El comprador nunca elige tarifa al
+   * recoger: solo confirma el modo.
+   */
+  private async preparePickupQuote(): Promise<void> {
+    const addr = await this.loadStoreAddress();
+    if (!addr) {
+      this.shipping_coverage.set('none');
+      this.error_message.set(
+        'La tienda aún no tiene dirección de retiro. Elige otra forma de entrega.',
+      );
+      return;
+    }
+    this.loading_shipping.set(true);
+    return new Promise<void>((resolve) => {
+      this.cart_service
+        .getShippingEstimates({
+          country_code: addr.country_code ?? 'CO',
+          state_province: addr.state_province,
+          city: addr.city,
+          postal_code: addr.postal_code,
+        })
+        .subscribe({
+          next: (options) => {
+            this.loading_shipping.set(false);
+            this.shipping_options.set(options ?? []);
+            const pickup =
+              (options ?? []).find((o: any) => o.method_type === 'pickup') ??
+              (options ?? [])[0];
+            if (pickup) {
+              this.shipping_coverage.set('unknown');
+              this.selectShippingMethod(pickup, pickup.cost);
+            } else {
+              this.shipping_coverage.set('none');
+              this.error_message.set(
+                'La tienda no tiene retiro configurado. Elige otra forma de entrega.',
+              );
+            }
+            resolve();
+          },
+          error: () => {
+            this.loading_shipping.set(false);
+            this.shipping_coverage.set('unknown');
+            this.error_message.set(
+              'No pudimos cargar el retiro en tienda. Intenta de nuevo.',
+            );
+            resolve();
+          },
+        });
+    });
+  }
+
+  /**
+   * Recotiza el domicilio en segundo plano para la dirección indicada.
+   * Lo dispara el effect del constructor cuando la dirección queda válida;
+   * `nextStep` lo espera antes de avanzar.
+   */
+  private refreshShippingQuote(key: string): Promise<void> {
+    let address: any | null = null;
+    if (this.use_new_address()) {
+      address = this.mapFormToCalcAddress(this.address_form.value);
+    } else if (this.selected_address_id() != null) {
+      const saved = this.addresses().find(
+        (a) => a.id === this.selected_address_id(),
+      );
+      address = saved ? this.mapAddressToCalc(saved) : null;
+    }
+    if (!address) return Promise.resolve();
+    const p = this.fetchShipping(address, false, true, key).then(() => {
+      // Solo sella si la dirección no cambió durante el vuelo (la respuesta
+      // lenta de una clave vieja nunca pisa la cotización vigente).
+      if (this.currentAddressKey() === key) {
+        this.shipping_quote_key = key;
+      }
+    });
+    this.shipping_fetch_promise = p;
+    return p;
+  }
+
   // ... (existing methods)
 
   // Modified logic: call this when address is finalized (e.g. Next from Address step)
@@ -1387,13 +1650,27 @@ export class CheckoutComponent implements OnInit {
     return value;
   }
 
-  fetchShipping(address: any, notify = true): Promise<void> {
-    this.is_loading.set(true);
+  fetchShipping(
+    address: any,
+    notify = true,
+    quiet = false,
+    quoteKey?: string,
+  ): Promise<void> {
+    // `quiet` = recotización de fondo del paso 1 delivery-first: no tapa la
+    // pantalla con el spinner global ni spamea toasts (el estado vive en
+    // `loading_shipping()` junto a la lista de opciones).
+    if (!quiet) this.is_loading.set(true);
     this.loading_shipping.set(true);
 
     return new Promise<void>((resolve) => {
       this.cart_service.getShippingEstimates(address).subscribe({
         next: (options) => {
+          // Anti-carrera: la respuesta lenta de una dirección vieja se
+          // descarta antes de tocar signals (auditoría D.3).
+          if (quoteKey && this.currentAddressKey() !== quoteKey) {
+            resolve();
+            return;
+          }
           this.shipping_options.set(options);
 
           if (options.length > 0) {
@@ -1402,15 +1679,20 @@ export class CheckoutComponent implements OnInit {
             const isFallbackOnly = options.every((o: any) => o.is_fallback);
             this.shipping_coverage.set(isFallbackOnly ? 'pickup_only' : 'zone');
 
-            // No auto-seleccionar a ciegas la primera opción: si esa opción es
-            // de tipo `pickup`, el backend filtra los métodos de pago y el
-            // comprador pierde contra-entrega sin haber elegido retirar. Se
-            // prefiere la primera opción de despacho, y sólo se cae a `pickup`
-            // cuando es lo único que hay.
-            const preferred =
-              options.find((o: any) => o.method_type !== 'pickup') ??
-              options[0];
-            this.selectShippingMethod(preferred, preferred.cost);
+            // No pisar la elección del comprador en cada recotización: si la
+            // opción elegida sigue existiendo se conserva; solo se
+            // autoselecciona cuando no hay selección válida. Se prefiere la
+            // primera opción de despacho y se cae a `pickup` cuando es lo
+            // único que hay (el modo "recoger" la filtra por su cuenta).
+            const stillValid = options.some(
+              (o: any) => o.id === this.selected_shipping_option_id,
+            );
+            if (!stillValid) {
+              const preferred =
+                options.find((o: any) => o.method_type !== 'pickup') ??
+                options[0];
+              this.selectShippingMethod(preferred, preferred.cost);
+            }
 
             if (isFallbackOnly) {
               this.error_message.set('');
@@ -1433,22 +1715,32 @@ export class CheckoutComponent implements OnInit {
             }
           }
 
-          this.is_loading.set(false);
+          if (!quiet) this.is_loading.set(false);
           this.loading_shipping.set(false);
           resolve();
         },
         error: () => {
-          this.is_loading.set(false);
+          if (!quiet) this.is_loading.set(false);
           this.loading_shipping.set(false);
           this.shipping_coverage.set('unknown');
-          this.toast.error(
-            'No pudimos cargar las opciones de envío. Intenta de nuevo.',
-            'Error de envío',
-          );
+          if (!quiet) {
+            this.toast.error(
+              'No pudimos cargar las opciones de envío. Intenta de nuevo.',
+              'Error de envío',
+            );
+          }
           resolve();
         },
       });
     });
+  }
+
+  /** Nombre de la tarifa elegida para el resumen del paso de pago (C.4). */
+  selectedShippingOptionName(): string {
+    const found = this.shipping_options().find(
+      (o: any) => o.id === this.selected_shipping_option_id,
+    );
+    return found?.method_name ?? 'Envío';
   }
 
   selectShippingMethod(option: any, cost: number) {
@@ -1486,12 +1778,21 @@ export class CheckoutComponent implements OnInit {
     }
   }
 
+  /**
+   * Defensa en profundidad (auditoría D.3): aunque el backend ya excluye
+   * `cash` del ecommerce, la UI nunca lo renderiza aunque regresara por
+   * error. El único freno real sigue siendo el POST (ECOM_CHECKOUT_002).
+   */
+  private withoutCash(methods: PaymentMethod[]): PaymentMethod[] {
+    return (methods ?? []).filter((m) => m?.type !== 'cash');
+  }
+
   loadPaymentMethods(shippingType?: string): void {
     this.loading_payment_methods = true;
     this.checkout_service.getPaymentMethods(shippingType).subscribe({
       next: (response) => {
         if (response.success) {
-          this.payment_methods.set(response.data);
+          this.payment_methods.set(this.withoutCash(response.data));
 
           // Reset selection if current method is no longer available
           if (this.selected_payment_method_id()) {
@@ -1555,8 +1856,32 @@ export class CheckoutComponent implements OnInit {
 
   // Override nextStep to load shipping if moving from Step 1
   async nextStep(): Promise<void> {
-    // Address step (only for carts with physical items)
+    // Paso 1 delivery-first (solo carritos con físicos): primero el modo de
+    // entrega; domicilio pide dirección y cotiza; recoger autocotiza el retiro.
     if (this.step() === 1 && !this.cartHasOnlyServices) {
+      const mode = this.selected_delivery();
+      if (!mode) {
+        this.error_message.set('Elige cómo quieres recibir tu pedido');
+        return;
+      }
+
+      if (mode === 'pickup') {
+        // Esperar la autocotización del retiro si sigue en vuelo.
+        if (this.loading_shipping()) {
+          await this.shipping_fetch_promise;
+        }
+        if (this.selected_shipping_method_id == null) {
+          await this.preparePickupQuote();
+        }
+        if (this.selected_shipping_method_id == null) {
+          // preparePickupQuote ya fijó el mensaje concreto.
+          return;
+        }
+        this.error_message.set('');
+        this.advanceStep();
+        return;
+      }
+
       if (this.use_new_address() && !this.address_form.valid) {
         this.error_message.set(
           ERROR_MESSAGES['ECOM_CHECKOUT_ADDR_REQUIRED_001'],
@@ -1579,13 +1904,28 @@ export class CheckoutComponent implements OnInit {
         return;
       }
 
-      // Esperar la respuesta del calculador ANTES de avanzar. Cuando esto era
-      // fire-and-forget el comprador aterrizaba en el paso de Pago con
-      // `shipping_options()` todavía vacío, así que veía el cartel de "sin
-      // cobertura" aunque su ciudad sí estuviera cubierta.
+      // La cotización vive en el paso 1 (la lista se elige aquí, no en Pago).
+      // Si la dirección cambió tras la última cotización (o nunca se cotizó),
+      // se recotiza y el comprador revisa la lista antes de avanzar: NO se
+      // avanza a ciegas con la preferencia automática.
       this.error_message.set('');
-      await this.loadShippingOptions();
-      this.step.set(this.step() + 1);
+      const key = this.currentAddressKey();
+      if (
+        key &&
+        (key !== this.shipping_quote_key ||
+          this.selected_shipping_option_id == null)
+      ) {
+        await this.refreshShippingQuote(key);
+        if (
+          this.shipping_options().length === 0 ||
+          this.selected_shipping_option_id == null
+        ) {
+          // Sin opciones no hay a dónde avanzar: el paso 1 ya muestra el
+          // estado vacío accionable (otra dirección o recoger).
+          return;
+        }
+      }
+      this.advanceStep();
       return;
     }
 
@@ -1598,7 +1938,7 @@ export class CheckoutComponent implements OnInit {
         return;
       }
       this.error_message.set('');
-      this.step.set(this.step() + 1);
+      this.advanceStep();
       return;
     }
 
@@ -1644,7 +1984,7 @@ export class CheckoutComponent implements OnInit {
     }
 
     this.error_message.set('');
-    this.step.set(this.step() + 1);
+    this.advanceStep();
   }
 
   /** Handle booking slot selection from the picker */
@@ -1741,7 +2081,7 @@ export class CheckoutComponent implements OnInit {
         // Continue with shipping options
         this.error_message.set('');
         await this.loadShippingOptions();
-        this.step.set(this.step() + 1);
+        this.advanceStep();
         this.is_loading.set(false);
       },
       error: async () => {
@@ -1753,7 +2093,7 @@ export class CheckoutComponent implements OnInit {
         );
         this.error_message.set('');
         await this.loadShippingOptions();
-        this.step.set(this.step() + 1);
+        this.advanceStep();
       },
     });
   }
@@ -1780,19 +2120,17 @@ export class CheckoutComponent implements OnInit {
     };
   }
 
-  prevStep(): void {
-    this.step.set(this.step() - 1);
+  /**
+   * Avanza a la siguiente etapa llevando la vista al tope con scroll suave,
+   * para que cada etapa siempre se vea desde arriba.
+   */
+  private advanceStep(): void {
+    this.step.set(this.step() + 1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  /**
-   * Vuelve al paso de dirección desde el estado "sin cobertura de envío".
-   * Es la salida que antes no existía: el comprador quedaba con el botón
-   * deshabilitado y sin ninguna acción posible.
-   */
-  goToAddressStep(): void {
-    this.error_message.set('');
-    this.shipping_coverage.set('unknown');
-    this.step.set(1);
+  prevStep(): void {
+    this.step.set(this.step() - 1);
   }
 
   placeOrder(): void {
@@ -1878,6 +2216,9 @@ export class CheckoutComponent implements OnInit {
     const request: CheckoutRequest = {
       payment_method_id: this.selected_payment_method_id()!,
       notes: this.notes() || undefined,
+      // Canal unificado: "Finalizar por WhatsApp" crea la orden por este
+      // mismo núcleo; el backend la marca channel='whatsapp'.
+      ...(this.is_whatsapp_channel() ? { channel: 'whatsapp' as const } : {}),
       // Only include shipping fields when cart has physical items
       ...(!this.cartHasOnlyServices
         ? {
@@ -1936,7 +2277,10 @@ export class CheckoutComponent implements OnInit {
       request.shipping_address_id = this.selected_address_id() ?? undefined;
     }
 
-    // Wompi payment flow: create order first, then open widget
+    // Wompi payment flow: create order first, then open widget.
+    // En canal WhatsApp NO se abre wa.me antes del pago: el mensaje de
+    // confirmación saldría con una orden aún impaga. La consulta post-pago
+    // vive en "Consultar por WhatsApp" de la página del pedido.
     if (this.isWompiPayment()) {
       this.wompiWidgetLoading.set(true);
       this.is_submitting.set(false);
@@ -1996,6 +2340,11 @@ export class CheckoutComponent implements OnInit {
         if (response.success) {
           this.orderPlaced = true;
           this.is_submitting.set(false);
+          // Canal WhatsApp: mismo flujo, pero al finalizar muestra el resumen
+          // y abre el WhatsApp de la tienda con el automensaje de la compra.
+          if (this.is_whatsapp_channel()) {
+            this.openWhatsAppFromResponse(response.data);
+          }
           if (!this.is_authenticated() && response.data.public_order_token) {
             this.cart_service.clearAllCart();
             this.router.navigate(
@@ -2016,14 +2365,162 @@ export class CheckoutComponent implements OnInit {
         const msg = extractApiErrorMessage(err);
         this.error_message.set(msg);
         this.toast.error(msg, 'Error al procesar el pedido');
+        // La decisión guest que llevó a un pedido fallido se deshace: al
+        // pulsar "Finalizar" de nuevo el modal vuelve a abrirse en vez de
+        // reintentar a ciegas contra el mismo 400 (auditoría D.3).
+        if (!this.is_authenticated()) {
+          this.guest_data_decision_made = false;
+        }
       },
     });
   }
 
   onGuestDataCompleted(data: GuestCheckoutData | null): void {
+    // `null` = el invitado canceló el modal: se aborta, sin reintentar solo.
+    // Al pulsar "Finalizar" de nuevo el modal vuelve a abrirse.
+    if (!data) return;
     this.guest_checkout_data = data;
     this.guest_data_decision_made = true;
     this.placeOrder();
+  }
+
+  /**
+   * CP-tienda-checkout-whatsapp (C.7): texto plano de la dirección de la
+   * tienda para copiar y para el enlace de Google Maps.
+   */
+  private storeAddressText(): string {
+    const addr = this.store_address();
+    if (!addr) return '';
+    return [
+      addr.address_line1,
+      addr.address_line2,
+      [addr.city, addr.state_province].filter(Boolean).join(', '),
+      addr.phone_number ? `Tel: ${addr.phone_number}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  /** Copia la dirección de la tienda (con fallback sin Clipboard API). */
+  copyStoreAddress(): void {
+    const text = this.storeAddressText();
+    if (!text) return;
+    const done = () => this.toast.success('Dirección copiada', 'Listo');
+    const fallback = () => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        done();
+      } catch {
+        this.toast.warning(text, 'Copia la dirección');
+      }
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else {
+      fallback();
+    }
+  }
+
+  /**
+   * Abre la dirección de la tienda en Google Maps en pestaña nueva, sin
+   * tocar el router ni el estado del checkout (anotación 3).
+   */
+  openStoreInMaps(): void {
+    const addr = this.store_address();
+    if (!addr) return;
+    const query = encodeURIComponent(
+      [addr.address_line1, addr.city, addr.state_province]
+        .filter(Boolean)
+        .join(', '),
+    );
+    window.open(
+      `https://www.google.com/maps/search/?api=1&query=${query}`,
+      '_blank',
+      'noopener',
+    );
+  }
+
+  /**
+   * CP-tienda-checkout-whatsapp (anotación 2): automensaje con TODOS los datos
+   * de la compra recién creada. Se arma desde la respuesta del backend (lo
+   * realmente comprado), nunca desde el carrito local. Si el navegador
+   * bloquea el popup, se informa para que el comprador lo abra manualmente
+   * (la orden YA existe: nunca se pierde la venta por un popup bloqueado).
+   */
+  private openWhatsAppFromResponse(order: {
+    order_number: string;
+    total: number;
+    items?: Array<{
+      name: string;
+      variant_sku: string | null;
+      quantity: number;
+      total_price: number;
+    }>;
+  }): void {
+    const config = this.tenant_facade.getCurrentDomainConfig();
+    const phone = (
+      config?.customConfig?.ecommerce?.checkout?.whatsapp_number || ''
+    ).replace(/\D/g, '');
+    if (!phone) {
+      this.toast.warning(
+        'La tienda no tiene un WhatsApp configurado. Tu pedido quedó registrado.',
+        'Pedido creado',
+      );
+      return;
+    }
+    const storeName =
+      config?.customConfig?.branding?.name ||
+      config?.store_name ||
+      'la tienda';
+    const fmt = (v: number) => this.currencyService.format(v);
+    const itemLines = (order.items ?? [])
+      .map(
+        (i) =>
+          `  - ${i.name}${i.variant_sku ? ' (' + i.variant_sku + ')' : ''} x${i.quantity} — ${fmt(Number(i.total_price))}`,
+      )
+      .join('\n');
+    const guest = this.guest_checkout_data;
+    const customerName =
+      this.is_authenticated() || !guest
+        ? ''
+        : `${guest.first_name ?? ''} ${guest.last_name ?? ''}`.trim();
+    // Pitch configurable por la tienda (admin ecommerce): reemplaza el
+    // saludo por defecto. `{tienda}`/`{web}` se sustituyen (compat con
+    // plantillas guardadas; el admin ya prellena resuelto).
+    const shopUrl =
+      typeof window !== 'undefined' ? window.location.origin : '';
+    const pitch = (
+      config?.customConfig?.ecommerce?.checkout?.whatsapp_pitch || ''
+    )
+      .trim()
+      .replaceAll('{tienda}', storeName)
+      .replaceAll('{web}', shopUrl);
+    const header = pitch
+      ? pitch
+      : customerName
+        ? `Hola, soy *${customerName}*! Acabo de comprar en *${storeName}* 🛒`
+        : `Hola! Acabo de comprar en *${storeName}* 🛒`;
+    const message = encodeURIComponent(
+      `${header}\n\n` +
+        `*Pedido:* ${order.order_number}\n\n` +
+        (itemLines ? `*Productos:*\n${itemLines}\n\n` : '') +
+        `*Total:* ${fmt(Number(order.total))}\n\n` +
+        `Quedo atento para coordinar el pago y la entrega!`,
+    );
+    const popup = window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
+    if (!popup) {
+      this.toast.warning(
+        'Tu pedido quedó registrado. Permite ventanas emergentes para abrir WhatsApp.',
+        'Pedido creado',
+      );
+    }
   }
 
   private toGuestCustomer(
@@ -2138,28 +2635,6 @@ export class CheckoutComponent implements OnInit {
 
   goToCart(): void {
     this.router.navigate(['/cart']);
-  }
-
-  /**
-   * Navega al wizard de booking para que el cliente pueda modificar el
-   * horario, profesional o modalidad sin tener que pasar por el carrito.
-   * Prioridad: (1) el primer bookable item sin booking en el carrito,
-   * (2) si todos tienen booking, el primero del carrito. Esto evita
-   * que con múltiples items se sobreescriban las selecciones existentes
-   * al navegar al wizard.
-   */
-  changeSchedule(): void {
-    const firstMissing = this.bookableItems.find(
-      (i) => !this.preBookedSelectionFor(i),
-    );
-    const target = firstMissing ?? this.bookableItems[0];
-    if (!target) {
-      this.toast.warning(
-        'No hay servicios con reserva para modificar en el carrito.',
-      );
-      return;
-    }
-    this.router.navigate(['/book', target.product_id]);
   }
 
   onQuickView(product: EcommerceProduct): void {

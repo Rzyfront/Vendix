@@ -34,9 +34,13 @@ export interface GuestCheckoutData {
     <app-modal
       [isOpen]="isOpen()"
       (isOpenChange)="onOpenChange($event)"
-      (cancel)="continueWithoutData()"
-      title="Datos opcionales"
-      subtitle="Puedes continuar sin registrarte. Estos datos solo ayudan a coordinar tu pedido o emitir factura a tu nombre."
+      (cancel)="cancel()"
+      [title]="requireName() ? 'Tus datos' : 'Datos opcionales'"
+      [subtitle]="
+        requireName()
+          ? 'Tu nombre es obligatorio para coordinar el pedido. El resto es opcional.'
+          : 'Puedes continuar sin registrarte. Estos datos solo ayudan a coordinar tu pedido o emitir factura a tu nombre.'
+      "
       size="md"
     >
       <form [formGroup]="form" class="guest-data-form">
@@ -45,6 +49,8 @@ export interface GuestCheckoutData {
             label="Nombre"
             formControlName="first_name"
             placeholder="Tu nombre"
+            [required]="requireName()"
+            [error]="firstNameError()"
           />
           <app-input
             label="Apellido"
@@ -95,9 +101,15 @@ export interface GuestCheckoutData {
       </form>
 
       <div slot="footer" class="guest-data-actions">
-        <app-button variant="ghost" (clicked)="continueWithoutData()">
-          Continuar sin datos
-        </app-button>
+        @if (!requireName()) {
+          <app-button variant="ghost" (clicked)="continueWithoutData()">
+            Continuar sin datos
+          </app-button>
+        } @else {
+          <app-button variant="ghost" (clicked)="cancel()">
+            Cancelar
+          </app-button>
+        }
         <app-button variant="primary" (clicked)="continueWithData()">
           Guardar y continuar
         </app-button>
@@ -171,6 +183,12 @@ export interface GuestCheckoutData {
 export class GuestCheckoutDataModalComponent {
   readonly isOpen = signal(false);
   readonly invoicingEnabled = input<boolean>(false);
+  /**
+   * CP-tienda-checkout-whatsapp (anotación 6): en la venta guest de la tienda
+   * el nombre es lo mínimo obligatorio. El wizard de mesa lo deja en `false`
+   * para conservar su flujo con fallback 'Invitado'.
+   */
+  readonly requireName = input<boolean>(true);
   readonly completed = output<GuestCheckoutData | null>();
 
   readonly form = new FormGroup({
@@ -183,11 +201,29 @@ export class GuestCheckoutDataModalComponent {
   });
 
   open(): void {
+    this.firstNameTouched.set(false);
     this.isOpen.set(true);
   }
 
   onOpenChange(isOpen: boolean): void {
     this.isOpen.set(isOpen);
+  }
+
+  /** Cierre sin datos (X o Cancelar): el llamador lo trata como aborto. */
+  cancel(): void {
+    this.isOpen.set(false);
+    this.completed.emit(null);
+  }
+
+  private readonly firstNameTouched = signal(false);
+
+  firstNameError(): string | undefined {
+    const control = this.form.controls.first_name;
+    const empty = control.value.trim().length === 0;
+    if (!this.requireName() || (!this.firstNameTouched() && !control.touched)) {
+      return undefined;
+    }
+    return empty ? 'El nombre es obligatorio' : undefined;
   }
 
   continueWithoutData(): void {
@@ -196,6 +232,12 @@ export class GuestCheckoutDataModalComponent {
   }
 
   continueWithData(): void {
+    const firstName = this.form.controls.first_name.value.trim();
+    if (this.requireName() && firstName.length === 0) {
+      this.firstNameTouched.set(true);
+      this.form.controls.first_name.markAsTouched();
+      return;
+    }
     const value = this.form.getRawValue();
     const entries = Object.entries(value).map(([key, val]) => [
       key,

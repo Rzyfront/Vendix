@@ -1,6 +1,8 @@
 import {Component,
   OnInit,
+  AfterViewInit,
   ChangeDetectionStrategy,
+  ElementRef,
   forwardRef,
   input,
   output,
@@ -103,9 +105,10 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
     </div>
   `})
 export class InputsearchComponent
-  implements OnInit, ControlValueAccessor
+  implements OnInit, AfterViewInit, ControlValueAccessor
 {
   private destroyRef = inject(DestroyRef);
+  private hostRef = inject(ElementRef);
   readonly type = input<'text' | 'search' | 'email' | 'url'>('text');
   readonly placeholder = input('Buscar...');
   readonly disabled = input<boolean>(false);
@@ -116,6 +119,7 @@ export class InputsearchComponent
   readonly size = input<InputSearchSize>('md');
   readonly styleVariant = input<FormStyleVariant>('modern');
   readonly debounceTime = input(300);
+  readonly autofocus = input(false);
   readonly helpText = input('');
   readonly errorMessage = input('');
   readonly customClasses = input('');
@@ -148,6 +152,17 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
         this.searchChange.emit(searchValue);
         this.search.emit(searchValue);
       });
+  }
+
+  ngAfterViewInit(): void {
+    if (this.autofocus() && !this.isDisabled() && !this.readonly()) {
+      setTimeout(() => this.focusInput(), 0);
+    }
+  }
+
+  focusInput(): void {
+    const el = this.hostRef.nativeElement?.querySelector?.('input') as HTMLInputElement | null;
+    el?.focus({ preventScroll: true });
   }
 // ControlValueAccessor implementation
   writeValue(value: string): void {

@@ -1080,7 +1080,11 @@ export class PosOrderService {
       category_id: isCustomItem ? undefined : categoryIds[0],
       category_ids: isCustomItem ? undefined : categoryIds,
       product_name: item.product.name,
-      description: item.description || item.notes || item.product.description || undefined,
+      description: item.description || item.product.description || undefined,
+      // QUI-787 — la nota por línea viaja al campo `notes` del
+      // `CreateOrderItemDto` (no se concatena a `description`, que es público
+      // y NO se propaga al KDS). Trim para evitar whitespace-only.
+      notes: item.notes?.trim() || undefined,
       product_sku: isCustomItem ? undefined : item.product.sku,
       quantity: item.quantity,
       unit_price: Number(item.unitPrice.toFixed(2)),

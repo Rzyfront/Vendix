@@ -124,6 +124,7 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
 import {
   PosRestaurantIntegrationService,
   CounterOrderLine,
+  PosFireItemNote,
 } from './services/pos-restaurant-integration.service';
 import { TaxesService } from '../products/services/taxes.service';
 import { TaxCategory } from '../products/interfaces';
@@ -1870,7 +1871,13 @@ export class PosComponent {
     }
 
     const cart = this.cartState();
-    const items: Array<{ product_id: number; quantity: number; product_variant_id?: number; is_takeaway?: boolean }> = [];
+    const items: Array<{
+      product_id: number;
+      quantity: number;
+      product_variant_id?: number;
+      is_takeaway?: boolean;
+      notes?: string;
+    }> = [];
     for (const it of cart?.items ?? []) {
       if (it.itemType === 'custom') continue;
       const productId = parseInt(
@@ -1880,7 +1887,13 @@ export class PosComponent {
         10,
       );
       if (!Number.isFinite(productId)) continue;
-      const line: { product_id: number; quantity: number; product_variant_id?: number; is_takeaway?: boolean } = {
+      const line: {
+        product_id: number;
+        quantity: number;
+        product_variant_id?: number;
+        is_takeaway?: boolean;
+        notes?: string;
+      } = {
         product_id: productId,
         quantity: it.quantity,
       };
@@ -1892,6 +1905,14 @@ export class PosComponent {
       }
       if (it.variant_id != null) {
         line.product_variant_id = it.variant_id;
+      }
+      // QUI-787 — nota por linea del mesero para cocina ("sin cebolla",
+      // "termino medio"). `TableSessionAddItem.notes` ya acepta el campo y
+      // `kitchen-fire.service.ts` la propaga a `kitchen_ticket_items.notes`.
+      // Trim para descartar whitespace-only y omitir si queda vacia.
+      const trimmedNote = it.notes?.trim();
+      if (trimmedNote) {
+        line.notes = trimmedNote;
       }
       items.push(line);
     }
@@ -4298,7 +4319,16 @@ export class PosComponent {
   readonly kitchenConfirmOpen = signal(false);
   readonly kitchenPreview = signal<FirePreview | null>(null);
   readonly kitchenPreviewLoading = signal(false);
-  private kitchenConfirmBridge: Subject<FireItemExclusion[]> | null = null;
+  /**
+   * QUI-787 — el bridge ahora reenvía TANTO las exclusiones confirmadas
+   * (QUI-655) COMO las notas por línea (`item_notes`) que el
+   * `KitchenConfirmModalComponent` ya emite pero el POS descartaba. El fire
+   * real se hace en el switchMap de abajo con ambos campos hacia el backend.
+   */
+  private kitchenConfirmBridge: Subject<{
+    exclusions: FireItemExclusion[];
+    item_notes?: PosFireItemNote[];
+  }> | null = null;
 
   private fireWithKitchenConfirm(
     orderId: number,
@@ -4308,7 +4338,10 @@ export class PosComponent {
     this.kitchenPreviewLoading.set(true);
     this.kitchenConfirmOpen.set(true);
 
-    const bridge = new Subject<FireItemExclusion[]>();
+    const bridge = new Subject<{
+      exclusions: FireItemExclusion[];
+      item_notes?: PosFireItemNote[];
+    }>();
     this.kitchenConfirmBridge = bridge;
 
     this.restaurantIntegration
@@ -4329,15 +4362,17 @@ export class PosComponent {
         },
       });
 
-    // El fire real ocurre cuando el bridge emite las exclusiones confirmadas.
+    // El fire real ocurre cuando el bridge emite las exclusiones + notas
+    // confirmadas. Ambas viajan al backend como `exclusions` y `item_notes`.
     return bridge.pipe(
       take(1),
-      switchMap((exclusions) =>
+      switchMap((payload) =>
         this.restaurantIntegration.fireOrderItems(
           orderId,
           orderItemIds,
           undefined,
-          exclusions,
+          payload.exclusions,
+          payload.item_notes,
         ),
       ),
     );
@@ -4346,7 +4381,10 @@ export class PosComponent {
   onKitchenConfirmed(event: FireConfirmPayload | FireItemExclusion[]): void {
     this.kitchenConfirmOpen.set(false);
     const exclusions = Array.isArray(event) ? event : (event?.exclusions ?? []);
-    this.kitchenConfirmBridge?.next(exclusions);
+    // QUI-787 — `item_notes` solo aparece en el shape `FireConfirmPayload`;
+    // el legacy `FireItemExclusion[]` (sin notas) sigue siendo válido.
+    const item_notes = Array.isArray(event) ? undefined : event?.item_notes;
+    this.kitchenConfirmBridge?.next({ exclusions, item_notes });
     this.kitchenConfirmBridge = null;
   }
 

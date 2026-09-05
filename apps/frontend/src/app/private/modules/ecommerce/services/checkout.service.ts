@@ -119,6 +119,12 @@ export interface CheckoutRequest {
    * disponible.
    */
   bank_account_id?: number | null;
+  /**
+   * CP-tienda-checkout-whatsapp: `'whatsapp'` cuando la orden se finaliza con
+   * "Finalizar por WhatsApp". Recorre el mismo núcleo del backend; solo el
+   * post-éxito del frontend cambia (resumen + `wa.me` con automensaje).
+   */
+  channel?: 'ecommerce' | 'whatsapp';
 }
 
 export interface CheckoutResponse {
@@ -138,42 +144,28 @@ export interface CheckoutResponse {
   promotion_discount?: number;
   coupon_discount?: number;
   shipping_cost?: number;
-}
-
-export interface WhatsappCheckoutResponse extends CheckoutResponse {
-  subtotal: number;
-  tax: number;
-  // Detailed discount totals so the WhatsApp UI surfaces promos + coupons
-  // and the message can include the final price the customer will pay.
-  discount_amount?: number;
-  promotion_discount?: number;
-  coupon_discount?: number;
-  shipping_cost?: number;
-  item_count: number;
-  items: Array<{
+  /**
+   * CP-tienda-checkout-whatsapp: líneas de la orden creada (para el resumen y
+   * el automensaje de WhatsApp, armados desde lo realmente comprado).
+   */
+  items?: Array<{
     name: string;
     variant_sku: string | null;
     quantity: number;
     unit_price: number;
     total_price: number;
   }>;
-  customer?: {
-    first_name: string;
-    last_name: string;
-    phone: string | null;
-    email?: string | null;
-    document_type?: string | null;
-    document_number?: string | null;
-    address: {
-      address_line1: string;
-      address_line2: string | null;
-      city: string;
-      state_province: string | null;
-      country_code: string;
-      postal_code: string | null;
-      phone_number: string | null;
-    } | null;
-  } | null;
+  channel?: 'ecommerce' | 'whatsapp';
+}
+
+// ELIMINADO en CP-tienda-checkout-whatsapp: `WhatsappCheckoutResponse` vivía
+// para el POST directo a /whatsapp que el storefront ya no llama. La
+// respuesta de `checkout()` (canal 'whatsapp') trae `items` + `channel`.
+
+export interface DeliveryOption {
+  method_id: number;
+  method_name: string;
+  delivery_type: 'pickup' | 'home_delivery' | 'other';
 }
 
 export interface WompiWidgetConfig {
@@ -218,6 +210,21 @@ export class CheckoutService {
     return new HttpHeaders({
       'x-store-id': storeId?.toString() || '',
     });
+  }
+
+  /**
+   * CP-tienda-checkout-whatsapp (C.2): tipos de entrega que la tienda expone,
+   * para el paso 0 del checkout. Sin precios ni zonas (eso sigue en
+   * `POST /shipping/calculate` vía `CartService.getShippingEstimates`).
+   */
+  getDeliveryOptions(): Observable<{
+    success: boolean;
+    data: DeliveryOption[];
+  }> {
+    return this.http.get<{ success: boolean; data: DeliveryOption[] }>(
+      `${this.api_url}/delivery-options`,
+      { headers: this.getHeaders() },
+    );
   }
 
   getPaymentMethods(
@@ -335,32 +342,9 @@ export class CheckoutService {
     );
   }
 
-  whatsappCheckout(
-    notes?: string,
-    items?: Array<{
-      product_id: number;
-      product_variant_id?: number;
-      quantity: number;
-      /** Ver `CheckoutRequest.items.price_tier_id`. */
-      price_tier_id?: number;
-    }>,
-    guestCustomer?: GuestCheckoutCustomer | null,
-    shippingAddress?: CheckoutShippingAddress | null,
-    couponCode?: string | null,
-  ): Observable<{ success: boolean; data: WhatsappCheckoutResponse }> {
-    return this.http.post<{ success: boolean; data: WhatsappCheckoutResponse }>(
-      `${this.api_url}/whatsapp`,
-      {
-        notes,
-        items,
-        guest_customer: guestCustomer,
-        shipping_address: shippingAddress,
-        coupon_code: couponCode || undefined,
-      },
-      { headers: this.getHeaders() },
-    );
-  }
-
+  // `whatsappCheckout` eliminado en CP-tienda-checkout-whatsapp: "Finalizar
+  // por WhatsApp" recorre `checkout()` con `channel='whatsapp'`. El endpoint
+  // legacy `POST /whatsapp` sigue vivo en el backend por compatibilidad.
   getGuestOrderSummary(
     token: string,
   ): Observable<{ success: boolean; data: any }> {

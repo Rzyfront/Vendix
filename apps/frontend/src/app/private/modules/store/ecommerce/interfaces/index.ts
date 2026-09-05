@@ -88,6 +88,7 @@ export interface EcommerceSettings {
     guest_newsletter_opt_in?: boolean;
     whatsapp_checkout?: boolean;
     whatsapp_number?: string;
+    whatsapp_pitch?: string;
   };
 
   // Envíos

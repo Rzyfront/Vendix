@@ -3,6 +3,7 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  HostListener,
   computed,
   effect,
   inject,
@@ -1487,6 +1488,57 @@ export class PosCheckoutShellComponent {
         ? (idx + 1) % modes.length
         : (idx - 1 + modes.length) % modes.length;
     this.onSelectSaleMode(modes[next]);
+  }
+
+  /**
+   * Navegación por teclado del modal de pago: flechas = Anterior/Siguiente del
+   * wizard, Enter = acción primaria (Siguiente o Cobrar/Guardar). Las flechas
+   * NUNCA disparan el cobro final; solo Enter lo hace. Los bloqueos no se
+   * saltan: Siguiente/Enter reutilizan `attemptNextStep`/`onPrimaryConfirm`,
+   * que destellan lo que falta en vez de avanzar en silencio.
+   */
+  @HostListener('keydown', ['$event'])
+  onShellKeydown(event: KeyboardEvent): void {
+    if (!this.isOpen() || event.defaultPrevented) return;
+    if (this.footerProcessing()) return;
+    const target = event.target as HTMLElement | null;
+    const tag = target?.tagName;
+    const editable =
+      tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || !!target?.isContentEditable;
+
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      // En campos editables las flechas mueven el caret, no navegan.
+      if (editable) return;
+      event.preventDefault();
+      // En el CTA terminal las flechas no avanzan ni cobran.
+      if (!this.isLastStep() || this.cobroNeedsAdvance()) this.attemptNextStep();
+      return;
+    }
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      if (editable) return;
+      event.preventDefault();
+      this.prevStep();
+      return;
+    }
+    if (event.key === 'Enter') {
+      if (tag === 'TEXTAREA') return;
+      // Un Enter sobre un botón ya dispara su click nativo: no duplicar.
+      if (target?.closest?.('button')) return;
+      event.preventDefault();
+      if (!this.isLastStep() || this.cobroNeedsAdvance()) {
+        this.attemptNextStep();
+        return;
+      }
+      if (this.confirmDisabled()) {
+        // CTA terminal bloqueado: nombrar lo que falta en vez de quedar mudo.
+        const key = this.currentStepKey();
+        if (key === 'cobro') this.paymentStep()?.flashValidation();
+        else if (key === 'envio') this.shippingStep()?.flashValidation();
+        else this.onPrimaryConfirm();
+        return;
+      }
+      this.onPrimaryConfirm();
+    }
   }
 
   /** Cliente elegido/creado: preserva la lógica de selectCustomer y avanza. */

@@ -175,3 +175,122 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
     });
   });
 });
+
+/**
+ * `removeFromCart` en modo adoptado: el servidor es la fuente de verdad
+ * (doctrina QUI-649, paridad con `addToCart`). El mutar-solo-local mostraba
+ * toast de éxito pero la línea sobrevivía en el backend y reaparecía al
+ * resincronizar — el "no me deja eliminar" del POS.
+ */
+describe('PosCartService — removeFromCart (modo adoptado)', () => {
+  let service: PosCartService;
+  let posApi: { updateOrderItems: jasmine.Spy };
+
+  const embeddedProduct = (id: number) => ({
+    id: String(id),
+    name: `Producto ${id}`,
+    sku: `SKU-${id}`,
+    price: 1000,
+    final_price: 1000,
+  });
+
+  const cartLine = (id: string, productId: number) =>
+    ({
+      id,
+      product: { id: String(productId), name: `Producto ${productId}` },
+      quantity: 1,
+      unitPrice: 1000,
+      finalPrice: 1000,
+      totalPrice: 1000,
+      taxAmount: 0,
+      itemType: 'product',
+      addedAt: new Date(),
+    }) as any;
+
+  const seedCart = (linkedOrderId: number | null) => {
+    service.cartState.set({
+      ...service.cartState(),
+      linkedOrderId,
+      linkedOrderNumber: linkedOrderId != null ? 'ORD1' : null,
+      items: [cartLine('a', 1), cartLine('b', 2)],
+    });
+  };
+
+  beforeEach(() => {
+    posApi = {
+      updateOrderItems: jasmine.createSpy('updateOrderItems'),
+    };
+
+    TestBed.configureTestingModule({
+      providers: [
+        PosCartService,
+        { provide: PosProductService, useValue: { getProductById: () => of(null) } },
+        { provide: PosApiService, useValue: posApi },
+        { provide: PosSaleUnitService, useValue: {} },
+        { provide: PriceResolverService, useValue: {} },
+        { provide: PriceTierCacheService, useValue: {} },
+        {
+          provide: WithholdingTaxService,
+          useValue: {
+            previewWithholding: () => of({ lines: [], total_withholding: 0 }),
+          },
+        },
+        { provide: CurrencyFormatService, useValue: {} },
+        {
+          provide: InvoicingService,
+          useValue: { getPosUvtThreshold: () => of({ data: null }) },
+        },
+      ],
+    });
+
+    service = TestBed.inject(PosCartService);
+  });
+
+  it('en modo adoptado envía la lista restante por PUT y resincroniza', (done) => {
+    seedCart(500);
+    posApi.updateOrderItems.and.returnValue(
+      of({
+        id: 500,
+        order_number: 'ORD1',
+        users: { id: 99, first_name: 'Juan', last_name: 'Pérez' },
+        order_promotions: [],
+        coupon_uses: [],
+        order_items: [
+          {
+            product_id: 2,
+            product_name: 'Producto 2',
+            quantity: 1,
+            unit_price: 1000,
+            final_unit_price: 1000,
+            total_price: 1000,
+            tax_amount_item: 0,
+            products: embeddedProduct(2),
+          },
+        ],
+      }),
+    );
+
+    service.removeFromCart('a').subscribe((state) => {
+      expect(posApi.updateOrderItems).toHaveBeenCalledTimes(1);
+      const [orderId, payload] =
+        posApi.updateOrderItems.calls.mostRecent().args;
+      expect(orderId).toBe(500);
+      expect(payload.length).toBe(1);
+      expect(payload[0].product_id).toBe(2);
+      expect(state.items.length).toBe(1);
+      expect(state.linkedOrderId).toBe(500);
+      done();
+    });
+  });
+
+  it('en modo local no toca el backend', (done) => {
+    seedCart(null);
+
+    service.removeFromCart('a').subscribe((state) => {
+      expect(posApi.updateOrderItems).not.toHaveBeenCalled();
+      expect(state.items.length).toBe(1);
+      expect(state.items[0].id).toBe('b');
+      done();
+    });
+  });
+});

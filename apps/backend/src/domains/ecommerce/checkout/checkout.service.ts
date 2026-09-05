@@ -342,15 +342,61 @@ export class CheckoutService {
     return { invoicing_enabled: state === 'ACTIVE' };
   }
 
+  /**
+   * CP-tienda-checkout-whatsapp (C.2): tipos de entrega expuestos por la
+   * tienda, uno por `delivery_type` derivado (`pickup` / `home_delivery` /
+   * `other`), con un método representativo por tipo. Sin precios ni zonas:
+   * la cotización sigue viviendo en `POST /shipping/calculate`.
+   */
+  async getDeliveryOptions(): Promise<
+    Array<{
+      method_id: number;
+      method_name: string;
+      delivery_type: 'pickup' | 'home_delivery' | 'other';
+    }>
+  > {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const methods = await this.store_prisma.shipping_methods.findMany({
+      where: { store_id, is_active: true },
+      select: { id: true, name: true, type: true },
+      orderBy: { display_order: 'asc' },
+    });
+    const seen = new Set<string>();
+    const out: Array<{
+      method_id: number;
+      method_name: string;
+      delivery_type: 'pickup' | 'home_delivery' | 'other';
+    }> = [];
+    for (const m of methods) {
+      const delivery_type = deriveDeliveryType(m.type);
+      if (seen.has(delivery_type)) continue;
+      seen.add(delivery_type);
+      out.push({
+        method_id: m.id,
+        method_name: m.name,
+        delivery_type,
+      });
+    }
+    return out;
+  }
+
   async getPaymentMethods(shippingMethodType?: string) {
     // Determine allowed processing modes based on shipping method type
-    // - pickup: DIRECT (cash at store) + ONLINE (online payments). No
-    //   ON_DELIVERY because the customer is already at the store.
+    // - pickup: DIRECT + ONLINE (no ON_DELIVERY: the customer is already at
+    //   the store).
     // - delivery methods (own_fleet, carrier, custom, third_party_provider):
-    //   ALL enabled modes. Cash (DIRECT) and prepaid wallet (DIRECT) are still
-    //   valid for any delivery type — the wallet balance is prepaid online
-    //   and the customer can choose how to settle at confirmation.
+    //   ALL enabled modes.
     // - no shipping_type: ALL modes (initial load before shipping is selected).
+    //
+    // PROHIBIDO exponer `cash` en la tienda en línea (ver ADR-2 del plan
+    // CP-tienda-checkout-whatsapp): el efectivo es el método estándar de
+    // caja/POS y habilitarlo allí NO debe filtrarlo al ecommerce. El filtro
+    // es por `type === 'cash'`, nunca por `processing_mode`, para no ocultar
+    // la wallet prepaga (`DIRECT`) ni la contra-entrega opt-in
+    // (`cash_on_delivery`, `ON_DELIVERY`).
     let allowedModes: payment_processing_mode_enum[];
 
     if (shippingMethodType === 'pickup') {
@@ -382,14 +428,16 @@ export class CheckoutService {
     const methods = await this.prisma.store_payment_methods.findMany({
       where: {
         state: 'enabled',
-        system_payment_method: {
-          processing_mode: { in: allowedModes },
+        AND: [
+          { system_payment_method: { processing_mode: { in: allowedModes } } },
+          // PROHIBIDO `cash` en ecommerce (ver comentario en checkout()).
+          { system_payment_method: { type: { not: 'cash' } } },
           // Hide wallet from anonymous users — it requires a logged-in
           // customer with a wallet_id.
           ...(isAuthenticated
-            ? {}
-            : { NOT: { type: 'wallet' } }),
-        },
+            ? []
+            : [{ system_payment_method: { NOT: { type: 'wallet' } } }]),
+        ],
       },
       include: {
         system_payment_method: true,
@@ -951,6 +999,16 @@ export class CheckoutService {
     const is_guest = !user_id;
     const guest_customer = this.normalizeGuestCustomer(dto.guest_customer);
 
+    // La venta guest exige como mínimo el nombre (el resto es opcional). El
+    // storefront lo pide en el modal de datos; este 400 es la defensa en
+    // profundidad para clientes que llamen a la API directamente.
+    if (is_guest && !guest_customer?.first_name) {
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_001,
+        'El nombre es obligatorio para comprar sin registro',
+      );
+    }
+
     const store_id_ctx = RequestContextService.getStoreId();
     let resolved_customer_id: number | null = user_id ?? null;
     if (is_guest && guest_customer && store_id_ctx) {
@@ -963,7 +1021,8 @@ export class CheckoutService {
     }
 
     if (is_guest && dto.bookings?.length) {
-      throw new BadRequestException(
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_001,
         'Debes iniciar sesión para reservar servicios con horario',
       );
     }
@@ -1049,6 +1108,19 @@ export class CheckoutService {
       throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_002);
     }
 
+    // PROHIBIDO exponer `cash` en la tienda en línea. El efectivo es el
+    // método estándar de caja/POS y, si se habilita allí, NO debe filtrarse
+    // al ecommerce: la tienda perdería la posibilidad de NO ofrecer pago
+    // contra entrega en efectivo online. La contra-entrega opt-in vive en el
+    // tipo `cash_on_delivery`, nunca reabriendo `cash`. Ver ADR-2 del plan
+    // CP-tienda-checkout-whatsapp. Caja/POS no se tocan.
+    if (payment_method.system_payment_method.type === 'cash') {
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_002,
+        'El pago en efectivo no está disponible en la tienda en línea',
+      );
+    }
+
     // FIX QUI-467: block wallet payment for anonymous users. Even if a guest
     // crafts a request manually, the server must refuse wallet — the wallet
     // is per-customer (prepaid balance) and needs an authenticated identity.
@@ -1126,7 +1198,8 @@ export class CheckoutService {
     let shipping_address_snapshot: any = null;
 
     if (is_guest && shipping_address_id) {
-      throw new BadRequestException(
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_001,
         'Los invitados deben enviar la dirección de envío en el checkout',
       );
     }
@@ -1199,8 +1272,12 @@ export class CheckoutService {
         throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_003);
       }
 
-      // Verificar que la zona pertenece a la tienda
-      if (rate.shipping_zone.store_id !== store_id) {
+      // Verificar que la zona pertenece a la tienda (null-guard: zona o
+      // método borrados → 400 registrado, nunca TypeError 500).
+      if (
+        rate.shipping_zone?.store_id !== store_id ||
+        rate.shipping_method == null
+      ) {
         throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_003);
       }
 
@@ -1230,7 +1307,10 @@ export class CheckoutService {
       }
 
       shipping_method_id = method.id;
-      // En este caso, shipping_cost queda en 0 o se debería recalcular
+      // Sin rate el costo queda en 0, pero el tipo SÍ se deriva: sin esto un
+      // retiro por method_id quedaba 'direct_delivery' y exigía dirección
+      // aunque fuera pickup (auditoría D.3).
+      delivery_type = deriveDeliveryType(method.type);
     }
 
     if (
@@ -1239,7 +1319,10 @@ export class CheckoutService {
       !shipping_address_id &&
       !shipping_address_snapshot
     ) {
-      throw new BadRequestException('La dirección de envío es requerida');
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_001,
+        'La dirección de envío es requerida',
+      );
     }
 
     const order_number = await this.generateOrderNumber();
@@ -1374,7 +1457,9 @@ export class CheckoutService {
       identified: Boolean(
         resolved_customer_id || guest_customer?.document_number,
       ),
-      channel: 'ecommerce',
+      // Mismo canal que se persiste en la orden (ADR-1: el núcleo no diverge
+      // por canal; el umbral DIAN debe evaluar el canal real).
+      channel: dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
     });
 
     // store_id y customer_id (user_id) se inyectan automáticamente
@@ -1382,7 +1467,11 @@ export class CheckoutService {
       data: {
         order_number,
         customer_id: resolved_customer_id,
-        channel: 'ecommerce', // Ecommerce orders are assigned 'ecommerce' channel
+        // Canal unificado CP-tienda-checkout-whatsapp: "Finalizar por
+        // WhatsApp" recorre este mismo núcleo con channel='whatsapp'; el
+        // endpoint legacy POST /whatsapp sigue creando channel='whatsapp'
+        // por su propio camino hasta su deprecación.
+        channel: dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
         currency: cart_currency,
         subtotal_amount: subtotal,
         tax_amount: total_tax,
@@ -1454,6 +1543,7 @@ export class CheckoutService {
       order_number: order.order_number,
       grand_total: Number(order.grand_total),
       currency: order.currency,
+      channel: order.channel,
     });
 
     // Upload payment receipt to S3 if the selected method is bank_transfer
@@ -1619,7 +1709,9 @@ export class CheckoutService {
     return {
       order_id: order.id,
       order_number: order.order_number,
-      total: order.grand_total,
+      // Contrato numérico: Prisma devuelve Decimal (serializa como string);
+      // el storefront tipa `total: number` (auditoría D.3).
+      total: this.roundMoney(Number(order.grand_total)),
       subtotal,
       tax_amount: total_tax,
       discount_amount: discountResult.total_discount,
@@ -1635,6 +1727,17 @@ export class CheckoutService {
       public_order_token: guestArtifacts?.invoice_data_token ?? null,
       invoice_data_token: guestArtifacts?.invoice_data_token ?? null,
       invoice_id: guestArtifacts?.invoice_id ?? invoice_id,
+      // Líneas para el resumen post-compra y el automensaje de WhatsApp
+      // ("Finalizar por WhatsApp" arma el wa.me desde esta respuesta, no
+      // desde el carrito local, para reflejar lo realmente comprado).
+      items: itemsWithTaxes.map((item) => ({
+        name: item.product.name,
+        variant_sku: item.product_variant?.sku ?? null,
+        quantity: item.quantity,
+        unit_price: item.net_price,
+        total_price: item.total_net,
+      })),
+      channel: dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
       message: 'Order placed successfully',
     };
   }
@@ -2161,6 +2264,7 @@ export class CheckoutService {
       order_number: order.order_number,
       grand_total: Number(order.grand_total),
       currency: order.currency,
+      channel: order.channel,
     });
 
     // Bucle POR ÍNDICE: dos líneas del mismo producto en presentaciones

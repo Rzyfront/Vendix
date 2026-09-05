@@ -98,28 +98,32 @@
   flex-shrink: 0;
 }
 
+/* QA tablero: las 5 cajas de estado NUNCA hacen wrap — cinta horizontal con
+   scroll y scrollbar casi imperceptible. Cada columna tiene ancho fijo para
+   que Pendientes / En preparación / Listos / Entregados / Cancelados se lean
+   igual en móvil, tablet y pantalla de cocina. */
 .kds-board__columns {
-  display: grid;
-  grid-template-columns: 1fr;
+  display: flex;
+  align-items: stretch;
   gap: 0.75rem;
-  padding: 0 0.5rem;
-}
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 0 0.5rem 0.5rem;
+  /* Scrollbar casi imperceptible: fina y translúcida en todos los motores. */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
 
-@media (min-width: 768px) {
-  .kds-board__columns {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  &::-webkit-scrollbar {
+    height: 4px;
   }
-}
 
-@media (min-width: 1024px) {
-  .kds-board__columns {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  &::-webkit-scrollbar-track {
+    background: transparent;
   }
-}
 
-@media (min-width: 1280px) {
-  .kds-board__columns {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: 999px;
   }
 }
 
@@ -159,6 +163,12 @@
 .kds-column {
   display: flex;
   flex-direction: column;
+  /* Ancho base fijo dentro de la cinta horizontal (sin wrap en ningún
+     viewport) + `flex-grow: 1` para que las columnas VISIBLES se repartan
+     todo el ancho: al ocultar Entregados/Cancelados, las que quedan se
+     ensanchan y los tickets se ven más grandes. */
+  flex: 1 0 clamp(250px, 80vw, 300px);
+  min-width: 0;
   background: var(--color-surface, #ffffff);
   border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
   border-radius: 12px;
@@ -264,6 +274,18 @@
   gap: 0.5rem;
   padding: 0.5rem;
   background: var(--kds-tint, transparent);
+}
+
+/* QA display: tamaño del contenido de los tickets (`data-ticket-size` lo pone
+   la plantilla desde `KdsDisplayService`). `zoom` escala layout real
+   (Baseline 2024, Chromium de las pantallas de cocina) y atraviesa la
+   encapsulación sin `::ng-deep`. */
+.kds-board[data-ticket-size='grande'] .kds-column__body {
+  zoom: 1.15;
+}
+
+.kds-board[data-ticket-size='muy-grande'] .kds-column__body {
+  zoom: 1.3;
 }
 
 .kds-column__empty {

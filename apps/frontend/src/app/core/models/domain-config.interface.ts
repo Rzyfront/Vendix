@@ -167,6 +167,7 @@ export interface EcommerceConfig {
     guest_newsletter_opt_in: boolean;
     whatsapp_checkout?: boolean;
     whatsapp_number?: string;
+    whatsapp_pitch?: string;
   };
   shipping?: {
     free_shipping_threshold?: number;

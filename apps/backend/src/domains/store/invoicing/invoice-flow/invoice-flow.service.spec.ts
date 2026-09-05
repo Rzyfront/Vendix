@@ -61,6 +61,22 @@ describe('InvoiceFlowService support documents', () => {
     notes: 'Documento soporte compra a no obligado',
   };
 
+  /**
+   * Rechazo RECIENTE. Los tres specs de reenvío juzgan la puerta fiscal, no el
+   * plazo: si heredaran la `issue_date` de marzo de `supportDocument` los
+   * cortaría antes `assertResendWindowOpen` y pasarían —o fallarían— por un
+   * motivo que no es el que anuncian. El plazo tiene sus propios specs abajo.
+   */
+  const recentRejected = (hours_ago = 2) => {
+    const instant = new Date(Date.now() - hours_ago * 60 * 60 * 1000);
+    return {
+      ...supportDocument,
+      status: 'rejected',
+      issue_date: instant,
+      created_at: instant,
+    };
+  };
+
   const createService = (overrides: any = {}) => {
     const acceptedInvoice = {
       ...supportDocument,
@@ -324,8 +340,8 @@ describe('InvoiceFlowService support documents', () => {
   // podía reenviarse tal cual, gastando un segundo consecutivo irrecuperable
   // si el defecto seguía ahí.
   describe('reenvío de un documento rechazado', () => {
-    it('revalida con la puerta fiscal (signing_date incluido) antes de transmitir', async () => {
-      const rejectedInvoice = { ...supportDocument, status: 'rejected' };
+    it('revalida con la puerta fiscal antes de transmitir, sin imponerle una fecha de firma inventada', async () => {
+      const rejectedInvoice = recentRejected();
       const fiscalDocumentValidate = jest.fn().mockReturnValue({
         emittable: true,
         blockers: [],
@@ -348,18 +364,22 @@ describe('InvoiceFlowService support documents', () => {
 
       await RequestContextService.run(requestContext, () => service.send(100));
 
-      // Se llamó ANTES de transmitir, y con `signing_date` poblado — el único
-      // punto de la cadena donde la regla FAD09e (IssueDate == fecha de
-      // firma) se juzga de verdad.
-      expect(fiscalDocumentValidate).toHaveBeenCalledWith(
-        expect.objectContaining({ signing_date: expect.any(Date) }),
-      );
+      // Se llamó ANTES de transmitir, y SIN `signing_date`. Antes se le pasaba
+      // `new Date()` para juzgar FAD09e (IssueDate == fecha de firma), pero el
+      // firmante ya no usa el reloj de pared: estampa el instante del propio
+      // documento, así que las dos fechas coinciden por construcción.
+      // Imponerle «ahora» bloquearía un reenvío que la DIAN sí acepta — que es
+      // exactamente lo que dejó varadas a FVJL11 y FVJL12.
+      expect(fiscalDocumentValidate).toHaveBeenCalled();
+      expect(
+        fiscalDocumentValidate.mock.calls[0][0].signing_date,
+      ).toBeUndefined();
       expect(resolver.resolve).toHaveBeenCalled();
       expect(provider.sendSupportDocument).toHaveBeenCalled();
     });
 
     it('bloquea el reenvío sin transmitir si la revalidación sigue fallando', async () => {
-      const rejectedInvoice = { ...supportDocument, status: 'rejected' };
+      const rejectedInvoice = recentRejected();
       const fiscalDocumentValidate = jest.fn().mockReturnValue({
         emittable: false,
         blockers: [
@@ -406,7 +426,7 @@ describe('InvoiceFlowService support documents', () => {
     // .update()` rechaza cualquier factura fuera de `draft`. El mensaje debe
     // nombrar el camino que sí existe: anular y emitir de nuevo.
     it('si la revalidación choca con FAD09e, el mensaje manda a anular y reemitir, no a editar la fecha', async () => {
-      const rejectedInvoice = { ...supportDocument, status: 'rejected' };
+      const rejectedInvoice = recentRejected();
       const fiscalDocumentValidate = jest.fn().mockReturnValue({
         emittable: false,
         blockers: [
@@ -449,6 +469,124 @@ describe('InvoiceFlowService support documents', () => {
       expect(fiscalLedger.ensureInvoiceTransmission).not.toHaveBeenCalled();
       expect(resolver.resolve).not.toHaveBeenCalled();
       expect(provider.sendSupportDocument).not.toHaveBeenCalled();
+    });
+
+    /**
+     * PLAZO DE REENVÍO. Con el firmante tomando la fecha del propio documento,
+     * `FAD09e` ya no puede fallar: emitir con fecha vieja pasa a ser un riesgo
+     * de OTRA regla —llegar fuera de término—, y el rechazo cuesta el
+     * consecutivo por segunda vez. Por eso la comparación de fechas se
+     * reemplazó por un plazo.
+     */
+    describe('plazo de transmisión', () => {
+      const passingValidation = () =>
+        jest.fn().mockReturnValue({
+          emittable: true,
+          blockers: [],
+          warnings: [],
+          document_type: 'support_document',
+          computed: {},
+        });
+
+      it('deja pasar el rechazo de anoche — el caso exacto de FVJL11 (26 h)', async () => {
+        const { service, provider } = createService({
+          prisma: {
+            invoices: {
+              findFirst: jest.fn().mockResolvedValue(recentRejected(26)),
+              update: jest.fn().mockResolvedValue({
+                ...recentRejected(26),
+                status: 'accepted',
+              }),
+            },
+          },
+          fiscalDocument: { validate: passingValidation() },
+        });
+
+        await RequestContextService.run(requestContext, () =>
+          service.send(100),
+        );
+
+        expect(provider.sendSupportDocument).toHaveBeenCalled();
+      });
+
+      it('corta el que ya pasó de 48 h, y lo corta ANTES de gastar nada', async () => {
+        const fiscalDocumentValidate = passingValidation();
+        const { service, provider, resolver, fiscalLedger } = createService({
+          prisma: {
+            invoices: {
+              findFirst: jest.fn().mockResolvedValue(recentRejected(49)),
+            },
+          },
+          fiscalDocument: { validate: fiscalDocumentValidate },
+        });
+
+        await expect(
+          RequestContextService.run(requestContext, () => service.send(100)),
+        ).rejects.toMatchObject({
+          errorCode: 'INVOICING_PREVALIDATION_004',
+          message: expect.stringMatching(/fuera de término|48/i),
+        });
+
+        // Se corta antes que la prevalidación fiscal, el consecutivo y el
+        // proveedor: rechazar acá es recuperable, en la DIAN no.
+        expect(fiscalDocumentValidate).not.toHaveBeenCalled();
+        expect(fiscalLedger.ensureInvoiceTransmission).not.toHaveBeenCalled();
+        expect(resolver.resolve).not.toHaveBeenCalled();
+        expect(provider.sendSupportDocument).not.toHaveBeenCalled();
+      });
+
+      it('el mensaje nombra el camino que sí existe: anular y reemitir', async () => {
+        const { service } = createService({
+          prisma: {
+            invoices: {
+              findFirst: jest.fn().mockResolvedValue(recentRejected(72)),
+            },
+          },
+          fiscalDocument: { validate: passingValidation() },
+        });
+
+        const error = await RequestContextService.run(requestContext, () =>
+          service.send(100),
+        ).catch((e) => e);
+
+        expect(error.message).toMatch(/anúlalo y emite uno nuevo/i);
+        // `VendixHttpException` guarda el contexto en el cuerpo de la respuesta,
+        // no en una propiedad suelta.
+        const body = error.getResponse();
+        expect(body.details.window_hours).toBe(48);
+        expect(body.details.elapsed_hours).toBeGreaterThanOrEqual(72);
+        expect(body.details.invoice_number).toBe('DS100');
+      });
+
+      it('el borde: 47 h pasa y 49 h no', async () => {
+        const build = (hours: number) =>
+          createService({
+            prisma: {
+              invoices: {
+                findFirst: jest.fn().mockResolvedValue(recentRejected(hours)),
+                update: jest.fn().mockResolvedValue({
+                  ...recentRejected(hours),
+                  status: 'accepted',
+                }),
+              },
+            },
+            fiscalDocument: { validate: passingValidation() },
+          });
+
+        const dentro = build(47);
+        await RequestContextService.run(requestContext, () =>
+          dentro.service.send(100),
+        );
+        expect(dentro.provider.sendSupportDocument).toHaveBeenCalled();
+
+        const fuera = build(49);
+        await expect(
+          RequestContextService.run(requestContext, () =>
+            fuera.service.send(100),
+          ),
+        ).rejects.toMatchObject({ errorCode: 'INVOICING_PREVALIDATION_004' });
+        expect(fuera.provider.sendSupportDocument).not.toHaveBeenCalled();
+      });
     });
   });
 });

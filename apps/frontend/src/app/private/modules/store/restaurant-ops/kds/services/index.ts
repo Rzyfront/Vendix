@@ -9,3 +9,8 @@ export type {
   KdsReconnectAttempt,
 } from './kds-sse.service';
 export { KdsStationsService } from './kds-stations.service';
+export {
+  KdsDisplayService,
+  KDS_TICKET_SIZES,
+} from './kds-display.service';
+export type { KdsTicketSize } from './kds-display.service';

@@ -77,6 +77,45 @@
       }
     </app-card>
 
+    <!-- ── Vista del tablero ───────────────────────────────────────────
+         Qué estados se ven en el KDS y a qué tamaño los tickets. Preferencia
+         del dispositivo: se aplica al instante, sin botón de guardar. -->
+    <app-card title="Vista del tablero" [responsive]="true">
+      <p class="display-hint">
+        Elige qué estados muestra el tablero. Al ocultar Entregados y
+        Cancelados, las columnas que quedan se reparten el ancho y los
+        tickets se ven más grandes.
+      </p>
+      <ul class="display-list">
+        @for (c of displayColumns; track c) {
+          <li class="display-row">
+            <span class="display-name">{{ displayTitle(c) }}</span>
+            <span (click)="$event.stopPropagation()">
+              <app-toggle
+                [checked]="display.isColumnVisible(c)"
+                [ariaLabel]="'Mostrar columna ' + displayTitle(c)"
+                (changed)="toggleDisplayColumn(c)"
+              ></app-toggle>
+            </span>
+          </li>
+        }
+      </ul>
+      <h4 class="display-subtitle">Tamaño de los tickets</h4>
+      <div class="display-sizes" role="group" aria-label="Tamaño de los tickets">
+        @for (s of ticketSizes; track s.id) {
+          <button
+            type="button"
+            class="display-size"
+            [class.is-on]="display.ticketSize() === s.id"
+            [attr.aria-pressed]="display.ticketSize() === s.id"
+            (click)="setTicketSize(s.id)"
+          >
+            {{ s.label }}
+          </button>
+        }
+      </div>
+    </app-card>
+
     <!-- ── Turnos ────────────────────────────────────────────────────── -->
     <app-card title="Historial de turnos" [responsive]="true">
       @if (loadingSessions() && sessions().length === 0) {

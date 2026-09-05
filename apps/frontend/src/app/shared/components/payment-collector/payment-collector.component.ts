@@ -631,7 +631,8 @@ export class PaymentCollectorComponent implements OnInit {
     this.amountCollapsed.set(false);
   }
 
-  selectMethod(method: PaymentMethod): void {
+  selectMethod(method: PaymentMethod, opts?: { advance?: boolean }): void {
+    const advance = opts?.advance !== false;
     this.amountCollapsed.set(false);
     // Reset per-method slices so a previous method never leaks state.
     this.wompiSlice.set(null);
@@ -655,7 +656,7 @@ export class PaymentCollectorComponent implements OnInit {
       this.walletLookup.emit({ id: customer.id });
       this.setCashProgrammatic(0);
       // A customer existed → the method was really selected: advance to Monto.
-      if (this.layout() === 'stepped') this.subStep.set(this.montoIndex());
+      if (advance && this.layout() === 'stepped') this.subStep.set(this.montoIndex());
       return;
     }
 
@@ -667,8 +668,9 @@ export class PaymentCollectorComponent implements OnInit {
     } else {
       this.setCashProgrammatic(0);
     }
-    // In the stepped layout, picking a method advances to the Monto sub-step.
-    if (this.layout() === 'stepped') this.subStep.set(this.montoIndex());
+    // In the stepped layout, picking a method advances to the Monto sub-step,
+    // unless the caller preselects a default (advance:false keeps Método visible).
+    if (advance && this.layout() === 'stepped') this.subStep.set(this.montoIndex());
   }
 
   isSelected(method: PaymentMethod): boolean {

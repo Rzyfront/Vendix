@@ -476,8 +476,17 @@ export class PosCartService {
 
   /**
    * Remove item from cart
+   *
+   * QUI-649 — bifurcación por modo (paridad con `addToCart`): con carrito
+   * adoptado el servidor es la fuente de verdad y la línea debe borrarse vía
+   * `PUT /store/orders/:id/items`; el mutar-solo-local mostraba toast de éxito
+   * pero la línea sobrevivía en el backend y reaparecía al resincronizar.
    */
   removeFromCart(itemId: string): Observable<CartState> {
+    const adoptedId = this.cartState().linkedOrderId;
+    if (adoptedId != null) {
+      return this.removeItemFromAdoptedOrder(itemId, adoptedId);
+    }
     return of(itemId).pipe(
       map((id) => this.processRemoveFromCart(id)),
       tap((newState) => this.cartState.set(newState)),
@@ -1068,7 +1077,43 @@ export class PosCartService {
     // already produced the in-memory merged state; we just need its `items`
     // serialized in the shape the backend expects.
     const mergedItems = this.processAddToCart(request).items;
-    const payloadItems = mergedItems.map((it) => ({
+    const payloadItems = this.serializeItemsForAdoptedOrder(mergedItems);
+
+    return this.posApi.updateOrderItems(orderId, payloadItems).pipe(
+      switchMap((response: any) => {
+        const order = response?.data ?? response;
+        if (!order) {
+          return throwError(
+            () => new Error('Respuesta vacía al actualizar la orden adoptada'),
+          );
+        }
+        return this.loadFromOrder(order).pipe(
+          map((state) => ({
+            ...state,
+            linkedOrderId: order.id ?? orderId,
+            linkedOrderNumber: order.order_number ?? null,
+            updatedAt: new Date(),
+          })),
+        );
+      }),
+      tap((newState) => {
+        this.cartState.set(newState);
+        this.loading.set(false);
+      }),
+      catchError((err) => {
+        this.loading.set(false);
+        return throwError(() => err);
+      }),
+    );
+  }
+
+  /**
+   * Serializa líneas del carrito al shape que acepta
+   * `PUT /store/orders/:id/items` (reemplazo total de la lista). Fuente única
+   * para add y remove en modo adoptado: ambos envían la lista completa.
+   */
+  private serializeItemsForAdoptedOrder(items: CartItem[]): any[] {
+    return items.map((it) => ({
       item_type: it.itemType === 'custom' ? 'custom' : 'product',
       product_id:
         it.itemType === 'custom' || !it.product?.id
@@ -1089,7 +1134,26 @@ export class PosCartService {
       // `forbidNonWhitelisted` rejects with 400 SYS_VALIDATION_001. The flag
       // continues to flow on `cartState.customer` and `processSaleWithPayment`.
     }));
+  }
 
+  /**
+   * QUI-649 — borra una línea de una orden adoptada vía
+   * `PUT /store/orders/:id/items` con la lista restante y resincroniza desde
+   * la respuesta (el servidor es la fuente de verdad). Si no quedan líneas,
+   * delega en `clearCart()`, que libera la orden (release) y resetea el state.
+   */
+  private removeItemFromAdoptedOrder(
+    itemId: string,
+    orderId: number,
+  ): Observable<CartState> {
+    const remaining = this.cartState().items.filter(
+      (item) => item.id !== itemId,
+    );
+    if (remaining.length === 0) {
+      return this.clearCart();
+    }
+    this.loading.set(true);
+    const payloadItems = this.serializeItemsForAdoptedOrder(remaining);
     return this.posApi.updateOrderItems(orderId, payloadItems).pipe(
       switchMap((response: any) => {
         const order = response?.data ?? response;

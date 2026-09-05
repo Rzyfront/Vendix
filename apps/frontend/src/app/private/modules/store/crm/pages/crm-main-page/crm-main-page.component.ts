@@ -15,7 +15,6 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
-  StickyHeaderComponent,
   StickyHeaderActionButton,
   StickyHeaderTab,
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
@@ -37,7 +36,6 @@ type CrmTab = 'estado' | 'diseno';
     CommonModule,
     IconComponent,
     ButtonComponent,
-    StickyHeaderComponent,
     CrmEditorComponent,
   ],
   templateUrl: './crm-main-page.component.html',

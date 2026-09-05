@@ -103,7 +103,7 @@ import { Cart } from '../../services/cart.service';
           (clicked)="onWhatsapp()"
         >
           <app-icon slot="icon" name="message-circle" [size]="18" />
-          Pagar por WhatsApp
+          Finalizar por WhatsApp
         </app-button>
       }
     </div>
@@ -190,7 +190,7 @@ import { Cart } from '../../services/cart.service';
               (clicked)="closeDetail(); onWhatsapp()"
             >
               <app-icon slot="icon" name="message-circle" [size]="18" />
-              Pagar por WhatsApp
+              Finalizar por WhatsApp
             </app-button>
           }
         </div>

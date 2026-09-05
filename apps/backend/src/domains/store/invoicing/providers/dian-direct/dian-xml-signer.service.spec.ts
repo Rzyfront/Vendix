@@ -566,4 +566,75 @@ describe('DianXmlSignerService (XAdES-EPES)', () => {
     expect(signed).toContain('xades:SignedProperties');
     expect(signed).toContain('ds:SignatureValue');
   });
+
+  /**
+   * La DIAN compara la FECHA de `xades:SigningTime` contra `cbc:IssueDate` y
+   * rechaza el documento cuando difieren: «Valida que fecha de generación de la
+   * factura sea igual a la fecha de firma». `UNSIGNED_INVOICE` declara
+   * `2026-07-11`, así que ése es el día que la firma debe declarar sin importar
+   * cuándo se ejecute la transmisión.
+   */
+  describe('xades:SigningTime — la fecha de firma sigue a la del documento', () => {
+    const readSigningTime = (xml: string): string => {
+      const parsed: any = new DOMParser().parseFromString(xml, 'text/xml');
+      const node = parsed
+        .getElementsByTagNameNS(XADES_NS, 'SigningTime')
+        .item(0);
+      return (node.textContent ?? '').trim();
+    };
+
+    const civilDateInBogota = (date: Date): string =>
+      new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Bogota',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(date);
+
+    it('estampa el instante recibido en vez del reloj de pared', async () => {
+      // El documento se generó el 11-jul 23:28 Bogotá; la transmisión ocurre
+      // ahora, otro día. Es la forma exacta de FVJL11/FVJL12 en producción.
+      const signed = await service.sign(
+        UNSIGNED_INVOICE,
+        material.p12Buffer,
+        password,
+        null,
+        new Date('2026-07-12T04:28:56.000Z'),
+      );
+
+      expect(readSigningTime(signed)).toBe('2026-07-11T23:28:56-05:00');
+      // Y eso es lo que la regla compara: mismo día que `cbc:IssueDate`.
+      expect(readSigningTime(signed).slice(0, 10)).toBe('2026-07-11');
+    });
+
+    it('sin instante explícito estampa el reloj de pared — el defecto que rechazó FVJL11', async () => {
+      // `signedXml` del `beforeAll` se firmó sin el quinto argumento.
+      expect(readSigningTime(signedXml).slice(0, 10)).toBe(
+        civilDateInBogota(new Date()),
+      );
+      // El fixture declara `<cbc:IssueDate>2026-07-11</cbc:IssueDate>`: mientras
+      // hoy no sea ese día, firma y documento hablan de fechas distintas.
+      expect(readSigningTime(signedXml).slice(0, 10)).not.toBe('2026-07-11');
+    });
+
+    it('el instante del documento gana aunque el reloj de pared diga otro día', async () => {
+      const con_documento = await service.sign(
+        UNSIGNED_INVOICE,
+        material.p12Buffer,
+        password,
+        null,
+        new Date('2026-07-12T04:28:56.000Z'),
+      );
+      const con_reloj = await service.sign(
+        UNSIGNED_INVOICE,
+        material.p12Buffer,
+        password,
+      );
+
+      expect(readSigningTime(con_documento)).not.toBe(
+        readSigningTime(con_reloj),
+      );
+      expect(readSigningTime(con_documento).slice(0, 10)).toBe('2026-07-11');
+    });
+  });
 });

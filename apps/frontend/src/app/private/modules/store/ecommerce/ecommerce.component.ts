@@ -43,6 +43,7 @@ import {
   SelectorComponent,
   SettingToggleComponent,
   StickyHeaderComponent,
+  TextareaComponent,
   StickyHeaderActionButton,
   ImageSourceModalComponent,
 } from '../../../../shared/components';
@@ -158,6 +159,7 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
     SelectorComponent,
     SettingToggleComponent,
     StickyHeaderComponent,
+    TextareaComponent,
     FooterSettingsFormComponent,
     StoreShareModalComponent,
     TourModalComponent,
@@ -167,6 +169,81 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
   styleUrls: ['./ecommerce.component.scss'],
 })
 export class EcommerceComponent {
+  /**
+   * Plantilla del pitch recomendado que encabeza el mensaje de pedido por
+   * WhatsApp. Al activar se guarda ya resuelta (nombre + web reales).
+   */
+  readonly defaultWhatsappPitch =
+    'Hola, bienvenido a {tienda} 🛍️✨ Aquí comprar es fácil, rápido y seguro: pide por nuestra web {web} y recíbelo donde estés 🚀';
+
+  /** Nombre visible de la tienda (branding, misma fuente del storefront). */
+  readonly pitchStoreName = computed(() => {
+    const settings: any = this.store.selectSignal(selectStoreSettings)();
+    return settings?.branding?.name || this.storeName || 'Mi Tienda';
+  });
+
+  /**
+   * Web de la tienda para el pitch: el dominio del QR de tienda
+   * (fallback: URL del ecommerce).
+   */
+  readonly pitchWebUrl = computed(
+    () => this.ecommerceQrTargetUrl() || this.ecommerceUrl() || '',
+  );
+
+  /** Pitch por defecto con {tienda} y {web} ya resueltos. */
+  readonly resolvedDefaultPitch = computed(() =>
+    this.resolvePitchVars(this.defaultWhatsappPitch),
+  );
+
+  /** Resuelve {tienda}/{web} con los valores reales de la tienda. */
+  private resolvePitchVars(template: string): string {
+    return (template || '')
+      .replaceAll('{tienda}', this.pitchStoreName())
+      .replaceAll('{web}', this.pitchWebUrl());
+  }
+
+  /** Copia el pitch actual (ya resuelto) al portapapeles. */
+  copyWhatsappPitch(): void {
+    const text = this.resolvePitchVars(
+      this.whatsappPitchControl?.value || this.defaultWhatsappPitch,
+    );
+    if (!text) return;
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      navigator.clipboard
+        .writeText(text)
+        .then(() => this.toastService.success('Pitch copiado'))
+        .catch(() => this.copyWhatsappPitchFallback(text));
+      return;
+    }
+
+    this.copyWhatsappPitchFallback(text);
+  }
+
+  private copyWhatsappPitchFallback(text: string): void {
+    if (typeof document === 'undefined') {
+      this.toastService.error('No se pudo copiar el pitch');
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'true');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    try {
+      document.execCommand('copy');
+      this.toastService.success('Pitch copiado');
+    } catch {
+      this.toastService.error('No se pudo copiar el pitch');
+    }
+
+    document.body.removeChild(textarea);
+  }
+
   private fb = inject(FormBuilder);
   private ecommerceService = inject(EcommerceService);
   private productService = inject(ProductService);
@@ -560,6 +637,7 @@ export class EcommerceComponent {
           '',
           [Validators.pattern(/^\+57[\d+#*\s()-]*$/)],
         ], // frontend-only, never sent to backend
+        whatsapp_pitch: ['', [Validators.maxLength(500)]],
         require_registration: [false],
       }),
     });
@@ -656,6 +734,9 @@ export class EcommerceComponent {
   get confirmWhatsappNumberControl() {
     return this.checkoutGroup.get('confirm_whatsapp_number') as any;
   }
+  get whatsappPitchControl() {
+    return this.checkoutGroup.get('whatsapp_pitch') as any;
+  }
   get requireRegistrationControl() {
     return this.checkoutGroup.get('require_registration') as any;
   }
@@ -696,6 +777,21 @@ export class EcommerceComponent {
           }
           if (!this.confirmWhatsappNumberControl.value) {
             this.confirmWhatsappNumberControl.setValue('+57', {
+              emitEvent: false,
+            });
+          }
+          // Prefill the recommended pitch on first activation, already
+          // resolved with the real store name + web so the store sees
+          // (and can tweak) the final text. Sin dominio aún, {web} queda
+          // como plantilla y se resuelve al enviar.
+          if (!this.whatsappPitchControl.value) {
+            const prefill = this.pitchWebUrl()
+              ? this.resolvedDefaultPitch()
+              : this.defaultWhatsappPitch.replaceAll(
+                  '{tienda}',
+                  this.pitchStoreName(),
+                );
+            this.whatsappPitchControl.setValue(prefill, {
               emitEvent: false,
             });
           }
@@ -783,6 +879,24 @@ export class EcommerceComponent {
             this.ecommerceQrTargetUrl.set(
               response.qrCodeUrl || response.ecommerceUrl || null,
             );
+
+            // Migrar pitch guardado con tokens ({tienda}/{web}) al texto
+            // final con los valores reales: el token nunca debe verse.
+            const savedPitch = this.whatsappPitchControl?.value as
+              | string
+              | null;
+            if (
+              savedPitch &&
+              (savedPitch.includes('{tienda}') ||
+                savedPitch.includes('{web}'))
+            ) {
+              const migrated = this.resolvePitchVars(savedPitch);
+              if (migrated !== savedPitch) {
+                this.whatsappPitchControl.setValue(migrated, {
+                  emitEvent: false,
+                });
+              }
+            }
             this.ecommerceQrGeneratedAt.set(response.qrCodeGeneratedAt || null);
             this.ecommerceQrStale.set(!!response.qrCodeStale);
           } else {
@@ -1410,6 +1524,16 @@ export class EcommerceComponent {
     // Validate WhatsApp checkout before proceeding
     const whatsappValid = await this.validateWhatsappCheckout();
     if (!whatsappValid) return;
+
+    // Resolver tokens del pitch ({tienda}/{web}) con los valores reales
+    // antes de guardar: el texto guardado nunca lleva tokens resolvibles.
+    const pitchValue = this.whatsappPitchControl?.value as string | null;
+    if (pitchValue && pitchValue.includes('{')) {
+      const resolved = this.resolvePitchVars(pitchValue);
+      if (resolved !== pitchValue) {
+        this.whatsappPitchControl.setValue(resolved, { emitEvent: false });
+      }
+    }
 
     this.syncInicioFromWelcomeSection();
 

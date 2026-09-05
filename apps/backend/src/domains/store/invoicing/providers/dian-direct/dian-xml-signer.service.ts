@@ -103,6 +103,13 @@ export class DianXmlSignerService {
    * @param kms_key_id - When present, the RSA signature is produced **inside AWS
    *   KMS** by a key whose private half never leaves the HSM. The `.p12` private
    *   key, if any, is then never touched.
+   * @param signing_date - Instante que se estampa en `xades:SigningTime`. Lo
+   *   resuelve quien llama a partir de la `IssueDate`/`IssueTime` del propio
+   *   documento, porque la DIAN exige que la fecha de firma coincida con la de
+   *   generación y rechaza el documento cuando difieren
+   *   («Valida que fecha de generación de la factura sea igual a la fecha de
+   *   firma»). Omitirlo deja el reloj de pared, que es correcto sólo mientras
+   *   la emisión ocurra el mismo día que la fecha del documento.
    * @returns The signed XML string (XAdES-EPES)
    */
   async sign(
@@ -110,6 +117,7 @@ export class DianXmlSignerService {
     p12_buffer: Buffer,
     p12_password: string,
     kms_key_id?: string | null,
+    signing_date?: Date,
   ): Promise<string> {
     try {
       // Una sola lectura del contenedor por custodia local. Antes había DOS
@@ -136,6 +144,7 @@ export class DianXmlSignerService {
         xml_content,
         signer,
         certificate,
+        signing_date ?? new Date(),
       );
 
       this.logger.debug(
