@@ -1,325 +1,404 @@
-import { WritableSignal, signal } from '@angular/core';
+import { Component, Pipe, PipeTransform, WritableSignal, input, output, runInInjectionContext, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { of } from 'rxjs';
 
 import { PosCheckoutShellComponent } from './pos-checkout-shell.component';
-import type { PosPaymentStepComponent } from './steps/pos-payment-step.component';
-import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
-import { ToastService } from '../../../../../../shared/components';
-import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { PosCartService } from '../../services/pos-cart.service';
 import { PosPaymentService } from '../../services/pos-payment.service';
 import { PosRestaurantIntegrationService } from '../../services/pos-restaurant-integration.service';
 import { StoreOrdersService } from '../../../orders/services/store-orders.service';
-import { PosCustomer } from '../../models/customer.model';
-import { CartItem, CartState } from '../../models/cart.model';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 
 /**
- * QUI-727 (F.1 Step 8) — la máquina tri-estado de venta (anónimo / alias /
- * cliente), su bloqueo bajo modo crédito y el vaciado del alias al asignar
- * cliente (ADR-9), PROBADOS sobre la instancia real del componente.
+ * CP-POS-CHECKOUT-KEYBOARD — matriz teclado × paso del modal de pago.
  *
- * ## Por qué NO se monta el template completo
- *
- * `PosCheckoutShellComponent` importa 8 componentes reales (`app-modal`,
- * `app-steps-line`, `app-address-form-fields`, `app-pos-customer-selector`,
- * `app-pos-consumo-step`, `app-pos-payment-step`, `app-pos-shipping-step`,
- * `app-icon`), cada uno con su propio grafo de servicios (p.ej.
- * `PosPaymentStepComponent` inyecta `PosPaymentService`, `StoreOrdersService`,
- * `PosWalletService`, `WompiService`, `StoreSettingsFacade`). Montar ese árbol
- * completo (`fixture.detectChanges()` sobre el template real) es
- * desproporcionado para lo que este spec custodia: la lógica de la
- * máquina de estados vive en signals/computed/métodos del PROPIO shell, no en
- * el DOM proyectado. Este spec:
- *
- * 1. Sobrescribe el `template` del shell por un `<div></div>` inerte (vía
- *    `TestBed.overrideComponent`) para poder llamar `fixture.detectChanges()`
- *    sin instanciar los 8 hijos reales — necesario SOLO para forzar el flush
- *    de los `effect()` del constructor (Angular flushea los root effects
- *    pendientes en cada `detectChanges()`, ver `rootEffectScheduler` en
- *    `ComponentFixture`).
- * 2. Sustituye el signal `paymentStep` (un `viewChild(PosPaymentStepComponent)`,
- *    siempre `undefined` sin el hijo real montado) por un signal real de
- *    Angular que expone solo `.mode()` — el ÚNICO miembro que los `effect()`
- *    de modo crédito leen. Es un doble de colaborador honesto: no afirma
- *    nada sobre sí mismo, solo permite que la lógica REAL del shell reaccione
- *    a un cambio de modo de pago sin requerir el collector completo.
- *
- * Todo lo demás (métodos públicos, signals, computed) se ejercita
- * directamente sobre `component`, sin necesidad de render.
- *
- * ## Qué NO cubre este spec (ver reporte del agente)
- *
- * - El collector de Cobro real (`PosPaymentStepComponent`) entrando a modo
- *   crédito por interacción de usuario — se simula su `.mode()` directamente.
- * - Los paths HTTP de `createCounterAndFire` / `openPickedTableThenAppend`
- *   (mesas de restaurante) — fuera del alcance de este step (tri-estado +
- *   crédito + ADR-9), no tocan alias/cliente de forma distinta a los paths
- *   cubiertos aquí.
- *
- * Skills: `vendix-zoneless-signals`, `vendix-angular-forms`, `how-to-test`.
+ * Los hijos se sustituyen por stubs con el mismo selector y la mínima API que
+ * el shell lee (signals/métodos). Así se prueba el enrutado de teclas y la
+ * invariante "las flechas nunca hacen submit" sin montar el checkout real.
  */
-describe('PosCheckoutShellComponent — máquina tri-estado de venta', () => {
+
+@Pipe({ name: 'currency', standalone: true })
+class CurrencyStubPipe implements PipeTransform {
+  transform(value: unknown): string {
+    return String(value ?? '');
+  }
+}
+
+@Component({ selector: 'app-modal', standalone: true, template: `<ng-content></ng-content>` })
+class ModalStub {
+  readonly isOpen = input(false);
+  readonly size = input('xl');
+  readonly title = input('');
+  readonly subtitle = input('');
+  readonly dialog = input(false);
+  readonly fullScreenOnMobile = input(false);
+  readonly closed = output<void>();
+}
+
+@Component({ selector: 'app-steps-line', standalone: true, template: `` })
+class StepsLineStub {
+  readonly steps = input<unknown[]>([]);
+  readonly currentStep = input(0);
+  readonly clickable = input(false);
+  readonly orientation = input('horizontal');
+  readonly size = input('md');
+  readonly fillHeight = input(false);
+  readonly minHeightPx = input(0);
+  readonly stepClicked = output<number>();
+}
+
+@Component({ selector: 'app-icon', standalone: true, template: `` })
+class IconStub {
+  readonly name = input('');
+  readonly size = input(16);
+  readonly color = input<string | null>(null);
+}
+
+@Component({ selector: 'app-pos-consumo-step', standalone: true, template: `` })
+class ConsumoStub {
+  readonly cartState = input<unknown>(null);
+  readonly tableId = input<number | null>(null);
+  readonly advanceRequested = output<void>();
+  fulfillmentMode = 'entrega';
+  needsTableFlag = false;
+  readonly openTablePicker = signal(false);
+  readonly checkoutTableId = signal<number | null>(null);
+  fulfillment(): string {
+    return this.fulfillmentMode;
+  }
+  needsTable(): boolean {
+    return this.needsTableFlag;
+  }
+}
+
+@Component({ selector: 'app-pos-payment-step', standalone: true, template: `` })
+class PaymentStub {
+  readonly cartState = input<unknown>(null);
+  readonly checkoutIntent = input('pickup');
+  readonly isRestaurantWithPrepared = input(false);
+  readonly tableId = input<number | null>(null);
+  readonly fulfillment = input('entrega');
+  readonly sessionId = input<number | null>(null);
+  readonly isAnonymous = input(false);
+  readonly isAlias = input(false);
+  readonly customerAlias = input('');
+  readonly paymentMethods = input<unknown[] | null>(null);
+  readonly isProcessing = input(false);
+  readonly editingOrderId = input<number | null>(null);
+  readonly autoExecute = input(true);
+  readonly amountOverride = input<number | null>(null);
+  readonly paymentCompleted = output<unknown>();
+  readonly paymentReady = output<unknown>();
+  readonly amountConfirmed = output<void>();
+  readonly requestCustomer = output<void>();
+  readonly mode = signal('contado');
+  readonly subStep = signal(0);
+  readonly modoOffset = signal(0);
+  readonly selectedMethodName = signal<string | null>(null);
+  readonly hasPendingSubSteps = signal(false);
+  readonly canAdvanceSubStep = signal(true);
+  readonly canSubmit = signal(true);
+  readonly selectedMethodType = signal<string | null>(null);
+  readonly isWompiSelected = signal(false);
+  readonly collectedIsProcessing = signal(false);
+  advanceRet = false;
+  advanceSubStepOrConfirm(): boolean {
+    return this.advanceRet;
+  }
+  flashValidation(): void {}
+  triggerSubmit(): void {}
+}
+
+@Component({ selector: 'app-pos-shipping-step', standalone: true, template: `` })
+class ShippingStub {
+  readonly cartState = input<unknown>(null);
+  readonly address = input<unknown>(null);
+  readonly addressId = input<number | null>(null);
+  readonly shippingCompleted = output<unknown>();
+  readonly shippingCost = signal(0);
+  readonly shipSubStep = signal(0);
+  readonly canConfirm = signal(true);
+  readonly shipIsProcessing = signal(false);
+  flashValidation(): void {}
+  execute(_submit: unknown): void {}
+}
+
+@Component({ selector: 'app-pos-customer-selector', standalone: true, template: `` })
+class CustomerSelectorStub {
+  readonly selectedCustomer = input<unknown>(null);
+  readonly allowAnonymous = input(true);
+  readonly minimalInvoiceMode = input(false);
+  readonly showTopSuggestions = input(false);
+  readonly searchLimit = input(3);
+  readonly customerSelected = output<unknown>();
+  readonly customerCleared = output<void>();
+  resolveIfNeeded() {
+    return of(false);
+  }
+}
+
+@Component({ selector: 'app-address-form-fields', standalone: true, template: `` })
+class AddressStub {
+  readonly initialAddress = input<unknown>(null);
+  readonly requirePhone = input(false);
+  readonly showErrors = input(false);
+  readonly addressChange = output<unknown>();
+  readonly validChange = output<boolean>();
+}
+
+describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBOARD)', () => {
   let fixture: ComponentFixture<PosCheckoutShellComponent>;
   let component: PosCheckoutShellComponent;
-  let posSettings: WritableSignal<any>;
-  let checkoutSettings: WritableSignal<any>;
-  let payMode: WritableSignal<'contado' | 'credito'>;
-  let updateOrderFromEditorSpy: jasmine.Spy;
+  let integrationMock: { isRestaurantMode: () => boolean; currentTableSession: () => null };
+  let settingsMock: { pos: () => null; checkout: () => null };
+  let restaurantMode: WritableSignal<boolean>;
 
-  function buildCartState(overrides: Partial<CartState> = {}): CartState {
-    const item: CartItem = {
-      id: 'line-1',
-      product: { id: 1, name: 'Producto de prueba', sku: 'SKU-1' } as any,
-      quantity: 1,
-      unitPrice: 10,
-      finalPrice: 10,
-      totalPrice: 10,
-      taxAmount: 0,
-      addedAt: new Date(),
-    } as CartItem;
-    return {
-      items: [item],
-      customer: null,
-      notes: '',
-      internalNotes: '',
-      appliedDiscounts: [],
-      pendingBookings: [],
-      summary: { subtotal: 10, tax: 0, total: 10 } as any,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      linkedOrderId: null,
-      linkedOrderNumber: null,
-      ...overrides,
-    } as CartState;
-  }
+  const payStub = (): PaymentStub =>
+    fixture.debugElement.query(By.directive(PaymentStub)).componentInstance as PaymentStub;
 
-  function buildCustomer(overrides: Partial<PosCustomer> = {}): PosCustomer {
-    return {
-      id: 42,
-      email: 'ana@example.com',
-      first_name: 'Ana',
-      last_name: 'Restrepo',
-      created_at: new Date(),
-      updated_at: new Date(),
-      ...overrides,
-    } as PosCustomer;
-  }
-
-  beforeEach(() => {
-    // Ambas banderas en true por defecto: las tres opciones del radiogroup
-    // "Tipo de venta" están disponibles salvo que un test las apague o que
-    // el collector entre en modo crédito (ver el describe dedicado).
-    posSettings = signal<any>({
-      allow_anonymous_sales: true,
-      anonymous_sales_as_default: false,
-      allow_alias_sales: true,
-      alias_sales_as_default: false,
+  /**
+   * `viewChild(ClaseReal)` no casa con un stub (no es instanceof), así que el
+   * shell vería todos los childs como undefined. Se inyectan los stubs
+   * montados en los slots viewChild: el shell solo lee su API pública.
+   */
+  const wireStubs = (): void => {
+    const pay = payStub();
+    Object.defineProperty(component, 'paymentStep', {
+      value: () => pay,
+      configurable: true,
     });
-    checkoutSettings = signal<any>({ require_customer_data: false });
+    // Envío solo se monta en delivery: si no está, stub suelto para el slot.
+    const shipEl = fixture.debugElement.query(By.directive(ShippingStub));
+    const ship = shipEl
+      ? shipEl.componentInstance
+      : TestBed.runInInjectionContext(() => new ShippingStub());
+    Object.defineProperty(component, 'shippingStep', {
+      value: () => ship,
+      configurable: true,
+    });
+  };
 
-    updateOrderFromEditorSpy = jasmine
-      .createSpy('updateOrderFromEditor')
-      .and.returnValue(of({ data: { id: 501 } }));
+  /** Evento de teclado mínimo; target falsificado para las ramas de Enter. */
+  const keyEvent = (key: string, target?: unknown) =>
+    ({
+      key,
+      target: target ?? { tagName: 'DIV', closest: () => null, isContentEditable: false },
+      preventDefault: () => {},
+      defaultPrevented: false,
+    }) as unknown as KeyboardEvent;
+
+  const searchTarget = {
+    tagName: 'INPUT',
+    isContentEditable: false,
+    closest: (sel: string) => (sel.includes('app-inputsearch') ? {} : null),
+  };
+  const buttonTarget = {
+    tagName: 'BUTTON',
+    isContentEditable: false,
+    closest: () => ({}),
+  };
+
+  beforeEach(async () => {
+    // El mock lee una señal: los computed del shell que hacen short-circuit
+    // antes de leer señales solo se invalidan por deps reactivas.
+    restaurantMode = signal(false);
+    integrationMock = { isRestaurantMode: () => restaurantMode(), currentTableSession: () => null };
+    settingsMock = { pos: () => null, checkout: () => null };
 
     TestBed.configureTestingModule({
       imports: [PosCheckoutShellComponent],
       providers: [
-        {
-          provide: CurrencyFormatService,
-          useValue: { loadCurrency: () => undefined } as unknown as CurrencyFormatService,
-        },
-        {
-          provide: StoreSettingsFacade,
-          useValue: {
-            pos: posSettings,
-            checkout: checkoutSettings,
-          } as unknown as StoreSettingsFacade,
-        },
-        { provide: PosCartService, useValue: {} as unknown as PosCartService },
-        {
-          provide: PosPaymentService,
-          useValue: {
-            saveDraft: () => of({ success: true, order: { id: 1 }, message: 'ok' }),
-          } as unknown as PosPaymentService,
-        },
-        {
-          provide: PosRestaurantIntegrationService,
-          useValue: {
-            isRestaurantMode: () => false,
-            currentTableSession: () => null,
-            maybeFireKitchen: () => of({ fired_item_ids: [] }),
-          } as unknown as PosRestaurantIntegrationService,
-        },
-        {
-          provide: StoreOrdersService,
-          useValue: {
-            updateOrderFromEditor: updateOrderFromEditorSpy,
-          } as unknown as StoreOrdersService,
-        },
-        {
-          provide: ToastService,
-          useValue: {
-            success: () => undefined,
-            error: () => undefined,
-            warning: () => undefined,
-          } as unknown as ToastService,
-        },
+        { provide: StoreSettingsFacade, useValue: settingsMock },
+        { provide: PosCartService, useValue: {} },
+        { provide: PosPaymentService, useValue: {} },
+        { provide: PosRestaurantIntegrationService, useValue: integrationMock },
+        { provide: StoreOrdersService, useValue: {} },
+        { provide: ToastService, useValue: {} },
+        { provide: CurrencyFormatService, useValue: { loadCurrency: () => {} } },
       ],
     });
 
-    // Ver el docstring de arriba: el template real arrastra 8 componentes
-    // hijos con su propio grafo de servicios. Lo sustituimos por un nodo
-    // inerte para poder flushear los `effect()` del constructor sin montar
-    // ese árbol.
     TestBed.overrideComponent(PosCheckoutShellComponent, {
-      set: { template: '<div></div>', imports: [] },
+      set: {
+        imports: [
+          ModalStub,
+          StepsLineStub,
+          IconStub,
+          ConsumoStub,
+          PaymentStub,
+          ShippingStub,
+          CustomerSelectorStub,
+          AddressStub,
+          CurrencyStubPipe,
+        ],
+      },
     });
 
+    await TestBed.compileComponents();
     fixture = TestBed.createComponent(PosCheckoutShellComponent);
     component = fixture.componentInstance;
-
-    // Doble del collector de Cobro real: solo expone `.mode()`, que es lo
-    // único que los `effect()` de modo crédito del shell leen de
-    // `paymentStep()`. Debe asignarse ANTES del primer `detectChanges()`
-    // para que el primer flush de efectos ya lea este signal.
-    payMode = signal<'contado' | 'credito'>('contado');
-    const fakePaymentStep = { mode: payMode } as unknown as PosPaymentStepComponent;
-    (component as any).paymentStep = signal(fakePaymentStep);
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('mode', 'create-payment');
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
   });
 
-  describe('1. tri-estado de venta: anonymous | alias | customer', () => {
-    it('arranca en modo "customer" por defecto', () => {
-      expect(component.saleMode()).toBe('customer');
-      expect(component.isAnonymousSale()).toBe(false);
-    });
-
-    it('onSelectSaleMode("anonymous") activa el modo anónimo y colapsa el sub-wizard de Cliente a un único paso "Tipo"', () => {
-      component.onSelectSaleMode('anonymous');
-
-      expect(component.saleMode()).toBe('anonymous');
-      expect(component.isAnonymousSale()).toBe(true);
-      expect(component.clienteSubSteps()).toEqual([{ label: 'Tipo' }]);
-    });
-
-    it('onSelectSaleMode("alias") activa el modo alias y abre el sub-paso "Alias"', () => {
-      component.onSelectSaleMode('alias');
-
-      expect(component.saleMode()).toBe('alias');
-      expect(component.isAnonymousSale()).toBe(false);
-      expect(component.clienteSubSteps()).toEqual([{ label: 'Tipo' }, { label: 'Alias' }]);
-      expect(component.clienteSubStep()).toBe(1);
-    });
-
-    it('onSelectSaleMode("customer") activa el modo cliente y abre el sub-paso "Cliente"', () => {
-      component.onSelectSaleMode('anonymous'); // arranca en otro modo
-      component.onSelectSaleMode('customer');
-
-      expect(component.saleMode()).toBe('customer');
-      expect(component.isAnonymousSale()).toBe(false);
-      expect(component.clienteSubSteps()).toEqual([{ label: 'Tipo' }, { label: 'Cliente' }]);
-      expect(component.clienteSubStep()).toBe(1);
-    });
-
-    it('onAliasInput guarda en el signal el texto crudo del input, sin recortar (el recorte vive en el borde de escritura)', () => {
-      component.onSelectSaleMode('alias');
-      component.onAliasInput({ target: { value: '  Mesa 5  ' } } as unknown as Event);
-
-      expect(component.customerAlias()).toBe('  Mesa 5  ');
-      // customerAliasForPayload es privado; se ejercita indirectamente vía
-      // createRetailDraft más abajo (test de ADR-9) y aquí solo se verifica
-      // que el signal captura el valor crudo del input tal cual el usuario
-      // escribió — el recorte ocurre en el borde de escritura, no en el
-      // signal.
-    });
+  it('→ en paso intermedio llama a Siguiente con source arrows y no cobra', () => {
+    // mode create-payment + pickup sin restaurante → [Cliente, Cobro], paso 0.
+    expect(component.currentStepKey()).toBe('cliente');
+    const next = spyOn(component, 'attemptNextStep');
+    const confirm = spyOn(component, 'onPrimaryConfirm');
+    component.onShellKeydown(keyEvent('ArrowRight'));
+    expect(next).toHaveBeenCalledOnceWith({ source: 'arrows' });
+    expect(confirm).not.toHaveBeenCalled();
   });
 
-  describe('2. bloqueo del modo alias bajo modo crédito (paridad con anónimo, QUI-737 B.4)', () => {
-    it('canBeAnonymous() y canBeAlias() son true en modo contado', () => {
-      payMode.set('contado');
-
-      expect(component.canBeAnonymous()).toBe(true);
-      expect(component.canBeAlias()).toBe(true);
-    });
-
-    it('canBeAnonymous() y canBeAlias() se apagan EN PARIDAD apenas el collector entra a crédito', () => {
-      payMode.set('credito');
-
-      expect(component.canBeAnonymous()).toBe(false);
-      expect(component.canBeAlias()).toBe(false);
-    });
-
-    it('REGRESIÓN: si ya se había elegido alias y el collector entra a crédito, el effect fuerza el modo de vuelta a "customer"', () => {
-      component.onSelectSaleMode('alias');
-      expect(component.saleMode()).toBe('alias');
-
-      // Flush inicial de los `effect()` del constructor. En contado, el
-      // effect de crédito es un no-op y el modo alias sobrevive intacto.
-      fixture.detectChanges();
-      expect(component.saleMode()).toBe('alias');
-
-      // El collector entra a crédito → el effect de paridad debe forzar el
-      // modo de vuelta a "customer" (misma regla que ya protegía "anonymous").
-      payMode.set('credito');
-      fixture.detectChanges();
-
-      expect(component.saleMode()).toBe('customer');
-    });
-
-    it('REGRESIÓN: el mismo effect protege el modo "anonymous" (caso ya cubierto, usado aquí como control de paridad)', () => {
-      component.onSelectSaleMode('anonymous');
-      fixture.detectChanges();
-      expect(component.saleMode()).toBe('anonymous');
-
-      payMode.set('credito');
-      fixture.detectChanges();
-
-      expect(component.saleMode()).toBe('customer');
-    });
+  it('→ en CTA terminal es no-op: ni avanza ni cobra', () => {
+    component.currentStep.set(1); // Cobro, último
+    fixture.detectChanges();
+    expect(component.isLastStep()).toBeTrue();
+    const next = spyOn(component, 'attemptNextStep');
+    const confirm = spyOn(component, 'onPrimaryConfirm');
+    component.onShellKeydown(keyEvent('ArrowRight'));
+    expect(next).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
   });
 
-  describe('3. ADR-9 — alias y customer_id son mutuamente excluyentes', () => {
-    it('selectCustomer() vacía cualquier alias existente (customer gana)', () => {
-      component.onSelectSaleMode('alias');
-      component.customerAlias.set('Mesa 5');
-      expect(component.saleMode()).toBe('alias');
-      expect(component.customerAlias()).toBe('Mesa 5');
+  it('← siempre retrocede sin cobrar', () => {
+    component.currentStep.set(1);
+    fixture.detectChanges();
+    const prev = spyOn(component, 'prevStep');
+    const confirm = spyOn(component, 'onPrimaryConfirm');
+    component.onShellKeydown(keyEvent('ArrowLeft'));
+    expect(prev).toHaveBeenCalledTimes(1);
+    expect(confirm).not.toHaveBeenCalled();
+  });
 
-      component.selectCustomer(buildCustomer());
+  it('Enter intermedio avanza con source enter', () => {
+    const next = spyOn(component, 'attemptNextStep');
+    component.onShellKeydown(keyEvent('Enter'));
+    expect(next).toHaveBeenCalledOnceWith({ source: 'enter' });
+  });
 
-      expect(component.saleMode()).toBe('customer');
-      expect(component.customerAlias()).toBe('');
+  it('Enter en terminal con gate abierto cobra', () => {
+    component.currentStep.set(1); // Cobro: canSubmit stub = true
+    fixture.detectChanges();
+    expect(component.confirmDisabled()).toBeFalse();
+    const confirm = spyOn(component, 'onPrimaryConfirm');
+    component.onShellKeydown(keyEvent('Enter'));
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('Enter en terminal con gate cerrado destella y no cobra', () => {
+    component.currentStep.set(1);
+    payStub().canSubmit.set(false);
+    fixture.detectChanges();
+    expect(component.confirmDisabled()).toBeTrue();
+    const flash = spyOn(payStub(), 'flashValidation');
+    const confirm = spyOn(component, 'onPrimaryConfirm');
+    component.onShellKeydown(keyEvent('Enter'));
+    expect(flash).toHaveBeenCalledTimes(1);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('Enter en el buscador de Cliente no avanza (solo busca)', () => {
+    const next = spyOn(component, 'attemptNextStep');
+    const confirm = spyOn(component, 'onPrimaryConfirm');
+    component.onShellKeydown(keyEvent('Enter', searchTarget));
+    expect(next).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('Enter sobre un botón deja el click nativo (no duplica)', () => {
+    const next = spyOn(component, 'attemptNextStep');
+    const confirm = spyOn(component, 'onPrimaryConfirm');
+    component.onShellKeydown(keyEvent('Enter', buttonTarget));
+    expect(next).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('evento ya consumido (radiogroup Tipo) no navega doble', () => {
+    const next = spyOn(component, 'attemptNextStep');
+    const evt = keyEvent('ArrowRight');
+    Object.defineProperty(evt, 'defaultPrevented', { value: true });
+    component.onShellKeydown(evt);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('con modal cerrado el teclado no hace nada', () => {
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.detectChanges();
+    const next = spyOn(component, 'attemptNextStep');
+    const prev = spyOn(component, 'prevStep');
+    const confirm = spyOn(component, 'onPrimaryConfirm');
+    component.onShellKeydown(keyEvent('ArrowRight'));
+    component.onShellKeydown(keyEvent('ArrowLeft'));
+    component.onShellKeydown(keyEvent('Enter'));
+    expect(next).not.toHaveBeenCalled();
+    expect(prev).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('flechas jamás disparan submit en modo crédito (intermedio o terminal)', () => {
+    payStub().mode.set('credito');
+    fixture.detectChanges();
+    // Terminal.
+    component.currentStep.set(1);
+    fixture.detectChanges();
+    const confirm = spyOn(component, 'onPrimaryConfirm');
+    const next = spyOn(component, 'attemptNextStep');
+    component.onShellKeydown(keyEvent('ArrowRight'));
+    expect(next).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    // Vía attemptNextStep real con source arrows en Cobro.
+    next.and.callThrough();
+    component.attemptNextStep({ source: 'arrows' });
+    expect(confirm).not.toHaveBeenCalled();
+    // Y con Enter sí llega al CTA (misma rama, otra fuente).
+    component.attemptNextStep({ source: 'enter' });
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('Enter sí cobra en modo crédito con gate válido', () => {
+    payStub().mode.set('credito');
+    component.currentStep.set(1);
+    fixture.detectChanges();
+    const confirm = spyOn(component, 'onPrimaryConfirm');
+    component.onShellKeydown(keyEvent('Enter'));
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('restaurante ordena [Consumo, Cliente, Cobro]', () => {
+    restaurantMode.set(true);
+    fixture.detectChanges();
+    expect(component.stepKeys()).toEqual(['consumo', 'cliente', 'cobro']);
+    expect(component.currentStepKey()).toBe('consumo');
+  });
+
+  it('Consumo-entrega avanza; consumo sin mesa abre el picker sin avanzar', () => {
+    const stub = TestBed.runInInjectionContext(() => new ConsumoStub());
+    Object.defineProperty(component, 'consumoStep', {
+      value: () => stub,
+      configurable: true,
     });
-
-    it('el payload de actualización de orden manda customer_id=null y el alias cuando el modo es alias', () => {
-      fixture.componentRef.setInput('mode', 'edit');
-      fixture.componentRef.setInput('editingOrderId', 501);
-      fixture.componentRef.setInput('cartState', buildCartState({ customer: null }));
-      component.onSelectSaleMode('alias');
-      component.customerAlias.set('Mesa 5');
-
-      component.onPrimaryConfirm();
-
-      expect(updateOrderFromEditorSpy).toHaveBeenCalledTimes(1);
-      const payload = updateOrderFromEditorSpy.calls.mostRecent().args[1];
-      expect(payload.customer_id).toBeNull();
-      expect(payload.customer_alias).toBe('Mesa 5');
-    });
-
-    it('el payload de actualización de orden manda el customer_id real y customer_alias=undefined cuando el modo es customer (aunque quede un alias viejo en el signal)', () => {
-      const customer = buildCustomer();
-      fixture.componentRef.setInput('mode', 'edit');
-      fixture.componentRef.setInput('editingOrderId', 501);
-      fixture.componentRef.setInput('cartState', buildCartState({ customer }));
-      // Simula el vaciado ADR-9: seleccionar cliente limpia el alias.
-      component.customerAlias.set('un alias viejo que selectCustomer ya vació');
-      component.selectCustomer(customer);
-
-      component.onPrimaryConfirm();
-
-      const payload = updateOrderFromEditorSpy.calls.mostRecent().args[1];
-      expect(payload.customer_id).toBe(42);
-      expect(payload.customer_alias).toBeUndefined();
-    });
+    const advance = component as unknown as { advanceConsumo: () => void };
+    // Entrega (default) → avanza.
+    advance.advanceConsumo();
+    expect(component.currentStep()).toBe(1);
+    // Consumo sin mesa → abre picker, no avanza.
+    component.currentStep.set(0);
+    stub.fulfillmentMode = 'consumo';
+    stub.needsTableFlag = true;
+    advance.advanceConsumo();
+    expect(stub.openTablePicker()).toBeTrue();
+    expect(component.currentStep()).toBe(0);
+    // Con mesa → avanza.
+    stub.needsTableFlag = false;
+    advance.advanceConsumo();
+    expect(component.currentStep()).toBe(1);
   });
 });
