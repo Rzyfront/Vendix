@@ -2759,7 +2759,69 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       p12_buffer,
       config.certificate_password || '',
       config.certificate_kms_key_id,
+      // La firma se estampa con el instante que el propio documento declara, no
+      // con el reloj de pared. Ver `resolveSigningInstant`.
+      this.resolveSigningInstant(xml),
     );
+  }
+
+  /**
+   * Instante que debe estampar `xades:SigningTime`, leído del documento mismo.
+   *
+   * POR QUÉ EXISTE: la DIAN valida que la fecha de firma coincida con la de
+   * generación —«Valida que fecha de generación de la factura sea igual a la
+   * fecha de firma»— y `cbc:IssueDate` viaja congelado desde la factura
+   * persistida, mientras que la firma se producía con `new Date()`. Bastaba con
+   * que la emisión cayera en un día distinto al de la fecha del documento
+   * (reintento tras un fallo, envío pasada la medianoche, contingencia) para que
+   * los dos relojes discreparan y el documento se rechazara con el resto de sus
+   * cifras impecables.
+   *
+   * VA EN `signXml` Y NO EN CADA CAMINO porque ese método es el único paso
+   * obligado de los siete tipos de documento; resolverlo aquí hace que la
+   * divergencia sea irrepresentable y que el próximo tipo nazca ya corregido.
+   *
+   * NO ALTERA NINGÚN DATO FISCAL: no toca `issue_date`, ni el CUFE —que se
+   * calcula antes y sobre estos mismos dos campos—, ni la numeración. Sólo
+   * alinea la firma con lo que el documento ya declara.
+   *
+   * `IssueTime` lleva el desfase horario (`23:28:56-05:00`), así que la pareja
+   * fecha+hora describe un instante exacto sin suponer zona. Si el documento no
+   * trae hora —ningún builder actual omite `cbc:IssueTime`, pero el respaldo
+   * evita que uno futuro reviva el defecto en silencio— se usa la medianoche
+   * civil de la fecha de emisión, que preserva la igualdad de FECHA que es lo
+   * que la regla exige. Ante cualquier lectura imposible devuelve `undefined` y
+   * el firmante conserva su comportamiento previo.
+   */
+  private resolveSigningInstant(xml: string): Date | undefined {
+    try {
+      // `parseFromString` no lanza ante XML malformado: reporta por su
+      // errorHandler y puede devolver un documento sin raíz.
+      const parsed = new DOMParser().parseFromString(xml, 'text/xml');
+      const root: Element | null = parsed.documentElement ?? null;
+      if (!root) return undefined;
+
+      const cbc = UBL_NAMESPACES.CBC;
+      const issue_date = this.directChildText(root, cbc, 'IssueDate');
+      if (!issue_date) return undefined;
+
+      const issue_time = this.directChildText(root, cbc, 'IssueTime');
+      // Mediodía UTC como sonda del desfase, igual que `issueTime`: evita que un
+      // cambio de horario en la medianoche misma etiquete la hora con el desfase
+      // del día contiguo.
+      const probe = new Date(`${issue_date}T12:00:00.000Z`);
+      if (Number.isNaN(probe.getTime())) return undefined;
+
+      const instant = new Date(
+        `${issue_date}T${
+          issue_time ||
+          `00:00:00${localOffsetString(probe, DEFAULT_STORE_TIMEZONE)}`
+        }`,
+      );
+      return Number.isNaN(instant.getTime()) ? undefined : instant;
+    } catch {
+      return undefined;
+    }
   }
 
   /**
