@@ -32,10 +32,11 @@ interface KitchenOrderDeliveryRevertedEvent {
  * antes de tocar los servicios Prisma scopeados dentro de `OrderFlowService`.
  *
  * Tras el commit, emite un `order.status_changed` por SSE al subject
- * compartido por tienda — mismo `kind` que el delivered, pero con
- * `old_state: 'delivered', new_state: 'processing'`. Igual que el delivered,
- * SOLO emite si la transición realmente ocurrió (chequeo
- * `updated?.state === 'processing'`).
+ * compartido por tienda — mismo `kind` que el delivered, pero con el
+ * pre-estado real como `old_state` y el estado resultante como `new_state`.
+ * Igual que el delivered, SOLO emite si la transición realmente ocurrió
+ * (`transitioned === true`); chequear `order.state` re-emitiría cuando la
+ * orden YA estaba en `processing` (no-op idempotente del service).
  */
 @Injectable()
 export class KitchenOrderDeliveryRevertedListener {
@@ -54,25 +55,29 @@ export class KitchenOrderDeliveryRevertedListener {
     event: KitchenOrderDeliveryRevertedEvent,
   ): Promise<void> {
     try {
-      const updated = await this.storeContextRunner.runInStoreContext(
+      const result = await this.storeContextRunner.runInStoreContext(
         event.storeId,
         () => this.orderFlowService.revertKitchenOrderDelivery(event.orderId),
       );
 
-      // Solo emitir si la transición realmente ocurrió. Idempotencia del
-      // service: si la orden no estaba en `delivered`, devuelve la fila
-      // tal cual (o null si no existe) y NO publica.
-      if (updated?.state === 'processing') {
-        const orderNumber =
-          (updated as { order_number?: string }).order_number ?? '';
+      // Solo emitir si la transición realmente ocurrió (`transitioned`).
+      // Idempotencia del service: si la orden no estaba en `delivered`,
+      // devuelve la fila tal cual con `transitioned: false` (u `order: null`
+      // si no existe) y NO publica. `old_state` es el pre-estado real
+      // reportado por el service, no un literal.
+      if (result?.transitioned === true && result?.order) {
+        const order = result.order as {
+          order_number?: string;
+          state: string;
+        };
         this.orderSseService.pushOrderEvent(
           event.storeId,
           event.orderId,
           'order.status_changed',
           {
-            old_state: 'delivered',
-            new_state: 'processing',
-            order_number: orderNumber,
+            old_state: result.previousState,
+            new_state: order.state,
+            order_number: order.order_number ?? '',
           },
         );
       }

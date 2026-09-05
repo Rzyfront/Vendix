@@ -40,9 +40,9 @@ describe('KitchenOrderDeliveredListener — SSE push (QUI-777)', () => {
   it('happy path: orden en processing transiciona a delivered y emite SSE con kind y extra exactos', async () => {
     const { listener, orderFlowService, orderSseService } = buildListener();
     orderFlowService.markKitchenOrderDelivered.mockResolvedValue({
-      id: 42,
-      state: 'delivered',
-      order_number: 'ORD-2026-001',
+      order: { id: 42, state: 'delivered', order_number: 'ORD-2026-001' },
+      transitioned: true,
+      previousState: 'processing',
     });
 
     await listener.handleAllDelivered({ orderId: 42, storeId: 7 });
@@ -61,32 +61,30 @@ describe('KitchenOrderDeliveredListener — SSE push (QUI-777)', () => {
     );
   });
 
-  it('idempotencia: orden ya en delivered (service hace no-op de un re-trigger) emite SSE', async () => {
-    // El service retorna la orden tal cual cuando NO está en `processing`
-    // (puede estar en `delivered`, `finished`, etc.). El listener distingue:
-    //   - state === 'delivered' → ya estaba entregada, pero igual emitimos
-    //     porque podría ser una reconexión / re-trigger desde el KDS. El
-    //     upsert en el cliente es idempotente.
-    //   - state !== 'delivered' → no-op real, NO emite.
+  it('idempotencia: orden ya en delivered (no-op, transitioned=false) NO emite SSE', async () => {
+    // El service retorna la fila tal cual con `transitioned: false` cuando NO
+    // estaba en `processing`. El listener decide por `transitioned`, NO por
+    // `order.state`: un re-trigger del KDS sobre una orden ya entregada no
+    // debe re-emitir (el chequeo viejo por `state === 'delivered'` sí lo
+    // hacía, con un `old_state` inventado).
     const { listener, orderFlowService, orderSseService } = buildListener();
     orderFlowService.markKitchenOrderDelivered.mockResolvedValue({
-      id: 42,
-      state: 'delivered',
-      order_number: 'ORD-2026-001',
+      order: { id: 42, state: 'delivered', order_number: 'ORD-2026-001' },
+      transitioned: false,
+      previousState: 'delivered',
     });
 
     await listener.handleAllDelivered({ orderId: 42, storeId: 7 });
 
-    // El guard acepta `state === 'delivered'` → emite.
-    expect(orderSseService.pushOrderEvent).toHaveBeenCalledTimes(1);
+    expect(orderSseService.pushOrderEvent).not.toHaveBeenCalled();
   });
 
   it('idempotencia: orden en finished (auto-finalizada por el job de 4h) NO emite SSE', async () => {
     const { listener, orderFlowService, orderSseService } = buildListener();
     orderFlowService.markKitchenOrderDelivered.mockResolvedValue({
-      id: 42,
-      state: 'finished',
-      order_number: 'ORD-2026-001',
+      order: { id: 42, state: 'finished', order_number: 'ORD-2026-001' },
+      transitioned: false,
+      previousState: 'finished',
     });
 
     await listener.handleAllDelivered({ orderId: 42, storeId: 7 });
@@ -117,8 +115,9 @@ describe('KitchenOrderDeliveredListener — SSE push (QUI-777)', () => {
   it('reestablece el contexto de tienda antes de tocar el service', async () => {
     const { listener, orderFlowService, storeContextRunner } = buildListener();
     orderFlowService.markKitchenOrderDelivered.mockResolvedValue({
-      id: 42,
-      state: 'delivered',
+      order: { id: 42, state: 'delivered' },
+      transitioned: true,
+      previousState: 'processing',
     });
 
     await listener.handleAllDelivered({ orderId: 42, storeId: 7 });
@@ -136,9 +135,10 @@ describe('KitchenOrderDeliveredListener — SSE push (QUI-777)', () => {
   it('order_number ausente en el retorno del service: emite con string vacío (defensivo, no rompe el push)', async () => {
     const { listener, orderFlowService, orderSseService } = buildListener();
     orderFlowService.markKitchenOrderDelivered.mockResolvedValue({
-      id: 42,
-      state: 'delivered',
-      // sin order_number — simula un SELECT mínimo en el service.
+      order: { id: 42, state: 'delivered' },
+      transitioned: true,
+      previousState: 'processing',
+      // sin order_number — la vista devuelta puede no exponerlo.
     });
 
     await listener.handleAllDelivered({ orderId: 42, storeId: 7 });

@@ -44,10 +44,13 @@ interface KitchenOrderAllDeliveredEvent {
  * filtro del cliente y romper la consistencia entre emisores.
  *
  * La emisión SOLO ocurre si `markKitchenOrderDelivered` realmente transicionó
- * la orden (chequeo `updated?.state === 'delivered'`). El service es
- * idempotente: si la orden no estaba en `processing`, devuelve la fila tal
- * cual y NO se publica nada — evita ruido para órdenes ya finalizadas o
- * auto-finalizadas por el job de 4h.
+ * la orden (`transitioned === true`). El service es idempotente: si la orden
+ * no estaba en `processing`, devuelve la fila tal cual con
+ * `transitioned: false` y NO se publica nada — evita ruido para órdenes ya
+ * entregadas, finalizadas o auto-finalizadas por el job de 4h. Chequear
+ * `order.state` en vez de `transitioned` re-emitiría en cada re-trigger del
+ * KDS. El `old_state` del payload es el pre-estado real (`previousState`),
+ * sin literales hardcodeados.
  */
 @Injectable()
 export class KitchenOrderDeliveredListener {
@@ -64,25 +67,29 @@ export class KitchenOrderDeliveredListener {
     event: KitchenOrderAllDeliveredEvent,
   ): Promise<void> {
     try {
-      const updated = await this.storeContextRunner.runInStoreContext(
+      const result = await this.storeContextRunner.runInStoreContext(
         event.storeId,
         () => this.orderFlowService.markKitchenOrderDelivered(event.orderId),
       );
 
-      // Solo emitir si la transición realmente ocurrió. Idempotencia: el
-      // service es no-op si la orden no estaba en `processing`, así que
-      // evita spam para órdenes ya finalizadas / auto-finalizadas.
-      if (updated?.state === 'delivered') {
-        const orderNumber =
-          (updated as { order_number?: string }).order_number ?? '';
+      // Solo emitir si la transición realmente ocurrió (`transitioned`).
+      // Idempotencia: el service es no-op si la orden no estaba en
+      // `processing` — un chequeo por `state` re-emitiría en re-triggers del
+      // KDS (la fila no-op ya viene en `delivered`). `old_state` es el
+      // pre-estado real reportado por el service, no un literal.
+      if (result?.transitioned === true && result?.order) {
+        const order = result.order as {
+          order_number?: string;
+          state: string;
+        };
         this.orderSseService.pushOrderEvent(
           event.storeId,
           event.orderId,
           'order.status_changed',
           {
-            old_state: 'processing',
-            new_state: 'delivered',
-            order_number: orderNumber,
+            old_state: result.previousState,
+            new_state: order.state,
+            order_number: order.order_number ?? '',
           },
         );
       }

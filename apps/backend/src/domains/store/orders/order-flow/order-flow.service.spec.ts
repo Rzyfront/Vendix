@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { OrderFlowService } from './order-flow.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -383,9 +384,10 @@ describe('OrderFlowService.reconcileOrderFromDispatch — tabla de derivación',
  * {@link OrderFlowService.revertKitchenOrderDelivery}). El listener que
  * traduce `kitchen.order_all_delivered` a `OrderSseService.pushOrderEvent`
  * depende de la DECISIÓN que toma este método: ¿la orden estaba en
- * `processing`?, ¿se transicionó a `delivered`? Si este método devuelve
- * la fila sin transicionar (estado distinto de `processing`), el listener
- * NO emite SSE — y esa decisión se prueba aquí, no en el listener.
+ * `processing`?, ¿se transicionó a `delivered`? El método reporta
+ * `{ order, transitioned, previousState }`: si devuelve la fila sin
+ * transicionar (`transitioned: false`), el listener NO emite SSE — y esa
+ * decisión se prueba aquí, no en el listener.
  *
  * Patrón: factory `buildService()` análogo al de `reconcileOrderFromDispatch`.
  * `getOrder` se espía (es método privado) y `updateOrderState` también, para
@@ -443,7 +445,9 @@ describe('OrderFlowService.markKitchenOrderDelivered — restaurant bridge', () 
       }),
       { source: 'kitchen_bridge' },
     );
-    expect(result?.state).toBe('delivered');
+    expect(result.transitioned).toBe(true);
+    expect(result.previousState).toBe('processing');
+    expect(result.order?.state).toBe('delivered');
   });
 
   it('idempotencia: orden ya en delivered devuelve la fila sin transicionar', async () => {
@@ -451,13 +455,14 @@ describe('OrderFlowService.markKitchenOrderDelivered — restaurant bridge', () 
 
     const result = await service.markKitchenOrderDelivered(ORDER_ID);
 
-    // Re-trigger desde KDS o reconexión SSE: no-op real, NO emite SSE
-    // (el listener chequea `updated?.state === 'delivered'`, pero como el
-    // service ya hizo no-op y devolvió la fila original, la igualdad sí
-    // pasa — la idempotencia vive en el chequeo del state que retorna,
-    // no en el de la fila original).
+    // Re-trigger desde KDS o reconexión SSE: no-op real. El listener decide
+    // por `transitioned === true`, así que este no-op NO emite SSE (el
+    // chequeo viejo por `state === 'delivered'` sí emitía, con `old_state`
+    // inventado).
     expect(updateSpy).not.toHaveBeenCalled();
-    expect(result?.state).toBe('delivered');
+    expect(result.transitioned).toBe(false);
+    expect(result.previousState).toBe('delivered');
+    expect(result.order?.state).toBe('delivered');
   });
 
   it('idempotencia: orden en finished (auto-finalizada por job 4h) NO transiciona', async () => {
@@ -466,7 +471,9 @@ describe('OrderFlowService.markKitchenOrderDelivered — restaurant bridge', () 
     const result = await service.markKitchenOrderDelivered(ORDER_ID);
 
     expect(updateSpy).not.toHaveBeenCalled();
-    expect(result?.state).toBe('finished');
+    expect(result.transitioned).toBe(false);
+    expect(result.previousState).toBe('finished');
+    expect(result.order?.state).toBe('finished');
   });
 
   it('validateTransition lanza ORDER_INVALID_TRANSITION: el error se propaga al listener', async () => {
@@ -565,7 +572,9 @@ describe('OrderFlowService.revertKitchenOrderDelivery — kitchen bridge reverse
       'processing',
       expect.objectContaining({ kitchen_delivery_reverted: true }),
     );
-    expect(result?.state).toBe('processing');
+    expect(result.transitioned).toBe(true);
+    expect(result.previousState).toBe('delivered');
+    expect(result.order?.state).toBe('processing');
   });
 
   it('idempotencia: orden inexistente (findFirst retorna null) NO transiciona', async () => {
@@ -574,7 +583,9 @@ describe('OrderFlowService.revertKitchenOrderDelivery — kitchen bridge reverse
     const result = await service.revertKitchenOrderDelivery(ORDER_ID);
 
     expect(updateSpy).not.toHaveBeenCalled();
-    expect(result).toBeNull();
+    expect(result.order).toBeNull();
+    expect(result.transitioned).toBe(false);
+    expect(result.previousState).toBeNull();
   });
 
   it('idempotencia: orden en processing (ya estaba) NO transiciona', async () => {
@@ -586,7 +597,9 @@ describe('OrderFlowService.revertKitchenOrderDelivery — kitchen bridge reverse
     const result = await service.revertKitchenOrderDelivery(ORDER_ID);
 
     expect(updateSpy).not.toHaveBeenCalled();
-    expect(result?.state).toBe('processing');
+    expect(result.transitioned).toBe(false);
+    expect(result.previousState).toBe('processing');
+    expect(result.order?.state).toBe('processing');
   });
 
   it('idempotencia: orden en finished (pago confirmado antes de la reversa) NO transiciona', async () => {
@@ -598,7 +611,9 @@ describe('OrderFlowService.revertKitchenOrderDelivery — kitchen bridge reverse
     const result = await service.revertKitchenOrderDelivery(ORDER_ID);
 
     expect(updateSpy).not.toHaveBeenCalled();
-    expect(result?.state).toBe('finished');
+    expect(result.transitioned).toBe(false);
+    expect(result.previousState).toBe('finished');
+    expect(result.order?.state).toBe('finished');
   });
 
   it('validateTransition lanza: el error se propaga al listener', async () => {

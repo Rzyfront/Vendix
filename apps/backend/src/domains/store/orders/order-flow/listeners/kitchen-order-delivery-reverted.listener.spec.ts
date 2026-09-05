@@ -32,14 +32,16 @@ describe('KitchenOrderDeliveryRevertedListener — SSE push (QUI-777)', () => {
   it('happy path: orden en delivered transiciona a processing y emite SSE con kind y extra exactos', async () => {
     const { listener, orderFlowService, orderSseService } = buildListener();
     orderFlowService.revertKitchenOrderDelivery.mockResolvedValue({
-      id: 99,
-      state: 'processing',
-      order_number: 'ORD-2026-099',
+      order: { id: 99, state: 'processing', order_number: 'ORD-2026-099' },
+      transitioned: true,
+      previousState: 'delivered',
     });
 
     await listener.handleDeliveryReverted({ orderId: 99, storeId: 4 });
 
-    expect(orderFlowService.revertKitchenOrderDelivery).toHaveBeenCalledWith(99);
+    expect(orderFlowService.revertKitchenOrderDelivery).toHaveBeenCalledWith(
+      99,
+    );
     expect(orderSseService.pushOrderEvent).toHaveBeenCalledTimes(1);
     expect(orderSseService.pushOrderEvent).toHaveBeenCalledWith(
       4, // storeId
@@ -53,22 +55,17 @@ describe('KitchenOrderDeliveryRevertedListener — SSE push (QUI-777)', () => {
     );
   });
 
-  it('idempotencia: orden en finished (no estaba en delivered) NO emite SSE', async () => {
-    // El service es no-op cuando la orden NO está en `delivered` (puede estar
-    // en `processing`, `finished`, etc.) y devuelve la fila tal cual.
-    //
-    // NOTA sobre el guard `state === 'processing'`: también pasa cuando el
-    // service hace no-op en una orden que YA estaba en `processing` (devuelve
-    // la fila con state='processing' sin transicionar). El listener emite en
-    // ese caso también — pero el upsert del cliente es idempotente, así que
-    // no causa daño (la UI ya muestra `processing` y el emit solo lo
-    // re-confirma). Acá testeamos el caso donde el guard SÍ rechaza: el
-    // service devolvió un state distinto de `processing` (no hubo
-    // transición).
+  it('idempotencia: orden ya en processing (no-op, transitioned=false) NO emite SSE', async () => {
+    // El service es no-op con `transitioned: false` cuando la orden NO estaba
+    // en `delivered`. El listener decide por `transitioned`, NO por
+    // `order.state`: el chequeo viejo (`state === 'processing'`) emitía un
+    // `status_changed` fantasma con `old_state: 'delivered'` inventado cada
+    // vez que la orden YA estaba en `processing`.
     const { listener, orderFlowService, orderSseService } = buildListener();
     orderFlowService.revertKitchenOrderDelivery.mockResolvedValue({
-      id: 99,
-      state: 'finished',
+      order: { id: 99, state: 'processing' },
+      transitioned: false,
+      previousState: 'processing',
     });
 
     await listener.handleDeliveryReverted({ orderId: 99, storeId: 4 });
@@ -76,9 +73,26 @@ describe('KitchenOrderDeliveryRevertedListener — SSE push (QUI-777)', () => {
     expect(orderSseService.pushOrderEvent).not.toHaveBeenCalled();
   });
 
-  it('idempotencia: orden inexistente (service retorna null) NO emite SSE', async () => {
+  it('idempotencia: orden en finished (no estaba en delivered) NO emite SSE', async () => {
     const { listener, orderFlowService, orderSseService } = buildListener();
-    orderFlowService.revertKitchenOrderDelivery.mockResolvedValue(null);
+    orderFlowService.revertKitchenOrderDelivery.mockResolvedValue({
+      order: { id: 99, state: 'finished' },
+      transitioned: false,
+      previousState: 'finished',
+    });
+
+    await listener.handleDeliveryReverted({ orderId: 99, storeId: 4 });
+
+    expect(orderSseService.pushOrderEvent).not.toHaveBeenCalled();
+  });
+
+  it('idempotencia: orden inexistente (order null, transitioned=false) NO emite SSE', async () => {
+    const { listener, orderFlowService, orderSseService } = buildListener();
+    orderFlowService.revertKitchenOrderDelivery.mockResolvedValue({
+      order: null,
+      transitioned: false,
+      previousState: null,
+    });
 
     await listener.handleDeliveryReverted({ orderId: 99, storeId: 4 });
 
@@ -108,8 +122,9 @@ describe('KitchenOrderDeliveryRevertedListener — SSE push (QUI-777)', () => {
   it('reestablece el contexto de tienda antes de tocar el service', async () => {
     const { listener, orderFlowService, storeContextRunner } = buildListener();
     orderFlowService.revertKitchenOrderDelivery.mockResolvedValue({
-      id: 99,
-      state: 'processing',
+      order: { id: 99, state: 'processing' },
+      transitioned: true,
+      previousState: 'delivered',
     });
 
     await listener.handleDeliveryReverted({ orderId: 99, storeId: 4 });
@@ -120,17 +135,18 @@ describe('KitchenOrderDeliveryRevertedListener — SSE push (QUI-777)', () => {
     );
     const callback = storeContextRunner.runInStoreContext.mock.calls[0][1];
     await callback();
-    expect(orderFlowService.revertKitchenOrderDelivery).toHaveBeenCalledWith(99);
+    expect(orderFlowService.revertKitchenOrderDelivery).toHaveBeenCalledWith(
+      99,
+    );
   });
 
   it('order_number ausente en el retorno del service: emite con string vacío (defensivo)', async () => {
     const { listener, orderFlowService, orderSseService } = buildListener();
     orderFlowService.revertKitchenOrderDelivery.mockResolvedValue({
-      id: 99,
-      state: 'processing',
-      // sin order_number — el service usa findFirst con `select: { id, state }`
-      // en el camino de no-op, así que esto puede ocurrir si la transición
-      // real pasa por un camino que no expone order_number.
+      order: { id: 99, state: 'processing' },
+      transitioned: true,
+      previousState: 'delivered',
+      // sin order_number — la vista devuelta puede no exponerlo.
     });
 
     await listener.handleDeliveryReverted({ orderId: 99, storeId: 4 });
