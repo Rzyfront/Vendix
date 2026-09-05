@@ -4,10 +4,12 @@ import {
   DestroyRef,
   OnInit,
   computed,
+  effect,
   inject,
   input,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -440,6 +442,26 @@ export class PosPaymentStepComponent implements OnInit {
     });
     // Credit sales cannot be anonymous — that flag is owned by the shell; the
     // step only reads `isAnonymous` as an input, so no local effect is needed.
+
+    // POS default: preselect Efectivo when available, else Transferencia, else
+    // nothing — so a cashier can complete a default sale with Enter only. Runs
+    // whenever the collector (re)mounts or methods resolve while nothing is
+    // selected; never overrides an explicit operator choice. advance:false keeps
+    // the Método sub-step visible with the default highlighted.
+    effect(() => {
+      const collector = this.collector();
+      const methods = this.paymentMethods();
+      const selected = collector?.selectedMethod();
+      if (!collector || methods.length === 0 || selected) return;
+      untracked(() => {
+        const enabled = methods.filter((m) => m.enabled !== false);
+        const pick =
+          enabled.find((m) => m.type === PaymentMethodType.CASH) ??
+          enabled.find((m) => m.type === PaymentMethodType.BANK_TRANSFER) ??
+          null;
+        if (pick) collector.selectMethod(pick, { advance: false });
+      });
+    });
   }
 
   ngOnInit(): void {
