@@ -879,6 +879,24 @@ export class EcommerceComponent {
             this.ecommerceQrTargetUrl.set(
               response.qrCodeUrl || response.ecommerceUrl || null,
             );
+
+            // Migrar pitch guardado con tokens ({tienda}/{web}) al texto
+            // final con los valores reales: el token nunca debe verse.
+            const savedPitch = this.whatsappPitchControl?.value as
+              | string
+              | null;
+            if (
+              savedPitch &&
+              (savedPitch.includes('{tienda}') ||
+                savedPitch.includes('{web}'))
+            ) {
+              const migrated = this.resolvePitchVars(savedPitch);
+              if (migrated !== savedPitch) {
+                this.whatsappPitchControl.setValue(migrated, {
+                  emitEvent: false,
+                });
+              }
+            }
             this.ecommerceQrGeneratedAt.set(response.qrCodeGeneratedAt || null);
             this.ecommerceQrStale.set(!!response.qrCodeStale);
           } else {
@@ -1506,6 +1524,16 @@ export class EcommerceComponent {
     // Validate WhatsApp checkout before proceeding
     const whatsappValid = await this.validateWhatsappCheckout();
     if (!whatsappValid) return;
+
+    // Resolver tokens del pitch ({tienda}/{web}) con los valores reales
+    // antes de guardar: el texto guardado nunca lleva tokens resolvibles.
+    const pitchValue = this.whatsappPitchControl?.value as string | null;
+    if (pitchValue && pitchValue.includes('{')) {
+      const resolved = this.resolvePitchVars(pitchValue);
+      if (resolved !== pitchValue) {
+        this.whatsappPitchControl.setValue(resolved, { emitEvent: false });
+      }
+    }
 
     this.syncInicioFromWelcomeSection();
 
