@@ -9,18 +9,23 @@ import { AccountingEffects } from '../accounting/state/effects/accounting.effect
 /**
  * Reports route tree.
  *
- * Architectural note (Fix 5 — `overview-summary` is the only summary):
+ * Each catalog/tab entry used to be a `redirectTo: ''` that collapsed into
+ * `<app-category-reports-catalog>` (Fix 5). That kept catalog cards from
+ * erroring on stale deep-links, but it ALSO meant clicking a card never
+ * left the catalog — exactly the symptom described in QUI-722
+ * (catalog + tabs no navegan, balance-sheet rejects page/limit).
  *
- *   - `/admin/reports/overview/overview-summary` is the single consolidated
- *     dashboard with stat cards + the full catalog. Every other category
- *     collapses into `/admin/reports/{category}/`, which renders
- *     `<app-category-reports-catalog>` filtered to that category.
- *   - Legacy sub-routes (e.g. `/admin/reports/sales/sales-summary`) are
- *     kept as `redirectTo: ''` so existing deep links, browser history and
- *     catalog cards continue to land on the catalog instead of erroring.
- *   - `accounting` and `payroll` keep their custom report pages because
- *     those flows route into the dedicated accounting/payroll modules via
- *     `fullViewRoute`; refactoring them is out of scope for Fix 5.
+ * Restore (QUI-722): every sub-route now points at a real
+ * `<app-generic-report-page>`. The page reads `reportId` from
+ * `route.data`, which selects the matching entry from
+ * `REPORT_DEFINITIONS` (the registry at `config/report-registry.ts`)
+ * and dispatches `selectReport(...)` → loads via the NgRx effect.
+ *
+ *   - `overview-summary` keeps its bespoke page (stat cards + catalog).
+ *   - `accounting` and `payroll` keep their dedicated pages with
+ *     fullViewRoute hops into their modules.
+ *   - `inventory-low-stock-by-supplier` keeps its bespoke page (has
+ *     its own searchable supplier dropdown).
  */
 export const reportsRoutes: Routes = [
   {
@@ -55,13 +60,15 @@ export const reportsRoutes: Routes = [
             loadComponent: () => import('./pages/category-reports-catalog/category-reports-catalog.component').then(c => c.CategoryReportsCatalogComponent),
             data: { categoryId: 'sales' },
           },
-          { path: 'sales-summary', redirectTo: '', pathMatch: 'full' },
-          { path: 'sales-by-product', redirectTo: '', pathMatch: 'full' },
-          { path: 'sales-by-category', redirectTo: '', pathMatch: 'full' },
-          { path: 'sales-by-customer', redirectTo: '', pathMatch: 'full' },
-          { path: 'sales-by-payment', redirectTo: '', pathMatch: 'full' },
-          { path: 'sales-by-channel', redirectTo: '', pathMatch: 'full' },
-          { path: 'sales-trends', redirectTo: '', pathMatch: 'full' },
+          // QUI-722: each sub-route loads GenericReportPageComponent which
+          // routes by `reportId` in `data`.
+          { path: 'sales-summary',         data: { reportId: 'sales-summary' },         loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'sales-by-product',      data: { reportId: 'sales-by-product' },      loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'sales-by-category',     data: { reportId: 'sales-by-category' },     loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'sales-by-customer',     data: { reportId: 'sales-by-customer' },     loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'sales-by-payment',      data: { reportId: 'sales-by-payment' },      loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'sales-by-channel',      data: { reportId: 'sales-by-channel' },      loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'sales-trends',          data: { reportId: 'sales-trends' },          loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {
@@ -74,21 +81,19 @@ export const reportsRoutes: Routes = [
             loadComponent: () => import('./pages/category-reports-catalog/category-reports-catalog.component').then(c => c.CategoryReportsCatalogComponent),
             data: { categoryId: 'inventory' },
           },
-          { path: 'inventory-overview', redirectTo: '', pathMatch: 'full' },
-          { path: 'inventory-stock-info', redirectTo: '', pathMatch: 'full' },
-          { path: 'inventory-low-stock', redirectTo: '', pathMatch: 'full' },
-          // CP-low-stock-by-supplier — custom page (not the generic viewer)
-          // because it needs a searchable supplier dropdown + a status
-          // filter that the viewer doesn't expose. KEPT as a real route
-          // because it has its own bespoke UI; the catalog card points
-          // directly at it.
+          // CP-low-stock-by-supplier — bespoke page (searchable supplier
+          // dropdown + status filter the viewer doesn't expose).
           {
             path: 'inventory-low-stock-by-supplier',
             loadComponent: () => import('./pages/inventory-low-stock-by-supplier/inventory-low-stock-by-supplier.component').then(c => c.InventoryLowStockBySupplierComponent),
           },
-          { path: 'inventory-valuation', redirectTo: '', pathMatch: 'full' },
-          { path: 'inventory-movements', redirectTo: '', pathMatch: 'full' },
-          { path: 'inventory-movement-analysis', redirectTo: '', pathMatch: 'full' },
+          // QUI-722: every other sub-route is a generic report page.
+          { path: 'inventory-overview',            data: { reportId: 'inventory-overview' },            loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'inventory-stock-info',          data: { reportId: 'inventory-stock-info' },          loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'inventory-low-stock',           data: { reportId: 'inventory-low-stock' },           loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'inventory-valuation',           data: { reportId: 'inventory-valuation' },           loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'inventory-movements',           data: { reportId: 'inventory-movements' },           loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'inventory-movement-analysis',   data: { reportId: 'inventory-movement-analysis' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {
@@ -101,9 +106,9 @@ export const reportsRoutes: Routes = [
             loadComponent: () => import('./pages/category-reports-catalog/category-reports-catalog.component').then(c => c.CategoryReportsCatalogComponent),
             data: { categoryId: 'products' },
           },
-          { path: 'product-performance', redirectTo: '', pathMatch: 'full' },
-          { path: 'product-top-sellers', redirectTo: '', pathMatch: 'full' },
-          { path: 'product-profitability', redirectTo: '', pathMatch: 'full' },
+          { path: 'product-performance',  data: { reportId: 'product-performance' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'product-top-sellers',  data: { reportId: 'product-top-sellers' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'product-profitability', data: { reportId: 'product-profitability' }, loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {
@@ -116,10 +121,10 @@ export const reportsRoutes: Routes = [
             loadComponent: () => import('./pages/category-reports-catalog/category-reports-catalog.component').then(c => c.CategoryReportsCatalogComponent),
             data: { categoryId: 'customers' },
           },
-          { path: 'customer-summary', redirectTo: '', pathMatch: 'full' },
-          { path: 'customer-acquisition', redirectTo: '', pathMatch: 'full' },
-          { path: 'customer-abandoned-carts', redirectTo: '', pathMatch: 'full' },
-          { path: 'customers-top', redirectTo: '', pathMatch: 'full' },
+          { path: 'customer-summary',            data: { reportId: 'customer-summary' },            loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'customer-acquisition',        data: { reportId: 'customer-acquisition' },        loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'customer-abandoned-carts',    data: { reportId: 'customer-abandoned-carts' },    loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'customers-top',               data: { reportId: 'customers-top' },               loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {
@@ -132,9 +137,9 @@ export const reportsRoutes: Routes = [
             loadComponent: () => import('./pages/category-reports-catalog/category-reports-catalog.component').then(c => c.CategoryReportsCatalogComponent),
             data: { categoryId: 'purchases' },
           },
-          { path: 'purchase-summary', redirectTo: '', pathMatch: 'full' },
-          { path: 'purchase-by-supplier', redirectTo: '', pathMatch: 'full' },
-          { path: 'purchase-trends', redirectTo: '', pathMatch: 'full' },
+          { path: 'purchase-summary',      data: { reportId: 'purchase-summary' },      loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'purchase-by-supplier',  data: { reportId: 'purchase-by-supplier' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'purchase-trends',       data: { reportId: 'purchase-trends' },       loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {
@@ -147,8 +152,8 @@ export const reportsRoutes: Routes = [
             loadComponent: () => import('./pages/category-reports-catalog/category-reports-catalog.component').then(c => c.CategoryReportsCatalogComponent),
             data: { categoryId: 'reviews' },
           },
-          { path: 'reviews-summary', redirectTo: '', pathMatch: 'full' },
-          { path: 'reviews-by-product', redirectTo: '', pathMatch: 'full' },
+          { path: 'reviews-summary',     data: { reportId: 'reviews-summary' },     loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'reviews-by-product',  data: { reportId: 'reviews-by-product' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {
@@ -173,15 +178,10 @@ export const reportsRoutes: Routes = [
             loadComponent: () => import('./pages/category-reports-catalog/category-reports-catalog.component').then(c => c.CategoryReportsCatalogComponent),
             data: { categoryId: 'financial' },
           },
-          // tax-summary component lived in pages/accounting/ but its
-          // registry category is `financial`. Collapsed into the same
-          // catalog redirect as the other financial sub-pages; the
-          // `tax-summary-report.component.ts` file becomes dead code
-          // and is deleted alongside the others.
-          { path: 'tax-summary', redirectTo: '', pathMatch: 'full' },
-          { path: 'profit-loss', redirectTo: '', pathMatch: 'full' },
-          { path: 'financial-refunds', redirectTo: '', pathMatch: 'full' },
-          { path: 'cash-sessions', redirectTo: '', pathMatch: 'full' },
+          { path: 'tax-summary',         data: { reportId: 'tax-summary' },         loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'profit-loss',         data: { reportId: 'profit-loss' },         loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'financial-refunds',   data: { reportId: 'financial-refunds' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'cash-sessions',       data: { reportId: 'cash-sessions' },       loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {

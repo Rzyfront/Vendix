@@ -7,21 +7,23 @@ import {
   SubsidiaryLedgerByAccountQueryDto,
   SubsidiaryLedgerByThirdPartyQueryDto,
 } from './dto/subsidiary-ledger-query.dto';
+import { Logger } from '@nestjs/common';
 
 @Injectable()
 export class AccountingReportsService {
+  private readonly logger = new Logger(AccountingReportsService.name);
+
   constructor(private readonly prisma: StorePrismaService) {}
 
   /**
    * Trial Balance: sums debit/credit by account for a fiscal period
    */
   async getTrialBalance(query: ReportQueryDto) {
-    const fiscal_period = await this.validateFiscalPeriod(
-      query.fiscal_period_id,
-    );
+    const fiscal_period_id = await this.resolveFiscalPeriod(query);
+    const fiscal_period = await this.validateFiscalPeriod(fiscal_period_id);
 
     const entry_where: Prisma.accounting_entriesWhereInput = {
-      fiscal_period_id: query.fiscal_period_id,
+      fiscal_period_id,
       status: 'posted',
       // store_id filter dropped (phase3-round2): StorePrismaService auto-scopes.
       ...(query.date_from && {
@@ -209,9 +211,8 @@ export class AccountingReportsService {
       );
     }
 
-    const fiscal_period = await this.validateFiscalPeriod(
-      query.fiscal_period_id,
-    );
+    const fiscal_period_id = await this.resolveFiscalPeriod(query);
+    const fiscal_period = await this.validateFiscalPeriod(fiscal_period_id);
 
     // Validate account exists
     const account = await this.prisma.chart_of_accounts.findFirst({
@@ -223,7 +224,7 @@ export class AccountingReportsService {
     }
 
     const entry_where: Prisma.accounting_entriesWhereInput = {
-      fiscal_period_id: query.fiscal_period_id,
+      fiscal_period_id,
       status: 'posted',
       // store_id filter dropped (phase3-round2): StorePrismaService auto-scopes.
       ...(query.date_from && {
@@ -319,6 +320,76 @@ export class AccountingReportsService {
     }
 
     return period;
+  }
+
+  /**
+   * Resolves which `fiscal_period_id` to scope the report to.
+   *
+   * Behavior (in priority order):
+   *  1. If the caller sent `fiscal_period_id` explicitly, return it
+   *     as-is. The downstream `validateFiscalPeriod` will 400 if it
+   *     doesn't exist (no behavior change vs. pre-QUI-722).
+   *  2. If `fiscal_period_id` is omitted and BOTH `date_from` AND
+   *     `date_to` are present, find the unique period whose
+   *     `[start_date, end_date]` interval CONTAINS the entire range.
+   *     If 0 or multiple periods match → 400 (avoid silently picking
+   *     the wrong one).
+   *  3. If `fiscal_period_id` is omitted and dates are absent or
+   *     partial → 400 with a clear, accionable message so the
+   *     caller knows what to send.
+   *
+   * Rationale: the catalog UI on `/admin/reports/...` doesn't have a
+   * fiscal-period picker, and the previous code rejected all those
+   * catalogs with a hard 400. This helper keeps the existing
+   * explicit-invocation case working (still validated) and only
+   * **adds** a safe inference path for explicit date ranges.
+   */
+  private async resolveFiscalPeriod(query: ReportQueryDto): Promise<number> {
+    if (query.fiscal_period_id != null) {
+      return query.fiscal_period_id;
+    }
+
+    if (!query.date_from || !query.date_to) {
+      throw new VendixHttpException(
+        ErrorCodes.ACC_VALIDATE_001,
+        'Provide fiscal_period_id, or both date_from and date_to so the period can be inferred.',
+      );
+    }
+
+    const inferred = await this.prisma.fiscal_periods.findMany({
+      where: {
+        start_date: { lte: new Date(query.date_from) },
+        end_date: { gte: new Date(query.date_to) },
+        status: 'open',
+      },
+      select: { id: true, name: true, start_date: true, end_date: true },
+      orderBy: { end_date: 'desc' },
+    });
+
+    if (inferred.length === 0) {
+      this.logger.warn(
+        `fiscal_period_id inference: no open period contains [${query.date_from}, ${query.date_to}]`,
+      );
+      throw new VendixHttpException(
+        ErrorCodes.ACC_FIND_003,
+        `No fiscal period contains the requested range [${query.date_from}, ${query.date_to}]. Pass fiscal_period_id explicitly.`,
+      );
+    }
+
+    if (inferred.length > 1) {
+      this.logger.warn(
+        `fiscal_period_id inference: ${inferred.length} periods match range [${query.date_from}, ${query.date_to}]; refusing to pick`,
+      );
+      throw new VendixHttpException(
+        ErrorCodes.ACC_VALIDATE_001,
+        `Range [${query.date_from}, ${query.date_to}] matches ${inferred.length} fiscal periods; pass fiscal_period_id explicitly to disambiguate.`,
+      );
+    }
+
+    this.logger.log(
+      `fiscal_period_id inferred as ${inferred[0].id} (${inferred[0].name}) from range [${query.date_from}, ${query.date_to}]`,
+    );
+    return inferred[0].id;
   }
 
   /**
