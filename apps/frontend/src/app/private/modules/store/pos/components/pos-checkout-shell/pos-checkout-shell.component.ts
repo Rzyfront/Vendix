@@ -939,8 +939,14 @@ export class PosCheckoutShellComponent {
    *    before reaching Cobro.
    * Every other step advances normally.
    */
-  attemptNextStep(): void {
+  attemptNextStep(opts?: { source?: 'arrows' | 'enter' | 'button' }): void {
     const key = this.currentStepKey();
+
+    // ── Consumo: avance validado (C.2) — nunca salta fulfillment/mesa ─────────
+    if (key === 'consumo') {
+      this.advanceConsumo();
+      return;
+    }
 
     // ── Cliente: sub-flujo obligatorio (Tipo → Cliente → Dirección) ──────────
     if (key === 'cliente' && !this.isAnonymousSale()) {
@@ -1047,13 +1053,12 @@ export class PosCheckoutShellComponent {
       const pay = this.paymentStep();
       if (pay?.advanceSubStepOrConfirm()) return;
       // Modo crédito: no hay sub-wizard que avanzar; el último paso mayor es
-      // Cobro. Si attemptNextStep llega aquí con crédito (atajo de teclado,
-      // navegación programática, o un cambio tardío de cobroNeedsAdvance),
-      // disparar el submit en lugar del no-op `nextStep()` — mismo camino que
-      // el CTA "Crear Venta a Crédito" del footer. Defensa en profundidad
-      // para QUI-779 (el footer ya queda correcto con el cambio en
-      // `cobroNeedsAdvance`).
+      // Cobro. Si attemptNextStep llega aquí con crédito por click o Enter,
+      // disparar el submit — mismo camino que el CTA "Crear Venta a Crédito"
+      // del footer (defensa QUI-779). Por FLECHAS nunca: son navegación pura
+      // (B.2) y el CTA terminal es exclusivo de Enter/click.
       if (pay?.mode() === 'credito') {
+        if (opts?.source === 'arrows') return;
         this.onPrimaryConfirm();
         return;
       }
@@ -1491,11 +1496,16 @@ export class PosCheckoutShellComponent {
   }
 
   /**
-   * Navegación por teclado del modal de pago: flechas = Anterior/Siguiente del
-   * wizard, Enter = acción primaria (Siguiente o Cobrar/Guardar). Las flechas
-   * NUNCA disparan el cobro final; solo Enter lo hace. Los bloqueos no se
-   * saltan: Siguiente/Enter reutilizan `attemptNextStep`/`onPrimaryConfirm`,
-   * que destellan lo que falta en vez de avanzar en silencio.
+   * CP-POS-CHECKOUT-KEYBOARD — matriz explícita paso × tecla del modal de pago.
+   *
+   * - Flechas (→/↓ adelante, ←/↑ atrás) = navegación pura: NUNCA disparan un
+   *   submit, ni siquiera en el CTA terminal (allí son no-op).
+   * - Enter = acción primaria del contexto: avanzar, confirmar monto o
+   *   cobrar/guardar. Es la ÚNICA tecla que dispara el CTA terminal.
+   * - Los bloqueos no se saltan: todo avance pasa por `attemptNextStep` /
+   *   `onPrimaryConfirm`, que destellan lo que falta.
+   * - Enter en el buscador de Cliente solo busca (ADR-2): avanzar exige elegir
+   *   persona; un default de cliente sería cobrar al equivocado.
    */
   @HostListener('keydown', ['$event'])
   onShellKeydown(event: KeyboardEvent): void {
@@ -1510,23 +1520,31 @@ export class PosCheckoutShellComponent {
       // En campos editables las flechas mueven el caret, no navegan.
       if (editable) return;
       event.preventDefault();
-      // En el CTA terminal las flechas no avanzan ni cobran.
-      if (!this.isLastStep() || this.cobroNeedsAdvance()) this.attemptNextStep();
+      // En el CTA terminal las flechas no avanzan ni cobran (B.2).
+      if (this.currentStepKey() === 'cobro' && this.paymentStep()?.mode() === 'credito') return;
+      if (!this.isLastStep() || this.cobroNeedsAdvance()) {
+        this.attemptNextStep({ source: 'arrows' });
+        this.focusActiveStepSoon();
+      }
       return;
     }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
       if (editable) return;
       event.preventDefault();
       this.prevStep();
+      this.focusActiveStepSoon();
       return;
     }
     if (event.key === 'Enter') {
       if (tag === 'TEXTAREA') return;
       // Un Enter sobre un botón ya dispara su click nativo: no duplicar.
       if (target?.closest?.('button')) return;
+      // ADR-2: Enter en el buscador de Cliente = solo buscar, nunca avanzar.
+      if (target?.closest?.('app-pos-customer-selector app-inputsearch')) return;
       event.preventDefault();
       if (!this.isLastStep() || this.cobroNeedsAdvance()) {
-        this.attemptNextStep();
+        this.attemptNextStep({ source: 'enter' });
+        this.focusActiveStepSoon();
         return;
       }
       if (this.confirmDisabled()) {
@@ -1539,6 +1557,40 @@ export class PosCheckoutShellComponent {
       }
       this.onPrimaryConfirm();
     }
+  }
+
+  /**
+   * Lleva el foco al panel del paso activo tras navegar con teclado (ADR-4).
+   * Diferido un tick: las clases `.step-hidden` se actualizan con el ciclo de
+   * detección posterior al set de la señal.
+   */
+  private focusActiveStepSoon(): void {
+    setTimeout(() => {
+      const panel = this.host.nativeElement?.querySelector?.(
+        '.checkout-main .step-panel:not(.step-hidden)',
+      ) as HTMLElement | null;
+      panel?.focus({ preventScroll: true });
+    }, 0);
+  }
+
+  /**
+   * Avance por teclado/click del paso Consumo (C.2): replica la semántica de
+   * `onFulfillmentReselected` sin emitir `advanceRequested` (evita recursión
+   * con `attemptNextStep`). Entrega avanza; consumo sin mesa abre el picker;
+   * con mesa avanza. Nunca salta la mesa en silencio.
+   */
+  private advanceConsumo(): void {
+    const step = this.consumoStep();
+    const fulfillment = step?.fulfillment() ?? 'entrega';
+    if (fulfillment !== 'consumo') {
+      this.nextStep();
+      return;
+    }
+    if (step && step.needsTable()) {
+      step.openTablePicker.set(true);
+      return;
+    }
+    this.nextStep();
   }
 
   /** Cliente elegido/creado: preserva la lógica de selectCustomer y avanza. */
