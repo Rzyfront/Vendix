@@ -1,0 +1,297 @@
+<div class="flex flex-col gap-6 w-full animate-fadeIn">
+
+  <!-- ==================== BANNER DE AUTOMATIZACIÓN ==================== -->
+  <div class="rounded-3xl border border-emerald-500/30 bg-emerald-500/5 p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div class="flex items-start sm:items-center gap-3.5">
+      <div class="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-600/20">
+        <app-icon name="user-check" [size]="20" color="white" />
+      </div>
+      <div>
+        <h3 class="text-sm font-bold text-text-primary">
+          Automatización Activa: Registro de Clientes & Envío de Correo
+        </h3>
+        <p class="text-xs text-text-secondary mt-0.5 max-w-2xl leading-relaxed">
+          Cada vez que un prospecto escribe en el formulario de contacto de tu landing page, el sistema lo registra automáticamente como <strong>Cliente oficial en Vendix</strong> y le despacha un correo electrónico de confirmación de forma inmediata.
+        </p>
+      </div>
+    </div>
+
+    <button
+      type="button"
+      class="px-3.5 py-2 rounded-xl border border-emerald-600/40 bg-surface hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 shadow-2xs"
+      (click)="loadLeads()"
+    >
+      <app-icon name="refresh-cw" [size]="13" />
+      <span>Actualizar Leads</span>
+    </button>
+  </div>
+
+  <!-- ==================== KPIS DE EMBUDO CRM ==================== -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <!-- KPI 1: Total Leads -->
+    <div class="rounded-2xl border border-border bg-surface p-4 shadow-xs flex flex-col justify-between">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold text-text-secondary uppercase tracking-wider">Total Prospectos</span>
+        <div class="p-2 rounded-xl bg-blue-500/10 text-blue-600">
+          <app-icon name="users" [size]="18" />
+        </div>
+      </div>
+      <div class="mt-3">
+        <span class="text-2xl font-black text-text-primary tracking-tight">
+          {{ stats().total }}
+        </span>
+        <p class="text-xs text-text-secondary mt-0.5">Captados desde tu landing page</p>
+      </div>
+    </div>
+
+    <!-- KPI 2: Nuevos por Contactar -->
+    <div class="rounded-2xl border border-border bg-surface p-4 shadow-xs flex flex-col justify-between">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold text-text-secondary uppercase tracking-wider">Nuevos Leads</span>
+        <div class="p-2 rounded-xl bg-amber-500/10 text-amber-600">
+          <app-icon name="user-plus" [size]="18" />
+        </div>
+      </div>
+      <div class="mt-3">
+        <div class="flex items-baseline gap-2">
+          <span class="text-2xl font-black text-amber-600 tracking-tight">
+            {{ stats().new_count }}
+          </span>
+          @if (stats().new_count > 0) {
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300">
+              Pendientes
+            </span>
+          }
+        </div>
+        <p class="text-xs text-text-secondary mt-0.5">Requieren primer contacto</p>
+      </div>
+    </div>
+
+    <!-- KPI 3: Clientes Convertidos -->
+    <div class="rounded-2xl border border-border bg-surface p-4 shadow-xs flex flex-col justify-between">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold text-text-secondary uppercase tracking-wider">Convertidos a Clientes</span>
+        <div class="p-2 rounded-xl bg-emerald-500/10 text-emerald-600">
+          <app-icon name="check-circle" [size]="18" />
+        </div>
+      </div>
+      <div class="mt-3">
+        <span class="text-2xl font-black text-emerald-600 tracking-tight">
+          {{ stats().converted_count }}
+        </span>
+        <p class="text-xs text-text-secondary mt-0.5">Registrados formalmente en Vendix</p>
+      </div>
+    </div>
+
+    <!-- KPI 4: Tasa de Conversión -->
+    <div class="rounded-2xl border border-border bg-surface p-4 shadow-xs flex flex-col justify-between">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold text-text-secondary uppercase tracking-wider">Tasa de Conversión</span>
+        <div class="p-2 rounded-xl bg-indigo-500/10 text-indigo-600">
+          <app-icon name="trending-up" [size]="18" />
+        </div>
+      </div>
+      <div class="mt-3">
+        <span class="text-2xl font-black text-indigo-600 tracking-tight">
+          {{ stats().conversion_rate }}%
+        </span>
+        <p class="text-xs text-text-secondary mt-0.5">De prospectos a compradores</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TABLA & FILTROS DE LEADS ==================== -->
+  <div class="rounded-3xl border border-border bg-surface p-5 sm:p-6 shadow-xs flex flex-col gap-4">
+    
+    <!-- Barra superior de búsqueda y pestañas de filtro -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-4">
+      <div class="flex items-center gap-1.5 p-1 bg-surface-hover rounded-xl border border-border overflow-x-auto">
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0"
+          [class]="filterStatus() === 'all' ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-xs' : 'text-text-secondary hover:text-text-primary'"
+          (click)="setFilter('all')"
+        >
+          Todos ({{ stats().total }})
+        </button>
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0"
+          [class]="filterStatus() === 'new' ? 'bg-amber-600 text-white shadow-xs' : 'text-text-secondary hover:text-text-primary'"
+          (click)="setFilter('new')"
+        >
+          Nuevos ({{ stats().new_count }})
+        </button>
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0"
+          [class]="filterStatus() === 'contacted' ? 'bg-blue-600 text-white shadow-xs' : 'text-text-secondary hover:text-text-primary'"
+          (click)="setFilter('contacted')"
+        >
+          Contactados ({{ stats().contacted_count }})
+        </button>
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0"
+          [class]="filterStatus() === 'converted' ? 'bg-emerald-600 text-white shadow-xs' : 'text-text-secondary hover:text-text-primary'"
+          (click)="setFilter('converted')"
+        >
+          Convertidos ({{ stats().converted_count }})
+        </button>
+      </div>
+
+      <!-- Buscador -->
+      <div class="relative w-full sm:w-72">
+        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-text-secondary">
+          <app-icon name="search" [size]="14" />
+        </div>
+        <input
+          type="text"
+          [(ngModel)]="searchQuery"
+          placeholder="Buscar por nombre, email, teléfono..."
+          class="w-full pl-9 pr-4 py-2 rounded-xl border border-border bg-surface text-xs text-text-primary placeholder:text-text-secondary focus:outline-hidden focus:ring-2 focus:ring-primary/40 transition-all"
+        />
+      </div>
+    </div>
+
+    <!-- Lista / Tabla de Leads -->
+    @if (loading()) {
+      <div class="py-16 flex items-center justify-center gap-2.5 text-text-secondary">
+        <app-icon name="loader" [size]="20" class="animate-spin text-primary" />
+        <span class="text-xs font-semibold">Cargando prospectos...</span>
+      </div>
+    } @else {
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="border-b border-border text-[11px] font-bold text-text-secondary uppercase tracking-wider">
+              <th class="py-3 px-3">Prospecto / Cliente</th>
+              <th class="py-3 px-3">Contacto Directo</th>
+              <th class="py-3 px-3">Mensaje o Interés</th>
+              <th class="py-3 px-3">Fecha Captación</th>
+              <th class="py-3 px-3">Estado CRM</th>
+              <th class="py-3 px-3 text-right">Acciones Rápidas</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border text-xs text-text-primary">
+            @for (lead of filteredLeads(); track lead.id) {
+              <tr class="hover:bg-surface-hover/50 transition-colors group">
+                <!-- Columna 1: Nombre & ID -->
+                <td class="py-3.5 px-3">
+                  <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center font-bold text-text-secondary shrink-0 text-xs">
+                      {{ lead.name.slice(0, 2).toUpperCase() }}
+                    </div>
+                    <div class="flex flex-col">
+                      <span class="font-bold text-text-primary truncate max-w-[160px]">{{ lead.name }}</span>
+                      @if (lead.customer_id) {
+                        <span class="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
+                          <app-icon name="check" [size]="10" />
+                          Cliente Vendix #{{ lead.customer_id }}
+                        </span>
+                      } @else {
+                        <span class="text-[10px] text-text-secondary">Lead web</span>
+                      }
+                    </div>
+                  </div>
+                </td>
+
+                <!-- Columna 2: Contacto -->
+                <td class="py-3.5 px-3">
+                  <div class="flex flex-col gap-0.5">
+                    @if (lead.phone) {
+                      <div class="flex items-center gap-1.5 text-text-secondary">
+                        <app-icon name="phone" [size]="11" />
+                        <span class="font-mono text-[11px]">{{ lead.phone }}</span>
+                      </div>
+                    }
+                    @if (lead.email) {
+                      <div class="flex items-center gap-1.5 text-text-secondary truncate max-w-[180px]">
+                        <app-icon name="mail" [size]="11" />
+                        <span class="truncate text-[11px]">{{ lead.email }}</span>
+                      </div>
+                    }
+                  </div>
+                </td>
+
+                <!-- Columna 3: Mensaje -->
+                <td class="py-3.5 px-3">
+                  <p class="text-xs text-text-secondary line-clamp-2 max-w-xs leading-relaxed" [title]="lead.message">
+                    "{{ lead.message || 'Sin mensaje adicional' }}"
+                  </p>
+                </td>
+
+                <!-- Columna 4: Fecha -->
+                <td class="py-3.5 px-3 text-text-secondary font-mono text-[11px] whitespace-nowrap">
+                  {{ lead.created_at | date:'short' }}
+                </td>
+
+                <!-- Columna 5: Estado -->
+                <td class="py-3.5 px-3 whitespace-nowrap">
+                  <div class="relative inline-block">
+                    <select
+                      [ngModel]="lead.status"
+                      (ngModelChange)="updateStatus(lead, $event)"
+                      [disabled]="updatingId() === lead.id"
+                      class="px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all cursor-pointer focus:outline-hidden"
+                      [class]="lead.status === 'new' 
+                        ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800' 
+                        : lead.status === 'contacted'
+                        ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-800'
+                        : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'"
+                    >
+                      <option value="new">Nuevo Lead</option>
+                      <option value="contacted">Contactado</option>
+                      <option value="converted">Cliente Convertido</option>
+                    </select>
+                  </div>
+                </td>
+
+                <!-- Columna 6: Acciones -->
+                <td class="py-3.5 px-3 text-right whitespace-nowrap">
+                  <div class="flex items-center justify-end gap-1.5">
+                    @if (lead.phone) {
+                      <button
+                        type="button"
+                        class="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 border border-emerald-200 dark:border-emerald-800/60 transition-colors cursor-pointer shadow-2xs"
+                        (click)="openWhatsApp(lead)"
+                        title="Contactar por WhatsApp"
+                      >
+                        <app-icon name="message-circle" [size]="14" />
+                      </button>
+                    }
+
+                    @if (lead.email) {
+                      <button
+                        type="button"
+                        class="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/50 border border-blue-200 dark:border-blue-800/60 transition-colors cursor-pointer shadow-2xs"
+                        (click)="openEmail(lead)"
+                        title="Enviar correo"
+                      >
+                        <app-icon name="mail" [size]="14" />
+                      </button>
+                    }
+                  </div>
+                </td>
+              </tr>
+            } @empty {
+              <tr>
+                <td colspan="6" class="py-16 text-center text-text-secondary">
+                  <div class="flex flex-col items-center gap-2 max-w-sm mx-auto">
+                    <app-icon name="users" [size]="36" class="opacity-30 text-emerald-600" />
+                    <p class="text-sm font-bold text-text-primary">No hay prospectos en este estado</p>
+                    <p class="text-xs text-text-secondary leading-relaxed">
+                      Cuando los visitantes de tu landing pública escriban en el formulario de contacto, aparecerán listados aquí automáticamente.
+                    </p>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+
+  </div>
+
+</div>

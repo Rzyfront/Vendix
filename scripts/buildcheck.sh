@@ -140,6 +140,7 @@ watch_status() {
   local pid puerto_ok=0
 
   pid="$(lsof -nP -iTCP:4200 -sTCP:LISTEN -t 2>/dev/null | head -1)"
+  [ -z "$pid" ] && pid="$(fuser 4200/tcp 2>/dev/null | tr -s ' ' '\n' | grep -v '^$' | head -1)"
   [ -n "$pid" ] && puerto_ok=1
 
   if [ "$puerto_ok" -eq 1 ]; then

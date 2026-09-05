@@ -2,7 +2,13 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
-import { CrmApiResponse, CrmLandingState } from '../models/crm.model';
+import {
+  CrmApiResponse,
+  CrmLandingState,
+  CrmLead,
+  CrmLeadStatus,
+  CrmLeadsData,
+} from '../models/crm.model';
 
 /**
  * HTTP service for the store CRM module.
@@ -53,5 +59,23 @@ export class CrmService {
     return this.http.get<
       CrmApiResponse<{ status: string; error?: string }>
     >(`${this.apiUrl}/generation/${jobId}`);
+  }
+
+  getLeads(status?: string): Observable<CrmApiResponse<CrmLeadsData>> {
+    const params: Record<string, string> = {};
+    if (status && status !== 'all') params['status'] = status;
+    return this.http.get<CrmApiResponse<CrmLeadsData>>(`${this.apiUrl}/leads`, {
+      params,
+    });
+  }
+
+  updateLeadStatus(
+    id: number,
+    status: CrmLeadStatus,
+  ): Observable<CrmApiResponse<CrmLead>> {
+    return this.http.patch<CrmApiResponse<CrmLead>>(
+      `${this.apiUrl}/leads/${id}/status`,
+      { status },
+    );
   }
 }

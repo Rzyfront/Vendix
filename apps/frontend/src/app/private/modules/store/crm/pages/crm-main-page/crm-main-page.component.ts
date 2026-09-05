@@ -20,6 +20,8 @@ import {
   StickyHeaderTab,
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { CrmEditorComponent } from '../crm-editor/crm-editor.component';
+import { CrmAiStudioComponent } from '../crm-ai-studio/crm-ai-studio.component';
+import { CrmLeadsComponent } from '../crm-leads/crm-leads.component';
 
 const STATUS_LABELS: Record<CrmGenerationStatus, string> = {
   idle: 'Sin generar',
@@ -29,7 +31,7 @@ const STATUS_LABELS: Record<CrmGenerationStatus, string> = {
   failed: 'Generación manual requerida',
 };
 
-type CrmTab = 'estado' | 'diseno';
+export type CrmTab = 'estado' | 'diseno' | 'ai-studio' | 'leads';
 
 @Component({
   selector: 'app-crm-main-page',
@@ -39,6 +41,8 @@ type CrmTab = 'estado' | 'diseno';
     ButtonComponent,
     StickyHeaderComponent,
     CrmEditorComponent,
+    CrmAiStudioComponent,
+    CrmLeadsComponent,
   ],
   templateUrl: './crm-main-page.component.html',
   styleUrl: './crm-main-page.component.scss',
@@ -74,6 +78,21 @@ export class CrmMainPageComponent {
         icon: 'palette',
         disabled: !state?.enabled,
         description: 'Edita los bloques visuales, textos, productos destacados y vista previa de tu landing.',
+      },
+      {
+        id: 'ai-studio',
+        label: 'Asistente IA & Estilos',
+        shortLabel: 'IA Studio',
+        icon: 'sparkles',
+        disabled: !state?.enabled,
+        description: 'Edita con lenguaje natural, aplica plantillas prediseñadas e integra módulos Vendix.',
+      },
+      {
+        id: 'leads',
+        label: 'Gestión de Clientes & Leads',
+        shortLabel: 'Leads CRM',
+        icon: 'users',
+        description: 'Pipeline de prospectos captados desde tu landing y sincronización de clientes.',
       },
     ];
   });

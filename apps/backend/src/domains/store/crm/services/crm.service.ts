@@ -18,6 +18,28 @@ export interface CrmLandingState {
   last_job_id: string | null;
 }
 
+export interface CrmLead {
+  id: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  message: string;
+  status: 'new' | 'contacted' | 'converted';
+  customer_id: number | null;
+  created_at: Date;
+}
+
+export interface CrmLeadsResponse {
+  leads: CrmLead[];
+  stats: {
+    total: number;
+    new_count: number;
+    contacted_count: number;
+    converted_count: number;
+    conversion_rate: number;
+  };
+}
+
 @Injectable()
 export class CrmService {
   private readonly logger = new Logger(CrmService.name);
@@ -185,6 +207,98 @@ export class CrmService {
     }
 
     return this.getLanding();
+  }
+
+  async getLeads(filterStatus?: string): Promise<CrmLeadsResponse> {
+    const storeId = this.requireStoreId();
+    const rows = await this.prisma.notifications.findMany({
+      where: {
+        store_id: storeId,
+        type: 'crm_contact_request',
+      },
+      orderBy: { created_at: 'desc' },
+      take: 100,
+    });
+
+    let newCount = 0;
+    let contactedCount = 0;
+    let convertedCount = 0;
+
+    const leads: CrmLead[] = rows.map((r) => {
+      const data = (r.data as Record<string, any>) || {};
+      const status: 'new' | 'contacted' | 'converted' =
+        data.status === 'contacted' || data.status === 'converted' ? data.status : 'new';
+
+      if (status === 'new') newCount++;
+      else if (status === 'contacted') contactedCount++;
+      else if (status === 'converted') convertedCount++;
+
+      return {
+        id: r.id,
+        name: data.name || r.title?.replace('Nuevo contacto desde tu landing', '')?.trim() || 'Contacto',
+        email: data.reply_to?.email || null,
+        phone: data.reply_to?.phone || null,
+        message: data.message || r.body || '',
+        status,
+        customer_id: data.customer_id ? Number(data.customer_id) : null,
+        created_at: r.created_at,
+      };
+    });
+
+    const filteredLeads = filterStatus && filterStatus !== 'all'
+      ? leads.filter((l) => l.status === filterStatus)
+      : leads;
+
+    const total = leads.length;
+    const conversionRate = total > 0 ? Math.round((convertedCount / total) * 100) : 0;
+
+    return {
+      leads: filteredLeads,
+      stats: {
+        total,
+        new_count: newCount,
+        contacted_count: contactedCount,
+        converted_count: convertedCount,
+        conversion_rate: conversionRate,
+      },
+    };
+  }
+
+  async updateLeadStatus(leadId: number, status: 'new' | 'contacted' | 'converted'): Promise<CrmLead> {
+    const storeId = this.requireStoreId();
+    const notification = await this.prisma.notifications.findFirst({
+      where: {
+        id: leadId,
+        store_id: storeId,
+        type: 'crm_contact_request',
+      },
+    });
+
+    if (!notification) {
+      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    }
+
+    const currentData = (notification.data as Record<string, any>) || {};
+    const updatedData = { ...currentData, status };
+
+    await this.prisma.notifications.updateMany({
+      where: { id: leadId, store_id: storeId },
+      data: {
+        data: updatedData as any,
+        is_read: true,
+      },
+    });
+
+    return {
+      id: notification.id,
+      name: updatedData.name || notification.title || 'Contacto',
+      email: updatedData.reply_to?.email || null,
+      phone: updatedData.reply_to?.phone || null,
+      message: updatedData.message || notification.body || '',
+      status,
+      customer_id: updatedData.customer_id ? Number(updatedData.customer_id) : null,
+      created_at: notification.created_at,
+    };
   }
 
   private requireStoreId(): number {

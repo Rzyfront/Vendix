@@ -7,6 +7,7 @@ import { ErrorCodes } from '@common/errors/error-codes';
 import { SettingsService } from '../../settings/settings.service';
 import { CustomersService } from '../../customers/customers.service';
 import { NotificationsService } from '../../notifications/notifications.service';
+import { EmailService } from '../../../../email/email.service';
 import { S3Service } from '@common/services/s3.service';
 import { ProductsAnalyticsService } from '../../analytics/services/products-analytics.service';
 import {
@@ -34,6 +35,7 @@ export class CrmPublicService {
     private readonly settingsService: SettingsService,
     private readonly customersService: CustomersService,
     private readonly notificationsService: NotificationsService,
+    private readonly emailService: EmailService,
     private readonly s3Service: S3Service,
     private readonly productsAnalytics: ProductsAnalyticsService,
   ) {}
@@ -273,13 +275,50 @@ export class CrmPublicService {
       {
         source: 'crm_landing',
         customer_id: resolved.customer_id,
+        name: resolved.name,
         message: dto.message,
+        status: 'new',
         reply_to: {
           email: dto.email ?? null,
           phone: dto.phone ?? null,
         },
       },
     );
+
+    // Si proporcionó email, enviar correo de bienvenida/confirmación
+    if (hasEmail && dto.email) {
+      try {
+        const store = await this.prisma.stores.findUnique({
+          where: { id: storeId },
+          select: { name: true },
+        });
+        const storeName = store?.name || 'Vendix';
+        const subject = `¡Gracias por escribir a ${storeName}!`;
+        const html = `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 580px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
+            <h2 style="color: #0f172a; margin-top: 0;">¡Hola ${dto.first_name}!</h2>
+            <p style="color: #334155; font-size: 15px; line-height: 1.5;">
+              Hemos recibido tu mensaje en <strong>${storeName}</strong> y ya estás registrado como cliente preferencial en nuestro sistema.
+            </p>
+            <div style="background-color: #f8fafc; border-left: 4px solid #10b981; padding: 14px; margin: 20px 0; border-radius: 4px;">
+              <p style="margin: 0; font-size: 13px; color: #475569; font-style: italic;">"${dto.message}"</p>
+            </div>
+            <p style="color: #334155; font-size: 14px; line-height: 1.5;">
+              Uno de nuestros asesores se pondrá en contacto contigo a la brevedad posible.
+            </p>
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+            <p style="color: #94a3b8; font-size: 12px; margin: 0;">
+              Este mensaje fue enviado automáticamente por ${storeName} a través de la plataforma Vendix.
+            </p>
+          </div>
+        `;
+        const text = `¡Hola ${dto.first_name}!\nHemos recibido tu mensaje en ${storeName} y ya estás registrado en nuestro sistema.\n\nTu consulta: "${dto.message}"\n\nPronto nos pondremos en contacto contigo.`;
+
+        await this.emailService.sendEmail(dto.email.toLowerCase().trim(), subject, html, text);
+      } catch (err) {
+        this.logger.warn(`No se pudo enviar correo de confirmación de contacto a ${dto.email}: ${err}`);
+      }
+    }
 
     return {
       customer_created: resolved.was_created,

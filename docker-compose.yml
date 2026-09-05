@@ -223,6 +223,9 @@ services:
     # arranca por defecto. Declararlo aqui haria fallar `docker compose up`.
     depends_on:
       - backend
+    # En Linux, Docker no resuelve host.docker.internal por defecto sin host-gateway
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - vendix_net
     logging:

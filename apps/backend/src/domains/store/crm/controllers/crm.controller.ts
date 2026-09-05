@@ -3,8 +3,11 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Body,
   Param,
+  Query,
+  ParseIntPipe,
   UseGuards,
 } from '@nestjs/common';
 import { CrmService } from '../services/crm.service';
@@ -61,5 +64,22 @@ export class CrmController {
   async getGenerationStatus(@Param('jobId') jobId: string) {
     const result = await this.crmService.getGenerationJobStatus(jobId);
     return this.responseService.success(result);
+  }
+
+  @Permissions('store:crm:read')
+  @Get('leads')
+  async getLeads(@Query('status') status?: string) {
+    const result = await this.crmService.getLeads(status);
+    return this.responseService.success(result);
+  }
+
+  @Permissions('store:crm:manage')
+  @Patch('leads/:id/status')
+  async updateLeadStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('status') status: 'new' | 'contacted' | 'converted',
+  ) {
+    const result = await this.crmService.updateLeadStatus(id, status);
+    return this.responseService.success(result, 'Estado de prospecto actualizado');
   }
 }

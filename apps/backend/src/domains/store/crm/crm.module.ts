@@ -12,6 +12,7 @@ import { SettingsModule } from '../settings/settings.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { CustomersModule } from '../customers/customers.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { EmailModule } from '../../../email/email.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     AnalyticsModule,
     CustomersModule,
     NotificationsModule,
+    EmailModule,
     // Cola dedicada del CRM (patrón receipt-scan): no compartir ai-generation.
     BullModule.registerQueue({ name: 'crm-landing' }),
   ],

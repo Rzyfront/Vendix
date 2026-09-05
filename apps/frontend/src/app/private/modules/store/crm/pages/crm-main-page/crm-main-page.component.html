@@ -18,13 +18,38 @@
         type="button"
         (click)="setTab('diseno')"
         [disabled]="!landing()?.enabled"
-        class="inline-flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-all cursor-pointer select-none"
+        class="inline-flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-all cursor-pointer select-none shrink-0"
         [class]="tab() === 'diseno' 
           ? 'border-slate-900 dark:border-white text-text-primary font-bold' 
           : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border disabled:opacity-40 disabled:cursor-not-allowed'"
       >
         <app-icon name="palette" [size]="16" />
         <span>Editor y Diseño</span>
+      </button>
+
+      <button
+        type="button"
+        (click)="setTab('ai-studio')"
+        [disabled]="!landing()?.enabled"
+        class="inline-flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-all cursor-pointer select-none shrink-0"
+        [class]="tab() === 'ai-studio' 
+          ? 'border-slate-900 dark:border-white text-text-primary font-bold' 
+          : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border disabled:opacity-40 disabled:cursor-not-allowed'"
+      >
+        <app-icon name="sparkles" [size]="16" class="text-blue-600" />
+        <span>Asistente IA & Estilos</span>
+      </button>
+
+      <button
+        type="button"
+        (click)="setTab('leads')"
+        class="inline-flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-all cursor-pointer select-none shrink-0"
+        [class]="tab() === 'leads' 
+          ? 'border-slate-900 dark:border-white text-text-primary font-bold' 
+          : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border'"
+      >
+        <app-icon name="users" [size]="16" class="text-emerald-600" />
+        <span>Gestión de Clientes & Leads</span>
       </button>
     </nav>
   </div>
@@ -203,6 +228,20 @@
               (discard)="discardChanges()"
             />
           </div>
+        }
+
+        @case ('ai-studio') {
+          <app-crm-ai-studio
+            [document]="serverDocument()"
+            [isBusy]="busy()"
+            (documentChange)="onDocumentChange($event)"
+            (saveDraft)="saveDraft()"
+            (goToDesign)="setTab('diseno')"
+          />
+        }
+
+        @case ('leads') {
+          <app-crm-leads />
         }
       }
     }

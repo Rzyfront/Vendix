@@ -20,3 +20,28 @@ export interface CrmApiResponse<T> {
   message?: string;
   data: T;
 }
+
+export type CrmLeadStatus = 'new' | 'contacted' | 'converted';
+
+export interface CrmLead {
+  id: number;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  message: string;
+  status: CrmLeadStatus;
+  customer_id: number | null;
+  created_at: string;
+}
+
+export interface CrmLeadsData {
+  leads: CrmLead[];
+  stats: {
+    total: number;
+    new_count: number;
+    contacted_count: number;
+    converted_count: number;
+    conversion_rate: number;
+  };
+}
+
