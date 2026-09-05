@@ -227,7 +227,10 @@ import {
   InvoiceSectionNotasComponent,
 } from '../../../../../../shared/components/invoice-sections/index';
 import type { FormatoSectionPaths, NotasSectionPaths } from '../../../../../../shared/components/invoice-sections/index';
-import { InvoiceTaxCatalogService } from '../../components/invoice-create/invoice-tax-catalog.service';
+import {
+  InvoiceTaxCatalogService,
+  taxCatalogLoadMessage,
+} from '../../components/invoice-create/invoice-tax-catalog.service';
 import {
   InvoiceAiuSettings,
   InvoiceAiuSettingsService,
@@ -2023,6 +2026,21 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                       </p>
                     }
                   }
+                  @if (taxCatalogState() !== 'ok') {
+                    <!--
+                      Paso 9: la carga falló —el «vacío» mentiría—. Se nombra
+                      la carga (permiso o servidor) en vez del vacío.
+                    -->
+                    <app-alert-banner
+                      class="mt-3"
+                      variant="danger"
+                      icon="alert-triangle"
+                      tone="token"
+                      heading="No se pudo cargar el catálogo de impuestos"
+                    >
+                      <p>{{ taxCatalogMessage(taxCatalogState()) }}</p>
+                    </app-alert-banner>
+                  }
                   @if (plan.unresolvedTaxes.length > 0) {
                     <!--
                       Paso 8: la tarifa gravable que el catálogo no resolvió
@@ -2194,6 +2212,7 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 [breakdown]="taxBreakdown()"
                 [formatCurrency]="formatCurrencyBound"
                 [availableTaxesCount]="availableTaxes().length"
+                [taxCatalogState]="taxCatalogState()"
               ></vendix-invoice-section-impuestos>
             </vendix-invoice-form-section>
 
@@ -3830,6 +3849,15 @@ export class InvoiceCreatePageComponent implements OnInit {
   // ── Catálogos cargados ──────────────────────────────────────
 
   readonly availableTaxes = signal<TaxOption[]>([]);
+  /**
+   * Paso 9: cómo terminó la carga del catálogo (`ok` / `forbidden` /
+   * `error`). La lista puede estar vacía de verdad o por fallo —este estado
+   * es lo que distingue una de otra en el recuadro, los bloqueos y la
+   * sección Impuestos.
+   */
+  readonly taxCatalogState = this.taxCatalog.catalogState;
+  /** Paso 9: frase del estado de carga, para el recuadro (el template no lee funciones sueltas). */
+  protected readonly taxCatalogMessage = taxCatalogLoadMessage;
 
   /** Conceptos de `withholding_concepts` del tenant, con tarifa en PORCENTAJE. */
   readonly withholdingConcepts = signal<WithholdingConceptOption[]>([]);
@@ -5151,6 +5179,10 @@ export class InvoiceCreatePageComponent implements OnInit {
       if (utilidad) utilidad.amount += residual / 100;
     }
 
+    // Paso 9: si la carga falló, el «vacío» miente —el catálogo no está
+    // vacío, nadie lo vio—. Los `empty-catalog` se retiran y el recuadro y
+    // los bloqueos nombran la carga en vez del vacío.
+    const catalogFailed = this.taxCatalogState() !== 'ok';
     return {
       ready: true,
       blocked: null,
@@ -5160,7 +5192,9 @@ export class InvoiceCreatePageComponent implements OnInit {
       aiuAmount: aiuCents / 100,
       contractAmount: (costCents + aiuCents) / 100,
       replaces,
-      unresolvedTaxes,
+      unresolvedTaxes: catalogFailed
+        ? unresolvedTaxes.filter((item) => item.reason !== 'empty-catalog')
+        : unresolvedTaxes,
       parts: parts.filter((part) => part.amount > 0),
     };
   });
@@ -7424,6 +7458,12 @@ export class InvoiceCreatePageComponent implements OnInit {
       for (const item of aiuPlan.unresolvedTaxes) {
         blockers.push(item.message);
       }
+    }
+    // Paso 9: si la carga del catálogo falló, el AIU no puede resolverse
+    // contra nada —las líneas gravables viajarían sin impuesto—. Se bloquea
+    // nombrando la carga, no un vacío que nadie vio.
+    if (this.isAiu() && this.taxCatalogState() !== 'ok') {
+      blockers.push(taxCatalogLoadMessage(this.taxCatalogState()));
     }
     // Espejo exacto de lo que el backend valida en `resolveAiuContext` antes de
     // tomar consecutivo. Se repite acá para que el usuario lo lea con la factura

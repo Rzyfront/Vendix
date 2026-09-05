@@ -15,6 +15,8 @@ import type { SelectorOption } from '../selector/selector.component';
 import { ToggleComponent } from '../toggle/toggle.component';
 import type { InvoiceSectionContext } from './invoice-section-context';
 import { isInvoiceContext, isProfileContext } from './invoice-section-context';
+import type { TaxCatalogLoadState } from '../../../private/modules/store/invoicing/components/invoice-create/invoice-tax-catalog.service';
+import { taxCatalogLoadMessage } from '../../../private/modules/store/invoicing/components/invoice-create/invoice-tax-catalog.service';
 
 /**
  * Dónde vive cada campo de UNA regla de la matriz por porción (contexto
@@ -192,10 +194,20 @@ export interface TaxBreakdownRow {
       }
 
       @if (availableTaxesCount() === 0) {
-        <p class="mt-2 text-xs text-warning">
-          El catálogo de impuestos de la tienda está vacío o no se pudo
-          cargar. Configúralo en Ajustes → Impuestos.
-        </p>
+        @if (taxCatalogState() === 'ok') {
+          <p class="mt-2 text-xs text-warning">
+            El catálogo de impuestos de la tienda está vacío. Configúralo
+            en Ajustes → Impuestos.
+          </p>
+        } @else {
+          <!--
+            Paso 9: la carga falló —el «vacío» mentiría—. Se nombra la carga
+            (permiso o servidor) en vez del vacío.
+          -->
+          <p class="mt-2 text-xs text-warning">
+            {{ catalogLoadMessage() }}
+          </p>
+        }
       }
     }
   `,
@@ -226,6 +238,16 @@ export class InvoiceSectionImpuestosComponent {
     String(value),
   );
   readonly availableTaxesCount = input<number>(0);
+  /**
+   * Paso 9: cómo terminó la carga del catálogo. Opcional y `'ok'` por
+   * defecto —las pantallas que no cargan por este servicio (perfiles,
+   * plataforma) siguen viendo el aviso de siempre—.
+   */
+  readonly taxCatalogState = input<TaxCatalogLoadState>('ok');
+  /** Frase del estado de carga, para el aviso (el template no lee funciones sueltas). */
+  protected readonly catalogLoadMessage = computed(() =>
+    taxCatalogLoadMessage(this.taxCatalogState()),
+  );
 
   rowControl(row: AbstractControl, path: string): FormControl {
     return row.get(path) as FormControl;
