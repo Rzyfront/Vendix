@@ -1332,3 +1332,31 @@
     font-size: var(--fs-sm);
     color: var(--color-text-secondary);
 }
+
+// Botonera fija abajo en móvil/tablet, como el footer del carrito
+// (app-cart-mobile-footer): Volver/Continuar siempre visibles sin bajar
+// hasta el resumen. Mismo breakpoint (1023px) y z-index (40).
+@media (max-width: 1023px) {
+    .checkout-page {
+        // Clearance para la botonera fija: que nunca tape el final del
+        // resumen ni las ofertas.
+        padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .checkout-actions--summary {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 40;
+        margin-top: 0;
+        border-radius: 0;
+        border-left: 0;
+        border-right: 0;
+        border-bottom: 0;
+        background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.92);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+    }
+}
