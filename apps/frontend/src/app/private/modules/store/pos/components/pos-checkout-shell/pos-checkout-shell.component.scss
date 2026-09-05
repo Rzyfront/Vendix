@@ -133,6 +133,12 @@
   max-height: none;
 }
 
+// CP-POS-CHECKOUT-KEYBOARD (B.3): los paneles reciben foco programático al
+// navegar con teclado; sin anillo visible (el panel activo ya se distingue).
+.step-panel:focus {
+  outline: none;
+}
+
 .step-hidden {
   display: none;
 }
