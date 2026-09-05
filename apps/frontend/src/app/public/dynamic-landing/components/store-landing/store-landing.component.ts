@@ -43,7 +43,7 @@ import {
   ],
   template: `
     <app-landing-layout [brandName]="storeName()" [logoUrl]="logoUrl()">
-      <div class="crm-landing" [style.--crm-primary]="primaryColor()">
+      <div class="crm-landing" [style.--crm-primary]="primaryColor()" [style.--crm-secondary]="secondaryColor()">
         @if (loading()) {
           <section class="crm-state">
             <app-icon name="loader" [size]="22" />
@@ -57,70 +57,120 @@ import {
                   [props]="block.props"
                   (ctaClick)="scrollToForm()"
                 />
-                <section id="contacto" class="crm-contact-form">
-                  <h3>Cuéntanos qué necesitas</h3>
-                  <div class="crm-form-grid">
-                    <input
-                      class="crm-field"
-                      type="text"
-                      placeholder="Tu nombre *"
-                      maxlength="80"
-                      [value]="formName()"
-                      (input)="onForm('name', $event)"
-                    />
-                    <input
-                      class="crm-field"
-                      type="email"
-                      placeholder="Correo electrónico"
-                      maxlength="160"
-                      [value]="formEmail()"
-                      (input)="onForm('email', $event)"
-                    />
-                    <input
-                      class="crm-field"
-                      type="tel"
-                      placeholder="Teléfono / WhatsApp"
-                      maxlength="30"
-                      [value]="formPhone()"
-                      (input)="onForm('phone', $event)"
-                    />
-                  </div>
-                  <textarea
-                    class="crm-field"
-                    rows="4"
-                    placeholder="¿En qué podemos ayudarte? *"
-                    maxlength="1000"
-                    [value]="formMessage()"
-                    (input)="onForm('message', $event)"
-                  ></textarea>
+                <section id="contacto" class="crm-contact-section max-w-xl mx-auto px-4 pb-20">
+                  <div class="crm-contact-card bg-white rounded-3xl p-7 sm:p-9 border border-slate-200/90 shadow-xl">
+                    <h3 class="text-xl font-bold text-slate-900 text-center mb-1.5">Envíanos un mensaje directo</h3>
+                    <p class="text-xs sm:text-sm text-slate-500 text-center mb-6">Déjanos tus datos y un asesor se pondrá en contacto contigo en breve.</p>
+                    
+                    <div class="space-y-4">
+                      <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">Nombre completo *</label>
+                        <input
+                          class="crm-field"
+                          type="text"
+                          placeholder="Tu nombre completo"
+                          maxlength="80"
+                          [value]="formName()"
+                          (input)="onForm('name', $event)"
+                        />
+                      </div>
+                      
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        <div>
+                          <label class="block text-xs font-semibold text-slate-700 mb-1.5">Correo electrónico</label>
+                          <input
+                            class="crm-field"
+                            type="email"
+                            placeholder="nombre@ejemplo.com"
+                            maxlength="160"
+                            [value]="formEmail()"
+                            (input)="onForm('email', $event)"
+                          />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-semibold text-slate-700 mb-1.5">Teléfono / WhatsApp</label>
+                          <input
+                            class="crm-field"
+                            type="tel"
+                            placeholder="Ej. 300 123 4567"
+                            maxlength="30"
+                            [value]="formPhone()"
+                            (input)="onForm('phone', $event)"
+                          />
+                        </div>
+                      </div>
 
-                  @if (submitted()) {
-                    <p class="crm-form-ok">
-                      ¡Gracias! Tu mensaje llegó a la tienda y te responderán
-                      pronto.
-                    </p>
-                  } @else {
-                    @if (formError()) {
-                      <p class="crm-form-error">{{ formError() }}</p>
-                    }
-                    <button
-                      type="button"
-                      class="crm-submit"
-                      [disabled]="sending()"
-                      (click)="submitContact()"
-                    >
-                      {{ sending() ? 'Enviando…' : 'Enviar mensaje' }}
-                    </button>
-                  }
+                      <div>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1.5">¿En qué podemos ayudarte? *</label>
+                        <textarea
+                          class="crm-field"
+                          rows="4"
+                          placeholder="Escribe aquí tu consulta o los productos de tu interés…"
+                          maxlength="1000"
+                          [value]="formMessage()"
+                          (input)="onForm('message', $event)"
+                        ></textarea>
+                      </div>
+
+                      @if (submitted()) {
+                        <div class="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-medium text-center flex items-center justify-center gap-2">
+                          <app-icon name="check-circle" [size]="18" color="#059669" />
+                          <span>¡Gracias! Tu mensaje fue enviado con éxito. Te responderemos muy pronto.</span>
+                        </div>
+                      } @else {
+                        @if (formError()) {
+                          <p class="crm-form-error text-center text-xs text-rose-600 font-semibold">{{ formError() }}</p>
+                        }
+                        <button
+                          type="button"
+                          class="crm-submit-btn w-full py-3.5 px-6 rounded-full text-white font-bold text-sm shadow-md transition-all duration-200 cursor-pointer flex items-center justify-center gap-2"
+                          [disabled]="sending()"
+                          (click)="submitContact()"
+                        >
+                          @if (sending()) {
+                            <app-icon name="loader" [size]="16" [spin]="true" color="white" />
+                            <span>Enviando mensaje…</span>
+                          } @else {
+                            <app-icon name="mail" [size]="16" color="white" />
+                            <span>Enviar mensaje</span>
+                          }
+                        </button>
+                      }
+                    </div>
+                  </div>
                 </section>
               } @else {
                 <app-block-renderer
                   [block]="block"
                   [baseUrl]="ecommerceBaseUrl()"
                   (ctaClick)="goToStore()"
+                  (secondaryCtaClick)="scrollToForm()"
                 />
               }
             </div>
+          }
+
+          <!-- Floating WhatsApp Widget Button -->
+          @if (enableWhatsappFloat()) {
+            @if (whatsappUrl(); as waUrl) {
+              <a
+                [href]="waUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="crm-floating-whatsapp fixed bottom-6 right-6 z-50 inline-flex items-center gap-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-4 py-3 rounded-full shadow-2xl transition-all duration-300 hover:scale-105 cursor-pointer"
+              >
+                <app-icon name="headphones" [size]="18" color="white" />
+                <span class="text-xs sm:text-sm font-bold">¿Dudas? Chatea en vivo</span>
+              </a>
+            } @else {
+              <a
+                (click)="scrollToForm()"
+                class="crm-floating-whatsapp fixed bottom-6 right-6 z-50 inline-flex items-center gap-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-4 py-3 rounded-full shadow-2xl transition-all duration-300 hover:scale-105 cursor-pointer"
+              >
+                <app-icon name="headphones" [size]="18" color="white" />
+                <span class="text-xs sm:text-sm font-bold">¿Dudas? Chatea en vivo</span>
+              </a>
+            }
           }
         } @else {
           <!-- Fallback branded para tiendas sin landing CRM publicada -->
@@ -255,74 +305,46 @@ import {
       }
 
       /* Formulario de contacto público */
-      .crm-contact-form {
-        max-width: 560px;
+      .crm-contact-section {
         margin: 0 auto;
-        padding: 24px 16px 48px;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
       }
-      .crm-contact-form h3 {
-        text-align: center;
-        margin: 0 0 4px;
-        font-size: 1.1rem;
-      }
-      .crm-form-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-      }
-      .crm-form-grid input:first-child {
-        grid-column: 1 / -1;
+      .crm-contact-card {
+        background: #ffffff;
       }
       .crm-field {
         width: 100%;
-        border: 1px solid var(--color-border, #d1d5db);
-        border-radius: 10px;
-        padding: 10px 12px;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 11px 14px;
         font-size: 0.9rem;
         font-family: inherit;
-        background: var(--bg-surface, #fff);
+        background: #f8fafc;
         box-sizing: border-box;
+        transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
       }
       .crm-field:focus {
-        outline: 2px solid var(--crm-primary, #3b82f6);
-        border-color: transparent;
+        outline: none;
+        background: #ffffff;
+        border-color: var(--crm-primary, #2563eb);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
       }
       textarea.crm-field {
         resize: vertical;
       }
-      .crm-submit {
-        align-self: center;
-        border: 0;
-        background: var(--crm-primary, #3b82f6);
-        color: #fff;
-        font-weight: 600;
-        padding: 11px 26px;
-        border-radius: 999px;
-        cursor: pointer;
+      .crm-submit-btn {
+        background: var(--crm-primary, #2563eb);
       }
-      .crm-submit:disabled {
+      .crm-submit-btn:hover:not(:disabled) {
+        filter: brightness(1.08);
+        transform: translateY(-1px);
+        box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
+      }
+      .crm-submit-btn:disabled {
         opacity: 0.6;
-        cursor: default;
+        cursor: not-allowed;
       }
-      .crm-form-ok {
-        text-align: center;
-        color: #15803d;
-        font-weight: 500;
-        margin: 0;
-      }
-      .crm-form-error {
-        text-align: center;
-        color: #dc2626;
-        font-size: 0.85rem;
-        margin: 0;
-      }
-      @media (max-width: 480px) {
-        .crm-form-grid {
-          grid-template-columns: 1fr;
-        }
+      .crm-floating-whatsapp {
+        box-shadow: 0 12px 24px -4px rgba(16, 185, 129, 0.45);
       }
     `,
   ],
@@ -355,8 +377,26 @@ export class StoreLandingComponent {
   readonly formError = signal('');
 
   readonly primaryColor = computed(
-    () => this.document()?.theme?.primary_color ?? '#3b82f6',
+    () => this.document()?.theme?.primary_color ?? '#1E40AF',
   );
+
+  readonly secondaryColor = computed(
+    () => this.document()?.theme?.secondary_color ?? '#0F172A',
+  );
+
+  readonly enableWhatsappFloat = computed(
+    () => this.document()?.theme?.enable_whatsapp_float ?? true,
+  );
+
+  readonly whatsappUrl = computed(() => {
+    const rawNumber = this.document()?.theme?.whatsapp_number?.trim();
+    const rawMsg =
+      this.document()?.theme?.whatsapp_message?.trim() ||
+      '¡Hola! Vi su catálogo en la landing y quiero más información.';
+    if (!rawNumber) return null;
+    const cleanNumber = rawNumber.replace(/[^0-9]/g, '');
+    return `https://wa.me/${cleanNumber}?text=${encodeURIComponent(rawMsg)}`;
+  });
 
   constructor() {
     this.loadDocument();

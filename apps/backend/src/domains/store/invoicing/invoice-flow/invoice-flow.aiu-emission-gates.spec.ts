@@ -107,6 +107,30 @@ describe('InvoiceFlowService · compuertas de emisión AIU', () => {
       );
     });
 
+    it('el importe suelto basta para dejarla pasar (el caso de la factura 63)', () => {
+      // `line.taxes` sólo se puebla cuando el documento trae DOS o más
+      // tributos de cabecera: `attachPersistedLineTaxes` se rinde porque
+      // ninguna fila de `invoice_taxes` guarda `invoice_item_id`, y
+      // `attachReconstructedLineTaxes` corta en `candidates.length < 2`. Una
+      // factura AIU con un solo IVA llega aquí con el arreglo vacío y el
+      // importe correcto: mirar sólo el arreglo la rechazaba por FAU04
+      // inventado. La hermana `INVOICING_AIU_005`, tres líneas más arriba,
+      // siempre miró las dos representaciones.
+      expect(
+        check(
+          [
+            {
+              description: 'instalacion de union de reparacion z 6"',
+              omit_tax_total: false,
+              taxes: [],
+              tax_amount: '4856.40',
+            },
+          ],
+          'decreto_1372_1992',
+        ),
+      ).not.toThrow();
+    });
+
     it('tarifa 0 declarada NO es lo mismo que impuesto omitido', () => {
       // Un servicio exento declara su grupo con `cbc:Percent` en 0,00. Si la
       // compuerta dedujera la omisión de que el importe es cero rechazaría un

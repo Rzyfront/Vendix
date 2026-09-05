@@ -322,4 +322,109 @@ describe('FAU04 — la base de la cabecera es la que declaran las líneas', () =
     expect(totals.TaxInclusiveAmount).toBe('1190.00');
     expectClean(xml);
   });
+  /**
+   * CONTRATO AIU DEL MODELO 1 — la factura 63 (`FVJL11`).
+   *
+   * Contrato de $2.328.800 en dos líneas, AIU del 10 % repartido 5/2/3, base
+   * Decreto 1372/1992 (sólo la utilidad, el 3 %): $69.864 de base gravable y
+   * $13.274,16 de IVA. Las dos líneas son `aiu_component: 'contrato'`, o sea
+   * cada una ES el contrato entero, y su base es una fracción de su importe.
+   */
+  describe('Modelo 1 del AIU — la línea que es el contrato entero', () => {
+    /** El documento tal como lo emite el riel con el desglose por línea. */
+    const contrato = () =>
+      emit({
+        discount_amount: '0.00',
+        tax_amount: '13274.16',
+        items: [
+          line({
+            description: 'instalacion de union de reparacion z 6"',
+            unit_price: '852000.00',
+            total_amount: '856856.40',
+            tax_amount: '4856.40',
+            taxes: [
+              tax({ taxable_amount: '25560.00', tax_amount: '4856.40' }),
+            ],
+          }),
+          line({
+            description: 'instalacion de union de reparacion z de 8"',
+            unit_price: '1476800.00',
+            total_amount: '1485217.76',
+            tax_amount: '8417.76',
+            taxes: [
+              tax({ taxable_amount: '44304.00', tax_amount: '8417.76' }),
+            ],
+          }),
+        ],
+        taxes: [tax({ taxable_amount: '69864.00', tax_amount: '13274.16' })],
+      });
+
+    it('declara la UTILIDAD como base imponible, no el valor del contrato', () => {
+      const { xml, totals } = contrato();
+
+      // El bruto sigue siendo el contrato entero: FAU14 (cabecera = Σ líneas) es
+      // otra regla y el cliente debe lo que debe.
+      expect(totals.LineExtensionAmount).toBe('2328800.00');
+      // La BASE IMPONIBLE, en cambio, es sólo la utilidad.
+      expect(totals.TaxExclusiveAmount).toBe('69864.00');
+      expect(totals.TaxInclusiveAmount).toBe('2342074.16');
+      expect(totals.PayableAmount).toBe('2342074.16');
+
+      expect(lineTaxableSum(xml)).toBe(69864);
+      expectClean(xml);
+    });
+
+    it('cada línea cierra contra su propia tarifa: 19 % de su base es su cuota', () => {
+      const { xml } = contrato();
+
+      const subtotales = [
+        ...xml.matchAll(
+          /<cbc:TaxableAmount currencyID="COP">([^<]*)<\/cbc:TaxableAmount><cbc:TaxAmount currencyID="COP">([^<]*)<\/cbc:TaxAmount>/g,
+        ),
+      ].map((m) => [Number(m[1]), Number(m[2])]);
+
+      for (const [base, cuota] of subtotales) {
+        expect(base * 0.19).toBeCloseTo(cuota, 2);
+      }
+    });
+
+    /**
+     * EL DEFECTO, y por qué NINGUNA compuerta aritmética lo veía.
+     *
+     * Sin desglose por línea el emisor cae al camino histórico y escribe
+     * `cbc:TaxableAmount = cbc:LineExtensionAmount`. Las cuatro identidades de
+     * totales SIGUEN CUADRANDO —los dos lados de FAU04 salen de la misma
+     * función, así que se mueven juntos— y el documento pasa el validador
+     * entero. Lo que sale es un XML internamente consistente que declara
+     * $2.328.800 de base gravable con $13.274,16 de IVA: la DIAN lo ACEPTA, y
+     * el error sólo se corrige después con nota crédito.
+     *
+     * Por eso la base tiene que venir del desglose de línea y no puede
+     * defenderse con una regla de totales.
+     */
+    it('sin desglose de línea el documento es consistente Y declara 33 veces la base', () => {
+      const { xml, totals } = emit({
+        discount_amount: '0.00',
+        tax_amount: '13274.16',
+        items: [
+          line({
+            unit_price: '852000.00',
+            total_amount: '856856.40',
+            tax_amount: '4856.40',
+          }),
+          line({
+            unit_price: '1476800.00',
+            total_amount: '1485217.76',
+            tax_amount: '8417.76',
+          }),
+        ],
+        taxes: [tax({ taxable_amount: '69864.00', tax_amount: '13274.16' })],
+      });
+
+      expect(totals.TaxExclusiveAmount).toBe('2328800.00');
+      expect(lineTaxableSum(xml)).toBe(2328800);
+      // Y aun así: cero violaciones.
+      expectClean(xml);
+    });
+  });
 });

@@ -77,7 +77,7 @@ import { OrderSseService } from './services/order-sse.service';
     // Carril B - B3: hub tipado de eventos de orden para SSE.
     OrderSseService,
   ],
-  exports: [OrdersService, OrderFlowModule, OrderEtaService],
+  exports: [OrdersService, OrderFlowModule, OrderEtaService, OrderSseService],
 })
 export class OrdersModule implements OnModuleInit {
   constructor(

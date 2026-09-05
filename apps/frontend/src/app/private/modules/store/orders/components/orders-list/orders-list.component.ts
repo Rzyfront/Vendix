@@ -45,6 +45,7 @@ import {
 } from '../../interfaces/order.interface';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { OrderPrintService } from '../../services/order-print.service';
+import { OrdersListSseService } from '../../services/orders-list-sse.service';
 
 @Component({
   selector: 'app-orders-list',
@@ -74,6 +75,12 @@ export class OrdersListComponent {
   private destroyRef = inject(DestroyRef);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  // QUI-777: SSE push para refrescar `state` en la lista sin F5 cuando el
+  // KDS marca todos los tickets de una orden como delivered (o revierte).
+  // El servicio es root-provided; lo abrimos en el constructor y lo
+  // cerramos en `destroyRef.onDestroy` para que el ciclo de vida siga al
+  // del componente (no del injector root).
+  private ordersListSse = inject(OrdersListSseService);
   // T10 B3 — predicado único de industria (canónica: AuthFacade.isRestaurant).
   // Antes este componente era "presentacional: no consulta AuthFacade"; ese
   // límite se rompe porque la columna Mesa debe responder a la industria del
@@ -197,10 +204,17 @@ export class OrdersListComponent {
       key: 'channel',
       label: 'Canal',
       type: 'select',
+      // El backend acepta más canales (whatsapp, agent, marketplace — ver
+      // channelMap en formatChannel / colorMap en columns), pero el filtro
+      // solo exponía pos + ecommerce. Tienda con ventas por WhatsApp
+      // (ej. TCM01-260728-0001) no podía filtrar por ese canal. Se agrega
+      // whatsapp que es el único que el usuario quiere exponer; agent y
+      // marketplace siguen llegando en la lista pero no se pueden filtrar.
       options: [
         { value: '', label: 'Todos los Canales' },
         { value: 'pos', label: 'Punto de Venta' },
         { value: 'ecommerce', label: 'Tienda Online' },
+        { value: 'whatsapp', label: 'WhatsApp' },
       ],
     },
     {
@@ -489,28 +503,75 @@ export class OrdersListComponent {
   });
 
   constructor() {
-    // Pre-filter from URL (ref 2026-06-25 — feature/orders-pending-dispatch).
-    // El dashboard navega con ?dispatchable=true (y opcionalmente ?status, ?search)
-    // para aterrizar la lista ya filtrada. Lectura síncrona del snapshot del
-    // ActivatedRoute evita NG0950 y no dispara un re-fetch posterior.
-    const qp = this.route.snapshot.queryParamMap;
-    if (qp.get('dispatchable') === 'true') {
-      this.dispatchableFilter.set(true);
-      this._filters.dispatchable = true;
-    }
-    const status = qp.get('status');
-    if (status) {
-      this.selectedStatus.set(status);
-      this._filters.status = status as OrderState;
-      this.filterValues.set({ status });
-    }
-    const search = qp.get('search');
-    if (search) {
-      this.searchTerm.set(search);
-      this._filters.search = search;
-    }
+    // Persistencia de filtros vía URL query params (QUI-778 admin-orders-filters).
+    // Patrón canónico: `org-invoice-list.component.ts:373-390`.
+    //
+    // Antes leíamos `route.snapshot.queryParamMap` una sola vez: si el usuario
+    // llegaba a `/admin/orders/sales` desde el sidebar (sin params) los filtros
+    // no se aplicaban aunque vinieran del back/forward del navegador. Ahora
+    // suscribimos REACTIVAMENTE: cada cambio de URL rehidrata signals + _filters
+    // y recarga.
+    //
+    // El guard `filtersEqual` es OBLIGATORIO: cuando nosotros mismos escribimos
+    // la URL con `updateQuery`, `queryParamMap` re-emite. Sin el guard caeríamos
+    // en loop (onFilterChange → updateQuery → queryParamMap emite → handler
+    // re-sincroniza signals → microtask extra de Angular).
+    // `initialQueryHandled` distingue el primer emit del subscribe (mount) de
+    // los siguientes (cambios de URL por back/forward o por `updateQuery`).
+    // Sin esta marca, el guard `filtersEqual` SALTARÍA la carga inicial cuando
+    // la URL está limpia y `_filters` arranca vacío — ambos objetos son iguales
+    // y nunca se llamaría a `loadOrders()`.
+    let initialQueryHandled = false;
 
-    this.loadOrders();
+    this.route.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((qp) => {
+        const incoming: OrderQuery = {
+          search: qp.get('search') ?? '',
+          status: (qp.get('status') as OrderState) || undefined,
+          channel: (qp.get('channel') as OrderChannel) || undefined,
+          payment_status:
+            (qp.get('payment_status') as PaymentStatus) || undefined,
+          date_range: qp.get('date_range') || undefined,
+          table_id: qp.get('table_id')
+            ? Number(qp.get('table_id'))
+            : undefined,
+          dispatchable:
+            qp.get('dispatchable') === 'true' ? true : undefined,
+          page: qp.get('page') ? Number(qp.get('page')) : 1,
+          limit: this._filters.limit ?? 10,
+          sort_by: this._filters.sort_by ?? 'created_at',
+          sort_order: this._filters.sort_order ?? 'desc',
+        };
+
+        // Guard contra loop + bypass para el primer emit (carga inicial):
+        //   - Primer emit: `_filters` puede ser igual a `incoming` (URL limpia
+        //     sin params), pero todavía necesitamos sincronizar signals y
+        //     ejecutar la carga inicial.
+        //   - Emits siguientes (deep-link, back/forward, updateQuery): si
+        //     incoming === _filters, saltamos para no duplicar el fetch.
+        if (initialQueryHandled && this.filtersEqual(this._filters, incoming)) {
+          return;
+        }
+        initialQueryHandled = true;
+
+        // Sincronizar signals + _filters
+        this._filters = { ...this._filters, ...incoming };
+        this.searchTerm.set(this._filters.search ?? '');
+        this.selectedStatus.set(this._filters.status ?? '');
+        this.selectedChannel.set(this._filters.channel ?? '');
+        this.selectedPaymentStatus.set(this._filters.payment_status ?? '');
+        this.selectedDateRange.set(this._filters.date_range ?? '');
+        this.selectedTable.set(
+          this._filters.table_id != null
+            ? String(this._filters.table_id)
+            : '',
+        );
+        this.dispatchableFilter.set(!!this._filters.dispatchable);
+        this.filterValues.set(this.filtersToFilterValues(this._filters));
+
+        this.loadOrders();
+      });
 
     // Bug 2 (Fase K): react to parent-triggered reload requests.
     effect(() => {
@@ -519,6 +580,36 @@ export class OrdersListComponent {
         this.loadOrders();
       }
     });
+
+    // QUI-777: reconciliación SSE — actualizar UNA fila por id sin re-fetch.
+    // El patrón effect+clear garantiza que el effect corra una vez por
+    // cambio externo del signal, sin riesgo de loop infinito. Si la orden
+    // NO está en la página actual (filtro de status la excluye, o el
+    // id es de otra tienda por error), el `.map` la deja igual y el
+    // upsert es idempotente.
+    effect(() => {
+      const evt = this.ordersListSse.lastRelevantEvent();
+      if (!evt) return;
+      const { order_id, new_state } = evt.data;
+      // `new_state` ya viene tipado como `OrderState` desde el servicio SSE
+      // (validación runtime en `OrdersListSseService.handleMessage`). Si el
+      // backend pushea un estado desconocido, el servicio descarta el
+      // evento silencioso y este effect nunca lo ve.
+      this.orders.update((prev) =>
+        prev.map((o) =>
+          o.id === order_id ? { ...o, state: new_state } : o,
+        ),
+      );
+      // Limpiar el signal para que el próximo evento vuelva a disparar el effect.
+      this.ordersListSse.lastRelevantEvent.set(null);
+    });
+
+    // QUI-777: abrir/cerrar el stream al ciclo de vida del componente.
+    // root-provided + connect/disconnect manual: si el usuario navega a
+    // otra ruta, la suscripción se cierra limpiamente (el subject
+    // compartido por tienda decrementa su refcount vía `req.close`).
+    this.ordersListSse.connect();
+    this.destroyRef.onDestroy(() => this.ordersListSse.disconnect());
 
     this.loadSeen();
     // Carril B - B2: carga mesas de la tienda. Si falla, el filtro no se
@@ -554,6 +645,68 @@ export class OrdersListComponent {
     }
   }
 
+  /**
+   * Mapea un `OrderQuery` (estado del backend) a un `FilterValues` (lo que
+   * entiende el `<app-options-dropdown>`). Usado en la rehidratación desde URL
+   * para que el dropdown muestre los filtros activos al re-entrar.
+   */
+  private filtersToFilterValues(f: OrderQuery): FilterValues {
+    return {
+      status: f.status ?? null,
+      channel: f.channel ?? null,
+      payment_status: f.payment_status ?? null,
+      date_range: f.date_range ?? null,
+      table_id: f.table_id != null ? String(f.table_id) : null,
+    };
+  }
+
+  /**
+   * Guarda contra loop de `updateQuery → queryParamMap emite → handler re-sincroniza`.
+   * Compara dos `OrderQuery` shallow para saber si la URL que llega de la
+   * suscripción reactiva es la misma que acabamos de escribir nosotros mismos.
+   *
+   * Approach C: unión de keys + comparación estricta. Robusto ante keys que
+   * faltan en uno de los dos lados, y `undefined === undefined` cuenta como
+   * igual (consistente con cómo `incoming` se construye — keys con `|| undefined`
+   * siguen presentes en el objeto, no ausentes).
+   */
+  private filtersEqual(current: OrderQuery, incoming: OrderQuery): boolean {
+    const keys = new Set([
+      ...Object.keys(current),
+      ...Object.keys(incoming),
+    ]);
+    for (const k of keys) {
+      if ((current as Record<string, unknown>)[k] !== (incoming as Record<string, unknown>)[k]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Escribe en la URL los params del patch. Convención `null = unset`:
+   * pasar `null` o `''` ELIMINA la clave de la URL (Angular la quita); pasar
+   * un valor lo serializa a string. `replaceUrl: true` evita acumular entradas
+   * de history por cada cambio de filtro. `queryParamsHandling: 'merge'`
+   * preserva otros params que no estemos tocando.
+   */
+  private updateQuery(patch: Partial<Record<keyof OrderQuery, unknown>>): void {
+    const next: Record<string, string | null> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (v == null || v === '') {
+        next[k] = null;
+      } else {
+        next[k] = String(v);
+      }
+    }
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: next,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+  }
+
   // Computed property for hasFilters
   readonly hasFilters = computed(() =>
     !!(
@@ -585,6 +738,8 @@ export class OrdersListComponent {
     this._filters.search = term;
     this._filters.page = 1;
     this.loadOrders();
+    // Persistir en URL para que sobreviva a back/forward y deep-link.
+    this.updateQuery({ search: term || null });
   }
 
   onFilterChange(values: FilterValues): void {
@@ -614,6 +769,16 @@ export class OrdersListComponent {
     this._filters.page = 1;
 
     this.loadOrders();
+    // Persistir TODOS los filtros del dropdown en URL — si el usuario cambia
+    // uno y otro ya estaba puesto, la URL refleja el estado completo (no
+    // pisamos los anteriores porque updateQuery hace merge).
+    this.updateQuery({
+      status: this._filters.status,
+      channel: this._filters.channel,
+      payment_status: this._filters.payment_status,
+      date_range: this._filters.date_range,
+      table_id: this._filters.table_id,
+    });
   }
 
   clearFilters(): void {
@@ -636,6 +801,17 @@ export class OrdersListComponent {
     this._filters.page = 1;
 
     this.loadOrders();
+    // Limpiar TODOS los params de filtro de la URL. `null` los elimina.
+    this.updateQuery({
+      search: null,
+      status: null,
+      channel: null,
+      payment_status: null,
+      date_range: null,
+      table_id: null,
+      dispatchable: null,
+      page: null,
+    });
   }
 
   toggleDispatchable(): void {
@@ -652,6 +828,11 @@ export class OrdersListComponent {
     }
     this._filters.page = 1;
     this.loadOrders();
+    // Persistir dispatchable y el status (que se limpia al activar el toggle).
+    this.updateQuery({
+      dispatchable: next || null,
+      status: this._filters.status,
+    });
   }
 
   onActionClick(action: string): void {
@@ -789,6 +970,8 @@ export class OrdersListComponent {
   onPageChange(page: number): void {
     this._filters.page = page;
     this.loadOrders();
+    // Persistir la página actual en URL (deep-linkable, back/forward friendly).
+    this.updateQuery({ page });
   }
 
   onSort(event: { column: string; direction: 'asc' | 'desc' | null }): void {

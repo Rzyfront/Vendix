@@ -22,6 +22,7 @@ import { InventorySerialNumbersModule } from '../../inventory/serial-numbers/inv
 import { OrderStockCommitModule } from '../../inventory/shared/order-stock-commit.module';
 import { WalletModule } from '../../wallet/wallet.module'; // QUI-457
 import { PaymentsModule } from '../../payments/payments.module'; // refund-gateway-fix: W2-A needs PaymentGatewayService
+import { OrdersModule } from '../orders.module'; // QUI-777: OrderSseService vive acá — el listener KDS lo usa para emitir `order.status_changed`
 
 @Module({
   imports: [
@@ -32,6 +33,9 @@ import { PaymentsModule } from '../../payments/payments.module'; // refund-gatew
     InventorySerialNumbersModule,
     OrderStockCommitModule,
     WalletModule,
+    // QUI-777: OrderSseService vive en OrdersModule y OrdersModule ya importa
+    // OrderFlowModule (línea 54) — ciclo. `forwardRef` rompe el ciclo en DI.
+    forwardRef(() => OrdersModule),
     // refund-gateway-fix: PaymentGatewayService.reversePaymentWithProcessor()
     // is called from RefundFlowService.dispatchRefundProcessor. Reverse the
     // forwardRef that PaymentsModule already declares against us (line 69 of

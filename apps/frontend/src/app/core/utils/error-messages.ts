@@ -1067,6 +1067,26 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La orden se guardó pero no se pudo recargar. Actualiza el detalle.',
   ORD_FLOW_PAYMENT_FAILED_001:
     'No se pudo registrar el cobro. La orden sigue pendiente.',
+
+  // Coupons (QUI-783). El backend rechaza el cupón con estos códigos cuando
+  // un cupón aplicado a una venta no puede ser validado server-side (antes
+  // el catch silencioso descartaba el descuento y el cajero sólo veía
+  // "monto recibido no puede ser menor al total de la orden"). El copy está
+  // pensado para un cajero: dice qué pasó y qué hacer, sin jerga técnica.
+  CPN_FIND_001:
+    'Ese cupón no existe o ya no está activo. Verifica el código o elimina el cupón para continuar.',
+  CPN_EXPIRED_001:
+    'Este cupón ya no está vigente. Verifica las fechas o usa otro cupón.',
+  CPN_LIMIT_001:
+    'Este cupón ya alcanzó el número máximo de usos permitidos.',
+  CPN_LIMIT_002:
+    'Este cliente ya usó este cupón. No se puede volver a aplicar.',
+  CPN_MIN_001:
+    'El subtotal de la venta no alcanza el mínimo que exige este cupón. Agrega más productos o usa otro cupón.',
+  CPN_APPLY_001:
+    'Este cupón no aplica a los productos del carrito. Revisa las condiciones del cupón o quítalo.',
+  CPN_VALIDATE_001:
+    'No se pudo validar el cupón. Revisa los datos e inténtalo de nuevo.',
 };
 
 export const EMPTY_CART_MESSAGE = 'El carrito está vacío.';

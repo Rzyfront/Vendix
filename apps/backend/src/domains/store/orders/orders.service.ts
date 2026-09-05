@@ -591,6 +591,19 @@ export class OrdersService {
       date_from,
       date_to,
       channel,
+      // FIX admin-orders-filters (BUG A) — `payment_status` viaja en el
+      // query del dropdown de "Estado de pago" del listado. El DTO lo
+      // valida contra `payments_state_enum` pero el servicio lo ignoraba
+      // silenciosamente: el destructure no lo traía y el `where` nunca lo
+      // aplicaba. Por eso filtrar por "Pagado" no recortaba la tabla.
+      // Verificado: `orders.payments payments[]` (schema.prisma:1548).
+      payment_status,
+      // FIX admin-orders-filters (BUG C) — destructurar `dispatchable`
+      // explícitamente para condicionar la rama de `state`. Si se deja
+      // implícito (`query.dispatchable`) no podemos hacer la guardia
+      // `status && !dispatchable` que evita que ambos spreads pisen la
+      // misma clave `state` del `where`.
+      dispatchable,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -612,7 +625,7 @@ export class OrdersService {
           { customer_alias: { contains: search, mode: 'insensitive' } },
         ],
       }),
-      ...(status && { state: status }),
+      ...(status && !dispatchable && { state: status }),
       ...(customer_id && { customer_id }),
       // Carril B — B2: filtra órdenes que tengan al menos una table_session
       // apuntando a la mesa solicitada (incluye sesiones ya cerradas; la orden
@@ -621,6 +634,17 @@ export class OrdersService {
         table_sessions: { some: { table_id } },
       }),
       ...(channel && { channel }),
+      // FIX admin-orders-filters (BUG A) — aplica el filtro de "Estado de
+      // pago" del dropdown. Viaja como `payments_state_enum` en el DTO.
+      // La columna destino NO está denormalizada en `orders` (sólo existe
+      // como `state` en la tabla `payments`), así que filtramos por
+      // relación: "al menos un pago con state=X". `some` (no `every`)
+      // porque una orden puede tener varios pagos en distintos estados
+      // (parcialmente pagada, reembolsada parcial, etc.) y queremos
+      // matchear si CUALQUIERA cumple.
+      ...(payment_status && {
+        payments: { some: { state: payment_status } },
+      }),
       ...(query.missing_shipping_method && {
         shipping_method_id: null,
         delivery_type: { not: 'direct_delivery' },
@@ -644,13 +668,20 @@ export class OrdersService {
         delivery_type: { notIn: ['direct_delivery', 'dine_in'] as order_delivery_type_enum[] },
         dispatch_fulfillment: { not: 'full' } as any,
       }),
-      ...(date_from &&
-        date_to && {
-          created_at: {
-            gte: new Date(date_from),
-            lte: new Date(date_to),
-          },
-        }),
+      // FIX admin-orders-filters (BUG B) — antes requería AMBOS params
+      // (`date_from && date_to` cortocircuitaba si uno faltaba). Si el
+      // usuario limpiaba sólo "Hasta" desde el dropdown, el filtro de
+      // fecha desaparecía silenciosamente. Ahora cada bound se aplica
+      // independiente: sólo `gte` si hay `date_from`, sólo `lte` si hay
+      // `date_to`, ambos si hay los dos, nada si no hay ninguno.
+      ...(date_from || date_to
+        ? {
+            created_at: {
+              ...(date_from && { gte: new Date(date_from) }),
+              ...(date_to && { lte: new Date(date_to) }),
+            },
+          }
+        : {}),
     };
 
     const orderBy: Prisma.ordersOrderByWithRelationInput = {};
@@ -1529,6 +1560,28 @@ export class OrdersService {
       existingOrder.state !== 'created' &&
       existingOrder.state !== 'draft'
     ) {
+      throw new VendixHttpException(ErrorCodes.ORD_EDIT_NOT_ALLOWED_001);
+    }
+
+    // 2.1) P0 revenue integrity (CP-POLLO-ARABE-727 / fix/table-close-order):
+    //     el editor rechaza mutaciones sobre órdenes cuya `table_session` ya
+    //     está cerrada. Hasta la fix, `closeSession` cambiaba `orders.state` a
+    //     `'finished'` como proxy y eso bloqueaba el editor por colateral —
+    //     pero contaminaba `COMPLETED_SALE_STATES` en analytics. Ahora el
+    //     estado de la orden sigue siendo dato de la operación (puede ser
+    //     draft/created/pending_payment después de cerrar mesa), y este guard
+    //     es el que cierra la compuerta de edición.
+    //
+    //     Sólo aplica a órdenes con sesión (POS abiertas en mesa). Órdenes
+    //     POS-only sin `table_sessions.order_id` se quedan sin guard y siguen
+    //     siendo editables vía el flujo normal. Idempotente: si el lookup
+    //     devuelve `null` la sesión no existe (caso POS-only), no es
+    //     error — se permite la edición.
+    const closedSession = await this.prisma.table_sessions.findFirst({
+      where: { order_id: orderId, closed_at: { not: null } },
+      select: { id: true, closed_at: true },
+    });
+    if (closedSession) {
       throw new VendixHttpException(ErrorCodes.ORD_EDIT_NOT_ALLOWED_001);
     }
 

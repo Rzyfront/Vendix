@@ -10,6 +10,7 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { OrderFlowService } from './order-flow/order-flow.service';
+import { OrderSseService } from './services/order-sse.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { AuditService } from '@common/audit/audit.service';
@@ -66,6 +67,15 @@ describe('OrdersService', () => {
     users: { findUnique: jest.fn() },
     stores: { findFirst: jest.fn() },
     payments: { findFirst: jest.fn() },
+    table_sessions: {
+      // CP-POLLO-ARABE-727 · fix/table-close-order. El guard del editor
+      // (OrdersService.updateOrderFromEditor) consulta `table_sessions.findFirst`
+      // por `order_id` para saber si hay una sesión CERRADA vinculada a la
+      // orden. Mock explícito para que las specs del guard puedan simular
+      // los 3 caminos: cerrada → rechaza, abierta → permite, sin sesión
+      // (POS-only) → permite.
+      findFirst: jest.fn(),
+    },
     audit_logs: {
       findMany: jest.fn(),
       // Round 3.5 · idempotency spec. The editor's idempotency
@@ -137,6 +147,17 @@ describe('OrdersService', () => {
     getContext: jest.fn(),
   };
 
+  // FIX admin-orders-filters — `OrdersService` constructor gained
+  // `OrderSseService` (index 12) in a recent commit. The spec was not
+  // updated, so Nest refused to build the TestingModule and every test
+  // failed at module init. Mock mínimo sólo para que DI resuelva;
+  // `findAll` no usa SSE.
+  const mockOrderSseService = {
+    emit: jest.fn(),
+    pushEvent: jest.fn(),
+    subscribe: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2024-12-01T12:00:00Z'));
@@ -157,6 +178,7 @@ describe('OrdersService', () => {
         { provide: PromotionEngineService, useValue: mockPromotionEngine },
         { provide: CouponsService, useValue: mockCouponsService },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: OrderSseService, useValue: mockOrderSseService },
       ],
     }).compile();
 
@@ -176,6 +198,119 @@ describe('OrdersService', () => {
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  /**
+   * FIX admin-orders-filters — regresión de los 3 bugs que rompían los
+   * filtros del dropdown en `/admin/orders/sales`:
+   *   A) `payment_status` se ignoraba silenciosamente (no estaba ni en el
+   *      destructure ni en el `where`).
+   *   B) `date_from` y `date_to` requerían ambos (cortocircuito `&&`).
+   *   C) `status` y `dispatchable` ambos escribían `state` en el `where`
+   *      y el último ganaba, descartando la selección de estado cuando
+   *      "Despachable" estaba activo.
+   *
+   * Cada test mockea `findMany` + `count` para que `findAll` retorne sin
+   * tocar la DB real, y luego inspecciona el `where` pasado al primer call.
+   */
+  describe('findAll — filtros (admin-orders-filters)', () => {
+    beforeEach(() => {
+      mockPrismaService.orders.findMany.mockResolvedValue([]);
+      mockPrismaService.orders.count.mockResolvedValue(0);
+    });
+
+    // Helper: captura el `where` del primer call a `findMany`.
+    const lastWhere = () =>
+      mockPrismaService.orders.findMany.mock.calls[0][0].where;
+
+    it('A) aplica payment_status via payments.some.state', async () => {
+      await service.findAll({
+        payment_status: 'succeeded',
+      } as any);
+
+      expect(lastWhere()).toEqual(
+        expect.objectContaining({
+          payments: { some: { state: 'succeeded' } },
+        }),
+      );
+    });
+
+    it('A-bis) NO agrega `payments` cuando payment_status viene undefined', async () => {
+      await service.findAll({} as any);
+
+      expect(lastWhere().payments).toBeUndefined();
+    });
+
+    it('B) aplica date_from solo (sin date_to)', async () => {
+      await service.findAll({
+        date_from: '2026-09-01T00:00:00Z',
+      } as any);
+
+      const where = lastWhere();
+      expect(where.created_at).toBeDefined();
+      expect(where.created_at.gte).toEqual(new Date('2026-09-01T00:00:00Z'));
+      // Sin `date_to` no debe existir bound superior.
+      expect(where.created_at.lte).toBeUndefined();
+    });
+
+    it('B) aplica date_to solo (sin date_from)', async () => {
+      await service.findAll({
+        date_to: '2026-09-30T23:59:59Z',
+      } as any);
+
+      const where = lastWhere();
+      expect(where.created_at).toBeDefined();
+      expect(where.created_at.lte).toEqual(new Date('2026-09-30T23:59:59Z'));
+      expect(where.created_at.gte).toBeUndefined();
+    });
+
+    it('B) aplica ambos date_from y date_to juntos', async () => {
+      await service.findAll({
+        date_from: '2026-09-01T00:00:00Z',
+        date_to: '2026-09-30T23:59:59Z',
+      } as any);
+
+      expect(lastWhere().created_at).toEqual({
+        gte: new Date('2026-09-01T00:00:00Z'),
+        lte: new Date('2026-09-30T23:59:59Z'),
+      });
+    });
+
+    it('B-bis) NO agrega created_at si ambos bounds están ausentes', async () => {
+      await service.findAll({} as any);
+
+      expect(lastWhere().created_at).toBeUndefined();
+    });
+
+    it('C) status solo se aplica cuando dispatchable es false/undefined', async () => {
+      await service.findAll({ status: 'finished' } as any);
+
+      expect(lastWhere().state).toBe('finished');
+    });
+
+    it('C) dispatchable=true omite el state de status (dispatchable gana)', async () => {
+      await service.findAll({
+        status: 'finished',
+        dispatchable: true,
+      } as any);
+
+      // dispatchable define su propio `state` (in [...]) — gana sobre status.
+      expect(lastWhere().state).toEqual({
+        in: ['processing', 'pending_payment'],
+      });
+    });
+
+    it('C) dispatchable=true sin status igual define state vía dispatchable', async () => {
+      await service.findAll({ dispatchable: true } as any);
+
+      expect(lastWhere().state).toEqual({
+        in: ['processing', 'pending_payment'],
+      });
+      expect(lastWhere().delivery_type).toEqual({
+        notIn: ['direct_delivery', 'dine_in'],
+      });
+      expect(lastWhere().dispatch_fulfillment).toEqual({ not: 'full' });
+    });
   });
 
   describe('findOne — discount snapshots', () => {
@@ -1240,6 +1375,154 @@ describe('OrdersService', () => {
             where: expect.objectContaining({
               id: 500,
               store_id: 1,
+              state: { in: ['created', 'draft'] },
+            }),
+          }),
+        );
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // CP-POLLO-ARABE-727 · fix/table-close-order — Option 2, leg 2.
+    //
+    // El editor atómico debe bloquearse cuando existe una sesión de mesa
+    // CERRADA vinculada al order_id. Eso cierra el síntoma reportado en
+    // QUI-726: el editor seguía aceptando mutaciones sobre órdenes que
+    // ya tenían la mesa cerrada (típicamente porque el mesero cerró la
+    // mesa pensando que el cliente se había ido, sin que la cuenta
+    // estuviera cobrada).
+    //
+    // El guard corre ANTES del claim atómico (paso 2.1, entre el gate
+    // de estado y el de `isDraft`), para no desperdiciar un UPDATE
+    // condicional con `state IN (created, draft)` que de todas formas
+    // va a fallar después.
+    //
+    // Decisión consciente: NO replicamos este guard en `update` /
+    // `updateOrderItems` en este PR — el reporte del líder menciona
+    // "el editor", y la fuente del leak reportada es el flujo del editor
+    // atómico. `updateOrderItems` ya valida `session.closed_at` por su
+    // propio camino (addItems/removeItem). Un sweep simétrico queda como
+    // follow-up explícito.
+    // ----------------------------------------------------------------
+
+    it('lanza 409 ORD_EDIT_NOT_ALLOWED_001 cuando existe una table_session CERRADA para el order_id', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        // La orden está en estado editable (el guard de estado pasaría).
+        mockPrismaService.orders.findFirst.mockResolvedValue(editableOrder);
+        // PERO la sesión de mesa ya fue cerrada (mesero la cerró sin cobrar).
+        // El guard del editor tiene que detectarlo y cortar antes del claim.
+        mockPrismaService.table_sessions.findFirst.mockResolvedValue({
+          id: 77,
+          order_id: 500,
+          closed_at: new Date(),
+        });
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, minimalDto);
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code,
+        );
+        // El guard corta ANTES del claim atómico ni de cualquier escritura.
+        expect(mockPrismaService.orders.updateMany).not.toHaveBeenCalled();
+        expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
+        // La membresía del cliente ni se consulta: el guard es anterior.
+        expect(mockPrismaService.store_users.findFirst).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('PERMITE editar cuando NO existe table_session para el order_id (orden POS-only)', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        // El lookup del guard devuelve null → la orden NO está atada a
+        // ninguna sesión de mesa (caso típico: órdenes de mostrador o
+        // ecommerce sin flujo de mesas).
+        mockPrismaService.table_sessions.findFirst.mockResolvedValue(null);
+
+        // arrangeEditableDraft arma el resto del pipeline editable.
+        arrangeEditableDraft();
+
+        // El validator `assertVariantRequiredForPrepared` hace un
+        // `products.findUnique` por `product_id` (no `findMany`); mock
+        // explícito para que el test sea autocontenido cuando corre
+        // aislado (el archivo no tiene `jest.clearAllMocks` global y
+        // depende de cross-test state).
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
+
+        // Usamos `fullDto` (no `minimalDto`) porque el pipeline del editor
+        // exige los campos de envío (delivery_type, shipping_method_id, etc.)
+        // para llegar al claim atómico — `minimalDto` corta antes en
+        // `variant-required.validator`.
+        await service.updateOrderFromEditor(500, fullDto);
+
+        // El pipeline corrió: el guard no se disparó.
+        expect(mockPrismaService.orders.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              id: 500,
+              store_id: 1,
+              state: { in: ['created', 'draft'] },
+            }),
+          }),
+        );
+        // El lookup del guard SÍ se hizo (no se saltó la verificación).
+        expect(mockPrismaService.table_sessions.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              order_id: 500,
+              closed_at: { not: null },
+            }),
+          }),
+        );
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('PERMITE editar cuando la table_session existe pero sigue ABIERTA', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        // El guard hace `findFirst({ where: { order_id, closed_at: { not: null } } })`.
+        // Una sesión con `closed_at: null` NO satisface ese WHERE (closed_at IS NULL,
+        // no NOT NULL), así que Prisma devuelve `null` aunque exista la sesión.
+        // Eso es lo correcto: la sesión existe pero sigue abierta → no bloqueamos.
+        mockPrismaService.table_sessions.findFirst.mockResolvedValue(null);
+
+        arrangeEditableDraft();
+
+        // Mismo setup del validator que el test anterior: autocontenido.
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
+
+        await service.updateOrderFromEditor(500, fullDto);
+
+        // El claim atómico corrió: el guard no bloqueó.
+        expect(mockPrismaService.orders.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              id: 500,
               state: { in: ['created', 'draft'] },
             }),
           }),
