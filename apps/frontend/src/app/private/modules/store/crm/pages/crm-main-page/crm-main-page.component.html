@@ -16,28 +16,15 @@
 
       <button
         type="button"
-        (click)="setTab('diseno')"
+        (click)="setTab('builder')"
         [disabled]="!landing()?.enabled"
         class="inline-flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-all cursor-pointer select-none shrink-0"
-        [class]="tab() === 'diseno' 
-          ? 'border-slate-900 dark:border-white text-text-primary font-bold' 
-          : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border disabled:opacity-40 disabled:cursor-not-allowed'"
-      >
-        <app-icon name="palette" [size]="16" />
-        <span>Editor y Diseño</span>
-      </button>
-
-      <button
-        type="button"
-        (click)="setTab('ai-studio')"
-        [disabled]="!landing()?.enabled"
-        class="inline-flex items-center gap-2 py-3 px-1 border-b-2 font-medium text-sm transition-all cursor-pointer select-none shrink-0"
-        [class]="tab() === 'ai-studio' 
+        [class]="tab() === 'builder' 
           ? 'border-slate-900 dark:border-white text-text-primary font-bold' 
           : 'border-transparent text-text-secondary hover:text-text-primary hover:border-border disabled:opacity-40 disabled:cursor-not-allowed'"
       >
         <app-icon name="sparkles" [size]="16" class="text-blue-600" />
-        <span>Asistente IA & Estilos</span>
+        <span>Diseñador en Vivo & IA</span>
       </button>
 
       <button
@@ -206,38 +193,83 @@
           </div>
         }
 
-        @case ('diseno') {
-          <div class="flex flex-col gap-4">
-            @if (pendingDocument()) {
-              <div class="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 px-4 py-2.5 rounded-xl text-xs font-medium">
-                <span class="flex items-center gap-2">
-                  <app-icon name="alert-circle" [size]="15" />
-                  Tienes cambios sin guardar en el borrador.
-                </span>
-                <span class="text-[11px] opacity-80">Guarda o publica para aplicar los cambios en vivo.</span>
+        @case ('builder') {
+          <div class="flex flex-col gap-6">
+            <!-- Hero Card para lanzar el Builder a Pantalla Completa -->
+            <div class="rounded-3xl border border-blue-500/20 bg-gradient-to-br from-slate-900 via-blue-950/40 to-slate-900 p-6 md:p-8 text-white shadow-xl relative overflow-hidden">
+              <div class="absolute -right-12 -top-12 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
+              
+              <div class="relative z-10 max-w-3xl space-y-4">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-300 text-xs font-semibold">
+                  <app-icon name="sparkles" [size]="14" />
+                  <span>Nuevo: Experiencia Inmersiva a Pantalla Completa</span>
+                </div>
+
+                <h2 class="text-xl md:text-3xl font-black tracking-tight text-white">
+                  Diseñador en Vivo con Dock Flotante de IA
+                </h2>
+
+                <p class="text-xs md:text-sm text-slate-300 leading-relaxed">
+                  Personaliza tu landing page sin saturación visual. Trabaja directamente sobre el lienzo en tiempo real con conmutador para celular y escritorio, edita con lenguaje natural chateando con Vexi, aplica estilos prediseñados y conecta tu inventario de Vendix.
+                </p>
+
+                <div class="pt-2 flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    (click)="openLiveBuilder()"
+                    class="inline-flex items-center gap-2 px-5 py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs md:text-sm font-bold shadow-lg hover:shadow-blue-500/25 transition-all cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    <app-icon name="maximize-2" [size]="16" />
+                    <span>Abrir Diseñador a Pantalla Completa</span>
+                    <app-icon name="arrow-right" [size]="14" />
+                  </button>
+
+                  @if (storeDomainHostname()) {
+                    <a
+                      [href]="'https://' + storeDomainHostname() + '/landing'"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="inline-flex items-center gap-2 px-4 py-3 rounded-2xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs md:text-sm font-medium transition-all"
+                    >
+                      <app-icon name="external-link" [size]="15" />
+                      <span>Ver Landing Pública</span>
+                    </a>
+                  }
+                </div>
               </div>
-            }
 
-            <app-crm-editor
-              [document]="serverDocument()"
-              [isBusy]="busy()"
-              [hasPendingChanges]="!!pendingDocument()"
-              (documentChange)="onDocumentChange($event)"
-              (saveDraft)="saveDraft()"
-              (publish)="publish()"
-              (discard)="discardChanges()"
-            />
+              <!-- Grid de Beneficios del Diseñador -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-8 pt-6 border-t border-slate-800/80 text-xs">
+                <div class="flex items-center gap-2.5 text-slate-300">
+                  <div class="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0">
+                    <app-icon name="sparkles" [size]="16" />
+                  </div>
+                  <span>Asistente IA Vexi en chat flotante</span>
+                </div>
+
+                <div class="flex items-center gap-2.5 text-slate-300">
+                  <div class="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                    <app-icon name="layers" [size]="16" />
+                  </div>
+                  <span>Gestión modular de secciones</span>
+                </div>
+
+                <div class="flex items-center gap-2.5 text-slate-300">
+                  <div class="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0">
+                    <app-icon name="palette" [size]="16" />
+                  </div>
+                  <span>Paletas y estilos prediseñados</span>
+                </div>
+
+                <div class="flex items-center gap-2.5 text-slate-300">
+                  <div class="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                    <app-icon name="smartphone" [size]="16" />
+                  </div>
+                  <span>Vista en smartphone y laptop</span>
+                </div>
+              </div>
+            </div>
           </div>
-        }
-
-        @case ('ai-studio') {
-          <app-crm-ai-studio
-            [document]="serverDocument()"
-            [isBusy]="busy()"
-            (documentChange)="onDocumentChange($event)"
-            (saveDraft)="saveDraft()"
-            (goToDesign)="setTab('diseno')"
-          />
         }
 
         @case ('leads') {

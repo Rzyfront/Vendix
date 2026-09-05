@@ -1,0 +1,838 @@
+<div class="fixed inset-0 z-[100] w-screen h-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden font-sans select-none">
+  
+  <!-- ==================== 1. TOP HUD BAR ==================== -->
+  <header class="h-14 px-4 sm:px-6 bg-slate-900/95 border-b border-slate-800 backdrop-blur-md flex items-center justify-between z-30 shrink-0 shadow-md">
+    <!-- Izquierda: Volver + Título + Status -->
+    <div class="flex items-center gap-3 min-w-0">
+      <button
+        type="button"
+        (click)="closeBuilder()"
+        class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-all cursor-pointer shadow-xs"
+        title="Regresar al panel CRM"
+      >
+        <app-icon name="arrow-left" [size]="14" />
+        <span class="hidden sm:inline">Volver al CRM</span>
+      </button>
+
+      <div class="h-4 w-[1px] bg-slate-700 hidden sm:block"></div>
+
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="text-xs sm:text-sm font-bold text-white truncate">
+          Diseñador en Vivo
+        </span>
+        @if (hasChanges()) {
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+            Sin guardar
+          </span>
+        } @else {
+          <span class="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+            <app-icon name="check" [size]="11" />
+            Guardado
+          </span>
+        }
+      </div>
+    </div>
+
+    <!-- Centro: Selector de Dispositivo (Escritorio / Celular) -->
+    <div class="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800">
+      <button
+        type="button"
+        (click)="previewMode.set('desktop')"
+        class="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+        [class]="previewMode() === 'desktop' 
+          ? 'bg-blue-600 text-white shadow-xs' 
+          : 'text-slate-400 hover:text-slate-200'"
+      >
+        <app-icon name="monitor" [size]="14" />
+        <span class="hidden md:inline">Escritorio</span>
+      </button>
+      <button
+        type="button"
+        (click)="previewMode.set('mobile')"
+        class="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+        [class]="previewMode() === 'mobile' 
+          ? 'bg-blue-600 text-white shadow-xs' 
+          : 'text-slate-400 hover:text-slate-200'"
+      >
+        <app-icon name="smartphone" [size]="14" />
+        <span class="hidden md:inline">Celular</span>
+      </button>
+    </div>
+
+    <!-- Derecha: Descartar + Guardar + Link Público -->
+    <div class="flex items-center gap-2">
+      @if (hasChanges()) {
+        <button
+          type="button"
+          (click)="discardChanges()"
+          class="px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-medium transition-all cursor-pointer"
+        >
+          Descartar
+        </button>
+      }
+
+      <button
+        type="button"
+        (click)="saveLanding()"
+        [disabled]="isSaving() || !hasChanges()"
+        class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
+      >
+        @if (isSaving()) {
+          <span class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+          <span>Guardando...</span>
+        } @else {
+          <app-icon name="save" [size]="13" />
+          <span>Guardar</span>
+        }
+      </button>
+
+      @if (storeDomainHostname()) {
+        <a
+          [href]="'https://' + storeDomainHostname() + '/landing'"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="hidden sm:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-slate-700 bg-slate-800/60 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-medium transition-all"
+          title="Abrir en pestaña nueva"
+        >
+          <app-icon name="external-link" [size]="12" />
+          <span>Ver en Vivo</span>
+        </a>
+      }
+    </div>
+  </header>
+
+  <!-- ==================== 2. MAIN CANVAS VIEWPORT ==================== -->
+  <main class="flex-1 relative overflow-hidden bg-slate-950 flex items-center justify-center p-0 md:p-6">
+
+    @if (isLoading()) {
+      <div class="flex flex-col items-center gap-3 text-slate-400">
+        <span class="w-8 h-8 border-3 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></span>
+        <span class="text-xs">Cargando lienzo en tiempo real...</span>
+      </div>
+    } @else {
+
+      <!-- MODO ESCRITORIO (Full-Width Responsive Canvas) -->
+      @if (previewMode() === 'desktop') {
+        <div class="w-full h-full overflow-y-auto overflow-x-hidden bg-white dark:bg-zinc-950 text-slate-900 dark:text-slate-100 flex flex-col shadow-2xl relative custom-scroll">
+          
+          <!-- Mini barra informativa superior de simulación web -->
+          <div class="bg-slate-100 dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 px-4 py-2 flex items-center justify-between text-xs text-slate-600 dark:text-slate-300 select-none shrink-0">
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-red-400/80"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-amber-400/80"></span>
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400/80"></span>
+              <span class="ml-2 font-mono text-[11px] text-slate-400 truncate max-w-xs">
+                https://{{ storeDomainHostname() || 'tutienda.com' }}/landing
+              </span>
+            </div>
+            <span class="text-[11px] font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1">
+              <app-icon name="eye" [size]="12" />
+              Lienzo en Vivo (Escritorio)
+            </span>
+          </div>
+
+          <!-- Flujo de Bloques Renderizados -->
+          <div class="flex flex-col flex-grow">
+            @for (b of blocks(); track b.id; let i = $index) {
+              <div
+                class="relative group transition-all"
+                [class.ring-2]="selectedIndex() === i"
+                [class.ring-blue-500]="selectedIndex() === i"
+              >
+                <app-block-renderer [block]="b" />
+
+                <!-- Overlay interactivo para editar rápido el bloque -->
+                <div class="absolute top-2 right-4 opacity-0 group-hover:opacity-100 transition-opacity z-20 flex items-center gap-2 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700 shadow-lg">
+                  <span class="text-xs font-bold text-white">{{ labelFor(b.type) }}</span>
+                  <button
+                    type="button"
+                    (click)="selectBlock(i)"
+                    class="p-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white cursor-pointer"
+                    title="Editar propiedades de la sección"
+                  >
+                    <app-icon name="pencil" [size]="12" />
+                  </button>
+                  <button
+                    type="button"
+                    (click)="removeBlock(i)"
+                    class="p-1 rounded-md bg-red-600/80 hover:bg-red-600 text-white cursor-pointer"
+                    title="Eliminar sección"
+                  >
+                    <app-icon name="trash" [size]="12" />
+                  </button>
+                </div>
+              </div>
+            } @empty {
+              <div class="py-32 px-4 text-center text-slate-400 flex flex-col items-center gap-3">
+                <app-icon name="sparkles" [size]="40" class="text-blue-500/50" />
+                <p class="text-base font-bold text-slate-700 dark:text-slate-200">El lienzo no tiene secciones aún</p>
+                <p class="text-xs text-slate-500">Usa el botón flotante de Estructura o el Asistente IA para generar tu landing.</p>
+                <button
+                  type="button"
+                  (click)="openAddCatalog()"
+                  class="mt-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold cursor-pointer shadow-md"
+                >
+                  + Añadir Primera Sección
+                </button>
+              </div>
+            }
+          </div>
+
+          <!-- Botón flotante simulado de WhatsApp si está activo -->
+          @if (theme().enable_whatsapp_float) {
+            <div class="fixed bottom-6 left-6 z-20 flex items-center gap-2 px-3 py-2 rounded-full bg-emerald-500 text-white shadow-xl hover:scale-105 transition-transform cursor-pointer">
+              <app-icon name="message-circle" [size]="18" />
+              <span class="text-xs font-bold hidden md:inline">Escríbenos</span>
+            </div>
+          }
+        </div>
+      }
+
+      <!-- MODO CELULAR (Smartphone Chassis Hiper-Realista) -->
+      @if (previewMode() === 'mobile') {
+        <div class="smartphone-chassis relative w-[320px] sm:w-[350px] bg-slate-950 rounded-[50px] p-3 shadow-2xl border-[4px] border-slate-700/90 ring-1 ring-slate-500/30 transition-all duration-300">
+          
+          <!-- Botones laterales simulados -->
+          <div class="absolute -left-[7px] top-24 w-[3px] h-10 bg-slate-600 rounded-l-sm"></div>
+          <div class="absolute -left-[7px] top-38 w-[3px] h-10 bg-slate-600 rounded-l-sm"></div>
+          <div class="absolute -right-[7px] top-32 w-[3px] h-14 bg-slate-600 rounded-r-sm"></div>
+
+          <!-- Dynamic Island Notch -->
+          <div class="relative w-full z-20 pb-1.5">
+            <div class="w-24 h-5 bg-black rounded-full mx-auto flex items-center justify-between px-3">
+              <div class="w-2 h-2 rounded-full bg-slate-800"></div>
+              <div class="w-2 h-2 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center">
+                <div class="w-1 h-1 rounded-full bg-blue-950"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Barra de Estado del Smartphone -->
+          <div class="flex items-center justify-between px-5 pt-0.5 pb-2 text-[10px] font-bold text-white tracking-wider select-none">
+            <span>12:00</span>
+            <div class="flex items-center gap-1.5">
+              <span class="text-[9px]">5G</span>
+              <div class="w-4 h-2 rounded-xs border border-white p-0.5 flex items-center">
+                <div class="w-full h-full bg-emerald-400 rounded-2xs"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pantalla / Viewport del Smartphone -->
+          <div class="smartphone-screen bg-slate-50 dark:bg-zinc-950 rounded-[36px] overflow-hidden shadow-inner h-[620px] max-h-[calc(100vh-160px)] overflow-y-auto no-scrollbar relative flex flex-col">
+            
+            <div class="flex flex-col mobile-blocks-flow">
+              @for (b of blocks(); track b.id; let i = $index) {
+                <div 
+                  class="relative group transition-all"
+                  [class.ring-2]="selectedIndex() === i"
+                  [class.ring-blue-500]="selectedIndex() === i"
+                  (click)="selectBlock(i)"
+                >
+                  <app-block-renderer [block]="b" />
+
+                  <!-- Badge flotante al hover -->
+                  <div class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                    <span class="bg-slate-900/90 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-xs">
+                      {{ labelFor(b.type) }}
+                    </span>
+                  </div>
+                </div>
+              } @empty {
+                <div class="py-24 px-4 text-center text-slate-400 flex flex-col items-center gap-2">
+                  <app-icon name="sparkles" [size]="32" class="text-blue-500/50" />
+                  <p class="text-xs font-semibold text-slate-700 dark:text-slate-200">Sin secciones añadidas</p>
+                  <p class="text-[10px]">Abre el panel de estructura o usa la IA para crearlas</p>
+                </div>
+              }
+            </div>
+
+            <!-- Botón flotante simulado WhatsApp en móvil -->
+            @if (theme().enable_whatsapp_float) {
+              <div class="sticky bottom-4 right-4 self-end mr-3 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500 text-white shadow-lg cursor-pointer">
+                <app-icon name="message-circle" [size]="14" />
+                <span class="text-[10px] font-bold">WhatsApp</span>
+              </div>
+            }
+          </div>
+
+          <!-- Home Indicator Inferior -->
+          <div class="w-28 h-1 bg-slate-500/70 rounded-full mx-auto mt-2.5 mb-1"></div>
+        </div>
+      }
+    }
+  </main>
+
+  <!-- ==================== 3. DOCK VERTICAL FLOTANTE (TOOL HUD) ==================== -->
+  <aside class="fixed right-4 sm:right-6 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-3 p-2 rounded-2xl bg-slate-900/90 backdrop-blur-xl border border-slate-700/80 shadow-2xl">
+    
+    <!-- 1. Botón Asistente IA -->
+    <button
+      type="button"
+      (click)="toggleDrawer('ai')"
+      class="group relative w-11 h-11 rounded-xl flex items-center justify-center transition-all cursor-pointer select-none"
+      [class]="activeDrawer() === 'ai' 
+        ? 'bg-blue-600 text-white shadow-lg ring-2 ring-blue-400' 
+        : 'bg-slate-800/80 text-blue-400 hover:bg-slate-700 hover:text-blue-300'"
+      title="Asistente IA (Vexi Copilot)"
+    >
+      <app-icon name="sparkles" [size]="20" />
+      <span class="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500"></span>
+      </span>
+      <!-- Tooltip a la izquierda -->
+      <span class="absolute right-14 px-2.5 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-md border border-slate-700">
+        Asistente IA
+      </span>
+    </button>
+
+    <!-- 2. Botón Estructura de Secciones -->
+    <button
+      type="button"
+      (click)="toggleDrawer('structure')"
+      class="group relative w-11 h-11 rounded-xl flex items-center justify-center transition-all cursor-pointer select-none"
+      [class]="activeDrawer() === 'structure' 
+        ? 'bg-emerald-600 text-white shadow-lg ring-2 ring-emerald-400' 
+        : 'bg-slate-800/80 text-emerald-400 hover:bg-slate-700 hover:text-emerald-300'"
+      title="Estructura de Secciones"
+    >
+      <app-icon name="layers" [size]="20" />
+      <span class="absolute right-14 px-2.5 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-md border border-slate-700">
+        Estructura ({{ blocks().length }})
+      </span>
+    </button>
+
+    <!-- 3. Botón Estilos & Presets -->
+    <button
+      type="button"
+      (click)="toggleDrawer('styles')"
+      class="group relative w-11 h-11 rounded-xl flex items-center justify-center transition-all cursor-pointer select-none"
+      [class]="activeDrawer() === 'styles' 
+        ? 'bg-purple-600 text-white shadow-lg ring-2 ring-purple-400' 
+        : 'bg-slate-800/80 text-purple-400 hover:bg-slate-700 hover:text-purple-300'"
+      title="Estilos y Presets"
+    >
+      <app-icon name="palette" [size]="20" />
+      <span class="absolute right-14 px-2.5 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-md border border-slate-700">
+        Estilos Prediseñados
+      </span>
+    </button>
+
+    <!-- 4. Botón Módulos Vendix -->
+    <button
+      type="button"
+      (click)="toggleDrawer('modules')"
+      class="group relative w-11 h-11 rounded-xl flex items-center justify-center transition-all cursor-pointer select-none"
+      [class]="activeDrawer() === 'modules' 
+        ? 'bg-amber-600 text-white shadow-lg ring-2 ring-amber-400' 
+        : 'bg-slate-800/80 text-amber-400 hover:bg-slate-700 hover:text-amber-300'"
+      title="Módulos de Vendix"
+    >
+      <app-icon name="puzzle" [size]="20" />
+      <span class="absolute right-14 px-2.5 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-md border border-slate-700">
+        Módulos Vendix
+      </span>
+    </button>
+
+    <div class="w-full h-[1px] bg-slate-700/60 my-0.5"></div>
+
+    <!-- 5. Toggle Dispositivo Rápido -->
+    <button
+      type="button"
+      (click)="previewMode.set(previewMode() === 'desktop' ? 'mobile' : 'desktop')"
+      class="group relative w-11 h-11 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer select-none"
+      title="Cambiar vista Móvil / Escritorio"
+    >
+      <app-icon [name]="previewMode() === 'desktop' ? 'smartphone' : 'monitor'" [size]="18" />
+      <span class="absolute right-14 px-2.5 py-1 rounded-lg bg-slate-900 text-white text-[11px] font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-md border border-slate-700">
+        Ver en {{ previewMode() === 'desktop' ? 'Celular' : 'Escritorio' }}
+      </span>
+    </button>
+  </aside>
+
+  <!-- ==================== 4. SLIDE-OVER DRAWERS (PANELES FLOTANTES) ==================== -->
+  
+  <!-- DRAWER: ASISTENTE IA -->
+  @if (activeDrawer() === 'ai') {
+    <section class="fixed top-18 right-18 sm:right-22 bottom-6 w-[380px] sm:w-[420px] max-w-[calc(100vw-5.5rem)] z-50 rounded-3xl bg-slate-900/95 backdrop-blur-2xl border border-slate-700/80 shadow-2xl flex flex-col overflow-hidden animate-slide-in">
+      <!-- Header Drawer -->
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-xl bg-blue-600/20 text-blue-400 flex items-center justify-center border border-blue-500/30">
+            <app-icon name="sparkles" [size]="16" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-white">Asistente IA (Vexi)</h3>
+            <p class="text-[11px] text-slate-400">Edición en lenguaje natural en tiempo real</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          (click)="closeDrawer()"
+          class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+        >
+          <app-icon name="x" [size]="16" />
+        </button>
+      </div>
+
+      <!-- Contenido Drawer -->
+      <div class="flex-1 p-5 overflow-y-auto space-y-4 text-xs custom-scroll">
+        <!-- Input de Lenguaje Natural -->
+        <div class="rounded-2xl border border-slate-700 bg-slate-950/70 p-4 space-y-3">
+          <label class="block text-[11px] font-bold text-slate-300">
+            ¿Qué deseas cambiar en tu landing?
+          </label>
+          <textarea
+            [(ngModel)]="naturalPrompt"
+            rows="3"
+            placeholder="Ej: Destaca garantía de 1 año, agrega preguntas frecuentes y cambia los colores a tonos oscuros..."
+            class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
+          ></textarea>
+
+          <button
+            type="button"
+            (click)="processNaturalPrompt()"
+            [disabled]="isProcessingAi() || !naturalPrompt().trim()"
+            class="w-full py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+          >
+            @if (isProcessingAi()) {
+              <span class="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+              <span>Procesando instrucción con IA...</span>
+            } @else {
+              <app-icon name="sparkles" [size]="14" />
+              <span>Aplicar al Lienzo</span>
+            }
+          </button>
+        </div>
+
+        <!-- Sugerencias Rápidas -->
+        <div>
+          <span class="text-[11px] font-bold text-slate-400 mb-2 block">Sugerencias rápidas en un clic:</span>
+          <div class="flex flex-col gap-1.5">
+            @for (sp of quickPrompts; track sp) {
+              <button
+                type="button"
+                (click)="setQuickPrompt(sp)"
+                class="text-left p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/60 text-slate-300 hover:text-white transition-all text-[11px] flex items-center justify-between gap-2 cursor-pointer"
+              >
+                <span class="truncate">{{ sp }}</span>
+                <app-icon name="arrow-right" [size]="12" class="text-blue-400 shrink-0" />
+              </button>
+            }
+          </div>
+        </div>
+
+        <!-- Tarjeta Agéntica para Vexi -->
+        <div class="rounded-2xl border border-blue-500/30 bg-blue-950/30 p-4 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] font-bold text-blue-300 flex items-center gap-1.5">
+              <app-icon name="cpu" [size]="14" />
+              Instrucción Agéntica
+            </span>
+            <button
+              type="button"
+              (click)="copyAgenticInstruction()"
+              class="px-2 py-1 rounded-lg bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/40 text-blue-200 text-[10px] font-semibold cursor-pointer flex items-center gap-1"
+            >
+              <app-icon [name]="copiedPrompt() ? 'check' : 'copy'" [size]="11" />
+              <span>{{ copiedPrompt() ? 'Copiado' : 'Copiar' }}</span>
+            </button>
+          </div>
+          <p class="text-[11px] text-blue-200/80 leading-relaxed font-mono">
+            1. Análisis comercial → 2. Generación de bloques → 3. Estilos Vendix → 4. Módulos → 5. Despliegue.
+          </p>
+        </div>
+      </div>
+    </section>
+  }
+
+  <!-- DRAWER: ESTRUCTURA DE SECCIONES -->
+  @if (activeDrawer() === 'structure') {
+    <section class="fixed top-18 right-18 sm:right-22 bottom-6 w-[380px] sm:w-[420px] max-w-[calc(100vw-5.5rem)] z-50 rounded-3xl bg-slate-900/95 backdrop-blur-2xl border border-slate-700/80 shadow-2xl flex flex-col overflow-hidden animate-slide-in">
+      <!-- Header -->
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+            <app-icon name="layers" [size]="16" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-white">Estructura de la Landing</h3>
+            <p class="text-[11px] text-slate-400">{{ blocks().length }} secciones en el lienzo</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          (click)="closeDrawer()"
+          class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+        >
+          <app-icon name="x" [size]="16" />
+        </button>
+      </div>
+
+      <!-- Botón Agregar Sección -->
+      <div class="p-4 border-b border-slate-800">
+        <button
+          type="button"
+          (click)="openAddCatalog()"
+          class="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+        >
+          <app-icon name="plus" [size]="14" />
+          <span>Añadir Nueva Sección</span>
+        </button>
+      </div>
+
+      <!-- Lista de Bloques -->
+      <div class="flex-1 p-4 overflow-y-auto space-y-2.5 custom-scroll">
+        @for (b of blocks(); track b.id; let i = $index) {
+          <div
+            class="flex items-center justify-between p-3 rounded-2xl border border-slate-800 bg-slate-950/60 hover:border-slate-700 transition-all select-none"
+            [class.ring-2]="selectedIndex() === i"
+            [class.ring-blue-500]="selectedIndex() === i"
+          >
+            <!-- Detalle bloque -->
+            <div
+              class="flex items-center gap-3 min-w-0 cursor-pointer flex-grow"
+              (click)="selectBlock(i)"
+            >
+              <div class="w-9 h-9 rounded-xl bg-slate-800 flex items-center justify-center text-slate-300 shrink-0">
+                <app-icon [name]="iconFor(b.type)" [size]="16" />
+              </div>
+              <div class="min-w-0">
+                <span class="text-xs font-bold text-white block truncate">
+                  {{ labelFor(b.type) }}
+                </span>
+                <span class="text-[10px] text-slate-400 block truncate">
+                  #{{ i + 1 }} · {{ subtitleFor(b.type) }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Acciones: Subir, Bajar, Editar, Borrar -->
+            <div class="flex items-center gap-1 shrink-0 ml-2">
+              <button
+                type="button"
+                [disabled]="i === 0"
+                (click)="moveBlock(i, -1)"
+                class="p-1.5 rounded-lg border border-slate-800 bg-slate-800/80 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-300 cursor-pointer"
+                title="Mover arriba"
+              >
+                <app-icon name="arrow-up" [size]="12" />
+              </button>
+              <button
+                type="button"
+                [disabled]="i === blocks().length - 1"
+                (click)="moveBlock(i, 1)"
+                class="p-1.5 rounded-lg border border-slate-800 bg-slate-800/80 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-slate-300 cursor-pointer"
+                title="Mover abajo"
+              >
+                <app-icon name="arrow-down" [size]="12" />
+              </button>
+              <button
+                type="button"
+                (click)="selectBlock(i)"
+                class="p-1.5 rounded-lg border border-slate-800 bg-slate-800/80 hover:bg-blue-600 hover:text-white text-slate-300 cursor-pointer"
+                title="Editar propiedades"
+              >
+                <app-icon name="pencil" [size]="12" />
+              </button>
+              <button
+                type="button"
+                (click)="removeBlock(i)"
+                class="p-1.5 rounded-lg border border-red-900/40 bg-red-950/30 hover:bg-red-600 hover:text-white text-red-400 cursor-pointer"
+                title="Eliminar"
+              >
+                <app-icon name="trash" [size]="12" />
+              </button>
+            </div>
+          </div>
+        }
+      </div>
+    </section>
+  }
+
+  <!-- DRAWER: EDITAR PROPIEDADES DE UN BLOQUE SELECCIONADO -->
+  @if (activeDrawer() === 'edit-block' && selectedBlock()) {
+    <section class="fixed top-18 right-18 sm:right-22 bottom-6 w-[380px] sm:w-[420px] max-w-[calc(100vw-5.5rem)] z-50 rounded-3xl bg-slate-900/95 backdrop-blur-2xl border border-slate-700/80 shadow-2xl flex flex-col overflow-hidden animate-slide-in">
+      <!-- Header -->
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            (click)="deselectBlock()"
+            class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+            title="Volver a la estructura"
+          >
+            <app-icon name="arrow-left" [size]="14" />
+          </button>
+          <div>
+            <h3 class="text-sm font-bold text-white">{{ labelFor(selectedBlock()!.type) }}</h3>
+            <p class="text-[10px] text-slate-400">Edición en vivo sobre el lienzo</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          (click)="closeDrawer()"
+          class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+        >
+          <app-icon name="x" [size]="16" />
+        </button>
+      </div>
+
+      <!-- Campos editables del bloque -->
+      <div class="flex-1 p-5 overflow-y-auto space-y-4 custom-scroll">
+        @for (f of selectedBlockFields(); track f.key) {
+          <div class="space-y-1.5">
+            <label class="block text-[11px] font-bold text-slate-300">
+              {{ f.label }}
+            </label>
+
+            @if (f.multiline) {
+              <textarea
+                [ngModel]="selectedBlock()?.props?.[f.key] || ''"
+                (ngModelChange)="updateProp(f.key, $event)"
+                rows="3"
+                [placeholder]="f.placeholder || ''"
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500 transition-colors"
+              ></textarea>
+            } @else {
+              <input
+                type="text"
+                [ngModel]="selectedBlock()?.props?.[f.key] || ''"
+                (ngModelChange)="updateProp(f.key, $event)"
+                [placeholder]="f.placeholder || ''"
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-blue-500 transition-colors"
+              />
+            }
+          </div>
+        }
+
+        <div class="pt-4 border-t border-slate-800 flex items-center justify-between">
+          <button
+            type="button"
+            (click)="deselectBlock()"
+            class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer"
+          >
+            ← Volver a la Lista
+          </button>
+          <button
+            type="button"
+            (click)="saveLanding()"
+            class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs cursor-pointer"
+          >
+            Guardar Cambios
+          </button>
+        </div>
+      </div>
+    </section>
+  }
+
+  <!-- DRAWER: ESTILOS & PRESETS -->
+  @if (activeDrawer() === 'styles') {
+    <section class="fixed top-18 right-18 sm:right-22 bottom-6 w-[380px] sm:w-[420px] max-w-[calc(100vw-5.5rem)] z-50 rounded-3xl bg-slate-900/95 backdrop-blur-2xl border border-slate-700/80 shadow-2xl flex flex-col overflow-hidden animate-slide-in">
+      <!-- Header -->
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-xl bg-purple-600/20 text-purple-400 flex items-center justify-center border border-purple-500/30">
+            <app-icon name="palette" [size]="16" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-white">Estilos Prediseñados</h3>
+            <p class="text-[11px] text-slate-400">Aplica paletas y curvas al instante</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          (click)="closeDrawer()"
+          class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+        >
+          <app-icon name="x" [size]="16" />
+        </button>
+      </div>
+
+      <!-- Lista de Presets -->
+      <div class="flex-1 p-5 overflow-y-auto space-y-3 custom-scroll">
+        @for (preset of stylePresets; track preset.id) {
+          <div
+            (click)="applyPreset(preset)"
+            class="p-4 rounded-2xl border border-slate-800 bg-slate-950/60 hover:border-purple-500/60 hover:bg-slate-900/80 transition-all cursor-pointer space-y-2.5 group"
+          >
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold text-white group-hover:text-purple-300 transition-colors">
+                {{ preset.name }}
+              </span>
+              <span class="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-purple-950/60 text-purple-300 border border-purple-800/40">
+                {{ preset.accent_badge }}
+              </span>
+            </div>
+
+            <p class="text-[11px] text-slate-400 line-clamp-2">
+              {{ preset.description }}
+            </p>
+
+            <div class="flex items-center justify-between pt-1">
+              <div class="flex items-center gap-2">
+                <span class="w-5 h-5 rounded-full border border-slate-700 shadow-xs" [style.background-color]="preset.primary_color"></span>
+                <span class="w-5 h-5 rounded-full border border-slate-700 shadow-xs" [style.background-color]="preset.secondary_color"></span>
+              </div>
+              <span class="text-[10px] text-slate-400 font-mono">
+                {{ preset.font_style }}
+              </span>
+            </div>
+          </div>
+        }
+      </div>
+    </section>
+  }
+
+  <!-- DRAWER: MÓDULOS VENDIX -->
+  @if (activeDrawer() === 'modules') {
+    <section class="fixed top-18 right-18 sm:right-22 bottom-6 w-[380px] sm:w-[420px] max-w-[calc(100vw-5.5rem)] z-50 rounded-3xl bg-slate-900/95 backdrop-blur-2xl border border-slate-700/80 shadow-2xl flex flex-col overflow-hidden animate-slide-in">
+      <!-- Header -->
+      <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-xl bg-amber-600/20 text-amber-400 flex items-center justify-center border border-amber-500/30">
+            <app-icon name="puzzle" [size]="16" />
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-white">Módulos de Vendix</h3>
+            <p class="text-[11px] text-slate-400">Conecta inventario, chat y geolocalización</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          (click)="closeDrawer()"
+          class="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+        >
+          <app-icon name="x" [size]="16" />
+        </button>
+      </div>
+
+      <!-- Tarjetas de Módulos -->
+      <div class="flex-1 p-5 overflow-y-auto space-y-3.5 custom-scroll">
+        @for (mod of vendixModules(); track mod.id) {
+          <div class="p-4 rounded-2xl border border-slate-800 bg-slate-950/60 space-y-3">
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex items-center gap-2.5">
+                <div class="w-8 h-8 rounded-xl bg-slate-800 text-amber-400 flex items-center justify-center shrink-0">
+                  <app-icon [name]="mod.icon" [size]="16" />
+                </div>
+                <div>
+                  <h4 class="text-xs font-bold text-white">{{ mod.name }}</h4>
+                  <span class="text-[10px] text-slate-400">{{ mod.statusBadge }}</span>
+                </div>
+              </div>
+
+              <!-- Switch Activar / Desactivar -->
+              <button
+                type="button"
+                (click)="toggleVendixModule(mod.id)"
+                class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                [class]="mod.enabled ? 'bg-emerald-500' : 'bg-slate-700'"
+              >
+                <span
+                  class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out"
+                  [class]="mod.enabled ? 'translate-x-4' : 'translate-x-0'"
+                ></span>
+              </button>
+            </div>
+
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              {{ mod.description }}
+            </p>
+          </div>
+        }
+      </div>
+    </section>
+  }
+
+  <!-- ==================== 5. MODAL: CATÁLOGO DE NUEVAS SECCIONES ==================== -->
+  @if (catalogModalOpen()) {
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
+      <div class="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        
+        <!-- Header Catálogo -->
+        <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+          <div>
+            <h3 class="text-sm sm:text-base font-bold text-white">Catálogo de Secciones Prediseñadas</h3>
+            <p class="text-xs text-slate-400">Selecciona el bloque que deseas insertar en tu landing</p>
+          </div>
+          <button
+            type="button"
+            (click)="closeAddCatalog()"
+            class="p-2 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+          >
+            <app-icon name="x" [size]="18" />
+          </button>
+        </div>
+
+        <!-- Filtro por Categorías -->
+        <div class="px-6 py-2.5 border-b border-slate-800 flex items-center gap-2 overflow-x-auto no-scrollbar">
+          <button
+            type="button"
+            (click)="catalogCategory.set('all')"
+            class="px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer shrink-0"
+            [class]="catalogCategory() === 'all' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'"
+          >
+            Todas
+          </button>
+          <button
+            type="button"
+            (click)="catalogCategory.set('hero')"
+            class="px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer shrink-0"
+            [class]="catalogCategory() === 'hero' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'"
+          >
+            Hero & Portada
+          </button>
+          <button
+            type="button"
+            (click)="catalogCategory.set('products')"
+            class="px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer shrink-0"
+            [class]="catalogCategory() === 'products' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'"
+          >
+            Productos & Vitrina
+          </button>
+          <button
+            type="button"
+            (click)="catalogCategory.set('trust')"
+            class="px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer shrink-0"
+            [class]="catalogCategory() === 'trust' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'"
+          >
+            Confianza & Social Proof
+          </button>
+          <button
+            type="button"
+            (click)="catalogCategory.set('contact')"
+            class="px-3 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer shrink-0"
+            [class]="catalogCategory() === 'contact' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'"
+          >
+            Contacto & Sedes
+          </button>
+        </div>
+
+        <!-- Grid de Secciones -->
+        <div class="p-6 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-3.5 custom-scroll">
+          @for (item of filteredCatalog(); track item.type) {
+            <div
+              (click)="addBlockFromCatalog(item.type)"
+              class="p-4 rounded-2xl border border-slate-800 bg-slate-950/70 hover:border-emerald-500/60 hover:bg-slate-800/80 transition-all cursor-pointer flex items-start gap-3.5 group"
+            >
+              <div class="w-10 h-10 rounded-xl bg-slate-800 group-hover:bg-emerald-600/20 text-slate-300 group-hover:text-emerald-400 flex items-center justify-center shrink-0 transition-colors">
+                <app-icon [name]="iconFor(item.type)" [size]="20" />
+              </div>
+              <div class="min-w-0">
+                <h4 class="text-xs font-bold text-white group-hover:text-emerald-300 transition-colors">
+                  {{ item.label }}
+                </h4>
+                <p class="text-[11px] text-slate-400 mt-1 line-clamp-2">
+                  {{ item.description }}
+                </p>
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+  }
+</div>

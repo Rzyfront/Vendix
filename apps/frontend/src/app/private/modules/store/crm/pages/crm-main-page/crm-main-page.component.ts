@@ -1,4 +1,5 @@
 import { Component, computed, inject, signal, DestroyRef } from '@angular/core';
+import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { interval, switchMap, take, takeWhile } from 'rxjs';
 import { CommonModule } from '@angular/common';
@@ -19,8 +20,6 @@ import {
   StickyHeaderActionButton,
   StickyHeaderTab,
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
-import { CrmEditorComponent } from '../crm-editor/crm-editor.component';
-import { CrmAiStudioComponent } from '../crm-ai-studio/crm-ai-studio.component';
 import { CrmLeadsComponent } from '../crm-leads/crm-leads.component';
 
 const STATUS_LABELS: Record<CrmGenerationStatus, string> = {
@@ -31,7 +30,7 @@ const STATUS_LABELS: Record<CrmGenerationStatus, string> = {
   failed: 'Generación manual requerida',
 };
 
-export type CrmTab = 'estado' | 'diseno' | 'ai-studio' | 'leads';
+export type CrmTab = 'estado' | 'builder' | 'leads';
 
 @Component({
   selector: 'app-crm-main-page',
@@ -40,8 +39,6 @@ export type CrmTab = 'estado' | 'diseno' | 'ai-studio' | 'leads';
     IconComponent,
     ButtonComponent,
     StickyHeaderComponent,
-    CrmEditorComponent,
-    CrmAiStudioComponent,
     CrmLeadsComponent,
   ],
   templateUrl: './crm-main-page.component.html',
@@ -51,6 +48,7 @@ export class CrmMainPageComponent {
   private readonly crmService = inject(CrmService);
   private readonly authFacade = inject(AuthFacade);
   private readonly toast = inject(ToastService);
+  private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly storeDomainHostname = this.authFacade.userDomainHostname;
@@ -72,20 +70,12 @@ export class CrmMainPageComponent {
         description: 'Supervisa el estado del CRM, versión del borrador y regeneración inteligente.',
       },
       {
-        id: 'diseno',
-        label: 'Editor y Diseño',
-        shortLabel: 'Diseño',
-        icon: 'palette',
-        disabled: !state?.enabled,
-        description: 'Edita los bloques visuales, textos, productos destacados y vista previa de tu landing.',
-      },
-      {
-        id: 'ai-studio',
-        label: 'Asistente IA & Estilos',
-        shortLabel: 'IA Studio',
+        id: 'builder',
+        label: 'Diseñador en Vivo & IA',
+        shortLabel: 'Diseñador',
         icon: 'sparkles',
         disabled: !state?.enabled,
-        description: 'Edita con lenguaje natural, aplica plantillas prediseñadas e integra módulos Vendix.',
+        description: 'Lienzo en tiempo real a pantalla completa con dock flotante de IA, estilos y bloques.',
       },
       {
         id: 'leads',
@@ -125,40 +115,28 @@ export class CrmMainPageComponent {
           disabled: isBusy,
         },
         {
-          id: 'edit_design',
-          label: 'Editar Landing',
+          id: 'open_builder',
+          label: 'Abrir Diseñador',
           variant: 'primary',
-          icon: 'edit-3',
+          icon: 'sparkles',
           disabled: isBusy || (!this.hasDraft() && state.generation_status !== 'ready'),
         },
       ];
     }
 
-    return [
-      {
-        id: 'discard',
-        label: 'Descartar',
-        variant: 'ghost',
-        icon: 'rotate-ccw',
-        disabled: isBusy || !this.pendingDocument(),
-      },
-      {
-        id: 'save_draft',
-        label: 'Guardar Borrador',
-        variant: 'outline',
-        icon: 'save',
-        loading: isBusy,
-        disabled: isBusy,
-      },
-      {
-        id: 'publish',
-        label: 'Publicar Landing',
-        variant: 'primary',
-        icon: 'globe',
-        loading: isBusy,
-        disabled: isBusy,
-      },
-    ];
+    if (currentTab === 'builder') {
+      return [
+        {
+          id: 'open_builder',
+          label: 'Pantalla Completa ↗',
+          variant: 'primary',
+          icon: 'maximize-2',
+          disabled: isBusy,
+        },
+      ];
+    }
+
+    return [];
   });
 
   readonly statusLabel = computed(() => {
@@ -194,6 +172,10 @@ export class CrmMainPageComponent {
     this.toast.info('Borrador descartado');
   }
 
+  openLiveBuilder(): void {
+    this.router.navigate(['/admin/customers/crm/builder']);
+  }
+
   onHeaderAction(actionId: string): void {
     switch (actionId) {
       case 'activate':
@@ -202,8 +184,9 @@ export class CrmMainPageComponent {
       case 'regenerate':
         this.regenerate();
         break;
+      case 'open_builder':
       case 'edit_design':
-        this.setTab('diseno');
+        this.openLiveBuilder();
         break;
       case 'discard':
         this.discardChanges();
@@ -357,7 +340,7 @@ export class CrmMainPageComponent {
             this.loadLanding();
             if (status === 'completed') {
               this.toast.success('¡Tu landing está lista!');
-              this.tab.set('diseno');
+              this.tab.set('builder');
             } else {
               this.toast.error(
                 res.data?.error || 'La generación terminó con error',

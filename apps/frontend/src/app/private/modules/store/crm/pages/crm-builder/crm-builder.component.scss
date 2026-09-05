@@ -1,0 +1,70 @@
+:host {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* Custom Scrollbar for sleek dark panels */
+.custom-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.2) transparent;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.2);
+    border-radius: 9999px;
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(148, 163, 184, 0.4);
+  }
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Smartphone realistic chassis */
+.smartphone-chassis {
+  box-shadow: 
+    0 25px 50px -12px rgba(0, 0, 0, 0.8),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 40px -10px rgba(59, 130, 246, 0.2);
+}
+
+.smartphone-screen {
+  background-color: #ffffff;
+}
+
+:host-context(.dark) .smartphone-screen {
+  background-color: #09090b;
+}
+
+/* Slide in animation for floating drawers */
+@keyframes slideInFromRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.animate-slide-in {
+  animation: slideInFromRight 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
