@@ -56,7 +56,7 @@
              fulfillment()/checkoutTableId()/needsTable(). Elegir mesa aquí NO
              escribe nada: la mesa se materializa en el cobro (QUI-535). -->
         @if (stepKeys().includes('consumo')) {
-          <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'consumo'">
+          <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'consumo'">
             <app-pos-consumo-step
               [cartState]="cartState()"
               [tableId]="tableId()"
@@ -69,7 +69,7 @@
              mientras 'cobro' esté en stepKeys para que el footer lea sus señales
              y triggerSubmit() funcione desde cualquier paso. -->
         @if (stepKeys().includes('cobro')) {
-          <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'cobro'">
+          <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'cobro'">
             <app-pos-payment-step
               [cartState]="cartState()"
               [checkoutIntent]="checkoutIntent()"
@@ -99,7 +99,7 @@
              [Tipo, Cliente, Dirección]. Espeja Cobro/Envío. QUI-482: volver a un
              sub-paso NO resetea cliente/dirección (colapso presentacional). -->
         @if (stepKeys().includes('cliente')) {
-        <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'cliente'">
+        <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'cliente'">
           <div class="cliente-grid">
             <div class="cliente-main">
               <!-- SUB-STEP 0 · Tipo (Venta Anónima / Con Cliente) -->
@@ -405,7 +405,7 @@
         <!-- Paso · Envío (delivery). Montado mientras 'envio' esté en stepKeys
              para que el footer lea shippingCost/canConfirm/isProcessing. -->
         @if (stepKeys().includes('envio')) {
-          <div class="step-panel" [class.step-hidden]="currentStepKey() !== 'envio'">
+          <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'envio'">
             <app-pos-shipping-step
               [cartState]="cartState()"
               [address]="capturedAddress()"
