@@ -399,6 +399,10 @@ export class CheckoutComponent implements OnInit {
     private route: ActivatedRoute,
     private fb: FormBuilder,
   ) {
+    // Limpieza del debounce de recotización al salir del checkout.
+    this.destroyRef.onDestroy(() => {
+      if (this.shipping_fetch_timer) clearTimeout(this.shipping_fetch_timer);
+    });
     this.initForm();
 
     // Offer location capture ONCE — the first time the customer is on the
@@ -445,8 +449,11 @@ export class CheckoutComponent implements OnInit {
         void fresh;
         const key = this.currentAddressKey();
         if (!key || key === this.shipping_quote_key) return;
+        // Anti-carrera A→B→A (auditoría D.3): solo la última clave programa;
+        // al disparar se revalida que siga vigente antes de cotizar.
         if (this.shipping_fetch_timer) clearTimeout(this.shipping_fetch_timer);
         this.shipping_fetch_timer = setTimeout(() => {
+          if (this.currentAddressKey() !== key) return;
           void this.refreshShippingQuote(key);
         }, 600);
       });
@@ -457,9 +464,14 @@ export class CheckoutComponent implements OnInit {
     // Asegurar que la moneda esté cargada para mostrar precios correctamente
     this.currencyService.loadCurrency();
 
-    this.is_whatsapp_channel.set(
-      this.route.snapshot.queryParamMap.get('channel') === 'whatsapp',
-    );
+    // Canal reactivo (no solo snapshot): si el componente se reutiliza entre
+    // navegaciones carrito→checkout, el snapshot quedaría obsoleto y el
+    // wa.me se abriría (o no) en el flujo equivocado (auditoría D.3).
+    this.route.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((params) => {
+        this.is_whatsapp_channel.set(params.get('channel') === 'whatsapp');
+      });
 
     this.auth_facade.isAuthenticated$
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -827,10 +839,10 @@ export class CheckoutComponent implements OnInit {
     // Load payment methods (initially without shipping type filter)
     this.loadPaymentMethods();
 
-    // Paso 1 delivery-first: tipos de entrega de la tienda + dirección para
-    // la tarjeta de "recoger" (prefetch; solo se muestran con físicos).
+    // Paso 1 delivery-first: tipos de entrega de la tienda. La dirección
+    // para "recoger" es lazy (la carga `preparePickupQuote` al elegir el
+    // modo) para no pagar un HTTP que la mayoría no usa (auditoría D.3).
     this.loadDeliveryOptions();
-    this.loadStoreAddress();
 
     if (!isAuthenticated) {
       this.is_loading.set(false);
@@ -1408,13 +1420,33 @@ export class CheckoutComponent implements OnInit {
         this.loading_delivery_options.set(false);
         if (!response.success) return;
         this.delivery_options.set(response.data ?? []);
+        if (this.delivery_options().length === 0) {
+          // Tienda sin métodos de envío activos: el paso 0 quedaría vacío
+          // sin explicación (auditoría D.3).
+          this.error_message.set(
+            'Esta tienda aún no tiene formas de entrega configuradas. Comunícate con la tienda para coordinar.',
+          );
+          return;
+        }
         const hasHome = this.offersHomeDelivery();
         const hasPickup = this.offersPickup();
         if (hasHome && !hasPickup) this.selectDelivery('home');
         else if (hasPickup && !hasHome) this.selectDelivery('pickup');
       },
-      error: () => {
+      error: (err) => {
         this.loading_delivery_options.set(false);
+        // Telemetría como el resto del checkout (patrón QUI-728).
+        // eslint-disable-next-line no-console
+        console.error('[checkout] getDeliveryOptions() failed:', err);
+        // Paso 0 vacío sin mensaje = comprador bloqueado sin acción
+        // (auditoría D.3): se informa y se puede reintentar al reentrar.
+        this.error_message.set(
+          'No pudimos cargar las formas de entrega. Revisa tu conexión e intenta de nuevo.',
+        );
+        this.toast.error(
+          'No pudimos cargar las formas de entrega',
+          'Error de entrega',
+        );
       },
     });
   }
@@ -1509,8 +1541,12 @@ export class CheckoutComponent implements OnInit {
       address = saved ? this.mapAddressToCalc(saved) : null;
     }
     if (!address) return Promise.resolve();
-    const p = this.fetchShipping(address, false, true).then(() => {
-      this.shipping_quote_key = key;
+    const p = this.fetchShipping(address, false, true, key).then(() => {
+      // Solo sella si la dirección no cambió durante el vuelo (la respuesta
+      // lenta de una clave vieja nunca pisa la cotización vigente).
+      if (this.currentAddressKey() === key) {
+        this.shipping_quote_key = key;
+      }
     });
     this.shipping_fetch_promise = p;
     return p;
@@ -1614,7 +1650,12 @@ export class CheckoutComponent implements OnInit {
     return value;
   }
 
-  fetchShipping(address: any, notify = true, quiet = false): Promise<void> {
+  fetchShipping(
+    address: any,
+    notify = true,
+    quiet = false,
+    quoteKey?: string,
+  ): Promise<void> {
     // `quiet` = recotización de fondo del paso 1 delivery-first: no tapa la
     // pantalla con el spinner global ni spamea toasts (el estado vive en
     // `loading_shipping()` junto a la lista de opciones).
@@ -1624,6 +1665,12 @@ export class CheckoutComponent implements OnInit {
     return new Promise<void>((resolve) => {
       this.cart_service.getShippingEstimates(address).subscribe({
         next: (options) => {
+          // Anti-carrera: la respuesta lenta de una dirección vieja se
+          // descarta antes de tocar signals (auditoría D.3).
+          if (quoteKey && this.currentAddressKey() !== quoteKey) {
+            resolve();
+            return;
+          }
           this.shipping_options.set(options);
 
           if (options.length > 0) {
@@ -1731,12 +1778,21 @@ export class CheckoutComponent implements OnInit {
     }
   }
 
+  /**
+   * Defensa en profundidad (auditoría D.3): aunque el backend ya excluye
+   * `cash` del ecommerce, la UI nunca lo renderiza aunque regresara por
+   * error. El único freno real sigue siendo el POST (ECOM_CHECKOUT_002).
+   */
+  private withoutCash(methods: PaymentMethod[]): PaymentMethod[] {
+    return (methods ?? []).filter((m) => m?.type !== 'cash');
+  }
+
   loadPaymentMethods(shippingType?: string): void {
     this.loading_payment_methods = true;
     this.checkout_service.getPaymentMethods(shippingType).subscribe({
       next: (response) => {
         if (response.success) {
-          this.payment_methods.set(response.data);
+          this.payment_methods.set(this.withoutCash(response.data));
 
           // Reset selection if current method is no longer available
           if (this.selected_payment_method_id()) {
@@ -2300,6 +2356,12 @@ export class CheckoutComponent implements OnInit {
         const msg = extractApiErrorMessage(err);
         this.error_message.set(msg);
         this.toast.error(msg, 'Error al procesar el pedido');
+        // La decisión guest que llevó a un pedido fallido se deshace: al
+        // pulsar "Finalizar" de nuevo el modal vuelve a abrirse en vez de
+        // reintentar a ciegas contra el mismo 400 (auditoría D.3).
+        if (!this.is_authenticated()) {
+          this.guest_data_decision_made = false;
+        }
       },
     });
   }

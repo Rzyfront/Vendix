@@ -1272,8 +1272,12 @@ export class CheckoutService {
         throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_003);
       }
 
-      // Verificar que la zona pertenece a la tienda
-      if (rate.shipping_zone.store_id !== store_id) {
+      // Verificar que la zona pertenece a la tienda (null-guard: zona o
+      // método borrados → 400 registrado, nunca TypeError 500).
+      if (
+        rate.shipping_zone?.store_id !== store_id ||
+        rate.shipping_method == null
+      ) {
         throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_003);
       }
 
@@ -1303,7 +1307,10 @@ export class CheckoutService {
       }
 
       shipping_method_id = method.id;
-      // En este caso, shipping_cost queda en 0 o se debería recalcular
+      // Sin rate el costo queda en 0, pero el tipo SÍ se deriva: sin esto un
+      // retiro por method_id quedaba 'direct_delivery' y exigía dirección
+      // aunque fuera pickup (auditoría D.3).
+      delivery_type = deriveDeliveryType(method.type);
     }
 
     if (
@@ -1450,7 +1457,9 @@ export class CheckoutService {
       identified: Boolean(
         resolved_customer_id || guest_customer?.document_number,
       ),
-      channel: 'ecommerce',
+      // Mismo canal que se persiste en la orden (ADR-1: el núcleo no diverge
+      // por canal; el umbral DIAN debe evaluar el canal real).
+      channel: dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
     });
 
     // store_id y customer_id (user_id) se inyectan automáticamente
@@ -1534,6 +1543,7 @@ export class CheckoutService {
       order_number: order.order_number,
       grand_total: Number(order.grand_total),
       currency: order.currency,
+      channel: order.channel,
     });
 
     // Upload payment receipt to S3 if the selected method is bank_transfer
@@ -1699,7 +1709,9 @@ export class CheckoutService {
     return {
       order_id: order.id,
       order_number: order.order_number,
-      total: order.grand_total,
+      // Contrato numérico: Prisma devuelve Decimal (serializa como string);
+      // el storefront tipa `total: number` (auditoría D.3).
+      total: this.roundMoney(Number(order.grand_total)),
       subtotal,
       tax_amount: total_tax,
       discount_amount: discountResult.total_discount,
@@ -2252,6 +2264,7 @@ export class CheckoutService {
       order_number: order.order_number,
       grand_total: Number(order.grand_total),
       currency: order.currency,
+      channel: order.channel,
     });
 
     // Bucle POR ÍNDICE: dos líneas del mismo producto en presentaciones

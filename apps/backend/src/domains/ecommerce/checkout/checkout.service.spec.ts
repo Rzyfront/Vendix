@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CheckoutService } from './checkout.service';
+import { StorefrontPriceService } from '../shared/services/storefront-price.service';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CartService } from '../cart/cart.service';
@@ -173,6 +174,15 @@ describe('CheckoutService - promotions and coupons', () => {
         }),
         findMany: jest.fn().mockResolvedValue([]),
       },
+      // Rotura preexistente (commit multi-tarifa 28012c4d2): el núcleo usa
+      // `resolveDefaultSaleUnits(this.prisma, …)` y el mock no tenía estas
+      // tablas → TypeError. Sin tiers en fixtures: ambas vacías.
+      product_price_tier_assignments: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      product_price_tier_overrides: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       addresses: {
         create: jest.fn(),
         findUnique: jest.fn(),
@@ -317,6 +327,25 @@ describe('CheckoutService - promotions and coupons', () => {
           provide: MenuAvailabilityCheckerService,
           useValue: {
             getBlockedProductIds: jest.fn().mockResolvedValue(new Set<number>()),
+          },
+        },
+        // Rotura preexistente (commit multi-tarifa 28012c4d2): el servicio
+        // exige StorefrontPriceService y el spec no lo proveía → el módulo
+        // ni siquiera instanciaba. Mock con precio base del producto.
+        {
+          provide: StorefrontPriceService,
+          useValue: {
+            resolveLine: jest.fn(({ product }: any) => ({
+              net_unit_price: Number(product?.price ?? 0),
+              gross_unit_price: Number(product?.price ?? 0),
+              compare_at_price: null,
+              tax_rate: 0,
+              applied_price_tier_id: null,
+              applied_price_tier_name: null,
+              pack_size: 1,
+              stock_units_consumed: null,
+              source: 'spec',
+            })),
           },
         },
       ],

@@ -938,6 +938,28 @@
     }
 }
 
+// Botonera debajo de la card de resumen: vive en la columna sticky de 360px,
+// apilada a ancho completo para que Continuar / Confirmar queden visibles
+// junto al total sin pelear espacio horizontal.
+.checkout-actions--summary {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    flex-direction: column;
+    align-items: stretch;
+
+    .checkout-actions__left {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    app-button {
+        width: 100%;
+    }
+}
+
 .summary-items {
     max-height: 200px;
     overflow-y: auto;
@@ -1161,7 +1183,9 @@
     margin-top: 1.5rem;
 }
 
-// C.3: mapa 50% enmarcado 9:16 tipo teléfono + formulario 50%.
+// C.3: mapa enmarcado tipo teléfono + formulario. En escritorio el marco
+// estira a lo alto de la fila y el mapa llena el espacio disponible; en
+// ≤992px (una columna) conserva alto fijo.
 .delivery-address-grid {
     display: grid;
     grid-template-columns: 5fr 6fr;
@@ -1171,6 +1195,10 @@
 
     @media (max-width: 992px) {
         grid-template-columns: 1fr;
+    }
+
+    @media (min-width: 993px) {
+        align-items: stretch;
     }
 }
 
@@ -1192,6 +1220,45 @@
     @media (max-width: 992px) {
         aspect-ratio: 16 / 10;
         max-height: 320px;
+    }
+
+    // Escritorio: el marco ocupa todo el alto disponible de la fila y el
+    // mapa (flex: 1) crece con él; el hint queda fijo abajo. Scoped al
+    // checkout para no afectar otros usos del picker.
+    @media (min-width: 993px) {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        min-height: 480px;
+        aspect-ratio: auto;
+        max-height: none;
+
+        app-address-map-picker {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .address-map-picker {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            min-height: 0;
+            margin-bottom: 0;
+        }
+
+        .amp-map {
+            flex: 1;
+            height: auto;
+            min-height: 320px;
+        }
+
+        .amp-skeleton,
+        .amp-error {
+            height: 100%;
+        }
     }
 }
 

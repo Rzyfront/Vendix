@@ -115,6 +115,14 @@
                     class="payment-card"
                     [class.selected]="selected_delivery() === 'home'"
                     (click)="selectDelivery('home')"
+                    (keydown.enter)="selectDelivery('home')"
+                    (keydown.space)="
+                      $event.preventDefault(); selectDelivery('home')
+                    "
+                    tabindex="0"
+                    role="radio"
+                    [attr.aria-checked]="selected_delivery() === 'home'"
+                    aria-label="Envío a domicilio"
                   >
                     <div class="payment-radio">
                       <span
@@ -136,6 +144,14 @@
                     class="payment-card"
                     [class.selected]="selected_delivery() === 'pickup'"
                     (click)="selectDelivery('pickup')"
+                    (keydown.enter)="selectDelivery('pickup')"
+                    (keydown.space)="
+                      $event.preventDefault(); selectDelivery('pickup')
+                    "
+                    tabindex="0"
+                    role="radio"
+                    [attr.aria-checked]="selected_delivery() === 'pickup'"
+                    aria-label="Recoger en tienda"
                   >
                     <div class="payment-radio">
                       <span
@@ -313,6 +329,19 @@
                     class="payment-card"
                     [class.selected]="selected_shipping_option_id === option.id"
                     (click)="selectShippingMethod(option, option.cost)"
+                    (keydown.enter)="
+                      selectShippingMethod(option, option.cost)
+                    "
+                    (keydown.space)="
+                      $event.preventDefault();
+                      selectShippingMethod(option, option.cost)
+                    "
+                    tabindex="0"
+                    role="radio"
+                    [attr.aria-checked]="
+                      selected_shipping_option_id === option.id
+                    "
+                    [attr.aria-label]="option.method_name"
                   >
                     <div class="payment-radio">
                       <span
@@ -844,78 +873,6 @@
           </div>
         }
 
-        <div class="checkout-actions">
-          @if (step() > 1) {
-            <div class="checkout-actions__left">
-              <app-button variant="outline" (clicked)="prevStep()">
-                <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
-                Anterior
-              </app-button>
-            </div>
-          } @else {
-            <div class="checkout-actions__left">
-              <app-button variant="outline" (clicked)="goToCart()">
-                <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
-                Volver al carrito
-              </app-button>
-              <!-- Paso 1 con booking: permite volver al wizard /book/:id para
-                   modificar horario / profesional / modalidad sin tener que
-                   pasar por el carrito. -->
-              <app-button variant="outline" (clicked)="changeSchedule()">
-                <app-icon slot="icon" name="calendar-clock" [size]="16"></app-icon>
-                Modificar reserva
-              </app-button>
-            </div>
-          }
-
-          @if (step() < confirmStep) {
-            <app-button
-              variant="primary"
-              (clicked)="nextStep()"
-              [disabled]="
-                (bookingStep !== null &&
-                  step() === bookingStep &&
-                  !allBookingSlotsSelected) ||
-                (step() === 1 &&
-                  !cartHasOnlyServices &&
-                  !canProceedFromAddress()) ||
-                (step() === paymentStep &&
-                  !cartHasOnlyServices &&
-                  shipping_options().length === 0)
-              "
-            >
-              Continuar
-              <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
-            </app-button>
-          } @else if (step() >= confirmStep) {
-            <app-button
-              variant="primary"
-              (clicked)="placeOrder()"
-              [loading]="is_submitting() || wompiWidgetLoading()"
-              [disabled]="is_submitting() || wompiWidgetLoading() || !canConfirmOrder()"
-              [title]="
-                !cartHasOnlyServices && shipping_options().length === 0
-                  ? 'No hay opciones de envío para esta ubicación'
-                  : null
-              "
-            >
-              @if (!is_submitting() && !wompiWidgetLoading()) {
-                <app-icon
-                  slot="icon"
-                  [name]="isWompiPayment() ? 'shield-check' : 'check'"
-                  [size]="16"
-                ></app-icon>
-              }
-              {{
-                is_submitting() || wompiWidgetLoading()
-                  ? "Procesando..."
-                  : isWompiPayment()
-                    ? "Pagar con Wompi"
-                    : (cartHasOnlyServices ? "Confirmar Reserva" : "Confirmar Pedido")
-              }}
-            </app-button>
-          }
-        </div>
       </div>
 
       <!-- Order Summary -->
@@ -1054,6 +1011,81 @@
                   shippingCost() | currency
               }}</span>
             </div>
+          }
+        </div>
+
+        <!-- Botonera de acciones: vive debajo de la card de resumen para que
+             Continuar / Confirmar queden siempre visibles junto al total. -->
+        <div class="checkout-actions checkout-actions--summary">
+          @if (step() > 1) {
+            <div class="checkout-actions__left">
+              <app-button variant="outline" (clicked)="prevStep()">
+                <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
+                Anterior
+              </app-button>
+            </div>
+          } @else {
+            <div class="checkout-actions__left">
+              <app-button variant="outline" (clicked)="goToCart()">
+                <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
+                Volver al carrito
+              </app-button>
+              <!-- Paso 1 con booking: permite volver al wizard /book/:id para
+                   modificar horario / profesional / modalidad sin tener que
+                   pasar por el carrito. -->
+              <app-button variant="outline" (clicked)="changeSchedule()">
+                <app-icon slot="icon" name="calendar-clock" [size]="16"></app-icon>
+                Modificar reserva
+              </app-button>
+            </div>
+          }
+
+          @if (step() < confirmStep) {
+            <app-button
+              variant="primary"
+              (clicked)="nextStep()"
+              [disabled]="
+                (bookingStep !== null &&
+                  step() === bookingStep &&
+                  !allBookingSlotsSelected) ||
+                (step() === 1 &&
+                  !cartHasOnlyServices &&
+                  !canProceedFromAddress()) ||
+                (step() === paymentStep &&
+                  !cartHasOnlyServices &&
+                  shipping_options().length === 0)
+              "
+            >
+              Continuar
+              <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
+            </app-button>
+          } @else if (step() >= confirmStep) {
+            <app-button
+              variant="primary"
+              (clicked)="placeOrder()"
+              [loading]="is_submitting() || wompiWidgetLoading()"
+              [disabled]="is_submitting() || wompiWidgetLoading() || !canConfirmOrder()"
+              [title]="
+                !cartHasOnlyServices && shipping_options().length === 0
+                  ? 'No hay opciones de envío para esta ubicación'
+                  : null
+              "
+            >
+              @if (!is_submitting() && !wompiWidgetLoading()) {
+                <app-icon
+                  slot="icon"
+                  [name]="isWompiPayment() ? 'shield-check' : 'check'"
+                  [size]="16"
+                ></app-icon>
+              }
+              {{
+                is_submitting() || wompiWidgetLoading()
+                  ? "Procesando..."
+                  : isWompiPayment()
+                    ? "Pagar con Wompi"
+                    : (cartHasOnlyServices ? "Confirmar Reserva" : "Confirmar Pedido")
+              }}
+            </app-button>
           }
         </div>
       </div>
