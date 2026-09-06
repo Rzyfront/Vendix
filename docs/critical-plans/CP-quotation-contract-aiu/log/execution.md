@@ -15,3 +15,4 @@
 | 2026-09-06 | orquestador | — | Requisito dueno: linea personalizada en cotizacion (como POS/factura); se suma paso B.3 | ef2c733ca |
 | 2026-09-06 | exec-C.2be | C.2 | GET base/:id + PATCH status con specs; rutas vivas en arranque dev | 5ef7c231c |
 | 2026-09-06 | exec-D.2be | D.2 | POST invoice + filtro contract_id, specs PASS verificados por orquestador | b627628a6 |
+| 2026-09-06 | orquestador | B.3 | Linea libre en modal + item_type custom; specs quotations PASS, watch OK | — |

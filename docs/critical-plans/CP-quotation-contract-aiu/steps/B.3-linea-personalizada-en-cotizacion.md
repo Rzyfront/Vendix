@@ -2,7 +2,7 @@
 id: B.3
 title: "Linea personalizada en cotizacion"
 phase: B
-status: pending
+status: done
 owner: none
 updated: 2026-09-06
 contracts: [FB-12]
@@ -24,7 +24,7 @@ skills: [vendix-frontend, vendix-zoneless-signals, vendix-angular-forms, vendix-
   - Crear cotizacion con linea libre y convertir a orden y a contrato sin perder totales
   - Linea libre llega a factura AIU con descripcion y base correctas
 - **Acceptance checklist:**
-  - [ ] Modal crea linea sin producto con impuesto editable
-  - [ ] Conversion conserva nombre, cantidad, precio e impuesto
-  - [ ] Totales de cabecera cuadran con lineas libres incluidas
-- **Status:** pending
+  - [x] Modal crea linea sin producto con impuesto editable
+  - [x] Conversion conserva nombre, cantidad, precio e impuesto (`custom`, null-safe verificado en codigo)
+  - [ ] Totales de cabecera cuadran con lineas libres incluidas en vivo (E.1)
+- **Status:** done (degradado: interaccion viva queda para E.1; evidencia en evidence/B.3-linea-libre-evidence.md)

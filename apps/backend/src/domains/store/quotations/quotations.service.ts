@@ -533,8 +533,10 @@ export class QuotationsService {
 
     const context = RequestContextService.getContext();
 
-    // Map quotation items to order items format
+    // Map quotation items to order items format. B.3: sin producto viaja
+    // como linea `custom` (el DTO de orden lo admite con product_id ausente).
     const orderItems = quotation.quotation_items.map((item: any) => ({
+      ...(item.product_id == null ? { item_type: 'custom' } : {}),
       product_id: item.product_id,
       product_variant_id: item.product_variant_id,
       product_name: item.product_name,

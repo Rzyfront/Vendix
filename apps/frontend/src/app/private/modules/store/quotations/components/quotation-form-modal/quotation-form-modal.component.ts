@@ -218,6 +218,14 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                 </div>
               }
             </div>
+            <button
+              type="button"
+              class="mt-2 w-full cursor-pointer rounded-md border border-dashed px-3 py-2 text-sm transition-colors hover:opacity-80"
+              style="border-color: var(--color-border); color: var(--color-text-secondary);"
+              (click)="addCustomLine()"
+            >
+              + Línea personalizada (sin producto)
+            </button>
           </div>
 
           <!-- Variant Selection -->
@@ -274,9 +282,19 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                     style="border-color: var(--color-border);"
                   >
                     <div class="flex min-w-0 flex-1 flex-col gap-1">
-                      <span class="truncate text-sm font-medium" style="color: var(--color-text-primary);">
-                        {{ itemGroup.get('product_name')?.value }}
-                      </span>
+                      @if (isCustomLine(itemGroup)) {
+                        <input
+                          type="text"
+                          formControlName="product_name"
+                          placeholder="Concepto de la línea..."
+                          class="w-full rounded border px-2 py-1 text-sm"
+                          style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 16px;"
+                        />
+                      } @else {
+                        <span class="truncate text-sm font-medium" style="color: var(--color-text-primary);">
+                          {{ itemGroup.get('product_name')?.value }}
+                        </span>
+                      }
                       @if (itemGroup.get('variant_sku')?.value) {
                         <span class="text-xs" style="color: var(--color-text-secondary);">
                           {{ itemGroup.get('variant_sku')?.value }}
@@ -315,9 +333,31 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                         (change)="recalculateItem(i)"
                       />
 
-                      <span class="whitespace-nowrap text-xs" style="color: var(--color-text-secondary);">
-                        {{ itemGroup.get('unit_price')?.value | currency }}
-                      </span>
+                      @if (isCustomLine(itemGroup)) {
+                        <input
+                          type="number"
+                          formControlName="unit_price"
+                          min="0"
+                          class="w-[100px] rounded border px-2 py-1 text-sm"
+                          style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 16px;"
+                          (change)="recalculateItem(i)"
+                        />
+                        <span class="flex items-center gap-1 whitespace-nowrap text-xs" style="color: var(--color-text-secondary);">
+                          <input
+                            type="number"
+                            [value]="customTaxPercent(itemGroup)"
+                            min="0"
+                            max="100"
+                            class="w-[56px] rounded border px-1 py-1 text-center text-xs"
+                            style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 16px;"
+                            (change)="onCustomTaxChange(i, $event)"
+                          />% IVA
+                        </span>
+                      } @else {
+                        <span class="whitespace-nowrap text-xs" style="color: var(--color-text-secondary);">
+                          {{ itemGroup.get('unit_price')?.value | currency }}
+                        </span>
+                      }
 
                       <span class="whitespace-nowrap font-mono text-sm font-semibold" style="color: var(--color-text-primary);">
                         {{ itemGroup.get('total_price')?.value | currency }}
@@ -756,6 +796,46 @@ export class QuotationFormModalComponent {
     const product = this.pendingVariantProduct();
     if (!product) return;
     this.addProductWithVariant(product, variant);
+  }
+
+  /**
+   * B.3 — linea personalizada sin producto (como POS/factura). Nombre,
+   * precio e impuesto los digita el usuario en la fila; `recalculateItem`
+   * es matematica pura y no exige producto. El DTO ya omite `product_id`
+   * ausente y el backend lo acepta (columna nullable).
+   */
+  addCustomLine(): void {
+    this.itemsArray.push(this.createItemGroup({
+      product_name: '',
+      quantity: 1,
+      unit_price: 0,
+      tax_rate: 0,
+      tax_amount_item: 0,
+      total_price: 0,
+      price_unit_quantity: 1,
+    }));
+    this.recalculateItem(this.itemsArray.length - 1);
+    this.productSearchTerm.set('');
+    this.productResults.set([]);
+  }
+
+  /** La fila es personalizada cuando no trae producto del catalogo. */
+  isCustomLine(itemGroup: any): boolean {
+    const pid = itemGroup.get('product_id')?.value;
+    return pid === undefined || pid === null || pid === '';
+  }
+
+  /** IVA en % (0-100) para la fila personalizada; guarda fraccion 0-1. */
+  customTaxPercent(itemGroup: any): number {
+    return Number(itemGroup.get('tax_rate')?.value || 0) * 100;
+  }
+
+  onCustomTaxChange(index: number, event: Event): void {
+    const group = this.itemsArray.at(index) as FormGroup;
+    if (!group) return;
+    const pct = Number((event.target as HTMLInputElement).value || 0);
+    group.patchValue({ tax_rate: Math.min(Math.max(pct, 0), 100) / 100 });
+    this.recalculateItem(index);
   }
 
   cancelVariantSelection(): void {
