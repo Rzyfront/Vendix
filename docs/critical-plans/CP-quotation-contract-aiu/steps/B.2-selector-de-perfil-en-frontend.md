@@ -26,5 +26,6 @@ skills: [vendix-frontend, vendix-zoneless-signals, vendix-angular-forms]
 - **Acceptance checklist:**
   - [x] Sin perfil el formulario funciona igual que hoy (`profile_id` se omite; DTO verificado + buildcheck PASS)
   - [x] Destino se elige al crear y luego se muestra bloqueado (select en crear, deshabilitado + etiqueta "fijo" en editar; nunca viaja en edicion)
-  - [ ] Con perfil precarga A/I/U, objeto y condiciones — FRONTEND LISTO, SERVIDOR PENDIENTE: el modal envia `profile_id` (FB-05) y rellena objeto/condiciones cuando el catalogo los expone; el catalogo NO existe (B.1 en curso, verificado por grep: cero `quotation-profiles` en backend), asi que la precarga real contra API viva queda para B.1. Degradacion verificada en codigo: 404/error de catalogo deja el formulario operando desde cero.
+  - [ ] Con perfil precarga A/I/U, objeto y condiciones contra API viva (fallback desde cero ya verificado)
+  - [ ] F-003 — Precarga A/I/U contra catalogo viva pendiente (major)
 - **Status:** done (degradado por B.1 pendiente; evidencia en evidence/B.2-profile-selector-evidence.md)

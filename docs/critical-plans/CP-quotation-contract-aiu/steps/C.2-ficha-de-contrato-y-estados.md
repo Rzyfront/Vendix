@@ -25,6 +25,6 @@ skills: [vendix-frontend, vendix-zoneless-signals, vendix-frontend-standard-modu
   - Transicion invalida muestra mensaje con codigo, no pantalla en blanco
 - **Acceptance checklist:**
   - [x] Ficha muestra objeto, A/I/U, totales y documentos origen (typecheck 0 errores; link a cotizacion + estado factura AIU)
-  - [x] Solo transiciones validas habilitadas por estado (botones = `validTransitions()`; matriz 18/18 en probe `/tmp/c2-probe.mjs`)
+  - [x] Solo transiciones validas habilitadas por estado (botones = `validTransitions()`; matriz 18/18 en evidence/C.2-ficha-evidence.md)
   - [x] Error de transicion es legible y accionable (banner + toast con codigo `CONTRACT_STATUS_001`; contra API viva queda para C.1/E.1 — controlador aun inexistente)
 - **Status:** done (degradado por C.1 pendiente en backend; evidencia en evidence/C.2-ficha-evidence.md)

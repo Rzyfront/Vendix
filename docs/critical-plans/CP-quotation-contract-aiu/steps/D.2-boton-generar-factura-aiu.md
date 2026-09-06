@@ -24,7 +24,7 @@ skills: [vendix-frontend, vendix-zoneless-signals]
   - Doble clic rapido genera una sola factura (boton se bloquea + backend 409)
   - Contrato ya facturado muestra enlace a factura en vez del boton
 - **Acceptance checklist:**
-  - [x] Boton solo visible y activo en contrato vigente sin factura (`canGenerateContractInvoice()` 7/7 en probe `/tmp/d2-probe.mjs`; typecheck 0 errores)
+  - [x] Boton solo visible y activo en contrato vigente sin factura (`canGenerateContractInvoice()` 7/7 en evidence/D.2-boton-factura-evidence.md; typecheck 0 errores)
   - [x] Abre borrador precargado listo para revisar y emitir (navega a `/admin/invoicing/invoices` tras POST; contra API viva queda para D.1/E.1 — endpoint aun inexistente)
   - [x] Estado 409 se muestra como "ya facturado" con enlace (rama 409/codigo + banner con accion "Ver facturas"; contra API viva queda para D.1/E.1)
 - **Status:** done (degradado por D.1 pendiente en backend; evidencia en evidence/D.2-boton-factura-evidence.md)
