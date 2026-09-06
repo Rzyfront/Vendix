@@ -293,6 +293,11 @@ export const ERROR_MESSAGES: Record<string, string> = {
   CONTRACT_INDUSTRY_001:
     'No disponible en tu industria. Este módulo aplica solo a tiendas de construcción.',
 
+  // C.2 (ERR-06): el backend responde 422 ante una transicion invalida.
+  // Mensaje accionable: el operador ve que estados si admite el contrato.
+  CONTRACT_STATUS_001:
+    'Transición no permitida para el estado actual del contrato. Revisa las acciones disponibles.',
+
   // Inventory
   INV_FIND_001: 'Inventario no encontrado.',
   INV_CREATE_001: 'Error al crear el registro de inventario.',
