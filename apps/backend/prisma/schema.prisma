@@ -5660,6 +5660,13 @@ model invoices {
   order_id                         Int?
   sales_order_id                   Int?
   related_invoice_id               Int?
+  /// D.1 (DB-05, ADR-03) — contrato de obra que origina ESTE documento
+  /// (FB-08 `POST /contracts/:id/invoice`). Nullable: el 100 % del historico
+  /// factura ordenes o captura manual y sigue intacto. La unicidad "un
+  /// contrato, una factura" NO va con `@unique` (bloquearia re-facturar tras
+  /// anular): la impone el indice parcial de la migracion propia, que solo
+  /// cuenta facturas activas (ver `20260906040000_invoice_contract_id`).
+  contract_id                      Int?
   subtotal_amount                  Decimal                         @default(0) @db.Decimal(12, 2)
   discount_amount                  Decimal                         @default(0) @db.Decimal(12, 2)
   tax_amount                       Decimal                         @default(0) @db.Decimal(12, 2)
@@ -5728,6 +5735,7 @@ model invoices {
   supplier                 suppliers?                 @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   order                    orders?                    @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   sales_order              sales_orders?              @relation(fields: [sales_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  contract                 contracts?                 @relation(fields: [contract_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   related_invoice          invoices?                  @relation("invoice_credit_debit_notes", fields: [related_invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   credit_debit_notes       invoices[]                 @relation("invoice_credit_debit_notes")
   resolution               invoice_resolutions?       @relation(fields: [resolution_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -7445,6 +7453,13 @@ model contracts {
   organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict)
   store        stores       @relation(fields: [store_id], references: [id], onDelete: Restrict)
   quotation    quotations   @relation(fields: [quotation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  /// D.1 (DB-05) — reverso de `invoices.contract_id`. No es columna. Es
+  /// lista y no uno-a-uno a proposito: Prisma solo sabe unicidad total
+  /// (`@unique` bloquearia re-facturar tras anular) y la invariante real es
+  /// "una factura ACTIVA por contrato", que impone el indice parcial de la
+  /// migracion `20260906040000_invoice_contract_id` + los guards del
+  /// servicio (`assertNoContractInvoice`).
+  invoices     invoices[]
   customer     users?       @relation("contracts_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   creator      users?       @relation("contracts_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
