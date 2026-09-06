@@ -336,7 +336,7 @@ hub_owner="$(fm_field "$PLAN" owner)"
 } >> "$TMP_INDEX"
 while IFS=$'\t' read -r s_phase s_num s_id s_title s_status s_updated s_contracts; do
   [ -z "$s_id" ] && continue
-  printf '| %s | %s | %s | %s | %s |\n' "$s_id" "$s_title" "$s_status" "$s_contracts" "$s_updated" >> "$TMP_INDEX"
+  printf '| %s | %s | %s | %s | %s |\n' "$s_id" "${s_title//|/\\|}" "$s_status" "$s_contracts" "$s_updated" >> "$TMP_INDEX"
 done < "$SORTED_STEPS_FILE" || true
 
 {
@@ -347,7 +347,7 @@ done < "$SORTED_STEPS_FILE" || true
 } >> "$TMP_INDEX"
 while IFS=$'\t' read -r a_id a_title a_status a_rev; do
   [ -z "$a_id" ] && continue
-  printf '| %s | %s | %s | %s |\n' "$a_id" "$a_title" "$a_status" "$a_rev" >> "$TMP_INDEX"
+  printf '| %s | %s | %s | %s |\n' "$a_id" "${a_title//|/\\|}" "$a_status" "$a_rev" >> "$TMP_INDEX"
 done < "$SORTED_ADRS_FILE" || true
 
 {

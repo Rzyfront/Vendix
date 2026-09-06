@@ -74,6 +74,15 @@ slugify() {
     | sed -E 's/-+$//'
 }
 
+
+sanitize_title() {
+  # Titles land in a quoted YAML scalar and in generated markdown table cells:
+  # fold double quotes to single quotes, pipes to dashes, and any newline/tab to a space.
+  local t="$1"
+  t="${t//\"/\'}"; t="${t//|/-}"; t="${t//$'\n'/ }"; t="${t//$'\t'/ }"
+  printf '%s' "$t"
+}
+
 esc_sed_repl() {
   # Escape &, / and \ so the value is safe as a sed s/// replacement.
   printf '%s' "$1" | sed -e 's/[&/\]/\\&/g'
@@ -155,6 +164,7 @@ cmd_bundle() {
   slug="$(slugify "$raw_slug")"
   if [ -z "$slug" ]; then die_usage "bundle: '<slug>' produced an empty slug"; fi
   [ -n "$title" ] || title="$raw_slug"
+  title="$(sanitize_title "$title")"
 
   local dest="$parent/CP-$slug"
   if [ -e "$dest" ]; then
@@ -192,6 +202,7 @@ cmd_bundle() {
 cmd_step() {
   if [ $# -lt 3 ]; then die_usage "'step' requires <bundle> <id> \"<title>\""; fi
   local bundle="${1%/}" id="$2" title="$3"; shift 3 || true
+  title="$(sanitize_title "$title")"
   [ $# -eq 0 ] || die_usage "step: unknown argument '$1'"
 
   [ -d "$bundle" ] || die_usage "step: bundle not found: $bundle"
@@ -229,6 +240,7 @@ cmd_step() {
 cmd_adr() {
   if [ $# -lt 2 ]; then die_usage "'adr' requires <bundle> \"<title>\""; fi
   local bundle="${1%/}" title="$2"; shift 2 || true
+  title="$(sanitize_title "$title")"
   [ $# -eq 0 ] || die_usage "adr: unknown argument '$1'"
 
   [ -d "$bundle" ] || die_usage "adr: bundle not found: $bundle"
@@ -261,6 +273,7 @@ cmd_adr() {
 cmd_finding() {
   if [ $# -lt 2 ]; then die_usage "'finding' requires <bundle> \"<title>\""; fi
   local bundle="${1%/}" title="$2"; shift 2
+  title="$(sanitize_title "$title")"
 
   local sev="" persp="" round="" step="none" loc=""
   while [ $# -gt 0 ]; do
