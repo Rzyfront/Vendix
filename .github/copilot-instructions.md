@@ -537,7 +537,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | --------------------------------- | ----------------------------- | ------------ | --------------------------------------------------------------------------- |
 | **`how-to-dev`**                  | **ALWAYS**                    | **CRITICAL** | Mandatory ultra-obligatory dev flow                                         |
 | **`Vendix-core`**                  | **ALWAYS**                    | **CRITICAL** | Core patterns and conventions                                               |
-| **`git-workflow`**                | **ALWAYS**                    | **CRITICAL** | Git commit, PR, branching, conflict rules, and the 4 hard gates: branches current with `origin/dev` (R5), Engram memories pulled at start of work (R6), Engram memory saved before push (R7), 80% PR review gate (R8) |
+| **`git-workflow`**                | **ALWAYS**                    | **CRITICAL** | Git commit, PR, branching, conflict rules, and the 4 hard gates: branches current with `origin/develop` (R5), Engram memories pulled at start of work (R6), Engram memory saved before push (R7), 80% PR review gate (R8) |
 | **`vendix-zoneless-signals`**     | **ANY FRONTEND FILE**         | **CRITICAL** | Zoneless + Signals (Angular 20) — violaciones producen bugs silenciosos     |
 | **`knowledge-gap`**               | **UNKNOWN PATTERN**           | **HIGH**     | Protocol for new/undefined patterns                                         |
 
