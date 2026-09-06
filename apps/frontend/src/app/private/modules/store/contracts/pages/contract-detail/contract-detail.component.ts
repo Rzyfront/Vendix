@@ -10,6 +10,8 @@ import {
   CONTRACT_STATUS_LABELS,
   CONTRACT_TRANSITIONS,
   CONTRACT_STATUS_ERROR_CODE,
+  CONTRACT_INVOICE_ERROR_CODE,
+  canGenerateContractInvoice,
 } from '../../interfaces/contract.interface';
 import {
   StickyHeaderComponent,
@@ -150,7 +152,15 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
                   <dt class="text-text-secondary">Factura AIU</dt>
                   <dd>
                     @if (contract()!.invoice) {
-                      <span class="font-medium">{{ contract()!.invoice!.invoice_number || ('Factura #' + contract()!.invoice!.id) }}</span>
+                      <a
+                        routerLink="/admin/invoicing/invoices"
+                        class="hover:underline font-medium"
+                        style="color: var(--color-primary);"
+                        [attr.aria-label]="'Ver factura AIU del contrato ' + contract()!.contract_number"
+                      >
+                        {{ contract()!.invoice!.invoice_number || ('Factura #' + contract()!.invoice!.id) }}
+                        <app-icon name="arrow-right" [size]="14" class="inline-block ml-1"></app-icon>
+                      </a>
                     } @else if (contract()!.status === 'active') {
                       <span class="text-text-secondary">Pendiente: se genera desde el contrato vigente.</span>
                     } @else {
@@ -173,6 +183,49 @@ const TRANSITION_META: Record<ContractStatus, { label: string; icon: string; hin
           </div>
 
           <div class="flex flex-col gap-3 lg:pt-0 pt-1">
+            <app-card shadow="sm" [responsivePadding]="true">
+              <h2 class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4">Factura AIU</h2>
+              @if (invoiceError()) {
+                <app-alert-banner variant="danger" heading="No se pudo generar la factura">
+                  {{ invoiceError() }}
+                  <div bannerActions class="mt-2 flex gap-2">
+                    <app-button variant="outline" size="sm" (clicked)="goToInvoices()">Ver facturas</app-button>
+                    <app-button variant="ghost" size="sm" (clicked)="clearInvoiceError()">Entendido</app-button>
+                  </div>
+                </app-alert-banner>
+              } @else if (contract()!.invoice) {
+                <p class="text-sm text-text-secondary">
+                  {{ contract()!.invoice!.invoice_number || ('Factura #' + contract()!.invoice!.id) }} ligada a este contrato.
+                </p>
+                <div class="mt-3">
+                  <app-button variant="outline" [fullWidth]="true" (clicked)="goToInvoices()">
+                    <app-icon slot="icon" name="receipt" size="16"></app-icon>
+                    Ver factura AIU
+                  </app-button>
+                </div>
+              } @else if (canGenerateInvoice()) {
+                <div>
+                  <app-button
+                    variant="primary"
+                    [fullWidth]="true"
+                    [disabled]="generatingInvoice()"
+                    [loading]="generatingInvoice()"
+                    (clicked)="generateInvoice()"
+                  >
+                    <app-icon slot="icon" name="file-text" size="16"></app-icon>
+                    Generar factura AIU
+                  </app-button>
+                </div>
+                <p class="mt-3 text-xs text-text-secondary">
+                  Crea el borrador precargado con el snapshot del contrato, listo para revisar y emitir.
+                </p>
+              } @else {
+                <p class="text-sm text-text-secondary">
+                  Disponible cuando el contrato esté vigente.
+                </p>
+              }
+            </app-card>
+
             <app-card shadow="sm" [responsivePadding]="true">
               <h2 class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4">Estado y transiciones</h2>
               @if (validTransitions().length > 0) {
@@ -248,6 +301,8 @@ export class ContractDetailComponent {
   readonly loadError = signal<string | null>(null);
   readonly transitionLoading = signal<ContractStatus | null>(null);
   readonly transitionError = signal<string | null>(null);
+  readonly generatingInvoice = signal(false);
+  readonly invoiceError = signal<string | null>(null);
 
   readonly statusLabel = computed(() => {
     const c = this.contract();
@@ -263,6 +318,12 @@ export class ContractDetailComponent {
   readonly validTransitions = computed<ContractStatus[]>(() => {
     const c = this.contract();
     return c ? [...(CONTRACT_TRANSITIONS[c.status] ?? [])] : [];
+  });
+
+  /** D.2 (FB-08/FB-09): el boton solo vive en contrato vigente sin factura. */
+  readonly canGenerateInvoice = computed(() => {
+    const c = this.contract();
+    return c ? canGenerateContractInvoice(c.status, c.invoice) : false;
   });
 
   readonly transitionHint = computed(() => {
@@ -345,8 +406,17 @@ export class ContractDetailComponent {
     this.transitionError.set(null);
   }
 
+  clearInvoiceError(): void {
+    this.invoiceError.set(null);
+  }
+
   goToList(): void {
     void this.router.navigate(['/admin/orders/contracts']);
+  }
+
+  /** D.2: apertura del borrador AIU en el modulo de facturacion. */
+  goToInvoices(): void {
+    void this.router.navigate(['/admin/invoicing/invoices']);
   }
 
   reload(): void {
@@ -365,8 +435,101 @@ export class ContractDetailComponent {
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe({
-        next: (c) => this.contract.set(c),
+        next: (c) => {
+          this.contract.set(c);
+          this.resolveLinkedInvoice(c);
+        },
         error: (err: ContractApiError | Error) => this.loadError.set(err?.message ?? 'Error al cargar el contrato'),
+      });
+  }
+
+  /**
+   * D.2 (FB-09): si el contrato esta vigente pero sin referencia de factura,
+   * se consulta la factura ligada para pintar enlace en vez de boton. El
+   * fallo se ignora en silencio: con D.1 pendiente el filtro aun no existe
+   * y la ficha conserva su estado consistente.
+   */
+  private resolveLinkedInvoice(c: Contract): void {
+    if (!canGenerateContractInvoice(c.status, c.invoice)) return;
+    this.contractsService
+      .getContractInvoice(c.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (invoice) => {
+          if (invoice) this.contract.set({ ...c, invoice });
+        },
+        error: () => undefined,
+      });
+  }
+
+  /** Refresco silencioso (sin spinner de pagina) tras generar o chocar con 409. */
+  private quietReload(): void {
+    const current = this.contract();
+    if (!current) return;
+    this.contractsService
+      .getContractById(current.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (c) => this.contract.set(c),
+        error: () => undefined,
+      });
+  }
+
+  /**
+   * D.2 (FB-08): genera el borrador AIU precargado desde el contrato vigente
+   * y abre el modulo de facturacion para revisarlo y emitirlo. El boton se
+   * bloquea mientras responde el backend (doble clic = una sola factura) y
+   * el 409 se muestra como "ya facturado" con enlace, nunca como error crudo.
+   */
+  generateInvoice(): void {
+    const current = this.contract();
+    if (!current || this.generatingInvoice()) return;
+    if (!canGenerateContractInvoice(current.status, current.invoice)) return;
+    this.generatingInvoice.set(true);
+    this.invoiceError.set(null);
+    this.contractsService
+      .generateContractInvoice(current.id)
+      .pipe(
+        finalize(() => this.generatingInvoice.set(false)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (result) => {
+          const updated = result?.contract && typeof result.contract === 'object' ? (result.contract as Contract) : null;
+          const created = result?.invoice && typeof result.invoice === 'object'
+            ? result.invoice
+            : result && typeof result.id === 'number' && ('invoice_number' in result || 'status' in result)
+              ? result
+              : null;
+          if (updated && updated.status) {
+            this.contract.set(updated);
+          } else if (created) {
+            this.contract.set({ ...current, invoice: created, status: 'invoiced' });
+          } else {
+            this.quietReload();
+          }
+          const label = created?.invoice_number ?? created?.id ?? null;
+          this.toastService.success(
+            label
+              ? `Borrador ${label} listo para revisar y emitir`
+              : 'Borrador AIU generado: listo para revisar y emitir',
+          );
+          this.goToInvoices();
+        },
+        error: (err: ContractApiError | Error) => {
+          const status = err instanceof ContractApiError ? err.status : null;
+          const code = err instanceof ContractApiError ? err.code : null;
+          if (status === 409 || code === CONTRACT_INVOICE_ERROR_CODE) {
+            const message = `Este contrato ya tiene factura AIU (${CONTRACT_INVOICE_ERROR_CODE})`;
+            this.invoiceError.set(message);
+            this.toastService.error(message);
+            this.quietReload();
+            return;
+          }
+          const message = err?.message ?? 'No se pudo generar la factura AIU';
+          this.invoiceError.set(message);
+          this.toastService.error(message);
+        },
       });
   }
 

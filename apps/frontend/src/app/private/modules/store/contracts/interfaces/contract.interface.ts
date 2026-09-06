@@ -14,6 +14,9 @@ export type ContractStatus = 'draft' | 'active' | 'invoiced' | 'cancelled';
 /** Codigo de error de transicion invalida (ERR-06, HTTP 422). */
 export const CONTRACT_STATUS_ERROR_CODE = 'CONTRACT_STATUS_001';
 
+/** Codigo de factura duplicada (D.2, HTTP 409): el contrato ya tiene factura AIU. */
+export const CONTRACT_INVOICE_ERROR_CODE = 'CONTRACT_INVOICE_001';
+
 /**
  * Transiciones validas por estado (FB-07).
  * `draft -> active -> invoiced`, y `cancelled` desde `draft` o `active`.
@@ -36,6 +39,18 @@ export const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
 
 export function isValidContractTransition(from: ContractStatus, to: ContractStatus): boolean {
   return CONTRACT_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
+/**
+ * D.2 (FB-08/FB-09): el boton "Generar factura AIU" solo existe en contrato
+ * vigente sin factura ligada. Cualquier otro estado muestra enlace o texto
+ * informativo, nunca el boton.
+ */
+export function canGenerateContractInvoice(
+  status: ContractStatus,
+  invoice: ContractInvoiceRef | null | undefined,
+): boolean {
+  return status === 'active' && (invoice === null || invoice === undefined);
 }
 
 export interface ContractQuotationRef {

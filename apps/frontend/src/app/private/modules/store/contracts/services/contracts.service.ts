@@ -7,6 +7,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import {
   Contract,
+  ContractInvoiceRef,
   ContractStatus,
   ContractStatusTransitionDto,
   PaginatedContractsResponse,
@@ -20,10 +21,12 @@ import {
  */
 export class ContractApiError extends Error {
   readonly code: string | null;
-  constructor(message: string, code: string | null) {
+  readonly status: number | null;
+  constructor(message: string, code: string | null, status: number | null = null) {
     super(message);
     this.name = 'ContractApiError';
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -34,8 +37,9 @@ function toContractApiError(error: any): ContractApiError {
     parsed.errorCode ??
     (typeof body?.error?.code === 'string' ? body.error.code : null) ??
     (typeof body?.code === 'string' ? body.code : null);
+  const status = typeof error?.status === 'number' ? (error.status as number) : null;
   const message = parsed.userMessage || extractApiErrorMessage(error);
-  return new ContractApiError(code ? `${message} (${code})` : message, code);
+  return new ContractApiError(code ? `${message} (${code})` : message, code, status);
 }
 
 @Injectable({
@@ -78,6 +82,41 @@ export class ContractsService {
     const dto: ContractStatusTransitionDto = { status };
     return this.http.patch<any>(`${this.apiUrl}/store/contracts/${id}`, dto).pipe(
       map((r) => r.data || r),
+      catchError((error) => throwError(() => toContractApiError(error))),
+    );
+  }
+
+  /**
+   * D.2 (FB-08): genera el borrador de factura AIU precargado desde el
+   * contrato vigente. El backend responde con el borrador (o
+   * `{ contract, invoice }`); un segundo intento responde 409
+   * `CONTRACT_INVOICE_001` sin crear fila. Escritura delegada al backend
+   * atomico de D.1: este servicio no calcula ni emite nada.
+   */
+  generateContractInvoice(id: number): Observable<any> {
+    return this.http.post<any>(`${this.apiUrl}/store/contracts/${id}/invoice`, {}).pipe(
+      map((r) => r.data || r),
+      catchError((error) => throwError(() => toContractApiError(error))),
+    );
+  }
+
+  /**
+   * D.2 (FB-09): factura ligada al contrato. Tolerante a proposito: si el
+   * backend aun no expone el filtro (D.1 pendiente) el error sube y la ficha
+   * lo ignora en silencio, conservando la referencia que ya trae el contrato.
+   */
+  getContractInvoice(contractId: number): Observable<ContractInvoiceRef | null> {
+    const url = `${this.apiUrl}/store/invoicing?contract_id=${contractId}`;
+    return this.http.get<any>(url).pipe(
+      map((r) => {
+        const body = r?.data ?? r;
+        const list = Array.isArray(body) ? body : body?.data;
+        if (Array.isArray(list)) return (list[0] as ContractInvoiceRef) ?? null;
+        if (body && typeof body === 'object' && 'id' in body) {
+          return body as ContractInvoiceRef;
+        }
+        return null;
+      }),
       catchError((error) => throwError(() => toContractApiError(error))),
     );
   }
