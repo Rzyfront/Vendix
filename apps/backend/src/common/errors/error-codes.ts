@@ -1014,6 +1014,19 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'Store industry does not support contracts (construction required)',
   },
+  // C.2/D.1 (ERR-06, ERR-07): consolidados desde `contract-invoice.errors.ts`
+  // al terminar el trabajo paralelo. Mismo code, mismo HTTP, mismos details:
+  // el wire no cambia un byte.
+  CONTRACT_STATUS_001: {
+    code: 'CONTRACT_STATUS_001',
+    httpStatus: 422,
+    devMessage: 'Invalid contract status transition',
+  },
+  CONTRACT_INVOICE_001: {
+    code: 'CONTRACT_INVOICE_001',
+    httpStatus: 409,
+    devMessage: 'Contract already has an invoice',
+  },
 
   // Orders
   ORD_FIND_001: {

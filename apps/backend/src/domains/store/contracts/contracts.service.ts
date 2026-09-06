@@ -40,17 +40,10 @@ import {
 export type ContractStatus = 'draft' | 'active' | 'invoiced' | 'cancelled';
 
 /**
- * C.2 (ERR-06): entrada inline — `CONTRACT_STATUS_001` aun no existe en
- * `error-codes.ts` (fuera del alcance de este cambio) y `VendixHttpException`
- * solo necesita la forma `ErrorCodeEntry`. Cuando el registry la incluya,
- * este literal se reemplaza por `ErrorCodes.CONTRACT_STATUS_001` sin
- * cambiar el contrato HTTP (mismo codigo, mismo 422).
+ * C.2 (ERR-06): alias al catalogo central. Mismo codigo, mismo 422.
  */
-export const CONTRACT_STATUS_ENTRY: ErrorCodeEntry = {
-  code: 'CONTRACT_STATUS_001',
-  httpStatus: 422,
-  devMessage: 'Invalid contract status transition',
-};
+export const CONTRACT_STATUS_ENTRY: ErrorCodeEntry =
+  ErrorCodes.CONTRACT_STATUS_001;
 
 /** Transiciones validas por estado (FB-07). */
 export const CONTRACT_TRANSITIONS: Record<ContractStatus, ContractStatus[]> = {

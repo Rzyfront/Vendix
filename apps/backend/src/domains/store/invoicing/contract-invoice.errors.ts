@@ -1,31 +1,20 @@
 import {
   ErrorCodeEntry,
+  ErrorCodes,
   VendixHttpException,
 } from 'src/common/errors';
 
 /**
  * D.1 (ERR-07, DB-05) — errores del carril contrato→factura AIU.
  *
- * Por que las entradas viven ACA y no en el catalogo central
- * (`common/errors/error-codes.ts`): D.1 solo puede tocar su alcance
- * (`domains/store/invoicing/`, schema y migracion propia). El catalogo es
- * compartido con los demas pasos paralelos del plan y dos appends al mismo
- * bloque conflictan. El contrato de wire es IDENTICO al del catalogo —
- * mismo `code`, mismo HTTP, mismos `details`— porque `VendixHttpException`
- * solo lee la entrada: cuando el orquestador consolide, mover estas dos
- * entradas al catalogo no cambia un byte de la respuesta.
+ * Las entradas viven en el catalogo central (`ErrorCodes`); estos alias
+ * existen para no reescribir los call sites. Mismo code, mismo HTTP.
  */
-export const CONTRACT_INVOICE_001_ENTRY: ErrorCodeEntry = {
-  code: 'CONTRACT_INVOICE_001',
-  httpStatus: 409,
-  devMessage: 'Contract already has an invoice',
-};
+export const CONTRACT_INVOICE_001_ENTRY: ErrorCodeEntry =
+  ErrorCodes.CONTRACT_INVOICE_001;
 
-export const CONTRACT_STATUS_001_ENTRY: ErrorCodeEntry = {
-  code: 'CONTRACT_STATUS_001',
-  httpStatus: 422,
-  devMessage: 'Invalid contract status transition',
-};
+export const CONTRACT_STATUS_001_ENTRY: ErrorCodeEntry =
+  ErrorCodes.CONTRACT_STATUS_001;
 
 /** 409 ERR-07 con la factura existente para navegar a ella. */
 export function contractAlreadyInvoiced(

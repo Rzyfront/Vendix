@@ -66,8 +66,8 @@ _Closed: 3 fixed · 0 accepted · 0 rejected_
 | Registry | Rows | Verified |
 |----------|------|----------|
 | FB | 12 | 0 |
-| DB | 5 | 0 |
-| ERR | 7 | 0 |
+| DB | 5 | 5 |
+| ERR | 7 | 5 |
 <!-- index:end -->
 
 ## Context                             <!-- [MANDATORY] full narrative, no compaction -->
