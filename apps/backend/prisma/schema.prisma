@@ -103,6 +103,10 @@ model users {
   quotations_as_customer quotations[] @relation("quotations_customer")
   quotations_created     quotations[] @relation("quotations_created_by")
 
+  // C.1 (DB-04) — reversos de `contracts.customer_id` / `contracts.created_by`.
+  contracts_as_customer contracts[] @relation("contracts_customer")
+  contracts_created     contracts[] @relation("contracts_created_by")
+
   // Coupons
   coupon_uses coupon_uses[]
 
@@ -581,6 +585,8 @@ model organizations {
   invoice_resolutions           invoice_resolutions[]
   invoice_profiles              invoice_profiles[]
   quotation_profiles            quotation_profiles[]
+  // C.1 (DB-04) — reverso de `contracts.organization_id`.
+  contracts                   contracts[]
   chart_of_accounts             chart_of_accounts[]
   fiscal_periods                fiscal_periods[]
   accounting_entries            accounting_entries[]
@@ -865,6 +871,8 @@ model stores {
   accounting_account_mappings accounting_account_mappings[]
   quotations                  quotations[]
   quotation_profiles          quotation_profiles[]
+  // C.1 (DB-04) — reverso de `contracts.store_id`.
+  contracts                   contracts[]
   promotions                  promotions[]
   coupons                     coupons[]
   marketing_ad_creatives      marketing_ad_creatives[]
@@ -7200,6 +7208,9 @@ enum quotation_status_enum {
   expired
   converted
   cancelled
+  // C.1 (ADR-04) — `accepted->contracted` marca contrato creado. Reservado
+  // al flujo de contratos; `accepted->converted` sigue siendo solo venta.
+  contracted
 }
 
 // A.1 (ADR-01) — Destino inmutable de la cotizacion: se fija al crear y
@@ -7247,6 +7258,8 @@ model quotations {
   store           stores            @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   customer        users?            @relation("quotations_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   converted_order orders?           @relation(fields: [converted_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  // C.1 (DB-04) — reverso uno-a-uno de `contracts.quotation_id` (@unique).
+  contract        contracts?
   created_by_user users?            @relation("quotations_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([store_id, quotation_number])
@@ -7374,6 +7387,71 @@ model quotation_profile_versions {
 
   @@unique([profile_id, version])
   @@index([profile_id, created_at])
+}
+
+/// C.1 (DB-04, FB-06, ADR-03) — Ficha del contrato de obra creado desde una
+/// cotizacion aceptada con destino `contract`.
+///
+/// Una cotizacion admite UN solo contrato: `quotation_id` es unico y es la
+/// llave de idempotencia (doble POST concurrente choca aca y el servicio
+/// traduce a 409 `QUOTE_CONTRACT_001`). Los items, totales y la
+/// configuracion AIU se congelan en `snapshot` (JSON, nunca referencia
+/// viva): cambios posteriores al perfil o a la cotizacion no alteran el
+/// documento. `status` es VarChar (`draft`|`active`|`invoiced`|`cancelled`,
+/// validado en el servicio igual que `invoice_profiles.state`); las
+/// transiciones las posee C.2. C.1 solo crea en `draft`.
+model contracts {
+  id              Int @id @default(autoincrement())
+  organization_id Int
+  /// Scoping directo por tienda (igual que `quotation_profiles`): exige
+  /// registro en `StorePrismaService.store_scoped_models`.
+  store_id        Int
+
+  /// Cotizacion origen. Unica: un contrato por cotizacion.
+  quotation_id Int @unique
+
+  /// Numero propio por tienda (`CT-YYYYMMDD-0001`), unico por
+  /// (store_id, contract_number) igual que ordenes y cotizaciones.
+  contract_number String @db.VarChar(50)
+
+  customer_id Int?
+
+  /// `draft` al crear (C.1). `active`/`invoiced`/`cancelled` los mueve C.2.
+  status String @db.VarChar(20) @default("draft")
+
+  /// Totales copiados de la cotizacion al momento de crear.
+  subtotal_amount Decimal @default(0.00) @db.Decimal(12, 2)
+  discount_amount Decimal @default(0.00) @db.Decimal(12, 2)
+  tax_amount      Decimal @default(0.00) @db.Decimal(12, 2)
+  grand_total     Decimal @default(0.00) @db.Decimal(12, 2)
+
+  /// Snapshot congelado (ADR-03): items, totales, A/I/U, vigencia,
+  /// terminos, version de perfil y numero de cotizacion. Lo que D.1 copia
+  /// a la factura AIU.
+  snapshot Json
+
+  /// Procedencia del snapshot (trazabilidad, sin FK: la fuente de verdad
+  /// es `snapshot`; borrar o editar el perfil no reescribe historia).
+  profile_id      Int?
+  profile_version Int?
+
+  notes      String?   @db.Text
+  created_by Int?
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  /// `Restrict` en toda la cadena: borrar tienda/org/cliente/cotizacion
+  /// con contrato no arrastra historia fiscal.
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  store        stores       @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  quotation    quotations   @relation(fields: [quotation_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer     users?       @relation("contracts_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  creator      users?       @relation("contracts_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([store_id, contract_number])
+  @@index([store_id, contract_number])
+  @@index([store_id, status])
+  @@index([customer_id])
 }
 
 // ===== COUPONS SYSTEM =====

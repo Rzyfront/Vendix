@@ -51,6 +51,10 @@ export class StorePrismaService extends BasePrismaService {
     // versiones NO va acá —no tiene `store_id`—: se scopea relacionalmente
     // a través del perfil, más abajo (igual que `invoice_profile_versions`).
     'quotation_profiles',
+    // C.1 — ficha del contrato (DB-04). `store_id` propio y NO nullable:
+    // scoping directo por tienda. `quotation_id` UNIQUE es la llave de
+    // idempotencia (un contrato por cotización).
+    'contracts',
     'cash_registers',
     'cash_register_sessions',
     'cash_register_movements',
@@ -1364,6 +1368,11 @@ export class StorePrismaService extends BasePrismaService {
   // calcularía con las cifras de otra empresa).
   get quotation_profile_versions() {
     return this.scoped_client.quotation_profile_versions;
+  }
+
+  // C.1 — ficha del contrato (DB-04, scope directo por `store_id` propio).
+  get contracts() {
+    return this.scoped_client.contracts;
   }
 
   // Coupons models

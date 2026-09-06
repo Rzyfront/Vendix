@@ -954,6 +954,15 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Quotation must have a customer before conversion',
   },
+  // C.1 (DB-04, FB-06, ERR-05, ADR-01): una cotizacion admite UN solo
+  // contrato. El segundo POST concurrente o reintentado responde 409 con
+  // el contrato existente en `details` para que el frontend navegue a la
+  // ficha en vez de mostrar un error generico.
+  QUOTE_CONTRACT_001: {
+    code: 'QUOTE_CONTRACT_001',
+    httpStatus: 409,
+    devMessage: 'Quotation already has a contract',
+  },
 
   // B.1 (ADR-03, DB-02, DB-03, ERR-04): perfiles de cotizacion opcionales
   // por store, versionados. El `config` congelado en
