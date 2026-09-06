@@ -1,5 +1,31 @@
 export type QuotationStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'converted' | 'cancelled';
 
+/** B.2 (FB-01 parcial-destination): destino fijo al crear, jamas editable. Default `sale`. */
+export type QuotationDestination = 'sale' | 'contract' | 'other';
+
+/**
+ * B.2 (FB-03): entrada del catalogo de perfiles activos (`GET /store/quotation-profiles/catalog`).
+ * Espejo liviano del patron de facturacion (`InvoiceProfileCatalogEntry`): elegir un perfil
+ * no requiere sus reglas; la precarga la resuelve el backend con la version congelada (FB-05).
+ * Campos de precarga opcionales: el catalogo puede no traerlos (solo id+nombre) y el
+ * formulario debe operar igual; `profile_id` igual viaja y el backend precarga.
+ */
+export interface QuotationProfileCatalogEntry {
+  id: number;
+  name: string;
+  is_default?: boolean;
+  current_version?: number;
+  state?: string;
+  /** Objeto/alcance del contrato cuando el catalogo lo expone (precarga de condiciones). */
+  contract_object?: string;
+  terms_and_conditions?: string;
+  notes?: string;
+  /** A/I/U cuando el catalogo los expone; sin campos AIU en el modal, viajan via `profile_id`. */
+  administration_percentage?: number;
+  contingency_percentage?: number;
+  profit_percentage?: number;
+}
+
 export interface QuotationItem {
   id: number;
   quotation_id: number;
@@ -27,6 +53,10 @@ export interface Quotation {
   customer_id?: number;
   quotation_number: string;
   status: QuotationStatus;
+  /** B.2: destino fijo al crear (default `sale` en backend). Solo lectura en frontend. */
+  destination?: QuotationDestination;
+  /** B.2: perfil con el que se precargo (nullable = cotizada desde cero). */
+  profile_id?: number | null;
   channel: string;
   subtotal_amount: number;
   discount_amount: number;
@@ -116,6 +146,10 @@ export interface CreateQuotationItemDto {
 
 export interface CreateQuotationDto {
   customer_id?: number;
+  /** B.2 (FB-01/FB-05): destino al crear; omitido = backend aplica `sale`. Nunca se edita. */
+  destination?: QuotationDestination;
+  /** B.2 (FB-05): perfil opcional; omitido = cotizar desde cero. Id ajeno/inactivo da 400/403. */
+  profile_id?: number;
   channel?: string;
   valid_until?: string;
   notes?: string;

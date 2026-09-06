@@ -10,6 +10,7 @@ import {
   PaginatedQuotationsResponse,
   QuotationStats,
   CreateQuotationDto,
+  QuotationProfileCatalogEntry,
 } from '../interfaces/quotation.interface';
 
 let quotationStatsCache: { observable: Observable<any>; lastFetch: number } | null = null;
@@ -66,6 +67,23 @@ export class QuotationsService {
     return this.http.get<any>(url).pipe(
       map((r) => r.data || r),
       catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+    );
+  }
+
+  /**
+   * B.2 (FB-03): catalogo de perfiles de cotizacion activos para el selector.
+   * Sin paginar a proposito: el selector necesita el conjunto completo.
+   * NO traga errores: el llamador degrada (formulario sin perfil) ante 404/catalogo
+   * caido — B.1 aun en curso y el endpoint puede no existir todavia.
+   */
+  getQuotationProfileCatalog(): Observable<QuotationProfileCatalogEntry[]> {
+    const url = `${this.apiUrl}/store/quotation-profiles/catalog`;
+    return this.http.get<any>(url).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error fetching quotation profile catalog:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
     );
   }
 
