@@ -11,3 +11,5 @@
 | 2026-09-06 | exec-C.2 | C.2 | Ficha contrato DONE con evidencia, sin tocar backend | 050197178 |
 | 2026-09-06 | exec-D.1 | D.1 | AIU precargada DONE: spec 14/14, vecinos 131/131 | 22287ac75 |
 | 2026-09-06 | exec-D.2 | D.2 | Boton DONE degradado: endpoints FB-08/09 pendientes, error accionable | 392faf8ca |
+| 2026-09-06 | orquestador | — | 500 quotations: cliente Prisma rancio + migraciones B.1-D.1 sin aplicar en dev; generate + deploy + restart, health 200 | ef2c733ca |
+| 2026-09-06 | orquestador | — | Requisito dueno: linea personalizada en cotizacion (como POS/factura); se suma paso B.3 | ef2c733ca |

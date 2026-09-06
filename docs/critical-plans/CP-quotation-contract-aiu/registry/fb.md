@@ -13,3 +13,4 @@
 | FB-09 | GET /invoices?contract_id= | query | Invoice[] | ficha contrato | + query | empty vs missing | curl con/sin factura ligada | [ ] |
 | FB-10 | POST /quotations/:id/convert | none | Quotation converted | detalle cotizacion | none (regression) | gate bypass | destino contract rechaza explicito | [ ] |
 | FB-11 | POST /invoices/from-order/:id | none | Invoice | facturacion | none (regression) | order shape drift | orden de cotiz venta factura igual | [ ] |
+| FB-12 | POST/PATCH /quotations (linea) | item sin product_id | item libre | form modal | + item libre | totales al convertir | convertir y comparar totales | [ ] |
