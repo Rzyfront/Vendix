@@ -689,6 +689,7 @@ export class InvoicingService {
       customer_id,
       cuds,
       supplier_id,
+      contract_id,
     } = query;
 
     const skip = (page - 1) * limit;
@@ -716,6 +717,9 @@ export class InvoicingService {
       ...(invoice_type && { invoice_type: invoice_type as any }),
       ...(customer_id && { customer_id }),
       ...(supplier_id && { supplier_id }),
+      // D.2 (FB-09) — filtro por contrato origen. Paridad con `customer_id` /
+      // `supplier_id`: solo entra al `where` cuando el query lo trae.
+      ...(contract_id && { contract_id }),
       ...(trimmed_cuds && { cufe: trimmed_cuds }),
       ...(date_from && {
         issue_date: {

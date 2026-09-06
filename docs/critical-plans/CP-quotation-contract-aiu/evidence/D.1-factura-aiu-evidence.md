@@ -93,3 +93,66 @@ lectura). Sin endpoint (FB-08 es D.2), sin tocar `contracts/`,
   `error-codes.ts` en consolidacion (wire identico, cambio invisible).
 - Contratos sin A/I/U no precargan (decision, no bug): E.1/orquestador
   decide si FB-08 acepta A/I/U manual o si quedan a captura manual.
+
+---
+
+# D.2 — Apéndice: cableado FB-08 + FB-09 (executor factura-desde-contrato)
+
+## Alcance ejecutado (solo este apéndice)
+- `POST /store/contracts/:id/invoice` (FB-08) en
+  `contracts.controller.ts` — SOLO esa ruta; GET/PATCH de la ficha (C.2, otro
+  ejecutor) intactos. Delega en `InvoicingService.createInvoiceFromContract`
+  (D.1); el duplicado ya venía traducido a 409 `CONTRACT_INVOICE_001` en las
+  3 capas del servicio — el controller solo no lo traga (sin `try/catch`,
+  `AllExceptionsFilter` emite el 409 real).
+- Permiso `invoicing:write` (facturar, seed existente — sin permiso nuevo):
+  paridad con `POST /store/invoicing/from-order/:orderId`. El gating por
+  industria `construction` (403 ERR-03) se hereda del guard de clase.
+- `GET /store/invoicing?contract_id=` (FB-09): `contract_id?` opcional en
+  `QueryInvoiceDto` (`@IsInt @Min(1)`: `0`/negativo/no-numérico = 400) +
+  filtro `where` en `findAll`. El controller ya reenviaba el DTO entero, así
+  que no se tocó.
+- Wiring de módulo: `ContractsModule` importa `InvoicingModule` (sin ciclo —
+  `InvoicingModule` no importa contratos; misma regla de ownership que
+  `QuotationProfilesModule` en C.1).
+
+## Archivos (solo alcance propio)
+- `apps/backend/src/domains/store/contracts/contracts.controller.ts` — SOLO
+  aditivo: import + inyección de `InvoicingService` + `POST :id/invoice`.
+- `apps/backend/src/domains/store/contracts/contracts.module.ts` — SOLO
+  aditivo: import de `InvoicingModule` + entrada en `imports` + nota.
+- `apps/backend/src/domains/store/contracts/contracts-invoice.spec.ts`
+  (NUEVO) — 3 casos: delegación + `created`, 409 propaga sin tragarse, 422
+  propaga intacto.
+- `apps/backend/src/domains/store/invoicing/dto/query-invoice.dto.ts` —
+  SOLO aditivo: `contract_id?` validado.
+- `apps/backend/src/domains/store/invoicing/invoicing.service.ts` — SOLO
+  aditivo: destructuring + `...(contract_id && { contract_id })` en `findAll`.
+- `apps/backend/src/domains/store/invoicing/invoicing.service.contract-filter.spec.ts`
+  (NUEVO) — 6 casos: `where` con/sin/combinado + validación DTO (acepta,
+  transforma `"7"`, rechaza `0`/negativo/`abc`).
+
+## Verificaciones (salida real)
+- `npx tsc -p tsconfig.build.json --noEmit` → exit 0 (incluye el controller
+  con C.2 + `POST :id/invoice` y el módulo con `InvoicingModule`)
+- `npx jest src/domains/store/contracts invoicing.service.contract-invoice
+  invoicing.service.contract-filter` → `5 suites passed, 43 passed`
+  (nuevos 9: `contracts-invoice` 3 — delegación+`created`, 409 propaga,
+  422 propaga; `contract-filter` 6 — `where` con/sin/combinado, DTO acepta /
+  transforma `"7"` / rechaza `0`, negativo y `abc`; vecinos sin regresión:
+  `contract-invoice` 14 de D.1, `contracts.service` y `contracts-snapshot`
+  de C.2)
+- `npx jest invoicing.service.spec.ts` → `8 passed` (sin regresión en
+  `findAll` ni calculadora)
+
+## Gaps honestos / handoff
+- Sin DB viva: doble POST concurrente real contra el endpoint y navegación
+  extremo a extremo ficha→factura quedan para E.1 (el 409 concurrente está
+  cubierto a nivel servicio por D.1 con mocks).
+- No se añadió fila seed con `path: /api/store/contracts/:id/invoice`: el
+  guard autoriza por NOMBRE (`invoicing:write`) además de por ruta, y el
+  alcance prohíbe tocar el seed compartido. Si el orquestador quiere match
+  por ruta exacta, que añada la fila en consolidación (sin ella, un rol con
+  acceso solo-por-ruta a `invoicing:write` no abre este endpoint; los roles
+  estándar lo tienen por nombre).
+- `registry/*.md`, `PLAN.md`, `log/`, pasos de otros ejecutores: no tocados.
