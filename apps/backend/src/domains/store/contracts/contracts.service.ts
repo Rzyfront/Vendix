@@ -1,7 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { ErrorCodes, VendixHttpException } from 'src/common/errors';
+import {
+  ErrorCodeEntry,
+  ErrorCodes,
+  VendixHttpException,
+} from 'src/common/errors';
 import { QuotationProfilesService } from '../backend-quotations-profiles/quotation-profiles.service';
 import {
   buildContractSnapshot,
@@ -22,7 +27,46 @@ import {
  * Idempotencia en dos capas: comprobacion previa (mensaje 409 accionable
  * con el contrato existente) + `contracts.quotation_id` UNIQUE como red
  * ante doble POST concurrente (la violacion se traduce al mismo 409).
+ *
+ * C.2 — lectura y transiciones de la ficha (FB-07, ERR-06): `findAll`
+ * devuelve el mismo envoltorio `{ data, pagination }` que el frontend
+ * `PaginatedContractsResponse`; `updateStatus` solo admite
+ * `draft -> active -> invoiced` y `draft|active -> cancelled` (terminales
+ * `invoiced`/`cancelled` sin salida). La transicion invalida responde 422
+ * `CONTRACT_STATUS_001`.
  */
+
+/** Estados de la ficha (espejo de `ContractStatus` del frontend). */
+export type ContractStatus = 'draft' | 'active' | 'invoiced' | 'cancelled';
+
+/**
+ * C.2 (ERR-06): entrada inline — `CONTRACT_STATUS_001` aun no existe en
+ * `error-codes.ts` (fuera del alcance de este cambio) y `VendixHttpException`
+ * solo necesita la forma `ErrorCodeEntry`. Cuando el registry la incluya,
+ * este literal se reemplaza por `ErrorCodes.CONTRACT_STATUS_001` sin
+ * cambiar el contrato HTTP (mismo codigo, mismo 422).
+ */
+export const CONTRACT_STATUS_ENTRY: ErrorCodeEntry = {
+  code: 'CONTRACT_STATUS_001',
+  httpStatus: 422,
+  devMessage: 'Invalid contract status transition',
+};
+
+/** Transiciones validas por estado (FB-07). */
+export const CONTRACT_TRANSITIONS: Record<ContractStatus, ContractStatus[]> = {
+  draft: ['active', 'cancelled'],
+  active: ['invoiced', 'cancelled'],
+  invoiced: [],
+  cancelled: [],
+};
+
+export interface ContractQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  status?: string;
+}
+
 @Injectable()
 export class ContractsService {
   constructor(
@@ -49,6 +93,101 @@ export class ContractsService {
       },
     },
   };
+
+  /**
+   * C.2 (FB-07) — listado paginado con el mismo envoltorio
+   * `{ data, pagination }` que `PaginatedContractsResponse` del frontend.
+   * Lecturas scopeadas por la extension de tenant (`findMany`/`count`,
+   * jamas `findUnique` bajo extension).
+   */
+  async findAll(query: ContractQuery) {
+    const rawPage = Number(query.page ?? 1);
+    const rawLimit = Number(query.limit ?? 10);
+    const page = Number.isFinite(rawPage)
+      ? Math.max(1, Math.floor(rawPage))
+      : 1;
+    const limit = Number.isFinite(rawLimit)
+      ? Math.min(100, Math.max(1, Math.floor(rawLimit)))
+      : 10;
+    const skip = (page - 1) * limit;
+    const search = query.search?.trim() || undefined;
+
+    const where: Prisma.contractsWhereInput = {
+      ...(search && {
+        OR: [
+          { contract_number: { contains: search, mode: 'insensitive' } },
+          { notes: { contains: search, mode: 'insensitive' } },
+        ],
+      }),
+      ...(query.status && { status: query.status }),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.contracts.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { created_at: 'desc' },
+        include: this.CONTRACT_INCLUDE,
+      }),
+      this.prisma.contracts.count({ where }),
+    ]);
+
+    return {
+      data,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  /**
+   * C.2 (FB-07) — ficha por id. 404 accionable con el id en `details`
+   * para que la ficha navegue o reintente en vez de pintar en blanco.
+   */
+  async findOne(id: number) {
+    const contract = await this.prisma.contracts.findFirst({
+      where: { id },
+      include: this.CONTRACT_INCLUDE,
+    });
+    if (!contract) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Contrato no encontrado en esta tienda.',
+        { contract_id: id },
+      );
+    }
+    return contract;
+  }
+
+  /**
+   * C.2 (FB-07, ERR-06) — transicion de estado: `draft -> active ->
+   * invoiced`, `draft|active -> cancelled`; `invoiced`/`cancelled` son
+   * terminales. Lo ilegal responde 422 `CONTRACT_STATUS_001` con el
+   * estado actual y las transiciones permitidas en `details`.
+   */
+  async updateStatus(id: number, status: ContractStatus) {
+    const contract = await this.findOne(id);
+    const from = contract.status as ContractStatus;
+    const allowed = CONTRACT_TRANSITIONS[from] ?? [];
+    if (!allowed.includes(status)) {
+      throw new VendixHttpException(
+        CONTRACT_STATUS_ENTRY,
+        `No se puede cambiar el contrato de "${from}" a "${status}".`,
+        {
+          contract_id: id,
+          current_status: from,
+          attempted_status: status,
+          allowed_transitions: allowed,
+        },
+      );
+    }
+    // Misma disciplina que `quotations.transition`: lectura scopeada
+    // primero (404 ajeno) y escritura sobre el id ya verificado.
+    return this.prisma.contracts.update({
+      where: { id },
+      data: { status, updated_at: new Date() },
+      include: this.CONTRACT_INCLUDE,
+    });
+  }
 
   async createFromQuotation(quotation_id: number) {
     const context = RequestContextService.getContext();
