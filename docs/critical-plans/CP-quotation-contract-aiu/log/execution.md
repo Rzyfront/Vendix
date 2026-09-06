@@ -14,3 +14,4 @@
 | 2026-09-06 | orquestador | — | 500 quotations: cliente Prisma rancio + migraciones B.1-D.1 sin aplicar en dev; generate + deploy + restart, health 200 | ef2c733ca |
 | 2026-09-06 | orquestador | — | Requisito dueno: linea personalizada en cotizacion (como POS/factura); se suma paso B.3 | ef2c733ca |
 | 2026-09-06 | exec-C.2be | C.2 | GET base/:id + PATCH status con specs; rutas vivas en arranque dev | 5ef7c231c |
+| 2026-09-06 | exec-D.2be | D.2 | POST invoice + filtro contract_id, specs PASS verificados por orquestador | b627628a6 |
