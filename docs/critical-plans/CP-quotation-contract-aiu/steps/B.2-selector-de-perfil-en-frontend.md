@@ -27,5 +27,5 @@ skills: [vendix-frontend, vendix-zoneless-signals, vendix-angular-forms]
   - [x] Sin perfil el formulario funciona igual que hoy (`profile_id` se omite; DTO verificado + buildcheck PASS)
   - [x] Destino se elige al crear y luego se muestra bloqueado (select en crear, deshabilitado + etiqueta "fijo" en editar; nunca viaja en edicion)
   - [ ] Con perfil precarga A/I/U, objeto y condiciones contra API viva (fallback desde cero ya verificado)
-  - [ ] F-003 — Precarga A/I/U contra catalogo viva pendiente (major)
+  - [x] F-003 — Precarga A/I/U contra catalogo viva pendiente (major) → evidence/F-003-precarga-evidence.md
 - **Status:** done (degradado por B.1 pendiente; evidencia en evidence/B.2-profile-selector-evidence.md)

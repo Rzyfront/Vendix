@@ -87,6 +87,22 @@ export class QuotationsService {
     );
   }
 
+  /**
+   * F-003: detalle del perfil con la version congelada (`current_config`).
+   * El catalogo liviano no trae los textos, asi que la precarga real los
+   * pide aqui. Un fallo degrada a cotizar desde cero, nunca bloquea.
+   */
+  getQuotationProfileDetail(id: number): Observable<any> {
+    const url = `${this.apiUrl}/store/quotation-profiles/${id}`;
+    return this.http.get<any>(url).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error fetching quotation profile detail:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
   createQuotation(dto: CreateQuotationDto): Observable<Quotation> {
     const url = `${this.apiUrl}/store/quotations`;
     return this.http.post<any>(url, dto).pipe(

@@ -656,11 +656,11 @@ export class QuotationFormModalComponent {
   }
 
   /**
-   * B.2 (FB-05): al elegir perfil, precarga objeto y condiciones en los campos
-   * visibles — solo los vacios, para no pisar lo ya digitado. A/I/U e items los
-   * precarga el backend con la version congelada (el catalogo liviano no los
-   * trae); por eso `profile_id` igual viaja en el DTO aunque aqui no haya
-   * campos AIU que pintar.
+   * B.2/F-003 (FB-05): al elegir perfil, precarga condiciones y notas desde
+   * el detalle con la version congelada — solo los vacios, para no pisar lo
+   * ya digitado. El catalogo liviano no trae los textos, asi que se piden
+   * aqui; si falla, el formulario sigue desde cero. El backend repite la
+   * precarga al crear (fuente final), por eso `profile_id` viaja en el DTO.
    */
   onProfileSelect(event: Event): void {
     const raw = (event.target as HTMLSelectElement).value;
@@ -670,20 +670,26 @@ export class QuotationFormModalComponent {
     }
     const profile = this.quotationProfiles().find((p) => String(p.id) === raw) || null;
     this.selectedProfile.set(profile);
-    if (!profile) return;
-    const patch: Record<string, string> = {};
-    if (profile.contract_object && !this.form.get('notes')?.value) {
-      patch['notes'] = profile.contract_object;
-    }
-    if (profile.terms_and_conditions && !this.form.get('terms_and_conditions')?.value) {
-      patch['terms_and_conditions'] = profile.terms_and_conditions;
-    }
-    if (profile.notes && !this.form.get('internal_notes')?.value) {
-      patch['internal_notes'] = profile.notes;
-    }
-    if (Object.keys(patch).length > 0) {
-      this.form.patchValue(patch);
-    }
+    if (!profile || profile.id == null) return;
+    this.quotationsService
+      .getQuotationProfileDetail(Number(profile.id))
+      .pipe(takeUntilDestroyed())
+      .subscribe({
+        next: (detail) => {
+          const config = (detail as any)?.current_config ?? {};
+          const patch: Record<string, string> = {};
+          if (config.notes && !this.form.get('notes')?.value) {
+            patch['notes'] = config.notes;
+          }
+          if (config.payment_terms && !this.form.get('terms_and_conditions')?.value) {
+            patch['terms_and_conditions'] = config.payment_terms;
+          }
+          if (Object.keys(patch).length > 0) {
+            this.form.patchValue(patch);
+          }
+        },
+        error: () => {},
+      });
   }
 
   // ── Product Search ──

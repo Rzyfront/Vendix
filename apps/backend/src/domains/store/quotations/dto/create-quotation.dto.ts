@@ -97,6 +97,15 @@ export class CreateQuotationDto {
   })
   destination?: quotation_destination_enum;
 
+  /**
+   * F-003 (FB-05) — Perfil opcional. Sin el campo, `forbidNonWhitelisted`
+   * rechaza con 400 toda creacion que elija perfil en el modal.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  profile_id?: number;
+
   @IsOptional()
   @IsString()
   channel?: string;

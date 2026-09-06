@@ -4,11 +4,10 @@ export type QuotationStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expi
 export type QuotationDestination = 'sale' | 'contract' | 'other';
 
 /**
- * B.2 (FB-03): entrada del catalogo de perfiles activos (`GET /store/quotation-profiles/catalog`).
- * Espejo liviano del patron de facturacion (`InvoiceProfileCatalogEntry`): elegir un perfil
- * no requiere sus reglas; la precarga la resuelve el backend con la version congelada (FB-05).
- * Campos de precarga opcionales: el catalogo puede no traerlos (solo id+nombre) y el
- * formulario debe operar igual; `profile_id` igual viaja y el backend precarga.
+ * B.2/F-003 (FB-03): entrada del catalogo de perfiles activos
+ * (`GET /store/quotation-profiles/catalog`). Solo identificacion: los textos
+ * de precarga se piden al detalle (`GET /store/quotation-profiles/:id`,
+ * `current_config`) y el backend repite la precarga al crear (FB-05).
  */
 export interface QuotationProfileCatalogEntry {
   id: number;
@@ -16,14 +15,6 @@ export interface QuotationProfileCatalogEntry {
   is_default?: boolean;
   current_version?: number;
   state?: string;
-  /** Objeto/alcance del contrato cuando el catalogo lo expone (precarga de condiciones). */
-  contract_object?: string;
-  terms_and_conditions?: string;
-  notes?: string;
-  /** A/I/U cuando el catalogo los expone; sin campos AIU en el modal, viajan via `profile_id`. */
-  administration_percentage?: number;
-  contingency_percentage?: number;
-  profit_percentage?: number;
 }
 
 export interface QuotationItem {

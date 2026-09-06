@@ -13,6 +13,7 @@ import { quotation_status_enum, Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrdersService } from '../orders/orders.service';
+import { QuotationProfilesService } from '../backend-quotations-profiles/quotation-profiles.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { EmailService } from '../../../email/email.service';
 import { generateQuotationEmailHtml } from '../../../email/templates/quotation-email.template';
@@ -60,6 +61,7 @@ export class QuotationsService {
     private readonly ordersService: OrdersService,
     private readonly eventEmitter: EventEmitter2,
     private readonly emailService: EmailService,
+    private readonly profilesService: QuotationProfilesService,
   ) {}
 
   // VALID_TRANSITIONS state machine
@@ -155,6 +157,36 @@ export class QuotationsService {
     );
     const grand_total = subtotal - totalDiscount + totalTax;
 
+    // F-003 — precarga desde el perfil con la version congelada. Solo
+    // rellena vacios: lo digitado manda. `resolveForQuotation` valida el
+    // tenant (ERR-04 si es ajeno, 404 si no existe).
+    let profileConfig: {
+      payment_terms?: string;
+      notes?: string;
+      validity_days?: number;
+    } | null = null;
+    if (createQuotationDto.profile_id != null) {
+      const resolved = await this.profilesService.resolveForQuotation(
+        createQuotationDto.profile_id,
+      );
+      profileConfig = (resolved as any)?.current_config ?? null;
+    }
+    const pickText = (
+      own: string | undefined | null,
+      fromProfile?: string | null,
+    ) =>
+      own !== undefined && own !== null && own !== ''
+        ? own
+        : (fromProfile ?? own ?? null);
+    const validityDays = profileConfig?.validity_days;
+    const validUntil =
+      createQuotationDto.valid_until != null &&
+      createQuotationDto.valid_until !== ''
+        ? new Date(createQuotationDto.valid_until)
+        : validityDays != null && validityDays > 0
+          ? new Date(Date.now() + validityDays * 86400000)
+          : null;
+
     const quotation = await this.prisma.quotations.create({
       data: {
         store_id,
@@ -163,17 +195,19 @@ export class QuotationsService {
         status: quotation_status_enum.draft,
         // A.1 (ADR-01): destino fijo al crear; sin valor nace `sale`.
         destination: (createQuotationDto.destination as any) ?? 'sale',
+        profile_id: createQuotationDto.profile_id ?? null,
         channel: (createQuotationDto.channel as any) || 'pos',
         subtotal_amount: subtotal,
         discount_amount: totalDiscount,
         tax_amount: totalTax,
         grand_total,
-        valid_until: createQuotationDto.valid_until
-          ? new Date(createQuotationDto.valid_until)
-          : null,
-        notes: createQuotationDto.notes,
+        valid_until: validUntil,
+        notes: pickText(createQuotationDto.notes, profileConfig?.notes),
         internal_notes: createQuotationDto.internal_notes,
-        terms_and_conditions: createQuotationDto.terms_and_conditions,
+        terms_and_conditions: pickText(
+          createQuotationDto.terms_and_conditions,
+          profileConfig?.payment_terms,
+        ),
         created_by_user_id: context?.user_id,
         updated_at: new Date(),
         quotation_items: {
