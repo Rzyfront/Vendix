@@ -154,7 +154,7 @@ Varias sesiones de agente comparten el mismo árbol e índice. De ahí:
 |---|---|
 | Un commit se lleva archivos de otra sesión | **Nunca `git add -A` ni `git add .`.** Commitear con rutas explícitas: `git commit -- <ruta>`. |
 | Un commit propio aparece en la rama equivocada, o HEAD no es el que se leyó | **HEAD se mueve solo.** Tomar el hash **en el mismo momento** en que se reporta o se usa. |
-| Un push sube commits que no se auditaron | `git push origin dev` empuja **el tip de la rama**, no lo auditado. Empujar por sha: `git push origin <sha>:dev`, con una guarda previa que compare `git rev-parse HEAD` contra el sha auditado y aborte si cambió. |
+| Un push sube commits que no se auditaron | `git push origin develop` empuja **el tip de la rama**, no lo auditado. Empujar por sha: `git push origin <sha>:develop`, con una guarda previa que compare `git rev-parse HEAD` contra el sha auditado y aborte si cambió. |
 | Un conflicto que no debería existir | **`git patch-id`** prueba si es fantasma. |
 | `gh pr review --approve` falla en el propio PR | No se puede aprobar el PR propio: el veredicto va como `--comment`. |
 

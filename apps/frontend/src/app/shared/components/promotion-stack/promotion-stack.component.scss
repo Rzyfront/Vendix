@@ -1,12 +1,13 @@
 /*
  * `app-promotion-stack` styles
- * CP-ECOM-PROMO-UX-001 — shared component (compact-pills, scroll-batch, expanded-cards).
+ * CP-ECOM-PROMO-UX-001 — shared component (compact-pills, scroll-batch,
+ * expanded-cards, marquee-bar).
  *
  * Tokens semánticos:
  *   --color-success, --color-primary, --color-warning,
  *   --color-success-rgb, --color-primary-rgb, --color-warning-rgb,
  *   --color-text-primary, --color-text-secondary, --color-border,
- *   --color-surface, --color-background.
+ *   --color-surface, --color-background, --color-text-on-primary.
  *
  * Mobile-first. prefers-reduced-motion respetado. Touch targets ≥ 44px.
  * Empty state: host sin contenido (no wrapper div) → display:contents.
@@ -212,6 +213,68 @@
   outline-offset: 2px;
 }
 
+/* ── marquee-bar ─────────────────────────────────────────────────── */
+/* Barra fina de loop infinito. El track mide 2× el contenido (dos listas
+   idénticas) y anima translateX(0 → -50%) para el loop seamless.
+   Fondo = primario de la tienda; texto = on-primary (contraste resuelto
+   por ThemeService). Solo anima `transform`. Sin elementos interactivos:
+   no hay touch targets que garantizar aquí. */
+.promotion-stack__marquee {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 0.625rem;
+  background: var(--color-primary, #2563eb);
+  color: var(--color-text-on-primary, #ffffff);
+}
+
+.promotion-stack__marquee-track {
+  display: flex;
+  width: max-content;
+  animation: promotion-marquee var(--marquee-duration, 30s) linear infinite;
+}
+
+/* Pausa sin JS: la barra es informativa y el usuario puede detenerla
+   pasando el cursor o el foco por encima. */
+.promotion-stack__marquee:hover .promotion-stack__marquee-track,
+.promotion-stack__marquee:focus-within .promotion-stack__marquee-track {
+  animation-play-state: paused;
+}
+
+.promotion-stack__marquee-list {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0.5rem 0;
+  list-style: none;
+}
+
+.promotion-stack__marquee-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2rem;
+  padding-right: 2rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* Separador entre mensajes (también cierra el loop entre copias). */
+.promotion-stack__marquee-item::after {
+  content: '•';
+  opacity: 0.7;
+  font-weight: 400;
+}
+
+@keyframes promotion-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
 /* ── expanded-cards ──────────────────────────────────────────────── */
 .promotion-stack__expanded {
   display: flex;
@@ -410,5 +473,15 @@
 
   .promotion-stack__scroller {
     scroll-behavior: auto;
+  }
+
+  /* Marquee estático pero legible: sin animación y con scroll manual
+     como fallback para ver los mensajes que no caben. */
+  .promotion-stack__marquee {
+    overflow-x: auto;
+  }
+
+  .promotion-stack__marquee-track {
+    animation: none;
   }
 }

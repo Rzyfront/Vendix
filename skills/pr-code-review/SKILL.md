@@ -17,7 +17,7 @@ metadata:
     - "revisar pull request"
     - "Running the 80% pass gate before merging a PR (git-workflow RULE 8)"
     - "Re-developing solutions identified by a code review below 80%"
-    - "Tagging a Linear issue Aprobado after merging a PR to dev"
+    - "Tagging a Linear issue Aprobado after merging a PR to develop"
     - "Tagging a Linear issue Requiere cambios after requesting changes on a PR"
 ---
 
@@ -529,7 +529,7 @@ The one **state write** this skill may propose is a *correction*, not a transiti
 
 | Outcome | GitHub action | Linear label | Linear state |
 | ------- | ------------- | ------------ | ------------ |
-| Review ≥ 80% → merged to `dev` | `gh pr merge <N>` | **`Aprobado`** | unchanged (`Code Review`) |
+| Review ≥ 80% → merged to `develop` | `gh pr merge <N>` | **`Aprobado`** | unchanged (`Code Review`) |
 | Review < 80% → sent back | `gh pr review <N> --request-changes` | **`Requiere cambios`** | unchanged (`Code Review`) |
 
 **Flow (both outcomes):**

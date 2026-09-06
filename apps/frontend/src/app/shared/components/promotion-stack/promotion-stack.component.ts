@@ -29,8 +29,17 @@ import { CurrencyPipe, CurrencyFormatService } from '../../pipes/currency';
  * - `compact-pills`: pills verticales/horizontales minimalistas (cards, sidebar).
  * - `scroll-batch`: carrusel horizontal auto-advance (banners, header).
  * - `expanded-cards`: cards de tiers con progreso (PDP, cart-side).
+ * - `marquee-bar`: barra fina de loop infinito (banner de catálogo).
+ *   Animación CSS pura con contenido duplicado; sin flechas, dots,
+ *   autoplay por intervalo ni IntersectionObserver. El fondo usa el
+ *   primario de la tienda (`--color-primary`) y el texto
+ *   `--color-text-on-primary`.
  */
-export type PromotionStackMode = 'compact-pills' | 'scroll-batch' | 'expanded-cards';
+export type PromotionStackMode =
+  | 'compact-pills'
+  | 'scroll-batch'
+  | 'expanded-cards'
+  | 'marquee-bar';
 
 export type PromotionType =
   | 'percentage'
@@ -67,7 +76,7 @@ export interface PromotionStackItem {
  * `app-promotion-stack`
  *
  * Componente compartido (Angular 20, standalone, OnPush, zoneless) que
- * renderiza una lista de promociones en tres modos visuales. Es el destino
+ * renderiza una lista de promociones en cuatro modos visuales. Es el destino
  * único de presentación para el módulo `CP-ECOM-PROMO-UX-001` y reemplaza
  * las implementaciones divergentes que existían en cards / cart / PDP /
  * sidebar.
@@ -157,12 +166,27 @@ export class PromotionStackComponent {
   // ── Refs ──────────────────────────────────────────────────────────────
   private readonly scrollerRef = viewChild<ElementRef<HTMLElement>>('scroller');
 
+  /**
+   * Copias del contenido en `marquee-bar`. El track anima `translateX(0 → -50%)`,
+   * así que necesita exactamente 2 listas idénticas para el loop seamless.
+   * Constante (no reactiva): el texto reacciona vía `items()` en cada copia.
+   */
+  readonly marqueeCopies = [0, 1];
+
   // ── Estado local (no expuesto por output) ────────────────────────────
   private readonly activeIndexSignal = signal(0);
   private autoplayInterval: ReturnType<typeof setInterval> | null = null;
   private autoplayPaused = false;
   /** Última entrada observada en `scroll-batch` (id del item visible). */
   private readonly lastViewedPromotionId = signal<string | number | null>(null);
+  /**
+   * Ids ya reportados en `marquee-bar`. La barra muestra todos los items
+   * a la vez (no hay IntersectionObserver), así que cada promo emite
+   * `promotionViewed` una sola vez por instancia del componente.
+   * Set plano (no signal): solo se lee/escribe dentro del `effect()`
+   * de marquee, nunca desde el template.
+   */
+  private readonly marqueeViewedIds = new Set<string | number>();
   /** Último tier cuyo cruce se emitió (id o null). */
   private readonly lastEmittedTierId = signal<string | number | null>(null);
   /** Bandera para evitar emitir el mismo view antes de que cambie. */
@@ -309,6 +333,25 @@ export class PromotionStackComponent {
         tier_index: tier.tier_index,
         quantity: qty,
       });
+    });
+
+    // `effect()` SOLO para side-effects (emitir `promotionViewed` de marquee).
+    // En `marquee-bar` todos los items están visibles a la vez y no existe
+    // scroller que observar: se emite una vez por promo cuando `items()`
+    // trae datos (carga asíncrona del catálogo incluida). El Set plano
+    // evita re-emitir si el input cambia de identidad con los mismos ids.
+    effect(() => {
+      if (this.mode() !== 'marquee-bar') return;
+      const list = this.items();
+      if (list.length === 0) return;
+      for (const item of list) {
+        if (this.marqueeViewedIds.has(item.id)) continue;
+        this.marqueeViewedIds.add(item.id);
+        this.promotionViewed.emit({
+          promotion_id: item.id,
+          mode: 'marquee-bar',
+        });
+      }
     });
   }
 

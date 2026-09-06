@@ -183,8 +183,13 @@ export class CatalogComponent implements OnInit {
   readonly storePromotions = signal<ActiveStorePromotion[]>([]);
   /**
    * Proyecta `ActiveStorePromotion[]` a la forma que espera
-   * `<app-promotion-stack>`. Marca como `featured` la primera promo
-   * (la de mayor descuento efectivo: `percentage` > `fixed_amount` más alto).
+   * `<app-promotion-stack mode="marquee-bar">`. El `label` es la frase
+   * con beneficio + alcance (`promotion_type_label`: "… en este producto" /
+   * "… en productos de esta categoría" / "… en toda tu compra"), con
+   * fallback a `badge_label` para no dejar la barra vacía. Marca como
+   * `featured` la primera promo (la de mayor descuento efectivo:
+   * `percentage` > `fixed_amount` más alto); en marquee el flag no
+   * cambia el pintado, pero se conserva para el ranking analítico.
    */
   readonly promotionStackItems = computed<PromotionStackItem[]>(() => {
     const promos = this.storePromotions();
@@ -201,7 +206,7 @@ export class CatalogComponent implements OnInit {
 
     return ranked.map((promo, index) => ({
       id: promo.id,
-      label: promo.badge_label,
+      label: promo.promotion_type_label?.trim() || promo.badge_label,
       type: promo.type,
       value: promo.value,
       scope: (['order', 'product', 'category'].includes(promo.scope)
@@ -240,8 +245,8 @@ export class CatalogComponent implements OnInit {
   ) {}
 
   /**
-   * Forward `promotionViewed` from the catalog banner's scroll-batch
-   * stack to the analytics sink. Mode is fixed at `scroll-batch` here
+   * Forward `promotionViewed` from the catalog banner's marquee-bar
+   * stack to the analytics sink. Mode is fixed at `marquee-bar` here
    * because the catalog only renders the banner in that mode, but we
    * still forward the `mode` from the event so the sink keeps the
    * discrimination logic in one place.

@@ -68,9 +68,11 @@ export interface ActiveStorePromotion {
   badge_label: string;
   min_purchase_amount: number | null;
   /**
-   * Optional human-readable label for the promotion type (e.g. "2x1",
-   * "Descuento por volumen"). Backend-driven (Phase A.3) so the storefront
-   * does not have to localize the rule_type enum itself.
+   * Frase lista para pintar con beneficio + alcance ("20% OFF en toda tu
+   * compra", "Desde 3 und: -10% en este producto"). La compone el backend
+   * (`EcommercePromotionsService.buildPromotionTypeLabel`) y está
+   * garantizada no vacía; el banner del catálogo la usa verbatim con
+   * fallback a `badge_label` para payloads que aún no la traigan.
    */
   promotion_type_label?: string;
   /**

@@ -188,7 +188,7 @@ Backlog → Todo → In Progress → Code Review → In Review → Done
    git-workflow R9 ────────────────────┘          │
    (abrir PR)                                     │
    pr-code-review ── labels only, NEVER estado    │
-   git-workflow R10 (release dev→main) ───────────┘  limpia las 3 labels
+   git-workflow R10 (release develop→main) ───────────┘  limpia las 3 labels
    verify-ticket-prod ── Done, o Todo +Devuelto +prioridad Alta
 ```
 

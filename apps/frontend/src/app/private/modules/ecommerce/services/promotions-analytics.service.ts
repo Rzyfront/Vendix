@@ -24,9 +24,9 @@ import { environment } from '../../../../../environments/environment';
 export class PromotionsAnalyticsService {
   /**
    * View/impression of a promotion card. `mode` is the stack's visual
-   * mode (`scroll-batch`, `compact-pills`, `expanded-cards`) so a single
-   * `promotion_id` can be tracked across multiple surfaces without the
-   * downstream sink collapsing them.
+   * mode (`scroll-batch`, `compact-pills`, `expanded-cards`,
+   * `marquee-bar`) so a single `promotion_id` can be tracked across
+   * multiple surfaces without the downstream sink collapsing them.
    */
   trackViewed(promotion_id: string | number, mode: string): void {
     const payload = {
