@@ -1,862 +1,1379 @@
-<div class="vendix-landing min-h-screen bg-[var(--color-background)] text-[var(--color-text-primary)]">
-  <!-- Navigation Header (Modern Clean Design) -->
-  <header
-    class="fixed top-0 left-0 right-0 z-50 bg-surface/80 backdrop-blur-xl border-b border-[var(--color-border)] shadow-sm">
-    <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="flex items-center justify-between h-16">
-        <!-- Logo Section -->
-        <div class="flex items-center space-x-3">
-          <div class="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
-            <img src="vlogo.png" alt="Vendix" class="w-full h-full object-contain" />
-          </div>
-          <h1 class="text-xl font-semibold text-[var(--color-text-primary)]">
-            {{ tenantConfig()?.branding?.name || "Vendix" }}
-          </h1>
-        </div>
+<div class="min-h-screen bg-[#f8f9ff] text-[#0b1c30] antialiased selection:bg-emerald-500 selection:text-white">
+  <!-- STICKY NAVBAR -->
+  <header class="sticky top-0 z-50 w-full bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
+    <div class="h-20 max-w-[75rem] mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
+      <!-- Logo & Brand -->
+      <div class="flex items-center gap-8">
+        <a [routerLink]="['/']" class="flex items-center gap-2.5 group">
+          <img
+            src="/vlogo.png"
+            alt="Vendix Logo"
+            class="h-9 w-auto object-contain transition-transform group-hover:scale-105"
+            onerror="this.src='/favicon.ico'"
+          />
+          <span class="text-2xl font-extrabold tracking-tight text-slate-900 group-hover:text-emerald-700 transition-colors">
+            Vendix
+          </span>
+        </a>
 
-        <!-- Desktop Navigation -->
-        <nav class="hidden md:flex items-center space-x-8">
-          <a href="#features"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
-            Características
-          </a>
-          <a href="#solutions"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
-            Soluciones
-          </a>
-          <a href="#early-access"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
-            Acceso Gratis
-          </a>
-          <a routerLink="/ayuda"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
-            Centro de Ayuda
-          </a>
-          <a routerLink="/auth/login"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
+        <!-- Desktop Navigation Links -->
+        <nav class="hidden lg:flex items-center gap-6">
+          <button (click)="scrollToSection('hero-simulator')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
+            Producto
+          </button>
+          <button (click)="scrollToSection('sectores')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
+            Sectores
+          </button>
+          <button (click)="scrollToSection('vexi')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1 flex items-center gap-1">
+            Vexi IA
+            <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full">IA</span>
+          </button>
+          <button (click)="scrollToSection('precios-section')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
+            Planes y Precios
+          </button>
+        </nav>
+      </div>
+
+      <!-- Right CTAs -->
+      <div class="flex items-center gap-3">
+        <a
+          [routerLink]="['/auth/login']"
+          class="hidden sm:inline-flex text-sm font-bold text-slate-700 hover:text-emerald-700 px-3 py-2 transition-colors">
+          Iniciar Sesión
+        </a>
+        <a
+          [routerLink]="['/auth/register']"
+          class="inline-flex items-center justify-center text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-all duration-200 px-5 py-2.5 rounded-xl shadow-[0_4px_14px_0_rgba(16,185,129,0.3)] hover:shadow-none hover:-translate-y-0.5">
+          Prueba Gratis 14 Días
+        </a>
+
+        <!-- Mobile Menu Toggle Button -->
+        <button
+          (click)="toggleMobileMenu()"
+          class="lg:hidden p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+          aria-label="Abrir menú de navegación">
+          <app-icon [name]="mobileMenuOpen() ? 'x' : 'menu'" [size]="24"></app-icon>
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile Drawer Navigation -->
+    @if (mobileMenuOpen()) {
+      <div class="lg:hidden border-t border-slate-200 bg-white/98 px-4 pt-3 pb-6 space-y-2 shadow-xl animate-in fade-in slide-in-from-top-4 duration-200">
+        <button (click)="scrollToSection('hero-simulator')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
+          Producto (POS en Vivo)
+        </button>
+        <button (click)="scrollToSection('sectores')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
+          Sectores e Industrias
+        </button>
+        <button (click)="scrollToSection('vexi')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors flex items-center justify-between">
+          <span>Vexi IA Copilot</span>
+          <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full">NUEVO</span>
+        </button>
+        <button (click)="scrollToSection('precios-section')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
+          Planes y Precios
+        </button>
+
+        <div class="pt-4 border-t border-slate-100 flex flex-col gap-2.5">
+          <a [routerLink]="['/auth/login']" class="w-full py-2.5 text-center font-bold text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
             Iniciar Sesión
           </a>
-          <a routerLink="/auth/register"
-            class="bg-[var(--color-primary)] text-white px-6 py-2.5 rounded-xl hover:bg-[var(--color-secondary)] transition-all duration-200 shadow-md hover:shadow-lg font-medium">
-            Comenzar Gratis
+          <a [routerLink]="['/auth/register']" class="w-full py-2.5 text-center font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 shadow-md transition-all">
+            Comenzar 14 Días Gratis
           </a>
-        </nav>
-
-        <!-- Mobile Actions -->
-        <div class="flex md:hidden items-center gap-1">
-          <a routerLink="/auth/login"
-            class="flex items-center gap-1.5 text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 px-3 py-2 rounded-lg hover:bg-gray-50">
-            <app-icon name="log-in" [size]="18" color="currentColor"></app-icon>
-            Ingresar
-          </a>
-          <button class="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
-            (click)="toggleMobileMenu()">
-            <app-icon [name]="mobileMenuOpen() ? 'x' : 'menu'" [size]="24" color="var(--color-text-primary)"></app-icon>
-          </button>
         </div>
       </div>
-    </div>
+    }
   </header>
 
-  <!-- Mobile Menu Overlay -->
-  @if (mobileMenuOpen()) {
-  <div class="fixed inset-0 z-[60] md:hidden">
-    <!-- Backdrop -->
-    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" (click)="closeMobileMenu()"></div>
+  <main class="w-full">
+    <!-- SECTION 1: HERO SECTION -->
+    <section class="relative w-full px-4 sm:px-6 lg:px-8 py-16 sm:py-24 overflow-hidden">
+      <div class="max-w-[75rem] mx-auto flex flex-col items-center text-center">
+        <!-- Launch Pill Badge -->
+        <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-emerald-100/80 border border-emerald-300/50 rounded-full text-emerald-900 text-xs sm:text-sm font-bold mb-6 shadow-sm">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+          <span class="w-2 h-2 rounded-full bg-emerald-600 -ml-3"></span>
+          <span>LANZAMIENTO OFICIAL · VENDIX 2026 · FACTURACIÓN DIAN Y POS EN VIVO</span>
+        </div>
 
-    <!-- Mobile Menu Panel -->
-    <div
-      class="fixed right-0 top-0 h-full w-80 max-w-[85vw] bg-surface shadow-xl transform transition-transform duration-300 ease-in-out">
-      <div class="flex flex-col h-full">
-        <!-- Mobile Menu Header -->
-        <div class="flex items-center justify-between p-4 border-b border-gray-200">
-          <div class="flex items-center space-x-3">
-            <div class="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden">
-              <img src="vlogo.png" alt="Vendix" class="w-full h-full object-contain" />
-            </div>
-            <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">
-              {{ tenantConfig()?.branding?.name || "Vendix" }}
-            </h2>
-          </div>
-          <button class="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200" (click)="closeMobileMenu()">
-            <app-icon name="menu" [size]="20" color="var(--color-text-primary)"></app-icon>
+        <!-- Main Headline -->
+        <h1 class="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-slate-900 max-w-4xl tracking-tight mb-6 leading-tight">
+          El software todo-en-uno para <span class="text-emerald-700 font-black">vender más</span>, emitir <span class="text-emerald-700 font-black">facturación DIAN</span> y controlar tu negocio <span class="text-emerald-700 font-black">sin caos ni pérdidas</span>.
+        </h1>
+
+        <!-- Subtitle -->
+        <p class="text-base sm:text-lg text-slate-600 max-w-2xl mb-8 leading-relaxed">
+          Deja de pagar múltiples suscripciones y de cuadrar inventarios a mano. Controla ventas en mostrador, pedidos por WhatsApp, despachos y contabilidad con la ayuda de IA real.
+        </p>
+
+        <!-- CTA Row -->
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto mb-8">
+          <a
+            [routerLink]="['/auth/register']"
+            class="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-sm sm:text-base font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-all duration-200 px-6 py-3.5 rounded-xl shadow-lg shadow-emerald-600/25 hover:shadow-none hover:-translate-y-0.5">
+            <app-icon name="rocket" [size]="18"></app-icon>
+            Comenzar Prueba Gratis 14 Días (Sin tarjeta)
+          </a>
+          <button
+            (click)="showDemo()"
+            class="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-sm sm:text-base font-bold text-slate-800 bg-white hover:bg-slate-100 border border-slate-200 transition-all duration-200 px-5 py-3.5 rounded-xl shadow-sm">
+            <app-icon name="play-circle" [size]="18" class="text-emerald-600"></app-icon>
+            Ver Demo en Video (2 min)
+          </button>
+          <button
+            (click)="openWhatsApp()"
+            class="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-sm sm:text-base font-semibold text-emerald-800 hover:text-emerald-950 transition-colors px-4 py-3.5">
+            <app-icon name="message-circle" [size]="18" class="text-emerald-600"></app-icon>
+            Hablar con Asesor
           </button>
         </div>
 
-        <!-- Mobile Menu Content -->
-        <div class="flex-1 overflow-y-auto p-4">
-          <div class="space-y-2">
-            <a href="#features"
-              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-              (click)="closeMobileMenu()">
-              <app-icon name="check-circle" [size]="20" color="var(--color-text-secondary)"
-                class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
-              <span class="text-[var(--color-text-primary)] font-medium">Características</span>
-            </a>
+        <!-- Trust Chips -->
+        <div class="flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-xs sm:text-sm font-semibold text-slate-600 mb-12">
+          <span class="inline-flex items-center gap-1.5">
+            <app-icon name="check-circle" [size]="16" class="text-emerald-600"></app-icon>
+            Habilitado para Facturación Electrónica DIAN
+          </span>
+          <span class="inline-flex items-center gap-1.5">
+            <app-icon name="cloud" [size]="16" class="text-emerald-600"></app-icon>
+            Software en la nube multiplataforma
+          </span>
+          <span class="inline-flex items-center gap-1.5">
+            <app-icon name="refresh-cw" [size]="16" class="text-emerald-600"></app-icon>
+            Migración gratuita de tu catálogo anterior
+          </span>
+        </div>
 
-            <a href="#solutions"
-              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-              (click)="closeMobileMenu()">
-              <app-icon name="settings" [size]="20" color="var(--color-text-secondary)"
-                class="mr-3 group-hover:text-[var(--color-accent)]"></app-icon>
-              <span class="text-[var(--color-text-primary)] font-medium">Soluciones</span>
-            </a>
-
-            <a href="#early-access"
-              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-              (click)="closeMobileMenu()">
-              <app-icon name="sparkles" [size]="20" color="var(--color-text-secondary)"
-                class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
-              <span class="text-[var(--color-text-primary)] font-medium">Acceso Gratis</span>
-            </a>
-
-            <a routerLink="/ayuda"
-              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-              (click)="closeMobileMenu()">
-              <app-icon name="life-buoy" [size]="20" color="var(--color-text-secondary)"
-                class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
-              <span class="text-[var(--color-text-primary)] font-medium">Centro de Ayuda</span>
-            </a>
-
-            <div class="border-t border-gray-200 my-4"></div>
-
-            <a routerLink="/auth/login"
-              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-              (click)="closeMobileMenu()">
-              <app-icon name="user" [size]="20" color="var(--color-text-secondary)"
-                class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
-              <span class="text-[var(--color-text-primary)] font-medium">Iniciar Sesión</span>
-            </a>
-
-            <a routerLink="/auth/register"
-              class="flex items-center p-3 rounded-lg bg-[var(--color-primary)] text-white hover:bg-[var(--color-secondary)] transition-colors duration-200 group mt-4"
-              (click)="closeMobileMenu()">
-              <app-icon name="plus" [size]="20" color="white" class="mr-3"></app-icon>
-              <span class="font-medium">Comenzar Gratis</span>
-            </a>
+        <!-- HERO MEDIA & INTERACTIVE DASHBOARD SIMULATOR -->
+        <div id="hero-simulator" class="relative w-full max-w-5xl rounded-2xl bg-white shadow-2xl border border-slate-200/80 p-3 sm:p-6 text-left overflow-hidden">
+          <!-- Top Window Controls -->
+          <div class="flex items-center justify-between pb-3 mb-4 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200/60">
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full bg-red-500"></span>
+              <span class="w-3 h-3 rounded-full bg-amber-500"></span>
+              <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
+              <span class="text-xs text-slate-500 ml-2 hidden sm:inline-block font-mono">vendix.cloud/pos/caja-central-01</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center gap-1.5 text-[11px] font-bold text-white bg-emerald-700 px-2.5 py-0.5 rounded-full">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse"></span>
+                MODO OFFLINE SEGURO ACTIVO
+              </span>
+            </div>
           </div>
 
-          <!-- Mobile Menu Footer -->
-          <div class="border-t border-gray-200 mt-6 pt-4">
-            <div class="text-center">
-              <p class="text-sm text-[var(--color-text-secondary)] mb-4">
-                ¿Necesitas ayuda?
+          <!-- Dashboard Layout Grid -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            <!-- Main POS Section -->
+            <div class="lg:col-span-8 flex flex-col gap-4">
+              <!-- Metric Highlights -->
+              <div class="grid grid-cols-3 gap-2 sm:gap-3">
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                  <p class="text-[11px] font-semibold text-slate-500">Ventas Hoy (Total)</p>
+                  <p class="text-base sm:text-xl font-extrabold text-slate-900 mt-0.5">$ 3.842.500</p>
+                  <span class="text-[10px] sm:text-[11px] text-emerald-600 font-bold flex items-center gap-0.5">▲ +18.4% vs ayer</span>
+                </div>
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                  <p class="text-[11px] font-semibold text-slate-500">Facturas DIAN</p>
+                  <p class="text-base sm:text-xl font-extrabold text-slate-900 mt-0.5">142 <span class="text-xs font-normal text-slate-400">valid.</span></p>
+                  <span class="text-[10px] sm:text-[11px] text-emerald-600 font-bold">100% éxito transm.</span>
+                </div>
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                  <p class="text-[11px] font-semibold text-slate-500">Ticket Promedio</p>
+                  <p class="text-base sm:text-xl font-extrabold text-slate-900 mt-0.5">$ 27.050</p>
+                  <span class="text-[10px] sm:text-[11px] text-emerald-600 font-bold">5.2 prod/ticket</span>
+                </div>
+              </div>
+
+              <!-- Visual Bar Chart for Sales Trend -->
+              <div class="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+                <div class="flex items-center justify-between mb-3">
+                  <p class="text-xs sm:text-sm font-bold text-slate-800">Flujo de Facturación y POS en Tiempo Real</p>
+                  <span class="text-xs text-slate-400">Últimas 6 horas</span>
+                </div>
+                <div class="h-28 flex items-end justify-between gap-2 pt-2">
+                  <div class="flex-1 flex flex-col items-center gap-1">
+                    <div class="w-full bg-slate-200 rounded-t transition-all hover:bg-emerald-400" style="height: 38%"></div>
+                    <span class="text-[10px] text-slate-400">10:00</span>
+                  </div>
+                  <div class="flex-1 flex flex-col items-center gap-1">
+                    <div class="w-full bg-slate-200 rounded-t transition-all hover:bg-emerald-400" style="height: 52%"></div>
+                    <span class="text-[10px] text-slate-400">11:00</span>
+                  </div>
+                  <div class="flex-1 flex flex-col items-center gap-1">
+                    <div class="w-full bg-emerald-200 rounded-t transition-all hover:bg-emerald-400" style="height: 65%"></div>
+                    <span class="text-[10px] text-slate-400">12:00</span>
+                  </div>
+                  <div class="flex-1 flex flex-col items-center gap-1">
+                    <div class="w-full bg-emerald-500 rounded-t" style="height: 94%"></div>
+                    <span class="text-[10px] text-emerald-700 font-bold">13:00 (Pico)</span>
+                  </div>
+                  <div class="flex-1 flex flex-col items-center gap-1">
+                    <div class="w-full bg-emerald-200 rounded-t transition-all hover:bg-emerald-400" style="height: 75%"></div>
+                    <span class="text-[10px] text-slate-400">14:00</span>
+                  </div>
+                  <div class="flex-1 flex flex-col items-center gap-1">
+                    <div class="w-full bg-emerald-500 rounded-t" style="height: 86%"></div>
+                    <span class="text-[10px] text-slate-400">15:00</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Interactive POS Line items simulator -->
+              <div class="bg-slate-50 p-3 rounded-xl border border-slate-200/60">
+                <p class="text-xs font-bold text-slate-700 mb-2">Comanda / Venta en Curso (#POS-0941)</p>
+                <div class="space-y-1.5">
+                  <div class="flex items-center justify-between text-xs text-slate-800 bg-white px-3 py-2 rounded-lg border border-slate-100 shadow-xs">
+                    <span class="font-medium">2x Café Especial Bourbon Rosado 340g</span>
+                    <span class="font-bold text-slate-900">$ 44.000</span>
+                  </div>
+                  <div class="flex items-center justify-between text-xs text-slate-800 bg-white px-3 py-2 rounded-lg border border-slate-100 shadow-xs">
+                    <span class="font-medium">1x Filtro Origami Cerámica V60 (Blanco)</span>
+                    <span class="font-bold text-slate-900">$ 78.000</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- DIAN Electronic Invoice Preview + Vexi Floating Bubble -->
+            <div class="lg:col-span-4 flex flex-col justify-between bg-slate-50 p-4 rounded-xl border border-slate-200/60">
+              <div>
+                <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-200">
+                  <div class="flex items-center gap-1.5">
+                    <app-icon name="file-text" [size]="18" class="text-emerald-700"></app-icon>
+                    <span class="text-xs font-bold text-slate-800">Tique DIAN Electrónico</span>
+                  </div>
+                  <span class="px-2 py-0.5 bg-emerald-500 text-white text-[10px] font-bold rounded">VALIDADA</span>
+                </div>
+
+                <div class="bg-white p-3 rounded-lg text-xs space-y-1.5 shadow-sm border border-slate-100">
+                  <div class="flex justify-between text-[11px] text-slate-500">
+                    <span>Factura Electrónica:</span>
+                    <span class="font-bold text-slate-800">SETP-01842</span>
+                  </div>
+                  <div class="flex justify-between text-[11px] text-slate-500">
+                    <span>CUFE:</span>
+                    <span class="font-mono text-[9px] truncate max-w-[130px] text-slate-700">d41d8cd98f00b204e9800998ecf8427e</span>
+                  </div>
+                  <div class="flex justify-between text-[11px] text-slate-500">
+                    <span>Adquiriente:</span>
+                    <span class="font-bold text-slate-800">Consumidor Final (2222...)</span>
+                  </div>
+                  <div class="pt-2 border-t border-slate-100 flex justify-between font-bold text-sm text-slate-900">
+                    <span>Total Transmisión:</span>
+                    <span class="text-emerald-700">$ 122.000</span>
+                  </div>
+
+                  <!-- Simulated QR code -->
+                  <div class="flex flex-col items-center justify-center p-3 bg-slate-50 rounded mt-2 border border-slate-100">
+                    <div class="w-16 h-16 bg-slate-200 rounded flex items-center justify-center text-slate-400">
+                      <app-icon name="qr-code" [size]="40" class="text-slate-700"></app-icon>
+                    </div>
+                    <span class="text-[9px] text-slate-400 mt-1">Firma digital X.509 certificada</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Vexi Floating Assistant Bubble -->
+              <div class="mt-4 bg-[#0a2318] text-emerald-100 p-3.5 rounded-xl shadow-lg border border-emerald-800/60 relative">
+                <div class="flex items-start gap-2.5">
+                  <div class="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                    <app-icon name="sparkles" [size]="15" class="text-white"></app-icon>
+                  </div>
+                  <div class="text-left">
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-xs font-bold text-emerald-300">Vexi IA Copilot</span>
+                      <span class="text-[9px] bg-amber-500 text-slate-950 px-1 py-0.2 rounded font-black">EN VIVO</span>
+                    </div>
+                    <p class="text-[11px] text-emerald-100/90 mt-1 leading-snug">
+                      "✓ Factura #1842 aprobada por DIAN en 0.8s. Stock de 'Café Bourbon' actualizado en POS y Tienda Web simultáneamente."
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 2: SOCIAL PROOF & METRICS BAR -->
+    <section class="w-full bg-[#f0f4ff] py-12 px-4 sm:px-6 lg:px-8 border-y border-slate-200/60">
+      <div class="max-w-[75rem] mx-auto flex flex-col gap-8">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+          <div class="flex flex-col items-center">
+            <span class="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-700 tracking-tight">+150.000</span>
+            <span class="text-sm font-bold text-slate-800 mt-1">Facturas DIAN Emitidas</span>
+            <span class="text-xs text-slate-500">Sin rechazos ni intermediarios</span>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-700 tracking-tight">99.98%</span>
+            <span class="text-sm font-bold text-slate-800 mt-1">Uptime en Punto de Venta</span>
+            <span class="text-xs text-slate-500">Operación local sin interrupciones</span>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-700 tracking-tight">3 Horas</span>
+            <span class="text-sm font-bold text-slate-800 mt-1">Ahorradas al Día</span>
+            <span class="text-xs text-slate-500">En cuadre de caja e inventario</span>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-700 tracking-tight">10 Min</span>
+            <span class="text-sm font-bold text-slate-800 mt-1">Tiempo de Puesta en Marcha</span>
+            <span class="text-xs text-slate-500">Sin necesidad de hardware técnico</span>
+          </div>
+        </div>
+
+        <!-- Integration Badges -->
+        <div class="pt-4 border-t border-slate-200/70 flex flex-wrap items-center justify-center gap-6 sm:gap-10 opacity-90">
+          <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Integraciones de pago y fiscalidad:</span>
+          <span class="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">
+            <app-icon name="smartphone" [size]="16" class="text-emerald-600"></app-icon> NEQUI
+          </span>
+          <span class="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">
+            <app-icon name="landmark" [size]="16" class="text-emerald-600"></app-icon> PSE
+          </span>
+          <span class="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">
+            <app-icon name="building" [size]="16" class="text-emerald-600"></app-icon> BANCOLOMBIA
+          </span>
+          <span class="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">
+            <app-icon name="credit-card" [size]="16" class="text-emerald-600"></app-icon> WOMPI
+          </span>
+          <span class="text-sm font-black text-emerald-800 flex items-center gap-1.5">
+            <app-icon name="shield-check" [size]="18" class="text-emerald-600"></app-icon> DIAN
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 3: PAIN VS SOLUTION -->
+    <section class="w-full py-20 px-4 sm:px-6 lg:px-8 bg-white">
+      <div class="max-w-[75rem] mx-auto flex flex-col gap-12">
+        <div class="text-center max-w-2xl mx-auto">
+          <span class="text-xs font-bold text-amber-700 uppercase tracking-wider">El Caos del Comerciante vs. La Eficiencia Vendix</span>
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-2">
+            Deja de pegar herramientas con cinta adhesiva
+          </h2>
+          <p class="text-sm sm:text-base text-slate-600 mt-2">
+            Comprar un software para caja, pagar folios a un facturador aparte y mantener una tienda en línea aislada destruye tu rentabilidad.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8 items-stretch">
+          <!-- The Fragmented Nightmare (Left) -->
+          <div class="bg-red-50/50 border border-red-200/80 p-6 sm:p-8 rounded-2xl flex flex-col justify-between shadow-xs">
+            <div>
+              <div class="flex items-center gap-3 mb-6">
+                <span class="w-8 h-8 rounded-full bg-red-100 text-red-600 flex items-center justify-center font-bold">✕</span>
+                <h3 class="text-lg sm:text-xl font-bold text-slate-900">La Pesadilla Tradicional Fragmentada</h3>
+              </div>
+              <ul class="space-y-4 text-xs sm:text-sm text-slate-700">
+                <li class="flex items-start gap-3">
+                  <app-icon name="x-circle" [size]="18" class="text-red-500 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Software POS antiguo amarrado a una sola PC física:</strong> Licencias costosas, copias de seguridad manuales y cero acceso desde el celular.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="x-circle" [size]="18" class="text-red-500 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Facturador electrónico externo cobrando por paquetes de folios:</strong> Cada factura te cuesta dinero extra y debes digitar dos veces cada venta.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="x-circle" [size]="18" class="text-red-500 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Tienda web desincronizada:</strong> Vendes online lo que ya se agotó en la vitrina física de tu local, generando cancelaciones y clientes enojados.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="x-circle" [size]="18" class="text-red-500 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Hojas de Excel manuales para pérdidas y ganancias:</strong> Pérdida de 3 horas cada noche cuadrando cajas y recalculando márgenes a ciegas.</span>
+                </li>
+              </ul>
+            </div>
+            <div class="mt-8 p-4 bg-white/80 border border-red-200 rounded-xl">
+              <span class="text-xs font-bold text-slate-500 uppercase block">Costo mensual estimado en software disperso:</span>
+              <span class="text-xl sm:text-2xl font-black text-red-600">~$350.000 COP / mes</span>
+              <span class="text-xs text-slate-500 block mt-1">+ Horas perdidas de tu vida y riesgos de multas DIAN.</span>
+            </div>
+          </div>
+
+          <!-- The Unified Vendix Solution (Right) -->
+          <div class="bg-emerald-50/70 border-2 border-emerald-500/80 p-6 sm:p-8 rounded-2xl flex flex-col justify-between shadow-md relative overflow-hidden">
+            <div class="absolute top-0 right-0 px-4 py-1 bg-emerald-600 text-white text-[11px] font-bold rounded-bl-xl tracking-wider">
+              TODO INTEGRADO
+            </div>
+            <div>
+              <div class="flex items-center gap-3 mb-6">
+                <span class="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold">✓</span>
+                <h3 class="text-lg sm:text-xl font-bold text-slate-900">Con el Ecosistema Vendix</h3>
+              </div>
+              <ul class="space-y-4 text-xs sm:text-sm text-slate-800">
+                <li class="flex items-start gap-3">
+                  <app-icon name="check-circle" [size]="18" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>POS multidispositivo en la nube:</strong> Abre caja desde tu celular, tablet o computador. Sigue facturando incluso si se corta la luz o internet gracias al modo offline.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="check-circle" [size]="18" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Facturación DIAN nativa e ilimitada:</strong> Emite facturas electrónicas, notas crédito y tiques de caja en 1 solo clic sin recargos por folio.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="check-circle" [size]="18" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Catálogo centralizado (Mostrador + Tienda + WhatsApp):</strong> Cuando un producto se vende en tu mostrador, su stock se descuenta al instante de tu web.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="check-circle" [size]="18" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Márgenes reales y cuadres automáticos en segundos:</strong> Control de costo CPP, FIFO, arqueos ciegos y analítica en lenguaje natural con Vexi IA.</span>
+                </li>
+              </ul>
+            </div>
+            <div class="mt-8 p-4 bg-white rounded-xl shadow-xs border border-emerald-200">
+              <span class="text-xs font-bold text-emerald-800 uppercase block">Inversión única unificada con Vendix:</span>
+              <span class="text-xl sm:text-2xl font-black text-emerald-700">Desde $39.200 COP / mes</span>
+              <span class="text-xs text-slate-500 block mt-1">Todas las herramientas conectadas, soporte garantizado y cero enredos.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 4: SECTORES E INDUSTRIAS (INTERACTIVE TABS) -->
+    <section id="sectores" class="w-full bg-[#f8f9ff] py-20 px-4 sm:px-6 lg:px-8 border-t border-slate-200/60">
+      <div class="max-w-[75rem] mx-auto flex flex-col gap-10">
+        <div class="text-center max-w-2xl mx-auto">
+          <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">Especialización de Alto Rendimiento</span>
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-2">
+            Diseñado para el ritmo real de tu sector
+          </h2>
+          <p class="text-sm sm:text-base text-slate-600 mt-2">
+            Activa en segundos los flujos específicos de tu modelo comercial sin complicar la experiencia de tus cajeros.
+          </p>
+        </div>
+
+        <!-- Industry Tab Selectors -->
+        <div class="flex flex-wrap items-center justify-center gap-2 bg-slate-200/70 p-1.5 rounded-2xl max-w-4xl mx-auto">
+          <button
+            (click)="setIndustry('retail')"
+            [class.bg-white]="selectedIndustry() === 'retail'"
+            [class.text-emerald-800]="selectedIndustry() === 'retail'"
+            [class.shadow-sm]="selectedIndustry() === 'retail'"
+            class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
+            <app-icon name="store" [size]="16"></app-icon> Retail & Mostrador
+          </button>
+          <button
+            (click)="setIndustry('restaurant')"
+            [class.bg-white]="selectedIndustry() === 'restaurant'"
+            [class.text-emerald-800]="selectedIndustry() === 'restaurant'"
+            [class.shadow-sm]="selectedIndustry() === 'restaurant'"
+            class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
+            <app-icon name="coffee" [size]="16"></app-icon> Restaurantes & Gastronomía
+          </button>
+          <button
+            (click)="setIndustry('gym')"
+            [class.bg-white]="selectedIndustry() === 'gym'"
+            [class.text-emerald-800]="selectedIndustry() === 'gym'"
+            [class.shadow-sm]="selectedIndustry() === 'gym'"
+            class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
+            <app-icon name="activity" [size]="16"></app-icon> Gimnasios & Fitness
+          </button>
+          <button
+            (click)="setIndustry('service')"
+            [class.bg-white]="selectedIndustry() === 'service'"
+            [class.text-emerald-800]="selectedIndustry() === 'service'"
+            [class.shadow-sm]="selectedIndustry() === 'service'"
+            class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
+            <app-icon name="briefcase" [size]="16"></app-icon> Servicios & Consultoría
+          </button>
+          <button
+            (click)="setIndustry('manufacturing')"
+            [class.bg-white]="selectedIndustry() === 'manufacturing'"
+            [class.text-emerald-800]="selectedIndustry() === 'manufacturing'"
+            [class.shadow-sm]="selectedIndustry() === 'manufacturing'"
+            class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
+            <app-icon name="boxes" [size]="16"></app-icon> Manufactura & Taller
+          </button>
+          <button
+            (click)="setIndustry('construction')"
+            [class.bg-white]="selectedIndustry() === 'construction'"
+            [class.text-emerald-800]="selectedIndustry() === 'construction'"
+            [class.shadow-sm]="selectedIndustry() === 'construction'"
+            class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
+            <app-icon name="hammer" [size]="16"></app-icon> Contratistas & Obra
+          </button>
+        </div>
+
+        <!-- Industry Active Tab Content Display -->
+        <div class="bg-white rounded-2xl p-6 sm:p-10 shadow-sm border border-slate-200/80">
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+            <div class="lg:col-span-6 space-y-4">
+              <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-900 text-[11px] font-bold rounded-lg tracking-wider">
+                {{ activeIndustryData().tag }}
+              </span>
+              <h3 class="text-xl sm:text-3xl font-extrabold text-slate-900">
+                {{ activeIndustryData().headline }}
+              </h3>
+              <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                {{ activeIndustryData().description }}
               </p>
-              <a href="mailto:quicks.dev@gmail.com?subject=Quiero%20una%20demo%20de%20Vendix"
-                class="inline-flex items-center text-[var(--color-primary)] hover:text-[var(--color-secondary)] font-medium">
-                <app-icon name="mail-check" [size]="16" color="currentColor" class="mr-2"></app-icon>
-                Contactar Soporte
-              </a>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                <div class="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                  <app-icon [name]="activeIndustryData().feature1.icon" [size]="20" class="text-emerald-600 mb-2"></app-icon>
+                  <p class="text-xs sm:text-sm font-bold text-slate-900">{{ activeIndustryData().feature1.title }}</p>
+                  <p class="text-xs text-slate-500 mt-1">{{ activeIndustryData().feature1.desc }}</p>
+                </div>
+                <div class="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                  <app-icon [name]="activeIndustryData().feature2.icon" [size]="20" class="text-emerald-600 mb-2"></app-icon>
+                  <p class="text-xs sm:text-sm font-bold text-slate-900">{{ activeIndustryData().feature2.title }}</p>
+                  <p class="text-xs text-slate-500 mt-1">{{ activeIndustryData().feature2.desc }}</p>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-  }
 
-  <!-- Hero Section with Carousel -->
-  <section class="relative h-screen">
-    <app-hero-carousel class="h-full"></app-hero-carousel>
-  </section>
-
-  <main>
-    <!-- AI Features Section -->
-    <section id="features" class="min-h-screen bg-[var(--color-surface)] flex items-center py-20">
-      <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="text-center mb-16">
-          <div class="inline-flex items-center gap-2 bg-[var(--color-primary)] px-4 py-2 rounded-full mb-6">
-            <span class="w-2 h-2 bg-[var(--color-accent)] rounded-full"></span>
-            <span class="text-sm font-medium text-[var(--color-accent)]">Características IA</span>
-          </div>
-          <h2 class="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight">
-            Potencia tu Negocio con<br />
-            <span class="text-[var(--color-primary)]">Inteligencia Artificial</span>
-          </h2>
-          <p class="text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
-            Implementación avanzada de IA para transformar cada aspecto de tu
-            operación empresarial.
-          </p>
-        </div>
-
-        <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-2 md:p-4 max-w-7xl mx-auto">
-          <!-- Predicción de Ventas -->
-          <div
-            class="group bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="chart-line" [size]="24" color="var(--color-primary)"></app-icon>
+            <div class="lg:col-span-6">
+              <img
+                [src]="activeIndustryData().image"
+                [alt]="activeIndustryData().title"
+                class="w-full h-72 sm:h-80 rounded-xl object-cover shadow-sm border border-slate-200"
+              />
             </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">
-              Predicción de Ventas
-            </h3>
-            <p class="text-[var(--color-text-secondary)] leading-relaxed">
-              Algoritmos de machine learning que anticipan tendencias de venta
-              con 95% de precisión.
-            </p>
-          </div>
-
-          <!-- Recomendaciones Inteligentes -->
-          <div
-            class="group bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="users" [size]="24" color="var(--color-accent)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">
-              Recomendaciones IA
-            </h3>
-            <p class="text-[var(--color-text-secondary)] leading-relaxed">
-              Sistema que sugiere productos óptimos basados en comportamiento y
-              patrones de compra.
-            </p>
-          </div>
-
-          <!-- Optimización de Inventario -->
-          <div
-            class="group bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-success-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="package" [size]="24" color="var(--color-success)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">
-              Inventario Inteligente
-            </h3>
-            <p class="text-[var(--color-text-secondary)] leading-relaxed">
-              Gestión automatizada que predice demanda y optimiza niveles de
-              stock en tiempo real.
-            </p>
-          </div>
-
-          <!-- Análisis de Comportamiento -->
-          <div
-            class="group bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="bar-chart" [size]="24" color="var(--color-primary)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">
-              Análisis Cliente
-            </h3>
-            <p class="text-[var(--color-text-secondary)] leading-relaxed">
-              IA que analiza patrones de comportamiento para personalizar
-              experiencia y aumentar conversiones.
-            </p>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Solutions Section -->
-    <section id="solutions" class="min-h-screen bg-[var(--color-background)] flex items-center py-20">
-      <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="text-center mb-20">
-          <div class="inline-flex items-center gap-2 bg-[var(--color-primary)] px-4 py-2 rounded-full mb-6">
-            <span class="w-2 h-2 bg-[var(--color-accent)] rounded-full"></span>
-            <span class="text-sm font-medium text-[var(--color-accent)]">Tipos de Venta</span>
+    <!-- SECTION 5: SPOTLIGHT DIFERENCIADOR: VEXI IA -->
+    <section id="vexi" class="w-full py-20 px-4 sm:px-6 lg:px-8 bg-[#00170d] text-white relative overflow-hidden">
+      <!-- Glow ambient background -->
+      <div class="absolute -top-24 -left-24 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+      <div class="absolute -bottom-24 -right-24 w-96 h-96 bg-emerald-600/15 rounded-full blur-3xl pointer-events-none"></div>
+
+      <div class="max-w-[75rem] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12 items-center relative z-10">
+        <div class="lg:col-span-6 flex flex-col gap-4">
+          <div class="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-900/60 border border-emerald-700/50 rounded-full text-emerald-300 text-xs font-bold self-start">
+            <app-icon name="sparkles" [size]="14"></app-icon>
+            EXCLUSIVO EN VENDIX
           </div>
-          <h2 class="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight">
-            Soluciones para<br />
-            <span class="text-[var(--color-primary)]">Todos los Canales</span>
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
+            Conoce a Vexi: Tu copiloto de negocio con Inteligencia Artificial
           </h2>
-          <p class="text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
-            Gestiona todos tus puntos de venta con una plataforma unificada y
-            moderna.
+          <p class="text-sm sm:text-base text-emerald-100/80 leading-relaxed">
+            No es un chatbot genérico. Vexi está conectado a tus ventas, compras, costos y resoluciones DIAN en tiempo real para tomar acciones operativas por ti.
           </p>
+
+          <div class="space-y-3 mt-2">
+            <div class="bg-slate-900/60 border border-emerald-900/60 p-4 rounded-xl">
+              <div class="flex items-center gap-2 text-emerald-300 font-bold text-xs sm:text-sm">
+                <app-icon name="scan-line" [size]="16"></app-icon>
+                "Vexi, ingresa esta factura de mi proveedor"
+              </div>
+              <p class="text-xs text-emerald-100/70 mt-1">
+                Escaneo OCR inteligente de compras por foto o PDF: extrae NIT, ítems, IVA y actualiza tu stock sin escribir nada a mano.
+              </p>
+            </div>
+            <div class="bg-slate-900/60 border border-emerald-900/60 p-4 rounded-xl">
+              <div class="flex items-center gap-2 text-emerald-300 font-bold text-xs sm:text-sm">
+                <app-icon name="trending-up" [size]="16"></app-icon>
+                "Vexi, ¿cuál fue el producto con mayor margen esta semana?"
+              </div>
+              <p class="text-xs text-emerald-100/70 mt-1">
+                Obtén respuestas ejecutivas al instante en lenguaje natural con recomendaciones para promocionar o sustituir ítems lentos.
+              </p>
+            </div>
+            <div class="bg-slate-900/60 border border-emerald-900/60 p-4 rounded-xl">
+              <div class="flex items-center gap-2 text-emerald-300 font-bold text-xs sm:text-sm">
+                <app-icon name="bell" [size]="16"></app-icon>
+                "Vexi, avísame si el stock de café baja de 10 unidades"
+              </div>
+              <p class="text-xs text-emerald-100/70 mt-1">
+                Alertas proactivas a tu WhatsApp con borrador de orden de compra listo para enviar a tu distribuidor en un solo clic.
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-2 md:p-4 max-w-7xl mx-auto">
-          <!-- Punto de Venta POS -->
-          <div
-            class="bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 hover:shadow-lg transition-all duration-300">
-            <div class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-6">
-              <app-icon name="credit-card" [size]="24" color="var(--color-accent)"></app-icon>
+        <!-- Vexi Interactive Live UI Simulator -->
+        <div class="lg:col-span-6 bg-slate-900/95 border border-emerald-800/80 p-5 sm:p-6 rounded-2xl shadow-2xl flex flex-col gap-4">
+          <div class="flex items-center justify-between pb-3 border-b border-emerald-900/80">
+            <div class="flex items-center gap-2.5">
+              <div class="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center">
+                <app-icon name="bot" [size]="18" class="text-white"></app-icon>
+              </div>
+              <div>
+                <p class="text-xs sm:text-sm font-bold text-white">Vexi AI Assistant</p>
+                <span class="text-[10px] text-emerald-400 font-medium">● Conectado a base de datos de tu tienda</span>
+              </div>
             </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
-              Punto de Venta POS
-            </h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Escáner de códigos de barra</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Gestión de efectivo y tarjeta</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Impresión de tickets y facturas</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Inventario en tiempo real</span>
-              </li>
-            </ul>
+            <span class="text-[10px] text-emerald-300 font-mono bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800/50">LATENCIA: 140ms</span>
           </div>
 
-          <!-- Facturación -->
-          <div
-            class="bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-6">
-              <app-icon name="file-text" [size]="24" color="var(--color-primary)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
-              Facturación
-            </h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Facturas electrónicas válidas</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Generación automática DIAN</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Reportes contables</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Retenciones automáticas</span>
-              </li>
-            </ul>
+          <!-- Chat Conversation Stream -->
+          <div class="space-y-3 min-h-[160px] max-h-[300px] overflow-y-auto pr-1">
+            @for (msg of vexiChatMessages(); track $index) {
+              @if (msg.role === 'user') {
+                <div class="flex justify-end">
+                  <div class="bg-emerald-800/80 text-white text-xs sm:text-sm px-4 py-2.5 rounded-xl rounded-br-none max-w-[85%] shadow-sm">
+                    {{ msg.text }}
+                  </div>
+                </div>
+              } @else {
+                <div class="flex justify-start">
+                  <div class="bg-slate-800 text-emerald-50 text-xs sm:text-sm px-4 py-3 rounded-xl rounded-bl-none max-w-[90%] shadow-md space-y-2 border border-emerald-900/60">
+                    <p class="leading-relaxed">{{ msg.text }}</p>
+
+                    @if (msg.alert) {
+                      <div class="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-300 text-xs flex items-center gap-2">
+                        <app-icon name="alert-triangle" [size]="16" class="shrink-0 text-amber-400"></app-icon>
+                        <span>¡Alerta! 'Leche Entera Colanta 1L' tiene 4 unidades en almacén. Se agotará en aprox 1.5 horas.</span>
+                      </div>
+                    }
+
+                    @if (msg.actionText) {
+                      @if (!msg.completed) {
+                        <button
+                          (click)="executeVexiAction()"
+                          class="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm">
+                          <app-icon name="send" [size]="14"></app-icon>
+                          {{ msg.actionText }}
+                        </button>
+                      } @else {
+                        <div class="p-2 bg-emerald-900/40 border border-emerald-700/50 rounded-lg text-emerald-300 text-xs flex items-center gap-1.5">
+                          <app-icon name="check" [size]="14"></app-icon>
+                          <span>Acción ejecutada con éxito</span>
+                        </div>
+                      }
+                    }
+                  </div>
+                </div>
+              }
+            }
           </div>
 
-          <!-- Pagos -->
-          <div
-            class="bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div class="w-12 h-12 bg-[var(--color-success-light)] rounded-xl flex items-center justify-center mb-6">
-              <app-icon name="credit-card" [size]="24" color="var(--color-success)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
-              Pagos
-            </h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Tarjeta crédito y débito</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Pagos móviles QR</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Transferencias bancarias</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Criptomonedas</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- Gestión de Envíos -->
-          <div
-            class="bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-6">
-              <app-icon name="truck" [size]="24" color="var(--color-primary)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
-              Gestión de Envíos
-            </h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Integración transportadoras</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Seguimiento en tiempo real</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Cálculo automático fletes</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Notificaciones SMS/email</span>
-              </li>
-            </ul>
+          <!-- Input Box -->
+          <div class="mt-2 bg-slate-800/80 border border-emerald-900/80 p-2 rounded-xl flex items-center gap-2">
+            <input
+              [value]="vexiQuery()"
+              (input)="vexiQuery.set($any($event.target).value)"
+              (keyup.enter)="sendVexiCustomQuery()"
+              class="bg-transparent text-xs sm:text-sm text-white placeholder:text-slate-400 w-full px-2 outline-none"
+              placeholder="Pregunta a Vexi sobre ventas, stock o DIAN..."
+              type="text"
+            />
+            <button
+              (click)="sendVexiCustomQuery()"
+              class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shrink-0 transition-colors flex items-center gap-1">
+              <span>Enviar</span>
+              <app-icon name="corner-down-left" [size]="14"></app-icon>
+            </button>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- PRICING SECTION - COMMENTED OUT FOR EARLY ACCESS
-    <section id="pricing" class="min-h-screen bg-[var(--color-surface)] py-20 md:py-32">
-      <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="text-center mb-12 md:mb-16">
-          <div class="inline-flex items-center gap-2 bg-[var(--color-primary)] px-4 py-2 rounded-full mb-6">
-            <span class="w-2 h-2 bg-[var(--color-accent)] rounded-full"></span>
-            <span class="text-sm font-medium text-[var(--color-accent)]">Planes y Precios</span>
-          </div>
-          <h2 class="text-3xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight">
-            Planes para
-            <span class="text-[var(--color-primary)]">Tu Negocio</span>
+    <!-- SECTION 6: PLANES Y PRECIOS REALES (CORE COMMERCIAL SECTION) -->
+    <section id="precios-section" class="w-full py-20 px-4 sm:px-6 lg:px-8 bg-white">
+      <div class="max-w-[75rem] mx-auto flex flex-col gap-12">
+        <!-- Heading & Switchers -->
+        <div class="text-center max-w-2xl mx-auto flex flex-col items-center">
+          <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">Transparencia Total Sin Letra Menuda</span>
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-2">
+            Planes flexibles que crecen junto a tu negocio
           </h2>
-          <p class="text-lg md:text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
-            Elige el plan perfecto según tus necesidades. Cancela cuando quieras.
+          <p class="text-sm sm:text-base text-slate-600 mt-2">
+            Comienza gratis por 14 días. Sin tarjeta de crédito requerida. Cancela cuando quieras.
           </p>
+
+          <!-- Dynamic Billing Cycle Selector -->
+          <div class="mt-6 inline-flex flex-wrap items-center justify-center gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+            @for (cycle of availableCycles(); track cycle) {
+              <button
+                (click)="setBillingCycle(cycle)"
+                [class.bg-white]="selectedCycle() === cycle"
+                [class.text-emerald-800]="selectedCycle() === cycle"
+                [class.shadow-sm]="selectedCycle() === cycle"
+                class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-600 hover:text-slate-900">
+                {{ getCycleDisplayLabel(cycle) }}
+              </button>
+            }
+          </div>
+
+          <!-- Currency Switcher -->
+          <div class="mt-3 flex items-center gap-2 text-xs text-slate-500">
+            <span>Moneda:</span>
+            <button
+              (click)="setCurrency('COP')"
+              [class.font-bold]="selectedCurrency() === 'COP'"
+              [class.text-emerald-700]="selectedCurrency() === 'COP'"
+              [class.underline]="selectedCurrency() === 'COP'">
+              COP ($)
+            </button>
+            <span>/</span>
+            <button
+              (click)="setCurrency('USD')"
+              [class.font-bold]="selectedCurrency() === 'USD'"
+              [class.text-emerald-700]="selectedCurrency() === 'USD'"
+              [class.underline]="selectedCurrency() === 'USD'">
+              USD ($)
+            </button>
+          </div>
+        </div>
+
+        <!-- Pricing Cards Grid Dynamically Rendered From API -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 items-stretch">
+          @for (plan of visiblePlans(); track plan.id) {
+            <div
+              [class.bg-[#00170d]]="plan.is_popular"
+              [class.text-white]="plan.is_popular"
+              [class.border-2]="plan.is_popular"
+              [class.border-emerald-500]="plan.is_popular"
+              [class.shadow-xl]="plan.is_popular"
+              [class.lg:-translate-y-2]="plan.is_popular"
+              [class.bg-white]="!plan.is_popular"
+              [class.text-slate-900]="!plan.is_popular"
+              [class.border]="!plan.is_popular"
+              [class.border-slate-200]="!plan.is_popular"
+              [class.shadow-sm]="!plan.is_popular"
+              class="p-6 sm:p-8 rounded-2xl flex flex-col justify-between relative transition-all duration-200">
+
+              @if (plan.is_popular) {
+                <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 bg-amber-500 text-slate-950 text-xs font-black rounded-full shadow-md tracking-wider">
+                  ★ RECOMENDADO PARA NEGOCIOS EN EXPANSIÓN
+                </div>
+              }
+
+              <div>
+                <div class="flex justify-between items-center mb-2" [class.mt-2]="plan.is_popular">
+                  <h3 class="text-xl font-extrabold" [class.text-white]="plan.is_popular" [class.text-slate-900]="!plan.is_popular">
+                    {{ plan.name }}
+                  </h3>
+                  @if (plan.is_popular) {
+                    <span class="text-[11px] font-bold px-2.5 py-0.5 bg-emerald-500 text-slate-950 rounded-full">MÁS POPULAR</span>
+                  }
+                </div>
+
+                <p class="text-xs mb-6 min-h-[36px]" [class.text-emerald-100/70]="plan.is_popular" [class.text-slate-500]="!plan.is_popular">
+                  {{ plan.description }}
+                </p>
+
+                <div class="mb-6">
+                  <span class="text-3xl sm:text-4xl font-black" [class.text-emerald-300]="plan.is_popular" [class.text-slate-900]="!plan.is_popular">
+                    {{ formatPrice(plan.base_price) }}
+                  </span>
+                  <span class="text-xs" [class.text-emerald-100/60]="plan.is_popular" [class.text-slate-400]="!plan.is_popular">
+                    {{ getCyclePeriodSuffix(selectedCycle()) }}
+                  </span>
+                </div>
+
+                <!-- Feature List -->
+                <ul class="space-y-3 text-xs sm:text-sm pb-8">
+                  @for (feat of plan.features; track feat.key) {
+                    <li class="flex items-center gap-2.5">
+                      @if (feat.enabled) {
+                        <app-icon name="check" [size]="16" [class]="plan.is_popular ? 'text-emerald-300' : 'text-emerald-600'"></app-icon>
+                        <span [class.font-semibold]="plan.is_popular">{{ feat.label }}</span>
+                      } @else {
+                        <app-icon name="x" [size]="16" class="text-slate-400"></app-icon>
+                        <span class="text-slate-400 line-through">{{ feat.label }}</span>
+                      }
+                    </li>
+                  }
+                </ul>
+              </div>
+
+              <!-- CTA Button -->
+              <button
+                (click)="onSelectPlan(plan)"
+                [class.bg-emerald-500]="plan.is_popular"
+                [class.hover:bg-emerald-400]="plan.is_popular"
+                [class.text-slate-950]="plan.is_popular"
+                [class.bg-slate-100]="!plan.is_popular"
+                [class.hover:bg-emerald-600]="!plan.is_popular"
+                [class.hover:text-white]="!plan.is_popular"
+                [class.text-slate-800]="!plan.is_popular"
+                class="w-full py-3 px-4 rounded-xl text-xs sm:text-sm font-bold text-center transition-all duration-200 shadow-sm">
+                {{ plan.is_popular ? 'Elegir Plan Pro (14 Días Gratis)' : 'Iniciar Prueba de 14 Días' }}
+              </button>
+            </div>
+          }
         </div>
       </div>
     </section>
-    -->
 
-    <!-- Early Access Section -->
-    <section id="early-access" class="min-h-screen bg-[var(--color-surface)] py-20 md:py-32">
-      <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-7xl">
-
-        <!-- Header -->
-        <div class="text-center mb-12 md:mb-16">
-          <div class="inline-flex items-center gap-2 bg-[var(--color-primary)] px-4 py-2 rounded-full mb-6">
-            <app-icon name="sparkles" [size]="14" color="var(--color-accent)"></app-icon>
-            <span class="text-sm font-medium text-[var(--color-accent)]">Acceso Anticipado Gratuito</span>
-          </div>
-          <h2 class="text-3xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight">
-            Todas las Herramientas.<br />
-            <span class="text-[var(--color-primary)]">Gratis. Sin Límites.</span>
+    <!-- SECTION 7: COMPARATIVA TÉCNICA DETALLADA -->
+    <section class="w-full bg-[#f8f9ff] py-20 px-4 sm:px-6 lg:px-8 border-t border-slate-200/60">
+      <div class="max-w-[75rem] mx-auto flex flex-col gap-10">
+        <div class="text-center max-w-2xl mx-auto">
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+            Comparativa técnica detallada
           </h2>
-          <p class="text-lg md:text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
-            Vendix está en acceso anticipado. Regístrate hoy y obtén acceso completo a todas las funcionalidades
-            sin costo alguno, sin tarjeta de crédito, sin compromisos.
+          <p class="text-sm sm:text-base text-slate-600 mt-2">
+            Descubre cada una de las capacidades incluidas en cada plan sin costes ocultos.
           </p>
         </div>
 
-        <!-- Hero Card -->
-        <div class="max-w-2xl mx-auto mb-16">
-          <div
-            class="relative bg-surface rounded-2xl border-2 border-[var(--color-primary)]/30 shadow-xl p-8 md:p-10 text-center overflow-hidden">
-            <!-- Decorative gradient -->
-            <div
-              class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)]">
+        <div class="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200/80 overflow-x-auto">
+          <table class="w-full text-left text-xs sm:text-sm">
+            <thead>
+              <tr class="bg-slate-50 border-b border-slate-200">
+                <th class="p-3 sm:p-4 font-bold text-slate-800">Capacidad / Módulo</th>
+                <th class="p-3 sm:p-4 font-bold text-slate-800 text-center">Starter</th>
+                <th class="p-3 sm:p-4 font-bold text-emerald-700 text-center bg-emerald-50/50">Pro</th>
+                <th class="p-3 sm:p-4 font-bold text-slate-800 text-center">Enterprise</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <tr class="hover:bg-slate-50 transition-colors">
+                <td class="p-3 sm:p-4 font-medium text-slate-800">Productos y Catálogo</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Ilimitados</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">Ilimitados</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Ilimitados</td>
+              </tr>
+              <tr class="hover:bg-slate-50 transition-colors">
+                <td class="p-3 sm:p-4 font-medium text-slate-800">Comisión por venta realizada</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">0%</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">0%</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">0%</td>
+              </tr>
+              <tr class="hover:bg-slate-50 transition-colors">
+                <td class="p-3 sm:p-4 font-medium text-slate-800">Resolución DIAN (Factura Electrónica + Tique POS)</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Incluido</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">Incluido</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Incluido</td>
+              </tr>
+              <tr class="hover:bg-slate-50 transition-colors">
+                <td class="p-3 sm:p-4 font-medium text-slate-800">Compatibilidad Impresoras Térmicas (58mm / 80mm)</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">✓ Sí</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">✓ Sí</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">✓ Sí</td>
+              </tr>
+              <tr class="hover:bg-slate-50 transition-colors">
+                <td class="p-3 sm:p-4 font-medium text-slate-800">Retenciones Fiscales (ReteICA, ReteIVA, ReteFuente)</td>
+                <td class="p-3 sm:p-4 text-center text-slate-500">Básica</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">Automatizada</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Multi-tarifa</td>
+              </tr>
+              <tr class="hover:bg-slate-50 transition-colors">
+                <td class="p-3 sm:p-4 font-medium text-slate-800">Asistente IA Vexi (Consultas & OCR)</td>
+                <td class="p-3 sm:p-4 text-center text-slate-400">—</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">200 consult./día</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Ilimitado + Voz</td>
+              </tr>
+              <tr class="hover:bg-slate-50 transition-colors">
+                <td class="p-3 sm:p-4 font-medium text-slate-800">Migración de Inventario desde Excel</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Gratis (Auto)</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">Gratis (Asistida)</td>
+                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Llave en Mano VIP</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 8: CALCULADORA INTERACTIVA DE AHORRO (ROI CALCULATOR) -->
+    <section id="roi" class="w-full py-20 px-4 sm:px-6 lg:px-8 bg-white">
+      <div class="max-w-[75rem] mx-auto bg-slate-50 p-6 sm:p-10 rounded-3xl border border-slate-200 shadow-lg">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+          <!-- Calculator Controls -->
+          <div class="lg:col-span-7 flex flex-col gap-6">
+            <div>
+              <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">Calculadora de Retorno de Inversión</span>
+              <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-1">
+                ¿Cuánto dinero ahorras al año con Vendix?
+              </h2>
+              <p class="text-xs sm:text-sm text-slate-600 mt-1">
+                Compara el gasto de contratar POS independiente + Facturador DIAN por folios + Plugin Web frente a Vendix Todo-en-Uno.
+              </p>
             </div>
 
-            <div class="mb-6">
-              <span class="text-2xl md:text-3xl text-[var(--color-text-secondary)] line-through opacity-60">$69.900/mes</span>
+            <!-- Slider 1: Sucursales -->
+            <div class="space-y-2">
+              <div class="flex justify-between items-center text-xs sm:text-sm font-semibold">
+                <span class="text-slate-800">¿Cuántas sucursales o puntos de venta tienes?</span>
+                <span class="font-bold text-emerald-700 text-sm sm:text-base">{{ storeCount() }} {{ storeCount() === 1 ? 'Tienda' : 'Tiendas' }}</span>
+              </div>
+              <input
+                [value]="storeCount()"
+                (input)="updateStores($event)"
+                class="w-full accent-emerald-600 h-2 bg-slate-200 rounded-lg cursor-pointer"
+                max="5"
+                min="1"
+                step="1"
+                type="range"
+              />
             </div>
-            <div class="mb-4">
-              <span class="text-5xl md:text-7xl font-bold text-[var(--color-primary)]">GRATIS</span>
+
+            <!-- Slider 2: Facturas al mes -->
+            <div class="space-y-2">
+              <div class="flex justify-between items-center text-xs sm:text-sm font-semibold">
+                <span class="text-slate-800">¿Cuántas ventas o facturas emites al mes aprox?</span>
+                <span class="font-bold text-emerald-700 text-sm sm:text-base">{{ invoicesCount() | number:'1.0-0' }} ventas</span>
+              </div>
+              <input
+                [value]="invoicesCount()"
+                (input)="updateInvoices($event)"
+                class="w-full accent-emerald-600 h-2 bg-slate-200 rounded-lg cursor-pointer"
+                max="10000"
+                min="300"
+                step="100"
+                type="range"
+              />
             </div>
-            <p class="text-lg text-[var(--color-text-secondary)] mb-8">
-              durante Early Access
-            </p>
-            <div class="flex flex-wrap justify-center gap-3 mb-8 text-sm md:text-base text-[var(--color-text-secondary)]">
-              <span class="flex items-center gap-1.5">
-                <app-icon name="check" [size]="16" color="var(--color-success)"></app-icon>
-                Usuarios Ilimitados
-              </span>
-              <span class="text-[var(--color-border)]">·</span>
-              <span class="flex items-center gap-1.5">
-                <app-icon name="check" [size]="16" color="var(--color-success)"></app-icon>
-                Productos Ilimitados
-              </span>
-              <span class="text-[var(--color-border)]">·</span>
-              <span class="flex items-center gap-1.5">
-                <app-icon name="check" [size]="16" color="var(--color-success)"></app-icon>
-                Tiendas Ilimitadas
-              </span>
+
+            <div class="text-xs text-slate-500 flex items-center gap-1.5">
+              <app-icon name="info" [size]="14"></app-icon>
+              <span>Cálculo estimado basado en costo promedio de folios DIAN ($280 COP/folio) + POS tradicional ($180.000/mes).</span>
             </div>
-            <a routerLink="/auth/register"
-              class="inline-flex items-center gap-2 bg-[var(--color-primary)] text-white px-8 py-4 rounded-xl text-lg font-semibold hover:bg-[var(--color-secondary)] shadow-lg hover:shadow-xl transition-all duration-300">
-              <app-icon name="zap" [size]="20" color="white"></app-icon>
-              Comenzar Gratis Ahora
-            </a>
+          </div>
+
+          <!-- Result Card -->
+          <div class="lg:col-span-5 bg-white p-6 sm:p-8 rounded-2xl flex flex-col justify-between text-center border border-slate-200 shadow-md">
+            <div>
+              <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Ahorro anual estimado directo</span>
+              <div class="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-700 mt-2 tracking-tight">
+                $ {{ annualSavings() | number:'1.0-0' }} COP
+              </div>
+              <p class="text-xs sm:text-sm text-slate-600 mt-3 leading-relaxed">
+                Dinero que dejas de regalar a proveedores de software desconectados, además de ganar <strong>~90 horas de tiempo libre al mes</strong>.
+              </p>
+            </div>
+            <button
+              (click)="scrollToSection('precios-section')"
+              class="mt-6 w-full inline-flex items-center justify-center text-xs sm:text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors py-3 rounded-xl shadow-md">
+              Comenzar a Ahorrar Hoy
+            </button>
           </div>
         </div>
+      </div>
+    </section>
 
-        <!-- Feature Grid -->
-        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 mb-16">
-
-          <!-- Punto de Venta (POS) -->
-          <div
-            class="group bg-surface p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="credit-card" [size]="24" color="var(--color-accent)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Punto de Venta (POS)</h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Escaneo de códigos de barras</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Pagos en efectivo y tarjeta</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Impresión de tickets y facturas</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Inventario en tiempo real</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- Gestión de Inventario -->
-          <div
-            class="group bg-surface p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-success-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="package" [size]="24" color="var(--color-success)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Gestión de Inventario</h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Ajustes de stock y ubicaciones</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Gestión de proveedores</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Punto de compra automático</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Seguimiento por número de serie</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- E-commerce Completo -->
-          <div
-            class="group bg-surface p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="shopping-bag" [size]="24" color="var(--color-primary)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">E-commerce Completo</h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Tienda online personalizable</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Carrito de compras configurable</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Checkout con WhatsApp</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Catálogo con variantes</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- Analíticas Avanzadas -->
-          <div
-            class="group bg-surface p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="chart-line" [size]="24" color="var(--color-primary)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Analíticas Avanzadas</h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Resumen de ventas en tiempo real</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Análisis de inventario</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Rendimiento de productos y top sellers</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Pérdidas y ganancias</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- Marketing y Clientes -->
-          <div
-            class="group bg-surface p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="users" [size]="24" color="var(--color-accent)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Marketing y Clientes</h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Directorio de clientes</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Promociones y cupones</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Reseñas y calificaciones</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Segmentación de clientes</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- Multi-tienda y Organización -->
-          <div
-            class="group bg-surface p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="building" [size]="24" color="var(--color-primary)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Multi-tienda y Organización</h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Gestión multi-tienda</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Roles y permisos por usuario</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Dominios personalizados</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Auditoría y cumplimiento</span>
-              </li>
-            </ul>
-          </div>
+    <!-- SECTION 9: TESTIMONIOS Y CASOS DE ÉXITO -->
+    <section class="w-full bg-[#f8f9ff] py-20 px-4 sm:px-6 lg:px-8 border-t border-slate-200/60">
+      <div class="max-w-[75rem] mx-auto flex flex-col gap-10">
+        <div class="text-center max-w-2xl mx-auto">
+          <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">Historias Reales de Crecimiento</span>
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-2">
+            Comercios que ya no sufren a fin de mes
+          </h2>
         </div>
 
-        <!-- Urgency Banner -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <!-- Testimonial 1 -->
+          <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center gap-1 text-amber-500 mb-3">
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+              </div>
+              <p class="text-xs sm:text-sm text-slate-700 italic leading-relaxed">
+                "El tiempo de servicio en nuestras 2 sedes se redujo un 35%. Antes las comandas se perdían entre mesas y cocina. Con el comandero KDS y el cierre ciego de caja, los descuadres llegaron a cero."
+              </p>
+            </div>
+            <div class="flex items-center gap-3 mt-6 pt-4 border-t border-slate-100">
+              <img
+                class="w-11 h-11 rounded-full object-cover border border-slate-200"
+                src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&q=80"
+                alt="Carlos M."
+              />
+              <div>
+                <p class="text-xs sm:text-sm font-bold text-slate-900">Carlos M.</p>
+                <p class="text-[11px] text-slate-500">Gastrobar La Selva · Medellín</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Testimonial 2 -->
+          <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center gap-1 text-amber-500 mb-3">
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+              </div>
+              <p class="text-xs sm:text-sm text-slate-700 italic leading-relaxed">
+                "Teníamos la pesadilla de vender vestidos en Instagram y que ya no estuvieran disponibles en el local físico. Con Vendix el catálogo se descuenta en vivo. Vexi además me avisa qué tallas reponer."
+              </p>
+            </div>
+            <div class="flex items-center gap-3 mt-6 pt-4 border-t border-slate-100">
+              <img
+                class="w-11 h-11 rounded-full object-cover border border-slate-200"
+                src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=120&q=80"
+                alt="Andrea S."
+              />
+              <div>
+                <p class="text-xs sm:text-sm font-bold text-slate-900">Andrea S.</p>
+                <p class="text-[11px] text-slate-500">Boutique Aura · Bogotá</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Testimonial 3 -->
+          <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center gap-1 text-amber-500 mb-3">
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+              </div>
+              <p class="text-xs sm:text-sm text-slate-700 italic leading-relaxed">
+                "Emitir facturas electrónicas a clientes corporativos nos tomaba hasta 10 minutos por tique con el sistema viejo. Con Vendix es cuestión de un clic. El onboarding asistido nos migró 4.000 repuestos en 2 horas."
+              </p>
+            </div>
+            <div class="flex items-center gap-3 mt-6 pt-4 border-t border-slate-100">
+              <img
+                class="w-11 h-11 rounded-full object-cover border border-slate-200"
+                src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&q=80"
+                alt="Felipe R."
+              />
+              <div>
+                <p class="text-xs sm:text-sm font-bold text-slate-900">Felipe R.</p>
+                <p class="text-[11px] text-slate-500">Distribuidora Autopartes del Valle · Cali</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 10: FAQ ANTI-OBJECIONES (ACCORDION) -->
+    <section id="faq" class="w-full py-20 px-4 sm:px-6 lg:px-8 bg-white">
+      <div class="max-w-3xl mx-auto flex flex-col gap-10">
         <div class="text-center">
-          <div
-            class="bg-[var(--color-primary)]/5 rounded-2xl p-6 md:p-8 border border-[var(--color-primary)]/20 max-w-3xl mx-auto">
-            <app-icon name="zap" [size]="28" color="var(--color-primary)" class="mb-3"></app-icon>
-            <h3 class="text-lg md:text-xl font-semibold text-[var(--color-primary)] mb-3">
-              El acceso gratuito es por tiempo limitado
-            </h3>
-            <p class="text-[var(--color-text-secondary)] mb-5 leading-relaxed">
-              Aprovecha ahora: cuando lancemos los planes de pago, los usuarios de Early Access
-              conservarán beneficios exclusivos.
-            </p>
-            <a routerLink="/auth/register"
-              class="inline-flex items-center text-[var(--color-primary)] hover:text-[var(--color-secondary)] font-semibold transition-colors duration-200">
-              Crear mi cuenta gratis
-              <app-icon name="arrow-right" [size]="18" color="currentColor" class="ml-2"></app-icon>
-            </a>
-          </div>
+          <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">Claridad Absoluta</span>
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-2">
+            Preguntas Frecuentes
+          </h2>
         </div>
 
+        <div class="space-y-3">
+          <!-- FAQ 1 -->
+          <div class="bg-slate-50 rounded-xl p-4 sm:p-5 border border-slate-200/80 shadow-xs">
+            <button
+              (click)="toggleFaq(1)"
+              class="w-full flex justify-between items-center text-left text-xs sm:text-base font-bold text-slate-900">
+              <span>¿Cómo funciona la prueba gratis de 14 días? ¿Debo ingresar mi tarjeta?</span>
+              <app-icon
+                name="chevron-down"
+                [size]="20"
+                [class.rotate-180]="openFaqId() === 1"
+                class="text-emerald-700 transition-transform duration-200 shrink-0 ml-2">
+              </app-icon>
+            </button>
+            @if (openFaqId() === 1) {
+              <div class="text-xs sm:text-sm text-slate-600 pt-3 mt-2 border-t border-slate-200/60 leading-relaxed animate-in fade-in duration-150">
+                No necesitas ingresar ninguna tarjeta de crédito ni cuenta bancaria para iniciar. Tienes acceso completo e ilimitado a todas las funciones del Plan Pro durante 14 días. Si decides no continuar, tu cuenta simplemente expira sin ningún cobro sorpresa.
+              </div>
+            }
+          </div>
+
+          <!-- FAQ 2 -->
+          <div class="bg-slate-50 rounded-xl p-4 sm:p-5 border border-slate-200/80 shadow-xs">
+            <button
+              (click)="toggleFaq(2)"
+              class="w-full flex justify-between items-center text-left text-xs sm:text-base font-bold text-slate-900">
+              <span>¿Necesito comprar computadores o impresoras costosas para usar Vendix?</span>
+              <app-icon
+                name="chevron-down"
+                [size]="20"
+                [class.rotate-180]="openFaqId() === 2"
+                class="text-emerald-700 transition-transform duration-200 shrink-0 ml-2">
+              </app-icon>
+            </button>
+            @if (openFaqId() === 2) {
+              <div class="text-xs sm:text-sm text-slate-600 pt-3 mt-2 border-t border-slate-200/60 leading-relaxed animate-in fade-in duration-150">
+                No. Vendix funciona en la nube sobre cualquier dispositivo que ya tengas: tu smartphone actual, una tablet Android/iPad, un computador de escritorio o laptop. Es 100% compatible con tus impresoras térmicas ESC/POS (USB, Bluetooth, WiFi) y lectores de códigos de barra estándar.
+              </div>
+            }
+          </div>
+
+          <!-- FAQ 3 -->
+          <div class="bg-slate-50 rounded-xl p-4 sm:p-5 border border-slate-200/80 shadow-xs">
+            <button
+              (click)="toggleFaq(3)"
+              class="w-full flex justify-between items-center text-left text-xs sm:text-base font-bold text-slate-900">
+              <span>¿Cómo se tramita la habilitación ante la DIAN para facturación electrónica?</span>
+              <app-icon
+                name="chevron-down"
+                [size]="20"
+                [class.rotate-180]="openFaqId() === 3"
+                class="text-emerald-700 transition-transform duration-200 shrink-0 ml-2">
+              </app-icon>
+            </button>
+            @if (openFaqId() === 3) {
+              <div class="text-xs sm:text-sm text-slate-600 pt-3 mt-2 border-t border-slate-200/60 leading-relaxed animate-in fade-in duration-150">
+                Nosotros te guiamos paso a paso sin costo adicional. Solo necesitas tu RUT y usuario en el portal DIAN. Vendix te asocia como software propio o tecnológico y en menos de 24 horas quedas emitiendo facturas electrónicas válidas con su respectivo CUFE y código QR.
+              </div>
+            }
+          </div>
+
+          <!-- FAQ 4 -->
+          <div class="bg-slate-50 rounded-xl p-4 sm:p-5 border border-slate-200/80 shadow-xs">
+            <button
+              (click)="toggleFaq(4)"
+              class="w-full flex justify-between items-center text-left text-xs sm:text-base font-bold text-slate-900">
+              <span>¿Puedo migrar los productos y clientes que ya tengo en Excel o en otro software?</span>
+              <app-icon
+                name="chevron-down"
+                [size]="20"
+                [class.rotate-180]="openFaqId() === 4"
+                class="text-emerald-700 transition-transform duration-200 shrink-0 ml-2">
+              </app-icon>
+            </button>
+            @if (openFaqId() === 4) {
+              <div class="text-xs sm:text-sm text-slate-600 pt-3 mt-2 border-t border-slate-200/60 leading-relaxed animate-in fade-in duration-150">
+                ¡Totalmente! Contamos con importadores inteligentes de plantillas Excel y CSV. Además, en los planes Pro y Enterprise nuestro equipo técnico te ayuda a limpiar y estructurar tu base de datos de manera gratuita para que no pierdas ni un solo día de ventas.
+              </div>
+            }
+          </div>
+
+          <!-- FAQ 5 -->
+          <div class="bg-slate-50 rounded-xl p-4 sm:p-5 border border-slate-200/80 shadow-xs">
+            <button
+              (click)="toggleFaq(5)"
+              class="w-full flex justify-between items-center text-left text-xs sm:text-base font-bold text-slate-900">
+              <span>¿Hay cláusulas de permanencia o penalizaciones por cancelar?</span>
+              <app-icon
+                name="chevron-down"
+                [size]="20"
+                [class.rotate-180]="openFaqId() === 5"
+                class="text-emerald-700 transition-transform duration-200 shrink-0 ml-2">
+              </app-icon>
+            </button>
+            @if (openFaqId() === 5) {
+              <div class="text-xs sm:text-sm text-slate-600 pt-3 mt-2 border-t border-slate-200/60 leading-relaxed animate-in fade-in duration-150">
+                Cero permanencias. Creemos en la fidelidad por calidad, no por amarres contractuales. Puedes cancelar tu suscripción con un solo clic desde tu panel en cualquier momento y descargar toda tu información contable e inventario en formatos abiertos.
+              </div>
+            }
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- CTA Section -->
-    <section class="min-h-screen bg-[var(--color-primary)] relative overflow-hidden flex items-center">
-      <div class="container mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
-        <h2 class="text-4xl md:text-5xl font-bold text-white mb-6 tracking-tight">
-          ¿Listo para Transformar<br />
-          tu Negocio con IA?
-        </h2>
-        <p class="text-xl text-white/90 mb-10 max-w-3xl mx-auto leading-relaxed">
-          Únete a miles de empresas que ya están usando inteligencia artificial
-          para revolucionar sus ventas y operaciones.
-        </p>
-        <div class="flex flex-col sm:flex-row gap-2 md:gap-4 justify-center">
-          <a routerLink="/auth/register"
-            class="bg-white text-[var(--color-primary)] px-8 py-4 rounded-xl font-semibold hover:bg-gray-50 hover:shadow-xl transition-all duration-300">
-            Comenzar Gratis Ahora
+    <!-- SECTION 11: FINAL CONVERSION CTA (HIGH URGENCY & ZERO RISK) -->
+    <section class="w-full py-20 px-4 sm:px-6 lg:px-8 bg-white">
+      <div class="max-w-[75rem] mx-auto bg-gradient-to-br from-[#00170d] to-[#043320] rounded-3xl p-8 sm:p-14 text-center text-white relative overflow-hidden shadow-2xl">
+        <!-- Ambient Glow Decorators -->
+        <div class="absolute -top-24 -left-24 w-96 h-96 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="absolute -bottom-24 -right-24 w-96 h-96 bg-emerald-600/20 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div class="relative z-10 max-w-2xl mx-auto flex flex-col items-center">
+          <span class="inline-flex items-center gap-1.5 px-4 py-1.5 bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-bold rounded-full mb-6">
+            <app-icon name="zap" [size]="14"></app-icon>
+            ACTIVACIÓN INSTANTÁNEA
+          </span>
+
+          <h2 class="text-2xl sm:text-4xl lg:text-5xl font-black text-white tracking-tight mb-4 leading-tight">
+            Tu negocio listo para vender y crecer en menos de 10 minutos.
+          </h2>
+
+          <p class="text-sm sm:text-base text-emerald-100/85 mb-8 leading-relaxed">
+            Únete a cientos de comerciantes modernos que eliminaron el caos operativo y multiplicaron su rentabilidad con Vendix.
+          </p>
+
+          <a
+            [routerLink]="['/auth/register']"
+            class="inline-flex items-center justify-center gap-2 text-sm sm:text-base font-extrabold text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition-all duration-200 px-8 py-4 rounded-xl shadow-xl shadow-emerald-500/30 hover:scale-105">
+            <app-icon name="store" [size]="20"></app-icon>
+            Crear Cuenta y Probar Gratis Ahora
           </a>
-          <a href="mailto:quicks.dev@gmail.com?subject=Quiero%20una%20demo%20de%20Vendix"
-            class="border-2 border-white text-white px-8 py-4 rounded-xl font-semibold hover:bg-white hover:text-[var(--color-primary)] transition-all duration-300">
-            Agendar Demo Personalizada
-          </a>
+
+          <div class="flex flex-wrap items-center justify-center gap-4 text-xs font-medium text-emerald-200/80 mt-8">
+            <span class="inline-flex items-center gap-1">
+              <app-icon name="lock" [size]="14" class="text-emerald-400"></app-icon>
+              Sin tarjeta de crédito requerida
+            </span>
+            <span>•</span>
+            <span class="inline-flex items-center gap-1">
+              <app-icon name="calendar" [size]="14" class="text-emerald-400"></app-icon>
+              Cancela cuando quieras
+            </span>
+            <span>•</span>
+            <span class="inline-flex items-center gap-1">
+              <app-icon name="headphones" [size]="14" class="text-emerald-400"></app-icon>
+              Soporte local en español
+            </span>
+          </div>
         </div>
-      </div>
-      <!-- Decorative elements -->
-      <div class="absolute top-0 left-0 w-full h-full opacity-10">
-        <div class="absolute top-10 left-10 w-20 h-20 bg-white rounded-full"></div>
-        <div class="absolute bottom-10 right-10 w-32 h-32 bg-white rounded-full"></div>
-        <div class="absolute top-1/2 right-1/4 w-16 h-16 bg-white rounded-full"></div>
       </div>
     </section>
   </main>
 
-  <!-- Footer -->
-  <footer class="bg-[var(--color-secondary)] text-white py-16">
-    <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="grid md:grid-cols-4 gap-2 md:p-6 mb-12">
-        <div class="md:col-span-1">
-          <div class="flex items-center space-x-3 mb-4">
-            <div class="w-10 h-10 bg-transparent rounded-xl flex items-center justify-center overflow-hidden">
-              <img src="vlogo.png" alt="Vendix" class="w-full h-full object-contain" />
-            </div>
-            <h3 class="text-xl font-semibold">Vendix</h3>
+  <!-- CONSOLIDATED FOOTER -->
+  <footer class="w-full bg-[#00170d] text-white border-t border-emerald-950">
+    <div class="max-w-[75rem] mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-12">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-8 mb-12">
+        <div class="lg:col-span-2 flex flex-col items-start pr-0 lg:pr-8">
+          <div class="flex items-center gap-2 mb-3">
+            <img src="/vlogo.png" alt="Vendix" class="h-8 w-auto" onerror="this.src='/favicon.ico'" />
+            <span class="text-2xl font-extrabold text-white tracking-tight">Vendix</span>
           </div>
-          <p class="text-white/70 leading-relaxed">
-            La plataforma todo-en-uno para modernizar tu negocio con
-            inteligencia artificial.
+          <p class="text-xs text-emerald-100/70 max-w-sm mb-5 leading-relaxed">
+            El Sistema Operativo Comercial Todo-en-Uno para Latinoamérica. Control de inventario, punto de venta, emisión tributaria electrónica y copiloto con inteligencia artificial integrada.
           </p>
-        </div>
-
-        <div>
-          <h4 class="text-lg font-semibold mb-4">Producto</h4>
-          <div class="space-y-3">
-            <a href="#features" class="block text-white/70 hover:text-white transition-colors">Características</a>
-            <a href="#solutions" class="block text-white/70 hover:text-white transition-colors">Soluciones</a>
-            <a href="#early-access" class="block text-white/70 hover:text-white transition-colors">Acceso Gratis</a>
+          <div class="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-900/60 border border-emerald-700/50 rounded-full text-emerald-300 text-xs font-semibold">
+            <app-icon name="check-circle" [size]="14"></app-icon>
+            Resolución DIAN Autorizada
           </div>
         </div>
 
         <div>
-          <h4 class="text-lg font-semibold mb-4">Empresa</h4>
-          <div class="space-y-3">
-            <a routerLink="/auth/login" class="block text-white/70 hover:text-white transition-colors">Iniciar
-              Sesión</a>
-            <a routerLink="/auth/register"
-              class="block text-white/70 hover:text-white transition-colors">Registrarse</a>
-            <a href="mailto:quicks.dev@gmail.com"
-              class="block text-white/70 hover:text-white transition-colors">Contacto</a>
-          </div>
+          <p class="text-xs font-bold text-white uppercase tracking-wider mb-4">Producto</p>
+          <ul class="flex flex-col gap-2.5 text-xs text-emerald-100/70">
+            <li><button (click)="scrollToSection('hero-simulator')" class="hover:text-emerald-300 transition-colors">POS en la Nube</button></li>
+            <li><button (click)="scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">E-commerce B2B</button></li>
+            <li><button (click)="scrollToSection('hero-simulator')" class="hover:text-emerald-300 transition-colors">Facturación DIAN</button></li>
+            <li>
+              <button (click)="scrollToSection('vexi')" class="hover:text-emerald-300 transition-colors flex items-center gap-1.5">
+                Vexi Copiloto IA <span class="px-1.5 py-0.2 bg-emerald-500 text-slate-950 text-[9px] rounded font-bold">NUEVO</span>
+              </button>
+            </li>
+            <li><button (click)="scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Comandero Mesas</button></li>
+          </ul>
         </div>
 
         <div>
-          <h4 class="text-lg font-semibold mb-4">Legal</h4>
-          <div class="space-y-3">
-            <a routerLink="/legal/privacidad" class="block text-white/70 hover:text-white transition-colors">Política de Privacidad</a>
-            <a routerLink="/legal/terminos" class="block text-white/70 hover:text-white transition-colors">Términos de Servicio</a>
-            <a routerLink="/legal/cookies" class="block text-white/70 hover:text-white transition-colors">Cookies</a>
-          </div>
+          <p class="text-xs font-bold text-white uppercase tracking-wider mb-4">Sectores</p>
+          <ul class="flex flex-col gap-2.5 text-xs text-emerald-100/70">
+            <li><button (click)="setIndustry('retail'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Comercio Retail</button></li>
+            <li><button (click)="setIndustry('restaurant'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Restaurantes y Bares</button></li>
+            <li><button (click)="setIndustry('gym'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Gimnasios & Fitness</button></li>
+            <li><button (click)="setIndustry('service'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Servicios & Asesoría</button></li>
+            <li><button (click)="setIndustry('manufacturing'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Manufactura & Taller</button></li>
+          </ul>
+        </div>
+
+        <div>
+          <p class="text-xs font-bold text-white uppercase tracking-wider mb-4">Recursos & DIAN</p>
+          <ul class="flex flex-col gap-2.5 text-xs text-emerald-100/70">
+            <li><a href="https://www.dian.gov.co" target="_blank" rel="noopener noreferrer" class="hover:text-emerald-300 transition-colors">Normativa DIAN 2026</a></li>
+            <li><button (click)="scrollToSection('roi')" class="hover:text-emerald-300 transition-colors">Calculadora Ahorro</button></li>
+            <li><button (click)="scrollToSection('faq')" class="hover:text-emerald-300 transition-colors">Centro de Ayuda</button></li>
+            <li><button (click)="showDemo()" class="hover:text-emerald-300 transition-colors">Video Demostración</button></li>
+            <li><a [href]="'mailto:' + socialLinks.email" class="hover:text-emerald-300 transition-colors">Estado del Sistema</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <p class="text-xs font-bold text-white uppercase tracking-wider mb-4">Empresa</p>
+          <ul class="flex flex-col gap-2.5 text-xs text-emerald-100/70">
+            <li><a [href]="'mailto:' + socialLinks.email" class="hover:text-emerald-300 transition-colors">Contacto Comercial</a></li>
+            <li><button (click)="showTerms()" class="hover:text-emerald-300 transition-colors">Términos de Servicio</button></li>
+            <li><button (click)="showTerms()" class="hover:text-emerald-300 transition-colors">Privacidad y Datos</button></li>
+            <li><button (click)="openWhatsApp()" class="hover:text-emerald-300 transition-colors">WhatsApp Soporte</button></li>
+          </ul>
         </div>
       </div>
 
-      <div class="border-t border-white/20 pt-8">
-        <div class="flex flex-col md:flex-row justify-between items-center">
-          <p class="text-white/70 mb-4 md:mb-0">
-            &copy; 2024 Vendix Platform. Todos los derechos reservados.
-          </p>
-          <div class="flex space-x-6">
-            <a
-              href="https://www.facebook.com/share/1B1fq8BbXD/"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Facebook"
-              class="text-white/70 hover:text-white transition-colors">
-              <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                <path
-                  d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-              </svg>
-            </a>
-            <a
-              href="https://www.instagram.com/vendix.online/"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Instagram"
-              class="text-white/70 hover:text-white transition-colors">
-              <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                <path
-                  d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
-              </svg>
-            </a>
-            <a
-              href="https://www.tiktok.com/@vendix.online"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="TikTok"
-              class="text-white/70 hover:text-white transition-colors">
-              <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                <path
-                  d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" />
-              </svg>
-            </a>
-          </div>
+      <div class="pt-6 border-t border-emerald-900/60 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-emerald-200/60">
+        <p>© 2026 Vendix Platform. Todos los derechos reservados. Diseñado para comerciantes modernos.</p>
+        <div class="flex items-center gap-5">
+          <a
+            [href]="socialLinks.facebook"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Facebook Vendix"
+            class="text-emerald-200/70 hover:text-emerald-400 transition-colors">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+            </svg>
+          </a>
+          <a
+            [href]="socialLinks.instagram"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Instagram Vendix"
+            class="text-emerald-200/70 hover:text-emerald-400 transition-colors">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
+            </svg>
+          </a>
+          <a
+            [href]="socialLinks.tiktok"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="TikTok Vendix"
+            class="text-emerald-200/70 hover:text-emerald-400 transition-colors">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" />
+            </svg>
+          </a>
+          <button
+            (click)="openWhatsApp()"
+            aria-label="WhatsApp Vendix"
+            class="text-emerald-200/70 hover:text-emerald-400 transition-colors">
+            <app-icon name="message-circle" [size]="20"></app-icon>
+          </button>
         </div>
       </div>
     </div>
   </footer>
-</div>
 
-<!-- Modal de Términos y Condiciones -->
-@if (showTermsModal()) {
-<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-  <div class="bg-surface rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-2xl">
-    <!-- Header -->
-    <div class="bg-[var(--color-primary)] text-white p-2 md:p-4 flex justify-between items-center">
-      <h2 class="text-xl font-bold">Términos y Condiciones</h2>
-      <button (click)="closeTermsModal()" class="text-white hover:bg-white/20 rounded-lg p-2 transition-colors">
-        <app-icon name="x" [size]="20" color="white"></app-icon>
-      </button>
-    </div>
-
-    <!-- Content -->
-    <div class="p-2 md:p-4 overflow-y-auto max-h-[60vh]">
-      <div [innerHTML]="termsContent()"></div>
-    </div>
-
-    <!-- Footer -->
-    <div class="bg-gray-50 p-2 md:p-4 border-t border-gray-200">
-      <div class="flex justify-end gap-3">
-        <button (click)="closeTermsModal()"
-          class="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
-          Cerrar
-        </button>
-        <button (click)="closeTermsModal()"
-          class="px-6 py-2 bg-[var(--color-primary)] text-white rounded-lg hover:bg-[var(--color-secondary)] transition-colors">
-          Acepto los términos
-        </button>
+  <!-- MODAL: TÉRMINOS Y CONDICIONES -->
+  @if (showTermsModal()) {
+    <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+      <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-hidden shadow-2xl flex flex-col">
+        <div class="bg-emerald-800 text-white p-4 flex justify-between items-center">
+          <h2 class="text-base sm:text-lg font-bold">Términos y Condiciones — Vendix Platform</h2>
+          <button (click)="closeTerms()" class="text-white hover:bg-white/20 rounded-lg p-1.5 transition-colors">
+            <app-icon name="x" [size]="20"></app-icon>
+          </button>
+        </div>
+        <div class="p-5 overflow-y-auto flex-1 leading-relaxed" [innerHTML]="termsContent()"></div>
+        <div class="bg-slate-50 p-4 border-t border-slate-200 flex justify-end gap-3">
+          <button
+            (click)="closeTerms()"
+            class="px-5 py-2 text-xs sm:text-sm font-bold border border-slate-300 rounded-xl hover:bg-slate-100 transition-colors">
+            Entendido
+          </button>
+          <a
+            [routerLink]="['/auth/register']"
+            (click)="closeTerms()"
+            class="px-5 py-2 text-xs sm:text-sm font-bold bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-colors shadow-sm">
+            Crear Cuenta Ahora
+          </a>
+        </div>
       </div>
     </div>
-  </div>
+  }
+
+  <!-- MODAL: DEMO EN VIDEO -->
+  @if (showDemoModal()) {
+    <div class="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+      <div class="bg-white rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col">
+        <div class="bg-slate-900 text-white p-4 flex justify-between items-center">
+          <div class="flex items-center gap-2">
+            <app-icon name="play-circle" [size]="20" class="text-emerald-400"></app-icon>
+            <h2 class="text-base font-bold">Vendix en Acción: Facturación DIAN & POS</h2>
+          </div>
+          <button (click)="closeDemo()" class="text-white hover:bg-white/20 rounded-lg p-1.5 transition-colors">
+            <app-icon name="x" [size]="20"></app-icon>
+          </button>
+        </div>
+        <div class="p-6 text-center space-y-4">
+          <div class="relative w-full aspect-video bg-slate-950 rounded-xl flex items-center justify-center overflow-hidden border border-slate-800 shadow-inner">
+            <div class="flex flex-col items-center gap-3 p-6 text-emerald-100">
+              <div class="w-16 h-16 rounded-full bg-emerald-600 flex items-center justify-center shadow-lg">
+                <app-icon name="play" [size]="28" class="text-white ml-1"></app-icon>
+              </div>
+              <p class="text-sm font-bold">Demostración Interactiva del Flujo Comercial</p>
+              <p class="text-xs text-emerald-200/70 max-w-md">
+                Apertura de caja, lectura de código de barras, emisión de tique DIAN en 0.8s y sincronización con tienda virtual.
+              </p>
+            </div>
+          </div>
+          <div class="flex flex-col sm:flex-row justify-between items-center gap-3 pt-2">
+            <p class="text-xs text-slate-500">¿Prefieres una demostración personalizada con tus productos?</p>
+            <button
+              (click)="closeDemo(); openWhatsApp('Hola, vi la demo y quiero una sesión personalizada para mi negocio.')"
+              class="inline-flex items-center gap-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-4 py-2.5 rounded-xl shadow-sm transition-colors">
+              <app-icon name="message-circle" [size]="16"></app-icon>
+              Agendar Demo por WhatsApp
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  }
 </div>
-}
