@@ -939,9 +939,14 @@ export const ErrorCodes = {
   },
 
   // Quotations
+  QUOTE_DESTINATION_001: {
+    code: 'QUOTE_DESTINATION_001',
+    httpStatus: 422,
+    devMessage: 'Quotation destination cannot be changed after creation',
+  },
   QUOTE_CONVERT_STATUS_001: {
     code: 'QUOTE_CONVERT_STATUS_001',
-    httpStatus: 400,
+    httpStatus: 422,
     devMessage: 'Quotation must be accepted before conversion',
   },
   QUOTE_CONVERT_CUSTOMER_001: {

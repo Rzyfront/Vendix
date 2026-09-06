@@ -7198,12 +7198,22 @@ enum quotation_status_enum {
   cancelled
 }
 
+// A.1 (ADR-01) — Destino inmutable de la cotizacion: se fija al crear y
+// jamas se edita. `sale` fluye a orden como hoy; `contract`/`other` los
+// consumen pasos C/D sin pasar por convertToOrder.
+enum quotation_destination_enum {
+  sale
+  contract
+  other
+}
+
 model quotations {
   id                   Int                   @id @default(autoincrement())
   store_id             Int
   customer_id          Int?
   quotation_number     String                @db.VarChar(50)
   status               quotation_status_enum @default(draft)
+  destination          quotation_destination_enum @default(sale)
   channel              order_channel_enum    @default(pos)
   subtotal_amount      Decimal               @default(0.00) @db.Decimal(12, 2)
   discount_amount      Decimal               @default(0.00) @db.Decimal(12, 2)

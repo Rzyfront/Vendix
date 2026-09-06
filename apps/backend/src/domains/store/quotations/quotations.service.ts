@@ -158,6 +158,8 @@ export class QuotationsService {
         customer_id: createQuotationDto.customer_id,
         quotation_number,
         status: quotation_status_enum.draft,
+        // A.1 (ADR-01): destino fijo al crear; sin valor nace `sale`.
+        destination: (createQuotationDto.destination as any) ?? 'sale',
         channel: (createQuotationDto.channel as any) || 'pos',
         subtotal_amount: subtotal,
         discount_amount: totalDiscount,
@@ -276,6 +278,19 @@ export class QuotationsService {
   }
 
   async update(id: number, updateQuotationDto: UpdateQuotationDto) {
+    // A.1 (ADR-01, ERR-01): el destino se fija al crear y jamas se edita.
+    // Cualquier presencia (incluso el mismo valor) se rechaza: corregir un
+    // destino mal marcado exige cancelar y recrear la cotizacion.
+    if ((updateQuotationDto as any).destination !== undefined) {
+      throw new VendixHttpException(
+        ErrorCodes.QUOTE_DESTINATION_001,
+        undefined,
+        {
+          quotation_id: id,
+          attempted_destination: (updateQuotationDto as any).destination,
+        },
+      );
+    }
     const quotation = await this.findOne(id);
     if (quotation.status !== quotation_status_enum.draft) {
       throw new BadRequestException(
@@ -370,7 +385,13 @@ export class QuotationsService {
     }
 
     // Update without items
-    const { items: _items, ...updateData } = updateQuotationDto as any;
+    // A.1: `destination` fuera del spread por defensa en profundidad (el
+    // guard de arriba ya lo rechaza; esto impide que llegue a Prisma).
+    const {
+      items: _items,
+      destination: _destination,
+      ...updateData
+    } = updateQuotationDto as any;
     return this.prisma.quotations.update({
       where: { id },
       data: {
@@ -528,6 +549,8 @@ export class QuotationsService {
         customer_id: quotation.customer_id,
         quotation_number,
         status: quotation_status_enum.draft,
+        // A.1: el duplicado hereda el destino (fijado al crear, no editable).
+        destination: (quotation as any).destination ?? 'sale',
         channel: quotation.channel,
         subtotal_amount: quotation.subtotal_amount,
         discount_amount: quotation.discount_amount,
