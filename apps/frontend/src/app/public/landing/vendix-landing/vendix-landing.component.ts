@@ -84,6 +84,9 @@ export class VendixLandingComponent implements OnInit {
   readonly openFaqId = signal<number | null>(1);
 
   // Vexi Copilot Live Simulator Signal
+  readonly activeVexiTab = signal<number>(1);
+  readonly ocrConfirmed = signal<boolean>(false);
+  readonly stockAlertSent = signal<boolean>(false);
   readonly vexiQuery = signal<string>('');
   readonly vexiChatMessages = signal<VexiMessage[]>([
     {
@@ -244,9 +247,9 @@ export class VendixLandingComponent implements OnInit {
   // Dynamic Available Cycles computed strictly from loaded API plans
   readonly availableCycles = computed(() => {
     const p = this.plans();
-    if (!p || p.length === 0) return ['annual', 'monthly'];
+    if (!p || p.length === 0) return ['monthly', 'quarterly', 'annual'];
     const cycles = Array.from(new Set(p.map((item) => item.billing_cycle)));
-    const order = ['annual', 'quarterly', 'semiannual', 'monthly', 'yearly', 'lifetime'];
+    const order = ['monthly', 'quarterly', 'annual', 'semiannual', 'yearly', 'lifetime'];
     return cycles.sort((a, b) => {
       const idxA = order.indexOf(a);
       const idxB = order.indexOf(b);
@@ -352,23 +355,24 @@ export class VendixLandingComponent implements OnInit {
   private useCuratedFallbackPlans(): void {
     // Defensive fallback adhering to F-002: accurate canonical Vendix plans
     const fallback: PublicPlan[] = [
+      // Annual Plans (10% OFF)
       {
         id: 1,
         code: 'starter',
         name: 'Starter',
         description:
-          'Ideal para pequeños comercios y tiendas independientes en formalización comercial.',
-        base_price: 39200,
+          'Ideal para tiendas independientes que inician su formalización comercial.',
+        base_price: 44100,
         currency: 'COP',
         billing_cycle: 'annual',
         is_popular: false,
         features: [
           { key: 'stores', label: '1 Tienda / Sucursal', enabled: true, limit: 1 },
-          { key: 'users', label: '3 Usuarios con roles', enabled: true, limit: 3 },
-          { key: 'pos', label: 'Punto de Venta POS Ilimitado', enabled: true },
-          { key: 'offline', label: 'Modo Offline Seguro Activo', enabled: true },
-          { key: 'accounting', label: 'Facturación Electrónica DIAN', enabled: true },
-          { key: 'ecommerce', label: 'Catálogo Web & WhatsApp', enabled: true },
+          { key: 'users', label: '3 Usuarios con roles configurables', enabled: true, limit: 3 },
+          { key: 'pos', label: 'POS ilimitado en PC, tablet o celular', enabled: true },
+          { key: 'offline', label: 'Modo Offline seguro garantizado', enabled: true },
+          { key: 'accounting', label: 'Facturación Electrónica DIAN ilimitada', enabled: true },
+          { key: 'ecommerce', label: 'Catálogo Web & WhatsApp integrado', enabled: true },
           { key: 'vexi', label: 'Copiloto Vexi IA', enabled: false },
         ],
       },
@@ -377,17 +381,17 @@ export class VendixLandingComponent implements OnInit {
         code: 'pro',
         name: 'Pro',
         description:
-          'Para comercios con alto flujo de ventas, restaurantes, multi-bodega y analítica avanzada.',
-        base_price: 95200,
+          'Para comercios con alto flujo de ventas, restaurantes y multi-bodegas.',
+        base_price: 107100,
         currency: 'COP',
         billing_cycle: 'annual',
         is_popular: true,
         features: [
           { key: 'stores', label: 'Hasta 3 Sucursales incluidas', enabled: true, limit: 3 },
-          { key: 'users', label: '10 Usuarios con auditoría de caja', enabled: true, limit: 10 },
+          { key: 'users', label: '10 Usuarios con auditoría de caja en vivo', enabled: true, limit: 10 },
           { key: 'vexi', label: 'Copiloto Vexi IA (200 consultas/día)', enabled: true },
-          { key: 'ocr', label: 'Escáner OCR de facturas de compras', enabled: true },
-          { key: 'inventory_adv', label: 'Multi-bodega & traslados de stock', enabled: true },
+          { key: 'ocr', label: 'Escáner OCR de facturas de proveedores', enabled: true },
+          { key: 'inventory_adv', label: 'Multi-bodega & traslados con remisión', enabled: true },
           { key: 'restaurant', label: 'Módulo Restaurantes (KDS + Mesas)', enabled: true },
           { key: 'support', label: 'Soporte prioritario WhatsApp 12h', enabled: true },
         ],
@@ -397,8 +401,8 @@ export class VendixLandingComponent implements OnInit {
         code: 'enterprise',
         name: 'Enterprise',
         description:
-          'Solución integral para cadenas, franquicias y operaciones de gran escala con SLA garantizado.',
-        base_price: 1290000,
+          'Solución completa para operaciones complejas de gran escala y franquicias.',
+        base_price: 135000,
         currency: 'COP',
         billing_cycle: 'annual',
         is_popular: false,
@@ -409,47 +413,129 @@ export class VendixLandingComponent implements OnInit {
           { key: 'api', label: 'API abierta para ERP / SAP / Siigo', enabled: true },
           { key: 'domain', label: 'Dominio personalizado para tu e-commerce', enabled: true },
           { key: 'onboarding', label: 'Onboarding asistido & Account Manager', enabled: true },
-          { key: 'sla', label: 'SLA de soporte técnico VIP en 4 horas', enabled: true },
+          { key: 'sla', label: 'SLA y soporte VIP dedicado en 4 horas', enabled: true },
+        ],
+      },
+      // Quarterly Plans (5% OFF)
+      {
+        id: 4,
+        code: 'starter_quarterly',
+        name: 'Starter',
+        description:
+          'Ideal para tiendas independientes que inician su formalización comercial.',
+        base_price: 46550,
+        currency: 'COP',
+        billing_cycle: 'quarterly',
+        is_popular: false,
+        features: [
+          { key: 'stores', label: '1 Tienda / Sucursal', enabled: true, limit: 1 },
+          { key: 'users', label: '3 Usuarios con roles configurables', enabled: true, limit: 3 },
+          { key: 'pos', label: 'POS ilimitado en PC, tablet o celular', enabled: true },
+          { key: 'offline', label: 'Modo Offline seguro garantizado', enabled: true },
+          { key: 'accounting', label: 'Facturación Electrónica DIAN ilimitada', enabled: true },
+          { key: 'ecommerce', label: 'Catálogo Web & WhatsApp integrado', enabled: true },
+          { key: 'vexi', label: 'Copiloto Vexi IA', enabled: false },
         ],
       },
       {
-        id: 4,
+        id: 5,
+        code: 'pro_quarterly',
+        name: 'Pro',
+        description:
+          'Para comercios con alto flujo de ventas, restaurantes y multi-bodegas.',
+        base_price: 113050,
+        currency: 'COP',
+        billing_cycle: 'quarterly',
+        is_popular: true,
+        features: [
+          { key: 'stores', label: 'Hasta 3 Sucursales incluidas', enabled: true, limit: 3 },
+          { key: 'users', label: '10 Usuarios con auditoría de caja en vivo', enabled: true, limit: 10 },
+          { key: 'vexi', label: 'Copiloto Vexi IA (200 consultas/día)', enabled: true },
+          { key: 'ocr', label: 'Escáner OCR de facturas de proveedores', enabled: true },
+          { key: 'inventory_adv', label: 'Multi-bodega & traslados con remisión', enabled: true },
+          { key: 'restaurant', label: 'Módulo Restaurantes (KDS + Mesas)', enabled: true },
+          { key: 'support', label: 'Soporte prioritario WhatsApp 12h', enabled: true },
+        ],
+      },
+      {
+        id: 6,
+        code: 'enterprise_quarterly',
+        name: 'Enterprise',
+        description:
+          'Solución completa para operaciones complejas de gran escala y franquicias.',
+        base_price: 142500,
+        currency: 'COP',
+        billing_cycle: 'quarterly',
+        is_popular: false,
+        features: [
+          { key: 'stores', label: 'Sucursales / Tiendas Ilimitadas', enabled: true },
+          { key: 'users', label: '50 Usuarios con auditoría avanzada', enabled: true, limit: 50 },
+          { key: 'vexi', label: 'Vexi IA Ilimitada + Agente de Voz', enabled: true },
+          { key: 'api', label: 'API abierta para ERP / SAP / Siigo', enabled: true },
+          { key: 'domain', label: 'Dominio personalizado para tu e-commerce', enabled: true },
+          { key: 'onboarding', label: 'Onboarding asistido & Account Manager', enabled: true },
+          { key: 'sla', label: 'SLA y soporte VIP dedicado en 4 horas', enabled: true },
+        ],
+      },
+      // Monthly Plans
+      {
+        id: 7,
         code: 'starter_monthly',
         name: 'Starter',
         description:
-          'Ideal para pequeños comercios y tiendas independientes en formalización comercial.',
+          'Ideal para tiendas independientes que inician su formalización comercial.',
         base_price: 49000,
         currency: 'COP',
         billing_cycle: 'monthly',
         is_popular: false,
         features: [
           { key: 'stores', label: '1 Tienda / Sucursal', enabled: true, limit: 1 },
-          { key: 'users', label: '3 Usuarios con roles', enabled: true, limit: 3 },
-          { key: 'pos', label: 'Punto de Venta POS Ilimitado', enabled: true },
-          { key: 'offline', label: 'Modo Offline Seguro Activo', enabled: true },
-          { key: 'accounting', label: 'Facturación Electrónica DIAN', enabled: true },
-          { key: 'ecommerce', label: 'Catálogo Web & WhatsApp', enabled: true },
+          { key: 'users', label: '3 Usuarios con roles configurables', enabled: true, limit: 3 },
+          { key: 'pos', label: 'POS ilimitado en PC, tablet o celular', enabled: true },
+          { key: 'offline', label: 'Modo Offline seguro garantizado', enabled: true },
+          { key: 'accounting', label: 'Facturación Electrónica DIAN ilimitada', enabled: true },
+          { key: 'ecommerce', label: 'Catálogo Web & WhatsApp integrado', enabled: true },
           { key: 'vexi', label: 'Copiloto Vexi IA', enabled: false },
         ],
       },
       {
-        id: 5,
+        id: 8,
         code: 'pro_monthly',
         name: 'Pro',
         description:
-          'Para comercios con alto flujo de ventas, restaurantes, multi-bodega y analítica avanzada.',
+          'Para comercios con alto flujo de ventas, restaurantes y multi-bodegas.',
         base_price: 119000,
         currency: 'COP',
         billing_cycle: 'monthly',
         is_popular: true,
         features: [
           { key: 'stores', label: 'Hasta 3 Sucursales incluidas', enabled: true, limit: 3 },
-          { key: 'users', label: '10 Usuarios con auditoría de caja', enabled: true, limit: 10 },
+          { key: 'users', label: '10 Usuarios con auditoría de caja en vivo', enabled: true, limit: 10 },
           { key: 'vexi', label: 'Copiloto Vexi IA (200 consultas/día)', enabled: true },
-          { key: 'ocr', label: 'Escáner OCR de facturas de compras', enabled: true },
-          { key: 'inventory_adv', label: 'Multi-bodega & traslados de stock', enabled: true },
+          { key: 'ocr', label: 'Escáner OCR de facturas de proveedores', enabled: true },
+          { key: 'inventory_adv', label: 'Multi-bodega & traslados con remisión', enabled: true },
           { key: 'restaurant', label: 'Módulo Restaurantes (KDS + Mesas)', enabled: true },
           { key: 'support', label: 'Soporte prioritario WhatsApp 12h', enabled: true },
+        ],
+      },
+      {
+        id: 9,
+        code: 'enterprise_monthly',
+        name: 'Enterprise',
+        description:
+          'Solución completa para operaciones complejas de gran escala y franquicias.',
+        base_price: 150000,
+        currency: 'COP',
+        billing_cycle: 'monthly',
+        is_popular: false,
+        features: [
+          { key: 'stores', label: 'Sucursales / Tiendas Ilimitadas', enabled: true },
+          { key: 'users', label: '50 Usuarios con auditoría avanzada', enabled: true, limit: 50 },
+          { key: 'vexi', label: 'Vexi IA Ilimitada + Agente de Voz', enabled: true },
+          { key: 'api', label: 'API abierta para ERP / SAP / Siigo', enabled: true },
+          { key: 'domain', label: 'Dominio personalizado para tu e-commerce', enabled: true },
+          { key: 'onboarding', label: 'Onboarding asistido & Account Manager', enabled: true },
+          { key: 'sla', label: 'SLA y soporte VIP dedicado en 4 horas', enabled: true },
         ],
       },
     ];
@@ -459,6 +545,21 @@ export class VendixLandingComponent implements OnInit {
   // Interactive UI Actions
   setBillingCycle(cycle: string): void {
     this.selectedCycle.set(cycle);
+  }
+
+  setVexiTab(tab: number): void {
+    this.activeVexiTab.set(tab);
+  }
+
+  confirmOcr(): void {
+    this.ocrConfirmed.set(true);
+  }
+
+  sendStockAlert(): void {
+    this.stockAlertSent.set(true);
+    this.openWhatsApp(
+      'Hola, autorizo la reposición de 24 unidades de Café Especial Huila 500g para reabastecer el inventario.',
+    );
   }
 
   setCurrency(currency: 'COP' | 'USD'): void {
@@ -535,17 +636,31 @@ export class VendixLandingComponent implements OnInit {
     switch (cycle) {
       case 'annual':
       case 'yearly':
-        return 'Anual (2 Meses GRATIS)';
+        return 'Anual (10% Descuento)';
       case 'quarterly':
-        return 'Trimestral (-10%)';
+        return 'Trimestral';
       case 'semiannual':
-        return 'Semestral (-15%)';
+        return 'Semestral';
       case 'monthly':
-        return 'Facturación Mensual';
+        return 'Mensual';
       case 'lifetime':
         return 'Pago Único';
       default:
         return cycle;
+    }
+  }
+
+  getCycleDiscountBadge(cycle: string): string | null {
+    switch (cycle) {
+      case 'annual':
+      case 'yearly':
+        return '-10%';
+      case 'quarterly':
+        return '-5%';
+      case 'semiannual':
+        return '-15%';
+      default:
+        return null;
     }
   }
 
@@ -555,14 +670,35 @@ export class VendixLandingComponent implements OnInit {
       case 'yearly':
         return '/ mes (pago anual)';
       case 'quarterly':
-        return '/ trimestre';
+        return '/ mes (pago trimestral)';
       case 'semiannual':
-        return '/ semestre';
+        return '/ mes (pago semestral)';
       case 'monthly':
         return '/ mes';
       default:
         return `/${cycle}`;
     }
+  }
+
+  getCycleSubtext(plan: PublicPlan): string {
+    const cycle = this.selectedCycle();
+    const num =
+      typeof plan.base_price === 'number'
+        ? plan.base_price
+        : parseFloat(plan.base_price as any) || 0;
+    if (cycle === 'annual' || cycle === 'yearly') {
+      const annualTotal = num * 12;
+      return `Facturado anualmente ${this.formatPrice(annualTotal)} (10% OFF)`;
+    }
+    if (cycle === 'quarterly') {
+      const quarterlyTotal = num * 3;
+      return `Facturado cada 3 meses ${this.formatPrice(quarterlyTotal)} (5% OFF)`;
+    }
+    if (cycle === 'semiannual') {
+      const semiannualTotal = num * 6;
+      return `Facturado cada 6 meses ${this.formatPrice(semiannualTotal)} (15% OFF)`;
+    }
+    return 'Facturado mensualmente';
   }
 
   formatPrice(basePrice: number | string): string {

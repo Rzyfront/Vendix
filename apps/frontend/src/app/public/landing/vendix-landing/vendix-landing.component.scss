@@ -149,3 +149,100 @@ input[type="range"] {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Stitch Design Token mappings for Material 3 Emerald Precision */
+.bg-surface-container-lowest { background-color: #ffffff; }
+.bg-surface-container-low { background-color: #f4f7fb; }
+.bg-surface-container { background-color: #e2e8f0; }
+.bg-surface-container-high { background-color: #cbd5e1; }
+.bg-surface-container-highest { background-color: #94a3b8; }
+
+.bg-primary-container { background-color: #10b981; }
+.text-on-primary { color: #ffffff; }
+.text-primary-fixed { color: #6ffbbe; }
+.text-primary-fixed-dim { color: #34d399; }
+.bg-primary { background-color: #006c49; }
+.text-primary { color: #006c49; }
+
+.bg-secondary-container { background-color: #d1fae5; }
+.text-on-secondary-fixed { color: #064e3b; }
+
+.bg-tertiary-container { background-color: #fef3c7; }
+.text-on-tertiary { color: #78350f; }
+
+.bg-error { background-color: #ef4444; }
+.text-error { color: #dc2626; }
+.bg-error-container { background-color: #fee2e2; }
+.text-on-error { color: #ffffff; }
+
+.text-on-surface { color: #0b1c30; }
+.text-on-surface-variant { color: #475569; }
+.text-outline { color: #64748b; }
+
+.border-outline-variant\/20 { border-color: rgba(203, 213, 225, 0.2); }
+.border-outline-variant\/30 { border-color: rgba(203, 213, 225, 0.3); }
+.border-outline-variant\/50 { border-color: rgba(203, 213, 225, 0.5); }
+.border-outline-variant { border-color: #cbd5e1; }
+
+.bg-inverse-surface { background-color: #0f172a; }
+.text-inverse-on-surface { color: #f8fafc; }
+.bg-on-primary-fixed { background-color: #002113; }
+.bg-on-primary-fixed-variant { background-color: #003822; }
+
+/* Spacing tokens */
+.p-space-2xs { padding: 0.25rem; }
+.p-space-xs { padding: 0.5rem; }
+.p-space-sm { padding: 0.75rem; }
+.p-space-md { padding: 1rem; }
+.p-space-lg { padding: 1.5rem; }
+.p-space-xl { padding: 2rem; }
+.p-space-2xl { padding: 3rem; }
+.p-space-3xl { padding: 4rem; }
+
+.px-space-xs { padding-left: 0.5rem; padding-right: 0.5rem; }
+.px-space-sm { padding-left: 0.75rem; padding-right: 0.75rem; }
+.px-space-md { padding-left: 1rem; padding-right: 1rem; }
+.px-space-lg { padding-left: 1.5rem; padding-right: 1.5rem; }
+.px-space-xl { padding-left: 2rem; padding-right: 2rem; }
+
+.py-space-2xs { padding-top: 0.25rem; padding-bottom: 0.25rem; }
+.py-space-xs { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.py-space-sm { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+.py-space-md { padding-top: 1rem; padding-bottom: 1rem; }
+.py-space-lg { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+.py-space-xl { padding-top: 2rem; padding-bottom: 2rem; }
+.py-space-2xl { padding-top: 3rem; padding-bottom: 3rem; }
+.py-space-3xl { padding-top: 4rem; padding-bottom: 4rem; }
+
+.mb-space-2xs { margin-bottom: 0.25rem; }
+.mb-space-xs { margin-bottom: 0.5rem; }
+.mb-space-sm { margin-bottom: 0.75rem; }
+.mb-space-md { margin-bottom: 1rem; }
+.mb-space-lg { margin-bottom: 1.5rem; }
+.mb-space-xl { margin-bottom: 2rem; }
+
+.mt-space-xs { margin-top: 0.5rem; }
+.mt-space-sm { margin-top: 0.75rem; }
+.mt-space-md { margin-top: 1rem; }
+.mt-space-lg { margin-top: 1.5rem; }
+.mt-space-xl { margin-top: 2rem; }
+
+.gap-space-2xs { gap: 0.25rem; }
+.gap-space-xs { gap: 0.5rem; }
+.gap-space-sm { gap: 0.75rem; }
+.gap-space-md { gap: 1rem; }
+.gap-space-lg { gap: 1.5rem; }
+.gap-space-xl { gap: 2rem; }
+.gap-space-2xl { gap: 3rem; }
+
+/* Font tokens */
+.font-headline-sm { font-size: 1.25rem; line-height: 1.75rem; }
+.font-headline-md { font-size: 1.5rem; line-height: 2rem; }
+.font-headline-lg { font-size: 2rem; line-height: 2.5rem; }
+.font-label-sm { font-size: 0.75rem; line-height: 1rem; }
+.font-label-md { font-size: 0.875rem; line-height: 1.25rem; }
+.font-label-lg { font-size: 1rem; line-height: 1.5rem; }
+.font-body-sm { font-size: 0.8125rem; line-height: 1.25rem; }
+.font-body-md { font-size: 0.875rem; line-height: 1.375rem; }
+.font-body-lg { font-size: 1rem; line-height: 1.5rem; }
+.font-code-num { font-variant-numeric: tabular-nums; }
+

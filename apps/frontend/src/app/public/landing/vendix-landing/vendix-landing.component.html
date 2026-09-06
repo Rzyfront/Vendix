@@ -91,10 +91,10 @@
     <section class="relative w-full px-4 sm:px-6 lg:px-8 py-16 sm:py-24 overflow-hidden">
       <div class="max-w-[75rem] mx-auto flex flex-col items-center text-center">
         <!-- Launch Pill Badge -->
-        <div class="inline-flex items-center gap-2 px-4 py-1.5 bg-emerald-100/80 border border-emerald-300/50 rounded-full text-emerald-900 text-xs sm:text-sm font-bold mb-6 shadow-sm">
-          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-          <span class="w-2 h-2 rounded-full bg-emerald-600 -ml-3"></span>
-          <span>LANZAMIENTO OFICIAL · VENDIX 2026 · FACTURACIÓN DIAN Y POS EN VIVO</span>
+        <div class="inline-flex items-center gap-space-xs px-space-md py-space-xs bg-secondary-container/60 rounded-full text-on-secondary-fixed text-label-sm font-label-sm mb-space-lg shadow-sm">
+          <span class="w-2 h-2 rounded-full bg-primary-container animate-ping"></span>
+          <span class="w-2 h-2 rounded-full bg-primary-container -ml-space-xs"></span>
+          <span class="font-bold tracking-wide">OPERACIÓN CONTINUA 24/7 · +150.000 FACTURAS DIAN EMITIDAS · 99.98% UPTIME ACTIVO</span>
         </div>
 
         <!-- Main Headline -->
@@ -146,149 +146,312 @@
         </div>
 
         <!-- HERO MEDIA & INTERACTIVE DASHBOARD SIMULATOR -->
-        <div id="hero-simulator" class="relative w-full max-w-5xl rounded-2xl bg-white shadow-2xl border border-slate-200/80 p-3 sm:p-6 text-left overflow-hidden">
+        <div id="hero-simulator" class="relative w-full max-w-5xl rounded-2xl bg-surface-container-lowest shadow-2xl overflow-hidden border border-outline-variant/30 text-left">
           <!-- Top Window Controls -->
-          <div class="flex items-center justify-between pb-3 mb-4 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200/60">
-            <div class="flex items-center gap-2">
-              <span class="w-3 h-3 rounded-full bg-red-500"></span>
-              <span class="w-3 h-3 rounded-full bg-amber-500"></span>
-              <span class="w-3 h-3 rounded-full bg-emerald-500"></span>
-              <span class="text-xs text-slate-500 ml-2 hidden sm:inline-block font-mono">vendix.cloud/pos/caja-central-01</span>
+          <div class="flex items-center justify-between bg-surface-container-low px-space-md py-space-xs border-b border-outline-variant/30">
+            <div class="flex items-center gap-space-xs">
+              <span class="w-3 h-3 rounded-full bg-error inline-block"></span>
+              <span class="w-3 h-3 rounded-full bg-tertiary-container inline-block"></span>
+              <span class="w-3 h-3 rounded-full bg-primary-container inline-block"></span>
+              <span class="font-label-sm text-label-sm text-outline ml-space-sm hidden sm:inline-block font-mono">app.vendix.co/admin/panel-principal</span>
             </div>
-            <div class="flex items-center gap-2">
-              <span class="inline-flex items-center gap-1.5 text-[11px] font-bold text-white bg-emerald-700 px-2.5 py-0.5 rounded-full">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse"></span>
-                MODO OFFLINE SEGURO ACTIVO
+            <div class="flex items-center gap-space-sm">
+              <span class="inline-flex items-center gap-space-2xs text-[11px] font-bold text-on-primary bg-primary px-space-xs py-0.5 rounded-full shadow-sm">
+                <span class="w-1.5 h-1.5 rounded-full bg-primary-fixed animate-pulse"></span> ● EN VIVO · TIEMPO REAL
               </span>
             </div>
           </div>
 
-          <!-- Dashboard Layout Grid -->
-          <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            <!-- Main POS Section -->
-            <div class="lg:col-span-8 flex flex-col gap-4">
-              <!-- Metric Highlights -->
-              <div class="grid grid-cols-3 gap-2 sm:gap-3">
-                <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                  <p class="text-[11px] font-semibold text-slate-500">Ventas Hoy (Total)</p>
-                  <p class="text-base sm:text-xl font-extrabold text-slate-900 mt-0.5">$ 3.842.500</p>
-                  <span class="text-[10px] sm:text-[11px] text-emerald-600 font-bold flex items-center gap-0.5">▲ +18.4% vs ayer</span>
+          <!-- Dashboard Body with Left Icon Dock & Main View -->
+          <div class="flex w-full bg-[#f4f7fb] text-on-surface min-h-[640px]">
+            <!-- Left Dock -->
+            <aside class="w-14 bg-surface-container-lowest border-r border-outline-variant/30 flex flex-col items-center py-space-md justify-between shrink-0">
+              <div class="flex flex-col items-center gap-space-xs w-full">
+                <div class="w-9 h-9 rounded-xl bg-[#032317] flex items-center justify-center text-primary-fixed mb-space-xs shadow-sm">
+                  <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M3 4l9 16 9-16H3zm4.5 3h9L12 15 7.5 7z"></path></svg>
                 </div>
-                <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                  <p class="text-[11px] font-semibold text-slate-500">Facturas DIAN</p>
-                  <p class="text-base sm:text-xl font-extrabold text-slate-900 mt-0.5">142 <span class="text-xs font-normal text-slate-400">valid.</span></p>
-                  <span class="text-[10px] sm:text-[11px] text-emerald-600 font-bold">100% éxito transm.</span>
-                </div>
-                <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                  <p class="text-[11px] font-semibold text-slate-500">Ticket Promedio</p>
-                  <p class="text-base sm:text-xl font-extrabold text-slate-900 mt-0.5">$ 27.050</p>
-                  <span class="text-[10px] sm:text-[11px] text-emerald-600 font-bold">5.2 prod/ticket</span>
-                </div>
+                <a class="w-9 h-9 rounded-xl bg-primary-container text-on-primary flex items-center justify-center shadow-sm" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">home</span>
+                </a>
+                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">storefront</span>
+                </a>
+                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">shopping_cart</span>
+                </a>
+                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">local_shipping</span>
+                </a>
+                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">inventory_2</span>
+                </a>
+                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">receipt_long</span>
+                </a>
+                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">group</span>
+                </a>
+                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">assignment</span>
+                </a>
+                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">campaign</span>
+                </a>
+                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">trending_up</span>
+                </a>
+                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">account_balance_wallet</span>
+                </a>
+                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">account_balance</span>
+                </a>
               </div>
-
-              <!-- Visual Bar Chart for Sales Trend -->
-              <div class="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
-                <div class="flex items-center justify-between mb-3">
-                  <p class="text-xs sm:text-sm font-bold text-slate-800">Flujo de Facturación y POS en Tiempo Real</p>
-                  <span class="text-xs text-slate-400">Últimas 6 horas</span>
-                </div>
-                <div class="h-28 flex items-end justify-between gap-2 pt-2">
-                  <div class="flex-1 flex flex-col items-center gap-1">
-                    <div class="w-full bg-slate-200 rounded-t transition-all hover:bg-emerald-400" style="height: 38%"></div>
-                    <span class="text-[10px] text-slate-400">10:00</span>
-                  </div>
-                  <div class="flex-1 flex flex-col items-center gap-1">
-                    <div class="w-full bg-slate-200 rounded-t transition-all hover:bg-emerald-400" style="height: 52%"></div>
-                    <span class="text-[10px] text-slate-400">11:00</span>
-                  </div>
-                  <div class="flex-1 flex flex-col items-center gap-1">
-                    <div class="w-full bg-emerald-200 rounded-t transition-all hover:bg-emerald-400" style="height: 65%"></div>
-                    <span class="text-[10px] text-slate-400">12:00</span>
-                  </div>
-                  <div class="flex-1 flex flex-col items-center gap-1">
-                    <div class="w-full bg-emerald-500 rounded-t" style="height: 94%"></div>
-                    <span class="text-[10px] text-emerald-700 font-bold">13:00 (Pico)</span>
-                  </div>
-                  <div class="flex-1 flex flex-col items-center gap-1">
-                    <div class="w-full bg-emerald-200 rounded-t transition-all hover:bg-emerald-400" style="height: 75%"></div>
-                    <span class="text-[10px] text-slate-400">14:00</span>
-                  </div>
-                  <div class="flex-1 flex flex-col items-center gap-1">
-                    <div class="w-full bg-emerald-500 rounded-t" style="height: 86%"></div>
-                    <span class="text-[10px] text-slate-400">15:00</span>
-                  </div>
-                </div>
+              <div class="flex flex-col items-center gap-space-xs w-full">
+                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">help</span>
+                </a>
+                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
+                  <span class="material-symbols-outlined text-[20px]">settings</span>
+                </a>
               </div>
+            </aside>
 
-              <!-- Interactive POS Line items simulator -->
-              <div class="bg-slate-50 p-3 rounded-xl border border-slate-200/60">
-                <p class="text-xs font-bold text-slate-700 mb-2">Comanda / Venta en Curso (#POS-0941)</p>
-                <div class="space-y-1.5">
-                  <div class="flex items-center justify-between text-xs text-slate-800 bg-white px-3 py-2 rounded-lg border border-slate-100 shadow-xs">
-                    <span class="font-medium">2x Café Especial Bourbon Rosado 340g</span>
-                    <span class="font-bold text-slate-900">$ 44.000</span>
+            <!-- Main Panel Content -->
+            <div class="flex-1 flex flex-col p-space-md sm:p-space-lg gap-space-md overflow-hidden">
+              <!-- Header Bar (Breadcrumbs & User Profile) -->
+              <div class="flex flex-wrap items-center justify-between gap-space-sm">
+                <div class="flex flex-col">
+                  <div class="flex items-center gap-1.5 text-body-sm text-outline">
+                    <span class="material-symbols-outlined text-[15px]">settings</span>
+                    <span>Panel Administrativo</span>
+                    <span>/</span>
+                    <span class="material-symbols-outlined text-[15px] text-primary">home</span>
+                    <span class="text-on-surface font-semibold">Panel Principal</span>
                   </div>
-                  <div class="flex items-center justify-between text-xs text-slate-800 bg-white px-3 py-2 rounded-lg border border-slate-100 shadow-xs">
-                    <span class="font-medium">1x Filtro Origami Cerámica V60 (Blanco)</span>
-                    <span class="font-bold text-slate-900">$ 78.000</span>
-                  </div>
+                  <h2 class="text-headline-md font-headline-md font-extrabold text-[#091e32] tracking-tight">Panel Principal</h2>
                 </div>
-              </div>
-            </div>
-
-            <!-- DIAN Electronic Invoice Preview + Vexi Floating Bubble -->
-            <div class="lg:col-span-4 flex flex-col justify-between bg-slate-50 p-4 rounded-xl border border-slate-200/60">
-              <div>
-                <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-200">
-                  <div class="flex items-center gap-1.5">
-                    <app-icon name="file-text" [size]="18" class="text-emerald-700"></app-icon>
-                    <span class="text-xs font-bold text-slate-800">Tique DIAN Electrónico</span>
+                <div class="flex items-center gap-space-md">
+                  <button class="w-9 h-9 rounded-full bg-surface-container-lowest border border-outline-variant/30 flex items-center justify-center text-outline hover:text-on-surface">
+                    <span class="material-symbols-outlined text-[20px]">search</span>
+                  </button>
+                  <div class="relative">
+                    <button class="w-9 h-9 rounded-full bg-surface-container-lowest border border-outline-variant/30 flex items-center justify-center text-outline hover:text-on-surface">
+                      <span class="material-symbols-outlined text-[20px]">notifications</span>
+                    </button>
+                    <span class="absolute -top-1 -right-1 px-1.5 py-0.2 bg-error text-on-error text-[10px] font-black rounded-full shadow-sm">98</span>
                   </div>
-                  <span class="px-2 py-0.5 bg-emerald-500 text-white text-[10px] font-bold rounded">VALIDADA</span>
-                </div>
-
-                <div class="bg-white p-3 rounded-lg text-xs space-y-1.5 shadow-sm border border-slate-100">
-                  <div class="flex justify-between text-[11px] text-slate-500">
-                    <span>Factura Electrónica:</span>
-                    <span class="font-bold text-slate-800">SETP-01842</span>
-                  </div>
-                  <div class="flex justify-between text-[11px] text-slate-500">
-                    <span>CUFE:</span>
-                    <span class="font-mono text-[9px] truncate max-w-[130px] text-slate-700">d41d8cd98f00b204e9800998ecf8427e</span>
-                  </div>
-                  <div class="flex justify-between text-[11px] text-slate-500">
-                    <span>Adquiriente:</span>
-                    <span class="font-bold text-slate-800">Consumidor Final (2222...)</span>
-                  </div>
-                  <div class="pt-2 border-t border-slate-100 flex justify-between font-bold text-sm text-slate-900">
-                    <span>Total Transmisión:</span>
-                    <span class="text-emerald-700">$ 122.000</span>
-                  </div>
-
-                  <!-- Simulated QR code -->
-                  <div class="flex flex-col items-center justify-center p-3 bg-slate-50 rounded mt-2 border border-slate-100">
-                    <div class="w-16 h-16 bg-slate-200 rounded flex items-center justify-center text-slate-400">
-                      <app-icon name="qr-code" [size]="40" class="text-slate-700"></app-icon>
+                  <div class="flex items-center gap-space-xs bg-surface-container-lowest border border-outline-variant/30 px-space-sm py-1 rounded-full shadow-sm">
+                    <div class="w-8 h-8 rounded-full bg-primary-container text-on-primary font-bold text-body-sm flex items-center justify-center shadow-sm">VD</div>
+                    <div class="text-left hidden sm:block">
+                      <p class="text-label-sm font-bold text-on-surface leading-tight">Vendix Demo</p>
+                      <p class="text-[10px] text-outline leading-tight">Dueño</p>
                     </div>
-                    <span class="text-[9px] text-slate-400 mt-1">Firma digital X.509 certificada</span>
+                    <span class="material-symbols-outlined text-outline text-[18px]">expand_more</span>
                   </div>
                 </div>
               </div>
 
-              <!-- Vexi Floating Assistant Bubble -->
-              <div class="mt-4 bg-[#0a2318] text-emerald-100 p-3.5 rounded-xl shadow-lg border border-emerald-800/60 relative">
-                <div class="flex items-start gap-2.5">
-                  <div class="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
-                    <app-icon name="sparkles" [size]="15" class="text-white"></app-icon>
+              <!-- 4 Top Stat Cards -->
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-space-md">
+                <div class="bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex justify-between items-start">
+                  <div>
+                    <span class="text-label-sm text-outline font-medium">Ingresos</span>
+                    <p class="font-code-num text-headline-sm font-black text-on-surface mt-1" id="metric-ingresos">$39.2M</p>
+                    <p class="text-[11px] text-outline mt-1 font-medium">Sin IVA: $39.0M</p>
                   </div>
-                  <div class="text-left">
-                    <div class="flex items-center gap-1.5">
-                      <span class="text-xs font-bold text-emerald-300">Vexi IA Copilot</span>
-                      <span class="text-[9px] bg-amber-500 text-slate-950 px-1 py-0.2 rounded font-black">EN VIVO</span>
+                  <div class="w-8 h-8 rounded-full bg-[#e6fbf2] text-primary flex items-center justify-center font-bold text-body-sm">
+                    <span class="material-symbols-outlined text-[18px]">attach_money</span>
+                  </div>
+                </div>
+                <div class="bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex justify-between items-start">
+                  <div>
+                    <span class="text-label-sm text-outline font-medium">Ganancias</span>
+                    <p class="font-code-num text-headline-sm font-black text-on-surface mt-1" id="metric-ganancias">$23.8M</p>
+                    <p class="text-[11px] text-outline mt-1 font-medium">Tras gastos: $23.7M · 61.0% margen</p>
+                  </div>
+                  <div class="w-8 h-8 rounded-full bg-[#e6fbf2] text-primary flex items-center justify-center font-bold text-body-sm">
+                    <span class="material-symbols-outlined text-[18px]">trending_up</span>
+                  </div>
+                </div>
+                <div class="bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex justify-between items-start">
+                  <div>
+                    <span class="text-label-sm text-outline font-medium">Balance</span>
+                    <p class="font-code-num text-headline-sm font-black text-on-surface mt-1" id="metric-balance">$39.1M</p>
+                    <p class="text-[11px] text-outline mt-1 font-medium">Caja acumulada: $429.1M</p>
+                  </div>
+                  <div class="w-8 h-8 rounded-full bg-[#e8f1ff] text-[#1c64f2] flex items-center justify-center font-bold text-body-sm">
+                    <span class="material-symbols-outlined text-[18px]">account_balance_wallet</span>
+                  </div>
+                </div>
+                <div class="bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex justify-between items-start">
+                  <div>
+                    <span class="text-label-sm text-outline font-medium">Gastos</span>
+                    <p class="font-code-num text-headline-sm font-black text-on-surface mt-1">$90.0K</p>
+                    <p class="text-[11px] text-outline mt-1 font-medium">sin base de comparación</p>
+                  </div>
+                  <div class="w-8 h-8 rounded-full bg-[#fde8e8] text-error flex items-center justify-center font-bold text-body-sm">
+                    <span class="material-symbols-outlined text-[18px]">trending_down</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Trend & Channel Charts -->
+              <div class="grid grid-cols-1 lg:grid-cols-12 gap-space-md">
+                <!-- Line Chart: Tendencia de Ventas -->
+                <div class="lg:col-span-8 bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex flex-col justify-between">
+                  <div class="flex items-center justify-between mb-space-sm">
+                    <div>
+                      <h3 class="font-label-lg font-bold text-on-surface">Tendencia de Ventas</h3>
+                      <p class="text-[11px] text-outline">6 de sept - 6 de sept</p>
                     </div>
-                    <p class="text-[11px] text-emerald-100/90 mt-1 leading-snug">
-                      "✓ Factura #1842 aprobada por DIAN en 0.8s. Stock de 'Café Bourbon' actualizado en POS y Tienda Web simultáneamente."
-                    </p>
+                    <button class="flex items-center gap-1.5 px-space-sm py-1 bg-surface-container-lowest border border-outline-variant/30 rounded-xl text-body-sm font-bold text-on-surface shadow-sm hover:bg-surface-container-low transition-colors">
+                      <span class="material-symbols-outlined text-[16px]">tune</span>
+                      <span>Filtros</span>
+                      <span class="w-4 h-4 rounded-full bg-primary-container text-on-primary text-[10px] flex items-center justify-center font-black">1</span>
+                      <span class="material-symbols-outlined text-[16px]">expand_more</span>
+                    </button>
+                  </div>
+                  <div class="relative w-full h-56 mt-2">
+                    <svg class="w-full h-full" preserveAspectRatio="none" viewBox="0 0 600 200">
+                      <line stroke="#f1f5f9" stroke-dasharray="3 3" stroke-width="1" x1="40" x2="560" y1="20"></line>
+                      <line stroke="#f1f5f9" stroke-dasharray="3 3" stroke-width="1" x1="40" x2="560" y1="60"></line>
+                      <line stroke="#f1f5f9" stroke-dasharray="3 3" stroke-width="1" x1="40" x2="560" y1="100"></line>
+                      <line stroke="#f1f5f9" stroke-dasharray="3 3" stroke-width="1" x1="40" x2="560" y1="140"></line>
+                      <line stroke="#e2e8f0" stroke-width="1" x1="40" x2="560" y1="170"></line>
+                      <text fill="#94a3b8" font-size="9" text-anchor="end" x="35" y="24">$25M</text>
+                      <text fill="#94a3b8" font-size="9" text-anchor="end" x="35" y="64">$20M</text>
+                      <text fill="#94a3b8" font-size="9" text-anchor="end" x="35" y="104">$15M</text>
+                      <text fill="#94a3b8" font-size="9" text-anchor="end" x="35" y="144">$5M</text>
+                      <text fill="#94a3b8" font-size="9" text-anchor="end" x="35" y="173">$0</text>
+                      <text fill="#94a3b8" font-size="9" text-anchor="start" x="565" y="24">6</text>
+                      <text fill="#94a3b8" font-size="9" text-anchor="start" x="565" y="64">5</text>
+                      <text fill="#94a3b8" font-size="9" text-anchor="start" x="565" y="104">3</text>
+                      <text fill="#94a3b8" font-size="9" text-anchor="start" x="565" y="144">1</text>
+                      <text fill="#94a3b8" font-size="9" text-anchor="start" x="565" y="173">0</text>
+                      <rect fill="#abf7d6" height="150" opacity="0.5" rx="2" width="14" x="413" y="20"></rect>
+                      <rect fill="#abf7d6" height="150" opacity="0.5" rx="2" width="14" x="545" y="20"></rect>
+                      <path d="M 45 170 L 75 170 L 110 170 L 145 170 L 180 170 L 215 170 L 250 170 L 285 170 L 320 170 L 355 170 L 385 168 Q 410 162 420 100 Q 430 165 460 170 L 495 170 L 530 168 Q 545 140 550 20" fill="none" stroke="#10b981" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"></path>
+                      <circle cx="75" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
+                      <circle cx="110" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
+                      <circle cx="145" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
+                      <circle cx="180" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
+                      <circle cx="215" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
+                      <circle cx="250" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
+                      <circle cx="285" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
+                      <circle cx="320" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
+                      <circle cx="355" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
+                      <circle cx="385" cy="168" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
+                      <circle cx="420" cy="100" fill="#ffffff" r="4" stroke="#10b981" stroke-width="2"></circle>
+                      <circle cx="460" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
+                      <circle cx="495" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
+                      <circle cx="530" cy="168" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
+                      <circle cx="550" cy="20" fill="#ffffff" id="live-spike-dot" r="4" stroke="#10b981" stroke-width="2.5"></circle>
+                      <circle class="animate-ping" cx="550" cy="20" fill="none" opacity="0.75" r="8" stroke="#10b981" stroke-width="1.5"></circle>
+                    </svg>
+                  </div>
+                  <div class="flex justify-between px-6 text-[10px] text-outline font-mono mt-1">
+                    <span>00:00</span><span>01:00</span><span>02:00</span><span>03:00</span><span>04:00</span><span>05:00</span><span>06:00</span><span>07:00</span><span>08:00</span><span>09:00</span><span>10:00</span><span>11:00</span><span>12:00</span><span>13:00</span><span>14:00</span>
+                  </div>
+                  <div class="flex items-center justify-center gap-space-lg text-[11px] text-outline font-medium mt-3">
+                    <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-primary-container inline-block"></span><span class="w-2 h-2 rounded-full border border-primary-container bg-surface-container-lowest -ml-1"></span> Ingresos</span>
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 bg-[#abf7d6] rounded-sm inline-block"></span> Órdenes</span>
+                  </div>
+                </div>
+
+                <!-- Donut Chart: Ventas por Canal -->
+                <div class="lg:col-span-4 bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex flex-col justify-between">
+                  <div>
+                    <h3 class="font-label-lg font-bold text-on-surface">Ventas por Canal</h3>
+                    <p class="text-[11px] text-outline">Distribución del período</p>
+                  </div>
+                  <div class="relative flex items-center justify-center my-space-sm h-48">
+                    <svg class="w-44 h-44" viewBox="0 0 160 160">
+                      <g transform="translate(80, 80)">
+                        <path d="M 0 0 L 0 -58 A 58 58 0 0 1 54 22 Z" fill="#abf7d6"></path>
+                        <path d="M 0 0 L 54 22 A 58 58 0 0 1 -38 44 Z" fill="#10b981"></path>
+                        <path d="M 0 0 L -38 44 A 58 58 0 0 1 0 -58 Z" fill="#07271c"></path>
+                        <circle cx="0" cy="0" fill="#ffffff" r="28"></circle>
+                      </g>
+                    </svg>
+                    <div class="absolute top-12 left-0 text-[10px] text-outline flex items-center gap-1 font-medium">
+                      <span>Tienda Online</span>
+                      <span class="w-8 h-px bg-outline-variant/50"></span>
+                    </div>
+                    <div class="absolute top-12 right-2 text-[10px] text-outline flex items-center gap-1 font-medium">
+                      <span class="w-4 h-px bg-outline-variant/50"></span>
+                      <span>WhatsApp</span>
+                    </div>
+                    <div class="absolute bottom-2 right-12 text-[10px] text-outline flex flex-col items-center font-medium">
+                      <span class="w-px h-3 bg-outline-variant/50"></span>
+                      <span>Punto de Venta</span>
+                    </div>
+                  </div>
+                  <div class="flex items-center justify-center gap-space-sm text-[10px] text-outline">
+                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-[#abf7d6]"></span> WhatsApp</span>
+                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-primary-container"></span> Punto de Venta</span>
+                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-[#07271c]"></span> Tienda Online</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Operational Alerts & Quick Actions Row -->
+              <div class="grid grid-cols-1 lg:grid-cols-12 gap-space-md">
+                <!-- Operational Alerts -->
+                <div class="lg:col-span-6 bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex flex-col gap-space-sm">
+                  <h3 class="font-label-lg font-bold text-on-surface">Alertas Operativas</h3>
+                  <div class="flex items-center justify-between p-space-sm bg-[#fff8e6] border border-[#fde8bb] rounded-xl cursor-pointer hover:bg-[#fff3cc] transition-colors">
+                    <div class="flex items-center gap-space-xs text-[#b45309] font-bold text-body-sm">
+                      <span class="w-6 h-6 rounded-full bg-[#fde68a] flex items-center justify-center text-[14px]">⚠️</span>
+                      <span>3 bajo stock</span>
+                    </div>
+                    <span class="text-[#b45309] font-bold text-body-sm">›</span>
+                  </div>
+                  <div class="flex items-center justify-between p-space-sm bg-[#fef2f2] border border-[#fecaca] rounded-xl cursor-pointer hover:bg-[#fee2e2] transition-colors">
+                    <div class="flex items-center gap-space-xs text-error font-bold text-body-sm">
+                      <span class="w-6 h-6 rounded-full bg-[#fca5a5] flex items-center justify-center text-[14px]">⊗</span>
+                      <span>1 agotados</span>
+                    </div>
+                    <span class="text-error font-bold text-body-sm">›</span>
+                  </div>
+                </div>
+
+                <!-- Quick Actions with Vexi avatar -->
+                <div class="lg:col-span-6 bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm relative flex flex-col justify-between overflow-hidden">
+                  <h3 class="font-label-lg font-bold text-on-surface mb-space-xs">Accesos Rápidos</h3>
+                  <div class="grid grid-cols-2 gap-space-xs pr-14">
+                    <button class="flex items-center gap-2 p-2 rounded-xl bg-surface-container-low/40 hover:bg-surface-container-low text-left text-body-sm font-semibold text-on-surface transition-colors">
+                      <span class="material-symbols-outlined text-outline text-[18px]">trending_up</span>
+                      <span>Resumen de Ventas</span>
+                    </button>
+                    <button class="flex items-center gap-2 p-2 rounded-xl bg-surface-container-low/40 hover:bg-surface-container-low text-left text-body-sm font-semibold text-on-surface transition-colors">
+                      <span class="material-symbols-outlined text-outline text-[18px]">category</span>
+                      <span>Ventas por Producto</span>
+                    </button>
+                    <button class="flex items-center gap-2 p-2 rounded-xl bg-surface-container-low/40 hover:bg-surface-container-low text-left text-body-sm font-semibold text-on-surface transition-colors">
+                      <span class="material-symbols-outlined text-outline text-[18px]">shopping_cart</span>
+                      <span>Órdenes</span>
+                    </button>
+                    <button class="flex items-center gap-2 p-2 rounded-xl bg-surface-container-low/40 hover:bg-surface-container-low text-left text-body-sm font-semibold text-on-surface transition-colors">
+                      <span class="material-symbols-outlined text-outline text-[18px]">warning</span>
+                      <span>Stock Info</span>
+                    </button>
+                    <button class="flex items-center gap-2 p-2 rounded-xl bg-surface-container-low/40 hover:bg-surface-container-low text-left text-body-sm font-semibold text-on-surface transition-colors">
+                      <span class="material-symbols-outlined text-outline text-[18px]">payments</span>
+                      <span>Gastos</span>
+                    </button>
+                    <button class="flex items-center gap-2 p-2 rounded-xl bg-surface-container-low/40 hover:bg-surface-container-low text-left text-body-sm font-semibold text-on-surface transition-colors">
+                      <span class="material-symbols-outlined text-outline text-[18px]">group</span>
+                      <span>Clientes</span>
+                    </button>
+                  </div>
+                  <div class="absolute bottom-1 right-2 flex flex-col items-center pointer-events-none">
+                    <div class="relative w-14 h-14 rounded-full bg-gradient-to-tr from-primary to-primary-container p-0.5 shadow-lg shadow-primary-container/30 flex items-center justify-center">
+                      <div class="w-full h-full rounded-full bg-[#053222] flex items-center justify-center text-primary-fixed">
+                        <span class="material-symbols-outlined text-[28px]">smart_toy</span>
+                      </div>
+                      <span class="absolute -top-1 -right-1 text-[10px] font-bold text-primary-container animate-pulse">💤</span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -537,129 +700,383 @@
       </div>
     </section>
 
-    <!-- SECTION 5: SPOTLIGHT DIFERENCIADOR: VEXI IA -->
-    <section id="vexi" class="w-full py-20 px-4 sm:px-6 lg:px-8 bg-[#00170d] text-white relative overflow-hidden">
+    <!-- SECTION 5: SPOTLIGHT DIFERENCIADOR: "VEXI", TU COPILOTO DE NEGOCIO -->
+    <section id="vexi" class="w-full py-space-3xl px-gutter-mobile lg:px-gutter-desktop bg-on-primary-fixed text-on-primary relative overflow-hidden">
       <!-- Glow ambient background -->
       <div class="absolute -top-24 -left-24 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
       <div class="absolute -bottom-24 -right-24 w-96 h-96 bg-emerald-600/15 rounded-full blur-3xl pointer-events-none"></div>
 
-      <div class="max-w-[75rem] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12 items-center relative z-10">
-        <div class="lg:col-span-6 flex flex-col gap-4">
-          <div class="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-900/60 border border-emerald-700/50 rounded-full text-emerald-300 text-xs font-bold self-start">
-            <app-icon name="sparkles" [size]="14"></app-icon>
-            EXCLUSIVO EN VENDIX
+      <div class="max-w-[75rem] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-space-2xl items-center relative z-10">
+        <!-- Left column: Explanations & 4 Interactive Demo Cards -->
+        <div class="lg:col-span-5 flex flex-col gap-space-md">
+          <div class="inline-flex items-center gap-space-2xs px-space-sm py-1 bg-on-primary-fixed-variant rounded-full text-primary-fixed text-label-sm font-label-sm self-start">
+            <span class="material-symbols-outlined text-[16px]">psychology</span>
+            <span>EXCLUSIVO EN VENDIX</span>
           </div>
-          <h2 class="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
-            Conoce a Vexi: Tu copiloto de negocio con Inteligencia Artificial
+          <h2 class="font-headline-lg text-headline-lg text-on-primary tracking-tight">
+            Conoce a Vexi: Tu copiloto de tienda con Inteligencia Artificial
           </h2>
-          <p class="text-sm sm:text-base text-emerald-100/80 leading-relaxed">
-            No es un chatbot genérico. Vexi está conectado a tus ventas, compras, costos y resoluciones DIAN en tiempo real para tomar acciones operativas por ti.
+          <p class="font-body-lg text-body-lg text-inverse-on-surface/80">
+            No es un chatbot genérico. Vexi analiza en tiempo real tus ventas, márgenes, costos y resoluciones DIAN para darte respuestas exactas y tomar acción directa.
           </p>
 
-          <div class="space-y-3 mt-2">
-            <div class="bg-slate-900/60 border border-emerald-900/60 p-4 rounded-xl">
-              <div class="flex items-center gap-2 text-emerald-300 font-bold text-xs sm:text-sm">
-                <app-icon name="scan-line" [size]="16"></app-icon>
-                "Vexi, ingresa esta factura de mi proveedor"
+          <div class="space-y-space-sm mt-space-sm">
+            <!-- Card 1 -->
+            <div
+              (click)="setVexiTab(1)"
+              [class.border-primary-container]="activeVexiTab() === 1"
+              [class.bg-inverse-surface]="activeVexiTab() === 1"
+              [class.bg-inverse-surface\/60]="activeVexiTab() !== 1"
+              class="hover:bg-inverse-surface border border-outline-variant/20 hover:border-primary-container/60 p-space-md rounded-2xl cursor-pointer transition-all duration-200 group">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-space-2xs text-primary-fixed font-bold font-label-md">
+                  <span class="material-symbols-outlined text-[18px]">trending_down</span>
+                  <span>"¿Cuál es mi producto menos rentable?"</span>
+                </div>
+                <span
+                  [class.bg-primary-container]="activeVexiTab() === 1"
+                  [class.text-on-primary]="activeVexiTab() === 1"
+                  [class.bg-on-primary-fixed-variant]="activeVexiTab() !== 1"
+                  [class.text-primary-fixed]="activeVexiTab() !== 1"
+                  class="text-[11px] font-bold px-2 py-0.5 rounded-full group-hover:bg-primary-container group-hover:text-on-primary transition-colors">
+                  {{ activeVexiTab() === 1 ? 'Activo' : 'Ver demo' }}
+                </span>
               </div>
-              <p class="text-xs text-emerald-100/70 mt-1">
-                Escaneo OCR inteligente de compras por foto o PDF: extrae NIT, ítems, IVA y actualiza tu stock sin escribir nada a mano.
+              <p class="text-body-sm text-inverse-on-surface/70 mt-1">
+                Detecta márgenes críticos (ej. Huawei Watch GT 40 con 10,71%), calcula ganancia neta en pesos y evalúa el contexto general de tu catálogo.
               </p>
             </div>
-            <div class="bg-slate-900/60 border border-emerald-900/60 p-4 rounded-xl">
-              <div class="flex items-center gap-2 text-emerald-300 font-bold text-xs sm:text-sm">
-                <app-icon name="trending-up" [size]="16"></app-icon>
-                "Vexi, ¿cuál fue el producto con mayor margen esta semana?"
+
+            <!-- Card 2 -->
+            <div
+              (click)="setVexiTab(2)"
+              [class.border-primary-container]="activeVexiTab() === 2"
+              [class.bg-inverse-surface]="activeVexiTab() === 2"
+              [class.bg-inverse-surface\/60]="activeVexiTab() !== 2"
+              class="hover:bg-inverse-surface border border-outline-variant/20 hover:border-primary-container/60 p-space-md rounded-2xl cursor-pointer transition-all duration-200 group">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-space-2xs text-primary-fixed font-bold font-label-md">
+                  <span class="material-symbols-outlined text-[18px]">inventory_2</span>
+                  <span>"¿Cuál es el producto que menos vendo?"</span>
+                </div>
+                <span
+                  [class.bg-primary-container]="activeVexiTab() === 2"
+                  [class.text-on-primary]="activeVexiTab() === 2"
+                  [class.bg-on-primary-fixed-variant]="activeVexiTab() !== 2"
+                  [class.text-primary-fixed]="activeVexiTab() !== 2"
+                  class="text-[11px] font-bold px-2 py-0.5 rounded-full group-hover:bg-primary-container group-hover:text-on-primary transition-colors">
+                  {{ activeVexiTab() === 2 ? 'Activo' : 'Ver demo' }}
+                </span>
               </div>
-              <p class="text-xs text-emerald-100/70 mt-1">
-                Obtén respuestas ejecutivas al instante en lenguaje natural con recomendaciones para promocionar o sustituir ítems lentos.
+              <p class="text-body-sm text-inverse-on-surface/70 mt-1">
+                Identifica bajas rotaciones y empates de ventas críticas (Airpods 3, Xiaomi 13 Lite, Tecno Camon 20) para evitar inventario dormido.
               </p>
             </div>
-            <div class="bg-slate-900/60 border border-emerald-900/60 p-4 rounded-xl">
-              <div class="flex items-center gap-2 text-emerald-300 font-bold text-xs sm:text-sm">
-                <app-icon name="bell" [size]="16"></app-icon>
-                "Vexi, avísame si el stock de café baja de 10 unidades"
+
+            <!-- Card 3 -->
+            <div
+              (click)="setVexiTab(3)"
+              [class.border-primary-container]="activeVexiTab() === 3"
+              [class.bg-inverse-surface]="activeVexiTab() === 3"
+              [class.bg-inverse-surface\/60]="activeVexiTab() !== 3"
+              class="hover:bg-inverse-surface border border-outline-variant/20 hover:border-primary-container/60 p-space-md rounded-2xl cursor-pointer transition-all duration-200 group">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-space-2xs text-primary-fixed font-bold font-label-md">
+                  <span class="material-symbols-outlined text-[18px]">document_scanner</span>
+                  <span>"Vexi, ingresa esta factura de mi proveedor"</span>
+                </div>
+                <span
+                  [class.bg-primary-container]="activeVexiTab() === 3"
+                  [class.text-on-primary]="activeVexiTab() === 3"
+                  [class.bg-on-primary-fixed-variant]="activeVexiTab() !== 3"
+                  [class.text-primary-fixed]="activeVexiTab() !== 3"
+                  class="text-[11px] font-bold px-2 py-0.5 rounded-full group-hover:bg-primary-container group-hover:text-on-primary transition-colors">
+                  {{ activeVexiTab() === 3 ? 'Activo' : 'Ver demo' }}
+                </span>
               </div>
-              <p class="text-xs text-emerald-100/70 mt-1">
-                Alertas proactivas a tu WhatsApp con borrador de orden de compra listo para enviar a tu distribuidor en un solo clic.
+              <p class="text-body-sm text-inverse-on-surface/70 mt-1">
+                Escaneo OCR inteligente de compras por foto o PDF: extrae NIT, ítems, IVA y actualiza tu stock sin digitar nada a mano.
+              </p>
+            </div>
+
+            <!-- Card 4 -->
+            <div
+              (click)="setVexiTab(4)"
+              [class.border-primary-container]="activeVexiTab() === 4"
+              [class.bg-inverse-surface]="activeVexiTab() === 4"
+              [class.bg-inverse-surface\/60]="activeVexiTab() !== 4"
+              class="hover:bg-inverse-surface border border-outline-variant/20 hover:border-primary-container/60 p-space-md rounded-2xl cursor-pointer transition-all duration-200 group">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-space-2xs text-primary-fixed font-bold font-label-md">
+                  <span class="material-symbols-outlined text-[18px]">notifications_active</span>
+                  <span>"Vexi, avísame si el stock baja"</span>
+                </div>
+                <span
+                  [class.bg-primary-container]="activeVexiTab() === 4"
+                  [class.text-on-primary]="activeVexiTab() === 4"
+                  [class.bg-on-primary-fixed-variant]="activeVexiTab() !== 4"
+                  [class.text-primary-fixed]="activeVexiTab() !== 4"
+                  class="text-[11px] font-bold px-2 py-0.5 rounded-full group-hover:bg-primary-container group-hover:text-on-primary transition-colors">
+                  {{ activeVexiTab() === 4 ? 'Activo' : 'Ver demo' }}
+                </span>
+              </div>
+              <p class="text-body-sm text-inverse-on-surface/70 mt-1">
+                Alertas preventivas a WhatsApp con borrador de orden de compra listo para enviar a tus distribuidores.
               </p>
             </div>
           </div>
         </div>
 
-        <!-- Vexi Interactive Live UI Simulator -->
-        <div class="lg:col-span-6 bg-slate-900/95 border border-emerald-800/80 p-5 sm:p-6 rounded-2xl shadow-2xl flex flex-col gap-4">
-          <div class="flex items-center justify-between pb-3 border-b border-emerald-900/80">
-            <div class="flex items-center gap-2.5">
-              <div class="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center">
-                <app-icon name="bot" [size]="18" class="text-white"></app-icon>
+        <!-- Right column: Interactive Vexi Chat Simulator -->
+        <div class="lg:col-span-7 bg-[#0b1c30] rounded-3xl border border-outline-variant/30 shadow-2xl flex flex-col overflow-hidden">
+          <!-- Chat Window Header -->
+          <div class="flex items-center justify-between px-space-lg py-space-sm bg-[#053222] border-b border-primary-container/30 text-on-primary">
+            <div class="flex items-center gap-space-sm">
+              <div class="w-9 h-9 rounded-full bg-primary-container flex items-center justify-center text-on-primary shadow-sm">
+                <span class="material-symbols-outlined text-[20px]">menu_book</span>
               </div>
               <div>
-                <p class="text-xs sm:text-sm font-bold text-white">Vexi AI Assistant</p>
-                <span class="text-[10px] text-emerald-400 font-medium">● Conectado a base de datos de tu tienda</span>
+                <div class="flex items-center gap-2">
+                  <h4 class="font-headline-sm text-headline-sm font-bold leading-tight">Vexi</h4>
+                  <span class="inline-flex items-center gap-1 text-[11px] font-bold text-[#abf7d6] bg-primary/40 px-2 py-0.5 rounded-full">
+                    <span class="w-1.5 h-1.5 rounded-full bg-primary-fixed animate-pulse"></span> En línea
+                  </span>
+                </div>
+                <p class="text-body-sm text-[#abcebf]">Tu copiloto de tienda</p>
               </div>
             </div>
-            <span class="text-[10px] text-emerald-300 font-mono bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800/50">LATENCIA: 140ms</span>
+            <div class="flex items-center gap-space-xs text-primary-fixed-dim">
+              <button (click)="openWhatsApp('Hola Vexi, quiero activar el copiloto IA para mi tienda')" class="w-8 h-8 rounded-full hover:bg-primary/30 flex items-center justify-center transition-colors" title="Dictado por voz">
+                <span class="material-symbols-outlined text-[18px]">mic</span>
+              </button>
+              <button (click)="openWhatsApp('Hola Vexi, quiero configurar los ajustes de IA para mi comercio')" class="w-8 h-8 rounded-full hover:bg-primary/30 flex items-center justify-center transition-colors" title="Editar ajustes">
+                <span class="material-symbols-outlined text-[18px]">edit</span>
+              </button>
+              <button (click)="setVexiTab(1)" class="w-8 h-8 rounded-full hover:bg-primary/30 flex items-center justify-center transition-colors" title="Reiniciar vista">
+                <span class="material-symbols-outlined text-[18px]">refresh</span>
+              </button>
+            </div>
           </div>
 
-          <!-- Chat Conversation Stream -->
-          <div class="space-y-3 min-h-[160px] max-h-[300px] overflow-y-auto pr-1">
-            @for (msg of vexiChatMessages(); track $index) {
-              @if (msg.role === 'user') {
+          <!-- Horizontal Pill Navigation Tabs -->
+          <div class="flex items-center gap-2 px-space-md py-2.5 bg-[#07271c] border-b border-primary-container/20 overflow-x-auto">
+            <button
+              (click)="setVexiTab(1)"
+              [class.bg-primary-container]="activeVexiTab() === 1"
+              [class.text-on-primary]="activeVexiTab() === 1"
+              [class.font-bold]="activeVexiTab() === 1"
+              [class.bg-on-primary-fixed-variant\/50]="activeVexiTab() !== 1"
+              [class.text-inverse-on-surface\/80]="activeVexiTab() !== 1"
+              class="px-space-sm py-1 rounded-full text-label-sm shadow-sm transition-all whitespace-nowrap flex items-center gap-1 hover:text-on-primary">
+              <span class="material-symbols-outlined text-[14px]">trending_down</span> Menos rentable
+            </button>
+            <button
+              (click)="setVexiTab(2)"
+              [class.bg-primary-container]="activeVexiTab() === 2"
+              [class.text-on-primary]="activeVexiTab() === 2"
+              [class.font-bold]="activeVexiTab() === 2"
+              [class.bg-on-primary-fixed-variant\/50]="activeVexiTab() !== 2"
+              [class.text-inverse-on-surface\/80]="activeVexiTab() !== 2"
+              class="px-space-sm py-1 rounded-full text-label-sm shadow-sm transition-all whitespace-nowrap flex items-center gap-1 hover:text-on-primary">
+              <span class="material-symbols-outlined text-[14px]">inventory_2</span> Menos vendido
+            </button>
+            <button
+              (click)="setVexiTab(3)"
+              [class.bg-primary-container]="activeVexiTab() === 3"
+              [class.text-on-primary]="activeVexiTab() === 3"
+              [class.font-bold]="activeVexiTab() === 3"
+              [class.bg-on-primary-fixed-variant\/50]="activeVexiTab() !== 3"
+              [class.text-inverse-on-surface\/80]="activeVexiTab() !== 3"
+              class="px-space-sm py-1 rounded-full text-label-sm shadow-sm transition-all whitespace-nowrap flex items-center gap-1 hover:text-on-primary">
+              <span class="material-symbols-outlined text-[14px]">document_scanner</span> Ingresar factura
+            </button>
+            <button
+              (click)="setVexiTab(4)"
+              [class.bg-primary-container]="activeVexiTab() === 4"
+              [class.text-on-primary]="activeVexiTab() === 4"
+              [class.font-bold]="activeVexiTab() === 4"
+              [class.bg-on-primary-fixed-variant\/50]="activeVexiTab() !== 4"
+              [class.text-inverse-on-surface\/80]="activeVexiTab() !== 4"
+              class="px-space-sm py-1 rounded-full text-label-sm shadow-sm transition-all whitespace-nowrap flex items-center gap-1 hover:text-on-primary">
+              <span class="material-symbols-outlined text-[14px]">notifications_active</span> Alerta de stock
+            </button>
+          </div>
+
+          <!-- Dynamic Chat Body Area -->
+          <div class="p-space-md sm:p-space-lg space-y-space-md min-h-[380px] bg-[#f4f7fb] text-[#0b1c30]">
+            @if (activeVexiTab() === 1) {
+              <!-- Chat 1: Menos rentable -->
+              <div class="space-y-space-md">
                 <div class="flex justify-end">
-                  <div class="bg-emerald-800/80 text-white text-xs sm:text-sm px-4 py-2.5 rounded-xl rounded-br-none max-w-[85%] shadow-sm">
-                    {{ msg.text }}
+                  <div class="bg-[#c4e8d8] text-[#00422b] px-space-md py-space-xs rounded-2xl rounded-tr-sm max-w-[85%] font-medium shadow-sm text-body-md">
+                    ¿Cuál es mi producto menos rentable?
                   </div>
                 </div>
-              } @else {
-                <div class="flex justify-start">
-                  <div class="bg-slate-800 text-emerald-50 text-xs sm:text-sm px-4 py-3 rounded-xl rounded-bl-none max-w-[90%] shadow-md space-y-2 border border-emerald-900/60">
-                    <p class="leading-relaxed">{{ msg.text }}</p>
-
-                    @if (msg.alert) {
-                      <div class="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-300 text-xs flex items-center gap-2">
-                        <app-icon name="alert-triangle" [size]="16" class="shrink-0 text-amber-400"></app-icon>
-                        <span>¡Alerta! 'Leche Entera Colanta 1L' tiene 4 unidades en almacén. Se agotará en aprox 1.5 horas.</span>
+                <div class="flex items-start gap-space-xs">
+                  <div class="w-8 h-8 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0 mt-0.5 shadow-sm font-bold">
+                    <span class="material-symbols-outlined text-[18px]">smart_toy</span>
+                  </div>
+                  <div class="bg-surface-container-lowest text-on-surface p-space-md rounded-2xl rounded-tl-sm max-w-[92%] shadow-sm border border-outline-variant/30 space-y-space-sm">
+                    <div class="inline-flex items-center gap-1 px-2.5 py-1 bg-[#e6fbf2] text-primary font-bold text-label-sm rounded-full">
+                      <span class="material-symbols-outlined text-[14px]">auto_awesome</span> Consulté 1 dato
+                    </div>
+                    <p class="text-body-md leading-relaxed text-[#0b1c30]">
+                      Entre lo vendido este mes, el menos rentable es el <strong class="text-[#091e32] font-bold">Huawei Watch GT 40</strong>: margen de apenas <span class="font-bold text-error bg-error-container/40 px-1.5 py-0.5 rounded">10,71%</span> sobre el costo actual. Vendió 1 unidad a $168.000, así que el margen en pesos fue de unos $18.000.
+                    </p>
+                    <p class="text-body-md leading-relaxed text-[#3c4a42]">
+                      Para contexto, el resto del catálogo se mueve entre 23% y 90%, así que este reloj queda muy por debajo. Y ojo: también es de los que menos venden y está en stock 0 — es candidato a subirle el precio o replantearlo.
+                    </p>
+                    <div (click)="setVexiTab(2)" class="pt-2 border-t border-outline-variant/30 text-body-md font-semibold text-primary flex items-center gap-1.5 cursor-pointer hover:underline">
+                      <span class="material-symbols-outlined text-[18px]">help</span> ¿Quieres que mire el desglose de su precio y costo para ver si conviene ajustarlo?
+                    </div>
+                  </div>
+                </div>
+              </div>
+            } @else if (activeVexiTab() === 2) {
+              <!-- Chat 2: Menos vendido -->
+              <div class="space-y-space-md">
+                <div class="flex justify-end">
+                  <div class="bg-[#c4e8d8] text-[#00422b] px-space-md py-space-xs rounded-2xl rounded-tr-sm max-w-[85%] font-medium shadow-sm text-body-md">
+                    ¿Cuál es el producto que menos vendo?
+                  </div>
+                </div>
+                <div class="flex items-start gap-space-xs">
+                  <div class="w-8 h-8 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0 mt-0.5 shadow-sm font-bold">
+                    <span class="material-symbols-outlined text-[18px]">smart_toy</span>
+                  </div>
+                  <div class="bg-surface-container-lowest text-on-surface p-space-md rounded-2xl rounded-tl-sm max-w-[92%] shadow-sm border border-outline-variant/30 space-y-space-sm">
+                    <div class="inline-flex items-center gap-1 px-2.5 py-1 bg-[#e6fbf2] text-primary font-bold text-label-sm rounded-full">
+                      <span class="material-symbols-outlined text-[14px]">auto_awesome</span> Consulté 2 datos
+                    </div>
+                    <p class="text-body-md leading-relaxed text-[#0b1c30]">
+                      Mirando las ventas de este mes, hay un <strong class="text-[#091e32] font-bold">empate en el último puesto</strong>: 6 productos vendieron solo <strong class="text-error font-bold">1 unidad</strong>:
+                    </p>
+                    <div class="bg-[#eff4ff] p-space-sm rounded-xl text-body-sm space-y-1 font-mono text-[13px] border border-outline-variant/20">
+                      <p class="text-[#0b1c30]">• <strong>Airpods 3</strong> ($1.200.000 COP)</p>
+                      <p class="text-[#0b1c30]">• <strong>Xiaomi 13 Lite</strong> ($2.002.000 COP)</p>
+                      <p class="text-[#0b1c30]">• <strong>Tecno Camon 20</strong> ($900.000 COP)</p>
+                      <p class="text-[#0b1c30]">• <strong>Tecno Spark 10</strong> ($697.500 COP)</p>
+                      <p class="text-[#0b1c30]">• <strong>Huawei Watch GT 40</strong> ($168.000 COP)</p>
+                      <p class="text-[#0b1c30]">• <strong>Samsung Galaxy A54</strong> ($1.560.000 COP)</p>
+                    </div>
+                    <p class="text-body-md text-[#3c4a42]">
+                      Esto es solo entre lo que vendió algo este mes. Si quieres saber cuáles llevan <strong class="text-[#0b1c30] font-bold">cero ventas</strong> en el periodo, dime y te reviso el catálogo completo.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            } @else if (activeVexiTab() === 3) {
+              <!-- Chat 3: Ingresar factura -->
+              <div class="space-y-space-md">
+                <div class="flex justify-end">
+                  <div class="bg-[#c4e8d8] text-[#00422b] px-space-md py-space-xs rounded-2xl rounded-tr-sm max-w-[85%] font-medium shadow-sm text-body-md">
+                    Vexi, ingresa esta factura de mi proveedor
+                  </div>
+                </div>
+                <div class="flex items-start gap-space-xs">
+                  <div class="w-8 h-8 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0 mt-0.5 shadow-sm font-bold">
+                    <span class="material-symbols-outlined text-[18px]">smart_toy</span>
+                  </div>
+                  <div class="bg-surface-container-lowest text-on-surface p-space-md rounded-2xl rounded-tl-sm max-w-[92%] shadow-sm border border-outline-variant/30 space-y-space-sm">
+                    <div class="inline-flex items-center gap-1 px-2.5 py-1 bg-[#e6fbf2] text-primary font-bold text-label-sm rounded-full">
+                      <span class="material-symbols-outlined text-[14px]">auto_awesome</span> OCR Procesado con éxito
+                    </div>
+                    <p class="text-body-md leading-relaxed text-[#0b1c30]">
+                      He analizado el documento del proveedor <strong class="text-primary font-bold">Distribuciones Colanta S.A.S. (NIT 890.900.123-1)</strong>:
+                    </p>
+                    <div class="bg-[#eff4ff] p-space-sm rounded-xl text-body-sm space-y-1.5 border border-outline-variant/20">
+                      <div class="flex justify-between font-semibold text-on-surface">
+                        <span>Ítems detectados:</span>
+                        <span>3 líneas de producto</span>
+                      </div>
+                      <div class="flex justify-between text-on-surface-variant">
+                        <span>Total compra con IVA:</span>
+                        <span class="font-bold text-primary">$1.485.000 COP</span>
+                      </div>
+                      <div class="flex justify-between text-on-surface-variant">
+                        <span>Actualización de stock:</span>
+                        <span class="text-primary font-bold">+120 unidades ingresadas</span>
+                      </div>
+                    </div>
+                    @if (!ocrConfirmed()) {
+                      <button
+                        (click)="confirmOcr()"
+                        class="w-full py-2 px-space-sm bg-primary text-on-primary text-label-md font-bold rounded-xl hover:bg-primary/90 transition-all flex items-center justify-center gap-1.5 shadow-sm">
+                        <span class="material-symbols-outlined text-[18px]">check_circle</span>
+                        Confirmar registro y cargar a cuentas por pagar
+                      </button>
+                    } @else {
+                      <div class="p-2.5 bg-emerald-100 text-emerald-900 font-bold rounded-xl flex items-center gap-2 text-body-sm border border-emerald-300">
+                        <span class="material-symbols-outlined text-emerald-700 text-[20px]">task_alt</span>
+                        ¡Factura registrada exitosamente! 120 unidades añadidas al inventario central.
                       </div>
                     }
-
-                    @if (msg.actionText) {
-                      @if (!msg.completed) {
-                        <button
-                          (click)="executeVexiAction()"
-                          class="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-1.5 shadow-sm">
-                          <app-icon name="send" [size]="14"></app-icon>
-                          {{ msg.actionText }}
-                        </button>
-                      } @else {
-                        <div class="p-2 bg-emerald-900/40 border border-emerald-700/50 rounded-lg text-emerald-300 text-xs flex items-center gap-1.5">
-                          <app-icon name="check" [size]="14"></app-icon>
-                          <span>Acción ejecutada con éxito</span>
-                        </div>
-                      }
+                  </div>
+                </div>
+              </div>
+            } @else if (activeVexiTab() === 4) {
+              <!-- Chat 4: Alerta de stock -->
+              <div class="space-y-space-md">
+                <div class="flex justify-end">
+                  <div class="bg-[#c4e8d8] text-[#00422b] px-space-md py-space-xs rounded-2xl rounded-tr-sm max-w-[85%] font-medium shadow-sm text-body-md">
+                    Vexi, avísame si el stock baja de 10 unidades
+                  </div>
+                </div>
+                <div class="flex items-start gap-space-xs">
+                  <div class="w-8 h-8 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0 mt-0.5 shadow-sm font-bold">
+                    <span class="material-symbols-outlined text-[18px]">smart_toy</span>
+                  </div>
+                  <div class="bg-surface-container-lowest text-on-surface p-space-md rounded-2xl rounded-tl-sm max-w-[92%] shadow-sm border border-outline-variant/30 space-y-space-sm">
+                    <p class="font-bold text-primary flex items-center gap-1.5">
+                      <span class="material-symbols-outlined text-[18px]">notifications_active</span> Regla de alerta activada
+                    </p>
+                    <p class="text-body-md leading-relaxed text-[#0b1c30]">
+                      Te notificaré de inmediato a tu WhatsApp personal cada vez que el stock de cualquier referencia baje de 10 unidades. Actualmente tienes <strong class="text-error font-bold">2 productos</strong> en estado crítico:
+                    </p>
+                    <div class="p-space-xs bg-[#fef2f2] border border-[#fecaca] rounded-xl text-error text-body-sm font-medium flex items-center gap-2">
+                      <span class="material-symbols-outlined text-[18px]">warning</span> 'Café Especial Huila 500g' (3 unids restantes)
+                    </div>
+                    @if (!stockAlertSent()) {
+                      <button
+                        (click)="sendStockAlert()"
+                        class="w-full py-2 px-space-sm bg-primary text-on-primary text-label-md font-bold rounded-xl hover:bg-primary/90 transition-all flex items-center justify-center gap-1.5 shadow-sm">
+                        <span class="material-symbols-outlined text-[18px]">send</span> Enviar orden de reposición al proveedor por WhatsApp
+                      </button>
+                    } @else {
+                      <div class="p-2.5 bg-emerald-100 text-emerald-900 font-bold rounded-xl flex items-center gap-2 text-body-sm border border-emerald-300">
+                        <span class="material-symbols-outlined text-emerald-700 text-[20px]">check_circle</span>
+                        Orden de reposición transmitida al distribuidor por WhatsApp.
+                      </div>
                     }
                   </div>
                 </div>
-              }
+              </div>
             }
           </div>
 
-          <!-- Input Box -->
-          <div class="mt-2 bg-slate-800/80 border border-emerald-900/80 p-2 rounded-xl flex items-center gap-2">
-            <input
-              [value]="vexiQuery()"
-              (input)="vexiQuery.set($any($event.target).value)"
-              (keyup.enter)="sendVexiCustomQuery()"
-              class="bg-transparent text-xs sm:text-sm text-white placeholder:text-slate-400 w-full px-2 outline-none"
-              placeholder="Pregunta a Vexi sobre ventas, stock o DIAN..."
-              type="text"
-            />
+          <!-- Chat Input Footer -->
+          <div class="p-space-sm sm:p-space-md bg-surface-container-lowest border-t border-outline-variant/30 flex items-center gap-space-xs">
             <button
-              (click)="sendVexiCustomQuery()"
-              class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shrink-0 transition-colors flex items-center gap-1">
-              <span>Enviar</span>
-              <app-icon name="corner-down-left" [size]="14"></app-icon>
+              (click)="setVexiTab(3)"
+              class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center shrink-0 transition-colors"
+              title="Adjuntar archivo o factura">
+              <span class="material-symbols-outlined text-[22px]">attach_file</span>
             </button>
+            <div class="relative flex-1">
+              <input
+                [value]="vexiQuery()"
+                (input)="vexiQuery.set($any($event.target).value)"
+                (keyup.enter)="sendVexiCustomQuery()"
+                class="w-full bg-[#f4f7fb] text-body-md text-[#0b1c30] placeholder:text-outline px-space-md py-2.5 rounded-full outline-none border border-[#10b981]/50 focus:border-primary transition-all pr-10"
+                placeholder="Pregúntale a Vexi..."
+                type="text"
+              />
+              <button
+                (click)="sendVexiCustomQuery()"
+                class="absolute right-1 top-1 w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center hover:bg-primary/90 transition-colors shadow-sm">
+                <span class="material-symbols-outlined text-[18px]">arrow_upward</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -678,16 +1095,27 @@
             Comienza gratis por 14 días. Sin tarjeta de crédito requerida. Cancela cuando quieras.
           </p>
 
-          <!-- Dynamic Billing Cycle Selector -->
-          <div class="mt-6 inline-flex flex-wrap items-center justify-center gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+          <!-- Segmented Billing Switch (Monthly / Quarterly / Annual) -->
+          <div class="mt-6 inline-flex flex-wrap items-center justify-center gap-2 bg-slate-100 p-1.5 rounded-full border border-slate-200">
             @for (cycle of availableCycles(); track cycle) {
               <button
                 (click)="setBillingCycle(cycle)"
                 [class.bg-white]="selectedCycle() === cycle"
                 [class.text-emerald-800]="selectedCycle() === cycle"
                 [class.shadow-sm]="selectedCycle() === cycle"
-                class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-600 hover:text-slate-900">
-                {{ getCycleDisplayLabel(cycle) }}
+                [class.text-slate-600]="selectedCycle() !== cycle"
+                class="px-4 py-2 rounded-full text-xs sm:text-sm font-bold transition-all hover:text-slate-900 flex items-center gap-1.5">
+                <span>{{ getCycleDisplayLabel(cycle) }}</span>
+                @if (getCycleDiscountBadge(cycle); as badge) {
+                  <span
+                    [class.bg-amber-100]="cycle === 'annual' || cycle === 'yearly'"
+                    [class.text-amber-800]="cycle === 'annual' || cycle === 'yearly'"
+                    [class.bg-emerald-100]="cycle === 'quarterly' || cycle === 'semiannual'"
+                    [class.text-emerald-800]="cycle === 'quarterly' || cycle === 'semiannual'"
+                    class="px-1.5 py-0.5 text-[10px] font-black rounded-full">
+                    {{ badge }}
+                  </span>
+                }
               </button>
             }
           </div>
@@ -757,6 +1185,9 @@
                   <span class="text-xs" [class.text-emerald-100/60]="plan.is_popular" [class.text-slate-400]="!plan.is_popular">
                     {{ getCyclePeriodSuffix(selectedCycle()) }}
                   </span>
+                  <p class="text-[11px] font-medium mt-1" [class.text-emerald-200]="plan.is_popular" [class.text-emerald-700]="!plan.is_popular">
+                    {{ getCycleSubtext(plan) }}
+                  </p>
                 </div>
 
                 <!-- Feature List -->
