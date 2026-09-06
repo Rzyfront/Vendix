@@ -955,6 +955,17 @@ export const ErrorCodes = {
     devMessage: 'Quotation must have a customer before conversion',
   },
 
+  // A.2 (ADR-02, ERR-03): el flujo de contratos (cotizacion con destino
+  // `contract`, ficha de contrato, factura AIU) es regimen especial de
+  // obra. Un store sin la industria `construction` recibe 403 aunque
+  // manipule la UI: la visibilidad del menu es solo UX, este codigo es
+  // la frontera real de autorizacion.
+  CONTRACT_INDUSTRY_001: {
+    code: 'CONTRACT_INDUSTRY_001',
+    httpStatus: 403,
+    devMessage: 'Store industry does not support contracts (construction required)',
+  },
+
   // Orders
   ORD_FIND_001: {
     code: 'ORD_FIND_001',

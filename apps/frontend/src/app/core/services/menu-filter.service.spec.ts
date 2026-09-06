@@ -10,6 +10,7 @@ import {
   resolveStoreModule,
 } from '../../shared/constants/store-module-catalog.constant';
 import { APP_MODULES } from '../../shared/constants/app-modules.constant';
+import { getModulesHiddenByIndustries } from '../../shared/constants/industry-modules.constant';
 
 /**
  * Collects every key in the STORE_ADMIN tree, parents and children alike.
@@ -202,5 +203,35 @@ describe('MenuFilterService.diagnose', () => {
     const result = service.diagnoseModule('inventory_pop');
     expect(result.visible).toBe(false);
     expect(result.blockedBy).toBe('user_panel_ui');
+  });
+});
+
+describe('gating de contratos por industria (A.2, ADR-02)', () => {
+  it('toda industria sin construction oculta orders_contracts', () => {
+    for (const industries of [
+      ['retail'],
+      ['restaurant'],
+      ['manufacturing'],
+      ['service'],
+      ['gym'],
+    ]) {
+      expect(getModulesHiddenByIndustries(industries))
+        .withContext(`industrias [${industries.join(',')}]`)
+        .toContain('orders_contracts');
+    }
+  });
+
+  it('construction (sola o multi-industria) conserva orders_contracts', () => {
+    expect(getModulesHiddenByIndustries(['construction'])).not.toContain(
+      'orders_contracts',
+    );
+    expect(
+      getModulesHiddenByIndustries(['retail', 'construction']),
+    ).not.toContain('orders_contracts');
+  });
+
+  it('sin industrias no oculta nada (fallback defensivo existente)', () => {
+    expect(getModulesHiddenByIndustries([])).toEqual([]);
+    expect(getModulesHiddenByIndustries(null)).toEqual([]);
   });
 });

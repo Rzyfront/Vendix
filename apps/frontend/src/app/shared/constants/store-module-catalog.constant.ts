@@ -56,6 +56,10 @@ export const MODULE_ROUTES: Record<string, string> = {
   orders_sales: '/admin/orders/sales',
   orders_purchase_orders: '/admin/orders/purchase-orders',
   orders_quotations: '/admin/orders/quotations',
+  // Contratos de obra (A.2, ADR-02). La pagina llega con C.2; la ruta
+  // canonica se reserva desde ahora para que `resolveKeysForRoute` y
+  // `panelUiGuard` cubran la URL en cuanto exista.
+  orders_contracts: '/admin/orders/contracts',
   orders_layaway: '/admin/orders/layaway',
   orders_reservations: '/admin/reservations',
 

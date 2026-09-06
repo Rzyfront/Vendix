@@ -109,12 +109,29 @@ export const INDUSTRY_OPTIONS: ReadonlyArray<IndustryMeta> =
  * the store's industries (a `['service','retail']` store still sees it because
  * the `service` half of the intersection does not hide it). This mirrors the
  * inverse gating of `restaurant_ops` for the restaurant suite.
+ *
+ * Contracts Suite (A.2, ADR-02): the `orders_contracts` module (contratos de
+ * obra + factura AIU) is visible ⟺ the store's industry includes
+ * `construction`. Every other industry (retail / restaurant / manufacturing /
+ * service / gym) lists it as hidden, so the OR-semantics intersection keeps
+ * it visible only when `construction` is one of the store's industries (a
+ * `['construction','retail']` store still sees it because the `construction`
+ * half of the intersection does not hide it). Backend enforcement is
+ * `ConstructionIndustryGuard` (403 CONTRACT_INDUSTRY_001) — this map is UX
+ * only. The sidebar entry and page land with C.2; the key is registered here
+ * first so the rule exists before the first contracts endpoint does.
  */
 export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
-  retail: ['restaurant_ops', 'memberships', 'orders_reservations'],
+  retail: [
+    'restaurant_ops',
+    'memberships',
+    'orders_reservations',
+    'orders_contracts',
+  ],
   restaurant: [
     'memberships',
     'orders_reservations',
+    'orders_contracts',
     'dispatch',
     'orders_dispatch_notes',
     'orders_dispatch_routes',
@@ -125,6 +142,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'restaurant_ops',
     'memberships',
     'orders_reservations',
+    'orders_contracts',
     'dispatch',
     'orders_dispatch_notes',
     'orders_dispatch_routes',
@@ -134,6 +152,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   service: [
     'restaurant_ops',
     'memberships',
+    'orders_contracts',
     'dispatch',
     'orders_dispatch_notes',
     'orders_dispatch_routes',
@@ -143,6 +162,7 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   gym: [
     'restaurant_ops',
     'orders_reservations',
+    'orders_contracts',
     'dispatch',
     'orders_dispatch_notes',
     'orders_dispatch_routes',
@@ -160,6 +180,10 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
   // secciones que no le sirven y que enseñan a ignorar el menú. Si una
   // constructora pide despacho de materiales a obra, se quita 'dispatch' de acá.
   construction: [
+    // `orders_contracts` is INTENTIONALLY absent here: the contracts suite
+    // (A.2, ADR-02) is visible ⟺ the store includes `construction`. Every
+    // other industry lists it above, so the OR-semantics intersection keeps
+    // it visible exactly for construction (solo o multi-industria).
     'restaurant_ops',
     'memberships',
     'orders_reservations',

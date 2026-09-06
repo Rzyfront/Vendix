@@ -186,6 +186,15 @@ export const APP_MODULES: {
           label: 'Cotizaciones',
           description: 'Cotizaciones y presupuestos para clientes',
         },
+        // Contratos de obra (A.2, ADR-02, FB-02). La pagina y la entrada del
+        // sidebar llegan con C.2; la key se registra desde ahora para que el
+        // gating por industria (`INDUSTRY_HIDDEN_MODULES`), el fallback de
+        // panel_ui y el catalogo existan antes que el primer endpoint.
+        {
+          key: 'orders_contracts',
+          label: 'Contratos',
+          description: 'Contratos de obra y facturación AIU',
+        },
         {
           key: 'orders_layaway',
           label: 'Plan Separe',
