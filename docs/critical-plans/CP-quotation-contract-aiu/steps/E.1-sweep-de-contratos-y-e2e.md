@@ -27,5 +27,5 @@ skills: [vendix-frontend, vendix-backend-api, pr-code-review]
   - [ ] Todas las filas de registries en `[x]` con evidencia
   - [ ] E2E perfil-contrato-AIU en verde sobre servidor vivo
   - [ ] Revision de codigo >= 80% y lint en 0
-  - [ ] F-001 — convertToOrder sin rechazo explicito en destino contract (major)
+  - [x] F-001 — convertToOrder sin rechazo explicito en destino contract (major) → evidence/F-001-gate-evidence.md
 - **Status:** pending

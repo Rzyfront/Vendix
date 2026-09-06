@@ -27,5 +27,5 @@ skills: [vendix-backend-domain, vendix-prisma-migrations, vendix-prisma-scopes]
   - [x] Aceptada-contrato crea ficha con items, totales y snapshot AIU
   - [x] Reintento no duplica (unique `contracts.quotation_id` + triple capa 409; choque real contra DB viva queda para E.1)
   - [x] Venta sigue usando `converted` sin cambios (`convertToOrder` intacto, build + specs vecinos verdes)
-  - [ ] F-002 — VALID_TRANSITIONS sin contracted ni contracted_at (minor)
+  - [x] F-002 — VALID_TRANSITIONS sin contracted ni contracted_at (minor) → evidence/F-001-gate-evidence.md
 - **Status:** done · workflow-C.1 · 2026-09-06 · evidence/C.1-contracts-evidence.md

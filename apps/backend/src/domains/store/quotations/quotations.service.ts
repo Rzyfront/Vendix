@@ -66,10 +66,13 @@ export class QuotationsService {
   private readonly VALID_TRANSITIONS: Record<string, string[]> = {
     draft: ['sent', 'cancelled'],
     sent: ['accepted', 'rejected', 'expired', 'cancelled'],
-    accepted: ['converted', 'cancelled'],
+    // F-002 (ADR-04): `accepted->contracted` marca contrato creado sin
+    // contaminar `converted`, que sigue significando solo venta.
+    accepted: ['converted', 'contracted', 'cancelled'],
     rejected: [],
     expired: [],
     converted: [],
+    contracted: [],
     cancelled: [],
   };
 
@@ -467,6 +470,21 @@ export class QuotationsService {
         {
           current_status: quotation.status,
           required_status: quotation_status_enum.accepted,
+        },
+      );
+    }
+
+    // F-001 (ADR-01, ERR-01): lado venta del bloqueo mutuo. Solo destino
+    // `sale` crea orden; `contract`/`other` se rechazan con el mismo codigo
+    // que el lado contrato, para que ninguna via produzca doble ingreso.
+    if ((quotation as any).destination !== 'sale') {
+      throw new VendixHttpException(
+        ErrorCodes.QUOTE_DESTINATION_001,
+        'Solo las cotizaciones con destino venta crean orden.',
+        {
+          quotation_id: quotation.id,
+          destination: (quotation as any).destination,
+          required_destination: 'sale',
         },
       );
     }
