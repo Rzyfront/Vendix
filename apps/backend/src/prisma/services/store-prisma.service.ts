@@ -45,6 +45,12 @@ export class StorePrismaService extends BasePrismaService {
     'coupons',
     'marketing_ad_creatives',
     'quotations',
+    // B.1 — perfiles de cotización. `store_id` propio y NO nullable: el
+    // invariante «un solo predeterminado por store» se apoya en el índice
+    // único PARCIAL `quotation_profiles_store_default_uq`. Su tabla de
+    // versiones NO va acá —no tiene `store_id`—: se scopea relacionalmente
+    // a través del perfil, más abajo (igual que `invoice_profile_versions`).
+    'quotation_profiles',
     'cash_registers',
     'cash_register_sessions',
     'cash_register_movements',
@@ -309,6 +315,11 @@ export class StorePrismaService extends BasePrismaService {
       'marketing_ad_creative_products', // Relational
       'marketing_ad_creative_images', // Relational
       'quotation_items', // Relational
+      // B.1 — versiones de perfil de cotización. Scoped RELACIONALMENTE a
+      // través del perfil: la tabla no tiene `store_id` a propósito, porque
+      // duplicarlo permitiría que una versión declarara una tienda distinta
+      // de la de su perfil. El perfil es el ancla de tenant.
+      'quotation_profile_versions', // Relational
       'chart_of_accounts', // Org scoped
       'fiscal_periods', // Org scoped
       'accounting_entries', // Org scoped
@@ -527,6 +538,9 @@ export class StorePrismaService extends BasePrismaService {
         creative: { store_id: context.store_id },
       },
       quotation_items: { quotation: { store_id: context.store_id } },
+      quotation_profile_versions: {
+        profile: { store_id: context.store_id },
+      },
       layaway_items: { layaway_plan: { store_id: context.store_id } },
       layaway_installments: { layaway_plan: { store_id: context.store_id } },
       layaway_payments: { layaway_plan: { store_id: context.store_id } },
@@ -1338,6 +1352,18 @@ export class StorePrismaService extends BasePrismaService {
   // Quotations models
   get quotations() {
     return this.scoped_client.quotations;
+  }
+
+  // B.1 — perfiles de cotización (scope directo por `store_id` propio).
+  get quotation_profiles() {
+    return this.scoped_client.quotation_profiles;
+  }
+
+  // B.1 — versiones de perfil (`scoped_client`, no `baseClient`: el `config`
+  // de una versión es con qué números se cotizó; leer el de otro tenant
+  // calcularía con las cifras de otra empresa).
+  get quotation_profile_versions() {
+    return this.scoped_client.quotation_profile_versions;
   }
 
   // Coupons models

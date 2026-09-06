@@ -133,6 +133,8 @@ model users {
   invoices_created           invoices[]           @relation("invoices_created_by")
   invoice_profiles_created         invoice_profiles[]         @relation("invoice_profiles_created_by")
   invoice_profile_versions_created invoice_profile_versions[] @relation("invoice_profile_versions_created_by")
+  quotation_profiles_created         quotation_profiles[]         @relation("quotation_profiles_created_by")
+  quotation_profile_versions_created quotation_profile_versions[] @relation("quotation_profile_versions_created_by")
   invoices_as_customer       invoices[]           @relation("invoices_customer")
   fiscal_periods_closed      fiscal_periods[]     @relation("fiscal_periods_closed_by")
   accounting_entries_created accounting_entries[] @relation("accounting_entries_created_by")
@@ -578,6 +580,7 @@ model organizations {
   invoices                      invoices[]
   invoice_resolutions           invoice_resolutions[]
   invoice_profiles              invoice_profiles[]
+  quotation_profiles            quotation_profiles[]
   chart_of_accounts             chart_of_accounts[]
   fiscal_periods                fiscal_periods[]
   accounting_entries            accounting_entries[]
@@ -861,6 +864,7 @@ model stores {
   fiscal_operation_events     fiscal_operation_events[]
   accounting_account_mappings accounting_account_mappings[]
   quotations                  quotations[]
+  quotation_profiles          quotation_profiles[]
   promotions                  promotions[]
   coupons                     coupons[]
   marketing_ad_creatives      marketing_ad_creatives[]
@@ -7230,10 +7234,16 @@ model quotations {
   converted_at         DateTime?             @db.Timestamp(6)
   converted_order_id   Int?
   created_by_user_id   Int?
+  /// B.1 — perfil de cotizacion opcional con el que se cito (DB-02). Nullable:
+  /// quien no usa perfiles cotiza desde cero y la venta actual queda intacta.
+  /// C.1 congela la version vigente en el contrato (ADR-03); esta columna es
+  /// solo el puntero vivo al perfil, nunca el snapshot.
+  profile_id           Int?
   created_at           DateTime?             @default(now()) @db.Timestamp(6)
   updated_at           DateTime?             @default(now()) @db.Timestamp(6)
 
   quotation_items quotation_items[]
+  profile         quotation_profiles? @relation(fields: [profile_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   store           stores            @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   customer        users?            @relation("quotations_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   converted_order orders?           @relation(fields: [converted_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -7278,6 +7288,92 @@ model quotation_items {
 
   @@index([quotation_id])
   @@index([product_id, quotation_id])
+}
+
+/// B.1 (DB-02, ADR-03) — Perfil de cotizacion opcional por store, espejo del
+/// patron de `invoice_profiles` sin el rail de organizacion ni tipos DIAN.
+///
+/// La configuracion NO vive aca: vive en `quotation_profile_versions`,
+/// inmutable. Esta fila guarda solo lo que puede cambiar sin alterar lo ya
+/// cotizado — el nombre, el estado, cual es el predeterminado.
+model quotation_profiles {
+  id              Int @id @default(autoincrement())
+  organization_id Int
+  /// Siempre de tienda (NOT NULL): no hay rail de plataforma. El invariante
+  /// "un solo predeterminado por store" lo sostiene la base con el indice
+  /// unico parcial `quotation_profiles_store_default_uq`
+  /// ON (store_id) WHERE is_default (ver migracion 20260906020000).
+  /// `store_id` propio y no nullable tambien permite scoping directo en
+  /// `StorePrismaService`, igual que `invoice_profiles`.
+  store_id        Int
+
+  /// Unico por store (case-insensitive) via
+  /// `quotation_profiles_unique_name_per_store` ON (store_id, lower(name)).
+  name String @db.VarChar(150)
+  /// `active` | `inactive`. VarChar y no enum/boolean, igual que
+  /// `invoice_profiles.state`: la validacion vive en el DTO.
+  state String @db.VarChar(20) @default("active")
+
+  /// Predeterminado de la tienda. Lo sostiene el parcial
+  /// `quotation_profiles_store_default_uq`; el servicio desmarca el anterior
+  /// dentro de la misma transaccion.
+  is_default Boolean @default(false)
+
+  /// Numero de la ultima version COMPROMETIDA. Arranca en 0, no en 1: la fila
+  /// del perfil y su version 1 se escriben en la misma transaccion, y el 0
+  /// significa "sin version comprometida" (detectable, no una version fanta).
+  current_version Int @default(0)
+
+  /// Clonar produce un perfil INDEPENDIENTE (igual que invoice): procedencia
+  /// para el historial, no dependencia viva (`onDelete: SetNull`).
+  cloned_from_profile_id Int?
+  cloned_from_version    Int?
+
+  created_by Int?
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  /// `Restrict` en toda la cadena: borrar una tienda/org no puede arrastrar
+  /// perfiles con historial que las cotizaciones referencian.
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  store        stores       @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  creator      users?       @relation("quotation_profiles_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  cloned_from  quotation_profiles?  @relation("quotation_profile_clones", fields: [cloned_from_profile_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  clones       quotation_profiles[] @relation("quotation_profile_clones")
+  versions     quotation_profile_versions[]
+  quotations   quotations[]
+
+  @@index([store_id, state])
+  @@index([organization_id])
+  @@index([cloned_from_profile_id])
+}
+
+/// B.1 (DB-03, ADR-03) — Version INMUTABLE de la configuracion de un perfil
+/// de cotizacion. Solo INSERT: editar un perfil inserta una version nueva y
+/// mueve `quotation_profiles.current_version`. Es lo que C.1 congela en el
+/// contrato y D.1 en la factura AIU.
+model quotation_profile_versions {
+  id         Int @id @default(autoincrement())
+  profile_id Int
+  /// Contiguo desde 1. Invariante: `count(*) = max(version)` por perfil.
+  version    Int
+
+  /// Snapshot completo de la configuracion (contrato
+  /// `QuotationProfileConfig`: porcentajes AIU, vigencia, terminos).
+  config Json
+
+  created_by Int?
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+
+  /// `Restrict` y no `Cascade`: borrar un perfil NO puede llevarse el
+  /// historial que las cotizaciones/contratos referencian. El borrado de un
+  /// perfil con cotizaciones que lo usan ya esta prohibido en el servicio
+  /// (`QPROFILE_DELETE_001`); esta FK es la red a nivel de base.
+  profile quotation_profiles @relation(fields: [profile_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  creator users?             @relation("quotation_profile_versions_created_by", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([profile_id, version])
+  @@index([profile_id, created_at])
 }
 
 // ===== COUPONS SYSTEM =====

@@ -955,6 +955,46 @@ export const ErrorCodes = {
     devMessage: 'Quotation must have a customer before conversion',
   },
 
+  // B.1 (ADR-03, DB-02, DB-03, ERR-04): perfiles de cotizacion opcionales
+  // por store, versionados. El `config` congelado en
+  // `quotation_profile_versions` es lo que C.1 copia al contrato y D.1 a
+  // la factura AIU (snapshot, nunca referencia viva).
+  QPROFILE_NOT_FOUND_001: {
+    code: 'QPROFILE_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'Quotation profile not found',
+  },
+  QPROFILE_STORE_001: {
+    code: 'QPROFILE_STORE_001',
+    httpStatus: 400,
+    devMessage: 'Quotation profile does not belong to this store',
+  },
+  QPROFILE_NAME_001: {
+    code: 'QPROFILE_NAME_001',
+    httpStatus: 409,
+    devMessage: 'Quotation profile name already taken in this store',
+  },
+  QPROFILE_DEFAULT_001: {
+    code: 'QPROFILE_DEFAULT_001',
+    httpStatus: 409,
+    devMessage: 'Quotation profile cannot be made default in its current state',
+  },
+  QPROFILE_DELETE_001: {
+    code: 'QPROFILE_DELETE_001',
+    httpStatus: 409,
+    devMessage: 'Quotation profile is referenced and cannot be deleted',
+  },
+  QPROFILE_VERSION_001: {
+    code: 'QPROFILE_VERSION_001',
+    httpStatus: 404,
+    devMessage: 'Requested version of a quotation profile does not exist',
+  },
+  QPROFILE_CONFIG_001: {
+    code: 'QPROFILE_CONFIG_001',
+    httpStatus: 422,
+    devMessage: 'Quotation profile configuration is invalid',
+  },
+
   // A.2 (ADR-02, ERR-03): el flujo de contratos (cotizacion con destino
   // `contract`, ficha de contrato, factura AIU) es regimen especial de
   // obra. Un store sin la industria `construction` recibe 403 aunque
