@@ -16,6 +16,7 @@ export { GatewayComponent } from './pages/gateway/gateway.component';
 
 // Components
 export { AiFeatureMatrixComponent } from './components/ai-feature-matrix.component';
+export { PlanIncludesEditorComponent } from './components/plan-includes-editor.component';
 export { PricingCycleEditorComponent } from './components/pricing-cycle-editor.component';
 export { GraceThresholdEditorComponent } from './components/grace-threshold-editor.component';
 export { MarginCapInputComponent } from './components/margin-cap-input.component';

@@ -30,7 +30,13 @@ import {
   defaultAIFeatureFlags,
   normalizeAIFeatureFlags,
 } from '../../utils/ai-feature-flags.util';
+import {
+  PlanIncludedItem,
+  isLegacyFeatureMatrix,
+  normalizeIncludedItems,
+} from '../../../../../../shared/utils/plan-features.util';
 import { AiFeatureMatrixComponent } from '../../components/ai-feature-matrix.component';
+import { PlanIncludesEditorComponent } from '../../components/plan-includes-editor.component';
 import { PricingCycleEditorComponent } from '../../components/pricing-cycle-editor.component';
 import { GraceThresholdEditorComponent } from '../../components/grace-threshold-editor.component';
 import { MarkdownEditorComponent } from '../../../../../../shared/components/markdown-editor/markdown-editor.component';
@@ -77,6 +83,7 @@ interface PlanFormControls {
     SelectorComponent,
     StickyHeaderComponent,
     AiFeatureMatrixComponent,
+    PlanIncludesEditorComponent,
     PricingCycleEditorComponent,
     GraceThresholdEditorComponent,
     MarkdownEditorComponent,
@@ -261,6 +268,16 @@ interface PlanFormControls {
           </div>
         }
 
+        @if (activeTab() === 'incluye') {
+          <div class="bg-surface rounded-card border border-border p-4 md:p-6">
+            <app-plan-includes-editor
+              [initialValue]="includedItems()"
+              [legacy]="legacyMatrix()"
+              (valueChange)="onIncludedItemsChange($event)"
+            ></app-plan-includes-editor>
+          </div>
+        }
+
         @if (activeTab() === 'ai-matrix') {
           <div class="bg-surface rounded-card border border-border p-4 md:p-6">
             <app-ai-feature-matrix
@@ -396,6 +413,10 @@ export class PlanFormComponent {
   readonly aiFeatures = signal<AIFeatureFlags | undefined>(this.defaultAiFeatures());
   readonly pricing = signal<PlanPricing[] | undefined>(undefined);
   readonly detailsMd = signal<string>('');
+  /** Lista de «ítems que incluye» del plan; se envía siempre, aunque esté vacía. */
+  readonly includedItems = signal<PlanIncludedItem[]>([]);
+  /** true si el plan llegó con el `feature_matrix` legado en forma de objeto. */
+  readonly legacyMatrix = signal(false);
   readonly graceDays = signal<number | undefined>(undefined);
   readonly systemAiModels = signal<string[]>([]);
   private readonly paidPricingBeforeFree = signal<PlanPricing[] | undefined>(undefined);
@@ -403,6 +424,7 @@ export class PlanFormComponent {
 
   readonly tabs: StickyHeaderTab[] = [
     { id: 'overview', label: 'Resumen', icon: 'file-text' },
+    { id: 'incluye', label: 'Incluye', icon: 'list-checks' },
     { id: 'ai-matrix', label: 'Matriz IA', icon: 'bot' },
     { id: 'pricing', label: 'Precios', icon: 'credit-card' },
     { id: 'grace', label: 'Gracia y cobranza', icon: 'clock' },
@@ -644,6 +666,10 @@ export class PlanFormComponent {
             : rehydratedPricing,
         );
         this.detailsMd.set(plan.details_md ?? '');
+        // `feature_matrix` canónico es un arreglo; la forma de objeto legada se
+        // normaliza al cargar y el aviso avisa que al guardar se convierte.
+        this.legacyMatrix.set(isLegacyFeatureMatrix(plan.feature_matrix));
+        this.includedItems.set(normalizeIncludedItems(plan.feature_matrix));
         this.graceDays.set(plan.grace_period_soft_days ?? plan.grace_threshold_days ?? 0);
       },
     });
@@ -659,6 +685,10 @@ export class PlanFormComponent {
 
   onDetailsMdChange(value: string): void {
     this.detailsMd.set(value ?? '');
+  }
+
+  onIncludedItemsChange(items: PlanIncludedItem[]): void {
+    this.includedItems.set(items ?? []);
   }
 
   onGraceChange(days: number): void {
@@ -715,6 +745,12 @@ export class PlanFormComponent {
 
     const detailsMd = this.detailsMd().trim();
 
+    // Los ítems «incluye» viajan SIEMPRE como arreglo (aunque vaya vacío): el
+    // backend reemplaza el JSON completo, así que omitirlo dejaría el valor
+    // anterior. Las filas sin etiqueta se descartan aquí porque el DTO las
+    // rechaza con 400 y el usuario perdería el resto del formulario.
+    const includedItems = this.includedItems().filter((item) => item.label.trim().length > 0);
+
     const payload: Record<string, any> = {
       ...raw,
       // Campos canónicos derivados del ciclo default (back-compat)
@@ -728,6 +764,7 @@ export class PlanFormComponent {
       is_free: isFree,
       redemption_code: raw.redemption_code.trim() || null,
       ai_feature_flags: this.aiFeatures(),
+      feature_matrix: includedItems,
     };
 
     // En modo edit no reenviamos code (es inmutable e identificador del recurso)

@@ -1,3 +1,5 @@
+import type { PlanIncludedItem } from '../../../../../shared/utils/plan-features.util';
+
 export type PlanType = 'base' | 'partner_custom' | 'promotional';
 export type PlanState = 'draft' | 'active' | 'archived';
 export type PlanBillingCycle =
@@ -88,7 +90,8 @@ export interface SubscriptionPlan {
   cancellation_day: number;
 
   // Feature matrices
-  feature_matrix: Record<string, unknown>;
+  // Lectura: forma canonica de arreglo + forma de objeto legada (compat).
+  feature_matrix: PlanIncludedItem[] | Record<string, unknown>;
   ai_feature_flags: AIFeatureFlags;
 
   // Partner
@@ -270,7 +273,8 @@ export interface PlanFormData {
   is_default: boolean;
   // Feature matrices
   ai_feature_flags: AIFeatureFlags;
-  feature_matrix?: Record<string, unknown>;
+  // Escritura: siempre arreglo (el backend rechaza el objeto con 400).
+  feature_matrix?: PlanIncludedItem[];
   // Pricing array (derived from base_price + billing_cycle + currency, kept for child cmp)
   pricing: PlanPricing[];
 }
@@ -307,7 +311,8 @@ export interface CreatePlanDto {
   is_default?: boolean;
   // Feature matrices
   ai_feature_flags?: AIFeatureFlags;
-  feature_matrix?: Record<string, unknown>;
+  // Escritura: siempre arreglo (el backend rechaza el objeto con 400).
+  feature_matrix?: PlanIncludedItem[];
 }
 
 export interface UpdatePlanDto extends Partial<CreatePlanDto> {}

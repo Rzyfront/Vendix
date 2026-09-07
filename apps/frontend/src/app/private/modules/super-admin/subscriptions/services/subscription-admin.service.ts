@@ -111,7 +111,7 @@ export class SubscriptionAdminService {
 
     // Feature matrices
     if (d.ai_feature_flags !== undefined) payload['ai_feature_flags'] = d.ai_feature_flags;
-    if (d.feature_matrix !== undefined) payload['feature_matrix'] = d.feature_matrix ?? {};
+    if (d.feature_matrix !== undefined) payload['feature_matrix'] = d.feature_matrix ?? [];
 
     // ---- Backwards-compat shim (legacy callers using slug / is_active / is_public / grace_threshold_days / pricing[]) ----
     if (payload['code'] === undefined && d.slug !== undefined) payload['code'] = d.slug;
@@ -205,7 +205,7 @@ export class SubscriptionAdminService {
       suspension_day: Number(raw.suspension_day ?? 0),
       cancellation_day: Number(raw.cancellation_day ?? 0),
 
-      feature_matrix: raw.feature_matrix ?? {},
+      feature_matrix: raw.feature_matrix ?? [],
       ai_feature_flags: raw.ai_feature_flags ?? ({} as any),
 
       resellable: Boolean(raw.resellable),

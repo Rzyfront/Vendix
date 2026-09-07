@@ -9,6 +9,11 @@ export interface PricingCardFeature {
   enabled: boolean;
   limit?: number | null;
   unit?: string | null;
+  /** Texto corto que el super-admin escribe junto al ítem («Ilimitados»,
+   *  «1 usuario»). Cuando existe, sustituye al badge derivado de `limit`. */
+  value?: string | null;
+  /** Estado intermedio: incluido pero con tope. Distinto del check y de la X. */
+  is_limited?: boolean;
 }
 
 export interface PricingCardPlan {
@@ -138,7 +143,7 @@ export interface PricingCardSelectEvent {
           @for (f of plan().features; track f.key) {
             <li class="flex items-start gap-1.5 md:gap-2 text-xs md:text-sm min-w-0">
               <app-icon
-                [name]="f.enabled ? 'check' : 'minus'"
+                [name]="!f.enabled ? 'minus' : f.is_limited ? 'minus-circle' : 'check'"
                 [size]="14"
                 [class.text-primary-600]="f.enabled && !isPopular()"
                 [class.text-white]="f.enabled && isPopular()"
@@ -154,7 +159,17 @@ export interface PricingCardSelectEvent {
               >
                 {{ f.label }}
               </span>
-              @if (f.limit !== null && f.limit !== undefined) {
+              @if (f.value) {
+                <span
+                  class="text-[10px] md:text-[11px] px-1.5 md:px-2 py-0.5 rounded-md font-medium shrink-0"
+                  [class.bg-gray-100]="!isPopular()"
+                  [class.text-gray-700]="!isPopular()"
+                  [class.bg-white\\/20]="isPopular()"
+                  [class.text-white]="isPopular()"
+                >
+                  {{ f.value }}
+                </span>
+              } @else if (f.limit !== null && f.limit !== undefined) {
                 <span
                   class="text-[10px] md:text-[11px] px-1.5 md:px-2 py-0.5 rounded-md font-medium shrink-0"
                   [class.bg-gray-100]="!isPopular()"
