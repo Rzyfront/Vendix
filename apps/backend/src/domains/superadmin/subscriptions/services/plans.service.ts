@@ -92,6 +92,7 @@ export class PlansService {
       promo_rules: (dto.promo_rules as any) || null,
       promo_priority: dto.promo_priority ?? 0,
       is_popular: dto.is_popular ?? false,
+      is_ai_plan: dto.is_ai_plan ?? false,
       sort_order: dto.sort_order ?? 0,
       parent_plan_id: dto.parent_plan_id || null,
       details_md: dto.details_md ?? null,
@@ -505,6 +506,7 @@ export class PlansService {
         promo_priority: dto.promo_priority,
       }),
       ...(dto.is_popular !== undefined && { is_popular: dto.is_popular }),
+      ...(dto.is_ai_plan !== undefined && { is_ai_plan: dto.is_ai_plan }),
       ...(dto.sort_order !== undefined && { sort_order: dto.sort_order }),
       ...(dto.parent_plan_id !== undefined && {
         parent_plan_id: dto.parent_plan_id,
@@ -611,6 +613,7 @@ export class PlansService {
                   promo_rules: (dto.promo_rules ?? existing.promo_rules) as any,
                   promo_priority: dto.promo_priority ?? existing.promo_priority,
                   is_popular: dto.is_popular ?? existing.is_popular,
+                  is_ai_plan: dto.is_ai_plan ?? existing.is_ai_plan,
                   sort_order: dto.sort_order ?? existing.sort_order,
                   parent_plan_id: dto.parent_plan_id ?? existing.parent_plan_id,
                   details_md:

@@ -28,6 +28,7 @@ describe('PublicPlansService', () => {
       base_price: 99000,
       currency: 'COP',
       is_popular: false,
+      is_ai_plan: false,
       is_promotional: false,
       sort_order: 0,
       ai_feature_flags: {},
@@ -70,6 +71,18 @@ describe('PublicPlansService', () => {
 
       expect(plan.details_md).toBe('## Incluye\n- POS');
       expect(plan.plan_group_code).toBe('pro-group');
+    });
+
+    it('asks Postgres for is_ai_plan and exposes it as a boolean', async () => {
+      prisma.subscription_plans.findMany.mockResolvedValue([
+        planRow({ is_ai_plan: true }),
+      ]);
+
+      const [plan] = await service.findAll();
+
+      const args = prisma.subscription_plans.findMany.mock.calls[0][0];
+      expect(args.select.is_ai_plan).toBe(true);
+      expect(plan.is_ai_plan).toBe(true);
     });
 
     it('keeps only the public AI feature keys', async () => {

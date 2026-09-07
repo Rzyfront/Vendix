@@ -10018,6 +10018,7 @@ model subscription_plans {
   promo_priority          Int                             @default(0)
   redemption_code         String?                         @unique @db.VarChar(64)
   is_popular              Boolean                         @default(false)
+  is_ai_plan              Boolean                         @default(false)
   sort_order              Int                             @default(0)
   is_default              Boolean                         @default(false)
   plan_group_code         String?                         @db.VarChar(64)

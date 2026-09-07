@@ -53,6 +53,7 @@ export interface PublicPlanDto {
   base_price: number;
   currency: string;
   is_popular: boolean;
+  is_ai_plan: boolean;
   is_promotional: boolean;
   sort_order: number;
   features: PublicPlanFeatureDto[];
@@ -181,6 +182,7 @@ export class PublicPlansService {
         base_price: true,
         currency: true,
         is_popular: true,
+        is_ai_plan: true,
         is_promotional: true,
         sort_order: true,
         ai_feature_flags: true,
@@ -201,6 +203,7 @@ export class PublicPlansService {
       base_price: Number(plan.base_price),
       currency: plan.currency,
       is_popular: plan.is_popular,
+      is_ai_plan: plan.is_ai_plan,
       is_promotional: plan.is_promotional,
       sort_order: plan.sort_order,
       features: parseFeatureMatrix(plan.feature_matrix),

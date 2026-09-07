@@ -504,6 +504,38 @@ describe('PlansService', () => {
         service.update(999, { name: 'x' } as any),
       ).rejects.toBeInstanceOf(VendixHttpException);
     });
+
+    it('propagates is_ai_plan to the whole group via updateMany', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
+
+      await service.update(1, { is_ai_plan: true } as any);
+
+      expect(tx.subscription_plans.updateMany).toHaveBeenCalledTimes(1);
+      const args = tx.subscription_plans.updateMany.mock.calls[0][0];
+      expect(args.where.plan_group_code).toBe('pro');
+      expect(args.data.is_ai_plan).toBe(true);
+    });
+
+    it('inherits is_ai_plan on a newly created cycle row', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(
+        planFixture({ is_ai_plan: true }),
+      );
+      tx.subscription_plans.findMany.mockResolvedValue([
+        planFixture({ id: 1, code: 'pro', billing_cycle: 'monthly' }),
+      ]);
+      tx.subscription_plans.findUnique.mockResolvedValue(null);
+
+      await service.update(1, {
+        pricings: [
+          { billing_cycle: 'monthly', price: 99000, is_default: true },
+          { billing_cycle: 'annual', price: 990000, is_default: false },
+        ],
+      } as any);
+
+      const createArgs = tx.subscription_plans.create.mock.calls[0][0];
+      expect(createArgs.data.billing_cycle).toBe('annual');
+      expect(createArgs.data.is_ai_plan).toBe(true);
+    });
   });
 
   describe('archive', () => {

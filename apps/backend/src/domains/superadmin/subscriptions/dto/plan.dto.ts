@@ -145,6 +145,10 @@ export class CreatePlanDto {
 
   @IsOptional()
   @IsBoolean()
+  is_ai_plan?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   is_default?: boolean;
 
   @IsOptional()

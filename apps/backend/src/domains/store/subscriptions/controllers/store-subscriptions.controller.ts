@@ -157,6 +157,7 @@ export class StoreSubscriptionsController {
           features,
           sort_order: p.sort_order,
           is_popular: p.is_popular,
+          is_ai_plan: p.is_ai_plan,
           is_current: isCurrent,
         };
       }
@@ -177,6 +178,7 @@ export class StoreSubscriptionsController {
         features,
         sort_order: p.sort_order,
         is_popular: p.is_popular,
+        is_ai_plan: p.is_ai_plan,
         is_current: isCurrent,
       };
     });
