@@ -106,6 +106,7 @@ export interface SubscriptionPlan {
 
   // Display
   is_popular: boolean;
+  is_ai_plan: boolean;
   sort_order: number;
   is_default: boolean;
 
@@ -269,6 +270,7 @@ export interface PlanFormData {
   promo_priority: number;
   // Display
   is_popular: boolean;
+  is_ai_plan: boolean;
   sort_order: number;
   is_default: boolean;
   // Feature matrices
@@ -307,6 +309,7 @@ export interface CreatePlanDto {
   promo_priority?: number;
   // Display
   is_popular?: boolean;
+  is_ai_plan?: boolean;
   sort_order?: number;
   is_default?: boolean;
   // Feature matrices

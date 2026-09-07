@@ -817,6 +817,7 @@ export class VendixLandingComponent implements OnInit {
       name: string;
       description: string;
       popular?: boolean;
+      ai?: boolean;
       prices: Record<'monthly' | 'quarterly' | 'annual', number>;
     }> = [
       {
@@ -846,6 +847,7 @@ export class VendixLandingComponent implements OnInit {
         name: 'IA Business',
         description:
           'Escala tu operación con IA: límites ampliados, IA Tools e IA Agents en todos los procesos.',
+        ai: true,
         prices: { monthly: 179_900, quarterly: 512_900, annual: 1_942_900 },
       },
     ];
@@ -862,6 +864,7 @@ export class VendixLandingComponent implements OnInit {
         plan_type: 'base',
         is_promotional: false,
         is_popular: !!plan.popular,
+        is_ai_plan: !!plan.ai,
         sort_order: i * 10 + j,
         features: [],
       })),

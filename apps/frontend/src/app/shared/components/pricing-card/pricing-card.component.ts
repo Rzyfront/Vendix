@@ -27,6 +27,7 @@ export interface PricingCardPlan {
   features: PricingCardFeature[];
   is_current?: boolean;
   is_popular?: boolean;
+  is_ai_plan?: boolean;
 }
 
 /** Emitted on CTA click. `retry=true` indicates the user clicked the
@@ -58,6 +59,7 @@ export interface PricingCardSelectEvent {
       [class.ring-primary-600]="isCurrent() && !isPopular()"
       [class.ring-offset-2]="isPopular()"
       [class.lg:scale-105]="isPopular()"
+      [class.ai-plan-card]="isAiPlan()"
       [class.hover:-translate-y-1]="!loading()"
       [class.hover:shadow-lg]="!isPopular() && !loading()"
       [class.hover:shadow-2xl]="isPopular() && !loading()"
@@ -87,11 +89,15 @@ export interface PricingCardSelectEvent {
 
         <!-- Header -->
         <div class="p-4 md:p-6 pb-3 md:pb-4 pt-8 md:pt-10 space-y-1.5 md:space-y-2">
+          @if (isAiPlan()) {
+            <span class="ai-plan-card__badge">✦ Plan IA</span>
+          }
           <div class="flex items-center gap-1.5 md:gap-2 flex-wrap min-w-0">
             <h3
               class="text-base md:text-xl font-extrabold truncate min-w-0"
               [class.text-text-primary]="!isPopular()"
               [class.text-white]="isPopular()"
+              [class.ai-plan-card__name]="isAiPlan()"
             >
               {{ plan().name }}
             </h3>
@@ -218,6 +224,7 @@ export class PricingCardComponent {
     'linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 60%, #1f4f37 100%)';
 
   readonly isPopular = computed(() => this.plan().is_popular === true);
+  readonly isAiPlan = computed(() => this.plan().is_ai_plan === true);
   readonly isCurrent = computed(() => this.plan().is_current === true);
 
   /**

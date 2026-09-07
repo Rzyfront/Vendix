@@ -969,8 +969,9 @@
               [class.bg-white]="!plan.is_popular"
               [class.text-slate-900]="!plan.is_popular"
               [class.border]="!plan.is_popular"
-              [class.border-slate-200]="!plan.is_popular"
+              [class.border-slate-200]="!plan.is_popular && !plan.is_ai_plan"
               [class.shadow-sm]="!plan.is_popular"
+              [class.ai-plan-card]="plan.is_ai_plan"
               class="p-6 sm:p-8 rounded-2xl flex flex-col justify-between relative transition-all duration-200">
 
               @if (plan.is_popular) {
@@ -981,9 +982,13 @@
 
               <div>
                 <!-- El badge superior «Recomendado para crecer» ya marca el plan popular;
-                     un segundo chip junto al título se partía en dos líneas y pisaba el nombre. -->
+                     un segundo chip junto al título se partía en dos líneas y pisaba el nombre:
+                     el chip «Plan IA» va en su propia línea encima del h3. -->
+                @if (plan.is_ai_plan) {
+                  <span class="ai-plan-card__badge mb-2">✦ Plan IA</span>
+                }
                 <div class="flex justify-between items-center mb-2" [class.mt-2]="plan.is_popular">
-                  <h3 class="text-xl font-extrabold" [class.text-white]="plan.is_popular" [class.text-slate-900]="!plan.is_popular">
+                  <h3 class="text-xl font-extrabold" [class.text-white]="plan.is_popular" [class.text-slate-900]="!plan.is_popular" [class.ai-plan-card__name]="plan.is_ai_plan">
                     {{ plan.name }}
                   </h3>
                 </div>

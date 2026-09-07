@@ -106,6 +106,7 @@ export class SubscriptionAdminService {
 
     // Display
     if (d.is_popular !== undefined) payload['is_popular'] = Boolean(d.is_popular);
+    if (d.is_ai_plan !== undefined) payload['is_ai_plan'] = Boolean(d.is_ai_plan);
     if (d.sort_order !== undefined) payload['sort_order'] = Number(d.sort_order);
     if (d.is_default !== undefined) payload['is_default'] = Boolean(d.is_default);
 
@@ -217,6 +218,7 @@ export class SubscriptionAdminService {
       promo_priority: Number(raw.promo_priority ?? 0),
 
       is_popular: Boolean(raw.is_popular),
+      is_ai_plan: Boolean(raw.is_ai_plan),
       sort_order: Number(raw.sort_order ?? 0),
       is_default: Boolean(raw.is_default),
 

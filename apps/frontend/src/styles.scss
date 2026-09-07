@@ -915,6 +915,151 @@ footer {
     0 0 20px rgba(126, 215, 165, 0.1);
 }
 
+/* ============================================
+ * AI PLAN CARD - Marca «plan IA» con brillo IA
+ * Solo tokens IA: primario (RGB var) + cielo + brillo blanco.
+ * No fija background: funciona sobre superficie clara y oscura.
+ * ============================================ */
+.ai-plan-card {
+  position: relative;
+  isolation: isolate;
+  border: 1px solid transparent;
+  border-color: transparent;
+  box-shadow:
+    0 18px 45px rgba(var(--color-primary-rgb), 0.18),
+    0 0 0 1px rgba(56, 189, 248, 0.25);
+}
+
+/* Anillo de 2px con gradiente animado. Solo el marco es visible (máscara
+ * que excluye el centro): no cubre el fondo de la card en ninguna
+ * superficie (clara u oscura) y sobrevive a `overflow-hidden`. Los hijos
+ * con z-index negativo pintan SOBRE el fondo del padre, por eso el anillo
+ * nunca puede ser una capa de fondo completa. */
+.ai-plan-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-primary-rgb), 0.9),
+    rgba(56, 189, 248, 0.9),
+    rgba(var(--color-primary-rgb), 0.9)
+  );
+  background-size: 300% 300%;
+  animation: ai-plan-border-flow 4s linear infinite;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Barrido blanco decorativo sobre la card */
+.ai-plan-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+  background: linear-gradient(
+    115deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.5) 50%,
+    transparent 65%
+  );
+  background-size: 250% 100%;
+  animation: ai-plan-sheen 3.6s ease-in-out infinite;
+}
+
+/* Chip «plan IA»: gradiente primario -> cielo, texto blanco */
+.ai-plan-card__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 1);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--color-primary-rgb), 1),
+    rgba(56, 189, 248, 1)
+  );
+  box-shadow: 0 0 14px rgba(var(--color-primary-rgb), 0.45);
+}
+
+/* Nombre del plan en texto con gradiente animado */
+.ai-plan-card__name {
+  font-weight: 700;
+  background: linear-gradient(
+    90deg,
+    rgba(var(--color-primary-rgb), 1),
+    rgba(56, 189, 248, 1),
+    rgba(var(--color-primary-rgb), 1)
+  );
+  background-size: 200% 100%;
+  animation: ai-plan-shimmer 2.4s ease-in-out infinite;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+@keyframes ai-plan-border-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes ai-plan-sheen {
+  0% {
+    background-position: 120% 0;
+  }
+
+  50% {
+    background-position: -20% 0;
+  }
+
+  100% {
+    background-position: 120% 0;
+  }
+}
+
+@keyframes ai-plan-shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-plan-card::before,
+  .ai-plan-card::after,
+  .ai-plan-card__name {
+    animation: none;
+  }
+}
+
 /* Smooth transitions for modal interactions */
 .modal-smooth-transition {
   transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);

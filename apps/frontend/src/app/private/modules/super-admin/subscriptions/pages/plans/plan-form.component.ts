@@ -68,6 +68,7 @@ interface PlanFormControls {
   promo_priority: FormControl<number>;
   // Display
   is_popular: FormControl<boolean>;
+  is_ai_plan: FormControl<boolean>;
   sort_order: FormControl<number>;
   is_default: FormControl<boolean>;
 }
@@ -246,10 +247,18 @@ interface PlanFormControls {
               Visualización
             </h2>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
               <div class="flex items-center gap-2">
                 <app-toggle formControlName="is_popular"></app-toggle>
                 <span class="text-sm text-text-primary">Marcar como popular</span>
+              </div>
+
+              <div
+                class="flex items-center gap-2"
+                title="Resalta la card con el brillo IA en el landing"
+              >
+                <app-toggle formControlName="is_ai_plan"></app-toggle>
+                <span class="text-sm text-text-primary">Plan IA</span>
               </div>
 
               <div class="flex items-center gap-2">
@@ -485,6 +494,7 @@ export class PlanFormComponent {
     promo_priority: this.fb.nonNullable.control(0, [Validators.min(0)]),
     // Display
     is_popular: this.fb.nonNullable.control(false),
+    is_ai_plan: this.fb.nonNullable.control(false),
     sort_order: this.fb.nonNullable.control(0, [Validators.min(0)]),
     is_default: this.fb.nonNullable.control(false),
   });
@@ -644,6 +654,7 @@ export class PlanFormComponent {
             redemption_code: plan.redemption_code ?? '',
             promo_priority: plan.promo_priority ?? 0,
             is_popular: plan.is_popular,
+            is_ai_plan: plan.is_ai_plan ?? false,
             sort_order: plan.sort_order ?? 0,
             is_default: plan.is_default,
           },
