@@ -22,6 +22,15 @@ export interface PublicPlan extends PricingCardPlan {
    * rag_embeddings, async_queue). Values describe enable + caps.
    */
   ai_features?: Record<string, AIFeatureValue | undefined>;
+  /**
+   * Markdown largo que el super-admin escribe para el plan. Se renderiza en el
+   * modal «Ver todo lo que incluye» con `markdownToHtml` como string plano a
+   * `[innerHTML]` — nunca con `bypassSecurityTrustHtml`.
+   */
+  details_md?: string | null;
+  /** Código del grupo de planes: los ciclos (mensual/anual…) del mismo plan
+   *  comparten grupo y, por tanto, la misma lista de ítems incluidos. */
+  plan_group_code?: string | null;
 }
 
 export interface AIFeatureValue {

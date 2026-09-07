@@ -311,6 +311,20 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'contracts',
+            loadComponent: () =>
+              import('../../private/modules/store/contracts/contracts.component').then(
+                (c) => c.ContractsComponent,
+              ),
+          },
+          {
+            path: 'contracts/:id',
+            loadComponent: () =>
+              import('../../private/modules/store/contracts/pages/contract-detail/contract-detail.component').then(
+                (c) => c.ContractDetailComponent,
+              ),
+          },
+          {
             path: 'layaway',
             loadComponent: () =>
               import('../../private/modules/store/layaway/layaway.component').then(

@@ -5,7 +5,13 @@ import { HttpClient } from '@angular/common/http';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, of, catchError, map } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../../environments/environment';
-import { Quotation, CreateQuotationDto } from '../../interfaces/quotation.interface';
+import {
+  Quotation,
+  CreateQuotationDto,
+  QuotationDestination,
+  QuotationProfileCatalogEntry,
+} from '../../interfaces/quotation.interface';
+import { QuotationsService } from '../../services/quotations.service';
 import { PosProductService, Product } from '../../../pos/services/pos-product.service';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import {
@@ -47,6 +53,63 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
     >
       <div class="p-4">
         <form [formGroup]="form" class="space-y-4">
+
+          <!-- B.2: Destino fijo al crear; bloqueado al editar (ADR-01) -->
+          <div class="space-y-1">
+            <label class="text-sm font-medium text-text-primary" for="quotation-destination">
+              Destino
+              @if (isEditMode()) {
+                <span class="text-xs" style="color: var(--color-text-secondary);">(fijo, no editable)</span>
+              }
+            </label>
+            <select
+              id="quotation-destination"
+              formControlName="destination"
+              class="w-full rounded-md border px-3 py-2 text-sm"
+              style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 16px;"
+            >
+              @for (opt of destinationOptions; track opt.value) {
+                <option [value]="opt.value">{{ opt.label }}</option>
+              }
+            </select>
+          </div>
+
+          <!-- B.2 (FB-03/FB-05): Selector de perfil opcional; vacio = desde cero -->
+          <div class="space-y-1">
+            <label class="text-sm font-medium text-text-primary" for="quotation-profile">
+              Perfil de cotización (opcional)
+              @if (isEditMode()) {
+                <span class="text-xs" style="color: var(--color-text-secondary);">(fijo, no editable)</span>
+              }
+            </label>
+            @if (profilesLoading()) {
+              <p class="text-xs" style="color: var(--color-text-secondary);">Cargando perfiles…</p>
+            } @else if (profilesError()) {
+              <p class="text-xs" style="color: var(--color-text-secondary);">
+                Catálogo de perfiles no disponible — cotizando desde cero.
+              </p>
+            } @else {
+              <select
+                id="quotation-profile"
+                formControlName="profile_id"
+                class="w-full rounded-md border px-3 py-2 text-sm"
+                style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 16px;"
+                (change)="onProfileSelect($event)"
+              >
+                <option value="">Sin perfil — cotizar desde cero</option>
+                @for (profile of quotationProfiles(); track profile.id) {
+                  <option [value]="profile.id">
+                    {{ profile.name }}{{ profile.is_default ? ' (predeterminado)' : '' }}
+                  </option>
+                }
+              </select>
+              @if (selectedProfile()) {
+                <p class="text-xs" style="color: var(--color-text-secondary);">
+                  Con este perfil la cotización nace precargada (objeto y condiciones del perfil).
+                </p>
+              }
+            }
+          </div>
 
           <!-- Customer Search -->
           <div class="space-y-1">
@@ -155,6 +218,14 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                 </div>
               }
             </div>
+            <button
+              type="button"
+              class="mt-2 w-full cursor-pointer rounded-md border border-dashed px-3 py-2 text-sm transition-colors hover:opacity-80"
+              style="border-color: var(--color-border); color: var(--color-text-secondary);"
+              (click)="addCustomLine()"
+            >
+              + Línea personalizada (sin producto)
+            </button>
           </div>
 
           <!-- Variant Selection -->
@@ -211,9 +282,19 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                     style="border-color: var(--color-border);"
                   >
                     <div class="flex min-w-0 flex-1 flex-col gap-1">
-                      <span class="truncate text-sm font-medium" style="color: var(--color-text-primary);">
-                        {{ itemGroup.get('product_name')?.value }}
-                      </span>
+                      @if (isCustomLine(itemGroup)) {
+                        <input
+                          type="text"
+                          formControlName="product_name"
+                          placeholder="Concepto de la línea..."
+                          class="w-full rounded border px-2 py-1 text-sm"
+                          style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 16px;"
+                        />
+                      } @else {
+                        <span class="truncate text-sm font-medium" style="color: var(--color-text-primary);">
+                          {{ itemGroup.get('product_name')?.value }}
+                        </span>
+                      }
                       @if (itemGroup.get('variant_sku')?.value) {
                         <span class="text-xs" style="color: var(--color-text-secondary);">
                           {{ itemGroup.get('variant_sku')?.value }}
@@ -252,9 +333,31 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                         (change)="recalculateItem(i)"
                       />
 
-                      <span class="whitespace-nowrap text-xs" style="color: var(--color-text-secondary);">
-                        {{ itemGroup.get('unit_price')?.value | currency }}
-                      </span>
+                      @if (isCustomLine(itemGroup)) {
+                        <input
+                          type="number"
+                          formControlName="unit_price"
+                          min="0"
+                          class="w-[100px] rounded border px-2 py-1 text-sm"
+                          style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 16px;"
+                          (change)="recalculateItem(i)"
+                        />
+                        <span class="flex items-center gap-1 whitespace-nowrap text-xs" style="color: var(--color-text-secondary);">
+                          <input
+                            type="number"
+                            [value]="customTaxPercent(itemGroup)"
+                            min="0"
+                            max="100"
+                            class="w-[56px] rounded border px-1 py-1 text-center text-xs"
+                            style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 16px;"
+                            (change)="onCustomTaxChange(i, $event)"
+                          />% IVA
+                        </span>
+                      } @else {
+                        <span class="whitespace-nowrap text-xs" style="color: var(--color-text-secondary);">
+                          {{ itemGroup.get('unit_price')?.value | currency }}
+                        </span>
+                      }
 
                       <span class="whitespace-nowrap font-mono text-sm font-semibold" style="color: var(--color-text-primary);">
                         {{ itemGroup.get('total_price')?.value | currency }}
@@ -363,6 +466,7 @@ export class QuotationFormModalComponent {
   private readonly priceTierCache = inject(PriceTierCacheService);
   private readonly priceResolver = inject(PriceResolverService);
   private readonly authFacade = inject(AuthFacade);
+  private readonly quotationsService = inject(QuotationsService);
   private readonly apiUrl = environment.apiUrl;
 
   /** Active tiers loaded once when the modal opens (if user has permission). */
@@ -380,12 +484,38 @@ export class QuotationFormModalComponent {
 
   /** Reactive form */
   readonly form: FormGroup = this.fb.group({
+    // B.2: destino fijo al crear (default `sale`); bloqueado en edicion (ADR-01).
+    destination: ['sale' as QuotationDestination],
+    // B.2: perfil opcional; '' = sin perfil (cotizar desde cero). String en el
+    // <select> nativo, convertido a number|undefined al guardar (FB-05).
+    profile_id: [''],
     valid_until: [''],
     notes: [''],
     internal_notes: [''],
     terms_and_conditions: [''],
     items: this.fb.array([]),
   });
+
+  /**
+   * B.2 (FB-03): catalogo de perfiles activos para el selector.
+   * Vacio + `profilesError` cuando el endpoint no existe (B.1 en curso) o falla:
+   * el formulario sigue operando sin perfil — degradacion, no bloqueo.
+   */
+  readonly quotationProfiles = signal<QuotationProfileCatalogEntry[]>([]);
+  readonly profilesLoading = signal(false);
+  readonly profilesError = signal(false);
+  /** Perfil elegido (para aviso de precarga); null = cotizar desde cero. */
+  readonly selectedProfile = signal<QuotationProfileCatalogEntry | null>(null);
+
+  /** Opciones de destino (valor fijo al crear, bloqueado al editar). */
+  readonly destinationOptions: { value: QuotationDestination; label: string }[] = [
+    { value: 'sale', label: 'Venta' },
+    { value: 'contract', label: 'Contrato' },
+    { value: 'other', label: 'Otro' },
+  ];
+
+  /** true en edicion: destino y perfil se muestran bloqueados (ADR-01). */
+  readonly isEditMode = computed(() => this.quotation() !== null);
 
   /** Signals for search state */
   readonly customerSearchTerm = signal('');
@@ -470,16 +600,45 @@ export class QuotationFormModalComponent {
         this.productResults.set(products);
       });
 
+    // B.2 (FB-03): catalogo de perfiles activos. Un 404/500 (B.1 en curso) no
+    // bloquea: el formulario cotiza desde cero igual que hoy.
+    this.profilesLoading.set(true);
+    this.quotationsService
+      .getQuotationProfileCatalog()
+      .pipe(takeUntilDestroyed())
+      .subscribe({
+        next: (profiles) => {
+          const list = Array.isArray(profiles) ? profiles : [];
+          // Defensa: si el backend trajera inactivos, solo activos al selector.
+          const actives = list.filter((p) => !p.state || p.state === 'active');
+          // El predeterminado primero para que precargue el caso comun.
+          actives.sort((a, b) => Number(b.is_default ?? false) - Number(a.is_default ?? false));
+          this.quotationProfiles.set(actives);
+          this.profilesError.set(false);
+          this.profilesLoading.set(false);
+        },
+        error: () => {
+          this.quotationProfiles.set([]);
+          this.profilesError.set(true);
+          this.profilesLoading.set(false);
+        },
+      });
+
     // Populate form when editing an existing quotation
     const q = this.quotation();
     if (q) {
       this.selectedCustomer.set(q.customer || null);
       this.form.patchValue({
+        destination: (q.destination as QuotationDestination | undefined) || 'sale',
+        profile_id: q.profile_id != null ? String(q.profile_id) : '',
         valid_until: q.valid_until ? q.valid_until.split('T')[0] : '',
         notes: q.notes || '',
         internal_notes: q.internal_notes || '',
         terms_and_conditions: q.terms_and_conditions || '',
       });
+      // B.2 (ADR-01): destino y perfil fijos al crear — bloqueados al editar.
+      this.form.get('destination')?.disable();
+      this.form.get('profile_id')?.disable();
 
       q.quotation_items.forEach((item) => {
         const anyItem = item as any;
@@ -534,6 +693,43 @@ export class QuotationFormModalComponent {
 
   removeCustomer(): void {
     this.selectedCustomer.set(null);
+  }
+
+  /**
+   * B.2/F-003 (FB-05): al elegir perfil, precarga condiciones y notas desde
+   * el detalle con la version congelada — solo los vacios, para no pisar lo
+   * ya digitado. El catalogo liviano no trae los textos, asi que se piden
+   * aqui; si falla, el formulario sigue desde cero. El backend repite la
+   * precarga al crear (fuente final), por eso `profile_id` viaja en el DTO.
+   */
+  onProfileSelect(event: Event): void {
+    const raw = (event.target as HTMLSelectElement).value;
+    if (!raw) {
+      this.selectedProfile.set(null);
+      return;
+    }
+    const profile = this.quotationProfiles().find((p) => String(p.id) === raw) || null;
+    this.selectedProfile.set(profile);
+    if (!profile || profile.id == null) return;
+    this.quotationsService
+      .getQuotationProfileDetail(Number(profile.id))
+      .pipe(takeUntilDestroyed())
+      .subscribe({
+        next: (detail) => {
+          const config = (detail as any)?.current_config ?? {};
+          const patch: Record<string, string> = {};
+          if (config.notes && !this.form.get('notes')?.value) {
+            patch['notes'] = config.notes;
+          }
+          if (config.payment_terms && !this.form.get('terms_and_conditions')?.value) {
+            patch['terms_and_conditions'] = config.payment_terms;
+          }
+          if (Object.keys(patch).length > 0) {
+            this.form.patchValue(patch);
+          }
+        },
+        error: () => {},
+      });
   }
 
   // ── Product Search ──
@@ -600,6 +796,46 @@ export class QuotationFormModalComponent {
     const product = this.pendingVariantProduct();
     if (!product) return;
     this.addProductWithVariant(product, variant);
+  }
+
+  /**
+   * B.3 — linea personalizada sin producto (como POS/factura). Nombre,
+   * precio e impuesto los digita el usuario en la fila; `recalculateItem`
+   * es matematica pura y no exige producto. El DTO ya omite `product_id`
+   * ausente y el backend lo acepta (columna nullable).
+   */
+  addCustomLine(): void {
+    this.itemsArray.push(this.createItemGroup({
+      product_name: '',
+      quantity: 1,
+      unit_price: 0,
+      tax_rate: 0,
+      tax_amount_item: 0,
+      total_price: 0,
+      price_unit_quantity: 1,
+    }));
+    this.recalculateItem(this.itemsArray.length - 1);
+    this.productSearchTerm.set('');
+    this.productResults.set([]);
+  }
+
+  /** La fila es personalizada cuando no trae producto del catalogo. */
+  isCustomLine(itemGroup: any): boolean {
+    const pid = itemGroup.get('product_id')?.value;
+    return pid === undefined || pid === null || pid === '';
+  }
+
+  /** IVA en % (0-100) para la fila personalizada; guarda fraccion 0-1. */
+  customTaxPercent(itemGroup: any): number {
+    return Number(itemGroup.get('tax_rate')?.value || 0) * 100;
+  }
+
+  onCustomTaxChange(index: number, event: Event): void {
+    const group = this.itemsArray.at(index) as FormGroup;
+    if (!group) return;
+    const pct = Number((event.target as HTMLInputElement).value || 0);
+    group.patchValue({ tax_rate: Math.min(Math.max(pct, 0), 100) / 100 });
+    this.recalculateItem(index);
   }
 
   cancelVariantSelection(): void {
@@ -694,8 +930,16 @@ export class QuotationFormModalComponent {
     this.isSaving.set(true);
 
     const formValue = this.form.value;
+    // B.2: el <select> nativo entrega string; '' = sin perfil (se omite, FB-05).
+    // getRawValue() porque en edicion los controles van deshabilitados (ADR-01).
+    const rawValue = this.form.getRawValue();
+    const profileId = rawValue.profile_id ? Number(rawValue.profile_id) : undefined;
     const dto: CreateQuotationDto = {
       customer_id: this.selectedCustomer()?.id,
+      // B.2: destino solo al crear; en edicion se omite (inmutable, ADR-01).
+      // Sin valor explicito el backend aplica `sale` (A.1).
+      ...(!this.quotation() && rawValue.destination ? { destination: rawValue.destination } : {}),
+      ...(profileId != null && Number.isFinite(profileId) ? { profile_id: profileId } : {}),
       valid_until: formValue.valid_until || undefined,
       notes: formValue.notes || undefined,
       internal_notes: formValue.internal_notes || undefined,

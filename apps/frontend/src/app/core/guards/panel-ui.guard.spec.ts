@@ -160,6 +160,24 @@ describe('panelUiGuard', () => {
     expect(result).toBeTrue();
     expect(toast.info).not.toHaveBeenCalled();
   });
+
+  it('bloquea por industria (A.2) con el mensaje ERR-03 y redirige', () => {
+    menuFilter.resolveKeysForRoute.and.returnValue(['orders_contracts']);
+    menuFilter.diagnoseModule.and.returnValue({
+      visible: false,
+      blockedBy: 'industry' as const,
+      detail: '',
+      fixPath: null,
+    });
+
+    const result = runGuard('/admin/orders/contracts');
+
+    expect(result).toBeFalse();
+    expect(toast.info).toHaveBeenCalledWith(
+      'No disponible en tu industria. Este módulo aplica solo a tiendas de construcción.',
+    );
+    expect(router.navigateByUrl).toHaveBeenCalledWith('/admin/dashboard');
+  });
 });
 
 describe('firstActiveModuleRedirectGuard (B.1)', () => {

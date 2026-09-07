@@ -13,6 +13,7 @@ import { quotation_status_enum, Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrdersService } from '../orders/orders.service';
+import { QuotationProfilesService } from '../backend-quotations-profiles/quotation-profiles.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { EmailService } from '../../../email/email.service';
 import { generateQuotationEmailHtml } from '../../../email/templates/quotation-email.template';
@@ -60,16 +61,20 @@ export class QuotationsService {
     private readonly ordersService: OrdersService,
     private readonly eventEmitter: EventEmitter2,
     private readonly emailService: EmailService,
+    private readonly profilesService: QuotationProfilesService,
   ) {}
 
   // VALID_TRANSITIONS state machine
   private readonly VALID_TRANSITIONS: Record<string, string[]> = {
     draft: ['sent', 'cancelled'],
     sent: ['accepted', 'rejected', 'expired', 'cancelled'],
-    accepted: ['converted', 'cancelled'],
+    // F-002 (ADR-04): `accepted->contracted` marca contrato creado sin
+    // contaminar `converted`, que sigue significando solo venta.
+    accepted: ['converted', 'contracted', 'cancelled'],
     rejected: [],
     expired: [],
     converted: [],
+    contracted: [],
     cancelled: [],
   };
 
@@ -152,23 +157,57 @@ export class QuotationsService {
     );
     const grand_total = subtotal - totalDiscount + totalTax;
 
+    // F-003 — precarga desde el perfil con la version congelada. Solo
+    // rellena vacios: lo digitado manda. `resolveForQuotation` valida el
+    // tenant (ERR-04 si es ajeno, 404 si no existe).
+    let profileConfig: {
+      payment_terms?: string;
+      notes?: string;
+      validity_days?: number;
+    } | null = null;
+    if (createQuotationDto.profile_id != null) {
+      const resolved = await this.profilesService.resolveForQuotation(
+        createQuotationDto.profile_id,
+      );
+      profileConfig = (resolved as any)?.current_config ?? null;
+    }
+    const pickText = (
+      own: string | undefined | null,
+      fromProfile?: string | null,
+    ) =>
+      own !== undefined && own !== null && own !== ''
+        ? own
+        : (fromProfile ?? own ?? null);
+    const validityDays = profileConfig?.validity_days;
+    const validUntil =
+      createQuotationDto.valid_until != null &&
+      createQuotationDto.valid_until !== ''
+        ? new Date(createQuotationDto.valid_until)
+        : validityDays != null && validityDays > 0
+          ? new Date(Date.now() + validityDays * 86400000)
+          : null;
+
     const quotation = await this.prisma.quotations.create({
       data: {
         store_id,
         customer_id: createQuotationDto.customer_id,
         quotation_number,
         status: quotation_status_enum.draft,
+        // A.1 (ADR-01): destino fijo al crear; sin valor nace `sale`.
+        destination: (createQuotationDto.destination as any) ?? 'sale',
+        profile_id: createQuotationDto.profile_id ?? null,
         channel: (createQuotationDto.channel as any) || 'pos',
         subtotal_amount: subtotal,
         discount_amount: totalDiscount,
         tax_amount: totalTax,
         grand_total,
-        valid_until: createQuotationDto.valid_until
-          ? new Date(createQuotationDto.valid_until)
-          : null,
-        notes: createQuotationDto.notes,
+        valid_until: validUntil,
+        notes: pickText(createQuotationDto.notes, profileConfig?.notes),
         internal_notes: createQuotationDto.internal_notes,
-        terms_and_conditions: createQuotationDto.terms_and_conditions,
+        terms_and_conditions: pickText(
+          createQuotationDto.terms_and_conditions,
+          profileConfig?.payment_terms,
+        ),
         created_by_user_id: context?.user_id,
         updated_at: new Date(),
         quotation_items: {
@@ -276,6 +315,19 @@ export class QuotationsService {
   }
 
   async update(id: number, updateQuotationDto: UpdateQuotationDto) {
+    // A.1 (ADR-01, ERR-01): el destino se fija al crear y jamas se edita.
+    // Cualquier presencia (incluso el mismo valor) se rechaza: corregir un
+    // destino mal marcado exige cancelar y recrear la cotizacion.
+    if ((updateQuotationDto as any).destination !== undefined) {
+      throw new VendixHttpException(
+        ErrorCodes.QUOTE_DESTINATION_001,
+        undefined,
+        {
+          quotation_id: id,
+          attempted_destination: (updateQuotationDto as any).destination,
+        },
+      );
+    }
     const quotation = await this.findOne(id);
     if (quotation.status !== quotation_status_enum.draft) {
       throw new BadRequestException(
@@ -370,7 +422,13 @@ export class QuotationsService {
     }
 
     // Update without items
-    const { items: _items, ...updateData } = updateQuotationDto as any;
+    // A.1: `destination` fuera del spread por defensa en profundidad (el
+    // guard de arriba ya lo rechaza; esto impide que llegue a Prisma).
+    const {
+      items: _items,
+      destination: _destination,
+      ...updateData
+    } = updateQuotationDto as any;
     return this.prisma.quotations.update({
       where: { id },
       data: {
@@ -450,6 +508,21 @@ export class QuotationsService {
       );
     }
 
+    // F-001 (ADR-01, ERR-01): lado venta del bloqueo mutuo. Solo destino
+    // `sale` crea orden; `contract`/`other` se rechazan con el mismo codigo
+    // que el lado contrato, para que ninguna via produzca doble ingreso.
+    if ((quotation as any).destination !== 'sale') {
+      throw new VendixHttpException(
+        ErrorCodes.QUOTE_DESTINATION_001,
+        'Solo las cotizaciones con destino venta crean orden.',
+        {
+          quotation_id: quotation.id,
+          destination: (quotation as any).destination,
+          required_destination: 'sale',
+        },
+      );
+    }
+
     if (!quotation.customer_id) {
       throw new VendixHttpException(
         ErrorCodes.QUOTE_CONVERT_CUSTOMER_001,
@@ -460,8 +533,10 @@ export class QuotationsService {
 
     const context = RequestContextService.getContext();
 
-    // Map quotation items to order items format
+    // Map quotation items to order items format. B.3: sin producto viaja
+    // como linea `custom` (el DTO de orden lo admite con product_id ausente).
     const orderItems = quotation.quotation_items.map((item: any) => ({
+      ...(item.product_id == null ? { item_type: 'custom' } : {}),
       product_id: item.product_id,
       product_variant_id: item.product_variant_id,
       product_name: item.product_name,
@@ -528,6 +603,8 @@ export class QuotationsService {
         customer_id: quotation.customer_id,
         quotation_number,
         status: quotation_status_enum.draft,
+        // A.1: el duplicado hereda el destino (fijado al crear, no editable).
+        destination: (quotation as any).destination ?? 'sale',
         channel: quotation.channel,
         subtotal_amount: quotation.subtotal_amount,
         discount_amount: quotation.discount_amount,

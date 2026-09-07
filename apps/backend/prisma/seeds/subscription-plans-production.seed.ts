@@ -49,6 +49,7 @@ type CanonicalPlan = {
   ai_feature_flags: Prisma.InputJsonValue;
   sort_order: number;
   is_popular: boolean;
+  is_ai_plan: boolean;
 };
 
 const CANONICAL_PLANS: CanonicalPlan[] = [
@@ -62,6 +63,7 @@ const CANONICAL_PLANS: CanonicalPlan[] = [
     max_partner_margin_pct: 20.0,
     sort_order: 10,
     is_popular: false,
+    is_ai_plan: false,
     feature_matrix: {
       pos: true,
       ecommerce: true,
@@ -119,6 +121,7 @@ const CANONICAL_PLANS: CanonicalPlan[] = [
     max_partner_margin_pct: 25.0,
     sort_order: 20,
     is_popular: true,
+    is_ai_plan: false,
     feature_matrix: {
       pos: true,
       ecommerce: true,
@@ -179,6 +182,7 @@ const CANONICAL_PLANS: CanonicalPlan[] = [
     max_partner_margin_pct: 30.0,
     sort_order: 30,
     is_popular: false,
+    is_ai_plan: false,
     feature_matrix: {
       pos: true,
       ecommerce: true,
@@ -267,6 +271,7 @@ export async function seedSubscriptionPlansProduction(
       is_promotional: false,
       promo_priority: 0,
       is_popular: plan.is_popular,
+      is_ai_plan: plan.is_ai_plan,
       sort_order: plan.sort_order,
       is_default: false,
       // Canonical base plans MUST never carry a redemption_code. The CHECK

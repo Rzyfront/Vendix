@@ -287,6 +287,22 @@ export const ERROR_MESSAGES: Record<string, string> = {
   QUOTE_CONVERT_CUSTOMER_001:
     'Asigna un cliente a esta cotización antes de convertirla en orden.',
 
+  // Contratos de obra (A.2, ADR-02, ERR-03): el backend responde 403 cuando
+  // la tienda no tiene la industria `construction`. Mensaje estructural, no
+  // accionable por el usuario (no es un permiso pedible al admin).
+  CONTRACT_INDUSTRY_001:
+    'No disponible en tu industria. Este módulo aplica solo a tiendas de construcción.',
+
+  // C.2 (ERR-06): el backend responde 422 ante una transicion invalida.
+  // Mensaje accionable: el operador ve que estados si admite el contrato.
+  CONTRACT_STATUS_001:
+    'Transición no permitida para el estado actual del contrato. Revisa las acciones disponibles.',
+
+  // D.2 (FB-08): el backend responde 409 cuando el contrato ya tiene factura
+  // AIU. Mensaje accionable: el operador ve el enlace en vez del boton.
+  CONTRACT_INVOICE_001:
+    'Este contrato ya tiene factura AIU generada. Ábrela desde el enlace en vez de crear otra.',
+
   // Inventory
   INV_FIND_001: 'Inventario no encontrado.',
   INV_CREATE_001: 'Error al crear el registro de inventario.',

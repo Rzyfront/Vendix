@@ -156,6 +156,19 @@ export class QueryInvoiceDto {
   @Type(() => Number)
   @IsNumber()
   supplier_id?: number;
+
+  /**
+   * D.2 (FB-09) — filtra el listado por contrato origen (`invoices.contract_id`,
+   * DB-05). Lo usa la ficha del contrato para navegar a su factura sin un
+   * endpoint dedicado. Opcional: ausente = sin filtro. `@Min(1)` y no solo
+   * `@IsNumber()` por el mismo motivo que `page`: un id `0` o negativo no es
+   * un filtro vacio, es una peticion mal formada (400, no 200 vacio).
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  contract_id?: number;
 }
 
 /**

@@ -92,6 +92,14 @@ import { InvoiceWithholdingInputDto } from './dto/invoice-withholding-input.dto'
 import { resolveAcquirerRail } from './validators/acquirer-rail.resolver';
 import type { StoredTechnicalKey } from '../../../common/services/technical-key-vault.service';
 import { CUSTOMER_FOR_INVOICE_SELECT } from './utils/customer-invoice-data.adapter';
+import {
+  buildContractAiuDraft,
+  ContractAiuSnapshot,
+} from './contract-invoice';
+import {
+  contractAlreadyInvoiced,
+  contractNotReadyForInvoice,
+} from './contract-invoice.errors';
 
 /**
  * Listing rows whose send/transmission state is an error or a pending send get
@@ -681,6 +689,7 @@ export class InvoicingService {
       customer_id,
       cuds,
       supplier_id,
+      contract_id,
     } = query;
 
     const skip = (page - 1) * limit;
@@ -708,6 +717,9 @@ export class InvoicingService {
       ...(invoice_type && { invoice_type: invoice_type as any }),
       ...(customer_id && { customer_id }),
       ...(supplier_id && { supplier_id }),
+      // D.2 (FB-09) — filtro por contrato origen. Paridad con `customer_id` /
+      // `supplier_id`: solo entra al `where` cuando el query lo trae.
+      ...(contract_id && { contract_id }),
       ...(trimmed_cuds && { cufe: trimmed_cuds }),
       ...(date_from && {
         issue_date: {
@@ -2308,6 +2320,369 @@ export class InvoicingService {
       `Invoice ${invoice.invoice_number} created from sales order #${sales_order_id}`,
     );
     return invoice;
+  }
+
+  /**
+   * D.1 (DB-05, FB-08, ERR-07; ADR-03) — borrador de factura AIU precargada
+   * desde un contrato VIGENTE (`active`), atomico con su paso a `invoiced`.
+   *
+   * Es la transicion `active->invoiced` de la ficha (C.2): solo un contrato
+   * `active` genera factura; cualquier otro estado responde 422
+   * `CONTRACT_STATUS_001` con el estado actual. La idempotencia es triple
+   * capa como en `ContractsService.createFromQuotation`: chequeo previo 409
+   * con la factura existente, re-chequeo dentro de la transaccion, y el
+   * UNIQUE parcial de `invoices.contract_id` como red (el choque `P2002` se
+   * traduce al mismo 409 con la factura ganadora).
+   *
+   * La precarga sale ENTERA del snapshot congelado (`contract-invoice.ts`):
+   * lineas A/I/U Modelo 2, objeto desde las notas, tarifa heredada de la
+   * cotizacion. El REGIMEN sale del ajuste de la tienda —igual que la
+   * captura manual sin perfil— y queda CONGELADO en las columnas `aiu_*` de
+   * la factura: la emision lee lo congelado, nunca lo vivo. Todo lo que
+   * puede fallar (snapshot sin A/I/U, sin tarifa, nota CAV03, piso 001,
+   * 004) falla ANTES de tomar el consecutivo.
+   *
+   * Decisiones de alcance: sin retencion propia del contrato (Non-Goals del
+   * plan: la que corresponda la resuelve `InvoiceFlowService` al aceptar);
+   * sin periodo fiscal (paridad con `createFromOrder`); el gating por
+   * industria `construction` (403 ERR-03) vive en el endpoint FB-08 (D.2),
+   * igual que el de contratos vive en su controller y no en su servicio.
+   */
+  async createInvoiceFromContract(contract_id: number) {
+    const context = this.getContext();
+    await this.assertInvoicingAreaActive(context);
+    const accounting_entity_id =
+      await this.resolveAccountingEntityIdForContext(context);
+
+    // Lectura scopeada (`findFirst`, no `findUnique`: ver C.1).
+    const contract = await this.prisma.contracts.findFirst({
+      where: { id: contract_id },
+    });
+    if (!contract) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Contrato no encontrado.',
+        { contract_id },
+      );
+    }
+
+    // Idempotencia capa 1: la factura existente manda a la factura, no a un
+    // error generico. Va ANTES del gate de estado, igual que en C.1.
+    await this.assertNoContractInvoice(this.prisma, contract_id);
+
+    if (contract.status !== 'active') {
+      throw contractNotReadyForInvoice(contract.id, contract.status);
+    }
+
+    // Precarga pura desde el snapshot (ADR-03): 422 ANTES de numerar cuando
+    // el contrato no trae A/I/U o la cotizacion no trae tarifas.
+    const draft = buildContractAiuDraft(
+      contract.snapshot as unknown as ContractAiuSnapshot,
+      contract.contract_number,
+      contract.id,
+    );
+
+    const items: CreateInvoiceItemDto[] = draft.lines.map((line) => ({
+      description: line.description,
+      quantity: line.quantity,
+      unit_price: line.unit_price,
+      discount_amount: line.discount_amount,
+      aiu_component: line.aiu_component,
+      taxes: line.taxes.map((tax) => ({
+        tax_name: tax.tax_name,
+        tax_rate: tax.tax_rate,
+        tax_type: TaxFiscalType.IVA,
+      })),
+    }));
+
+    // MISMO orden que `create()`: regimen y recalculado ANTES del
+    // consecutivo — todo lo que rechaza lo hace sin gastar numeracion DIAN.
+    // Sin perfil de facturacion: el regimen sale del ajuste de la tienda
+    // (flujo manual) y `assertAiuBaseMatchesProfileMatrix` no tiene matriz
+    // contra la que contrastar.
+    const aiu_context = await this.resolveAiuContext(
+      DIAN_INVOICE_OPERATION_TYPES.AIU,
+      items,
+      draft.contract_object,
+      undefined,
+      undefined,
+    );
+    const line_snapshots = await this.resolveLinePricingSnapshots(items);
+    const calculated = this.recalculateDocument(
+      items,
+      line_snapshots,
+      'invoice:create-from-contract',
+      aiu_context.aiu,
+    );
+
+    // El adquiriente es el cliente del contrato (C.1 lo exige al crear).
+    // Paridad con `createFromSalesOrder`: nombre con `legal_name` primero y
+    // documento de la ficha; la emision congela desde estas columnas.
+    const customer = contract.customer_id
+      ? await this.prisma.users.findFirst({
+          where: { id: contract.customer_id },
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            legal_name: true,
+            document_type: true,
+            document_number: true,
+          },
+        })
+      : null;
+    const customer_name = customer
+      ? (customer.legal_name?.trim() ||
+        `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
+        undefined)
+      : undefined;
+
+    const { invoice_number, resolution_id } =
+      await this.invoice_number_generator.generateNextNumber({
+        document_type: 'sales_invoice',
+        accounting_entity_id,
+      });
+
+    // Un solo tributo (el IVA heredado) ⇒ fila agregada de cabecera, igual
+    // que en `create()`. La construccion lo garantiza; si algun dia no, el
+    // camino multi-tributo de abajo lo cubre fuera de la transaccion, como
+    // hace `create()`.
+    const split_line_taxes = this.needsPersistedLineTaxes(
+      calculated.header_taxes,
+      calculated.lines,
+    );
+
+    try {
+      // El cliente de `$transaction` es el BASE (sin extension de scoping):
+      // todo `where` lleva el tenant a mano (misma disciplina que
+      // `ContractsService.createFromQuotation`).
+      const invoice = await this.prisma.withoutScope().$transaction(
+        async (tx: any) => {
+          // Idempotencia capa 2 (dentro de la transaccion): cierra la
+          // carrera entre la comprobacion previa y el INSERT.
+          const fresh = await tx.contracts.findFirst({
+            where: {
+              id: contract_id,
+              store_id: context.store_id,
+              organization_id: context.organization_id,
+            },
+          });
+          if (!fresh) {
+            throw new VendixHttpException(
+              ErrorCodes.SYS_NOT_FOUND_001,
+              'Contrato no encontrado.',
+              { contract_id },
+            );
+          }
+          await this.assertNoContractInvoice(tx, contract_id);
+          if (fresh.status !== 'active') {
+            throw contractNotReadyForInvoice(fresh.id, fresh.status);
+          }
+
+          const created_invoice = await tx.invoices.create({
+            data: {
+              organization_id: context.organization_id,
+              store_id: context.store_id,
+              accounting_entity_id,
+              fiscal_document_type: 'sales_invoice',
+              invoice_number,
+              invoice_type: 'sales_invoice',
+              status: 'draft',
+              customer_id: contract.customer_id,
+              customer_name,
+              customer_tax_id: customer?.document_number || undefined,
+              customer_document_type: customer?.document_type || undefined,
+              // DB-05: el vinculo contrato→factura (el UNIQUE parcial lo
+              // respalda en base).
+              contract_id: contract.id,
+              resolution_id,
+              // `cbc:CustomizationID` '09': nace AIU, no hay otro tipo.
+              operation_type: DIAN_INVOICE_OPERATION_TYPES.AIU,
+              // SNAPSHOTS AIU con lo que se valido (ver `create()`): objeto,
+              // regimen, piso efectivo y matriz contra el snapshot.
+              aiu_contract_object: aiu_context.contract_object,
+              aiu_regime: aiu_context.aiu
+                ? this.regimeStringFromTaxableBasis(
+                    aiu_context.aiu.taxable_basis,
+                  )
+                : undefined,
+              aiu_minimum_percent: aiu_context.aiu
+                ? this.resolveAiuMinimumPercent(aiu_context.aiu)
+                : undefined,
+              aiu_taxable_matrix: aiu_context.aiu
+                ? this.buildAiuTaxableMatrix(
+                    calculated.lines,
+                    aiu_context.aiu,
+                    'invoice:create-from-contract',
+                  )
+                : undefined,
+              subtotal_amount: new Prisma.Decimal(
+                calculated.totals.total_before_tax,
+              ),
+              discount_amount: new Prisma.Decimal(
+                calculated.totals.discount_amount,
+              ),
+              tax_amount: new Prisma.Decimal(calculated.totals.tax_amount),
+              total_amount: new Prisma.Decimal(calculated.totals.total_amount),
+              currency: 'COP',
+              issue_date: new Date(),
+              created_by_user_id: context.user_id,
+              notes: contract.notes ?? undefined,
+              invoice_items: {
+                create: items.map((item, index) =>
+                  this.buildInvoiceItemCreateInput(
+                    item,
+                    calculated.lines[index],
+                    line_snapshots[index],
+                  ),
+                ),
+              },
+              ...(split_line_taxes || calculated.header_taxes.length === 0
+                ? {}
+                : {
+                    invoice_taxes: {
+                      create: calculated.header_taxes.map((t) =>
+                        this.buildInvoiceTaxCreateInput(t),
+                      ),
+                    },
+                  }),
+            },
+            include: INVOICE_INCLUDE,
+          });
+
+          // Atomico con la factura: el contrato pasa a `invoiced` en la
+          // MISMA transaccion. `updateMany` con filtro de tenant + estado
+          // (escritura scope-safe) y conteo verificado: si otro hilo
+          // facturo primero, el conteo es 0 y se resuelve al 409.
+          const marked = await tx.contracts.updateMany({
+            where: {
+              id: contract.id,
+              store_id: context.store_id,
+              status: 'active',
+            },
+            data: { status: 'invoiced', updated_at: new Date() },
+          });
+          if (marked.count === 0) {
+            const winner = await this.findActiveContractInvoice(
+              tx,
+              contract_id,
+            );
+            if (winner) {
+              throw contractAlreadyInvoiced(
+                contract_id,
+                winner.id,
+                winner.invoice_number,
+              );
+            }
+            throw contractNotReadyForInvoice(contract.id, fresh.status);
+          }
+
+          return created_invoice;
+        },
+      );
+
+      let created = invoice;
+      if (split_line_taxes) {
+        await this.persistLineTaxes(
+          invoice.id,
+          calculated.lines.map((line) => line.taxes),
+          calculated.header_taxes,
+        );
+        created =
+          (await this.prisma.invoices.findFirst({
+            where: { id: invoice.id },
+            include: INVOICE_INCLUDE,
+          })) ?? invoice;
+      }
+
+      this.event_emitter.emit('invoice.created', {
+        invoice_id: created.id,
+        invoice_number: created.invoice_number,
+        invoice_type: 'sales_invoice',
+        source: 'contract',
+        contract_id,
+      });
+
+      this.logger.log(
+        `Invoice ${created.invoice_number} created from contract #${contract_id}`,
+      );
+      return created;
+    } catch (error) {
+      // Idempotencia capa 3 (red de la red): si el UNIQUE parcial de
+      // `contract_id` choco dentro de la transaccion, la factura ya existe
+      // — se responde el mismo 409 con la factura real.
+      if (this.isUniqueViolation(error)) {
+        const winner = await this.findActiveContractInvoice(
+          this.prisma,
+          contract_id,
+        );
+        if (winner) {
+          throw contractAlreadyInvoiced(
+            contract_id,
+            winner.id,
+            winner.invoice_number,
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * D.1 — factura activa ligada al contrato, o nada. El cliente es el
+   * SCOPEADO o el de la transaccion: ambos exponen los mismos delegados, asi
+   * que un solo metodo cubre la capa 1 (pre-chequeo) y la capa 2 (re-chequeo
+   * en-tx). Espeja `assertNotAlreadyInvoiced`, pero el codigo es ERR-07
+   * (`CONTRACT_INVOICE_001`, 409 con la factura para navegar a ella) y no el
+   * generico de ordenes.
+   */
+  private async assertNoContractInvoice(
+    client: {
+      invoices: {
+        findFirst: (args: unknown) => Promise<{
+          id: number;
+          invoice_number: string;
+        } | null>;
+      };
+    },
+    contract_id: number,
+  ): Promise<void> {
+    const existing = await this.findActiveContractInvoice(client, contract_id);
+    if (existing) {
+      throw contractAlreadyInvoiced(
+        contract_id,
+        existing.id,
+        existing.invoice_number,
+      );
+    }
+  }
+
+  /** Factura activa (`sales_invoice`, no anulada) nacida de este contrato. */
+  private async findActiveContractInvoice(
+    client: {
+      invoices: {
+        findFirst: (args: unknown) => Promise<{
+          id: number;
+          invoice_number: string;
+        } | null>;
+      };
+    },
+    contract_id: number,
+  ): Promise<{ id: number; invoice_number: string } | null> {
+    return client.invoices.findFirst({
+      where: {
+        contract_id,
+        invoice_type: 'sales_invoice',
+        status: { notIn: ['voided', 'cancelled'] },
+      },
+      select: { id: true, invoice_number: true },
+      orderBy: { id: 'desc' },
+    }) as Promise<{ id: number; invoice_number: string } | null>;
+  }
+
+  /** `P2002` es violacion de restriccion unica (codigo estable, no mensaje). */
+  private isUniqueViolation(error: unknown): boolean {
+    return (error as { code?: string })?.code === 'P2002';
   }
 
   async update(id: number, dto: UpdateInvoiceDto) {

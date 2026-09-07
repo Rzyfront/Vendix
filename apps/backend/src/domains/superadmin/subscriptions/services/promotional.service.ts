@@ -12,6 +12,31 @@ import {
 export class PromotionalService {
   constructor(private readonly prisma: GlobalPrismaService) {}
 
+  /**
+   * Normalize `feature_matrix` for the WRITE path. Same contract as
+   * PlansService.toPlainFeatureMatrix: canonical shape is a plain ARRAY of
+   * items, class instances from `@Type()` are flattened before reaching the
+   * Prisma Json column, the legacy object shape is passed through untouched,
+   * and null/undefined persists as `[]`.
+   */
+  private toPlainFeatureMatrix(value: unknown): Prisma.InputJsonValue {
+    if (Array.isArray(value)) {
+      return value.map((item: any) => ({
+        key: item?.key,
+        label: item?.label,
+        enabled: item?.enabled,
+        ...(item?.is_limited !== undefined && { is_limited: item.is_limited }),
+        ...(item?.value !== undefined && { value: item.value }),
+        ...(item?.limit != null && { limit: item.limit }),
+        ...(item?.unit != null && { unit: item.unit }),
+      })) as Prisma.InputJsonValue;
+    }
+    if (value && typeof value === 'object') {
+      return value as Prisma.InputJsonValue;
+    }
+    return [] as Prisma.InputJsonValue;
+  }
+
   async create(dto: CreatePromotionalDto) {
     const existing = await this.prisma.subscription_plans.findUnique({
       where: { code: dto.code },
@@ -35,7 +60,7 @@ export class PromotionalService {
         grace_period_hard_days: dto.grace_period_hard_days ?? 10,
         suspension_day: dto.suspension_day ?? 14,
         cancellation_day: dto.cancellation_day ?? 45,
-        feature_matrix: (dto.feature_matrix ?? {}) as any,
+        feature_matrix: this.toPlainFeatureMatrix(dto.feature_matrix) as any,
         ai_feature_flags: (dto.ai_feature_flags ?? {}) as any,
         resellable: false,
         is_promotional: true,
@@ -163,7 +188,7 @@ export class PromotionalService {
           cancellation_day: dto.cancellation_day,
         }),
         ...(dto.feature_matrix !== undefined && {
-          feature_matrix: dto.feature_matrix as any,
+          feature_matrix: this.toPlainFeatureMatrix(dto.feature_matrix) as any,
         }),
         ...(dto.ai_feature_flags !== undefined && {
           ai_feature_flags: dto.ai_feature_flags as any,

@@ -124,6 +124,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Auditing Zoneless compliance (zoneless-audit.sh) or enforcing CI grep rules | `vendix-zoneless-signals` |
 | Auditing web↔mobile feature parity or mobile coverage gaps | `mobile-parity-audit` |
 | Auditing what Vexi changed in a store | `vendix-vexi-agent` |
+| Auditing which plans are still open before deleting anything | `purge-plans` |
 | Binding form controls in Angular templates | `vendix-angular-forms` |
 | Bootstrapping local Linear credentials for Vendix | `linear-connect` |
 | Branching off or rebasing onto origin/develop before work | `git-workflow` |
@@ -150,6 +151,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Choosing between viable architectural approaches | `how-to-plan` |
 | Choosing test credentials from seeds or asking the user | `how-to-test` |
 | Choosing the toSignal initialValue for a fiscal predicate | `vendix-fiscal-scope` |
+| Cleaning docs/plans, docs/planes, docs/critical-plans or .claude/plans | `purge-plans` |
 | Closing a Linear ticket to Done after QA verifies it in production | `verify-ticket-prod` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
 | Commitear o empujar en un árbol de trabajo compartido con otras sesiones | `vendix-known-errors` |
@@ -341,12 +343,14 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Protecting backend endpoints with auth, roles, or permissions | `vendix-backend-auth` |
 | Protecting store write operations behind a subscription | `vendix-subscription-gate` |
 | Pulling the latest Engram memories (engram sync --import) before starting work | `git-workflow` |
+| Purging or deleting old plan files | `purge-plans` |
 | Querying analytics by date range or bucketing a time series | `vendix-analytics-metrics` |
 | Querying by date ranges in backend | `vendix-date-timezone` |
 | Rate-limiting by calendar period (not sliding window) | `vendix-redis-quota` |
 | Re-developing solutions identified by a code review below 80% | `pr-code-review` |
 | Reaching the app via the local vhost vendix.com instead of localhost | `how-to-test` |
 | Reading frontend compile errors without a vendix_frontend container | `buildcheck-dev` |
+| Reclaiming disk space taken by executed plans | `purge-plans` |
 | Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo | `linear-connect` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
 | Registering a component as a VexiUiHost | `vendix-vexi-agent` |
@@ -537,7 +541,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | --------------------------------- | ----------------------------- | ------------ | --------------------------------------------------------------------------- |
 | **`how-to-dev`**                  | **ALWAYS**                    | **CRITICAL** | Mandatory ultra-obligatory dev flow                                         |
 | **`Vendix-core`**                  | **ALWAYS**                    | **CRITICAL** | Core patterns and conventions                                               |
-| **`git-workflow`**                | **ALWAYS**                    | **CRITICAL** | Git commit, PR, branching, conflict rules, and the 4 hard gates: branches current with `origin/dev` (R5), Engram memories pulled at start of work (R6), Engram memory saved before push (R7), 80% PR review gate (R8) |
+| **`git-workflow`**                | **ALWAYS**                    | **CRITICAL** | Git commit, PR, branching, conflict rules, and the 4 hard gates: branches current with `origin/develop` (R5), Engram memories pulled at start of work (R6), Engram memory saved before push (R7), 80% PR review gate (R8) |
 | **`vendix-zoneless-signals`**     | **ANY FRONTEND FILE**         | **CRITICAL** | Zoneless + Signals (Angular 20) — violaciones producen bugs silenciosos     |
 | **`knowledge-gap`**               | **UNKNOWN PATTERN**           | **HIGH**     | Protocol for new/undefined patterns                                         |
 

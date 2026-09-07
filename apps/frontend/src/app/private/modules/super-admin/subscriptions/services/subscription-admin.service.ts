@@ -106,12 +106,13 @@ export class SubscriptionAdminService {
 
     // Display
     if (d.is_popular !== undefined) payload['is_popular'] = Boolean(d.is_popular);
+    if (d.is_ai_plan !== undefined) payload['is_ai_plan'] = Boolean(d.is_ai_plan);
     if (d.sort_order !== undefined) payload['sort_order'] = Number(d.sort_order);
     if (d.is_default !== undefined) payload['is_default'] = Boolean(d.is_default);
 
     // Feature matrices
     if (d.ai_feature_flags !== undefined) payload['ai_feature_flags'] = d.ai_feature_flags;
-    if (d.feature_matrix !== undefined) payload['feature_matrix'] = d.feature_matrix ?? {};
+    if (d.feature_matrix !== undefined) payload['feature_matrix'] = d.feature_matrix ?? [];
 
     // ---- Backwards-compat shim (legacy callers using slug / is_active / is_public / grace_threshold_days / pricing[]) ----
     if (payload['code'] === undefined && d.slug !== undefined) payload['code'] = d.slug;
@@ -205,7 +206,7 @@ export class SubscriptionAdminService {
       suspension_day: Number(raw.suspension_day ?? 0),
       cancellation_day: Number(raw.cancellation_day ?? 0),
 
-      feature_matrix: raw.feature_matrix ?? {},
+      feature_matrix: raw.feature_matrix ?? [],
       ai_feature_flags: raw.ai_feature_flags ?? ({} as any),
 
       resellable: Boolean(raw.resellable),
@@ -217,6 +218,7 @@ export class SubscriptionAdminService {
       promo_priority: Number(raw.promo_priority ?? 0),
 
       is_popular: Boolean(raw.is_popular),
+      is_ai_plan: Boolean(raw.is_ai_plan),
       sort_order: Number(raw.sort_order ?? 0),
       is_default: Boolean(raw.is_default),
 

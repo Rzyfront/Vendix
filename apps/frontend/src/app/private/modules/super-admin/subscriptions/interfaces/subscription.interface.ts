@@ -1,3 +1,5 @@
+import type { PlanIncludedItem } from '../../../../../shared/utils/plan-features.util';
+
 export type PlanType = 'base' | 'pro' | 'enterprise' | 'custom';
 export type BillingCycle = 'monthly' | 'quarterly' | 'semi_annual' | 'annual';
 export type SubscriptionState = 'trial' | 'active' | 'grace_soft' | 'grace_hard' | 'suspended' | 'cancelled' | 'blocked';
@@ -14,7 +16,8 @@ export interface Plan {
   base_price: number;
   description?: string;
   ai_feature_flags: Record<string, boolean>;
-  feature_matrix: Record<string, any>;
+  // Lectura: arreglo canonico + objeto legado (compat).
+  feature_matrix: PlanIncludedItem[] | Record<string, unknown>;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -29,7 +32,8 @@ export interface CreatePlanDto {
   base_price: number;
   description?: string;
   ai_feature_flags?: Record<string, boolean>;
-  feature_matrix?: Record<string, any>;
+  // Escritura: siempre arreglo.
+  feature_matrix?: PlanIncludedItem[];
 }
 
 export interface UpdatePlanDto extends Partial<CreatePlanDto> {}

@@ -1,862 +1,1845 @@
-<div class="vendix-landing min-h-screen bg-[var(--color-background)] text-[var(--color-text-primary)]">
-  <!-- Navigation Header (Modern Clean Design) -->
-  <header
-    class="fixed top-0 left-0 right-0 z-50 bg-surface/80 backdrop-blur-xl border-b border-[var(--color-border)] shadow-sm">
-    <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="flex items-center justify-between h-16">
-        <!-- Logo Section -->
-        <div class="flex items-center space-x-3">
-          <div class="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
-            <img src="vlogo.png" alt="Vendix" class="w-full h-full object-contain" />
-          </div>
-          <h1 class="text-xl font-semibold text-[var(--color-text-primary)]">
-            {{ tenantConfig()?.branding?.name || "Vendix" }}
-          </h1>
-        </div>
+<div class="min-h-screen bg-[#f8f9ff] text-[#0b1c30] antialiased selection:bg-emerald-500 selection:text-white">
+  <!-- STICKY NAVBAR -->
+  <header class="sticky top-0 z-50 w-full bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
+    <div class="h-20 max-w-[75rem] mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-4">
+      <!-- Logo & Brand -->
+      <div class="flex items-center gap-8">
+        <a [routerLink]="['/']" class="flex items-center gap-2.5 group">
+          <img
+            src="/vlogo.png"
+            alt="Vendix Logo"
+            class="h-9 w-auto object-contain transition-transform group-hover:scale-105"
+            onerror="this.src='/favicon.ico'"
+          />
+          <span class="text-2xl font-extrabold tracking-tight text-slate-900 group-hover:text-emerald-700 transition-colors">
+            Vendix
+          </span>
+        </a>
 
-        <!-- Desktop Navigation -->
-        <nav class="hidden md:flex items-center space-x-8">
-          <a href="#features"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
-            Características
-          </a>
-          <a href="#solutions"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
-            Soluciones
-          </a>
-          <a href="#early-access"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
-            Acceso Gratis
-          </a>
-          <a routerLink="/ayuda"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
-            Centro de Ayuda
-          </a>
-          <a routerLink="/auth/login"
-            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
+        <!-- Desktop Navigation Links -->
+        <nav class="hidden lg:flex items-center gap-6">
+          <button (click)="scrollToSection('hero-simulator')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
+            Producto
+          </button>
+          <button (click)="scrollToSection('sectores')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
+            Sectores
+          </button>
+          <button (click)="scrollToSection('vexi')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1 flex items-center gap-1">
+            Vexi
+            <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full">IA</span>
+          </button>
+          <button (click)="scrollToSection('precios-section')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
+            Planes y Precios
+          </button>
+          <button (click)="scrollToSection('faq')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
+            FAQ
+          </button>
+        </nav>
+      </div>
+
+      <!-- Right CTAs -->
+      <div class="flex items-center gap-3">
+        <a
+          [routerLink]="['/auth/login']"
+          class="hidden sm:inline-flex text-sm font-bold text-slate-700 hover:text-emerald-700 px-3 py-2 transition-colors">
+          Iniciar Sesión
+        </a>
+        <a
+          [routerLink]="['/auth/register']"
+          class="inline-flex items-center justify-center text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-all duration-200 px-5 py-2.5 rounded-xl shadow-[0_4px_14px_0_rgba(16,185,129,0.3)] hover:shadow-none hover:-translate-y-0.5">
+          Prueba Gratis 14 Días
+        </a>
+
+        <!-- Mobile Menu Toggle Button -->
+        <button
+          (click)="toggleMobileMenu()"
+          class="lg:hidden p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+          aria-label="Abrir menú de navegación">
+          <app-icon [name]="mobileMenuOpen() ? 'x' : 'menu'" [size]="24"></app-icon>
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile Drawer Navigation -->
+    @if (mobileMenuOpen()) {
+      <div class="lg:hidden border-t border-slate-200 bg-white/98 px-4 pt-3 pb-6 space-y-2 shadow-xl animate-in fade-in slide-in-from-top-4 duration-200">
+        <button (click)="scrollToSection('hero-simulator')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
+          Producto (POS en Vivo)
+        </button>
+        <button (click)="scrollToSection('sectores')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
+          Sectores e Industrias
+        </button>
+        <button (click)="scrollToSection('vexi')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors flex items-center justify-between">
+          <span>Vexi IA Copilot</span>
+          <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full">NUEVO</span>
+        </button>
+        <button (click)="scrollToSection('precios-section')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
+          Planes y Precios
+        </button>
+        <button (click)="scrollToSection('faq')" class="w-full text-left font-semibold text-slate-700 hover:text-emerald-700 py-2.5 px-3 rounded-lg hover:bg-slate-50 transition-colors">
+          Preguntas Frecuentes (FAQ)
+        </button>
+
+        <div class="pt-4 border-t border-slate-100 flex flex-col gap-2.5">
+          <a [routerLink]="['/auth/login']" class="w-full py-2.5 text-center font-bold text-slate-700 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
             Iniciar Sesión
           </a>
-          <a routerLink="/auth/register"
-            class="bg-[var(--color-primary)] text-white px-6 py-2.5 rounded-xl hover:bg-[var(--color-secondary)] transition-all duration-200 shadow-md hover:shadow-lg font-medium">
-            Comenzar Gratis
+          <a [routerLink]="['/auth/register']" class="w-full py-2.5 text-center font-bold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 shadow-md transition-all">
+            Comenzar 14 Días Gratis
           </a>
-        </nav>
-
-        <!-- Mobile Actions -->
-        <div class="flex md:hidden items-center gap-1">
-          <a routerLink="/auth/login"
-            class="flex items-center gap-1.5 text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 px-3 py-2 rounded-lg hover:bg-gray-50">
-            <app-icon name="log-in" [size]="18" color="currentColor"></app-icon>
-            Ingresar
-          </a>
-          <button class="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
-            (click)="toggleMobileMenu()">
-            <app-icon [name]="mobileMenuOpen() ? 'x' : 'menu'" [size]="24" color="var(--color-text-primary)"></app-icon>
-          </button>
         </div>
       </div>
-    </div>
+    }
   </header>
 
-  <!-- Mobile Menu Overlay -->
-  @if (mobileMenuOpen()) {
-  <div class="fixed inset-0 z-[60] md:hidden">
-    <!-- Backdrop -->
-    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" (click)="closeMobileMenu()"></div>
+  <main class="w-full">
+    <!-- SECTION 1: HERO SECTION -->
+    <section class="relative w-full px-4 sm:px-6 lg:px-8 pt-11 pb-16 sm:pt-[4.2rem] sm:pb-24 overflow-hidden">
+      <div class="max-w-[75rem] mx-auto flex flex-col items-center text-center">
+        <!-- Launch Pill Badge -->
+        <div class="inline-flex items-center gap-space-xs px-space-md py-space-xs bg-secondary-container/60 rounded-full text-on-secondary-fixed text-label-sm font-label-sm mb-space-lg shadow-sm">
+          <span class="w-2 h-2 rounded-full bg-primary-container animate-ping"></span>
+          <span class="w-2 h-2 rounded-full bg-primary-container -ml-space-xs"></span>
+          <span class="font-bold tracking-wide">OPERACIÓN CONTINUA 24/7 · +150.000 FACTURAS DIAN EMITIDAS · 99.98% UPTIME ACTIVO</span>
+        </div>
 
-    <!-- Mobile Menu Panel -->
-    <div
-      class="fixed right-0 top-0 h-full w-80 max-w-[85vw] bg-surface shadow-xl transform transition-transform duration-300 ease-in-out">
-      <div class="flex flex-col h-full">
-        <!-- Mobile Menu Header -->
-        <div class="flex items-center justify-between p-4 border-b border-gray-200">
-          <div class="flex items-center space-x-3">
-            <div class="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden">
-              <img src="vlogo.png" alt="Vendix" class="w-full h-full object-contain" />
-            </div>
-            <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">
-              {{ tenantConfig()?.branding?.name || "Vendix" }}
-            </h2>
-          </div>
-          <button class="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200" (click)="closeMobileMenu()">
-            <app-icon name="menu" [size]="20" color="var(--color-text-primary)"></app-icon>
+        <!-- Main Headline -->
+        <h1 class="text-3xl sm:text-5xl lg:text-6xl font-extrabold text-slate-900 max-w-4xl tracking-tight mb-6 leading-tight">
+          El software todo-en-uno para <span class="text-emerald-700 font-black">vender más</span>, emitir <span class="text-emerald-700 font-black">facturación DIAN</span> y controlar tu negocio <span class="text-emerald-700 font-black">sin caos ni pérdidas</span>.
+        </h1>
+
+        <!-- Subtitle -->
+        <p class="text-base sm:text-lg text-slate-600 max-w-2xl mb-8 leading-relaxed">
+          Deja de pagar múltiples suscripciones y de cuadrar inventarios a mano. Controla ventas en mostrador, pedidos por WhatsApp, despachos y contabilidad con la ayuda de IA real.
+        </p>
+
+        <!-- CTA Row -->
+        <div class="flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto mb-8">
+          <a
+            [routerLink]="['/auth/register']"
+            class="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-sm sm:text-base font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-all duration-200 px-6 py-3.5 rounded-xl shadow-lg shadow-emerald-600/25 hover:shadow-none hover:-translate-y-0.5">
+            <app-icon name="zap" [size]="18"></app-icon>
+            Comenzar Prueba Gratis 14 Días (Sin tarjeta)
+          </a>
+          <button
+            (click)="showDemo()"
+            class="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-sm sm:text-base font-bold text-slate-800 bg-white hover:bg-slate-100 border border-slate-200 transition-all duration-200 px-5 py-3.5 rounded-xl shadow-sm">
+            <app-icon name="play-circle" [size]="18" class="text-emerald-600"></app-icon>
+            Ver Demo en Video (2 min)
+          </button>
+          <button
+            (click)="openWhatsApp()"
+            class="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-sm sm:text-base font-semibold text-emerald-800 hover:text-emerald-950 transition-colors px-4 py-3.5">
+            <!-- Marca WhatsApp: Lucide no trae logos, así que se usa el mismo
+                 path inline que los share-modals del panel. -->
+            <svg viewBox="0 0 24 24" fill="currentColor" class="w-[18px] h-[18px] text-emerald-600 shrink-0" aria-hidden="true">
+              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+            </svg>
+            Hablar con Asesor
           </button>
         </div>
 
-        <!-- Mobile Menu Content -->
-        <div class="flex-1 overflow-y-auto p-4">
-          <div class="space-y-2">
-            <a href="#features"
-              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-              (click)="closeMobileMenu()">
-              <app-icon name="check-circle" [size]="20" color="var(--color-text-secondary)"
-                class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
-              <span class="text-[var(--color-text-primary)] font-medium">Características</span>
-            </a>
+        <!-- Trust Chips -->
+        <div class="flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-xs sm:text-sm font-semibold text-slate-600 mb-12">
+          <span class="inline-flex items-center gap-1.5">
+            <app-icon name="check-circle" [size]="16" class="text-emerald-600"></app-icon>
+            Habilitado para Facturación Electrónica DIAN
+          </span>
+          <span class="inline-flex items-center gap-1.5">
+            <app-icon name="cloud" [size]="16" class="text-emerald-600"></app-icon>
+            Software en la nube multiplataforma
+          </span>
+          <span class="inline-flex items-center gap-1.5">
+            <app-icon name="refresh-cw" [size]="16" class="text-emerald-600"></app-icon>
+            Migración gratuita de tu catálogo anterior
+          </span>
+        </div>
 
-            <a href="#solutions"
-              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-              (click)="closeMobileMenu()">
-              <app-icon name="settings" [size]="20" color="var(--color-text-secondary)"
-                class="mr-3 group-hover:text-[var(--color-accent)]"></app-icon>
-              <span class="text-[var(--color-text-primary)] font-medium">Soluciones</span>
-            </a>
+        <!-- HERO MEDIA & INTERACTIVE DASHBOARD SIMULATOR -->
+        <!-- Escenario: cuando la ventana se cierra, se minimiza o pasa a pantalla
+             completa, hereda el alto que ésta tenía para que la landing no salte.
+             El id vive aquí (y no en la ventana) para que los enlaces del menú
+             sigan llegando aunque la ventana esté cerrada. -->
+        <div id="hero-simulator" class="relative w-full max-w-5xl" [style.min-height.px]="heroStageMinHeight()">
+          <div
+            #heroSimulatorWindow
+            class="hero-window relative w-full rounded-2xl bg-surface-container-lowest shadow-2xl overflow-hidden border border-outline-variant/30 text-left"
+            [class.hidden]="!heroWindowVisible()"
+            [class.hero-window--closing]="heroWindow() === 'closing'"
+            [class.hero-window--minimizing]="heroWindow() === 'minimizing'"
+            [class.hero-window--opening]="heroEnter() === 'opening'"
+            [class.hero-window--restoring]="heroEnter() === 'restoring'"
+            [class.hero-window--full]="heroFullscreen()">
+            <!-- Barra de ventana: es cromo de navegador de escritorio, así que en
+                 teléfono (donde no existe esa barra) no se pinta. -->
+            <div class="hidden sm:flex shrink-0 items-center justify-between bg-surface-container-low px-space-md py-space-xs border-b border-outline-variant/30">
+              <div class="flex items-center gap-space-xs">
+                <!-- Semáforo macOS: los glifos aparecen al pasar el puntero por el
+                     grupo, como en el sistema. Rojo cierra, amarillo minimiza,
+                     verde alterna pantalla completa. -->
+                <div class="hero-tl flex items-center gap-space-xs" role="group" aria-label="Controles de la ventana del simulador">
+                  <button
+                    type="button"
+                    class="hero-tl__btn hero-tl__btn--close"
+                    (click)="closeHeroWindow(heroSimulatorWindow)"
+                    aria-label="Cerrar Vendix app"
+                    title="Cerrar">
+                    <svg viewBox="0 0 10 10" class="hero-tl__glyph" aria-hidden="true">
+                      <path d="M2.6 2.6l4.8 4.8M7.4 2.6L2.6 7.4" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" fill="none" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="hero-tl__btn hero-tl__btn--min"
+                    (click)="minimizeHeroWindow(heroSimulatorWindow)"
+                    aria-label="Minimizar Vendix app"
+                    title="Minimizar">
+                    <svg viewBox="0 0 10 10" class="hero-tl__glyph" aria-hidden="true">
+                      <path d="M2 5h6" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" fill="none" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="hero-tl__btn hero-tl__btn--zoom"
+                    (click)="toggleHeroFullscreen(heroSimulatorWindow)"
+                    [attr.aria-label]="heroFullscreen() ? 'Salir de pantalla completa' : 'Pantalla completa'"
+                    [attr.aria-pressed]="heroFullscreen()"
+                    [title]="heroFullscreen() ? 'Salir de pantalla completa' : 'Pantalla completa'">
+                    @if (heroFullscreen()) {
+                      <!-- Dos triángulos apuntando hacia dentro: volver al tamaño normal -->
+                      <svg viewBox="0 0 10 10" class="hero-tl__glyph" aria-hidden="true">
+                        <path d="M5.5 1.6l2.9 2.9H5.5z M4.5 8.4L1.6 5.5h2.9z" fill="currentColor" />
+                      </svg>
+                    } @else {
+                      <!-- Dos triángulos hacia las esquinas: ampliar -->
+                      <svg viewBox="0 0 10 10" class="hero-tl__glyph" aria-hidden="true">
+                        <path d="M5.6 1.7h2.7v2.7z M4.4 8.3H1.7V5.6z" fill="currentColor" />
+                      </svg>
+                    }
+                  </button>
+                </div>
+                <span class="font-label-sm text-label-sm text-outline ml-space-sm inline-block font-mono">www.vendix.online/admin/dashboard</span>
+              </div>
+              <div class="flex items-center gap-space-sm">
+                <span class="hero-live-badge inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.08em] px-2.5 py-1 rounded-full">
+                  <span class="hero-live-badge__dot relative flex w-1.5 h-1.5">
+                    <span class="absolute inline-flex w-full h-full rounded-full bg-emerald-200 opacity-70 animate-ping"></span>
+                    <span class="relative inline-flex w-1.5 h-1.5 rounded-full bg-emerald-100"></span>
+                  </span>
+                  En vivo · tiempo real
+                </span>
+              </div>
+            </div>
 
-            <a href="#early-access"
-              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-              (click)="closeMobileMenu()">
-              <app-icon name="sparkles" [size]="20" color="var(--color-text-secondary)"
-                class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
-              <span class="text-[var(--color-text-primary)] font-medium">Acceso Gratis</span>
-            </a>
-
-            <a routerLink="/ayuda"
-              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-              (click)="closeMobileMenu()">
-              <app-icon name="life-buoy" [size]="20" color="var(--color-text-secondary)"
-                class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
-              <span class="text-[var(--color-text-primary)] font-medium">Centro de Ayuda</span>
-            </a>
-
-            <div class="border-t border-gray-200 my-4"></div>
-
-            <a routerLink="/auth/login"
-              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
-              (click)="closeMobileMenu()">
-              <app-icon name="user" [size]="20" color="var(--color-text-secondary)"
-                class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
-              <span class="text-[var(--color-text-primary)] font-medium">Iniciar Sesión</span>
-            </a>
-
-            <a routerLink="/auth/register"
-              class="flex items-center p-3 rounded-lg bg-[var(--color-primary)] text-white hover:bg-[var(--color-secondary)] transition-colors duration-200 group mt-4"
-              (click)="closeMobileMenu()">
-              <app-icon name="plus" [size]="20" color="white" class="mr-3"></app-icon>
-              <span class="font-medium">Comenzar Gratis</span>
-            </a>
+            <!-- Dashboard Body: replica viva del Panel Principal (datos fake).
+                 En pantalla completa es la zona que crece y hace scroll. -->
+            <app-hero-live-dashboard class="hero-window__body block"></app-hero-live-dashboard>
           </div>
 
-          <!-- Mobile Menu Footer -->
-          <div class="border-t border-gray-200 mt-6 pt-4">
-            <div class="text-center">
-              <p class="text-sm text-[var(--color-text-secondary)] mb-4">
-                ¿Necesitas ayuda?
+          <!-- Escritorio: sustituye a la ventana cerrada o minimizada. El punto
+               bajo el icono, como en el Dock, indica que sigue en segundo plano. -->
+          @if (!heroWindowVisible()) {
+            <div class="hero-dock absolute inset-0 hidden sm:flex flex-col items-center justify-center rounded-2xl border border-outline-variant/30 shadow-2xl overflow-hidden">
+              <button
+                type="button"
+                class="hero-dock__app group"
+                (click)="reopenHeroWindow()"
+                [attr.aria-label]="heroWindow() === 'minimized' ? 'Volver a Vendix app' : 'Abrir Vendix app'">
+                <span class="hero-dock__icon">
+                  <img src="/icons/vendix-192.png" alt="" class="w-14 h-14 object-contain" width="56" height="56" decoding="async" />
+                </span>
+                <span class="hero-dock__dot" [class.hero-dock__dot--on]="heroWindow() === 'minimized'" aria-hidden="true"></span>
+                <span class="hero-dock__label">Vendix app</span>
+              </button>
+              <p class="hero-dock__hint">
+                @if (heroWindow() === 'minimized') {
+                  Abierta en segundo plano · clic para volver
+                } @else {
+                  Clic para abrir
+                }
               </p>
-              <a href="mailto:quicks.dev@gmail.com?subject=Quiero%20una%20demo%20de%20Vendix"
-                class="inline-flex items-center text-[var(--color-primary)] hover:text-[var(--color-secondary)] font-medium">
-                <app-icon name="mail-check" [size]="16" color="currentColor" class="mr-2"></app-icon>
-                Contactar Soporte
-              </a>
             </div>
-          </div>
+          }
         </div>
       </div>
-    </div>
-  </div>
-  }
+    </section>
 
-  <!-- Hero Section with Carousel -->
-  <section class="relative h-screen">
-    <app-hero-carousel class="h-full"></app-hero-carousel>
-  </section>
-
-  <main>
-    <!-- AI Features Section -->
-    <section id="features" class="min-h-screen bg-[var(--color-surface)] flex items-center py-20">
-      <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="text-center mb-16">
-          <div class="inline-flex items-center gap-2 bg-[var(--color-primary)] px-4 py-2 rounded-full mb-6">
-            <span class="w-2 h-2 bg-[var(--color-accent)] rounded-full"></span>
-            <span class="text-sm font-medium text-[var(--color-accent)]">Características IA</span>
+    <!-- SECTION 2: SOCIAL PROOF & METRICS BAR -->
+    <section class="w-full bg-[#f0f4ff] py-12 px-4 sm:px-6 lg:px-8 border-y border-slate-200/60">
+      <div class="max-w-[75rem] mx-auto flex flex-col gap-8">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+          <div class="flex flex-col items-center">
+            <span class="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-700 tracking-tight">+150.000</span>
+            <span class="text-sm font-bold text-slate-800 mt-1">Facturas DIAN Emitidas</span>
+            <span class="text-xs text-slate-500">Sin rechazos ni intermediarios</span>
           </div>
-          <h2 class="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight">
-            Potencia tu Negocio con<br />
-            <span class="text-[var(--color-primary)]">Inteligencia Artificial</span>
+          <div class="flex flex-col items-center">
+            <span class="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-700 tracking-tight">99.98%</span>
+            <span class="text-sm font-bold text-slate-800 mt-1">Uptime en Punto de Venta</span>
+            <span class="text-xs text-slate-500">Operación local sin interrupciones</span>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-700 tracking-tight">3 Horas</span>
+            <span class="text-sm font-bold text-slate-800 mt-1">Ahorradas al Día</span>
+            <span class="text-xs text-slate-500">En cuadre de caja e inventario</span>
+          </div>
+          <div class="flex flex-col items-center">
+            <span class="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-700 tracking-tight">10 Min</span>
+            <span class="text-sm font-bold text-slate-800 mt-1">Tiempo de Puesta en Marcha</span>
+            <span class="text-xs text-slate-500">Sin necesidad de hardware técnico</span>
+          </div>
+        </div>
+
+        <!-- Integration Badges -->
+        <div class="pt-4 border-t border-slate-200/70 flex flex-wrap items-center justify-center gap-6 sm:gap-10 opacity-90">
+          <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Integraciones de pago y fiscalidad:</span>
+          <span class="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">
+            <app-icon name="smartphone" [size]="16" class="text-emerald-600"></app-icon> NEQUI
+          </span>
+          <span class="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">
+            <app-icon name="landmark" [size]="16" class="text-emerald-600"></app-icon> PSE
+          </span>
+          <span class="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">
+            <app-icon name="building" [size]="16" class="text-emerald-600"></app-icon> BANCOLOMBIA
+          </span>
+          <span class="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">
+            <app-icon name="credit-card" [size]="16" class="text-emerald-600"></app-icon> WOMPI
+          </span>
+          <span class="text-sm font-black text-emerald-800 flex items-center gap-1.5">
+            <app-icon name="shield-check" [size]="18" class="text-emerald-600"></app-icon> DIAN
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 3: PAIN VS SOLUTION -->
+    <section class="w-full py-20 px-4 sm:px-6 lg:px-8 bg-white">
+      <div class="max-w-[75rem] mx-auto flex flex-col gap-12">
+        <div class="text-center max-w-2xl mx-auto">
+          <span class="text-xs font-bold text-amber-700 uppercase tracking-wider">El Caos del Comerciante vs. La Eficiencia Vendix</span>
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-2">
+            Deja de pegar herramientas con cinta adhesiva
           </h2>
-          <p class="text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
-            Implementación avanzada de IA para transformar cada aspecto de tu
-            operación empresarial.
+          <p class="text-sm sm:text-base text-slate-600 mt-2">
+            Comprar un software para caja, pagar folios a un facturador aparte y mantener una tienda en línea aislada destruye tu rentabilidad.
           </p>
         </div>
 
-        <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-2 md:p-4 max-w-7xl mx-auto">
-          <!-- Predicción de Ventas -->
-          <div
-            class="group bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="chart-line" [size]="24" color="var(--color-primary)"></app-icon>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8 items-stretch">
+          <!-- The Fragmented Nightmare (Left) -->
+          <div class="bg-red-50/50 border border-red-200/80 p-6 sm:p-8 rounded-2xl flex flex-col justify-between shadow-xs">
+            <div>
+              <div class="flex items-center gap-3 mb-6">
+                <span class="w-8 h-8 rounded-full bg-red-100 text-red-600 flex items-center justify-center font-bold">✕</span>
+                <h3 class="text-lg sm:text-xl font-bold text-slate-900">La Pesadilla Tradicional Fragmentada</h3>
+              </div>
+              <ul class="space-y-4 text-xs sm:text-sm text-slate-700">
+                <li class="flex items-start gap-3">
+                  <app-icon name="x-circle" [size]="18" class="text-red-500 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Software POS antiguo amarrado a una sola PC física:</strong> Licencias costosas, copias de seguridad manuales y cero acceso desde el celular.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="x-circle" [size]="18" class="text-red-500 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Facturador electrónico externo cobrando por paquetes de folios:</strong> Cada factura te cuesta dinero extra y debes digitar dos veces cada venta.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="x-circle" [size]="18" class="text-red-500 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Tienda web desincronizada:</strong> Vendes online lo que ya se agotó en la vitrina física de tu local, generando cancelaciones y clientes enojados.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="x-circle" [size]="18" class="text-red-500 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Hojas de Excel manuales para pérdidas y ganancias:</strong> Pérdida de 3 horas cada noche cuadrando cajas y recalculando márgenes a ciegas.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="x-circle" [size]="18" class="text-red-500 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Cargar y mantener el inventario a mano:</strong> Días transcribiendo listas de precios, facturas de proveedor y conteos uno por uno, con errores de digitación que descuadran el stock.</span>
+                </li>
+              </ul>
             </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">
-              Predicción de Ventas
-            </h3>
-            <p class="text-[var(--color-text-secondary)] leading-relaxed">
-              Algoritmos de machine learning que anticipan tendencias de venta
-              con 95% de precisión.
-            </p>
+            <div class="mt-8 p-4 bg-white/80 border border-red-200 rounded-xl">
+              <span class="text-xs font-bold text-slate-500 uppercase block">Costo mensual estimado en software disperso:</span>
+              <span class="text-xl sm:text-2xl font-black text-red-600">~$350.000 COP / mes</span>
+              <span class="text-xs text-slate-500 block mt-1">+ Horas perdidas de tu vida y riesgos de multas DIAN.</span>
+            </div>
           </div>
 
-          <!-- Recomendaciones Inteligentes -->
-          <div
-            class="group bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="users" [size]="24" color="var(--color-accent)"></app-icon>
+          <!-- The Unified Vendix Solution (Right) -->
+          <div class="bg-emerald-50/70 border-2 border-emerald-500/80 p-6 sm:p-8 rounded-2xl flex flex-col justify-between shadow-md relative overflow-hidden">
+            <div class="absolute top-0 right-0 px-4 py-1 bg-emerald-600 text-white text-[11px] font-bold rounded-bl-xl tracking-wider">
+              TODO INTEGRADO
             </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">
-              Recomendaciones IA
-            </h3>
-            <p class="text-[var(--color-text-secondary)] leading-relaxed">
-              Sistema que sugiere productos óptimos basados en comportamiento y
-              patrones de compra.
-            </p>
-          </div>
-
-          <!-- Optimización de Inventario -->
-          <div
-            class="group bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-success-light)] rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="package" [size]="24" color="var(--color-success)"></app-icon>
+            <div>
+              <div class="flex items-center gap-3 mb-6">
+                <span class="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold">✓</span>
+                <h3 class="text-lg sm:text-xl font-bold text-slate-900">Con el Ecosistema Vendix</h3>
+              </div>
+              <ul class="space-y-4 text-xs sm:text-sm text-slate-800">
+                <li class="flex items-start gap-3">
+                  <app-icon name="check-circle" [size]="18" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>POS multidispositivo en la nube:</strong> Abre caja desde tu celular, tablet o computador. Sigue facturando incluso si se corta la luz o internet gracias al modo offline.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="check-circle" [size]="18" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Facturación DIAN nativa e ilimitada:</strong> Emite facturas electrónicas, notas crédito y tiques de caja en 1 solo clic sin recargos por folio.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="check-circle" [size]="18" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Catálogo centralizado (Mostrador + Tienda + WhatsApp):</strong> Cuando un producto se vende en tu mostrador, su stock se descuenta al instante de tu web.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="check-circle" [size]="18" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Márgenes reales y cuadres automáticos en segundos:</strong> Control de costo CPP, FIFO, arqueos ciegos y analítica en lenguaje natural con Vexi IA.</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="check-circle" [size]="18" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Inventario cargado y mantenido con IA: de días a segundos.</strong> Vexi lee la factura del proveedor o tu catálogo en PDF, Excel o foto y crea productos, precios y entradas de stock por ti; los conteos se ajustan desde el celular.</span>
+                </li>
+              </ul>
             </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">
-              Inventario Inteligente
-            </h3>
-            <p class="text-[var(--color-text-secondary)] leading-relaxed">
-              Gestión automatizada que predice demanda y optimiza niveles de
-              stock en tiempo real.
-            </p>
-          </div>
-
-          <!-- Análisis de Comportamiento -->
-          <div
-            class="group bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-6 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="bar-chart" [size]="24" color="var(--color-primary)"></app-icon>
+            <div class="mt-8 p-4 bg-white rounded-xl shadow-xs border border-emerald-200">
+              <span class="text-xs font-bold text-emerald-800 uppercase block">Inversión única unificada con Vendix:</span>
+              <span class="text-xl sm:text-2xl font-black text-emerald-700">Desde ${{ cheapestMonthlyPrice() | number: '1.0-0' : 'es-CO' }} COP / mes</span>
+              <span class="text-xs text-slate-500 block mt-1">Todas las herramientas conectadas, soporte garantizado y cero enredos.</span>
             </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-3">
-              Análisis Cliente
-            </h3>
-            <p class="text-[var(--color-text-secondary)] leading-relaxed">
-              IA que analiza patrones de comportamiento para personalizar
-              experiencia y aumentar conversiones.
-            </p>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Solutions Section -->
-    <section id="solutions" class="min-h-screen bg-[var(--color-background)] flex items-center py-20">
-      <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="text-center mb-20">
-          <div class="inline-flex items-center gap-2 bg-[var(--color-primary)] px-4 py-2 rounded-full mb-6">
-            <span class="w-2 h-2 bg-[var(--color-accent)] rounded-full"></span>
-            <span class="text-sm font-medium text-[var(--color-accent)]">Tipos de Venta</span>
-          </div>
-          <h2 class="text-4xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight">
-            Soluciones para<br />
-            <span class="text-[var(--color-primary)]">Todos los Canales</span>
+    <!-- SECTION 4: SECTORES E INDUSTRIAS (INTERACTIVE TABS) -->
+    <section id="sectores" class="w-full bg-[#f8f9ff] py-20 px-4 sm:px-6 lg:px-8 border-t border-slate-200/60">
+      <div class="max-w-[75rem] mx-auto flex flex-col gap-10">
+        <div class="text-center max-w-2xl mx-auto">
+          <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">Especialización de Alto Rendimiento</span>
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-2">
+            Diseñado para el ritmo real de tu sector
           </h2>
-          <p class="text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
-            Gestiona todos tus puntos de venta con una plataforma unificada y
-            moderna.
+          <p class="text-sm sm:text-base text-slate-600 mt-2">
+            Activa en segundos los flujos específicos de tu modelo comercial sin complicar la experiencia de tus cajeros.
           </p>
         </div>
 
-        <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-2 md:p-4 max-w-7xl mx-auto">
-          <!-- Punto de Venta POS -->
-          <div
-            class="bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-accent)]/30 hover:shadow-lg transition-all duration-300">
-            <div class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-6">
-              <app-icon name="credit-card" [size]="24" color="var(--color-accent)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
-              Punto de Venta POS
-            </h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Escáner de códigos de barra</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Gestión de efectivo y tarjeta</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Impresión de tickets y facturas</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Inventario en tiempo real</span>
-              </li>
-            </ul>
-          </div>
+        <!-- Industry Tab Selectors: una pestaña por sector, rotan solas cada
+             10s y se congelan mientras el puntero está encima. -->
+        <div
+          class="flex flex-wrap items-center justify-center gap-2 bg-slate-200/70 p-1.5 rounded-2xl max-w-4xl mx-auto"
+          (mouseenter)="pauseSectorRotation()"
+          (mouseleave)="resumeSectorRotation()"
+          (focusin)="pauseSectorRotation()"
+          (focusout)="resumeSectorRotation()">
+          @for (tab of sectorTabs; track tab.value) {
+            <button
+              (click)="setIndustry(tab.value)"
+              [class.bg-white]="selectedIndustry() === tab.value"
+              [class.text-emerald-800]="selectedIndustry() === tab.value"
+              [class.shadow-sm]="selectedIndustry() === tab.value"
+              [attr.aria-pressed]="selectedIndustry() === tab.value"
+              class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
+              <app-icon [name]="tab.icon" [size]="16"></app-icon> {{ tab.label }}
+            </button>
+          }
+        </div>
 
-          <!-- Facturación -->
-          <div
-            class="bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-6">
-              <app-icon name="file-text" [size]="24" color="var(--color-primary)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
-              Facturación
-            </h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Facturas electrónicas válidas</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Generación automática DIAN</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Reportes contables</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Retenciones automáticas</span>
-              </li>
-            </ul>
-          </div>
+        <!-- Industry Active Tab Content Display.
+             La foto ocupa una mitad completa de la tarjeta, sin padding, y se
+             difumina hacia el centro hasta fundirse con el fondo blanco del
+             texto. El lado se sortea en cada cambio de sector (ver
+             rollSectorImageSide); en móvil el mismo reparto pasa a vertical:
+             «izquierda» = arriba, «derecha» = abajo. El @for de un solo
+             elemento recrea el bloque al cambiar de sector para que la
+             animación de entrada vuelva a correr. -->
+        <div
+          class="sector-card relative overflow-hidden bg-white rounded-2xl shadow-sm border border-slate-200/80"
+          (mouseenter)="pauseSectorRotation()"
+          (mouseleave)="resumeSectorRotation()"
+          (focusin)="pauseSectorRotation()"
+          (focusout)="resumeSectorRotation()">
+          @for (data of [activeIndustryData()]; track data.value) {
+            <div
+              class="sector-card__grid grid grid-cols-1 lg:grid-cols-2 items-stretch lg:min-h-[26rem]"
+              [class.sector-card__grid--left]="sectorImageSide() === 'left'">
+              <div class="sector-card__text relative z-10 flex flex-col justify-center space-y-4 p-6 sm:p-10 lg:p-12">
+                <span class="inline-block self-start px-3 py-1 bg-emerald-100 text-emerald-900 text-[11px] font-bold rounded-lg tracking-wider">
+                  {{ data.tag }}
+                </span>
+                <h3 class="text-xl sm:text-3xl font-extrabold text-slate-900">
+                  {{ data.headline }}
+                </h3>
+                <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                  {{ data.description }}
+                </p>
 
-          <!-- Pagos -->
-          <div
-            class="bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div class="w-12 h-12 bg-[var(--color-success-light)] rounded-xl flex items-center justify-center mb-6">
-              <app-icon name="credit-card" [size]="24" color="var(--color-success)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
-              Pagos
-            </h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Tarjeta crédito y débito</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Pagos móviles QR</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Transferencias bancarias</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Criptomonedas</span>
-              </li>
-            </ul>
-          </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                  <div class="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <app-icon [name]="data.feature1.icon" [size]="20" class="text-emerald-600 mb-2"></app-icon>
+                    <p class="text-xs sm:text-sm font-bold text-slate-900">{{ data.feature1.title }}</p>
+                    <p class="text-xs text-slate-500 mt-1">{{ data.feature1.desc }}</p>
+                  </div>
+                  <div class="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <app-icon [name]="data.feature2.icon" [size]="20" class="text-emerald-600 mb-2"></app-icon>
+                    <p class="text-xs sm:text-sm font-bold text-slate-900">{{ data.feature2.title }}</p>
+                    <p class="text-xs text-slate-500 mt-1">{{ data.feature2.desc }}</p>
+                  </div>
+                </div>
+              </div>
 
-          <!-- Gestión de Envíos -->
-          <div
-            class="bg-surface p-2 md:p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-6">
-              <app-icon name="truck" [size]="24" color="var(--color-primary)"></app-icon>
+              <!-- Fotos locales de cada industria. WebP primero (≈100 KB); el PNG
+                   original (≈2 MB) queda de respaldo. `eager` porque el carrusel
+                   cambia solo cada 10 s y una foto perezosa llegaría tarde. -->
+              <div class="sector-card__media relative h-64 sm:h-80 lg:h-auto">
+                <picture class="absolute inset-0 block">
+                  <source [srcset]="data.image + '.webp'" type="image/webp" />
+                  <img
+                    [src]="data.image + '.png'"
+                    [alt]="data.title"
+                    width="1322"
+                    height="738"
+                    loading="eager"
+                    decoding="async"
+                    class="absolute inset-0 w-full h-full object-cover"
+                  />
+                </picture>
+              </div>
             </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">
-              Gestión de Envíos
-            </h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Integración transportadoras</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Seguimiento en tiempo real</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Cálculo automático fletes</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Notificaciones SMS/email</span>
-              </li>
-            </ul>
+          }
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 5: SPOTLIGHT DIFERENCIADOR: "VEXI", TU COPILOTO DE NEGOCIO -->
+    <section id="vexi" class="w-full py-space-3xl px-gutter-mobile lg:px-gutter-desktop bg-on-primary-fixed text-on-primary relative overflow-hidden">
+      <!-- Glow ambient background -->
+      <div class="absolute -top-24 -left-24 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+      <div class="absolute -bottom-24 -right-24 w-96 h-96 bg-emerald-600/15 rounded-full blur-3xl pointer-events-none"></div>
+
+      <div class="max-w-[75rem] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-space-2xl items-center relative z-10">
+        <!-- Left column: Explanations & 4 Interactive Demo Cards -->
+        <div class="lg:col-span-5 flex flex-col gap-space-md">
+          <div class="inline-flex items-center gap-space-2xs px-space-sm py-1 bg-on-primary-fixed-variant rounded-full text-primary-fixed text-label-sm font-label-sm self-start">
+            <span class="material-symbols-outlined text-[16px]">psychology</span>
+            <span>EXCLUSIVO EN VENDIX</span>
+          </div>
+          <h2 class="font-headline-lg text-headline-lg text-on-primary tracking-tight">
+            Conoce a Vexi: Tu copiloto de tienda con Inteligencia Artificial
+          </h2>
+          <p class="font-body-lg text-body-lg text-inverse-on-surface/80">
+            No es un chatbot genérico. Vexi analiza en tiempo real tus ventas, márgenes, costos y resoluciones DIAN para darte respuestas exactas y tomar acción directa.
+          </p>
+
+          <!-- Casos de uso: cada tarjeta reproduce un ejemplo en el panel de la derecha -->
+          <div class="lv-cases mt-2">
+            @for (example of vexiExamples; track example.id) {
+              <button
+                type="button"
+                (click)="setVexiTab(example.id)"
+                class="lv-case"
+                [class.lv-case--active]="activeVexiTab() === example.id && vexiPhase() !== 'empty'"
+                [attr.aria-pressed]="activeVexiTab() === example.id && vexiPhase() !== 'empty'">
+                <div class="flex items-start gap-3.5">
+                  <span class="lv-case__icon" aria-hidden="true">
+                    <app-icon [name]="example.icon" [size]="20" />
+                  </span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-start justify-between gap-3">
+                      <p class="font-bold text-[15px] leading-snug text-white">“{{ example.question }}”</p>
+                      <span class="lv-case__chip">{{ activeVexiTab() === example.id && vexiPhase() !== 'empty' ? 'Activo' : 'Ver demo' }}</span>
+                    </div>
+                    <p class="text-[13.5px] leading-relaxed text-white/70 mt-2">{{ example.blurb }}</p>
+                  </div>
+                </div>
+              </button>
+            }
+          </div>
+        </div>
+
+        <!-- Right column: réplica del panel flotante real de Vexi (app-vexi-panel).
+             Clases lv-* copiadas del panel real (ver SCSS); avatar y traza de
+             herramientas son los componentes reales. -->
+        <div class="lg:col-span-7 flex justify-center lg:justify-end">
+          <div class="lv-stage" [style.min-height.px]="vexiStageHeight()">
+            @if (vexiPanelOpen()) {
+              <section class="lv-panel" aria-label="Demostración del chat de Vexi">
+                <span class="lv-panel__grip" aria-hidden="true"></span>
+
+                <header class="lv-panel__header">
+                  <button
+                    type="button"
+                    class="lv-panel__icon-btn"
+                    (click)="vexiSidebarOpen.set(!vexiSidebarOpen())"
+                    [attr.aria-expanded]="vexiSidebarOpen()"
+                    [attr.aria-label]="vexiSidebarOpen() ? 'Ocultar conversaciones' : 'Ver conversaciones'">
+                    <app-icon [name]="vexiSidebarOpen() ? 'panel-left-close' : 'panel-left-open'" [size]="18" />
+                  </button>
+
+                  <span class="lv-panel__heading">
+                    <span class="lv-panel__title">Vexi</span>
+                    <span class="lv-panel__subtitle">{{ vexiStatusLine() }}</span>
+                  </span>
+
+                  <button
+                    type="button"
+                    class="lv-panel__icon-btn"
+                    [class.is-active]="vexiVoiceUi()"
+                    (click)="toggleVexiVoice()"
+                    [attr.aria-pressed]="vexiVoiceUi()"
+                    [attr.aria-label]="vexiVoiceUi() ? 'Volver a escribir' : 'Hablar con Vexi'"
+                    [title]="vexiVoiceUi() ? 'Volver a escribir' : 'Hablar con Vexi'">
+                    <app-icon [name]="vexiVoiceUi() ? 'message-square' : 'mic'" [size]="18" />
+                  </button>
+
+                  <button type="button" class="lv-panel__icon-btn" (click)="newVexiConversation()" aria-label="Nueva conversación" title="Nueva conversación">
+                    <app-icon name="square-pen" [size]="18" />
+                  </button>
+
+                  <button type="button" class="lv-panel__icon-btn" (click)="closeVexiPanel()" aria-label="Cerrar" title="Cerrar">
+                    <app-icon name="x" [size]="18" />
+                  </button>
+                </header>
+
+                @if (vexiVoiceUi()) {
+                  <div class="lv-voice__stage">
+                    <span class="lv-voice__portrait" [class.is-speaking]="vexiPhase() === 'typing'" aria-hidden="true">
+                      <app-vexi-avatar [expression]="vexiExpression()" [voice]="vexiVoiceRecording()" />
+                    </span>
+                    <p class="lv-voice__status" role="status">{{ vexiVoiceStatus() }}</p>
+                  </div>
+                }
+
+                <div class="lv-panel__body">
+                  <aside
+                    class="lv-panel__sidebar"
+                    [class.is-collapsed]="!vexiSidebarOpen()"
+                    [attr.inert]="vexiSidebarOpen() ? null : ''"
+                    [attr.aria-hidden]="!vexiSidebarOpen()">
+                    <div class="lv-panel__sidebar-inner">
+                      @for (example of vexiExamples; track example.id) {
+                        <button
+                          type="button"
+                          class="lv-panel__conversation"
+                          [class.is-active]="example.id === activeVexiTab() && vexiPhase() !== 'empty'"
+                          (click)="setVexiTab(example.id)">
+                          {{ example.title }}
+                        </button>
+                      }
+                    </div>
+                  </aside>
+
+                  <div id="lv-scroller" class="lv-panel__messages" [class.lv-panel__messages--captions]="vexiVoiceUi()">
+                    @if (vexiPhase() === 'empty') {
+                      @if (!vexiVoiceUi()) {
+                        <div class="lv-empty">
+                          <span class="lv-empty__portrait" aria-hidden="true">
+                            <app-vexi-avatar expression="idle" />
+                          </span>
+                          <p class="lv-empty__title">Hola, soy Vexi</p>
+                          <p class="lv-empty__text">
+                            Pregúntame por tu inventario, tus ventas o tu contabilidad. Si quieres, también te llevo al módulo que necesites.
+                          </p>
+                          <div class="lv-empty__chips">
+                            @for (example of vexiExamples; track example.id) {
+                              <button type="button" class="lv-empty__chip" (click)="setVexiTab(example.id)">{{ example.question }}</button>
+                            }
+                          </div>
+                        </div>
+                      }
+                    } @else {
+                      @if (activeVexiTab() === 3) {
+                        <span class="lv-attachment">
+                          <app-icon name="file-text" [size]="14" />
+                          <span>factura-colanta-0921.pdf</span>
+                        </span>
+                      }
+                      <div class="lv-msg lv-msg--user">{{ vexiQuestion() }}</div>
+
+                      @if (vexiPhase() === 'typing') {
+                        <div class="lv-turn">
+                          <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="thinking" /></span>
+                          <div class="lv-msg lv-msg--assistant lv-msg--working">
+                            <span class="lv-msg--typing" aria-hidden="true"><span></span><span></span><span></span></span>
+                            <span class="lv-msg__phrase" role="status">{{ vexiProgressPhrase() }}</span>
+                          </div>
+                        </div>
+                      } @else {
+                        @if (activeVexiExample(); as example) {
+                          <app-vexi-tool-trace [steps]="example.steps" />
+                        }
+
+                        @switch (activeVexiTab()) {
+                          @case (1) {
+                            <div class="lv-turn">
+                              <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="idle" /></span>
+                              <div class="lv-msg lv-msg--assistant lv-md">
+                                <p>Entre lo vendido este mes, el menos rentable es el <strong>Huawei Watch GT 40</strong>: margen de apenas <strong>10,71%</strong> sobre el costo actual. Vendió 1 unidad a $168.000, así que el margen en pesos fue de unos $18.000.</p>
+                                <p>Para contexto, el resto del catálogo se mueve entre 23% y 90%, así que este reloj queda muy por debajo. Y ojo: también es de los que menos venden y está en stock 0 — es candidato a subirle el precio o replantearlo.</p>
+                                <p>¿Quieres que mire el desglose de su precio y costo para ver si conviene ajustarlo?</p>
+                              </div>
+                            </div>
+                          }
+                          @case (2) {
+                            <div class="lv-turn">
+                              <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="idle" /></span>
+                              <div class="lv-msg lv-msg--assistant lv-md">
+                                <p>Mirando las ventas de este mes, hay un <strong>empate en el último puesto</strong>: 6 productos vendieron solo <strong>1 unidad</strong>:</p>
+                                <ul>
+                                  <li><strong>Airpods 3</strong> ($1.200.000 COP)</li>
+                                  <li><strong>Xiaomi 13 Lite</strong> ($2.002.000 COP)</li>
+                                  <li><strong>Tecno Camon 20</strong> ($900.000 COP)</li>
+                                  <li><strong>Tecno Spark 10</strong> ($697.500 COP)</li>
+                                  <li><strong>Huawei Watch GT 40</strong> ($168.000 COP)</li>
+                                  <li><strong>Samsung Galaxy A54</strong> ($1.560.000 COP)</li>
+                                </ul>
+                                <p>Esto es solo entre lo que vendió algo este mes. Si quieres saber cuáles llevan <strong>cero ventas</strong> en el periodo, dime y te reviso el catálogo completo.</p>
+                              </div>
+                            </div>
+                          }
+                          @case (3) {
+                            <div class="lv-turn">
+                              <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar [expression]="vexiExpression()" /></span>
+                              <div class="lv-msg lv-msg--assistant lv-md">
+                                <p>Leí la factura de <strong>Distribuciones Colanta S.A.S. (NIT 890.900.123-1)</strong>: 3 líneas de producto, <strong>$1.485.000</strong> con IVA y 120 unidades para ingresar al inventario.</p>
+                                <p>Antes de tocar tu stock y tus cuentas por pagar, confírmame el registro:</p>
+                              </div>
+                            </div>
+
+                            @if (vexiDecision() === 'pending') {
+                              <section class="lv-card" role="group" aria-label="Cambio propuesto por Vexi">
+                                <header class="lv-card__header">
+                                  <span class="lv-card__badge" aria-hidden="true"><app-icon name="pencil" [size]="15" /></span>
+                                  <span class="lv-card__heading">
+                                    <strong class="lv-card__title">Vexi propone un cambio</strong>
+                                    <span class="lv-card__target">Registrar compra · Distribuciones Colanta S.A.S.</span>
+                                  </span>
+                                </header>
+                                <p class="lv-card__message">Crea la compra, ingresa las unidades al inventario y deja la factura en cuentas por pagar.</p>
+                                <dl class="lv-card__diff">
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Ítems detectados</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">—</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">3 líneas de producto</span></dd>
+                                  </div>
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Total con IVA</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">—</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">$1.485.000 COP</span></dd>
+                                  </div>
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Stock · Bodega principal</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">1.240 unidades</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">1.360 unidades (+120)</span></dd>
+                                  </div>
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Cuentas por pagar</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">—</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">$1.485.000 a 30 días</span></dd>
+                                  </div>
+                                </dl>
+                                <footer class="lv-card__actions">
+                                  <button type="button" class="lv-card__btn lv-card__btn--reject" (click)="rejectVexiProposal()" [disabled]="vexiApplying()">
+                                    <app-icon name="x" [size]="15" /> Rechazar
+                                  </button>
+                                  <button type="button" class="lv-card__btn lv-card__btn--approve" (click)="approveVexiProposal()" [disabled]="vexiApplying()">
+                                    @if (vexiApplying()) {
+                                      <app-icon name="loader-2" [size]="15" [spin]="true" /> Aplicando…
+                                    } @else {
+                                      <app-icon name="check" [size]="15" /> Aprobar
+                                    }
+                                  </button>
+                                </footer>
+                              </section>
+                            } @else if (vexiDecision() === 'approved') {
+                              <app-vexi-tool-trace [steps]="vexiOcrAppliedSteps" />
+                              <div class="lv-turn">
+                                <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="happy" /></span>
+                                <div class="lv-msg lv-msg--assistant lv-md">
+                                  <p>¡Listo! Factura registrada: <strong>120 unidades</strong> añadidas al inventario central y <strong>$1.485.000</strong> en cuentas por pagar con vencimiento a 30 días.</p>
+                                </div>
+                              </div>
+                            } @else {
+                              <div class="lv-turn">
+                                <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="idle" /></span>
+                                <div class="lv-msg lv-msg--assistant lv-md">
+                                  <p>Entendido, no registré nada. Si quieres, súbeme otra foto o el PDF corregido y lo intento de nuevo.</p>
+                                </div>
+                              </div>
+                            }
+                          }
+                          @case (4) {
+                            <div class="lv-turn">
+                              <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar [expression]="vexiExpression()" /></span>
+                              <div class="lv-msg lv-msg--assistant lv-md">
+                                <p><strong>Regla de alerta activada.</strong> Te notificaré a tu WhatsApp cada vez que el stock de cualquier referencia baje de 10 unidades. Ahora mismo tienes <strong>2 productos</strong> en estado crítico:</p>
+                                <ul>
+                                  <li><strong>Café Especial Huila 500g</strong> · 3 unidades restantes</li>
+                                  <li><strong>Panela orgánica 1 kg</strong> · 7 unidades restantes</li>
+                                </ul>
+                                <p>Puedo enviarle ya al proveedor un borrador de orden de reposición del café:</p>
+                              </div>
+                            </div>
+
+                            @if (vexiDecision() === 'pending') {
+                              <section class="lv-card" role="group" aria-label="Cambio propuesto por Vexi">
+                                <header class="lv-card__header">
+                                  <span class="lv-card__badge" aria-hidden="true"><app-icon name="pencil" [size]="15" /></span>
+                                  <span class="lv-card__heading">
+                                    <strong class="lv-card__title">Vexi propone un cambio</strong>
+                                    <span class="lv-card__target">Orden de reposición · Café Especial Huila 500g</span>
+                                  </span>
+                                </header>
+                                <p class="lv-card__message">Envía al proveedor el borrador por WhatsApp para que lo confirme. Nada sale sin tu aprobación.</p>
+                                <dl class="lv-card__diff">
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Proveedor</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">—</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">Distribuidora del Huila</span></dd>
+                                  </div>
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Cantidad</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">3 unidades</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">24 unidades</span></dd>
+                                  </div>
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Canal</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">—</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">WhatsApp del proveedor</span></dd>
+                                  </div>
+                                </dl>
+                                <footer class="lv-card__actions">
+                                  <button type="button" class="lv-card__btn lv-card__btn--reject" (click)="rejectVexiProposal()" [disabled]="vexiApplying()">
+                                    <app-icon name="x" [size]="15" /> Rechazar
+                                  </button>
+                                  <button type="button" class="lv-card__btn lv-card__btn--approve" (click)="approveVexiProposal()" [disabled]="vexiApplying()">
+                                    @if (vexiApplying()) {
+                                      <app-icon name="loader-2" [size]="15" [spin]="true" /> Aplicando…
+                                    } @else {
+                                      <app-icon name="check" [size]="15" /> Aprobar
+                                    }
+                                  </button>
+                                </footer>
+                              </section>
+                            } @else if (vexiDecision() === 'approved') {
+                              <div class="lv-turn">
+                                <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="happy" /></span>
+                                <div class="lv-msg lv-msg--assistant lv-md">
+                                  <p>Orden de reposición <strong>#OC-2026-084</strong> transmitida a Distribuidora del Huila por WhatsApp. Reposición estimada: mañana a las 8:00 a. m.</p>
+                                </div>
+                              </div>
+                            } @else {
+                              <div class="lv-turn">
+                                <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="idle" /></span>
+                                <div class="lv-msg lv-msg--assistant lv-md">
+                                  <p>Perfecto, dejo la alerta activa y no le envío nada al proveedor por ahora.</p>
+                                </div>
+                              </div>
+                            }
+                          }
+                          @default {
+                            <div class="lv-turn">
+                              <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="idle" /></span>
+                              <div class="lv-msg lv-msg--assistant lv-md">
+                                <p>Esa la respondo con los datos reales de tu tienda cuando actives a Vexi. En esta demo puedo mostrarte cómo trabajo con estos casos:</p>
+                              </div>
+                            </div>
+                            <div class="lv-empty__chips lv-empty__chips--start">
+                              @for (example of vexiExamples; track example.id) {
+                                <button type="button" class="lv-empty__chip" (click)="setVexiTab(example.id)">{{ example.title }}</button>
+                              }
+                            </div>
+                          }
+                        }
+                      }
+                    }
+                  </div>
+                </div>
+
+                @if (vexiVoiceUi()) {
+                  <div class="lv-voice__composer">
+                    <button
+                      type="button"
+                      class="lv-voice__mic"
+                      [class.is-recording]="vexiVoiceRecording()"
+                      (pointerdown)="onVexiMicDown($event)"
+                      (pointerup)="onVexiMicUp()"
+                      (pointercancel)="onVexiMicCancel()"
+                      (keydown.space)="onVexiMicDown($event)"
+                      (keydown.enter)="onVexiMicDown($event)"
+                      (keyup.space)="onVexiMicUp()"
+                      (keyup.enter)="onVexiMicUp()"
+                      [attr.aria-pressed]="vexiVoiceRecording()"
+                      aria-label="Mantén presionado para hablar">
+                      <app-icon [name]="vexiVoiceRecording() ? 'square' : 'mic'" [size]="26" />
+                    </button>
+                    <p class="lv-voice__hint">{{ vexiVoiceHint() }}</p>
+                  </div>
+                } @else {
+                  <form class="lv-panel__composer" (submit)="onVexiSubmit($event)">
+                    <button type="button" class="lv-panel__attach" (click)="setVexiTab(3)" aria-label="Adjuntar documento" title="Adjuntar una factura, un recibo o una foto">
+                      <app-icon name="paperclip" [size]="18" />
+                    </button>
+                    <input
+                      class="lv-panel__input"
+                      name="vexiMessage"
+                      autocomplete="off"
+                      placeholder="Pregúntale a Vexi…"
+                      aria-label="Mensaje para Vexi"
+                      [value]="vexiQuery()"
+                      (input)="vexiQuery.set($any($event.target).value)"
+                    />
+                    <button type="submit" class="lv-panel__send" [disabled]="!vexiQuery().trim()" aria-label="Enviar">
+                      <app-icon name="send" [size]="18" />
+                    </button>
+                  </form>
+                }
+
+                <span class="lv-panel__grip" aria-hidden="true"></span>
+              </section>
+            } @else {
+              <span class="lv-dock__hint" role="status">Toca a Vexi para volver a abrir el chat</span>
+              <button type="button" class="lv-dock" (click)="openVexiPanel()" aria-label="Abrir a Vexi">
+                <span class="lv-dock__veil"><app-vexi-avatar expression="happy" /></span>
+              </button>
+            }
           </div>
         </div>
       </div>
     </section>
 
-    <!-- PRICING SECTION - COMMENTED OUT FOR EARLY ACCESS
-    <section id="pricing" class="min-h-screen bg-[var(--color-surface)] py-20 md:py-32">
-      <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="text-center mb-12 md:mb-16">
-          <div class="inline-flex items-center gap-2 bg-[var(--color-primary)] px-4 py-2 rounded-full mb-6">
-            <span class="w-2 h-2 bg-[var(--color-accent)] rounded-full"></span>
-            <span class="text-sm font-medium text-[var(--color-accent)]">Planes y Precios</span>
-          </div>
-          <h2 class="text-3xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight">
-            Planes para
-            <span class="text-[var(--color-primary)]">Tu Negocio</span>
+    <!-- SECTION 6: PLANES Y PRECIOS REALES (CORE COMMERCIAL SECTION) -->
+    <section id="precios-section" class="w-full py-20 px-4 sm:px-6 lg:px-8 bg-white">
+      <div class="max-w-[75rem] mx-auto flex flex-col gap-12">
+        <!-- Heading & Switchers -->
+        <div class="text-center max-w-2xl mx-auto flex flex-col items-center">
+          <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">Transparencia Total Sin Letra Menuda</span>
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-2">
+            Planes flexibles que crecen junto a tu negocio
           </h2>
-          <p class="text-lg md:text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
-            Elige el plan perfecto según tus necesidades. Cancela cuando quieras.
+          <p class="text-sm sm:text-base text-slate-600 mt-2">
+            Comienza gratis por 14 días. Sin tarjeta de crédito requerida. Cancela cuando quieras.
           </p>
+
+          <!-- Segmented Billing Switch (Monthly / Quarterly / Annual) -->
+          <div class="mt-6 inline-flex flex-wrap items-center justify-center gap-2 bg-slate-100 p-1.5 rounded-full border border-slate-200">
+            @for (cycle of availableCycles(); track cycle) {
+              <button
+                (click)="setBillingCycle(cycle)"
+                [class.bg-white]="selectedCycle() === cycle"
+                [class.text-emerald-800]="selectedCycle() === cycle"
+                [class.shadow-sm]="selectedCycle() === cycle"
+                [class.text-slate-600]="selectedCycle() !== cycle"
+                class="px-4 py-2 rounded-full text-xs sm:text-sm font-bold transition-all hover:text-slate-900 flex items-center gap-1.5">
+                <span>{{ getCycleDisplayLabel(cycle) }}</span>
+                @if (getCycleDiscountBadge(cycle); as badge) {
+                  <span
+                    [class.bg-amber-100]="cycle === 'annual' || cycle === 'yearly'"
+                    [class.text-amber-800]="cycle === 'annual' || cycle === 'yearly'"
+                    [class.bg-emerald-100]="cycle === 'quarterly' || cycle === 'semiannual'"
+                    [class.text-emerald-800]="cycle === 'quarterly' || cycle === 'semiannual'"
+                    class="px-1.5 py-0.5 text-[10px] font-black rounded-full">
+                    {{ badge }}
+                  </span>
+                }
+              </button>
+            }
+          </div>
+
+          <!-- Currency Switcher -->
+          <div class="mt-3 flex items-center gap-2 text-xs text-slate-500">
+            <span>Moneda:</span>
+            <button
+              (click)="setCurrency('COP')"
+              [class.font-bold]="selectedCurrency() === 'COP'"
+              [class.text-emerald-700]="selectedCurrency() === 'COP'"
+              [class.underline]="selectedCurrency() === 'COP'">
+              COP ($)
+            </button>
+            <span>/</span>
+            <button
+              (click)="setCurrency('USD')"
+              [class.font-bold]="selectedCurrency() === 'USD'"
+              [class.text-emerald-700]="selectedCurrency() === 'USD'"
+              [class.underline]="selectedCurrency() === 'USD'">
+              USD ($)
+            </button>
+          </div>
+        </div>
+
+        <!-- Pricing Cards Grid Dynamically Rendered From API -->
+        <!-- 4 planes base en producción (Impulsa · Emprendedor · Empresarial Pro · IA Business) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-6 items-stretch">
+          @for (plan of visiblePlans(); track plan.id) {
+            <div
+              [class.bg-[#00170d]]="plan.is_popular"
+              [class.text-white]="plan.is_popular"
+              [class.border-2]="plan.is_popular"
+              [class.border-emerald-500]="plan.is_popular"
+              [class.shadow-xl]="plan.is_popular"
+              [class.lg:-translate-y-2]="plan.is_popular"
+              [class.bg-white]="!plan.is_popular"
+              [class.text-slate-900]="!plan.is_popular"
+              [class.border]="!plan.is_popular"
+              [class.border-slate-200]="!plan.is_popular && !plan.is_ai_plan"
+              [class.shadow-sm]="!plan.is_popular"
+              [class.ai-plan-card]="plan.is_ai_plan"
+              class="p-6 sm:p-8 rounded-2xl flex flex-col justify-between relative transition-all duration-200">
+
+              @if (plan.is_popular) {
+                <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3.5 py-1 bg-amber-500 text-slate-950 text-[10px] sm:text-[11px] font-black rounded-full shadow-md tracking-wider whitespace-nowrap">
+                  ★ RECOMENDADO PARA CRECER
+                </div>
+              }
+
+              <div>
+                <!-- El badge superior «Recomendado para crecer» ya marca el plan popular;
+                     un segundo chip junto al título se partía en dos líneas y pisaba el nombre:
+                     el chip «Plan IA» va en su propia línea encima del h3. -->
+                @if (plan.is_ai_plan) {
+                  <span class="ai-plan-card__badge mb-2">✦ Plan IA</span>
+                }
+                <div class="flex justify-between items-center mb-2" [class.mt-2]="plan.is_popular">
+                  <h3 class="text-xl font-extrabold" [class.text-white]="plan.is_popular" [class.text-slate-900]="!plan.is_popular" [class.ai-plan-card__name]="plan.is_ai_plan">
+                    {{ plan.name }}
+                  </h3>
+                </div>
+
+                <p class="text-xs mb-6 min-h-[36px] line-clamp-4" [title]="plan.description" [class.text-emerald-100/70]="plan.is_popular" [class.text-slate-500]="!plan.is_popular">
+                  {{ plan.description }}
+                </p>
+
+                <div class="mb-6">
+                  <!-- base_price es el total del período; aquí va el equivalente mensual -->
+                  <span class="text-3xl sm:text-4xl font-black" [class.text-emerald-300]="plan.is_popular" [class.text-slate-900]="!plan.is_popular">
+                    {{ formatPrice(monthlyEquivalent(plan)) }}
+                  </span>
+                  <span class="text-xs" [class.text-emerald-100/60]="plan.is_popular" [class.text-slate-400]="!plan.is_popular">
+                    {{ getCyclePeriodSuffix(selectedCycle()) }}
+                  </span>
+                  <p class="text-[11px] font-medium mt-1" [class.text-emerald-200]="plan.is_popular" [class.text-emerald-700]="!plan.is_popular">
+                    {{ getCycleSubtext(plan) }}
+                  </p>
+                </div>
+
+                <!-- Feature List: tope de 7 ítems por card; lo que sobra vive en el
+                     modal «Ver todo lo que incluye». Producción publica algunos
+                     planes sin bullets: en ese caso la card manda a la comparativa
+                     en vez de quedar vacía. -->
+                @if (plan.features.length) {
+                  <ul class="space-y-3 text-xs sm:text-sm" [class.pb-8]="!hasPlanDetail(plan)">
+                    @for (feat of visibleFeatures(plan); track feat.key) {
+                      <li class="flex items-start gap-2.5">
+                        @if (!feat.enabled) {
+                          <app-icon name="x" [size]="16" class="text-slate-400 shrink-0 mt-0.5"></app-icon>
+                          <span class="flex-1 min-w-0 text-slate-400 line-through">{{ feat.label }}</span>
+                        } @else if (feat.is_limited) {
+                          <app-icon name="minus-circle" [size]="16" [class]="plan.is_popular ? 'text-amber-300 shrink-0 mt-0.5' : 'text-amber-600 shrink-0 mt-0.5'"></app-icon>
+                          <span class="flex-1 min-w-0" [class.font-semibold]="plan.is_popular">{{ feat.label }}</span>
+                        } @else {
+                          <app-icon name="check" [size]="16" [class]="plan.is_popular ? 'text-emerald-300 shrink-0 mt-0.5' : 'text-emerald-600 shrink-0 mt-0.5'"></app-icon>
+                          <span class="flex-1 min-w-0" [class.font-semibold]="plan.is_popular">{{ feat.label }}</span>
+                        }
+                        @if (feat.value) {
+                          <span
+                            class="shrink-0 text-[10px] sm:text-[11px] font-semibold px-1.5 py-0.5 rounded-md"
+                            [class.bg-emerald-900]="plan.is_popular"
+                            [class.text-emerald-200]="plan.is_popular"
+                            [class.bg-slate-100]="!plan.is_popular"
+                            [class.text-slate-600]="!plan.is_popular">
+                            {{ feat.value }}
+                          </span>
+                        }
+                      </li>
+                    }
+                  </ul>
+                }
+
+                @if (!plan.features.length) {
+                  <button
+                    type="button"
+                    (click)="scrollToSection('comparativa')"
+                    class="mb-8 inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold underline-offset-2 hover:underline"
+                    [class.text-emerald-300]="plan.is_popular"
+                    [class.text-emerald-700]="!plan.is_popular">
+                    Ver todo lo que incluye
+                    <app-icon name="chevron-right" [size]="14"></app-icon>
+                  </button>
+                } @else if (hasPlanDetail(plan)) {
+                  <button
+                    type="button"
+                    (click)="openPlanDetail(plan)"
+                    class="mt-4 mb-8 inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold underline-offset-2 hover:underline"
+                    [class.text-emerald-300]="plan.is_popular"
+                    [class.text-emerald-700]="!plan.is_popular">
+                    @if (hiddenFeatureCount(plan) > 0) {
+                      <span>Ver todo lo que incluye (+{{ hiddenFeatureCount(plan) }})</span>
+                    } @else {
+                      <span>Ver todo lo que incluye</span>
+                    }
+                    <app-icon name="chevron-right" [size]="14"></app-icon>
+                  </button>
+                }
+              </div>
+
+              <!-- CTA Button -->
+              <button
+                (click)="onSelectPlan(plan)"
+                [class.bg-emerald-500]="plan.is_popular"
+                [class.hover:bg-emerald-400]="plan.is_popular"
+                [class.text-slate-950]="plan.is_popular"
+                [class.bg-slate-100]="!plan.is_popular"
+                [class.hover:bg-emerald-600]="!plan.is_popular"
+                [class.hover:text-white]="!plan.is_popular"
+                [class.text-slate-800]="!plan.is_popular"
+                class="w-full py-3 px-4 rounded-xl text-xs sm:text-sm font-bold text-center transition-all duration-200 shadow-sm">
+                {{ plan.is_popular ? 'Elegir ' + plan.name + ' (14 Días Gratis)' : 'Iniciar Prueba de 14 Días' }}
+              </button>
+            </div>
+          }
         </div>
       </div>
     </section>
-    -->
 
-    <!-- Early Access Section -->
-    <section id="early-access" class="min-h-screen bg-[var(--color-surface)] py-20 md:py-32">
-      <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-7xl">
-
-        <!-- Header -->
-        <div class="text-center mb-12 md:mb-16">
-          <div class="inline-flex items-center gap-2 bg-[var(--color-primary)] px-4 py-2 rounded-full mb-6">
-            <app-icon name="sparkles" [size]="14" color="var(--color-accent)"></app-icon>
-            <span class="text-sm font-medium text-[var(--color-accent)]">Acceso Anticipado Gratuito</span>
-          </div>
-          <h2 class="text-3xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-6 tracking-tight">
-            Todas las Herramientas.<br />
-            <span class="text-[var(--color-primary)]">Gratis. Sin Límites.</span>
+    <!-- SECTION 7: COMPARATIVA TÉCNICA DETALLADA.
+         Sólo capacidades: los precios viven en las cards, que los leen de la
+         API. Columnas y filas salen de COMPARISON_PLANS / COMPARISON_ROWS. -->
+    <section id="comparativa" class="w-full bg-[#f8f9ff] py-20 px-4 sm:px-6 lg:px-8 border-t border-slate-200/60">
+      <div class="max-w-[75rem] mx-auto flex flex-col gap-10">
+        <div class="text-center max-w-2xl mx-auto">
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
+            Comparativa técnica detallada
           </h2>
-          <p class="text-lg md:text-xl text-[var(--color-text-secondary)] max-w-3xl mx-auto leading-relaxed">
-            Vendix está en acceso anticipado. Regístrate hoy y obtén acceso completo a todas las funcionalidades
-            sin costo alguno, sin tarjeta de crédito, sin compromisos.
+          <p class="text-sm sm:text-base text-slate-600 mt-2">
+            Descubre cada una de las capacidades incluidas en cada plan sin costes ocultos.
           </p>
         </div>
 
-        <!-- Hero Card -->
-        <div class="max-w-2xl mx-auto mb-16">
-          <div
-            class="relative bg-surface rounded-2xl border-2 border-[var(--color-primary)]/30 shadow-xl p-8 md:p-10 text-center overflow-hidden">
-            <!-- Decorative gradient -->
-            <div
-              class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-secondary)]">
+        <!-- Comparativa dinámica: columnas y filas salen de los ítems que el
+             super-admin cargó en cada plan del ciclo seleccionado, en el mismo
+             orden que las cards. `comparison()` es todo-o-nada: si algún plan
+             visible no tiene ítems devuelve null y se pinta la tabla estática
+             de respaldo, en vez de una comparativa a medias. -->
+        @if (comparison(); as c) {
+          <div class="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200/80 overflow-x-auto">
+            <table class="w-full text-left text-xs sm:text-sm min-w-[40rem]">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200">
+                  <th class="p-3 sm:p-4 font-bold text-slate-800">Capacidad / Módulo</th>
+                  @for (name of c.columns; track name; let i = $index) {
+                    <th
+                      class="p-3 sm:p-4 font-bold text-center whitespace-nowrap"
+                      [class.text-emerald-700]="c.highlightIndex >= 0 && i === c.highlightIndex"
+                      [class.bg-emerald-50/50]="c.highlightIndex >= 0 && i === c.highlightIndex"
+                      [class.text-slate-800]="c.highlightIndex < 0 || i !== c.highlightIndex">
+                      {{ name }}
+                      @if (c.highlightIndex >= 0 && i === c.highlightIndex) {
+                        <span class="block text-[10px] font-black uppercase tracking-wider text-emerald-600 mt-0.5">Más popular</span>
+                      }
+                    </th>
+                  }
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                @for (row of c.rows; track row.key) {
+                  <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="p-3 sm:p-4 font-medium text-slate-800">{{ row.label }}</td>
+                    @for (cell of row.cells; track $index; let i = $index) {
+                      <td
+                        class="p-3 sm:p-4 text-center"
+                        [class.bg-emerald-50/20]="c.highlightIndex >= 0 && i === c.highlightIndex"
+                        [class.text-emerald-700]="cell.tone === 'yes'"
+                        [class.font-bold]="cell.tone === 'yes'"
+                        [class.text-amber-600]="cell.tone === 'partial'"
+                        [class.text-slate-300]="cell.tone === 'no'">
+                        {{ cell.text }}
+                      </td>
+                    }
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+        <div class="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200/80 overflow-x-auto">
+          <table class="w-full text-left text-xs sm:text-sm min-w-[40rem]">
+            <thead>
+              <tr class="bg-slate-50 border-b border-slate-200">
+                <th class="p-3 sm:p-4 font-bold text-slate-800">Capacidad / Módulo</th>
+                @for (name of comparisonPlans; track name; let i = $index) {
+                  <th
+                    class="p-3 sm:p-4 font-bold text-center whitespace-nowrap"
+                    [class.text-emerald-700]="i === comparisonHighlightIndex"
+                    [class.bg-emerald-50/50]="i === comparisonHighlightIndex"
+                    [class.text-slate-800]="i !== comparisonHighlightIndex">
+                    {{ name }}
+                    @if (i === comparisonHighlightIndex) {
+                      <span class="block text-[10px] font-black uppercase tracking-wider text-emerald-600 mt-0.5">Más popular</span>
+                    }
+                  </th>
+                }
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              @for (row of comparisonRows; track row.label) {
+                <tr class="hover:bg-slate-50 transition-colors">
+                  <td class="p-3 sm:p-4 font-medium text-slate-800">{{ row.label }}</td>
+                  @for (cell of row.cells; track $index; let i = $index) {
+                    <td
+                      class="p-3 sm:p-4 text-center"
+                      [class.bg-emerald-50/20]="i === comparisonHighlightIndex"
+                      [class.text-emerald-700]="cell.tone === 'yes'"
+                      [class.font-bold]="cell.tone === 'yes'"
+                      [class.text-slate-500]="cell.tone === 'partial'"
+                      [class.text-slate-300]="cell.tone === 'no'">
+                      {{ cell.text }}
+                    </td>
+                  }
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        }
+      </div>
+    </section>
+
+    <!-- SECTION 8: CALCULADORA INTERACTIVA DE AHORRO (ROI CALCULATOR) -->
+    <section id="roi" class="w-full py-20 px-4 sm:px-6 lg:px-8 bg-white">
+      <div class="max-w-[75rem] mx-auto bg-slate-50 p-6 sm:p-10 rounded-3xl border border-slate-200 shadow-lg">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+          <!-- Calculator Controls -->
+          <div class="lg:col-span-7 flex flex-col gap-6">
+            <div>
+              <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">Calculadora de Retorno de Inversión</span>
+              <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-1">
+                ¿Cuánto dinero ahorras al año con Vendix?
+              </h2>
+              <p class="text-xs sm:text-sm text-slate-600 mt-1">
+                Compara el gasto de contratar POS independiente + Facturador DIAN por folios + Plugin Web frente a Vendix Todo-en-Uno.
+              </p>
             </div>
 
-            <div class="mb-6">
-              <span class="text-2xl md:text-3xl text-[var(--color-text-secondary)] line-through opacity-60">$69.900/mes</span>
+            <!-- Slider 1: Sucursales -->
+            <div class="space-y-2">
+              <div class="flex justify-between items-center text-xs sm:text-sm font-semibold">
+                <span class="text-slate-800">¿Cuántas sucursales o puntos de venta tienes?</span>
+                <span class="font-bold text-emerald-700 text-sm sm:text-base">{{ storeCount() }} {{ storeCount() === 1 ? 'Tienda' : 'Tiendas' }}</span>
+              </div>
+              <input
+                [value]="storeCount()"
+                (input)="updateStores($event)"
+                class="roi-range w-full accent-emerald-600 h-2 bg-[#1f4f37] rounded-lg cursor-pointer"
+                max="5"
+                min="1"
+                step="1"
+                type="range"
+              />
             </div>
-            <div class="mb-4">
-              <span class="text-5xl md:text-7xl font-bold text-[var(--color-primary)]">GRATIS</span>
+
+            <!-- Slider 2: Facturas al mes -->
+            <div class="space-y-2 -mt-3">
+              <div class="flex justify-between items-center text-xs sm:text-sm font-semibold">
+                <span class="text-slate-800">¿Cuántas ventas o facturas emites al mes aprox?</span>
+                <span class="font-bold text-emerald-700 text-sm sm:text-base">{{ invoicesCount() | number:'1.0-0' }} ventas</span>
+              </div>
+              <input
+                [value]="invoicesCount()"
+                (input)="updateInvoices($event)"
+                class="roi-range w-full accent-emerald-600 h-2 bg-[#1f4f37] rounded-lg cursor-pointer"
+                max="10000"
+                min="300"
+                step="100"
+                type="range"
+              />
             </div>
-            <p class="text-lg text-[var(--color-text-secondary)] mb-8">
-              durante Early Access
-            </p>
-            <div class="flex flex-wrap justify-center gap-3 mb-8 text-sm md:text-base text-[var(--color-text-secondary)]">
-              <span class="flex items-center gap-1.5">
-                <app-icon name="check" [size]="16" color="var(--color-success)"></app-icon>
-                Usuarios Ilimitados
-              </span>
-              <span class="text-[var(--color-border)]">·</span>
-              <span class="flex items-center gap-1.5">
-                <app-icon name="check" [size]="16" color="var(--color-success)"></app-icon>
-                Productos Ilimitados
-              </span>
-              <span class="text-[var(--color-border)]">·</span>
-              <span class="flex items-center gap-1.5">
-                <app-icon name="check" [size]="16" color="var(--color-success)"></app-icon>
-                Tiendas Ilimitadas
-              </span>
+
+            <div class="text-xs text-slate-500 flex items-center gap-1.5">
+              <app-icon name="info" [size]="14"></app-icon>
+              <span>Cálculo estimado basado en costo promedio de folios DIAN ($280 COP/folio) + POS tradicional ($180.000/mes).</span>
             </div>
-            <a routerLink="/auth/register"
-              class="inline-flex items-center gap-2 bg-[var(--color-primary)] text-white px-8 py-4 rounded-xl text-lg font-semibold hover:bg-[var(--color-secondary)] shadow-lg hover:shadow-xl transition-all duration-300">
-              <app-icon name="zap" [size]="20" color="white"></app-icon>
-              Comenzar Gratis Ahora
-            </a>
+          </div>
+
+          <!-- Result Card -->
+          <div class="lg:col-span-5 bg-white p-6 sm:p-8 rounded-2xl flex flex-col justify-between text-center border border-slate-200 shadow-md">
+            <div>
+              <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Ahorro anual estimado directo</span>
+              <div class="text-3xl sm:text-4xl lg:text-5xl font-black text-emerald-700 mt-2 tracking-tight">
+                $ {{ annualSavings() | number:'1.0-0' }} COP
+              </div>
+              <p class="text-xs sm:text-sm text-slate-600 mt-3 leading-relaxed">
+                Dinero que dejas de regalar a proveedores de software desconectados, además de ganar <strong>~90 horas de tiempo libre al mes</strong>.
+              </p>
+            </div>
+            <button
+              (click)="scrollToSection('precios-section')"
+              class="mt-6 w-full inline-flex items-center justify-center text-xs sm:text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors py-3 rounded-xl shadow-md">
+              Comenzar a Ahorrar Hoy
+            </button>
           </div>
         </div>
+      </div>
+    </section>
 
-        <!-- Feature Grid -->
-        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 mb-16">
-
-          <!-- Punto de Venta (POS) -->
-          <div
-            class="group bg-surface p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="credit-card" [size]="24" color="var(--color-accent)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Punto de Venta (POS)</h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Escaneo de códigos de barras</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Pagos en efectivo y tarjeta</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Impresión de tickets y facturas</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Inventario en tiempo real</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- Gestión de Inventario -->
-          <div
-            class="group bg-surface p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-success-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="package" [size]="24" color="var(--color-success)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Gestión de Inventario</h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Ajustes de stock y ubicaciones</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Gestión de proveedores</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Punto de compra automático</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Seguimiento por número de serie</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- E-commerce Completo -->
-          <div
-            class="group bg-surface p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="shopping-bag" [size]="24" color="var(--color-primary)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">E-commerce Completo</h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Tienda online personalizable</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Carrito de compras configurable</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Checkout con WhatsApp</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Catálogo con variantes</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- Analíticas Avanzadas -->
-          <div
-            class="group bg-surface p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-primary-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="chart-line" [size]="24" color="var(--color-primary)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Analíticas Avanzadas</h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Resumen de ventas en tiempo real</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Análisis de inventario</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Rendimiento de productos y top sellers</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Pérdidas y ganancias</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- Marketing y Clientes -->
-          <div
-            class="group bg-surface p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-[var(--color-accent-light)] rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="users" [size]="24" color="var(--color-accent)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Marketing y Clientes</h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Directorio de clientes</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Promociones y cupones</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Reseñas y calificaciones</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Segmentación de clientes</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- Multi-tienda y Organización -->
-          <div
-            class="group bg-surface p-6 rounded-2xl border border-[var(--color-border)] hover:border-[var(--color-primary)]/30 hover:shadow-lg transition-all duration-300">
-            <div
-              class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center mb-5 group-hover:scale-105 transition-transform duration-300">
-              <app-icon name="building" [size]="24" color="var(--color-primary)"></app-icon>
-            </div>
-            <h3 class="text-xl font-semibold text-[var(--color-text-primary)] mb-4">Multi-tienda y Organización</h3>
-            <ul class="space-y-3 text-[var(--color-text-secondary)]">
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Gestión multi-tienda</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Roles y permisos por usuario</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Dominios personalizados</span>
-              </li>
-              <li class="flex items-start">
-                <app-icon name="check" [size]="16" color="var(--color-success)"
-                  class="mr-2 mt-0.5 flex-shrink-0"></app-icon>
-                <span>Auditoría y cumplimiento</span>
-              </li>
-            </ul>
-          </div>
+    <!-- SECTION 9: TESTIMONIOS Y CASOS DE ÉXITO -->
+    <section class="w-full bg-[#f8f9ff] py-20 px-4 sm:px-6 lg:px-8 border-t border-slate-200/60">
+      <div class="max-w-[75rem] mx-auto flex flex-col gap-10">
+        <div class="text-center max-w-2xl mx-auto">
+          <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">Historias Reales de Crecimiento</span>
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-2">
+            Comercios que ya no sufren a fin de mes
+          </h2>
         </div>
 
-        <!-- Urgency Banner -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <!-- Testimonial 1 -->
+          <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center gap-1 text-amber-500 mb-3">
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+              </div>
+              <p class="text-xs sm:text-sm text-slate-700 italic leading-relaxed">
+                "El tiempo de servicio en nuestras 2 sedes se redujo un 35%. Antes las comandas se perdían entre mesas y cocina. Con el comandero KDS y el cierre ciego de caja, los descuadres llegaron a cero."
+              </p>
+            </div>
+            <div class="flex items-center gap-3 mt-6 pt-4 border-t border-slate-100">
+              <img
+                class="w-11 h-11 rounded-full object-cover border border-slate-200"
+                src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&q=80"
+                alt="Carlos M."
+              />
+              <div>
+                <p class="text-xs sm:text-sm font-bold text-slate-900">Carlos M.</p>
+                <p class="text-[11px] text-slate-500">Gastrobar La Selva · Medellín</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Testimonial 2 -->
+          <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center gap-1 text-amber-500 mb-3">
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+              </div>
+              <p class="text-xs sm:text-sm text-slate-700 italic leading-relaxed">
+                "Teníamos la pesadilla de vender vestidos en Instagram y que ya no estuvieran disponibles en el local físico. Con Vendix el catálogo se descuenta en vivo. Vexi además me avisa qué tallas reponer."
+              </p>
+            </div>
+            <div class="flex items-center gap-3 mt-6 pt-4 border-t border-slate-100">
+              <img
+                class="w-11 h-11 rounded-full object-cover border border-slate-200"
+                src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=120&q=80"
+                alt="Andrea S."
+              />
+              <div>
+                <p class="text-xs sm:text-sm font-bold text-slate-900">Andrea S.</p>
+                <p class="text-[11px] text-slate-500">Boutique Aura · Bogotá</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Testimonial 3 -->
+          <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/80 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center gap-1 text-amber-500 mb-3">
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+                <app-icon name="star" [size]="16"></app-icon>
+              </div>
+              <p class="text-xs sm:text-sm text-slate-700 italic leading-relaxed">
+                "Emitir facturas electrónicas a clientes corporativos nos tomaba hasta 10 minutos por tique con el sistema viejo. Con Vendix es cuestión de un clic. El onboarding asistido nos migró 4.000 repuestos en 2 horas."
+              </p>
+            </div>
+            <div class="flex items-center gap-3 mt-6 pt-4 border-t border-slate-100">
+              <img
+                class="w-11 h-11 rounded-full object-cover border border-slate-200"
+                src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&q=80"
+                alt="Felipe R."
+              />
+              <div>
+                <p class="text-xs sm:text-sm font-bold text-slate-900">Felipe R.</p>
+                <p class="text-[11px] text-slate-500">Distribuidora Autopartes del Valle · Cali</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 10: FAQ ANTI-OBJECIONES (ACCORDION) -->
+    <section id="faq" class="w-full py-20 px-4 sm:px-6 lg:px-8 bg-white">
+      <div class="max-w-3xl mx-auto flex flex-col gap-10">
         <div class="text-center">
-          <div
-            class="bg-[var(--color-primary)]/5 rounded-2xl p-6 md:p-8 border border-[var(--color-primary)]/20 max-w-3xl mx-auto">
-            <app-icon name="zap" [size]="28" color="var(--color-primary)" class="mb-3"></app-icon>
-            <h3 class="text-lg md:text-xl font-semibold text-[var(--color-primary)] mb-3">
-              El acceso gratuito es por tiempo limitado
-            </h3>
-            <p class="text-[var(--color-text-secondary)] mb-5 leading-relaxed">
-              Aprovecha ahora: cuando lancemos los planes de pago, los usuarios de Early Access
-              conservarán beneficios exclusivos.
-            </p>
-            <a routerLink="/auth/register"
-              class="inline-flex items-center text-[var(--color-primary)] hover:text-[var(--color-secondary)] font-semibold transition-colors duration-200">
-              Crear mi cuenta gratis
-              <app-icon name="arrow-right" [size]="18" color="currentColor" class="ml-2"></app-icon>
-            </a>
+          <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">Claridad Absoluta</span>
+          <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight mt-2">
+            Preguntas Frecuentes
+          </h2>
+        </div>
+
+        <div class="space-y-3">
+          <!-- FAQ 1 -->
+          <div class="bg-slate-50 rounded-xl p-4 sm:p-5 border border-slate-200/80 shadow-xs">
+            <button
+              (click)="toggleFaq(1)"
+              class="w-full flex justify-between items-center text-left text-xs sm:text-base font-bold text-slate-900">
+              <span>¿Cómo funciona la prueba gratis de 14 días? ¿Debo ingresar mi tarjeta?</span>
+              <app-icon
+                name="chevron-down"
+                [size]="20"
+                [class.rotate-180]="openFaqId() === 1"
+                class="text-emerald-700 transition-transform duration-200 shrink-0 ml-2">
+              </app-icon>
+            </button>
+            @if (openFaqId() === 1) {
+              <div class="text-xs sm:text-sm text-slate-600 pt-3 mt-2 border-t border-slate-200/60 leading-relaxed animate-in fade-in duration-150">
+                No necesitas ingresar ninguna tarjeta de crédito ni cuenta bancaria para iniciar. Tienes acceso completo e ilimitado a todas las funciones del Plan Pro durante 14 días. Si decides no continuar, tu cuenta simplemente expira sin ningún cobro sorpresa.
+              </div>
+            }
+          </div>
+
+          <!-- FAQ 2 -->
+          <div class="bg-slate-50 rounded-xl p-4 sm:p-5 border border-slate-200/80 shadow-xs">
+            <button
+              (click)="toggleFaq(2)"
+              class="w-full flex justify-between items-center text-left text-xs sm:text-base font-bold text-slate-900">
+              <span>¿Necesito comprar computadores o impresoras costosas para usar Vendix?</span>
+              <app-icon
+                name="chevron-down"
+                [size]="20"
+                [class.rotate-180]="openFaqId() === 2"
+                class="text-emerald-700 transition-transform duration-200 shrink-0 ml-2">
+              </app-icon>
+            </button>
+            @if (openFaqId() === 2) {
+              <div class="text-xs sm:text-sm text-slate-600 pt-3 mt-2 border-t border-slate-200/60 leading-relaxed animate-in fade-in duration-150">
+                No. Vendix funciona en la nube sobre cualquier dispositivo que ya tengas: tu smartphone actual, una tablet Android/iPad, un computador de escritorio o laptop. Es 100% compatible con tus impresoras térmicas ESC/POS (USB, Bluetooth, WiFi) y lectores de códigos de barra estándar.
+              </div>
+            }
+          </div>
+
+          <!-- FAQ 3 -->
+          <div class="bg-slate-50 rounded-xl p-4 sm:p-5 border border-slate-200/80 shadow-xs">
+            <button
+              (click)="toggleFaq(3)"
+              class="w-full flex justify-between items-center text-left text-xs sm:text-base font-bold text-slate-900">
+              <span>¿Cómo se tramita la habilitación ante la DIAN para facturación electrónica?</span>
+              <app-icon
+                name="chevron-down"
+                [size]="20"
+                [class.rotate-180]="openFaqId() === 3"
+                class="text-emerald-700 transition-transform duration-200 shrink-0 ml-2">
+              </app-icon>
+            </button>
+            @if (openFaqId() === 3) {
+              <div class="text-xs sm:text-sm text-slate-600 pt-3 mt-2 border-t border-slate-200/60 leading-relaxed animate-in fade-in duration-150">
+                Nosotros te guiamos paso a paso sin costo adicional. Solo necesitas tu RUT y usuario en el portal DIAN. Vendix te asocia como software propio o tecnológico y en menos de 24 horas quedas emitiendo facturas electrónicas válidas con su respectivo CUFE y código QR.
+              </div>
+            }
+          </div>
+
+          <!-- FAQ 4 -->
+          <div class="bg-slate-50 rounded-xl p-4 sm:p-5 border border-slate-200/80 shadow-xs">
+            <button
+              (click)="toggleFaq(4)"
+              class="w-full flex justify-between items-center text-left text-xs sm:text-base font-bold text-slate-900">
+              <span>¿Puedo migrar los productos y clientes que ya tengo en Excel o en otro software?</span>
+              <app-icon
+                name="chevron-down"
+                [size]="20"
+                [class.rotate-180]="openFaqId() === 4"
+                class="text-emerald-700 transition-transform duration-200 shrink-0 ml-2">
+              </app-icon>
+            </button>
+            @if (openFaqId() === 4) {
+              <div class="text-xs sm:text-sm text-slate-600 pt-3 mt-2 border-t border-slate-200/60 leading-relaxed animate-in fade-in duration-150">
+                ¡Totalmente! Contamos con importadores inteligentes de plantillas Excel y CSV. Además, en los planes Pro y Enterprise nuestro equipo técnico te ayuda a limpiar y estructurar tu base de datos de manera gratuita para que no pierdas ni un solo día de ventas.
+              </div>
+            }
+          </div>
+
+          <!-- FAQ 5 -->
+          <div class="bg-slate-50 rounded-xl p-4 sm:p-5 border border-slate-200/80 shadow-xs">
+            <button
+              (click)="toggleFaq(5)"
+              class="w-full flex justify-between items-center text-left text-xs sm:text-base font-bold text-slate-900">
+              <span>¿Hay cláusulas de permanencia o penalizaciones por cancelar?</span>
+              <app-icon
+                name="chevron-down"
+                [size]="20"
+                [class.rotate-180]="openFaqId() === 5"
+                class="text-emerald-700 transition-transform duration-200 shrink-0 ml-2">
+              </app-icon>
+            </button>
+            @if (openFaqId() === 5) {
+              <div class="text-xs sm:text-sm text-slate-600 pt-3 mt-2 border-t border-slate-200/60 leading-relaxed animate-in fade-in duration-150">
+                Cero permanencias. Creemos en la fidelidad por calidad, no por amarres contractuales. Puedes cancelar tu suscripción con un solo clic desde tu panel en cualquier momento y descargar toda tu información contable e inventario en formatos abiertos.
+              </div>
+            }
           </div>
         </div>
 
+        <!-- Centro de ayuda: guías, respuestas y envío de PQRs -->
+        <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#00170d] to-[#043320] p-6 sm:p-8 shadow-xl">
+          <div class="absolute -top-20 -right-20 w-72 h-72 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none"></div>
+          <div class="absolute -bottom-24 -left-16 w-72 h-72 bg-emerald-600/20 rounded-full blur-3xl pointer-events-none"></div>
+          <div class="relative z-10 flex flex-col sm:flex-row sm:items-center gap-5">
+            <div class="shrink-0 w-12 h-12 rounded-2xl bg-emerald-400/15 border border-emerald-300/30 flex items-center justify-center">
+              <app-icon name="help-circle" [size]="26" class="text-emerald-300"></app-icon>
+            </div>
+            <div class="flex-1 min-w-0">
+              <h3 class="text-base sm:text-lg font-extrabold text-white tracking-tight">
+                ¿Aún tienes dudas? Te ayudamos
+              </h3>
+              <p class="text-xs sm:text-sm text-emerald-100/80 mt-1 leading-relaxed">
+                Visita nuestro centro de ayuda integral: guías paso a paso, respuestas a fondo y envío de PQRs con seguimiento.
+              </p>
+            </div>
+            <a
+              href="https://vendix.online/ayuda"
+              target="_blank"
+              rel="noopener"
+              class="shrink-0 inline-flex items-center justify-center gap-2 text-xs sm:text-sm font-extrabold text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition-all duration-200 px-5 py-3 rounded-xl shadow-lg shadow-emerald-500/30 hover:scale-105">
+              <span>Ir al Centro de Ayuda</span>
+              <app-icon name="external-link" [size]="16"></app-icon>
+            </a>
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- CTA Section -->
-    <section class="min-h-screen bg-[var(--color-primary)] relative overflow-hidden flex items-center">
-      <div class="container mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
-        <h2 class="text-4xl md:text-5xl font-bold text-white mb-6 tracking-tight">
-          ¿Listo para Transformar<br />
-          tu Negocio con IA?
-        </h2>
-        <p class="text-xl text-white/90 mb-10 max-w-3xl mx-auto leading-relaxed">
-          Únete a miles de empresas que ya están usando inteligencia artificial
-          para revolucionar sus ventas y operaciones.
-        </p>
-        <div class="flex flex-col sm:flex-row gap-2 md:gap-4 justify-center">
-          <a routerLink="/auth/register"
-            class="bg-white text-[var(--color-primary)] px-8 py-4 rounded-xl font-semibold hover:bg-gray-50 hover:shadow-xl transition-all duration-300">
-            Comenzar Gratis Ahora
+    <!-- SECTION 11: FINAL CONVERSION CTA (HIGH URGENCY & ZERO RISK) -->
+    <section class="w-full py-20 px-4 sm:px-6 lg:px-8 bg-white">
+      <div class="max-w-[75rem] mx-auto bg-gradient-to-br from-[#00170d] to-[#043320] rounded-3xl p-8 sm:p-14 text-center text-white relative overflow-hidden shadow-2xl">
+        <!-- Ambient Glow Decorators -->
+        <div class="absolute -top-24 -left-24 w-96 h-96 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="absolute -bottom-24 -right-24 w-96 h-96 bg-emerald-600/20 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div class="relative z-10 max-w-2xl mx-auto flex flex-col items-center">
+          <span class="inline-flex items-center gap-1.5 px-4 py-1.5 bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-bold rounded-full mb-6">
+            <app-icon name="zap" [size]="14"></app-icon>
+            ACTIVACIÓN INSTANTÁNEA
+          </span>
+
+          <h2 class="text-2xl sm:text-4xl lg:text-5xl font-black text-white tracking-tight mb-4 leading-tight">
+            Tu negocio listo para vender y crecer en menos de 10 minutos.
+          </h2>
+
+          <p class="text-sm sm:text-base text-emerald-100/85 mb-8 leading-relaxed">
+            Únete a cientos de comerciantes modernos que eliminaron el caos operativo y multiplicaron su rentabilidad con Vendix.
+          </p>
+
+          <a
+            [routerLink]="['/auth/register']"
+            class="inline-flex items-center justify-center gap-2 text-sm sm:text-base font-extrabold text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition-all duration-200 px-8 py-4 rounded-xl shadow-xl shadow-emerald-500/30 hover:scale-105">
+            <app-icon name="store" [size]="20"></app-icon>
+            Crear Cuenta y Probar Gratis Ahora
           </a>
-          <a href="mailto:quicks.dev@gmail.com?subject=Quiero%20una%20demo%20de%20Vendix"
-            class="border-2 border-white text-white px-8 py-4 rounded-xl font-semibold hover:bg-white hover:text-[var(--color-primary)] transition-all duration-300">
-            Agendar Demo Personalizada
-          </a>
+
+          <div class="flex flex-wrap items-center justify-center gap-4 text-xs font-medium text-emerald-200/80 mt-8">
+            <span class="inline-flex items-center gap-1">
+              <app-icon name="lock" [size]="14" class="text-emerald-400"></app-icon>
+              Sin tarjeta de crédito requerida
+            </span>
+            <span>•</span>
+            <span class="inline-flex items-center gap-1">
+              <app-icon name="calendar" [size]="14" class="text-emerald-400"></app-icon>
+              Cancela cuando quieras
+            </span>
+            <span>•</span>
+            <span class="inline-flex items-center gap-1">
+              <app-icon name="headphones" [size]="14" class="text-emerald-400"></app-icon>
+              Soporte local en español
+            </span>
+          </div>
         </div>
-      </div>
-      <!-- Decorative elements -->
-      <div class="absolute top-0 left-0 w-full h-full opacity-10">
-        <div class="absolute top-10 left-10 w-20 h-20 bg-white rounded-full"></div>
-        <div class="absolute bottom-10 right-10 w-32 h-32 bg-white rounded-full"></div>
-        <div class="absolute top-1/2 right-1/4 w-16 h-16 bg-white rounded-full"></div>
       </div>
     </section>
   </main>
 
-  <!-- Footer -->
-  <footer class="bg-[var(--color-secondary)] text-white py-16">
-    <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="grid md:grid-cols-4 gap-2 md:p-6 mb-12">
-        <div class="md:col-span-1">
-          <div class="flex items-center space-x-3 mb-4">
-            <div class="w-10 h-10 bg-transparent rounded-xl flex items-center justify-center overflow-hidden">
-              <img src="vlogo.png" alt="Vendix" class="w-full h-full object-contain" />
-            </div>
-            <h3 class="text-xl font-semibold">Vendix</h3>
+  <!-- CONSOLIDATED FOOTER -->
+  <footer class="w-full bg-[#00170d] text-white border-t border-emerald-950">
+    <div class="max-w-[75rem] mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-12">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-8 mb-12">
+        <div class="lg:col-span-2 flex flex-col items-start pr-0 lg:pr-8">
+          <div class="flex items-center gap-2 mb-3">
+            <img src="/vlogo.png" alt="Vendix" class="h-8 w-auto" onerror="this.src='/favicon.ico'" />
+            <span class="text-2xl font-extrabold text-white tracking-tight">Vendix</span>
           </div>
-          <p class="text-white/70 leading-relaxed">
-            La plataforma todo-en-uno para modernizar tu negocio con
-            inteligencia artificial.
+          <p class="text-xs text-emerald-100/70 max-w-sm mb-5 leading-relaxed">
+            El Sistema Operativo Comercial Todo-en-Uno para Latinoamérica. Control de inventario, punto de venta, emisión tributaria electrónica y copiloto con inteligencia artificial integrada.
           </p>
-        </div>
-
-        <div>
-          <h4 class="text-lg font-semibold mb-4">Producto</h4>
-          <div class="space-y-3">
-            <a href="#features" class="block text-white/70 hover:text-white transition-colors">Características</a>
-            <a href="#solutions" class="block text-white/70 hover:text-white transition-colors">Soluciones</a>
-            <a href="#early-access" class="block text-white/70 hover:text-white transition-colors">Acceso Gratis</a>
+          <div class="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-900/60 border border-emerald-700/50 rounded-full text-emerald-300 text-xs font-semibold">
+            <app-icon name="check-circle" [size]="14"></app-icon>
+            Resolución DIAN Autorizada
           </div>
         </div>
 
         <div>
-          <h4 class="text-lg font-semibold mb-4">Empresa</h4>
-          <div class="space-y-3">
-            <a routerLink="/auth/login" class="block text-white/70 hover:text-white transition-colors">Iniciar
-              Sesión</a>
-            <a routerLink="/auth/register"
-              class="block text-white/70 hover:text-white transition-colors">Registrarse</a>
-            <a href="mailto:quicks.dev@gmail.com"
-              class="block text-white/70 hover:text-white transition-colors">Contacto</a>
-          </div>
+          <p class="text-xs font-bold text-white uppercase tracking-wider mb-4">Producto</p>
+          <ul class="flex flex-col gap-2.5 text-xs text-emerald-100/70">
+            <li><button (click)="scrollToSection('hero-simulator')" class="hover:text-emerald-300 transition-colors">POS en la Nube</button></li>
+            <li><button (click)="scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">E-commerce B2B</button></li>
+            <li><button (click)="scrollToSection('hero-simulator')" class="hover:text-emerald-300 transition-colors">Facturación DIAN</button></li>
+            <li>
+              <button (click)="scrollToSection('vexi')" class="hover:text-emerald-300 transition-colors flex items-center gap-1.5">
+                Vexi Copiloto IA <span class="px-1.5 py-0.2 bg-emerald-500 text-slate-950 text-[9px] rounded font-bold">NUEVO</span>
+              </button>
+            </li>
+            <li><button (click)="scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Comandero Mesas</button></li>
+          </ul>
         </div>
 
         <div>
-          <h4 class="text-lg font-semibold mb-4">Legal</h4>
-          <div class="space-y-3">
-            <a routerLink="/legal/privacidad" class="block text-white/70 hover:text-white transition-colors">Política de Privacidad</a>
-            <a routerLink="/legal/terminos" class="block text-white/70 hover:text-white transition-colors">Términos de Servicio</a>
-            <a routerLink="/legal/cookies" class="block text-white/70 hover:text-white transition-colors">Cookies</a>
-          </div>
+          <p class="text-xs font-bold text-white uppercase tracking-wider mb-4">Sectores</p>
+          <ul class="flex flex-col gap-2.5 text-xs text-emerald-100/70">
+            <li><button (click)="setIndustry('retail'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Comercio Retail</button></li>
+            <li><button (click)="setIndustry('restaurant'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Restaurantes y Bares</button></li>
+            <li><button (click)="setIndustry('gym'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Gimnasios & Fitness</button></li>
+            <li><button (click)="setIndustry('service'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Servicios & Asesoría</button></li>
+            <li><button (click)="setIndustry('manufacturing'); scrollToSection('sectores')" class="hover:text-emerald-300 transition-colors">Manufactura & Taller</button></li>
+          </ul>
+        </div>
+
+        <div>
+          <p class="text-xs font-bold text-white uppercase tracking-wider mb-4">Recursos & DIAN</p>
+          <ul class="flex flex-col gap-2.5 text-xs text-emerald-100/70">
+            <li><a href="https://www.dian.gov.co" target="_blank" rel="noopener noreferrer" class="hover:text-emerald-300 transition-colors">Normativa DIAN 2026</a></li>
+            <li><button (click)="scrollToSection('roi')" class="hover:text-emerald-300 transition-colors">Calculadora Ahorro</button></li>
+            <li><button (click)="scrollToSection('faq')" class="hover:text-emerald-300 transition-colors">Centro de Ayuda</button></li>
+            <li><button (click)="showDemo()" class="hover:text-emerald-300 transition-colors">Video Demostración</button></li>
+            <li><a [href]="'mailto:' + socialLinks.email" class="hover:text-emerald-300 transition-colors">Estado del Sistema</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <p class="text-xs font-bold text-white uppercase tracking-wider mb-4">Empresa</p>
+          <ul class="flex flex-col gap-2.5 text-xs text-emerald-100/70">
+            <li><a [href]="'mailto:' + socialLinks.email" class="hover:text-emerald-300 transition-colors">Contacto Comercial</a></li>
+            <li><a routerLink="/legal/privacidad" class="hover:text-emerald-300 transition-colors">Política de Privacidad</a></li>
+            <li><a routerLink="/legal/terminos" class="hover:text-emerald-300 transition-colors">Términos de Servicio</a></li>
+            <li><a routerLink="/legal/cookies" class="hover:text-emerald-300 transition-colors">Política de Cookies</a></li>
+            <li><button (click)="openWhatsApp()" class="hover:text-emerald-300 transition-colors">WhatsApp Soporte</button></li>
+          </ul>
         </div>
       </div>
 
-      <div class="border-t border-white/20 pt-8">
-        <div class="flex flex-col md:flex-row justify-between items-center">
-          <p class="text-white/70 mb-4 md:mb-0">
-            &copy; 2024 Vendix Platform. Todos los derechos reservados.
-          </p>
-          <div class="flex space-x-6">
-            <a
-              href="https://www.facebook.com/share/1B1fq8BbXD/"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Facebook"
-              class="text-white/70 hover:text-white transition-colors">
-              <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                <path
-                  d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-              </svg>
-            </a>
-            <a
-              href="https://www.instagram.com/vendix.online/"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="Instagram"
-              class="text-white/70 hover:text-white transition-colors">
-              <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                <path
-                  d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
-              </svg>
-            </a>
-            <a
-              href="https://www.tiktok.com/@vendix.online"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="TikTok"
-              class="text-white/70 hover:text-white transition-colors">
-              <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                <path
-                  d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" />
-              </svg>
-            </a>
-          </div>
+      <div class="pt-6 border-t border-emerald-900/60 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-emerald-200/60">
+        <p>© 2026 Vendix Platform. Todos los derechos reservados. Diseñado para comerciantes modernos.</p>
+        <div class="flex items-center gap-5">
+          <a
+            [href]="socialLinks.facebook"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Facebook Vendix"
+            class="text-emerald-200/70 hover:text-emerald-400 transition-colors">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+            </svg>
+          </a>
+          <a
+            [href]="socialLinks.instagram"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Instagram Vendix"
+            class="text-emerald-200/70 hover:text-emerald-400 transition-colors">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
+            </svg>
+          </a>
+          <a
+            [href]="socialLinks.tiktok"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="TikTok Vendix"
+            class="text-emerald-200/70 hover:text-emerald-400 transition-colors">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" />
+            </svg>
+          </a>
+          <button
+            (click)="openWhatsApp()"
+            aria-label="WhatsApp Vendix"
+            class="text-emerald-200/70 hover:text-emerald-400 transition-colors">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" />
+            </svg>
+          </button>
         </div>
       </div>
     </div>
   </footer>
-</div>
 
-<!-- Modal de Términos y Condiciones -->
-@if (showTermsModal()) {
-<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-  <div class="bg-surface rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-2xl">
-    <!-- Header -->
-    <div class="bg-[var(--color-primary)] text-white p-2 md:p-4 flex justify-between items-center">
-      <h2 class="text-xl font-bold">Términos y Condiciones</h2>
-      <button (click)="closeTermsModal()" class="text-white hover:bg-white/20 rounded-lg p-2 transition-colors">
-        <app-icon name="x" [size]="20" color="white"></app-icon>
-      </button>
-    </div>
+  <!-- MODAL: DEMO EN VIDEO -->
+  @if (showDemoModal()) {
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="demo-modal-title"
+      (click)="closeDemo()">
+      <!-- stopPropagation: el clic dentro de la tarjeta no cierra el modal -->
+      <div
+        class="demo-modal relative w-full max-w-5xl rounded-3xl overflow-hidden bg-slate-950 border border-white/10"
+        (click)="$event.stopPropagation()">
+        <span class="pointer-events-none absolute -top-32 left-1/2 -translate-x-1/2 w-[34rem] h-[34rem] rounded-full bg-emerald-500/20 blur-3xl"></span>
 
-    <!-- Content -->
-    <div class="p-2 md:p-4 overflow-y-auto max-h-[60vh]">
-      <div [innerHTML]="termsContent()"></div>
-    </div>
+        <header class="relative flex items-center justify-between gap-4 px-4 sm:px-7 py-4 border-b border-white/10">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="shrink-0 w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center">
+              <app-icon name="play-circle" [size]="18" class="text-emerald-300"></app-icon>
+            </span>
+            <div class="min-w-0">
+              <h2 id="demo-modal-title" class="text-sm sm:text-base font-bold text-white truncate">
+                Vendix en Acción: Facturación DIAN &amp; POS
+              </h2>
+              <p class="text-[11px] text-slate-400">Recorrido completo del flujo comercial · 2 min</p>
+            </div>
+          </div>
+          <button
+            (click)="closeDemo()"
+            aria-label="Cerrar la demostración"
+            class="shrink-0 w-9 h-9 rounded-xl border border-white/10 text-slate-300 hover:text-white hover:bg-white/10 flex items-center justify-center transition-colors">
+            <app-icon name="x" [size]="18"></app-icon>
+          </button>
+        </header>
 
-    <!-- Footer -->
-    <div class="bg-gray-50 p-2 md:p-4 border-t border-gray-200">
-      <div class="flex justify-end gap-3">
-        <button (click)="closeTermsModal()"
-          class="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
-          Cerrar
-        </button>
-        <button (click)="closeTermsModal()"
-          class="px-6 py-2 bg-[var(--color-primary)] text-white rounded-lg hover:bg-[var(--color-secondary)] transition-colors">
-          Acepto los términos
-        </button>
+        <!-- Fachada liviana de YouTube: hasta que no se pulsa play sólo hay
+             un fotograma <img>; el iframe (y con él el reproductor y sus
+             chunks de vídeo) se crea recién al hacer clic y se destruye al
+             cerrar el modal. -->
+        <div class="relative w-full aspect-video bg-black">
+          @if (demoPlaying()) {
+            <iframe
+              class="absolute inset-0 w-full h-full"
+              [src]="demoEmbedUrl()"
+              title="Vendix en acción: facturación DIAN y POS"
+              frameborder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              referrerpolicy="strict-origin-when-cross-origin"
+              allowfullscreen
+            ></iframe>
+          } @else {
+            <button
+              type="button"
+              (click)="playDemo()"
+              (pointerenter)="warmDemoConnection()"
+              (focus)="warmDemoConnection()"
+              class="demo-modal__play group absolute inset-0 w-full h-full cursor-pointer"
+              aria-label="Reproducir el vídeo de demostración de Vendix">
+              <img
+                [src]="demoThumbUrl()"
+                (error)="onDemoThumbError()"
+                alt=""
+                class="absolute inset-0 w-full h-full object-cover opacity-70 transition-all duration-500 group-hover:opacity-90 group-hover:scale-[1.02]"
+                width="1280"
+                height="720"
+                decoding="async"
+              />
+              <span class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-slate-950/10"></span>
+              <span class="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
+                <span class="demo-modal__ring relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-emerald-400 bg-emerald-500/10 backdrop-blur-sm text-white shadow-[0_10px_40px_-8px_rgba(16,185,129,0.45)] transition-all duration-300 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:border-emerald-500 group-hover:shadow-[0_10px_40px_-8px_rgba(16,185,129,0.9)] group-focus-visible:bg-emerald-500 group-focus-visible:border-emerald-500">
+                  <!-- Triángulo con centroide en x=12: centrado óptico real, no de caja -->
+                  <svg class="block w-7 h-7 sm:w-8 sm:h-8" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M8.5 5.5v13l11-6.5z" />
+                  </svg>
+                </span>
+                <span class="text-base sm:text-lg font-bold text-white">Demostración interactiva del flujo comercial</span>
+                <span class="hidden sm:block text-xs text-slate-300 max-w-lg">
+                  Apertura de caja, lectura de código de barras, emisión de tique DIAN en 0.8s y sincronización con la tienda virtual.
+                </span>
+              </span>
+            </button>
+          }
+        </div>
+
+        <footer class="relative flex flex-col lg:flex-row lg:items-center justify-between gap-4 px-4 sm:px-7 py-5 border-t border-white/10">
+          <ul class="flex flex-wrap gap-x-5 gap-y-2 text-[11px] sm:text-xs font-medium text-slate-300">
+            <li class="inline-flex items-center gap-1.5">
+              <app-icon name="check-circle" [size]="14" class="text-emerald-400"></app-icon>
+              Tique DIAN en 0.8s
+            </li>
+            <li class="inline-flex items-center gap-1.5">
+              <app-icon name="check-circle" [size]="14" class="text-emerald-400"></app-icon>
+              Inventario en tiempo real
+            </li>
+            <li class="inline-flex items-center gap-1.5">
+              <app-icon name="check-circle" [size]="14" class="text-emerald-400"></app-icon>
+              Tienda online sincronizada
+            </li>
+          </ul>
+          <div class="flex flex-col sm:flex-row gap-2 sm:gap-3 shrink-0">
+            <button
+              (click)="closeDemo(); openWhatsApp('Hola, vi la demo y quiero una sesión personalizada para mi negocio.')"
+              class="inline-flex items-center justify-center gap-2 text-xs font-bold text-white bg-white/10 hover:bg-white/20 border border-white/15 px-4 py-2.5 rounded-xl transition-colors">
+              <svg viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 shrink-0" aria-hidden="true">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+              </svg>
+              Demo personalizada
+            </button>
+            <a
+              [routerLink]="['/auth/register']"
+              (click)="closeDemo()"
+              class="inline-flex items-center justify-center gap-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-600/30 transition-colors">
+              <app-icon name="zap" [size]="16"></app-icon>
+              Probar gratis 14 días
+            </a>
+          </div>
+        </footer>
       </div>
     </div>
-  </div>
+  }
+
+  <!-- MODAL: DETALLE COMPLETO DEL PLAN («Ver todo lo que incluye»).
+       El markdown llega como STRING PLANO a [innerHTML]: el sanitizador de
+       Angular limpia el marcado peligroso. Nunca bypassSecurityTrustHtml. -->
+  <app-modal
+    [(isOpen)]="planDetailOpen"
+    size="lg"
+    [closeOnBackdrop]="true"
+    [showCloseButton]="true"
+    [title]="planDetail()?.name || 'Detalle del plan'"
+    subtitle="Todo lo que incluye este plan">
+    @if (planDetail(); as detail) {
+      <div class="plan-detail">
+        @if (detail.description) {
+          <p class="text-sm text-slate-600 mb-5">{{ detail.description }}</p>
+        }
+
+        @if (planDetailFeatures().length) {
+          <ul class="space-y-2.5 text-sm">
+            @for (feat of planDetailFeatures(); track feat.key) {
+              <li class="flex items-start gap-2.5 py-1">
+                @if (!feat.enabled) {
+                  <app-icon name="x" [size]="16" class="text-slate-400 shrink-0 mt-0.5"></app-icon>
+                  <span class="flex-1 min-w-0 text-slate-400 line-through">{{ feat.label }}</span>
+                } @else if (feat.is_limited) {
+                  <app-icon name="minus-circle" [size]="16" class="text-amber-600 shrink-0 mt-0.5"></app-icon>
+                  <span class="flex-1 min-w-0 text-slate-800">{{ feat.label }}</span>
+                } @else {
+                  <app-icon name="check" [size]="16" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
+                  <span class="flex-1 min-w-0 text-slate-800">{{ feat.label }}</span>
+                }
+                @if (feat.value) {
+                  <span class="shrink-0 text-[11px] font-semibold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                    {{ feat.value }}
+                  </span>
+                }
+              </li>
+            }
+          </ul>
+        }
+
+        @if (planDetailHtml()) {
+          <div class="plan-detail__md mt-6 pt-5 border-t border-slate-200" [innerHTML]="planDetailHtml()"></div>
+        }
+      </div>
+    }
+
+    <div slot="footer" class="flex justify-end w-full">
+      <button
+        type="button"
+        (click)="closePlanDetail()"
+        class="inline-flex items-center justify-center gap-2 text-xs sm:text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 px-5 py-2.5 rounded-xl transition-colors">
+        Entendido
+      </button>
+    </div>
+  </app-modal>
 </div>
-}

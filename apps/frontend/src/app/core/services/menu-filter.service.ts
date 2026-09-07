@@ -162,6 +162,10 @@ export class MenuFilterService {
     'Ordenes de Venta': 'orders_sales',
     'Ordenes de Compra': 'orders_purchase_orders',
     Cotizaciones: 'orders_quotations',
+    // Contratos de obra (A.2, ADR-02, FB-02). La pagina y la entrada del
+    // sidebar llegan con C.2; el mapeo existe desde ahora para que el filtro
+    // y `diagnose()` apliquen el gating por industria a la key.
+    Contratos: 'orders_contracts',
     'Plan Separe': 'orders_layaway',
     Reservas: 'orders_reservations',
 

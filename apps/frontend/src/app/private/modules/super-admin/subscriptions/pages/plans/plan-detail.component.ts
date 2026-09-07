@@ -5,6 +5,10 @@ import { SubscriptionAdminService } from '../../services/subscription-admin.serv
 import { SubscriptionPlan } from '../../interfaces/subscription-admin.interface';
 import { formatFeatureCap } from '../../utils/ai-feature-flags.util';
 import {
+  PlanIncludedItem,
+  normalizeIncludedItems,
+} from '../../../../../../shared/utils/plan-features.util';
+import {
   ButtonComponent,
   IconComponent,
   BadgeComponent,
@@ -92,6 +96,44 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
             </div>
 
             <div>
+              <h2 class="text-sm font-semibold text-text-primary mb-3">Incluye</h2>
+              <div class="space-y-2">
+                @for (item of includedItems(); track item.key) {
+                  <div
+                    class="flex items-start gap-2 text-sm p-2 rounded-lg bg-background border border-border"
+                  >
+                    <app-icon
+                      [name]="itemIcon(item)"
+                      [size]="16"
+                      class="mt-0.5 shrink-0"
+                      [class.text-green-500]="item.enabled && !item.is_limited"
+                      [class.text-amber-500]="item.enabled && item.is_limited"
+                      [class.text-gray-400]="!item.enabled"
+                    ></app-icon>
+                    <div class="flex-1 min-w-0">
+                      <div
+                        class="text-text-primary"
+                        [class.line-through]="!item.enabled"
+                        [class.text-text-secondary]="!item.enabled"
+                      >
+                        {{ item.label }}
+                      </div>
+                      @if (itemValue(item)) {
+                        <div class="text-xs text-text-secondary">{{ itemValue(item) }}</div>
+                      }
+                    </div>
+                  </div>
+                } @empty {
+                  <div
+                    class="rounded-lg border border-dashed border-border bg-background px-3 py-4 text-center text-sm text-text-secondary"
+                  >
+                    Este plan aún no declara ítems incluidos.
+                  </div>
+                }
+              </div>
+            </div>
+
+            <div>
               <h2 class="text-sm font-semibold text-text-primary mb-3">Funciones de IA</h2>
               <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 @for (entry of aiFlagEntries(); track entry[0]) {
@@ -153,6 +195,12 @@ export class PlanDetailComponent {
   readonly plan = signal<SubscriptionPlan | null>(null);
   readonly loading = signal(true);
 
+  /** Lista «incluye» en sólo lectura. Acepta el arreglo canónico y la forma
+   *  de objeto legada, normalizando ambas al mismo shape. */
+  readonly includedItems = computed<PlanIncludedItem[]>(() =>
+    normalizeIncludedItems(this.plan()?.feature_matrix),
+  );
+
   readonly aiFlagEntries = computed(() => {
     const flags = (this.plan()?.ai_feature_flags as Record<string, any>) ?? {};
     return Object.entries(flags);
@@ -182,5 +230,18 @@ export class PlanDetailComponent {
 
   getFeatureCapLabel(value: any): string {
     return formatFeatureCap(value);
+  }
+
+  itemIcon(item: PlanIncludedItem): 'check' | 'minus-circle' | 'x' {
+    if (!item.enabled) return 'x';
+    return item.is_limited ? 'minus-circle' : 'check';
+  }
+
+  itemValue(item: PlanIncludedItem): string {
+    if (item.value) return item.value;
+    if (typeof item.limit === 'number') {
+      return item.unit ? `${item.limit} ${item.unit}` : String(item.limit);
+    }
+    return '';
   }
 }

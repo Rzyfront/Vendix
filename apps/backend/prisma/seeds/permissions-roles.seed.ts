@@ -801,6 +801,38 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
+    // Contratos de obra (A.2, ADR-02, ERR-03) — el controlador llega en C.1;
+    // el seed se adelanta para que el contrato de permisos exista antes que
+    // el primer endpoint. El gating por industria lo aplica
+    // `ConstructionIndustryGuard` (403 CONTRACT_INDUSTRY_001); estos permisos
+    // controlan QUIEN dentro de una constructora opera cada accion.
+    // Owner/admin/manager los heredan por los filtros catch-all del seed
+    // (`store:` / no-superadmin), sin listas explicitas que mantener.
+    {
+      name: 'store:contracts:create',
+      description: 'Crear contrato desde cotización aceptada',
+      path: '/api/store/contracts/from-quotation/:id',
+      method: 'POST',
+    },
+    {
+      name: 'store:contracts:read',
+      description: 'Leer contratos',
+      path: '/api/store/contracts',
+      method: 'GET',
+    },
+    {
+      name: 'store:contracts:read:one',
+      description: 'Leer contrato específico',
+      path: '/api/store/contracts/:id',
+      method: 'GET',
+    },
+    {
+      name: 'store:contracts:update',
+      description: 'Actualizar estado del contrato',
+      path: '/api/store/contracts/:id',
+      method: 'PATCH',
+    },
+
     // Planes Separé (Layaway)
     {
       name: 'store:layaway:create',

@@ -90,6 +90,15 @@ export class DefaultPanelUIService {
         orders_sales: true,
         orders_purchase_orders: true,
         orders_quotations: true,
+        // Contratos de obra (A.2, ADR-02, FB-02).
+        // Plan decisions: `default_visible_for_privileged_users=true`
+        // (owner/admin de una constructora ven "Contratos" en el proximo
+        // login sin backfill), `show_new_badge=yes` (banner del dropdown +
+        // Settings → "Módulos del Panel" lo muestran como nuevo hasta que
+        // el usuario lo toque). El gating por industria vive en
+        // `INDUSTRY_HIDDEN_MODULES` (todas menos `construction` lo ocultan);
+        // esta key es el default, no la compuerta.
+        orders_contracts: true,
         orders_layaway: true,
         orders_reservations: true,
         orders_dispatch_notes: true,

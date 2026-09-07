@@ -7,10 +7,12 @@ import {
   IsArray,
   ValidateNested,
   IsDateString,
+  IsEnum,
   Max,
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { quotation_destination_enum } from '@prisma/client';
 
 export class CreateQuotationItemDto {
   @IsOptional()
@@ -83,6 +85,26 @@ export class CreateQuotationDto {
   @IsOptional()
   @IsInt()
   customer_id?: number;
+
+  /**
+   * A.1 (ADR-01, FB-01) — Destino de la cotizacion. Opcional al crear:
+   * sin valor nace `sale` y fluye a orden como hoy. Se fija al crear y
+   * jamas se edita (`update` lo rechaza con QUOTE_DESTINATION_001).
+   */
+  @IsOptional()
+  @IsEnum(quotation_destination_enum, {
+    message: 'destination debe ser sale, contract u other',
+  })
+  destination?: quotation_destination_enum;
+
+  /**
+   * F-003 (FB-05) — Perfil opcional. Sin el campo, `forbidNonWhitelisted`
+   * rechaza con 400 toda creacion que elija perfil en el modal.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  profile_id?: number;
 
   @IsOptional()
   @IsString()

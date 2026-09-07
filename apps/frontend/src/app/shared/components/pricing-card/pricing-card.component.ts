@@ -9,6 +9,11 @@ export interface PricingCardFeature {
   enabled: boolean;
   limit?: number | null;
   unit?: string | null;
+  /** Texto corto que el super-admin escribe junto al ítem («Ilimitados»,
+   *  «1 usuario»). Cuando existe, sustituye al badge derivado de `limit`. */
+  value?: string | null;
+  /** Estado intermedio: incluido pero con tope. Distinto del check y de la X. */
+  is_limited?: boolean;
 }
 
 export interface PricingCardPlan {
@@ -22,6 +27,7 @@ export interface PricingCardPlan {
   features: PricingCardFeature[];
   is_current?: boolean;
   is_popular?: boolean;
+  is_ai_plan?: boolean;
 }
 
 /** Emitted on CTA click. `retry=true` indicates the user clicked the
@@ -53,6 +59,7 @@ export interface PricingCardSelectEvent {
       [class.ring-primary-600]="isCurrent() && !isPopular()"
       [class.ring-offset-2]="isPopular()"
       [class.lg:scale-105]="isPopular()"
+      [class.ai-plan-card]="isAiPlan()"
       [class.hover:-translate-y-1]="!loading()"
       [class.hover:shadow-lg]="!isPopular() && !loading()"
       [class.hover:shadow-2xl]="isPopular() && !loading()"
@@ -82,11 +89,15 @@ export interface PricingCardSelectEvent {
 
         <!-- Header -->
         <div class="p-4 md:p-6 pb-3 md:pb-4 pt-8 md:pt-10 space-y-1.5 md:space-y-2">
+          @if (isAiPlan()) {
+            <span class="ai-plan-card__badge">✦ Plan IA</span>
+          }
           <div class="flex items-center gap-1.5 md:gap-2 flex-wrap min-w-0">
             <h3
               class="text-base md:text-xl font-extrabold truncate min-w-0"
               [class.text-text-primary]="!isPopular()"
               [class.text-white]="isPopular()"
+              [class.ai-plan-card__name]="isAiPlan()"
             >
               {{ plan().name }}
             </h3>
@@ -138,7 +149,7 @@ export interface PricingCardSelectEvent {
           @for (f of plan().features; track f.key) {
             <li class="flex items-start gap-1.5 md:gap-2 text-xs md:text-sm min-w-0">
               <app-icon
-                [name]="f.enabled ? 'check' : 'minus'"
+                [name]="!f.enabled ? 'minus' : f.is_limited ? 'minus-circle' : 'check'"
                 [size]="14"
                 [class.text-primary-600]="f.enabled && !isPopular()"
                 [class.text-white]="f.enabled && isPopular()"
@@ -154,7 +165,17 @@ export interface PricingCardSelectEvent {
               >
                 {{ f.label }}
               </span>
-              @if (f.limit !== null && f.limit !== undefined) {
+              @if (f.value) {
+                <span
+                  class="text-[10px] md:text-[11px] px-1.5 md:px-2 py-0.5 rounded-md font-medium shrink-0"
+                  [class.bg-gray-100]="!isPopular()"
+                  [class.text-gray-700]="!isPopular()"
+                  [class.bg-white\\/20]="isPopular()"
+                  [class.text-white]="isPopular()"
+                >
+                  {{ f.value }}
+                </span>
+              } @else if (f.limit !== null && f.limit !== undefined) {
                 <span
                   class="text-[10px] md:text-[11px] px-1.5 md:px-2 py-0.5 rounded-md font-medium shrink-0"
                   [class.bg-gray-100]="!isPopular()"
@@ -203,6 +224,7 @@ export class PricingCardComponent {
     'linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 60%, #1f4f37 100%)';
 
   readonly isPopular = computed(() => this.plan().is_popular === true);
+  readonly isAiPlan = computed(() => this.plan().is_ai_plan === true);
   readonly isCurrent = computed(() => this.plan().is_current === true);
 
   /**

@@ -52,6 +52,32 @@ export const panelUiGuard: CanActivateFn = (_route, state): boolean => {
   // sin gobernante propio) → no la gobierna este guard.
   if (!keys.length) return true;
 
+  // A.2 (ADR-02, ERR-03): la industria también cierra la URL directa. Sin
+  // esto, teclear /admin/orders/contracts en una tienda sin `construction`
+  // entraba aunque el sidebar lo ocultara — el mismo bypass que A.4 cerró
+  // para panel_ui. El mensaje es el de ERR-03, no el ERR-10 de panel_ui:
+  // el bloqueo es estructural (giro de la tienda), no un toggle pedible al
+  // admin. El owner conserva su bypass global (return true de arriba),
+  // coherente con el case 7 del filtro; la frontera real anti-manipulación
+  // es el backend (`ConstructionIndustryGuard`, 403).
+  const hiddenByIndustry = keys.some((key) => {
+    const diagnosis = menuFilter.diagnoseModule(
+      key,
+      tree.length ? tree : undefined,
+    );
+    return diagnosis.blockedBy === 'industry';
+  });
+
+  if (hiddenByIndustry) {
+    toast.info(
+      'No disponible en tu industria. Este módulo aplica solo a tiendas de construcción.',
+    );
+    const target = menuFilter.firstActiveModuleRoute(tree);
+    if (target === state.url) return true; // terminal: nada más activo
+    router.navigateByUrl(target);
+    return false;
+  }
+
   const hiddenByPanel = keys.some((key) => {
     const diagnosis = menuFilter.diagnoseModule(
       key,

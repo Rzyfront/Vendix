@@ -545,6 +545,11 @@ export class StoreAdminLayoutComponent {
           route: '/admin/orders/quotations',
         },
         {
+          label: 'Contratos',
+          icon: 'circle',
+          route: '/admin/orders/contracts',
+        },
+        {
           label: 'Plan Separe',
           icon: 'circle',
           route: '/admin/orders/layaway',

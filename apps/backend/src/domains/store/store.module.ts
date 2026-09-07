@@ -31,6 +31,8 @@ import { StoreRolesModule } from './roles/store-roles.module';
 import { PromotionsModule } from './promotions/promotions.module';
 import { CouponsModule } from './coupons/coupons.module';
 import { QuotationsModule } from './quotations/quotations.module';
+import { QuotationProfilesModule } from './backend-quotations-profiles/quotation-profiles.module';
+import { ContractsModule } from './contracts/contracts.module';
 import { CashRegistersModule } from './cash-registers/cash-registers.module';
 import { KdsModule } from './kds/kds.module';
 import { LayawayModule } from './layaway/layaway.module';
@@ -103,6 +105,8 @@ import { CrmModule } from './crm/crm.module';
     PromotionsModule,
     CouponsModule,
     QuotationsModule,
+    QuotationProfilesModule,
+    ContractsModule,
     CashRegistersModule,
     KdsModule,
     LayawayModule,
