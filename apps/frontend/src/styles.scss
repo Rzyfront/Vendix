@@ -1060,6 +1060,43 @@ footer {
   }
 }
 
+/* ROI CALCULATOR — pista verde oscura en los sliders. El fondo del input
+ * no basta: el track nativo (y el reset de @tailwindcss/forms) pinta encima,
+ * así que se recolorea el pseudo-elemento en ambos motores. El thumb sigue
+ * con `accent-emerald-600`, no se toca. */
+input[type='range'].roi-range::-webkit-slider-runnable-track {
+  background-color: #1f4f37;
+  height: 8px;
+  border-radius: 9999px;
+}
+input[type='range'].roi-range::-moz-range-track {
+  background-color: #1f4f37;
+  height: 8px;
+  border-radius: 9999px;
+}
+/* Thumb propio: círculo perfecto centrado en la pista. El thumb nativo
+ * (accent-color) se renderizaba con el brillo desplazado y parecía torcido;
+ * con tamaño explícito y margin negativo queda centrado verticalmente. */
+input[type='range'].roi-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 9999px;
+  background: #059669;
+  margin-top: -6px;
+  cursor: pointer;
+}
+input[type='range'].roi-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 9999px;
+  background: #059669;
+  cursor: pointer;
+}
+
 /* Smooth transitions for modal interactions */
 .modal-smooth-transition {
   transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);

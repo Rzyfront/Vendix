@@ -1217,7 +1217,7 @@
               <input
                 [value]="storeCount()"
                 (input)="updateStores($event)"
-                class="w-full accent-emerald-600 h-2 bg-slate-200 rounded-lg cursor-pointer"
+                class="roi-range w-full accent-emerald-600 h-2 bg-[#1f4f37] rounded-lg cursor-pointer"
                 max="5"
                 min="1"
                 step="1"
@@ -1226,7 +1226,7 @@
             </div>
 
             <!-- Slider 2: Facturas al mes -->
-            <div class="space-y-2">
+            <div class="space-y-2 -mt-3">
               <div class="flex justify-between items-center text-xs sm:text-sm font-semibold">
                 <span class="text-slate-800">¿Cuántas ventas o facturas emites al mes aprox?</span>
                 <span class="font-bold text-emerald-700 text-sm sm:text-base">{{ invoicesCount() | number:'1.0-0' }} ventas</span>
@@ -1234,7 +1234,7 @@
               <input
                 [value]="invoicesCount()"
                 (input)="updateInvoices($event)"
-                class="w-full accent-emerald-600 h-2 bg-slate-200 rounded-lg cursor-pointer"
+                class="roi-range w-full accent-emerald-600 h-2 bg-[#1f4f37] rounded-lg cursor-pointer"
                 max="10000"
                 min="300"
                 step="100"
@@ -1473,6 +1473,33 @@
                 Cero permanencias. Creemos en la fidelidad por calidad, no por amarres contractuales. Puedes cancelar tu suscripción con un solo clic desde tu panel en cualquier momento y descargar toda tu información contable e inventario en formatos abiertos.
               </div>
             }
+          </div>
+        </div>
+
+        <!-- Centro de ayuda: guías, respuestas y envío de PQRs -->
+        <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#00170d] to-[#043320] p-6 sm:p-8 shadow-xl">
+          <div class="absolute -top-20 -right-20 w-72 h-72 bg-emerald-500/20 rounded-full blur-3xl pointer-events-none"></div>
+          <div class="absolute -bottom-24 -left-16 w-72 h-72 bg-emerald-600/20 rounded-full blur-3xl pointer-events-none"></div>
+          <div class="relative z-10 flex flex-col sm:flex-row sm:items-center gap-5">
+            <div class="shrink-0 w-12 h-12 rounded-2xl bg-emerald-400/15 border border-emerald-300/30 flex items-center justify-center">
+              <app-icon name="help-circle" [size]="26" class="text-emerald-300"></app-icon>
+            </div>
+            <div class="flex-1 min-w-0">
+              <h3 class="text-base sm:text-lg font-extrabold text-white tracking-tight">
+                ¿Aún tienes dudas? Te ayudamos
+              </h3>
+              <p class="text-xs sm:text-sm text-emerald-100/80 mt-1 leading-relaxed">
+                Visita nuestro centro de ayuda integral: guías paso a paso, respuestas a fondo y envío de PQRs con seguimiento.
+              </p>
+            </div>
+            <a
+              href="https://vendix.online/ayuda"
+              target="_blank"
+              rel="noopener"
+              class="shrink-0 inline-flex items-center justify-center gap-2 text-xs sm:text-sm font-extrabold text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition-all duration-200 px-5 py-3 rounded-xl shadow-lg shadow-emerald-500/30 hover:scale-105">
+              <span>Ir al Centro de Ayuda</span>
+              <app-icon name="external-link" [size]="16"></app-icon>
+            </a>
           </div>
         </div>
       </div>
