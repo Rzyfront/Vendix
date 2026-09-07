@@ -25,7 +25,7 @@
             Sectores
           </button>
           <button (click)="scrollToSection('vexi')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1 flex items-center gap-1">
-            Vexi IA
+            Vexi
             <span class="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full">IA</span>
           </button>
           <button (click)="scrollToSection('precios-section')" class="text-sm font-semibold text-slate-600 hover:text-emerald-700 transition-colors py-1">
@@ -94,7 +94,7 @@
 
   <main class="w-full">
     <!-- SECTION 1: HERO SECTION -->
-    <section class="relative w-full px-4 sm:px-6 lg:px-8 py-16 sm:py-24 overflow-hidden">
+    <section class="relative w-full px-4 sm:px-6 lg:px-8 pt-11 pb-16 sm:pt-[4.2rem] sm:pb-24 overflow-hidden">
       <div class="max-w-[75rem] mx-auto flex flex-col items-center text-center">
         <!-- Launch Pill Badge -->
         <div class="inline-flex items-center gap-space-xs px-space-md py-space-xs bg-secondary-container/60 rounded-full text-on-secondary-fixed text-label-sm font-label-sm mb-space-lg shadow-sm">
@@ -118,7 +118,7 @@
           <a
             [routerLink]="['/auth/register']"
             class="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-sm sm:text-base font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-all duration-200 px-6 py-3.5 rounded-xl shadow-lg shadow-emerald-600/25 hover:shadow-none hover:-translate-y-0.5">
-            <app-icon name="rocket" [size]="18"></app-icon>
+            <app-icon name="zap" [size]="18"></app-icon>
             Comenzar Prueba Gratis 14 Días (Sin tarjeta)
           </a>
           <button
@@ -130,7 +130,11 @@
           <button
             (click)="openWhatsApp()"
             class="w-full sm:w-auto inline-flex items-center justify-center gap-2 text-sm sm:text-base font-semibold text-emerald-800 hover:text-emerald-950 transition-colors px-4 py-3.5">
-            <app-icon name="message-circle" [size]="18" class="text-emerald-600"></app-icon>
+            <!-- Marca WhatsApp: Lucide no trae logos, así que se usa el mismo
+                 path inline que los share-modals del panel. -->
+            <svg viewBox="0 0 24 24" fill="currentColor" class="w-[18px] h-[18px] text-emerald-600 shrink-0" aria-hidden="true">
+              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+            </svg>
             Hablar con Asesor
           </button>
         </div>
@@ -152,317 +156,110 @@
         </div>
 
         <!-- HERO MEDIA & INTERACTIVE DASHBOARD SIMULATOR -->
-        <div id="hero-simulator" class="relative w-full max-w-5xl rounded-2xl bg-surface-container-lowest shadow-2xl overflow-hidden border border-outline-variant/30 text-left">
-          <!-- Top Window Controls -->
-          <div class="flex items-center justify-between bg-surface-container-low px-space-md py-space-xs border-b border-outline-variant/30">
-            <div class="flex items-center gap-space-xs">
-              <span class="w-3 h-3 rounded-full bg-error inline-block"></span>
-              <span class="w-3 h-3 rounded-full bg-tertiary-container inline-block"></span>
-              <span class="w-3 h-3 rounded-full bg-primary-container inline-block"></span>
-              <span class="font-label-sm text-label-sm text-outline ml-space-sm hidden sm:inline-block font-mono">app.vendix.co/admin/panel-principal</span>
-            </div>
-            <div class="flex items-center gap-space-sm">
-              <span class="inline-flex items-center gap-space-2xs text-[11px] font-bold text-on-primary bg-primary px-space-xs py-0.5 rounded-full shadow-sm">
-                <span class="w-1.5 h-1.5 rounded-full bg-primary-fixed animate-pulse"></span> ● EN VIVO · TIEMPO REAL
-              </span>
-            </div>
-          </div>
-
-          <!-- Dashboard Body with Left Icon Dock & Main View -->
-          <div class="flex w-full bg-[#f4f7fb] text-on-surface min-h-[640px]">
-            <!-- Left Dock -->
-            <aside class="w-14 bg-surface-container-lowest border-r border-outline-variant/30 flex flex-col items-center py-space-md justify-between shrink-0">
-              <div class="flex flex-col items-center gap-space-xs w-full">
-                <div class="w-9 h-9 rounded-xl bg-[#032317] flex items-center justify-center text-primary-fixed mb-space-xs shadow-sm">
-                  <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M3 4l9 16 9-16H3zm4.5 3h9L12 15 7.5 7z"></path></svg>
-                </div>
-                <a class="w-9 h-9 rounded-xl bg-primary-container text-on-primary flex items-center justify-center shadow-sm" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">home</span>
-                </a>
-                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">storefront</span>
-                </a>
-                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">shopping_cart</span>
-                </a>
-                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">local_shipping</span>
-                </a>
-                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">inventory_2</span>
-                </a>
-                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">receipt_long</span>
-                </a>
-                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">group</span>
-                </a>
-                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">assignment</span>
-                </a>
-                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">campaign</span>
-                </a>
-                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">trending_up</span>
-                </a>
-                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">account_balance_wallet</span>
-                </a>
-                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">account_balance</span>
-                </a>
-              </div>
-              <div class="flex flex-col items-center gap-space-xs w-full">
-                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">help</span>
-                </a>
-                <a class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center transition-colors" href="javascript:void(0)">
-                  <span class="material-symbols-outlined text-[20px]">settings</span>
-                </a>
-              </div>
-            </aside>
-
-            <!-- Main Panel Content -->
-            <div class="flex-1 flex flex-col p-space-md sm:p-space-lg gap-space-md overflow-hidden">
-              <!-- Header Bar (Breadcrumbs & User Profile) -->
-              <div class="flex flex-wrap items-center justify-between gap-space-sm">
-                <div class="flex flex-col">
-                  <div class="flex items-center gap-1.5 text-body-sm text-outline">
-                    <span class="material-symbols-outlined text-[15px]">settings</span>
-                    <span>Panel Administrativo</span>
-                    <span>/</span>
-                    <span class="material-symbols-outlined text-[15px] text-primary">home</span>
-                    <span class="text-on-surface font-semibold">Panel Principal</span>
-                  </div>
-                  <h2 class="text-headline-md font-headline-md font-extrabold text-[#091e32] tracking-tight">Panel Principal</h2>
-                </div>
-                <div class="flex items-center gap-space-md">
-                  <button class="w-9 h-9 rounded-full bg-surface-container-lowest border border-outline-variant/30 flex items-center justify-center text-outline hover:text-on-surface">
-                    <span class="material-symbols-outlined text-[20px]">search</span>
+        <!-- Escenario: cuando la ventana se cierra, se minimiza o pasa a pantalla
+             completa, hereda el alto que ésta tenía para que la landing no salte.
+             El id vive aquí (y no en la ventana) para que los enlaces del menú
+             sigan llegando aunque la ventana esté cerrada. -->
+        <div id="hero-simulator" class="relative w-full max-w-5xl" [style.min-height.px]="heroStageMinHeight()">
+          <div
+            #heroSimulatorWindow
+            class="hero-window relative w-full rounded-2xl bg-surface-container-lowest shadow-2xl overflow-hidden border border-outline-variant/30 text-left"
+            [class.hidden]="!heroWindowVisible()"
+            [class.hero-window--closing]="heroWindow() === 'closing'"
+            [class.hero-window--minimizing]="heroWindow() === 'minimizing'"
+            [class.hero-window--opening]="heroEnter() === 'opening'"
+            [class.hero-window--restoring]="heroEnter() === 'restoring'"
+            [class.hero-window--full]="heroFullscreen()">
+            <!-- Barra de ventana: es cromo de navegador de escritorio, así que en
+                 teléfono (donde no existe esa barra) no se pinta. -->
+            <div class="hidden sm:flex shrink-0 items-center justify-between bg-surface-container-low px-space-md py-space-xs border-b border-outline-variant/30">
+              <div class="flex items-center gap-space-xs">
+                <!-- Semáforo macOS: los glifos aparecen al pasar el puntero por el
+                     grupo, como en el sistema. Rojo cierra, amarillo minimiza,
+                     verde alterna pantalla completa. -->
+                <div class="hero-tl flex items-center gap-space-xs" role="group" aria-label="Controles de la ventana del simulador">
+                  <button
+                    type="button"
+                    class="hero-tl__btn hero-tl__btn--close"
+                    (click)="closeHeroWindow(heroSimulatorWindow)"
+                    aria-label="Cerrar Vendix app"
+                    title="Cerrar">
+                    <svg viewBox="0 0 10 10" class="hero-tl__glyph" aria-hidden="true">
+                      <path d="M2.6 2.6l4.8 4.8M7.4 2.6L2.6 7.4" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" fill="none" />
+                    </svg>
                   </button>
-                  <div class="relative">
-                    <button class="w-9 h-9 rounded-full bg-surface-container-lowest border border-outline-variant/30 flex items-center justify-center text-outline hover:text-on-surface">
-                      <span class="material-symbols-outlined text-[20px]">notifications</span>
-                    </button>
-                    <span class="absolute -top-1 -right-1 px-1.5 py-0.2 bg-error text-on-error text-[10px] font-black rounded-full shadow-sm">98</span>
-                  </div>
-                  <div class="flex items-center gap-space-xs bg-surface-container-lowest border border-outline-variant/30 px-space-sm py-1 rounded-full shadow-sm">
-                    <div class="w-8 h-8 rounded-full bg-primary-container text-on-primary font-bold text-body-sm flex items-center justify-center shadow-sm">VD</div>
-                    <div class="text-left hidden sm:block">
-                      <p class="text-label-sm font-bold text-on-surface leading-tight">Vendix Demo</p>
-                      <p class="text-[10px] text-outline leading-tight">Dueño</p>
-                    </div>
-                    <span class="material-symbols-outlined text-outline text-[18px]">expand_more</span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 4 Top Stat Cards -->
-              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-space-md">
-                <div class="bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex justify-between items-start">
-                  <div>
-                    <span class="text-label-sm text-outline font-medium">Ingresos</span>
-                    <p class="font-code-num text-headline-sm font-black text-on-surface mt-1" id="metric-ingresos">$39.2M</p>
-                    <p class="text-[11px] text-outline mt-1 font-medium">Sin IVA: $39.0M</p>
-                  </div>
-                  <div class="w-8 h-8 rounded-full bg-[#e6fbf2] text-primary flex items-center justify-center font-bold text-body-sm">
-                    <span class="material-symbols-outlined text-[18px]">attach_money</span>
-                  </div>
-                </div>
-                <div class="bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex justify-between items-start">
-                  <div>
-                    <span class="text-label-sm text-outline font-medium">Ganancias</span>
-                    <p class="font-code-num text-headline-sm font-black text-on-surface mt-1" id="metric-ganancias">$23.8M</p>
-                    <p class="text-[11px] text-outline mt-1 font-medium">Tras gastos: $23.7M · 61.0% margen</p>
-                  </div>
-                  <div class="w-8 h-8 rounded-full bg-[#e6fbf2] text-primary flex items-center justify-center font-bold text-body-sm">
-                    <span class="material-symbols-outlined text-[18px]">trending_up</span>
-                  </div>
-                </div>
-                <div class="bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex justify-between items-start">
-                  <div>
-                    <span class="text-label-sm text-outline font-medium">Balance</span>
-                    <p class="font-code-num text-headline-sm font-black text-on-surface mt-1" id="metric-balance">$39.1M</p>
-                    <p class="text-[11px] text-outline mt-1 font-medium">Caja acumulada: $429.1M</p>
-                  </div>
-                  <div class="w-8 h-8 rounded-full bg-[#e8f1ff] text-[#1c64f2] flex items-center justify-center font-bold text-body-sm">
-                    <span class="material-symbols-outlined text-[18px]">account_balance_wallet</span>
-                  </div>
-                </div>
-                <div class="bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex justify-between items-start">
-                  <div>
-                    <span class="text-label-sm text-outline font-medium">Gastos</span>
-                    <p class="font-code-num text-headline-sm font-black text-on-surface mt-1">$90.0K</p>
-                    <p class="text-[11px] text-outline mt-1 font-medium">sin base de comparación</p>
-                  </div>
-                  <div class="w-8 h-8 rounded-full bg-[#fde8e8] text-error flex items-center justify-center font-bold text-body-sm">
-                    <span class="material-symbols-outlined text-[18px]">trending_down</span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Trend & Channel Charts -->
-              <div class="grid grid-cols-1 lg:grid-cols-12 gap-space-md">
-                <!-- Line Chart: Tendencia de Ventas -->
-                <div class="lg:col-span-8 bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex flex-col justify-between">
-                  <div class="flex items-center justify-between mb-space-sm">
-                    <div>
-                      <h3 class="font-label-lg font-bold text-on-surface">Tendencia de Ventas</h3>
-                      <p class="text-[11px] text-outline">6 de sept - 6 de sept</p>
-                    </div>
-                    <button class="flex items-center gap-1.5 px-space-sm py-1 bg-surface-container-lowest border border-outline-variant/30 rounded-xl text-body-sm font-bold text-on-surface shadow-sm hover:bg-surface-container-low transition-colors">
-                      <span class="material-symbols-outlined text-[16px]">tune</span>
-                      <span>Filtros</span>
-                      <span class="w-4 h-4 rounded-full bg-primary-container text-on-primary text-[10px] flex items-center justify-center font-black">1</span>
-                      <span class="material-symbols-outlined text-[16px]">expand_more</span>
-                    </button>
-                  </div>
-                  <div class="relative w-full h-56 mt-2">
-                    <svg class="w-full h-full" preserveAspectRatio="none" viewBox="0 0 600 200">
-                      <line stroke="#f1f5f9" stroke-dasharray="3 3" stroke-width="1" x1="40" x2="560" y1="20"></line>
-                      <line stroke="#f1f5f9" stroke-dasharray="3 3" stroke-width="1" x1="40" x2="560" y1="60"></line>
-                      <line stroke="#f1f5f9" stroke-dasharray="3 3" stroke-width="1" x1="40" x2="560" y1="100"></line>
-                      <line stroke="#f1f5f9" stroke-dasharray="3 3" stroke-width="1" x1="40" x2="560" y1="140"></line>
-                      <line stroke="#e2e8f0" stroke-width="1" x1="40" x2="560" y1="170"></line>
-                      <text fill="#94a3b8" font-size="9" text-anchor="end" x="35" y="24">$25M</text>
-                      <text fill="#94a3b8" font-size="9" text-anchor="end" x="35" y="64">$20M</text>
-                      <text fill="#94a3b8" font-size="9" text-anchor="end" x="35" y="104">$15M</text>
-                      <text fill="#94a3b8" font-size="9" text-anchor="end" x="35" y="144">$5M</text>
-                      <text fill="#94a3b8" font-size="9" text-anchor="end" x="35" y="173">$0</text>
-                      <text fill="#94a3b8" font-size="9" text-anchor="start" x="565" y="24">6</text>
-                      <text fill="#94a3b8" font-size="9" text-anchor="start" x="565" y="64">5</text>
-                      <text fill="#94a3b8" font-size="9" text-anchor="start" x="565" y="104">3</text>
-                      <text fill="#94a3b8" font-size="9" text-anchor="start" x="565" y="144">1</text>
-                      <text fill="#94a3b8" font-size="9" text-anchor="start" x="565" y="173">0</text>
-                      <rect fill="#abf7d6" height="150" opacity="0.5" rx="2" width="14" x="413" y="20"></rect>
-                      <rect fill="#abf7d6" height="150" opacity="0.5" rx="2" width="14" x="545" y="20"></rect>
-                      <path d="M 45 170 L 75 170 L 110 170 L 145 170 L 180 170 L 215 170 L 250 170 L 285 170 L 320 170 L 355 170 L 385 168 Q 410 162 420 100 Q 430 165 460 170 L 495 170 L 530 168 Q 545 140 550 20" fill="none" stroke="#10b981" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"></path>
-                      <circle cx="75" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
-                      <circle cx="110" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
-                      <circle cx="145" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
-                      <circle cx="180" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
-                      <circle cx="215" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
-                      <circle cx="250" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
-                      <circle cx="285" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
-                      <circle cx="320" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
-                      <circle cx="355" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
-                      <circle cx="385" cy="168" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
-                      <circle cx="420" cy="100" fill="#ffffff" r="4" stroke="#10b981" stroke-width="2"></circle>
-                      <circle cx="460" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
-                      <circle cx="495" cy="170" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
-                      <circle cx="530" cy="168" fill="#ffffff" r="3" stroke="#10b981" stroke-width="1.5"></circle>
-                      <circle cx="550" cy="20" fill="#ffffff" id="live-spike-dot" r="4" stroke="#10b981" stroke-width="2.5"></circle>
-                      <circle class="animate-ping" cx="550" cy="20" fill="none" opacity="0.75" r="8" stroke="#10b981" stroke-width="1.5"></circle>
+                  <button
+                    type="button"
+                    class="hero-tl__btn hero-tl__btn--min"
+                    (click)="minimizeHeroWindow(heroSimulatorWindow)"
+                    aria-label="Minimizar Vendix app"
+                    title="Minimizar">
+                    <svg viewBox="0 0 10 10" class="hero-tl__glyph" aria-hidden="true">
+                      <path d="M2 5h6" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" fill="none" />
                     </svg>
-                  </div>
-                  <div class="flex justify-between px-6 text-[10px] text-outline font-mono mt-1">
-                    <span>00:00</span><span>01:00</span><span>02:00</span><span>03:00</span><span>04:00</span><span>05:00</span><span>06:00</span><span>07:00</span><span>08:00</span><span>09:00</span><span>10:00</span><span>11:00</span><span>12:00</span><span>13:00</span><span>14:00</span>
-                  </div>
-                  <div class="flex items-center justify-center gap-space-lg text-[11px] text-outline font-medium mt-3">
-                    <span class="flex items-center gap-1"><span class="w-3 h-0.5 bg-primary-container inline-block"></span><span class="w-2 h-2 rounded-full border border-primary-container bg-surface-container-lowest -ml-1"></span> Ingresos</span>
-                    <span class="flex items-center gap-1"><span class="w-3 h-3 bg-[#abf7d6] rounded-sm inline-block"></span> Órdenes</span>
-                  </div>
+                  </button>
+                  <button
+                    type="button"
+                    class="hero-tl__btn hero-tl__btn--zoom"
+                    (click)="toggleHeroFullscreen(heroSimulatorWindow)"
+                    [attr.aria-label]="heroFullscreen() ? 'Salir de pantalla completa' : 'Pantalla completa'"
+                    [attr.aria-pressed]="heroFullscreen()"
+                    [title]="heroFullscreen() ? 'Salir de pantalla completa' : 'Pantalla completa'">
+                    @if (heroFullscreen()) {
+                      <!-- Dos triángulos apuntando hacia dentro: volver al tamaño normal -->
+                      <svg viewBox="0 0 10 10" class="hero-tl__glyph" aria-hidden="true">
+                        <path d="M5.5 1.6l2.9 2.9H5.5z M4.5 8.4L1.6 5.5h2.9z" fill="currentColor" />
+                      </svg>
+                    } @else {
+                      <!-- Dos triángulos hacia las esquinas: ampliar -->
+                      <svg viewBox="0 0 10 10" class="hero-tl__glyph" aria-hidden="true">
+                        <path d="M5.6 1.7h2.7v2.7z M4.4 8.3H1.7V5.6z" fill="currentColor" />
+                      </svg>
+                    }
+                  </button>
                 </div>
-
-                <!-- Donut Chart: Ventas por Canal -->
-                <div class="lg:col-span-4 bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex flex-col justify-between">
-                  <div>
-                    <h3 class="font-label-lg font-bold text-on-surface">Ventas por Canal</h3>
-                    <p class="text-[11px] text-outline">Distribución del período</p>
-                  </div>
-                  <div class="relative flex items-center justify-center my-space-sm h-48">
-                    <svg class="w-44 h-44" viewBox="0 0 160 160">
-                      <g transform="translate(80, 80)">
-                        <path d="M 0 0 L 0 -58 A 58 58 0 0 1 54 22 Z" fill="#abf7d6"></path>
-                        <path d="M 0 0 L 54 22 A 58 58 0 0 1 -38 44 Z" fill="#10b981"></path>
-                        <path d="M 0 0 L -38 44 A 58 58 0 0 1 0 -58 Z" fill="#07271c"></path>
-                        <circle cx="0" cy="0" fill="#ffffff" r="28"></circle>
-                      </g>
-                    </svg>
-                    <div class="absolute top-12 left-0 text-[10px] text-outline flex items-center gap-1 font-medium">
-                      <span>Tienda Online</span>
-                      <span class="w-8 h-px bg-outline-variant/50"></span>
-                    </div>
-                    <div class="absolute top-12 right-2 text-[10px] text-outline flex items-center gap-1 font-medium">
-                      <span class="w-4 h-px bg-outline-variant/50"></span>
-                      <span>WhatsApp</span>
-                    </div>
-                    <div class="absolute bottom-2 right-12 text-[10px] text-outline flex flex-col items-center font-medium">
-                      <span class="w-px h-3 bg-outline-variant/50"></span>
-                      <span>Punto de Venta</span>
-                    </div>
-                  </div>
-                  <div class="flex items-center justify-center gap-space-sm text-[10px] text-outline">
-                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-[#abf7d6]"></span> WhatsApp</span>
-                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-primary-container"></span> Punto de Venta</span>
-                    <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-[#07271c]"></span> Tienda Online</span>
-                  </div>
-                </div>
+                <span class="font-label-sm text-label-sm text-outline ml-space-sm inline-block font-mono">www.vendix.online/admin/dashboard</span>
               </div>
-
-              <!-- Operational Alerts & Quick Actions Row -->
-              <div class="grid grid-cols-1 lg:grid-cols-12 gap-space-md">
-                <!-- Operational Alerts -->
-                <div class="lg:col-span-6 bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm flex flex-col gap-space-sm">
-                  <h3 class="font-label-lg font-bold text-on-surface">Alertas Operativas</h3>
-                  <div class="flex items-center justify-between p-space-sm bg-[#fff8e6] border border-[#fde8bb] rounded-xl cursor-pointer hover:bg-[#fff3cc] transition-colors">
-                    <div class="flex items-center gap-space-xs text-[#b45309] font-bold text-body-sm">
-                      <span class="w-6 h-6 rounded-full bg-[#fde68a] flex items-center justify-center text-[14px]">⚠️</span>
-                      <span>3 bajo stock</span>
-                    </div>
-                    <span class="text-[#b45309] font-bold text-body-sm">›</span>
-                  </div>
-                  <div class="flex items-center justify-between p-space-sm bg-[#fef2f2] border border-[#fecaca] rounded-xl cursor-pointer hover:bg-[#fee2e2] transition-colors">
-                    <div class="flex items-center gap-space-xs text-error font-bold text-body-sm">
-                      <span class="w-6 h-6 rounded-full bg-[#fca5a5] flex items-center justify-center text-[14px]">⊗</span>
-                      <span>1 agotados</span>
-                    </div>
-                    <span class="text-error font-bold text-body-sm">›</span>
-                  </div>
-                </div>
-
-                <!-- Quick Actions with Vexi avatar -->
-                <div class="lg:col-span-6 bg-surface-container-lowest p-space-md rounded-2xl border border-outline-variant/20 shadow-sm relative flex flex-col justify-between overflow-hidden">
-                  <h3 class="font-label-lg font-bold text-on-surface mb-space-xs">Accesos Rápidos</h3>
-                  <div class="grid grid-cols-2 gap-space-xs pr-14">
-                    <button class="flex items-center gap-2 p-2 rounded-xl bg-surface-container-low/40 hover:bg-surface-container-low text-left text-body-sm font-semibold text-on-surface transition-colors">
-                      <span class="material-symbols-outlined text-outline text-[18px]">trending_up</span>
-                      <span>Resumen de Ventas</span>
-                    </button>
-                    <button class="flex items-center gap-2 p-2 rounded-xl bg-surface-container-low/40 hover:bg-surface-container-low text-left text-body-sm font-semibold text-on-surface transition-colors">
-                      <span class="material-symbols-outlined text-outline text-[18px]">category</span>
-                      <span>Ventas por Producto</span>
-                    </button>
-                    <button class="flex items-center gap-2 p-2 rounded-xl bg-surface-container-low/40 hover:bg-surface-container-low text-left text-body-sm font-semibold text-on-surface transition-colors">
-                      <span class="material-symbols-outlined text-outline text-[18px]">shopping_cart</span>
-                      <span>Órdenes</span>
-                    </button>
-                    <button class="flex items-center gap-2 p-2 rounded-xl bg-surface-container-low/40 hover:bg-surface-container-low text-left text-body-sm font-semibold text-on-surface transition-colors">
-                      <span class="material-symbols-outlined text-outline text-[18px]">warning</span>
-                      <span>Stock Info</span>
-                    </button>
-                    <button class="flex items-center gap-2 p-2 rounded-xl bg-surface-container-low/40 hover:bg-surface-container-low text-left text-body-sm font-semibold text-on-surface transition-colors">
-                      <span class="material-symbols-outlined text-outline text-[18px]">payments</span>
-                      <span>Gastos</span>
-                    </button>
-                    <button class="flex items-center gap-2 p-2 rounded-xl bg-surface-container-low/40 hover:bg-surface-container-low text-left text-body-sm font-semibold text-on-surface transition-colors">
-                      <span class="material-symbols-outlined text-outline text-[18px]">group</span>
-                      <span>Clientes</span>
-                    </button>
-                  </div>
-                  <div class="absolute bottom-1 right-2 flex flex-col items-center pointer-events-none">
-                    <div class="relative w-14 h-14 rounded-full bg-gradient-to-tr from-primary to-primary-container p-0.5 shadow-lg shadow-primary-container/30 flex items-center justify-center">
-                      <div class="w-full h-full rounded-full bg-[#053222] flex items-center justify-center text-primary-fixed">
-                        <span class="material-symbols-outlined text-[28px]">smart_toy</span>
-                      </div>
-                      <span class="absolute -top-1 -right-1 text-[10px] font-bold text-primary-container animate-pulse">💤</span>
-                    </div>
-                  </div>
-                </div>
+              <div class="flex items-center gap-space-sm">
+                <span class="hero-live-badge inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.08em] px-2.5 py-1 rounded-full">
+                  <span class="hero-live-badge__dot relative flex w-1.5 h-1.5">
+                    <span class="absolute inline-flex w-full h-full rounded-full bg-emerald-200 opacity-70 animate-ping"></span>
+                    <span class="relative inline-flex w-1.5 h-1.5 rounded-full bg-emerald-100"></span>
+                  </span>
+                  En vivo · tiempo real
+                </span>
               </div>
             </div>
+
+            <!-- Dashboard Body: replica viva del Panel Principal (datos fake).
+                 En pantalla completa es la zona que crece y hace scroll. -->
+            <app-hero-live-dashboard class="hero-window__body block"></app-hero-live-dashboard>
           </div>
+
+          <!-- Escritorio: sustituye a la ventana cerrada o minimizada. El punto
+               bajo el icono, como en el Dock, indica que sigue en segundo plano. -->
+          @if (!heroWindowVisible()) {
+            <div class="hero-dock absolute inset-0 hidden sm:flex flex-col items-center justify-center rounded-2xl border border-outline-variant/30 shadow-2xl overflow-hidden">
+              <button
+                type="button"
+                class="hero-dock__app group"
+                (click)="reopenHeroWindow()"
+                [attr.aria-label]="heroWindow() === 'minimized' ? 'Volver a Vendix app' : 'Abrir Vendix app'">
+                <span class="hero-dock__icon">
+                  <img src="/icons/vendix-192.png" alt="" class="w-14 h-14 object-contain" width="56" height="56" decoding="async" />
+                </span>
+                <span class="hero-dock__dot" [class.hero-dock__dot--on]="heroWindow() === 'minimized'" aria-hidden="true"></span>
+                <span class="hero-dock__label">Vendix app</span>
+              </button>
+              <p class="hero-dock__hint">
+                @if (heroWindow() === 'minimized') {
+                  Abierta en segundo plano · clic para volver
+                } @else {
+                  Clic para abrir
+                }
+              </p>
+            </div>
+          }
         </div>
       </div>
     </section>
@@ -553,6 +350,10 @@
                   <app-icon name="x-circle" [size]="18" class="text-red-500 shrink-0 mt-0.5"></app-icon>
                   <span><strong>Hojas de Excel manuales para pérdidas y ganancias:</strong> Pérdida de 3 horas cada noche cuadrando cajas y recalculando márgenes a ciegas.</span>
                 </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="x-circle" [size]="18" class="text-red-500 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Cargar y mantener el inventario a mano:</strong> Días transcribiendo listas de precios, facturas de proveedor y conteos uno por uno, con errores de digitación que descuadran el stock.</span>
+                </li>
               </ul>
             </div>
             <div class="mt-8 p-4 bg-white/80 border border-red-200 rounded-xl">
@@ -589,11 +390,15 @@
                   <app-icon name="check-circle" [size]="18" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
                   <span><strong>Márgenes reales y cuadres automáticos en segundos:</strong> Control de costo CPP, FIFO, arqueos ciegos y analítica en lenguaje natural con Vexi IA.</span>
                 </li>
+                <li class="flex items-start gap-3">
+                  <app-icon name="check-circle" [size]="18" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
+                  <span><strong>Inventario cargado y mantenido con IA: de días a segundos.</strong> Vexi lee la factura del proveedor o tu catálogo en PDF, Excel o foto y crea productos, precios y entradas de stock por ti; los conteos se ajustan desde el celular.</span>
+                </li>
               </ul>
             </div>
             <div class="mt-8 p-4 bg-white rounded-xl shadow-xs border border-emerald-200">
               <span class="text-xs font-bold text-emerald-800 uppercase block">Inversión única unificada con Vendix:</span>
-              <span class="text-xl sm:text-2xl font-black text-emerald-700">Desde $39.200 COP / mes</span>
+              <span class="text-xl sm:text-2xl font-black text-emerald-700">Desde ${{ cheapestMonthlyPrice() | number: '1.0-0' : 'es-CO' }} COP / mes</span>
               <span class="text-xs text-slate-500 block mt-1">Todas las herramientas conectadas, soporte garantizado y cero enredos.</span>
             </div>
           </div>
@@ -614,94 +419,89 @@
           </p>
         </div>
 
-        <!-- Industry Tab Selectors -->
-        <div class="flex flex-wrap items-center justify-center gap-2 bg-slate-200/70 p-1.5 rounded-2xl max-w-4xl mx-auto">
-          <button
-            (click)="setIndustry('retail')"
-            [class.bg-white]="selectedIndustry() === 'retail'"
-            [class.text-emerald-800]="selectedIndustry() === 'retail'"
-            [class.shadow-sm]="selectedIndustry() === 'retail'"
-            class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
-            <app-icon name="store" [size]="16"></app-icon> Retail & Mostrador
-          </button>
-          <button
-            (click)="setIndustry('restaurant')"
-            [class.bg-white]="selectedIndustry() === 'restaurant'"
-            [class.text-emerald-800]="selectedIndustry() === 'restaurant'"
-            [class.shadow-sm]="selectedIndustry() === 'restaurant'"
-            class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
-            <app-icon name="coffee" [size]="16"></app-icon> Restaurantes & Gastronomía
-          </button>
-          <button
-            (click)="setIndustry('gym')"
-            [class.bg-white]="selectedIndustry() === 'gym'"
-            [class.text-emerald-800]="selectedIndustry() === 'gym'"
-            [class.shadow-sm]="selectedIndustry() === 'gym'"
-            class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
-            <app-icon name="activity" [size]="16"></app-icon> Gimnasios & Fitness
-          </button>
-          <button
-            (click)="setIndustry('service')"
-            [class.bg-white]="selectedIndustry() === 'service'"
-            [class.text-emerald-800]="selectedIndustry() === 'service'"
-            [class.shadow-sm]="selectedIndustry() === 'service'"
-            class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
-            <app-icon name="briefcase" [size]="16"></app-icon> Servicios & Consultoría
-          </button>
-          <button
-            (click)="setIndustry('manufacturing')"
-            [class.bg-white]="selectedIndustry() === 'manufacturing'"
-            [class.text-emerald-800]="selectedIndustry() === 'manufacturing'"
-            [class.shadow-sm]="selectedIndustry() === 'manufacturing'"
-            class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
-            <app-icon name="boxes" [size]="16"></app-icon> Manufactura & Taller
-          </button>
-          <button
-            (click)="setIndustry('construction')"
-            [class.bg-white]="selectedIndustry() === 'construction'"
-            [class.text-emerald-800]="selectedIndustry() === 'construction'"
-            [class.shadow-sm]="selectedIndustry() === 'construction'"
-            class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
-            <app-icon name="hammer" [size]="16"></app-icon> Contratistas & Obra
-          </button>
+        <!-- Industry Tab Selectors: una pestaña por sector, rotan solas cada
+             10s y se congelan mientras el puntero está encima. -->
+        <div
+          class="flex flex-wrap items-center justify-center gap-2 bg-slate-200/70 p-1.5 rounded-2xl max-w-4xl mx-auto"
+          (mouseenter)="pauseSectorRotation()"
+          (mouseleave)="resumeSectorRotation()"
+          (focusin)="pauseSectorRotation()"
+          (focusout)="resumeSectorRotation()">
+          @for (tab of sectorTabs; track tab.value) {
+            <button
+              (click)="setIndustry(tab.value)"
+              [class.bg-white]="selectedIndustry() === tab.value"
+              [class.text-emerald-800]="selectedIndustry() === tab.value"
+              [class.shadow-sm]="selectedIndustry() === tab.value"
+              [attr.aria-pressed]="selectedIndustry() === tab.value"
+              class="px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all text-slate-700 hover:text-slate-900 flex items-center gap-1.5">
+              <app-icon [name]="tab.icon" [size]="16"></app-icon> {{ tab.label }}
+            </button>
+          }
         </div>
 
-        <!-- Industry Active Tab Content Display -->
-        <div class="bg-white rounded-2xl p-6 sm:p-10 shadow-sm border border-slate-200/80">
-          <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-            <div class="lg:col-span-6 space-y-4">
-              <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-900 text-[11px] font-bold rounded-lg tracking-wider">
-                {{ activeIndustryData().tag }}
-              </span>
-              <h3 class="text-xl sm:text-3xl font-extrabold text-slate-900">
-                {{ activeIndustryData().headline }}
-              </h3>
-              <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                {{ activeIndustryData().description }}
-              </p>
+        <!-- Industry Active Tab Content Display.
+             La foto ocupa una mitad completa de la tarjeta, sin padding, y se
+             difumina hacia el centro hasta fundirse con el fondo blanco del
+             texto. El lado se sortea en cada cambio de sector (ver
+             rollSectorImageSide); en móvil el mismo reparto pasa a vertical:
+             «izquierda» = arriba, «derecha» = abajo. El @for de un solo
+             elemento recrea el bloque al cambiar de sector para que la
+             animación de entrada vuelva a correr. -->
+        <div
+          class="sector-card relative overflow-hidden bg-white rounded-2xl shadow-sm border border-slate-200/80"
+          (mouseenter)="pauseSectorRotation()"
+          (mouseleave)="resumeSectorRotation()"
+          (focusin)="pauseSectorRotation()"
+          (focusout)="resumeSectorRotation()">
+          @for (data of [activeIndustryData()]; track data.value) {
+            <div
+              class="sector-card__grid grid grid-cols-1 lg:grid-cols-2 items-stretch lg:min-h-[26rem]"
+              [class.sector-card__grid--left]="sectorImageSide() === 'left'">
+              <div class="sector-card__text relative z-10 flex flex-col justify-center space-y-4 p-6 sm:p-10 lg:p-12">
+                <span class="inline-block self-start px-3 py-1 bg-emerald-100 text-emerald-900 text-[11px] font-bold rounded-lg tracking-wider">
+                  {{ data.tag }}
+                </span>
+                <h3 class="text-xl sm:text-3xl font-extrabold text-slate-900">
+                  {{ data.headline }}
+                </h3>
+                <p class="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                  {{ data.description }}
+                </p>
 
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                <div class="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                  <app-icon [name]="activeIndustryData().feature1.icon" [size]="20" class="text-emerald-600 mb-2"></app-icon>
-                  <p class="text-xs sm:text-sm font-bold text-slate-900">{{ activeIndustryData().feature1.title }}</p>
-                  <p class="text-xs text-slate-500 mt-1">{{ activeIndustryData().feature1.desc }}</p>
-                </div>
-                <div class="p-4 bg-slate-50 rounded-xl border border-slate-100">
-                  <app-icon [name]="activeIndustryData().feature2.icon" [size]="20" class="text-emerald-600 mb-2"></app-icon>
-                  <p class="text-xs sm:text-sm font-bold text-slate-900">{{ activeIndustryData().feature2.title }}</p>
-                  <p class="text-xs text-slate-500 mt-1">{{ activeIndustryData().feature2.desc }}</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                  <div class="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <app-icon [name]="data.feature1.icon" [size]="20" class="text-emerald-600 mb-2"></app-icon>
+                    <p class="text-xs sm:text-sm font-bold text-slate-900">{{ data.feature1.title }}</p>
+                    <p class="text-xs text-slate-500 mt-1">{{ data.feature1.desc }}</p>
+                  </div>
+                  <div class="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <app-icon [name]="data.feature2.icon" [size]="20" class="text-emerald-600 mb-2"></app-icon>
+                    <p class="text-xs sm:text-sm font-bold text-slate-900">{{ data.feature2.title }}</p>
+                    <p class="text-xs text-slate-500 mt-1">{{ data.feature2.desc }}</p>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div class="lg:col-span-6">
-              <img
-                [src]="activeIndustryData().image"
-                [alt]="activeIndustryData().title"
-                class="w-full h-72 sm:h-80 rounded-xl object-cover shadow-sm border border-slate-200"
-              />
+              <!-- Fotos locales de cada industria. WebP primero (≈100 KB); el PNG
+                   original (≈2 MB) queda de respaldo. `eager` porque el carrusel
+                   cambia solo cada 10 s y una foto perezosa llegaría tarde. -->
+              <div class="sector-card__media relative h-64 sm:h-80 lg:h-auto">
+                <picture class="absolute inset-0 block">
+                  <source [srcset]="data.image + '.webp'" type="image/webp" />
+                  <img
+                    [src]="data.image + '.png'"
+                    [alt]="data.title"
+                    width="1322"
+                    height="738"
+                    loading="eager"
+                    decoding="async"
+                    class="absolute inset-0 w-full h-full object-cover"
+                  />
+                </picture>
+              </div>
             </div>
-          </div>
+          }
         </div>
       </div>
     </section>
@@ -726,363 +526,371 @@
             No es un chatbot genérico. Vexi analiza en tiempo real tus ventas, márgenes, costos y resoluciones DIAN para darte respuestas exactas y tomar acción directa.
           </p>
 
-          <div class="space-y-space-sm mt-space-sm">
-            <!-- Card 1 -->
-            <div
-              (click)="setVexiTab(1)"
-              [class.border-primary-container]="activeVexiTab() === 1"
-              [class.bg-inverse-surface]="activeVexiTab() === 1"
-              [class.bg-inverse-surface\/60]="activeVexiTab() !== 1"
-              class="hover:bg-inverse-surface border border-outline-variant/20 hover:border-primary-container/60 p-space-md rounded-2xl cursor-pointer transition-all duration-200 group">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-space-2xs text-primary-fixed font-bold font-label-md">
-                  <span class="material-symbols-outlined text-[18px]">trending_down</span>
-                  <span>"¿Cuál es mi producto menos rentable?"</span>
+          <!-- Casos de uso: cada tarjeta reproduce un ejemplo en el panel de la derecha -->
+          <div class="lv-cases mt-2">
+            @for (example of vexiExamples; track example.id) {
+              <button
+                type="button"
+                (click)="setVexiTab(example.id)"
+                class="lv-case"
+                [class.lv-case--active]="activeVexiTab() === example.id && vexiPhase() !== 'empty'"
+                [attr.aria-pressed]="activeVexiTab() === example.id && vexiPhase() !== 'empty'">
+                <div class="flex items-start gap-3.5">
+                  <span class="lv-case__icon" aria-hidden="true">
+                    <app-icon [name]="example.icon" [size]="20" />
+                  </span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-start justify-between gap-3">
+                      <p class="font-bold text-[15px] leading-snug text-white">“{{ example.question }}”</p>
+                      <span class="lv-case__chip">{{ activeVexiTab() === example.id && vexiPhase() !== 'empty' ? 'Activo' : 'Ver demo' }}</span>
+                    </div>
+                    <p class="text-[13.5px] leading-relaxed text-white/70 mt-2">{{ example.blurb }}</p>
+                  </div>
                 </div>
-                <span
-                  [class.bg-primary-container]="activeVexiTab() === 1"
-                  [class.text-on-primary]="activeVexiTab() === 1"
-                  [class.bg-on-primary-fixed-variant]="activeVexiTab() !== 1"
-                  [class.text-primary-fixed]="activeVexiTab() !== 1"
-                  class="text-[11px] font-bold px-2 py-0.5 rounded-full group-hover:bg-primary-container group-hover:text-on-primary transition-colors">
-                  {{ activeVexiTab() === 1 ? 'Activo' : 'Ver demo' }}
-                </span>
-              </div>
-              <p class="text-body-sm text-inverse-on-surface/70 mt-1">
-                Detecta márgenes críticos (ej. Huawei Watch GT 40 con 10,71%), calcula ganancia neta en pesos y evalúa el contexto general de tu catálogo.
-              </p>
-            </div>
-
-            <!-- Card 2 -->
-            <div
-              (click)="setVexiTab(2)"
-              [class.border-primary-container]="activeVexiTab() === 2"
-              [class.bg-inverse-surface]="activeVexiTab() === 2"
-              [class.bg-inverse-surface\/60]="activeVexiTab() !== 2"
-              class="hover:bg-inverse-surface border border-outline-variant/20 hover:border-primary-container/60 p-space-md rounded-2xl cursor-pointer transition-all duration-200 group">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-space-2xs text-primary-fixed font-bold font-label-md">
-                  <span class="material-symbols-outlined text-[18px]">inventory_2</span>
-                  <span>"¿Cuál es el producto que menos vendo?"</span>
-                </div>
-                <span
-                  [class.bg-primary-container]="activeVexiTab() === 2"
-                  [class.text-on-primary]="activeVexiTab() === 2"
-                  [class.bg-on-primary-fixed-variant]="activeVexiTab() !== 2"
-                  [class.text-primary-fixed]="activeVexiTab() !== 2"
-                  class="text-[11px] font-bold px-2 py-0.5 rounded-full group-hover:bg-primary-container group-hover:text-on-primary transition-colors">
-                  {{ activeVexiTab() === 2 ? 'Activo' : 'Ver demo' }}
-                </span>
-              </div>
-              <p class="text-body-sm text-inverse-on-surface/70 mt-1">
-                Identifica bajas rotaciones y empates de ventas críticas (Airpods 3, Xiaomi 13 Lite, Tecno Camon 20) para evitar inventario dormido.
-              </p>
-            </div>
-
-            <!-- Card 3 -->
-            <div
-              (click)="setVexiTab(3)"
-              [class.border-primary-container]="activeVexiTab() === 3"
-              [class.bg-inverse-surface]="activeVexiTab() === 3"
-              [class.bg-inverse-surface\/60]="activeVexiTab() !== 3"
-              class="hover:bg-inverse-surface border border-outline-variant/20 hover:border-primary-container/60 p-space-md rounded-2xl cursor-pointer transition-all duration-200 group">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-space-2xs text-primary-fixed font-bold font-label-md">
-                  <span class="material-symbols-outlined text-[18px]">document_scanner</span>
-                  <span>"Vexi, ingresa esta factura de mi proveedor"</span>
-                </div>
-                <span
-                  [class.bg-primary-container]="activeVexiTab() === 3"
-                  [class.text-on-primary]="activeVexiTab() === 3"
-                  [class.bg-on-primary-fixed-variant]="activeVexiTab() !== 3"
-                  [class.text-primary-fixed]="activeVexiTab() !== 3"
-                  class="text-[11px] font-bold px-2 py-0.5 rounded-full group-hover:bg-primary-container group-hover:text-on-primary transition-colors">
-                  {{ activeVexiTab() === 3 ? 'Activo' : 'Ver demo' }}
-                </span>
-              </div>
-              <p class="text-body-sm text-inverse-on-surface/70 mt-1">
-                Escaneo OCR inteligente de compras por foto o PDF: extrae NIT, ítems, IVA y actualiza tu stock sin digitar nada a mano.
-              </p>
-            </div>
-
-            <!-- Card 4 -->
-            <div
-              (click)="setVexiTab(4)"
-              [class.border-primary-container]="activeVexiTab() === 4"
-              [class.bg-inverse-surface]="activeVexiTab() === 4"
-              [class.bg-inverse-surface\/60]="activeVexiTab() !== 4"
-              class="hover:bg-inverse-surface border border-outline-variant/20 hover:border-primary-container/60 p-space-md rounded-2xl cursor-pointer transition-all duration-200 group">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-space-2xs text-primary-fixed font-bold font-label-md">
-                  <span class="material-symbols-outlined text-[18px]">notifications_active</span>
-                  <span>"Vexi, avísame si el stock baja"</span>
-                </div>
-                <span
-                  [class.bg-primary-container]="activeVexiTab() === 4"
-                  [class.text-on-primary]="activeVexiTab() === 4"
-                  [class.bg-on-primary-fixed-variant]="activeVexiTab() !== 4"
-                  [class.text-primary-fixed]="activeVexiTab() !== 4"
-                  class="text-[11px] font-bold px-2 py-0.5 rounded-full group-hover:bg-primary-container group-hover:text-on-primary transition-colors">
-                  {{ activeVexiTab() === 4 ? 'Activo' : 'Ver demo' }}
-                </span>
-              </div>
-              <p class="text-body-sm text-inverse-on-surface/70 mt-1">
-                Alertas preventivas a WhatsApp con borrador de orden de compra listo para enviar a tus distribuidores.
-              </p>
-            </div>
+              </button>
+            }
           </div>
         </div>
 
-        <!-- Right column: Interactive Vexi Chat Simulator -->
-        <div class="lg:col-span-7 bg-[#0b1c30] rounded-3xl border border-outline-variant/30 shadow-2xl flex flex-col overflow-hidden">
-          <!-- Chat Window Header -->
-          <div class="flex items-center justify-between px-space-lg py-space-sm bg-[#053222] border-b border-primary-container/30 text-on-primary">
-            <div class="flex items-center gap-space-sm">
-              <div class="w-9 h-9 rounded-full bg-primary-container flex items-center justify-center text-on-primary shadow-sm">
-                <span class="material-symbols-outlined text-[20px]">menu_book</span>
-              </div>
-              <div>
-                <div class="flex items-center gap-2">
-                  <h4 class="font-headline-sm text-headline-sm font-bold leading-tight">Vexi</h4>
-                  <span class="inline-flex items-center gap-1 text-[11px] font-bold text-[#abf7d6] bg-primary/40 px-2 py-0.5 rounded-full">
-                    <span class="w-1.5 h-1.5 rounded-full bg-primary-fixed animate-pulse"></span> En línea
+        <!-- Right column: réplica del panel flotante real de Vexi (app-vexi-panel).
+             Clases lv-* copiadas del panel real (ver SCSS); avatar y traza de
+             herramientas son los componentes reales. -->
+        <div class="lg:col-span-7 flex justify-center lg:justify-end">
+          <div class="lv-stage" [style.min-height.px]="vexiStageHeight()">
+            @if (vexiPanelOpen()) {
+              <section class="lv-panel" aria-label="Demostración del chat de Vexi">
+                <span class="lv-panel__grip" aria-hidden="true"></span>
+
+                <header class="lv-panel__header">
+                  <button
+                    type="button"
+                    class="lv-panel__icon-btn"
+                    (click)="vexiSidebarOpen.set(!vexiSidebarOpen())"
+                    [attr.aria-expanded]="vexiSidebarOpen()"
+                    [attr.aria-label]="vexiSidebarOpen() ? 'Ocultar conversaciones' : 'Ver conversaciones'">
+                    <app-icon [name]="vexiSidebarOpen() ? 'panel-left-close' : 'panel-left-open'" [size]="18" />
+                  </button>
+
+                  <span class="lv-panel__heading">
+                    <span class="lv-panel__title">Vexi</span>
+                    <span class="lv-panel__subtitle">{{ vexiStatusLine() }}</span>
                   </span>
-                </div>
-                <p class="text-body-sm text-[#abcebf]">Tu copiloto de tienda</p>
-              </div>
-            </div>
-            <div class="flex items-center gap-space-xs text-primary-fixed-dim">
-              <button (click)="openWhatsApp('Hola Vexi, quiero activar el copiloto IA para mi tienda')" class="w-8 h-8 rounded-full hover:bg-primary/30 flex items-center justify-center transition-colors" title="Dictado por voz">
-                <span class="material-symbols-outlined text-[18px]">mic</span>
-              </button>
-              <button (click)="openWhatsApp('Hola Vexi, quiero configurar los ajustes de IA para mi comercio')" class="w-8 h-8 rounded-full hover:bg-primary/30 flex items-center justify-center transition-colors" title="Editar ajustes">
-                <span class="material-symbols-outlined text-[18px]">edit</span>
-              </button>
-              <button (click)="setVexiTab(1)" class="w-8 h-8 rounded-full hover:bg-primary/30 flex items-center justify-center transition-colors" title="Reiniciar vista">
-                <span class="material-symbols-outlined text-[18px]">refresh</span>
-              </button>
-            </div>
-          </div>
 
-          <!-- Horizontal Pill Navigation Tabs -->
-          <div class="flex items-center gap-2 px-space-md py-2.5 bg-[#07271c] border-b border-primary-container/20 overflow-x-auto">
-            <button
-              (click)="setVexiTab(1)"
-              [class.bg-primary-container]="activeVexiTab() === 1"
-              [class.text-on-primary]="activeVexiTab() === 1"
-              [class.font-bold]="activeVexiTab() === 1"
-              [class.bg-on-primary-fixed-variant\/50]="activeVexiTab() !== 1"
-              [class.text-inverse-on-surface\/80]="activeVexiTab() !== 1"
-              class="px-space-sm py-1 rounded-full text-label-sm shadow-sm transition-all whitespace-nowrap flex items-center gap-1 hover:text-on-primary">
-              <span class="material-symbols-outlined text-[14px]">trending_down</span> Menos rentable
-            </button>
-            <button
-              (click)="setVexiTab(2)"
-              [class.bg-primary-container]="activeVexiTab() === 2"
-              [class.text-on-primary]="activeVexiTab() === 2"
-              [class.font-bold]="activeVexiTab() === 2"
-              [class.bg-on-primary-fixed-variant\/50]="activeVexiTab() !== 2"
-              [class.text-inverse-on-surface\/80]="activeVexiTab() !== 2"
-              class="px-space-sm py-1 rounded-full text-label-sm shadow-sm transition-all whitespace-nowrap flex items-center gap-1 hover:text-on-primary">
-              <span class="material-symbols-outlined text-[14px]">inventory_2</span> Menos vendido
-            </button>
-            <button
-              (click)="setVexiTab(3)"
-              [class.bg-primary-container]="activeVexiTab() === 3"
-              [class.text-on-primary]="activeVexiTab() === 3"
-              [class.font-bold]="activeVexiTab() === 3"
-              [class.bg-on-primary-fixed-variant\/50]="activeVexiTab() !== 3"
-              [class.text-inverse-on-surface\/80]="activeVexiTab() !== 3"
-              class="px-space-sm py-1 rounded-full text-label-sm shadow-sm transition-all whitespace-nowrap flex items-center gap-1 hover:text-on-primary">
-              <span class="material-symbols-outlined text-[14px]">document_scanner</span> Ingresar factura
-            </button>
-            <button
-              (click)="setVexiTab(4)"
-              [class.bg-primary-container]="activeVexiTab() === 4"
-              [class.text-on-primary]="activeVexiTab() === 4"
-              [class.font-bold]="activeVexiTab() === 4"
-              [class.bg-on-primary-fixed-variant\/50]="activeVexiTab() !== 4"
-              [class.text-inverse-on-surface\/80]="activeVexiTab() !== 4"
-              class="px-space-sm py-1 rounded-full text-label-sm shadow-sm transition-all whitespace-nowrap flex items-center gap-1 hover:text-on-primary">
-              <span class="material-symbols-outlined text-[14px]">notifications_active</span> Alerta de stock
-            </button>
-          </div>
+                  <button
+                    type="button"
+                    class="lv-panel__icon-btn"
+                    [class.is-active]="vexiVoiceUi()"
+                    (click)="toggleVexiVoice()"
+                    [attr.aria-pressed]="vexiVoiceUi()"
+                    [attr.aria-label]="vexiVoiceUi() ? 'Volver a escribir' : 'Hablar con Vexi'"
+                    [title]="vexiVoiceUi() ? 'Volver a escribir' : 'Hablar con Vexi'">
+                    <app-icon [name]="vexiVoiceUi() ? 'message-square' : 'mic'" [size]="18" />
+                  </button>
 
-          <!-- Dynamic Chat Body Area -->
-          <div class="p-space-md sm:p-space-lg space-y-space-md min-h-[380px] bg-[#f4f7fb] text-[#0b1c30]">
-            @if (activeVexiTab() === 1) {
-              <!-- Chat 1: Menos rentable -->
-              <div class="space-y-space-md">
-                <div class="flex justify-end">
-                  <div class="bg-[#c4e8d8] text-[#00422b] px-space-md py-space-xs rounded-2xl rounded-tr-sm max-w-[85%] font-medium shadow-sm text-body-md">
-                    ¿Cuál es mi producto menos rentable?
+                  <button type="button" class="lv-panel__icon-btn" (click)="newVexiConversation()" aria-label="Nueva conversación" title="Nueva conversación">
+                    <app-icon name="square-pen" [size]="18" />
+                  </button>
+
+                  <button type="button" class="lv-panel__icon-btn" (click)="closeVexiPanel()" aria-label="Cerrar" title="Cerrar">
+                    <app-icon name="x" [size]="18" />
+                  </button>
+                </header>
+
+                @if (vexiVoiceUi()) {
+                  <div class="lv-voice__stage">
+                    <span class="lv-voice__portrait" [class.is-speaking]="vexiPhase() === 'typing'" aria-hidden="true">
+                      <app-vexi-avatar [expression]="vexiExpression()" [voice]="vexiVoiceRecording()" />
+                    </span>
+                    <p class="lv-voice__status" role="status">{{ vexiVoiceStatus() }}</p>
                   </div>
-                </div>
-                <div class="flex items-start gap-space-xs">
-                  <div class="w-8 h-8 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0 mt-0.5 shadow-sm font-bold">
-                    <span class="material-symbols-outlined text-[18px]">smart_toy</span>
-                  </div>
-                  <div class="bg-surface-container-lowest text-on-surface p-space-md rounded-2xl rounded-tl-sm max-w-[92%] shadow-sm border border-outline-variant/30 space-y-space-sm">
-                    <div class="inline-flex items-center gap-1 px-2.5 py-1 bg-[#e6fbf2] text-primary font-bold text-label-sm rounded-full">
-                      <span class="material-symbols-outlined text-[14px]">auto_awesome</span> Consulté 1 dato
+                }
+
+                <div class="lv-panel__body">
+                  <aside
+                    class="lv-panel__sidebar"
+                    [class.is-collapsed]="!vexiSidebarOpen()"
+                    [attr.inert]="vexiSidebarOpen() ? null : ''"
+                    [attr.aria-hidden]="!vexiSidebarOpen()">
+                    <div class="lv-panel__sidebar-inner">
+                      @for (example of vexiExamples; track example.id) {
+                        <button
+                          type="button"
+                          class="lv-panel__conversation"
+                          [class.is-active]="example.id === activeVexiTab() && vexiPhase() !== 'empty'"
+                          (click)="setVexiTab(example.id)">
+                          {{ example.title }}
+                        </button>
+                      }
                     </div>
-                    <p class="text-body-md leading-relaxed text-[#0b1c30]">
-                      Entre lo vendido este mes, el menos rentable es el <strong class="text-[#091e32] font-bold">Huawei Watch GT 40</strong>: margen de apenas <span class="font-bold text-error bg-error-container/40 px-1.5 py-0.5 rounded">10,71%</span> sobre el costo actual. Vendió 1 unidad a $168.000, así que el margen en pesos fue de unos $18.000.
-                    </p>
-                    <p class="text-body-md leading-relaxed text-[#3c4a42]">
-                      Para contexto, el resto del catálogo se mueve entre 23% y 90%, así que este reloj queda muy por debajo. Y ojo: también es de los que menos venden y está en stock 0 — es candidato a subirle el precio o replantearlo.
-                    </p>
-                    <div (click)="setVexiTab(2)" class="pt-2 border-t border-outline-variant/30 text-body-md font-semibold text-primary flex items-center gap-1.5 cursor-pointer hover:underline">
-                      <span class="material-symbols-outlined text-[18px]">help</span> ¿Quieres que mire el desglose de su precio y costo para ver si conviene ajustarlo?
-                    </div>
-                  </div>
-                </div>
-              </div>
-            } @else if (activeVexiTab() === 2) {
-              <!-- Chat 2: Menos vendido -->
-              <div class="space-y-space-md">
-                <div class="flex justify-end">
-                  <div class="bg-[#c4e8d8] text-[#00422b] px-space-md py-space-xs rounded-2xl rounded-tr-sm max-w-[85%] font-medium shadow-sm text-body-md">
-                    ¿Cuál es el producto que menos vendo?
-                  </div>
-                </div>
-                <div class="flex items-start gap-space-xs">
-                  <div class="w-8 h-8 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0 mt-0.5 shadow-sm font-bold">
-                    <span class="material-symbols-outlined text-[18px]">smart_toy</span>
-                  </div>
-                  <div class="bg-surface-container-lowest text-on-surface p-space-md rounded-2xl rounded-tl-sm max-w-[92%] shadow-sm border border-outline-variant/30 space-y-space-sm">
-                    <div class="inline-flex items-center gap-1 px-2.5 py-1 bg-[#e6fbf2] text-primary font-bold text-label-sm rounded-full">
-                      <span class="material-symbols-outlined text-[14px]">auto_awesome</span> Consulté 2 datos
-                    </div>
-                    <p class="text-body-md leading-relaxed text-[#0b1c30]">
-                      Mirando las ventas de este mes, hay un <strong class="text-[#091e32] font-bold">empate en el último puesto</strong>: 6 productos vendieron solo <strong class="text-error font-bold">1 unidad</strong>:
-                    </p>
-                    <div class="bg-[#eff4ff] p-space-sm rounded-xl text-body-sm space-y-1 font-mono text-[13px] border border-outline-variant/20">
-                      <p class="text-[#0b1c30]">• <strong>Airpods 3</strong> ($1.200.000 COP)</p>
-                      <p class="text-[#0b1c30]">• <strong>Xiaomi 13 Lite</strong> ($2.002.000 COP)</p>
-                      <p class="text-[#0b1c30]">• <strong>Tecno Camon 20</strong> ($900.000 COP)</p>
-                      <p class="text-[#0b1c30]">• <strong>Tecno Spark 10</strong> ($697.500 COP)</p>
-                      <p class="text-[#0b1c30]">• <strong>Huawei Watch GT 40</strong> ($168.000 COP)</p>
-                      <p class="text-[#0b1c30]">• <strong>Samsung Galaxy A54</strong> ($1.560.000 COP)</p>
-                    </div>
-                    <p class="text-body-md text-[#3c4a42]">
-                      Esto es solo entre lo que vendió algo este mes. Si quieres saber cuáles llevan <strong class="text-[#0b1c30] font-bold">cero ventas</strong> en el periodo, dime y te reviso el catálogo completo.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            } @else if (activeVexiTab() === 3) {
-              <!-- Chat 3: Ingresar factura -->
-              <div class="space-y-space-md">
-                <div class="flex justify-end">
-                  <div class="bg-[#c4e8d8] text-[#00422b] px-space-md py-space-xs rounded-2xl rounded-tr-sm max-w-[85%] font-medium shadow-sm text-body-md">
-                    Vexi, ingresa esta factura de mi proveedor
-                  </div>
-                </div>
-                <div class="flex items-start gap-space-xs">
-                  <div class="w-8 h-8 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0 mt-0.5 shadow-sm font-bold">
-                    <span class="material-symbols-outlined text-[18px]">smart_toy</span>
-                  </div>
-                  <div class="bg-surface-container-lowest text-on-surface p-space-md rounded-2xl rounded-tl-sm max-w-[92%] shadow-sm border border-outline-variant/30 space-y-space-sm">
-                    <div class="inline-flex items-center gap-1 px-2.5 py-1 bg-[#e6fbf2] text-primary font-bold text-label-sm rounded-full">
-                      <span class="material-symbols-outlined text-[14px]">auto_awesome</span> OCR Procesado con éxito
-                    </div>
-                    <p class="text-body-md leading-relaxed text-[#0b1c30]">
-                      He analizado el documento del proveedor <strong class="text-primary font-bold">Distribuciones Colanta S.A.S. (NIT 890.900.123-1)</strong>:
-                    </p>
-                    <div class="bg-[#eff4ff] p-space-sm rounded-xl text-body-sm space-y-1.5 border border-outline-variant/20">
-                      <div class="flex justify-between font-semibold text-on-surface">
-                        <span>Ítems detectados:</span>
-                        <span>3 líneas de producto</span>
-                      </div>
-                      <div class="flex justify-between text-on-surface-variant">
-                        <span>Total compra con IVA:</span>
-                        <span class="font-bold text-primary">$1.485.000 COP</span>
-                      </div>
-                      <div class="flex justify-between text-on-surface-variant">
-                        <span>Actualización de stock:</span>
-                        <span class="text-primary font-bold">+120 unidades ingresadas</span>
-                      </div>
-                    </div>
-                    @if (!ocrConfirmed()) {
-                      <button
-                        (click)="confirmOcr()"
-                        class="w-full py-2 px-space-sm bg-primary text-on-primary text-label-md font-bold rounded-xl hover:bg-primary/90 transition-all flex items-center justify-center gap-1.5 shadow-sm">
-                        <span class="material-symbols-outlined text-[18px]">check_circle</span>
-                        Confirmar registro y cargar a cuentas por pagar
-                      </button>
+                  </aside>
+
+                  <div id="lv-scroller" class="lv-panel__messages" [class.lv-panel__messages--captions]="vexiVoiceUi()">
+                    @if (vexiPhase() === 'empty') {
+                      @if (!vexiVoiceUi()) {
+                        <div class="lv-empty">
+                          <span class="lv-empty__portrait" aria-hidden="true">
+                            <app-vexi-avatar expression="idle" />
+                          </span>
+                          <p class="lv-empty__title">Hola, soy Vexi</p>
+                          <p class="lv-empty__text">
+                            Pregúntame por tu inventario, tus ventas o tu contabilidad. Si quieres, también te llevo al módulo que necesites.
+                          </p>
+                          <div class="lv-empty__chips">
+                            @for (example of vexiExamples; track example.id) {
+                              <button type="button" class="lv-empty__chip" (click)="setVexiTab(example.id)">{{ example.question }}</button>
+                            }
+                          </div>
+                        </div>
+                      }
                     } @else {
-                      <div class="p-2.5 bg-emerald-100 text-emerald-900 font-bold rounded-xl flex items-center gap-2 text-body-sm border border-emerald-300">
-                        <span class="material-symbols-outlined text-emerald-700 text-[20px]">task_alt</span>
-                        ¡Factura registrada exitosamente! 120 unidades añadidas al inventario central.
-                      </div>
+                      @if (activeVexiTab() === 3) {
+                        <span class="lv-attachment">
+                          <app-icon name="file-text" [size]="14" />
+                          <span>factura-colanta-0921.pdf</span>
+                        </span>
+                      }
+                      <div class="lv-msg lv-msg--user">{{ vexiQuestion() }}</div>
+
+                      @if (vexiPhase() === 'typing') {
+                        <div class="lv-turn">
+                          <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="thinking" /></span>
+                          <div class="lv-msg lv-msg--assistant lv-msg--working">
+                            <span class="lv-msg--typing" aria-hidden="true"><span></span><span></span><span></span></span>
+                            <span class="lv-msg__phrase" role="status">{{ vexiProgressPhrase() }}</span>
+                          </div>
+                        </div>
+                      } @else {
+                        @if (activeVexiExample(); as example) {
+                          <app-vexi-tool-trace [steps]="example.steps" />
+                        }
+
+                        @switch (activeVexiTab()) {
+                          @case (1) {
+                            <div class="lv-turn">
+                              <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="idle" /></span>
+                              <div class="lv-msg lv-msg--assistant lv-md">
+                                <p>Entre lo vendido este mes, el menos rentable es el <strong>Huawei Watch GT 40</strong>: margen de apenas <strong>10,71%</strong> sobre el costo actual. Vendió 1 unidad a $168.000, así que el margen en pesos fue de unos $18.000.</p>
+                                <p>Para contexto, el resto del catálogo se mueve entre 23% y 90%, así que este reloj queda muy por debajo. Y ojo: también es de los que menos venden y está en stock 0 — es candidato a subirle el precio o replantearlo.</p>
+                                <p>¿Quieres que mire el desglose de su precio y costo para ver si conviene ajustarlo?</p>
+                              </div>
+                            </div>
+                          }
+                          @case (2) {
+                            <div class="lv-turn">
+                              <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="idle" /></span>
+                              <div class="lv-msg lv-msg--assistant lv-md">
+                                <p>Mirando las ventas de este mes, hay un <strong>empate en el último puesto</strong>: 6 productos vendieron solo <strong>1 unidad</strong>:</p>
+                                <ul>
+                                  <li><strong>Airpods 3</strong> ($1.200.000 COP)</li>
+                                  <li><strong>Xiaomi 13 Lite</strong> ($2.002.000 COP)</li>
+                                  <li><strong>Tecno Camon 20</strong> ($900.000 COP)</li>
+                                  <li><strong>Tecno Spark 10</strong> ($697.500 COP)</li>
+                                  <li><strong>Huawei Watch GT 40</strong> ($168.000 COP)</li>
+                                  <li><strong>Samsung Galaxy A54</strong> ($1.560.000 COP)</li>
+                                </ul>
+                                <p>Esto es solo entre lo que vendió algo este mes. Si quieres saber cuáles llevan <strong>cero ventas</strong> en el periodo, dime y te reviso el catálogo completo.</p>
+                              </div>
+                            </div>
+                          }
+                          @case (3) {
+                            <div class="lv-turn">
+                              <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar [expression]="vexiExpression()" /></span>
+                              <div class="lv-msg lv-msg--assistant lv-md">
+                                <p>Leí la factura de <strong>Distribuciones Colanta S.A.S. (NIT 890.900.123-1)</strong>: 3 líneas de producto, <strong>$1.485.000</strong> con IVA y 120 unidades para ingresar al inventario.</p>
+                                <p>Antes de tocar tu stock y tus cuentas por pagar, confírmame el registro:</p>
+                              </div>
+                            </div>
+
+                            @if (vexiDecision() === 'pending') {
+                              <section class="lv-card" role="group" aria-label="Cambio propuesto por Vexi">
+                                <header class="lv-card__header">
+                                  <span class="lv-card__badge" aria-hidden="true"><app-icon name="pencil" [size]="15" /></span>
+                                  <span class="lv-card__heading">
+                                    <strong class="lv-card__title">Vexi propone un cambio</strong>
+                                    <span class="lv-card__target">Registrar compra · Distribuciones Colanta S.A.S.</span>
+                                  </span>
+                                </header>
+                                <p class="lv-card__message">Crea la compra, ingresa las unidades al inventario y deja la factura en cuentas por pagar.</p>
+                                <dl class="lv-card__diff">
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Ítems detectados</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">—</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">3 líneas de producto</span></dd>
+                                  </div>
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Total con IVA</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">—</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">$1.485.000 COP</span></dd>
+                                  </div>
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Stock · Bodega principal</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">1.240 unidades</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">1.360 unidades (+120)</span></dd>
+                                  </div>
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Cuentas por pagar</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">—</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">$1.485.000 a 30 días</span></dd>
+                                  </div>
+                                </dl>
+                                <footer class="lv-card__actions">
+                                  <button type="button" class="lv-card__btn lv-card__btn--reject" (click)="rejectVexiProposal()" [disabled]="vexiApplying()">
+                                    <app-icon name="x" [size]="15" /> Rechazar
+                                  </button>
+                                  <button type="button" class="lv-card__btn lv-card__btn--approve" (click)="approveVexiProposal()" [disabled]="vexiApplying()">
+                                    @if (vexiApplying()) {
+                                      <app-icon name="loader-2" [size]="15" [spin]="true" /> Aplicando…
+                                    } @else {
+                                      <app-icon name="check" [size]="15" /> Aprobar
+                                    }
+                                  </button>
+                                </footer>
+                              </section>
+                            } @else if (vexiDecision() === 'approved') {
+                              <app-vexi-tool-trace [steps]="vexiOcrAppliedSteps" />
+                              <div class="lv-turn">
+                                <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="happy" /></span>
+                                <div class="lv-msg lv-msg--assistant lv-md">
+                                  <p>¡Listo! Factura registrada: <strong>120 unidades</strong> añadidas al inventario central y <strong>$1.485.000</strong> en cuentas por pagar con vencimiento a 30 días.</p>
+                                </div>
+                              </div>
+                            } @else {
+                              <div class="lv-turn">
+                                <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="idle" /></span>
+                                <div class="lv-msg lv-msg--assistant lv-md">
+                                  <p>Entendido, no registré nada. Si quieres, súbeme otra foto o el PDF corregido y lo intento de nuevo.</p>
+                                </div>
+                              </div>
+                            }
+                          }
+                          @case (4) {
+                            <div class="lv-turn">
+                              <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar [expression]="vexiExpression()" /></span>
+                              <div class="lv-msg lv-msg--assistant lv-md">
+                                <p><strong>Regla de alerta activada.</strong> Te notificaré a tu WhatsApp cada vez que el stock de cualquier referencia baje de 10 unidades. Ahora mismo tienes <strong>2 productos</strong> en estado crítico:</p>
+                                <ul>
+                                  <li><strong>Café Especial Huila 500g</strong> · 3 unidades restantes</li>
+                                  <li><strong>Panela orgánica 1 kg</strong> · 7 unidades restantes</li>
+                                </ul>
+                                <p>Puedo enviarle ya al proveedor un borrador de orden de reposición del café:</p>
+                              </div>
+                            </div>
+
+                            @if (vexiDecision() === 'pending') {
+                              <section class="lv-card" role="group" aria-label="Cambio propuesto por Vexi">
+                                <header class="lv-card__header">
+                                  <span class="lv-card__badge" aria-hidden="true"><app-icon name="pencil" [size]="15" /></span>
+                                  <span class="lv-card__heading">
+                                    <strong class="lv-card__title">Vexi propone un cambio</strong>
+                                    <span class="lv-card__target">Orden de reposición · Café Especial Huila 500g</span>
+                                  </span>
+                                </header>
+                                <p class="lv-card__message">Envía al proveedor el borrador por WhatsApp para que lo confirme. Nada sale sin tu aprobación.</p>
+                                <dl class="lv-card__diff">
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Proveedor</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">—</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">Distribuidora del Huila</span></dd>
+                                  </div>
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Cantidad</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">3 unidades</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">24 unidades</span></dd>
+                                  </div>
+                                  <div class="lv-row">
+                                    <dt class="lv-row__label">Canal</dt>
+                                    <dd class="lv-row__values"><span class="lv-row__from">—</span><span class="lv-row__arrow" aria-hidden="true"><app-icon name="arrow-right" [size]="12" /></span><span class="lv-row__to">WhatsApp del proveedor</span></dd>
+                                  </div>
+                                </dl>
+                                <footer class="lv-card__actions">
+                                  <button type="button" class="lv-card__btn lv-card__btn--reject" (click)="rejectVexiProposal()" [disabled]="vexiApplying()">
+                                    <app-icon name="x" [size]="15" /> Rechazar
+                                  </button>
+                                  <button type="button" class="lv-card__btn lv-card__btn--approve" (click)="approveVexiProposal()" [disabled]="vexiApplying()">
+                                    @if (vexiApplying()) {
+                                      <app-icon name="loader-2" [size]="15" [spin]="true" /> Aplicando…
+                                    } @else {
+                                      <app-icon name="check" [size]="15" /> Aprobar
+                                    }
+                                  </button>
+                                </footer>
+                              </section>
+                            } @else if (vexiDecision() === 'approved') {
+                              <div class="lv-turn">
+                                <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="happy" /></span>
+                                <div class="lv-msg lv-msg--assistant lv-md">
+                                  <p>Orden de reposición <strong>#OC-2026-084</strong> transmitida a Distribuidora del Huila por WhatsApp. Reposición estimada: mañana a las 8:00 a. m.</p>
+                                </div>
+                              </div>
+                            } @else {
+                              <div class="lv-turn">
+                                <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="idle" /></span>
+                                <div class="lv-msg lv-msg--assistant lv-md">
+                                  <p>Perfecto, dejo la alerta activa y no le envío nada al proveedor por ahora.</p>
+                                </div>
+                              </div>
+                            }
+                          }
+                          @default {
+                            <div class="lv-turn">
+                              <span class="lv-turn__avatar" aria-hidden="true"><app-vexi-avatar expression="idle" /></span>
+                              <div class="lv-msg lv-msg--assistant lv-md">
+                                <p>Esa la respondo con los datos reales de tu tienda cuando actives a Vexi. En esta demo puedo mostrarte cómo trabajo con estos casos:</p>
+                              </div>
+                            </div>
+                            <div class="lv-empty__chips lv-empty__chips--start">
+                              @for (example of vexiExamples; track example.id) {
+                                <button type="button" class="lv-empty__chip" (click)="setVexiTab(example.id)">{{ example.title }}</button>
+                              }
+                            </div>
+                          }
+                        }
+                      }
                     }
                   </div>
                 </div>
-              </div>
-            } @else if (activeVexiTab() === 4) {
-              <!-- Chat 4: Alerta de stock -->
-              <div class="space-y-space-md">
-                <div class="flex justify-end">
-                  <div class="bg-[#c4e8d8] text-[#00422b] px-space-md py-space-xs rounded-2xl rounded-tr-sm max-w-[85%] font-medium shadow-sm text-body-md">
-                    Vexi, avísame si el stock baja de 10 unidades
+
+                @if (vexiVoiceUi()) {
+                  <div class="lv-voice__composer">
+                    <button
+                      type="button"
+                      class="lv-voice__mic"
+                      [class.is-recording]="vexiVoiceRecording()"
+                      (pointerdown)="onVexiMicDown($event)"
+                      (pointerup)="onVexiMicUp()"
+                      (pointercancel)="onVexiMicCancel()"
+                      (keydown.space)="onVexiMicDown($event)"
+                      (keydown.enter)="onVexiMicDown($event)"
+                      (keyup.space)="onVexiMicUp()"
+                      (keyup.enter)="onVexiMicUp()"
+                      [attr.aria-pressed]="vexiVoiceRecording()"
+                      aria-label="Mantén presionado para hablar">
+                      <app-icon [name]="vexiVoiceRecording() ? 'square' : 'mic'" [size]="26" />
+                    </button>
+                    <p class="lv-voice__hint">{{ vexiVoiceHint() }}</p>
                   </div>
-                </div>
-                <div class="flex items-start gap-space-xs">
-                  <div class="w-8 h-8 rounded-full bg-primary-container text-on-primary flex items-center justify-center shrink-0 mt-0.5 shadow-sm font-bold">
-                    <span class="material-symbols-outlined text-[18px]">smart_toy</span>
-                  </div>
-                  <div class="bg-surface-container-lowest text-on-surface p-space-md rounded-2xl rounded-tl-sm max-w-[92%] shadow-sm border border-outline-variant/30 space-y-space-sm">
-                    <p class="font-bold text-primary flex items-center gap-1.5">
-                      <span class="material-symbols-outlined text-[18px]">notifications_active</span> Regla de alerta activada
-                    </p>
-                    <p class="text-body-md leading-relaxed text-[#0b1c30]">
-                      Te notificaré de inmediato a tu WhatsApp personal cada vez que el stock de cualquier referencia baje de 10 unidades. Actualmente tienes <strong class="text-error font-bold">2 productos</strong> en estado crítico:
-                    </p>
-                    <div class="p-space-xs bg-[#fef2f2] border border-[#fecaca] rounded-xl text-error text-body-sm font-medium flex items-center gap-2">
-                      <span class="material-symbols-outlined text-[18px]">warning</span> 'Café Especial Huila 500g' (3 unids restantes)
-                    </div>
-                    @if (!stockAlertSent()) {
-                      <button
-                        (click)="sendStockAlert()"
-                        class="w-full py-2 px-space-sm bg-primary text-on-primary text-label-md font-bold rounded-xl hover:bg-primary/90 transition-all flex items-center justify-center gap-1.5 shadow-sm">
-                        <span class="material-symbols-outlined text-[18px]">send</span> Enviar orden de reposición al proveedor por WhatsApp
-                      </button>
-                    } @else {
-                      <div class="p-2.5 bg-emerald-100 text-emerald-900 font-bold rounded-xl flex items-center gap-2 text-body-sm border border-emerald-300">
-                        <span class="material-symbols-outlined text-emerald-700 text-[20px]">check_circle</span>
-                        Orden de reposición transmitida al distribuidor por WhatsApp.
-                      </div>
-                    }
-                  </div>
-                </div>
-              </div>
+                } @else {
+                  <form class="lv-panel__composer" (submit)="onVexiSubmit($event)">
+                    <button type="button" class="lv-panel__attach" (click)="setVexiTab(3)" aria-label="Adjuntar documento" title="Adjuntar una factura, un recibo o una foto">
+                      <app-icon name="paperclip" [size]="18" />
+                    </button>
+                    <input
+                      class="lv-panel__input"
+                      name="vexiMessage"
+                      autocomplete="off"
+                      placeholder="Pregúntale a Vexi…"
+                      aria-label="Mensaje para Vexi"
+                      [value]="vexiQuery()"
+                      (input)="vexiQuery.set($any($event.target).value)"
+                    />
+                    <button type="submit" class="lv-panel__send" [disabled]="!vexiQuery().trim()" aria-label="Enviar">
+                      <app-icon name="send" [size]="18" />
+                    </button>
+                  </form>
+                }
+
+                <span class="lv-panel__grip" aria-hidden="true"></span>
+              </section>
+            } @else {
+              <span class="lv-dock__hint" role="status">Toca a Vexi para volver a abrir el chat</span>
+              <button type="button" class="lv-dock" (click)="openVexiPanel()" aria-label="Abrir a Vexi">
+                <span class="lv-dock__veil"><app-vexi-avatar expression="happy" /></span>
+              </button>
             }
-          </div>
-
-          <!-- Chat Input Footer -->
-          <div class="p-space-sm sm:p-space-md bg-surface-container-lowest border-t border-outline-variant/30 flex items-center gap-space-xs">
-            <button
-              (click)="setVexiTab(3)"
-              class="w-9 h-9 rounded-xl text-outline hover:text-primary flex items-center justify-center shrink-0 transition-colors"
-              title="Adjuntar archivo o factura">
-              <span class="material-symbols-outlined text-[22px]">attach_file</span>
-            </button>
-            <div class="relative flex-1">
-              <input
-                [value]="vexiQuery()"
-                (input)="vexiQuery.set($any($event.target).value)"
-                (keyup.enter)="sendVexiCustomQuery()"
-                class="w-full bg-[#f4f7fb] text-body-md text-[#0b1c30] placeholder:text-outline px-space-md py-2.5 rounded-full outline-none border border-[#10b981]/50 focus:border-primary transition-all pr-10"
-                placeholder="Pregúntale a Vexi..."
-                type="text"
-              />
-              <button
-                (click)="sendVexiCustomQuery()"
-                class="absolute right-1 top-1 w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center hover:bg-primary/90 transition-colors shadow-sm">
-                <span class="material-symbols-outlined text-[18px]">arrow_upward</span>
-              </button>
-            </div>
           </div>
         </div>
       </div>
@@ -1148,7 +956,8 @@
         </div>
 
         <!-- Pricing Cards Grid Dynamically Rendered From API -->
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 items-stretch">
+        <!-- 4 planes base en producción (Impulsa · Emprendedor · Empresarial Pro · IA Business) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 lg:gap-6 items-stretch">
           @for (plan of visiblePlans(); track plan.id) {
             <div
               [class.bg-[#00170d]]="plan.is_popular"
@@ -1165,28 +974,28 @@
               class="p-6 sm:p-8 rounded-2xl flex flex-col justify-between relative transition-all duration-200">
 
               @if (plan.is_popular) {
-                <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 bg-amber-500 text-slate-950 text-xs font-black rounded-full shadow-md tracking-wider">
-                  ★ RECOMENDADO PARA NEGOCIOS EN EXPANSIÓN
+                <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3.5 py-1 bg-amber-500 text-slate-950 text-[10px] sm:text-[11px] font-black rounded-full shadow-md tracking-wider whitespace-nowrap">
+                  ★ RECOMENDADO PARA CRECER
                 </div>
               }
 
               <div>
+                <!-- El badge superior «Recomendado para crecer» ya marca el plan popular;
+                     un segundo chip junto al título se partía en dos líneas y pisaba el nombre. -->
                 <div class="flex justify-between items-center mb-2" [class.mt-2]="plan.is_popular">
                   <h3 class="text-xl font-extrabold" [class.text-white]="plan.is_popular" [class.text-slate-900]="!plan.is_popular">
                     {{ plan.name }}
                   </h3>
-                  @if (plan.is_popular) {
-                    <span class="text-[11px] font-bold px-2.5 py-0.5 bg-emerald-500 text-slate-950 rounded-full">MÁS POPULAR</span>
-                  }
                 </div>
 
-                <p class="text-xs mb-6 min-h-[36px]" [class.text-emerald-100/70]="plan.is_popular" [class.text-slate-500]="!plan.is_popular">
+                <p class="text-xs mb-6 min-h-[36px] line-clamp-4" [title]="plan.description" [class.text-emerald-100/70]="plan.is_popular" [class.text-slate-500]="!plan.is_popular">
                   {{ plan.description }}
                 </p>
 
                 <div class="mb-6">
+                  <!-- base_price es el total del período; aquí va el equivalente mensual -->
                   <span class="text-3xl sm:text-4xl font-black" [class.text-emerald-300]="plan.is_popular" [class.text-slate-900]="!plan.is_popular">
-                    {{ formatPrice(plan.base_price) }}
+                    {{ formatPrice(monthlyEquivalent(plan)) }}
                   </span>
                   <span class="text-xs" [class.text-emerald-100/60]="plan.is_popular" [class.text-slate-400]="!plan.is_popular">
                     {{ getCyclePeriodSuffix(selectedCycle()) }}
@@ -1196,20 +1005,64 @@
                   </p>
                 </div>
 
-                <!-- Feature List -->
-                <ul class="space-y-3 text-xs sm:text-sm pb-8">
-                  @for (feat of plan.features; track feat.key) {
-                    <li class="flex items-center gap-2.5">
-                      @if (feat.enabled) {
-                        <app-icon name="check" [size]="16" [class]="plan.is_popular ? 'text-emerald-300' : 'text-emerald-600'"></app-icon>
-                        <span [class.font-semibold]="plan.is_popular">{{ feat.label }}</span>
-                      } @else {
-                        <app-icon name="x" [size]="16" class="text-slate-400"></app-icon>
-                        <span class="text-slate-400 line-through">{{ feat.label }}</span>
-                      }
-                    </li>
-                  }
-                </ul>
+                <!-- Feature List: tope de 7 ítems por card; lo que sobra vive en el
+                     modal «Ver todo lo que incluye». Producción publica algunos
+                     planes sin bullets: en ese caso la card manda a la comparativa
+                     en vez de quedar vacía. -->
+                @if (plan.features.length) {
+                  <ul class="space-y-3 text-xs sm:text-sm" [class.pb-8]="!hasPlanDetail(plan)">
+                    @for (feat of visibleFeatures(plan); track feat.key) {
+                      <li class="flex items-start gap-2.5">
+                        @if (!feat.enabled) {
+                          <app-icon name="x" [size]="16" class="text-slate-400 shrink-0 mt-0.5"></app-icon>
+                          <span class="flex-1 min-w-0 text-slate-400 line-through">{{ feat.label }}</span>
+                        } @else if (feat.is_limited) {
+                          <app-icon name="minus-circle" [size]="16" [class]="plan.is_popular ? 'text-amber-300 shrink-0 mt-0.5' : 'text-amber-600 shrink-0 mt-0.5'"></app-icon>
+                          <span class="flex-1 min-w-0" [class.font-semibold]="plan.is_popular">{{ feat.label }}</span>
+                        } @else {
+                          <app-icon name="check" [size]="16" [class]="plan.is_popular ? 'text-emerald-300 shrink-0 mt-0.5' : 'text-emerald-600 shrink-0 mt-0.5'"></app-icon>
+                          <span class="flex-1 min-w-0" [class.font-semibold]="plan.is_popular">{{ feat.label }}</span>
+                        }
+                        @if (feat.value) {
+                          <span
+                            class="shrink-0 text-[10px] sm:text-[11px] font-semibold px-1.5 py-0.5 rounded-md"
+                            [class.bg-emerald-900]="plan.is_popular"
+                            [class.text-emerald-200]="plan.is_popular"
+                            [class.bg-slate-100]="!plan.is_popular"
+                            [class.text-slate-600]="!plan.is_popular">
+                            {{ feat.value }}
+                          </span>
+                        }
+                      </li>
+                    }
+                  </ul>
+                }
+
+                @if (!plan.features.length) {
+                  <button
+                    type="button"
+                    (click)="scrollToSection('comparativa')"
+                    class="mb-8 inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold underline-offset-2 hover:underline"
+                    [class.text-emerald-300]="plan.is_popular"
+                    [class.text-emerald-700]="!plan.is_popular">
+                    Ver todo lo que incluye
+                    <app-icon name="chevron-right" [size]="14"></app-icon>
+                  </button>
+                } @else if (hasPlanDetail(plan)) {
+                  <button
+                    type="button"
+                    (click)="openPlanDetail(plan)"
+                    class="mt-4 mb-8 inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold underline-offset-2 hover:underline"
+                    [class.text-emerald-300]="plan.is_popular"
+                    [class.text-emerald-700]="!plan.is_popular">
+                    @if (hiddenFeatureCount(plan) > 0) {
+                      <span>Ver todo lo que incluye (+{{ hiddenFeatureCount(plan) }})</span>
+                    } @else {
+                      <span>Ver todo lo que incluye</span>
+                    }
+                    <app-icon name="chevron-right" [size]="14"></app-icon>
+                  </button>
+                }
               </div>
 
               <!-- CTA Button -->
@@ -1223,7 +1076,7 @@
                 [class.hover:text-white]="!plan.is_popular"
                 [class.text-slate-800]="!plan.is_popular"
                 class="w-full py-3 px-4 rounded-xl text-xs sm:text-sm font-bold text-center transition-all duration-200 shadow-sm">
-                {{ plan.is_popular ? 'Elegir Plan Pro (14 Días Gratis)' : 'Iniciar Prueba de 14 Días' }}
+                {{ plan.is_popular ? 'Elegir ' + plan.name + ' (14 Días Gratis)' : 'Iniciar Prueba de 14 Días' }}
               </button>
             </div>
           }
@@ -1231,8 +1084,10 @@
       </div>
     </section>
 
-    <!-- SECTION 7: COMPARATIVA TÉCNICA DETALLADA -->
-    <section class="w-full bg-[#f8f9ff] py-20 px-4 sm:px-6 lg:px-8 border-t border-slate-200/60">
+    <!-- SECTION 7: COMPARATIVA TÉCNICA DETALLADA.
+         Sólo capacidades: los precios viven en las cards, que los leen de la
+         API. Columnas y filas salen de COMPARISON_PLANS / COMPARISON_ROWS. -->
+    <section id="comparativa" class="w-full bg-[#f8f9ff] py-20 px-4 sm:px-6 lg:px-8 border-t border-slate-200/60">
       <div class="max-w-[75rem] mx-auto flex flex-col gap-10">
         <div class="text-center max-w-2xl mx-auto">
           <h2 class="text-2xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
@@ -1243,62 +1098,92 @@
           </p>
         </div>
 
+        <!-- Comparativa dinámica: columnas y filas salen de los ítems que el
+             super-admin cargó en cada plan del ciclo seleccionado, en el mismo
+             orden que las cards. `comparison()` es todo-o-nada: si algún plan
+             visible no tiene ítems devuelve null y se pinta la tabla estática
+             de respaldo, en vez de una comparativa a medias. -->
+        @if (comparison(); as c) {
+          <div class="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200/80 overflow-x-auto">
+            <table class="w-full text-left text-xs sm:text-sm min-w-[40rem]">
+              <thead>
+                <tr class="bg-slate-50 border-b border-slate-200">
+                  <th class="p-3 sm:p-4 font-bold text-slate-800">Capacidad / Módulo</th>
+                  @for (name of c.columns; track name; let i = $index) {
+                    <th
+                      class="p-3 sm:p-4 font-bold text-center whitespace-nowrap"
+                      [class.text-emerald-700]="c.highlightIndex >= 0 && i === c.highlightIndex"
+                      [class.bg-emerald-50/50]="c.highlightIndex >= 0 && i === c.highlightIndex"
+                      [class.text-slate-800]="c.highlightIndex < 0 || i !== c.highlightIndex">
+                      {{ name }}
+                      @if (c.highlightIndex >= 0 && i === c.highlightIndex) {
+                        <span class="block text-[10px] font-black uppercase tracking-wider text-emerald-600 mt-0.5">Más popular</span>
+                      }
+                    </th>
+                  }
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                @for (row of c.rows; track row.key) {
+                  <tr class="hover:bg-slate-50 transition-colors">
+                    <td class="p-3 sm:p-4 font-medium text-slate-800">{{ row.label }}</td>
+                    @for (cell of row.cells; track $index; let i = $index) {
+                      <td
+                        class="p-3 sm:p-4 text-center"
+                        [class.bg-emerald-50/20]="c.highlightIndex >= 0 && i === c.highlightIndex"
+                        [class.text-emerald-700]="cell.tone === 'yes'"
+                        [class.font-bold]="cell.tone === 'yes'"
+                        [class.text-amber-600]="cell.tone === 'partial'"
+                        [class.text-slate-300]="cell.tone === 'no'">
+                        {{ cell.text }}
+                      </td>
+                    }
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
         <div class="bg-white rounded-2xl p-4 sm:p-6 shadow-sm border border-slate-200/80 overflow-x-auto">
-          <table class="w-full text-left text-xs sm:text-sm">
+          <table class="w-full text-left text-xs sm:text-sm min-w-[40rem]">
             <thead>
               <tr class="bg-slate-50 border-b border-slate-200">
                 <th class="p-3 sm:p-4 font-bold text-slate-800">Capacidad / Módulo</th>
-                <th class="p-3 sm:p-4 font-bold text-slate-800 text-center">Starter</th>
-                <th class="p-3 sm:p-4 font-bold text-emerald-700 text-center bg-emerald-50/50">Pro</th>
-                <th class="p-3 sm:p-4 font-bold text-slate-800 text-center">Enterprise</th>
+                @for (name of comparisonPlans; track name; let i = $index) {
+                  <th
+                    class="p-3 sm:p-4 font-bold text-center whitespace-nowrap"
+                    [class.text-emerald-700]="i === comparisonHighlightIndex"
+                    [class.bg-emerald-50/50]="i === comparisonHighlightIndex"
+                    [class.text-slate-800]="i !== comparisonHighlightIndex">
+                    {{ name }}
+                    @if (i === comparisonHighlightIndex) {
+                      <span class="block text-[10px] font-black uppercase tracking-wider text-emerald-600 mt-0.5">Más popular</span>
+                    }
+                  </th>
+                }
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
-              <tr class="hover:bg-slate-50 transition-colors">
-                <td class="p-3 sm:p-4 font-medium text-slate-800">Productos y Catálogo</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Ilimitados</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">Ilimitados</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Ilimitados</td>
-              </tr>
-              <tr class="hover:bg-slate-50 transition-colors">
-                <td class="p-3 sm:p-4 font-medium text-slate-800">Comisión por venta realizada</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">0%</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">0%</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">0%</td>
-              </tr>
-              <tr class="hover:bg-slate-50 transition-colors">
-                <td class="p-3 sm:p-4 font-medium text-slate-800">Resolución DIAN (Factura Electrónica + Tique POS)</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Incluido</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">Incluido</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Incluido</td>
-              </tr>
-              <tr class="hover:bg-slate-50 transition-colors">
-                <td class="p-3 sm:p-4 font-medium text-slate-800">Compatibilidad Impresoras Térmicas (58mm / 80mm)</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">✓ Sí</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">✓ Sí</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">✓ Sí</td>
-              </tr>
-              <tr class="hover:bg-slate-50 transition-colors">
-                <td class="p-3 sm:p-4 font-medium text-slate-800">Retenciones Fiscales (ReteICA, ReteIVA, ReteFuente)</td>
-                <td class="p-3 sm:p-4 text-center text-slate-500">Básica</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">Automatizada</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Multi-tarifa</td>
-              </tr>
-              <tr class="hover:bg-slate-50 transition-colors">
-                <td class="p-3 sm:p-4 font-medium text-slate-800">Asistente IA Vexi (Consultas & OCR)</td>
-                <td class="p-3 sm:p-4 text-center text-slate-400">—</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">200 consult./día</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Ilimitado + Voz</td>
-              </tr>
-              <tr class="hover:bg-slate-50 transition-colors">
-                <td class="p-3 sm:p-4 font-medium text-slate-800">Migración de Inventario desde Excel</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Gratis (Auto)</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold bg-emerald-50/20">Gratis (Asistida)</td>
-                <td class="p-3 sm:p-4 text-center text-emerald-700 font-bold">Llave en Mano VIP</td>
-              </tr>
+              @for (row of comparisonRows; track row.label) {
+                <tr class="hover:bg-slate-50 transition-colors">
+                  <td class="p-3 sm:p-4 font-medium text-slate-800">{{ row.label }}</td>
+                  @for (cell of row.cells; track $index; let i = $index) {
+                    <td
+                      class="p-3 sm:p-4 text-center"
+                      [class.bg-emerald-50/20]="i === comparisonHighlightIndex"
+                      [class.text-emerald-700]="cell.tone === 'yes'"
+                      [class.font-bold]="cell.tone === 'yes'"
+                      [class.text-slate-500]="cell.tone === 'partial'"
+                      [class.text-slate-300]="cell.tone === 'no'">
+                      {{ cell.text }}
+                    </td>
+                  }
+                </tr>
+              }
             </tbody>
           </table>
         </div>
+        }
       </div>
     </section>
 
@@ -1696,8 +1581,9 @@
           <p class="text-xs font-bold text-white uppercase tracking-wider mb-4">Empresa</p>
           <ul class="flex flex-col gap-2.5 text-xs text-emerald-100/70">
             <li><a [href]="'mailto:' + socialLinks.email" class="hover:text-emerald-300 transition-colors">Contacto Comercial</a></li>
-            <li><button (click)="showTerms()" class="hover:text-emerald-300 transition-colors">Términos de Servicio</button></li>
-            <li><button (click)="showTerms()" class="hover:text-emerald-300 transition-colors">Privacidad y Datos</button></li>
+            <li><a routerLink="/legal/privacidad" class="hover:text-emerald-300 transition-colors">Política de Privacidad</a></li>
+            <li><a routerLink="/legal/terminos" class="hover:text-emerald-300 transition-colors">Términos de Servicio</a></li>
+            <li><a routerLink="/legal/cookies" class="hover:text-emerald-300 transition-colors">Política de Cookies</a></li>
             <li><button (click)="openWhatsApp()" class="hover:text-emerald-300 transition-colors">WhatsApp Soporte</button></li>
           </ul>
         </div>
@@ -1740,77 +1626,188 @@
             (click)="openWhatsApp()"
             aria-label="WhatsApp Vendix"
             class="text-emerald-200/70 hover:text-emerald-400 transition-colors">
-            <app-icon name="message-circle" [size]="20"></app-icon>
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" />
+            </svg>
           </button>
         </div>
       </div>
     </div>
   </footer>
 
-  <!-- MODAL: TÉRMINOS Y CONDICIONES -->
-  @if (showTermsModal()) {
-    <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-      <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-hidden shadow-2xl flex flex-col">
-        <div class="bg-emerald-800 text-white p-4 flex justify-between items-center">
-          <h2 class="text-base sm:text-lg font-bold">Términos y Condiciones — Vendix Platform</h2>
-          <button (click)="closeTerms()" class="text-white hover:bg-white/20 rounded-lg p-1.5 transition-colors">
-            <app-icon name="x" [size]="20"></app-icon>
-          </button>
-        </div>
-        <div class="p-5 overflow-y-auto flex-1 leading-relaxed" [innerHTML]="termsContent()"></div>
-        <div class="bg-slate-50 p-4 border-t border-slate-200 flex justify-end gap-3">
+  <!-- MODAL: DEMO EN VIDEO -->
+  @if (showDemoModal()) {
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="demo-modal-title"
+      (click)="closeDemo()">
+      <!-- stopPropagation: el clic dentro de la tarjeta no cierra el modal -->
+      <div
+        class="demo-modal relative w-full max-w-5xl rounded-3xl overflow-hidden bg-slate-950 border border-white/10"
+        (click)="$event.stopPropagation()">
+        <span class="pointer-events-none absolute -top-32 left-1/2 -translate-x-1/2 w-[34rem] h-[34rem] rounded-full bg-emerald-500/20 blur-3xl"></span>
+
+        <header class="relative flex items-center justify-between gap-4 px-4 sm:px-7 py-4 border-b border-white/10">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="shrink-0 w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-400/30 flex items-center justify-center">
+              <app-icon name="play-circle" [size]="18" class="text-emerald-300"></app-icon>
+            </span>
+            <div class="min-w-0">
+              <h2 id="demo-modal-title" class="text-sm sm:text-base font-bold text-white truncate">
+                Vendix en Acción: Facturación DIAN &amp; POS
+              </h2>
+              <p class="text-[11px] text-slate-400">Recorrido completo del flujo comercial · 2 min</p>
+            </div>
+          </div>
           <button
-            (click)="closeTerms()"
-            class="px-5 py-2 text-xs sm:text-sm font-bold border border-slate-300 rounded-xl hover:bg-slate-100 transition-colors">
-            Entendido
+            (click)="closeDemo()"
+            aria-label="Cerrar la demostración"
+            class="shrink-0 w-9 h-9 rounded-xl border border-white/10 text-slate-300 hover:text-white hover:bg-white/10 flex items-center justify-center transition-colors">
+            <app-icon name="x" [size]="18"></app-icon>
           </button>
-          <a
-            [routerLink]="['/auth/register']"
-            (click)="closeTerms()"
-            class="px-5 py-2 text-xs sm:text-sm font-bold bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-colors shadow-sm">
-            Crear Cuenta Ahora
-          </a>
+        </header>
+
+        <!-- Fachada liviana de YouTube: hasta que no se pulsa play sólo hay
+             un fotograma <img>; el iframe (y con él el reproductor y sus
+             chunks de vídeo) se crea recién al hacer clic y se destruye al
+             cerrar el modal. -->
+        <div class="relative w-full aspect-video bg-black">
+          @if (demoPlaying()) {
+            <iframe
+              class="absolute inset-0 w-full h-full"
+              [src]="demoEmbedUrl()"
+              title="Vendix en acción: facturación DIAN y POS"
+              frameborder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              referrerpolicy="strict-origin-when-cross-origin"
+              allowfullscreen
+            ></iframe>
+          } @else {
+            <button
+              type="button"
+              (click)="playDemo()"
+              (pointerenter)="warmDemoConnection()"
+              (focus)="warmDemoConnection()"
+              class="demo-modal__play group absolute inset-0 w-full h-full cursor-pointer"
+              aria-label="Reproducir el vídeo de demostración de Vendix">
+              <img
+                [src]="demoThumbUrl()"
+                (error)="onDemoThumbError()"
+                alt=""
+                class="absolute inset-0 w-full h-full object-cover opacity-70 transition-all duration-500 group-hover:opacity-90 group-hover:scale-[1.02]"
+                width="1280"
+                height="720"
+                decoding="async"
+              />
+              <span class="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/40 to-slate-950/10"></span>
+              <span class="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
+                <span class="demo-modal__ring relative flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full border-2 border-emerald-400 bg-emerald-500/10 backdrop-blur-sm text-white shadow-[0_10px_40px_-8px_rgba(16,185,129,0.45)] transition-all duration-300 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:border-emerald-500 group-hover:shadow-[0_10px_40px_-8px_rgba(16,185,129,0.9)] group-focus-visible:bg-emerald-500 group-focus-visible:border-emerald-500">
+                  <!-- Triángulo con centroide en x=12: centrado óptico real, no de caja -->
+                  <svg class="block w-7 h-7 sm:w-8 sm:h-8" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M8.5 5.5v13l11-6.5z" />
+                  </svg>
+                </span>
+                <span class="text-base sm:text-lg font-bold text-white">Demostración interactiva del flujo comercial</span>
+                <span class="hidden sm:block text-xs text-slate-300 max-w-lg">
+                  Apertura de caja, lectura de código de barras, emisión de tique DIAN en 0.8s y sincronización con la tienda virtual.
+                </span>
+              </span>
+            </button>
+          }
         </div>
+
+        <footer class="relative flex flex-col lg:flex-row lg:items-center justify-between gap-4 px-4 sm:px-7 py-5 border-t border-white/10">
+          <ul class="flex flex-wrap gap-x-5 gap-y-2 text-[11px] sm:text-xs font-medium text-slate-300">
+            <li class="inline-flex items-center gap-1.5">
+              <app-icon name="check-circle" [size]="14" class="text-emerald-400"></app-icon>
+              Tique DIAN en 0.8s
+            </li>
+            <li class="inline-flex items-center gap-1.5">
+              <app-icon name="check-circle" [size]="14" class="text-emerald-400"></app-icon>
+              Inventario en tiempo real
+            </li>
+            <li class="inline-flex items-center gap-1.5">
+              <app-icon name="check-circle" [size]="14" class="text-emerald-400"></app-icon>
+              Tienda online sincronizada
+            </li>
+          </ul>
+          <div class="flex flex-col sm:flex-row gap-2 sm:gap-3 shrink-0">
+            <button
+              (click)="closeDemo(); openWhatsApp('Hola, vi la demo y quiero una sesión personalizada para mi negocio.')"
+              class="inline-flex items-center justify-center gap-2 text-xs font-bold text-white bg-white/10 hover:bg-white/20 border border-white/15 px-4 py-2.5 rounded-xl transition-colors">
+              <svg viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4 shrink-0" aria-hidden="true">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+              </svg>
+              Demo personalizada
+            </button>
+            <a
+              [routerLink]="['/auth/register']"
+              (click)="closeDemo()"
+              class="inline-flex items-center justify-center gap-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-600/30 transition-colors">
+              <app-icon name="zap" [size]="16"></app-icon>
+              Probar gratis 14 días
+            </a>
+          </div>
+        </footer>
       </div>
     </div>
   }
 
-  <!-- MODAL: DEMO EN VIDEO -->
-  @if (showDemoModal()) {
-    <div class="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-      <div class="bg-white rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col">
-        <div class="bg-slate-900 text-white p-4 flex justify-between items-center">
-          <div class="flex items-center gap-2">
-            <app-icon name="play-circle" [size]="20" class="text-emerald-400"></app-icon>
-            <h2 class="text-base font-bold">Vendix en Acción: Facturación DIAN & POS</h2>
-          </div>
-          <button (click)="closeDemo()" class="text-white hover:bg-white/20 rounded-lg p-1.5 transition-colors">
-            <app-icon name="x" [size]="20"></app-icon>
-          </button>
-        </div>
-        <div class="p-6 text-center space-y-4">
-          <div class="relative w-full aspect-video bg-slate-950 rounded-xl flex items-center justify-center overflow-hidden border border-slate-800 shadow-inner">
-            <div class="flex flex-col items-center gap-3 p-6 text-emerald-100">
-              <div class="w-16 h-16 rounded-full bg-emerald-600 flex items-center justify-center shadow-lg">
-                <app-icon name="play" [size]="28" class="text-white ml-1"></app-icon>
-              </div>
-              <p class="text-sm font-bold">Demostración Interactiva del Flujo Comercial</p>
-              <p class="text-xs text-emerald-200/70 max-w-md">
-                Apertura de caja, lectura de código de barras, emisión de tique DIAN en 0.8s y sincronización con tienda virtual.
-              </p>
-            </div>
-          </div>
-          <div class="flex flex-col sm:flex-row justify-between items-center gap-3 pt-2">
-            <p class="text-xs text-slate-500">¿Prefieres una demostración personalizada con tus productos?</p>
-            <button
-              (click)="closeDemo(); openWhatsApp('Hola, vi la demo y quiero una sesión personalizada para mi negocio.')"
-              class="inline-flex items-center gap-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-4 py-2.5 rounded-xl shadow-sm transition-colors">
-              <app-icon name="message-circle" [size]="16"></app-icon>
-              Agendar Demo por WhatsApp
-            </button>
-          </div>
-        </div>
+  <!-- MODAL: DETALLE COMPLETO DEL PLAN («Ver todo lo que incluye»).
+       El markdown llega como STRING PLANO a [innerHTML]: el sanitizador de
+       Angular limpia el marcado peligroso. Nunca bypassSecurityTrustHtml. -->
+  <app-modal
+    [(isOpen)]="planDetailOpen"
+    size="lg"
+    [closeOnBackdrop]="true"
+    [showCloseButton]="true"
+    [title]="planDetail()?.name || 'Detalle del plan'"
+    subtitle="Todo lo que incluye este plan">
+    @if (planDetail(); as detail) {
+      <div class="plan-detail">
+        @if (detail.description) {
+          <p class="text-sm text-slate-600 mb-5">{{ detail.description }}</p>
+        }
+
+        @if (planDetailFeatures().length) {
+          <ul class="space-y-2.5 text-sm">
+            @for (feat of planDetailFeatures(); track feat.key) {
+              <li class="flex items-start gap-2.5 py-1">
+                @if (!feat.enabled) {
+                  <app-icon name="x" [size]="16" class="text-slate-400 shrink-0 mt-0.5"></app-icon>
+                  <span class="flex-1 min-w-0 text-slate-400 line-through">{{ feat.label }}</span>
+                } @else if (feat.is_limited) {
+                  <app-icon name="minus-circle" [size]="16" class="text-amber-600 shrink-0 mt-0.5"></app-icon>
+                  <span class="flex-1 min-w-0 text-slate-800">{{ feat.label }}</span>
+                } @else {
+                  <app-icon name="check" [size]="16" class="text-emerald-600 shrink-0 mt-0.5"></app-icon>
+                  <span class="flex-1 min-w-0 text-slate-800">{{ feat.label }}</span>
+                }
+                @if (feat.value) {
+                  <span class="shrink-0 text-[11px] font-semibold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                    {{ feat.value }}
+                  </span>
+                }
+              </li>
+            }
+          </ul>
+        }
+
+        @if (planDetailHtml()) {
+          <div class="plan-detail__md mt-6 pt-5 border-t border-slate-200" [innerHTML]="planDetailHtml()"></div>
+        }
       </div>
+    }
+
+    <div slot="footer" class="flex justify-end w-full">
+      <button
+        type="button"
+        (click)="closePlanDetail()"
+        class="inline-flex items-center justify-center gap-2 text-xs sm:text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-500 px-5 py-2.5 rounded-xl transition-colors">
+        Entendido
+      </button>
     </div>
-  }
+  </app-modal>
 </div>

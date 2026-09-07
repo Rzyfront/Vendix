@@ -1,0 +1,291 @@
+<!-- Réplica viva y compacta del Panel Principal: mismos componentes que la app (app-stats + app-chart).
+     NOTA: solo usa utilidades Tailwind GLOBALAS. Las clases `*-space-*`, `surface-container-*`,
+     `on-surface`, `outline-variant`, `headline-*` viven en el SCSS del landing con encapsulación
+     de Angular y NO aplican dentro de este componente hijo. -->
+<div class="flex w-full min-h-full bg-[#f4f7fb] text-slate-900 relative">
+  <!-- Sidebar colapsado: réplica a escala (~0.8) de app-sidebar.collapsed del store-admin.
+       Original: 56px ancho · cabecera 72px con logo 38px (img del logo, object-contain) · ítems 39px
+       (icono 18px + padding 0.66rem, centrados, activo = bg primary + icono blanco) · footer oculto.
+       Aquí: 44px · cabecera 56px con logo 30px · ítems 32px (icono 14px) · mismos íconos Lucide. -->
+  <aside class="w-11 bg-white border-r border-slate-200 hidden md:flex flex-col shrink-0" aria-label="Navegación principal (demo)">
+    <div class="h-14 border-b border-slate-200 flex items-center justify-center shrink-0">
+      <!-- Mismo patrón que .logo-container del sidebar real: contenedor cuadrado + img object-contain -->
+      <div class="w-[30px] h-[30px] rounded overflow-hidden flex items-center justify-center shrink-0">
+        <img src="/icons/vendix-192.png" alt="Vendix" class="w-full h-full object-contain" width="30" height="30" />
+      </div>
+    </div>
+    <nav class="flex-1 px-1.5 py-2 overflow-hidden">
+      <ul class="flex flex-col list-none m-0 p-0">
+        @for (item of dockItems; track item.label; let i = $index) {
+          <li>
+            <span
+              class="w-8 h-8 rounded-lg flex items-center justify-center"
+              [class]="i === 0 ? 'bg-primary text-white' : 'text-slate-700'"
+              [attr.title]="item.label"
+              aria-hidden="true">
+              <app-icon [name]="item.icon" [size]="14"></app-icon>
+            </span>
+          </li>
+        }
+      </ul>
+    </nav>
+  </aside>
+
+  <!-- Drawer móvil (patrón del sidebar store-admin: backdrop + Escape + aria) -->
+  @if (drawerOpen()) {
+    <div
+      class="absolute inset-0 z-30 md:hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Menú principal (demo)"
+      (keydown)="onDrawerKeydown($event)">
+      <div class="absolute inset-0 bg-slate-900/50" (click)="closeDrawer()" aria-hidden="true"></div>
+      <nav class="hero-drawer absolute left-0 top-0 bottom-0 w-60 max-w-[75%] bg-white shadow-2xl flex flex-col py-4 px-3 gap-1 overflow-y-auto">
+        <div class="flex items-center justify-between px-2 pb-3">
+          <span class="flex items-center gap-2 font-extrabold text-[#091e32]">
+            <span class="w-8 h-8 rounded-lg overflow-hidden flex items-center justify-center shrink-0">
+              <img src="/icons/vendix-192.png" alt="" class="w-full h-full object-contain" width="32" height="32" />
+            </span>
+            Vendix Demo
+          </span>
+          <button
+            (click)="closeDrawer()"
+            class="w-9 h-9 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-500"
+            aria-label="Cerrar menú">
+            <app-icon name="x" [size]="16"></app-icon>
+          </button>
+        </div>
+        @for (item of dockItems; track item.label; let i = $index) {
+          <span
+            class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold"
+            [class]="i === 0 ? 'bg-primary text-white' : 'text-slate-600'">
+            <app-icon [name]="item.icon" [size]="18"></app-icon>
+            <span>{{ item.label }}</span>
+          </span>
+        }
+      </nav>
+    </div>
+  }
+
+  <!-- Contenido principal: misma estructura que store-admin-layout (header + main) -->
+  <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+    <!-- Header: réplica a escala (~0.8) de app-header.
+         Original: banda 72px (--admin-header-h) transparente sin borde, simétrica con la cabecera del
+         sidebar · hamburguesa 20px (desktop) / logo 32px + chevron (móvil) · breadcrumb 12px con íconos 14px
+         (actual en blue-600) · H2 24–30px bold · derecha: buscar 36px, campana 36px + badge 18px,
+         pill de usuario (avatar 32px primary + nombre 14px / rol 12px + chevron) con borde y radio 12px.
+         Aquí: banda 56px (= cabecera del sidebar) · hamburguesa 16px · breadcrumb 10px / íconos 11px ·
+         H2 20–24px · controles 28px, badge 14px · pill con avatar 26px y radio 10px. -->
+    <header class="h-14 shrink-0 flex items-center px-1 bg-transparent">
+      <div class="flex-1 min-w-0 flex items-center justify-between p-1.5 gap-2 md:gap-5">
+        <div class="flex items-center gap-1.5 sm:gap-4 flex-1 min-w-0">
+          <!-- Desktop: alternar sidebar (decorativo en el demo) -->
+          <span class="hidden md:flex items-center justify-center shrink-0 p-1.5 rounded-lg text-slate-900" aria-hidden="true">
+            <app-icon name="menu" [size]="16"></app-icon>
+          </span>
+          <!-- Móvil: logo + chevron abre el drawer (igual que el header real) -->
+          <button
+            (click)="toggleDrawer()"
+            class="flex md:hidden items-center gap-1 shrink-0 p-0.5 rounded-lg bg-transparent border-0"
+            [attr.aria-expanded]="drawerOpen()"
+            aria-label="Abrir menú principal">
+            <span class="w-7 h-7 rounded-md overflow-hidden bg-white border border-slate-200 flex items-center justify-center">
+              <img src="/icons/vendix-192.png" alt="" class="w-full h-full object-cover" width="28" height="28" />
+            </span>
+            <app-icon name="chevron-right" [size]="12" class="text-slate-400"></app-icon>
+          </button>
+
+          <!-- Breadcrumb + título -->
+          <div class="flex flex-col gap-0 min-w-0 flex-1">
+            <div class="flex items-center gap-1 sm:gap-1.5 flex-nowrap overflow-hidden">
+              <span class="flex items-center gap-1 text-[9px] sm:text-[10px] font-medium text-slate-600 min-w-0">
+                <app-icon name="settings" [size]="11" class="opacity-70 hidden sm:block shrink-0"></app-icon>
+                <span class="truncate">Panel Administrativo</span>
+              </span>
+              <span class="text-slate-600 opacity-70 mx-0.5 text-[9px] sm:text-[10px] font-normal shrink-0">/</span>
+              <span class="flex items-center gap-1 text-[9px] sm:text-[10px] font-semibold text-slate-900 min-w-0">
+                <app-icon name="home" [size]="11" class="text-blue-600 hidden sm:block shrink-0"></app-icon>
+                <span class="truncate">Panel Principal</span>
+              </span>
+            </div>
+            <h2 class="text-xs sm:text-base md:text-xl lg:text-2xl font-bold text-slate-900 m-0 leading-none tracking-tight block truncate">Panel Principal</h2>
+          </div>
+        </div>
+
+        <!-- Buscar + notificaciones + usuario (decorativos en el demo) -->
+        <div class="shrink-0 flex items-center gap-1.5">
+          <span class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-500" aria-hidden="true">
+            <app-icon name="search" [size]="14"></app-icon>
+          </span>
+          <span class="relative w-7 h-7 rounded-lg flex items-center justify-center text-slate-500" aria-hidden="true">
+            <app-icon name="bell" [size]="14"></app-icon>
+            <span class="absolute -top-[3px] -right-[3px] min-w-[14px] h-[14px] px-[3px] rounded-full bg-red-500 text-white text-[8px] font-bold flex items-center justify-center leading-none border-2 border-white">98</span>
+          </span>
+          <span class="flex items-center gap-2.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-[10px]" aria-hidden="true">
+            <span class="w-[26px] h-[26px] rounded-full bg-primary text-white text-[10px] font-semibold flex items-center justify-center shrink-0">VD</span>
+            <span class="hidden lg:flex flex-col items-start text-left">
+              <span class="text-[11px] font-medium text-slate-900 leading-tight">Vendix Demo</span>
+              <span class="text-[10px] text-slate-500 leading-tight">Dueño</span>
+            </span>
+            <app-icon name="chevron-down" [size]="11" class="text-slate-500"></app-icon>
+          </span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main: mismo respiro que el outlet real (--admin-header-gap 12px → 10px) y px-4 → px-3 -->
+    <main class="flex-1 flex flex-col gap-3 px-3 pb-3 pt-2.5 min-w-0 overflow-hidden">
+    <!-- 4 cards: MISMO componente que el panel real (app-stats) -->
+    <div class="stats-container">
+      <app-stats
+        title="Ingresos"
+        [value]="ingresosText()"
+        [smallText]="ingresosSub()"
+        iconName="dollar-sign"
+        iconBgColor="bg-primary/10"
+        iconColor="text-primary"
+      />
+      <app-stats
+        title="Ganancias"
+        [value]="gananciasText()"
+        [smallText]="gananciasSub()"
+        iconName="trending-up"
+        iconBgColor="bg-success-light"
+        iconColor="text-success"
+      />
+      <app-stats
+        title="Balance"
+        [value]="balanceText()"
+        [smallText]="balanceSub()"
+        iconName="wallet"
+        iconBgColor="bg-info-light"
+        iconColor="text-info"
+      />
+      <app-stats
+        title="Gastos"
+        [value]="gastosText()"
+        smallText="sin base de comparación"
+        iconName="trending-down"
+        iconBgColor="bg-error-light"
+        iconColor="text-error"
+      />
+    </div>
+
+    <!-- Gráficos: mismos app-chart (ECharts) del Panel Principal real, a escala ~0.8.
+         Original: tarjeta bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border-border ·
+         cabecera p-4 con h3 14px + subtítulo 12px + trigger «Período» de app-options-dropdown (44px,
+         icono filter 16, chevron 14, min-w 110px) · cuerpo p-4 con app-chart size="large" (400px).
+         Aquí: p-3 · trigger 36px (icono 13, chevron 11, min-w 88px) · área de gráfico 320px y opciones
+         ECharts escaladas en el TS (fuentes 11/10 → 9, pie radius [30,110] → [24,88], barMaxWidth 16 → 13). -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+      <div class="lg:col-span-2 bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden flex flex-col">
+        <div class="p-3 border-b border-border flex items-center justify-between gap-2">
+          <div>
+            <h3 class="font-semibold text-text-primary text-sm">Tendencia de Ventas</h3>
+            <p class="text-xs text-text-secondary">{{ trendRangeLabel() }}</p>
+          </div>
+          <span
+            class="inline-flex items-center gap-1.5 h-9 px-2.5 min-w-[88px] text-[11px] font-medium text-text-primary bg-surface border border-border rounded-md"
+            aria-hidden="true">
+            <app-icon name="filter" [size]="13"></app-icon>
+            <span>Período</span>
+            <app-icon name="chevron-down" [size]="11" class="ml-auto"></app-icon>
+          </span>
+        </div>
+        <div class="p-3 flex-1">
+          <div class="h-[320px]">
+            <app-chart [options]="trendChartOptions()"></app-chart>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden flex flex-col">
+        <div class="p-3 border-b border-border">
+          <h3 class="font-semibold text-text-primary text-sm">Ventas por Canal</h3>
+          <p class="text-xs text-text-secondary">Distribución del período</p>
+        </div>
+        <div class="p-3 flex-1">
+          <div class="h-[320px]">
+            <app-chart [options]="channelChartOptions()"></app-chart>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Alertas + accesos rápidos: misma estructura y clases que el panel real, a escala 0.8 -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
+        <div class="px-3 py-2.5 border-b border-border">
+          <h3 class="font-semibold text-text-primary text-sm">Alertas Operativas</h3>
+        </div>
+        <div class="p-2.5 space-y-1.5">
+          <div class="flex items-center gap-2.5 p-2.5 bg-warning-light rounded-lg">
+            <div class="flex-shrink-0 w-6 h-6 bg-warning/20 rounded-full flex items-center justify-center">
+              <app-icon name="alert-triangle" [size]="12" class="text-warning"></app-icon>
+            </div>
+            <p class="flex-1 min-w-0 text-xs sm:text-[13px] font-medium text-warning truncate m-0">
+              Tienes {{ lowStock() }} {{ lowStock() === 1 ? 'producto' : 'productos' }} con stock bajo
+            </p>
+            <span class="shrink-0 inline-flex items-center gap-0.5 text-[11px] font-medium text-warning/80">
+              <span class="hidden sm:inline">Ver detalle</span>
+              <app-icon name="chevron-right" [size]="12" class="text-warning/60"></app-icon>
+            </span>
+          </div>
+          <div class="flex items-center gap-2.5 p-2.5 bg-error-light rounded-lg">
+            <div class="flex-shrink-0 w-6 h-6 bg-error/20 rounded-full flex items-center justify-center">
+              <app-icon name="x-circle" [size]="12" class="text-error"></app-icon>
+            </div>
+            <p class="flex-1 min-w-0 text-xs sm:text-[13px] font-medium text-error truncate m-0">
+              Tienes {{ outOfStock() }} {{ outOfStock() === 1 ? 'producto agotado' : 'productos agotados' }}
+            </p>
+            <span class="shrink-0 inline-flex items-center gap-0.5 text-[11px] font-medium text-error/80">
+              <span class="hidden sm:inline">Ver detalle</span>
+              <app-icon name="chevron-right" [size]="12" class="text-error/60"></app-icon>
+            </span>
+          </div>
+          <div class="flex items-center gap-2.5 p-2.5 bg-primary/10 rounded-lg">
+            <div class="flex-shrink-0 w-6 h-6 bg-primary/20 rounded-full flex items-center justify-center">
+              <app-icon name="truck" [size]="12" class="text-primary"></app-icon>
+            </div>
+            <p class="flex-1 min-w-0 text-xs sm:text-[13px] font-medium text-primary truncate m-0">
+              Tienes {{ dispatchPending() }} {{ dispatchPending() === 1 ? 'orden lista' : 'órdenes listas' }} para despachar
+            </p>
+            <span class="shrink-0 inline-flex items-center gap-0.5 text-[11px] font-medium text-primary/80">
+              <span class="hidden sm:inline">Ver detalle</span>
+              <app-icon name="chevron-right" [size]="12" class="text-primary/60"></app-icon>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
+        <div class="px-3 py-2.5 border-b border-border">
+          <h3 class="font-semibold text-text-primary text-sm">Accesos Rápidos</h3>
+        </div>
+        <div class="p-2.5 grid grid-cols-2 gap-1">
+          @for (link of quickLinks; track link.label) {
+            <span class="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-2.5 py-2 text-xs sm:text-[13px] text-text-primary rounded-lg text-left">
+              <app-icon [name]="link.icon" [size]="12" class="text-text-secondary shrink-0"></app-icon>
+              <span class="truncate">{{ link.label }}</span>
+            </span>
+          }
+        </div>
+      </div>
+    </div>
+    </main>
+  </div>
+
+  <!-- Vexi flotante: réplica decorativa del dock real (94px → ~76px), sin interacción -->
+  <div class="hero-vexi" aria-hidden="true">
+    <span class="hero-vexi__halo"></span>
+    <img
+      src="assets/vexi/vexi-idle.png"
+      alt=""
+      class="hero-vexi__img"
+      width="76"
+      height="76"
+      loading="lazy"
+      decoding="async"
+    />
+  </div>
+</div>
