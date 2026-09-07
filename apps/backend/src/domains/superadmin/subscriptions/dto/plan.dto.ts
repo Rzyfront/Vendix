@@ -6,12 +6,14 @@ import {
   IsObject,
   IsNotEmpty,
   IsArray,
+  ArrayMaxSize,
   ValidateNested,
   MaxLength,
   Min,
   IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PlanFeatureItemDto } from './plan-feature-item.dto';
 
 export class PlanPricingDto {
   @IsIn(['monthly', 'quarterly', 'semiannual', 'annual'])
@@ -95,9 +97,17 @@ export class CreatePlanDto {
   @Min(0)
   cancellation_day?: number;
 
+  // Canonical shape: an ARRAY of "what the plan includes" items, same nested-DTO
+  // pattern as `pricings` below. The legacy OBJECT shape
+  // (`{ pos: true, users: { max: 3 } }`) is only READ for backwards
+  // compatibility (see PublicPlansService.parseFeatureMatrix); it is never
+  // written any more, so a payload sending an object is rejected with 400.
   @IsOptional()
-  @IsObject()
-  feature_matrix?: Record<string, any>;
+  @IsArray()
+  @ArrayMaxSize(40)
+  @ValidateNested({ each: true })
+  @Type(() => PlanFeatureItemDto)
+  feature_matrix?: PlanFeatureItemDto[];
 
   @IsOptional()
   @IsObject()

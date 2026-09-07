@@ -35,6 +35,10 @@ export interface PublicPlanFeatureDto {
   key: string;
   label: string;
   enabled: boolean;
+  /** Short qualifier shown next to the label ("Ilimitados", "1 usuario"). */
+  value?: string | null;
+  /** true renders the item as partially included ("limitado"). */
+  is_limited?: boolean;
   limit?: number | null;
   unit?: string | null;
 }
@@ -53,6 +57,11 @@ export interface PublicPlanDto {
   sort_order: number;
   features: PublicPlanFeatureDto[];
   ai_features: Record<string, unknown>;
+  /** Long-form markdown written by the super-admin; rendered in the landing
+   *  "Ver todo lo que incluye" detail. */
+  details_md: string | null;
+  /** Multi-cycle group key: every billing cycle of the same plan shares it. */
+  plan_group_code: string | null;
 }
 
 const FEATURE_HUMAN_LABELS: Record<string, string> = {
@@ -68,15 +77,40 @@ const FEATURE_HUMAN_LABELS: Record<string, string> = {
 };
 
 function parseFeatureMatrix(matrix: unknown): PublicPlanFeatureDto[] {
+  // Canonical shape: array of items edited by the super-admin.
   if (Array.isArray(matrix)) {
-    return matrix.map((f: any) => ({
-      key: f.key ?? '',
-      label: f.label ?? f.key ?? '',
-      enabled: f.enabled ?? true,
-      limit: f.limit ?? null,
-      unit: f.unit ?? null,
-    }));
+    const seen = new Set<string>();
+    const items: PublicPlanFeatureDto[] = [];
+
+    matrix.forEach((f: any, index: number) => {
+      // An item without a resolvable label has nothing to render: drop it
+      // instead of publishing an empty bullet.
+      const label = String(f?.label ?? f?.key ?? '').trim();
+      if (!label) return;
+
+      // A missing key still needs a stable identity so the public comparison
+      // table can key rows; derive it from the position.
+      const key = String(f?.key ?? '').trim() || `item-${index + 1}`;
+      // Duplicated keys would render the same row twice: first one wins.
+      if (seen.has(key)) return;
+      seen.add(key);
+
+      items.push({
+        key,
+        label,
+        enabled: f?.enabled ?? true,
+        value: f?.value ?? null,
+        is_limited: f?.is_limited === true,
+        limit: f?.limit ?? null,
+        unit: f?.unit ?? null,
+      });
+    });
+
+    return items;
   }
+
+  // Legacy object shape (`{ pos: true, users: { max: 3 } }`): read-only
+  // compatibility for rows created before the array contract.
   if (matrix && typeof matrix === 'object') {
     return Object.entries(matrix as Record<string, any>)
       .filter(([k]) => !k.startsWith('cost_') && !k.startsWith('partner_') && !k.startsWith('internal_'))
@@ -84,10 +118,17 @@ function parseFeatureMatrix(matrix: unknown): PublicPlanFeatureDto[] {
         const enabled = typeof val === 'boolean' ? val : true;
         let label = FEATURE_HUMAN_LABELS[k] || k.replace(/_/g, ' ');
         let limit: number | null = null;
+        let value: string | null = null;
+        let isLimited = false;
         if (typeof val === 'object' && val !== null) {
           if ('max' in val) {
             limit = val.max;
             label = val.max === null ? `${label} Ilimitadas` : `Hasta ${val.max} ${label}`;
+            // A numeric cap is the legacy way of saying "limitado"; a null cap
+            // is unlimited, so it stays fully included. `value` stays null on
+            // purpose: the legacy label already embeds the cap ("Hasta 3 ..."),
+            // and emitting it again would render the number twice on the card.
+            isLimited = val.max !== null;
           } else if ('channel' in val) {
             label = `Soporte ${val.channel === 'priority' ? 'Prioritario WhatsApp' : val.channel === 'dedicated' ? 'VIP Dedicado 4h' : 'Estándar'}`;
           }
@@ -96,6 +137,8 @@ function parseFeatureMatrix(matrix: unknown): PublicPlanFeatureDto[] {
           key: k,
           label,
           enabled,
+          value,
+          is_limited: isLimited,
           limit,
           unit: null,
         };
@@ -142,6 +185,8 @@ export class PublicPlansService {
         sort_order: true,
         ai_feature_flags: true,
         feature_matrix: true,
+        details_md: true,
+        plan_group_code: true,
       },
       orderBy: [{ sort_order: 'asc' }, { base_price: 'asc' }],
     });
@@ -162,6 +207,8 @@ export class PublicPlansService {
       ai_features: pickPublicFeatures(
         plan.ai_feature_flags as Record<string, unknown> | null,
       ),
+      details_md: plan.details_md,
+      plan_group_code: plan.plan_group_code,
     }));
   }
 }

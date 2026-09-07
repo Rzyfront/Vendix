@@ -90,6 +90,59 @@ describe('PlansService', () => {
       expect(err instanceof VendixHttpException).toBe(true);
       expect(prisma.subscription_plans.create).not.toHaveBeenCalled();
     });
+
+    // feature_matrix canonical shape is an ARRAY of "what the plan includes"
+    // items. It must reach the Prisma Json column as PLAIN objects (never the
+    // class instances produced by @Type(() => PlanFeatureItemDto)).
+    it('persists feature_matrix as a plain array of items', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(null);
+      prisma.subscription_plans.create.mockResolvedValue(planFixture());
+
+      await service.create({
+        code: 'pro',
+        name: 'Pro Plan',
+        base_price: 99000,
+        feature_matrix: [
+          {
+            key: 'usuarios',
+            label: 'Usuarios del equipo',
+            enabled: true,
+            is_limited: true,
+            value: '1 usuario',
+          },
+          { key: 'api', label: 'API pública', enabled: false },
+        ],
+      } as any);
+
+      const args = prisma.subscription_plans.create.mock.calls[0][0];
+      expect(Array.isArray(args.data.feature_matrix)).toBe(true);
+      expect(args.data.feature_matrix).toEqual([
+        {
+          key: 'usuarios',
+          label: 'Usuarios del equipo',
+          enabled: true,
+          is_limited: true,
+          value: '1 usuario',
+        },
+        { key: 'api', label: 'API pública', enabled: false },
+      ]);
+      // Plain objects only — no class instance leaks into the Json column.
+      expect(args.data.feature_matrix[0].constructor).toBe(Object);
+    });
+
+    it('defaults feature_matrix to an empty array when omitted', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(null);
+      prisma.subscription_plans.create.mockResolvedValue(planFixture());
+
+      await service.create({
+        code: 'pro',
+        name: 'Pro Plan',
+        base_price: 99000,
+      } as any);
+
+      const args = prisma.subscription_plans.create.mock.calls[0][0];
+      expect(args.data.feature_matrix).toEqual([]);
+    });
   });
 
   describe('createMultiCycle (pricings[])', () => {
@@ -364,6 +417,85 @@ describe('PlansService', () => {
       expect(tx.subscription_plans.delete).toHaveBeenCalledWith({
         where: { id: 2 },
       });
+    });
+
+    it('propagates feature_matrix to the whole group as a plain array', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
+
+      await service.update(1, {
+        feature_matrix: [
+          { key: 'pos', label: 'POS', enabled: true, is_limited: false },
+          { key: 'api', label: 'API', enabled: false },
+        ],
+      } as any);
+
+      const args = tx.subscription_plans.updateMany.mock.calls[0][0];
+      expect(args.where.plan_group_code).toBe('pro');
+      expect(args.data.feature_matrix).toEqual([
+        { key: 'pos', label: 'POS', enabled: true, is_limited: false },
+        { key: 'api', label: 'API', enabled: false },
+      ]);
+    });
+
+    it('inherits the existing feature_matrix on a newly created cycle row', async () => {
+      const items = [
+        { key: 'pos', label: 'POS', enabled: true },
+        { key: 'api', label: 'API', enabled: false },
+      ];
+      prisma.subscription_plans.findUnique.mockResolvedValue(
+        planFixture({ feature_matrix: items }),
+      );
+      tx.subscription_plans.findMany.mockResolvedValue([
+        planFixture({ id: 1, code: 'pro', billing_cycle: 'monthly' }),
+      ]);
+      tx.subscription_plans.findUnique.mockResolvedValue(null);
+
+      await service.update(1, {
+        pricings: [
+          { billing_cycle: 'monthly', price: 99000, is_default: true },
+          { billing_cycle: 'annual', price: 990000, is_default: false },
+        ],
+      } as any);
+
+      const createArgs = tx.subscription_plans.create.mock.calls[0][0];
+      expect(createArgs.data.billing_cycle).toBe('annual');
+      expect(createArgs.data.feature_matrix).toEqual(items);
+    });
+
+    /**
+     * Legacy rows can carry a NULL plan_group_code. `groupCode` already falls
+     * back to the plan code, but leaving the column null keeps the row OUT of
+     * its own group, so the updateMany skips it and every shared field written
+     * from that point on is lost silently.
+     */
+    it('auto-heals a null plan_group_code to the plan code inside the transaction', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(
+        planFixture({ plan_group_code: null }),
+      );
+
+      await service.update(1, { name: 'New' } as any);
+
+      const healCall = tx.subscription_plans.update.mock.calls.find(
+        (c: any[]) => c[0].data?.plan_group_code === 'pro',
+      );
+      expect(healCall).toBeTruthy();
+      expect(healCall[0].where.id).toBe(1);
+      // The shared propagation targets that very same group code.
+      expect(
+        tx.subscription_plans.updateMany.mock.calls[0][0].where
+          .plan_group_code,
+      ).toBe('pro');
+    });
+
+    it('does not rewrite plan_group_code when the row already has one', async () => {
+      prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
+
+      await service.update(1, { name: 'New' } as any);
+
+      const healCall = tx.subscription_plans.update.mock.calls.find(
+        (c: any[]) => c[0].data?.plan_group_code !== undefined,
+      );
+      expect(healCall).toBeFalsy();
     });
 
     it('throws SYS_NOT_FOUND_001 when the plan does not exist', async () => {

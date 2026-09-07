@@ -40,6 +40,35 @@ export class PlansService {
   }
 
   /**
+   * Normalize `feature_matrix` for the WRITE path.
+   *
+   * Canonical shape is a plain ARRAY of "what the plan includes" items. The
+   * instances produced by `@Type(() => PlanFeatureItemDto)` are class
+   * instances, and those must never travel as-is to a Prisma Json column, so
+   * every item is copied into a plain object carrying only the keys actually
+   * sent. The legacy OBJECT shape is returned untouched (read compatibility
+   * for rows created before the array contract). null/undefined means "no
+   * items" and is persisted as `[]`.
+   */
+  private toPlainFeatureMatrix(value: unknown): Prisma.InputJsonValue {
+    if (Array.isArray(value)) {
+      return value.map((item: any) => ({
+        key: item?.key,
+        label: item?.label,
+        enabled: item?.enabled,
+        ...(item?.is_limited !== undefined && { is_limited: item.is_limited }),
+        ...(item?.value !== undefined && { value: item.value }),
+        ...(item?.limit != null && { limit: item.limit }),
+        ...(item?.unit != null && { unit: item.unit }),
+      })) as Prisma.InputJsonValue;
+    }
+    if (value && typeof value === 'object') {
+      return value as Prisma.InputJsonValue;
+    }
+    return [] as Prisma.InputJsonValue;
+  }
+
+  /**
    * Build the subset of subscription_plans fields that are shared across every
    * row of a multi-cycle group. Excludes per-cycle fields (code, billing_cycle,
    * base_price, currency) and the group/identity fields handled by the caller.
@@ -55,7 +84,7 @@ export class PlansService {
       grace_period_hard_days: dto.grace_period_hard_days ?? 10,
       suspension_day: dto.suspension_day ?? 14,
       cancellation_day: dto.cancellation_day ?? 45,
-      feature_matrix: (dto.feature_matrix ?? {}) as any,
+      feature_matrix: this.toPlainFeatureMatrix(dto.feature_matrix) as any,
       ai_feature_flags: (dto.ai_feature_flags ?? {}) as any,
       resellable: dto.resellable ?? !isPromotional,
       max_partner_margin_pct: dto.max_partner_margin_pct || null,
@@ -455,7 +484,7 @@ export class PlansService {
         cancellation_day: dto.cancellation_day,
       }),
       ...(dto.feature_matrix !== undefined && {
-        feature_matrix: dto.feature_matrix as any,
+        feature_matrix: this.toPlainFeatureMatrix(dto.feature_matrix) as any,
       }),
       ...(dto.ai_feature_flags !== undefined && {
         ai_feature_flags: dto.ai_feature_flags as any,
@@ -486,6 +515,17 @@ export class PlansService {
 
     return this.prisma.$transaction(
       async (tx) => {
+        // 0. Auto-heal a legacy row whose plan_group_code is NULL. `groupCode`
+        //    already falls back to `existing.code`, but the row itself stays
+        //    outside its own group, so the updateMany below — and every future
+        //    edit — would silently skip it and the shared fields would be lost.
+        if (!existing.plan_group_code) {
+          await tx.subscription_plans.update({
+            where: { id: existing.id },
+            data: { plan_group_code: groupCode, updated_at: new Date() },
+          });
+        }
+
         // 1. Propagate shared fields to every non-archived row of the group.
         await tx.subscription_plans.updateMany({
           where: { plan_group_code: groupCode, state: { not: 'archived' } },
@@ -558,8 +598,9 @@ export class PlansService {
                   suspension_day: dto.suspension_day ?? existing.suspension_day,
                   cancellation_day:
                     dto.cancellation_day ?? existing.cancellation_day,
-                  feature_matrix: (dto.feature_matrix ??
-                    existing.feature_matrix) as any,
+                  feature_matrix: this.toPlainFeatureMatrix(
+                    dto.feature_matrix ?? existing.feature_matrix,
+                  ) as any,
                   ai_feature_flags: (dto.ai_feature_flags ??
                     existing.ai_feature_flags) as any,
                   resellable: dto.resellable ?? existing.resellable,

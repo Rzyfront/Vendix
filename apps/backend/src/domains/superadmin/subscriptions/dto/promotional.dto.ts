@@ -4,10 +4,15 @@ import {
   IsNumber,
   IsObject,
   IsNotEmpty,
+  IsArray,
+  ArrayMaxSize,
+  ValidateNested,
   MaxLength,
   Min,
   IsIn,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { PlanFeatureItemDto } from './plan-feature-item.dto';
 
 export class CreatePromotionalDto {
   @IsString()
@@ -37,9 +42,14 @@ export class CreatePromotionalDto {
   @MaxLength(3)
   currency?: string;
 
+  // Same canonical ARRAY shape as CreatePlanDto.feature_matrix. The legacy
+  // object shape is read-only compatibility, never written.
   @IsOptional()
-  @IsObject()
-  feature_matrix?: Record<string, any>;
+  @IsArray()
+  @ArrayMaxSize(40)
+  @ValidateNested({ each: true })
+  @Type(() => PlanFeatureItemDto)
+  feature_matrix?: PlanFeatureItemDto[];
 
   @IsOptional()
   @IsObject()
