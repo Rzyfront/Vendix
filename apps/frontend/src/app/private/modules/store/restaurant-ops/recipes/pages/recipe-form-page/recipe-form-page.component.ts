@@ -6,6 +6,7 @@ import {
   inject,
   OnInit,
   signal,
+  untracked,
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
@@ -130,6 +131,17 @@ export class RecipeFormPageComponent implements OnInit {
   readonly yieldOptions = signal<SelectorOption[]>([]);
 
   /**
+   * Clave de yield pedida por el deep-link del KDS
+   * (`recipes/new?product_id=…&product_variant_id=…`), PENDIENTE de validar.
+   *
+   * No se escribe directo en el control: `yieldOptions` se puebla por HTTP,
+   * así que al montar todavía no se sabe si la clave existe entre las
+   * opciones reales. El efecto del constructor la resuelve cuando la lista
+   * llega. `null` = nada pendiente (navegación normal o clave ya aplicada).
+   */
+  private readonly pendingYieldSelection = signal<string | null>(null);
+
+  /**
    * Curated list of yield units for restaurant recipes. Keeps `yield_unit`
    * as a free VARCHAR(20) in the DB (no migration) while steering the user
    * to the canonical codes used in the UoM catalog and the unit conversion
@@ -205,6 +217,51 @@ export class RecipeFormPageComponent implements OnInit {
     effect(() => {
       this.itemsCount();
     });
+
+    /**
+     * Resolución del deep-link contra las opciones REALES del selector.
+     *
+     * Antes se escribía la clave del query param directo en el control: si
+     * esa clave no existía entre las opciones (caso típico: llega la clave
+     * base `"<product_id>"` de un plato variantizado, que nunca se ofrece),
+     * el `<select>` no podía representarla, el campo se veía vacío y el
+     * formulario parecía «válido» hasta reventar en el backend con
+     * `RECIPE_VARIANT_REQUIRED`. Ahora se comprueba la pertenencia y, si no
+     * pertenece, se cae al valor por defecto —sin selección— para que
+     * `Validators.required` frene el guardado y el usuario elija a mano.
+     *
+     * Zoneless: las opciones llegan por HTTP, así que la comprobación NO
+     * puede correr en `ngOnInit` (siempre fallaría). Vive en un effect que
+     * espera a que la carga termine y la lista esté poblada. La clave
+     * pendiente se LEE con `untracked` y todas las escrituras van dentro de
+     * `untracked`, de modo que limpiarla no reentra al effect.
+     */
+    effect(() => {
+      const options = this.yieldOptions();
+      if (this.isLoadingProducts() || options.length === 0) return;
+      const pending = untracked(this.pendingYieldSelection);
+      if (pending == null) return;
+
+      untracked(() => {
+        this.pendingYieldSelection.set(null);
+        const control = this.form.controls.yield_selection;
+        const match = options.some(
+          (o) => String(o.value) === pending && o.disabled !== true,
+        );
+        if (match) {
+          control.setValue(pending);
+          return;
+        }
+        // Valor por defecto sensato: SIN selección. Nunca se auto-asigna una
+        // variante (la intención del usuario es incognoscible, misma regla
+        // que `parseYieldSelection`), pero tampoco se deja basura escrita.
+        control.setValue(null);
+        control.markAsTouched();
+        this.submitError.set(
+          'No se pudo preseleccionar el plato del atajo: elige abajo el plato o la variante que produce esta receta. Si el plato tiene variantes, la receta se crea sobre una variante, nunca sobre el producto base.',
+        );
+      });
+    });
   }
 
   ngOnInit(): void {
@@ -218,17 +275,31 @@ export class RecipeFormPageComponent implements OnInit {
       return;
     }
 
-    // Deep-link desde el KDS: `recipes/new?product_id=<id>` preselecciona el
+    // Deep-link desde el KDS:
+    // `recipes/new?product_id=<id>[&product_variant_id=<id>]` preselecciona el
     // plato exacto que disparó el atajo "Crear receta" en un ticket sin
     // receta. Solo aplica en modo creación (en edición el producto es
-    // inmutable y viene del recipe cargado). Si el plato tiene variantes, la
-    // clave base no coincide con ninguna opción (la base nunca se ofrece) y
-    // el usuario elige la variante a mano — nunca se auto-asigna.
+    // inmutable y viene del recipe cargado).
+    //
+    // `product_variant_id` es OPCIONAL: si viene, la clave pedida es la del
+    // par `(producto, variante)`; si no viene —plato sin variantes, el camino
+    // común— es la clave base de siempre. La clave NO se escribe aquí: queda
+    // pendiente y el effect del constructor la valida contra las opciones
+    // reales cuando terminen de cargar.
     const rawProductId = this.route.snapshot.queryParamMap.get('product_id');
     const productId = rawProductId ? Number(rawProductId) : NaN;
-    if (Number.isFinite(productId)) {
-      this.form.controls.yield_selection.setValue(String(productId));
-    }
+    if (!Number.isFinite(productId)) return;
+
+    const rawVariantId = this.route.snapshot.queryParamMap.get(
+      'product_variant_id',
+    );
+    const parsedVariantId =
+      rawVariantId != null && rawVariantId.trim() !== ''
+        ? Number(rawVariantId)
+        : NaN;
+    const variantId = Number.isFinite(parsedVariantId) ? parsedVariantId : null;
+
+    this.pendingYieldSelection.set(this.yieldKey(productId, variantId));
   }
 
   // -------------------------------------------------------- Data loaders

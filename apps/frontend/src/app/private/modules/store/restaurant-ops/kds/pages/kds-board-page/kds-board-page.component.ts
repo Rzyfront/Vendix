@@ -292,12 +292,27 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
 
   /**
    * Deep-link a la creación de receta del plato exacto que bloquea el
-   * ticket (`recipes/new?product_id=…`). Emitido por la card y por el modal
-   * de detalle cuando el operador pulsa "Crear receta" en un item sin receta.
+   * ticket (`recipes/new?product_id=…&product_variant_id=…`). Emitido por la
+   * card y por el modal de detalle cuando el operador pulsa "Crear receta"
+   * en un item sin receta.
+   *
+   * Recetas-por-variante: la línea que bloquea el ticket puede ser una
+   * VARIANTE («Pollo Picante»), no el producto base. Sin propagar
+   * `product_variant_id`, el formulario abría preseleccionando el producto y,
+   * si ese producto ya tenía receta BASE, el guardado chocaba contra el
+   * índice parcial `recipes_product_base_uq` y el usuario recibía un error de
+   * duplicado en vez de crear la receta de la variante que le falta.
+   *
+   * El parámetro SÓLO viaja cuando la línea trae variante: el plato sin
+   * variantes navega con el mismo query param de siempre, sin cambio alguno.
    */
   onCreateRecipe(item: KitchenTicketItem): void {
+    const variantId = item.product_variant_id ?? null;
     void this.router.navigate(['/admin/restaurant-ops/recipes/new'], {
-      queryParams: { product_id: item.product_id },
+      queryParams:
+        variantId != null
+          ? { product_id: item.product_id, product_variant_id: variantId }
+          : { product_id: item.product_id },
     });
   }
 
