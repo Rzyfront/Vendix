@@ -135,6 +135,21 @@ export class KdsTicketCardComponent {
     return '';
   });
 
+  /**
+   * Nombre del cliente junto a la mesa (también cuando el pedido NO es en
+   * mesa). Prioridad: `customer_alias` trimmeado > "first_name last_name"
+   * trimmeado > ''. Todo opcional/defensivo: si el backend aún no anida
+   * el include, devuelve '' y el @if del template lo oculta sin romper.
+   */
+  readonly customerName = computed<string>(() => {
+    const order = this.ticket()?.order;
+    const alias = order?.customer_alias?.trim();
+    if (alias) return alias;
+    const first = order?.users?.first_name?.trim() ?? '';
+    const last = order?.users?.last_name?.trim() ?? '';
+    return `${first} ${last}`.trim();
+  });
+
   readonly statusBadgeVariant = computed<'success' | 'neutral' | 'warning' | 'error' | 'info' | 'primary'>(() => {
     switch (this.ticket().status) {
       case 'pending':

@@ -101,7 +101,11 @@ export interface KitchenTicket {
   daily_number?: number | null;
   /** QUI-651 — estacion que prepara este ticket. NOT NULL en la DB. */
   kds_id?: number;
-  order?: { order_number: string } | null;
+  order?: {
+    order_number: string;
+    customer_alias?: string | null;
+    users?: { first_name: string; last_name: string } | null;
+  } | null;
   /**
    * QUI-756 — rótulo humano de la mesa, anidado por `KITCHEN_TICKET_INCLUDE`
    * en el backend. `table_id` (el FK crudo) sigue presente para queries

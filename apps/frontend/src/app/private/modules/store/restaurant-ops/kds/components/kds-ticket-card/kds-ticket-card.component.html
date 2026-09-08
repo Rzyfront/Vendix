@@ -24,6 +24,9 @@
           <app-icon name="square" [size]="12" /> {{ tableLabel() }}
         </span>
       }
+      @if (customerName()) {
+        <span class="kds-card__client" [attr.title]="customerName()"><app-icon name="user" [size]="12" />{{ customerName() }}</span>
+      }
       <span class="kds-card__order" title="Orden">
         <app-icon name="file-text" [size]="12" /> Orden {{ ticket().order?.order_number ?? ('#' + ticket().order_id) }}
       </span>
