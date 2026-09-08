@@ -2,7 +2,7 @@
 id: A.2
 title: "Autofocus del buscador al cerrar modales POS"
 phase: A
-status: pending
+status: done
 owner: none
 updated: 2026-09-08
 contracts: []
@@ -24,7 +24,7 @@ skills: []
   - tsc en cero errores sobre los componentes tocados.
   - Cierre manual de cada modal del POS deja el foco en Buscar productos.
 - **Acceptance checklist:**
-  - [ ] `focusSearch()` existe y es no-op si no hay buscador
-  - [ ] Checkout/cliente/carrito/ítem/confirmación/cobro/sesión/horarios enfocan al cerrar
-  - [ ] Sin excepciones en consola al cerrar modales
-- **Status:** pending
+  - [x] `focusSearch()` existe y es no-op si no hay buscador
+  - [x] Checkout/cliente/carrito/ítem/confirmación/cobro/sesión/horarios enfocan al cerrar
+  - [x] Sin excepciones en consola al cerrar modales
+- **Status:** done

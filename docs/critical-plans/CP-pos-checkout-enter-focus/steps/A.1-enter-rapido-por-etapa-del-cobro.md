@@ -2,7 +2,7 @@
 id: A.1
 title: "Enter rapido por etapa del cobro"
 phase: A
-status: pending
+status: done
 owner: none
 updated: 2026-09-08
 contracts: []
@@ -24,9 +24,9 @@ skills: []
   - Specs del shell en verde (casos Enter existentes + nuevos).
   - Recorrido manual https://vendix.com: cobro con defaults solo con Enter hasta Cobrar.
 - **Acceptance checklist:**
-  - [ ] Al abrir el modal, el foco entra al panel activo (primer Enter avanza Consumo)
-  - [ ] Enter sobre SELECT no avanza el wizard
-  - [ ] Enter en efectivo/total confirma sin clic y sin doble submit
-  - [ ] Enter con gate cerrado destella en vez de avanzar
-  - [ ] Specs del shell en verde
-- **Status:** pending
+  - [x] Al abrir el modal, el foco entra al panel activo (primer Enter avanza Consumo)
+  - [x] Enter sobre SELECT no avanza el wizard
+  - [x] Enter en efectivo/total confirma sin clic y sin doble submit
+  - [x] Enter con gate cerrado destella en vez de avanzar
+  - [x] Specs del shell en verde
+- **Status:** done
