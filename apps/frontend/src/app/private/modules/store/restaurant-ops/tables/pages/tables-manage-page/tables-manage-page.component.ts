@@ -28,11 +28,17 @@ import {
   TableColumn,
   ToastService,
 } from '../../../../../../../shared/components/index';
-import { Table, TableQrResponse, TableStatus } from '../../interfaces';
+import {
+  Table,
+  TableQrResponse,
+  TableStatus,
+  TransferResult,
+} from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
 import { TableFloorMapComponent } from '../../components/table-floor-map/table-floor-map.component';
 import { TableFormModalComponent } from '../../components/table-form-modal/table-form-modal.component';
 import { TableQrModalComponent } from '../../components/table-qr-modal/table-qr-modal.component';
+import { TransferTableModalComponent } from '../../components/transfer-table-modal/transfer-table-modal.component';
 
 interface TablesStats {
   total: number;
@@ -72,6 +78,7 @@ interface TableRow extends Table {
     TableFloorMapComponent,
     TableFormModalComponent,
     TableQrModalComponent,
+    TransferTableModalComponent,
   ],
   templateUrl: './tables-manage-page.component.html',
   styleUrl: './tables-manage-page.component.scss',
@@ -105,6 +112,17 @@ export class TablesManagePageComponent implements OnInit {
    * para que un doble clic no dispare dos secuencias cierre+PATCH.
    */
   readonly releasingTableId = signal<number | null>(null);
+
+  /**
+   * "Cambiar de mesa" (PLAN-cambio-mesa-swap · paso 5). Misma idea que
+   * `releasingTableId`: señal propia anti-doble-clic que cubre desde el
+   * clic en la acción hasta que el modal se cierra (confirmado o
+   * cancelado), para que un doble clic no abra dos selectores de
+   * destino. El guard del POST vive además en el modal (`isConfirming`).
+   */
+  readonly transferringTableId = signal<number | null>(null);
+  readonly isTransferOpen = signal(false);
+  readonly transferSource = signal<Table | null>(null);
 
   readonly floorMapKey = signal(0);
 
@@ -162,6 +180,19 @@ export class TablesManagePageComponent implements OnInit {
       variant: 'secondary',
       tooltip: 'Ver e imprimir el QR de la mesa',
       action: (item: Table) => this.openQr(item),
+    },
+    {
+      label: 'Cambiar de mesa',
+      icon: 'arrow-right-left',
+      variant: 'secondary',
+      tooltip:
+        'Mover la cuenta abierta a otra mesa (intercambia cuentas si el destino está ocupado)',
+      // Solo con cuenta abierta: `active_session` del floor-map, o
+      // `effective_status === 'occupied'` cuando la fila persiste otro
+      // estado pero arrastra sesión (mismo criterio que "Liberar").
+      show: (item: Table) => this.hasOpenAccount(item),
+      disabled: (item: Table) => this.transferringTableId() === item.id,
+      action: (item: Table) => this.openTransfer(item),
     },
     {
       label: 'Liberar',
@@ -287,6 +318,63 @@ export class TablesManagePageComponent implements OnInit {
   closeQr(): void {
     this.isQrOpen.set(false);
     this.qrTable.set(null);
+  }
+
+  /**
+   * La acción "Cambiar de mesa" solo existe con cuenta abierta
+   * (PLAN-cambio-mesa-swap · objetivo 1): `active_session` del floor-map
+   * o `effective_status === 'occupied'` cuando la fila persiste otro
+   * estado pero arrastra sesión.
+   */
+  hasOpenAccount(t: Table): boolean {
+    return t.active_session != null || this.effectiveStatus(t) === 'occupied';
+  }
+
+  /**
+   * Abre el selector de mesa destino (paso 5). Pide confirmación con el
+   * mismo `dialogService.confirm` que "Liberar" antes de mostrar el
+   * modal; `transferringTableId` se arma ANTES del confirm para que un
+   * doble clic en la acción no abra dos diálogos ni dos modales.
+   */
+  private openTransfer(t: Table): void {
+    if (this.transferringTableId() != null) return;
+    this.transferringTableId.set(t.id);
+    const sessionId = t.active_session?.id;
+    this.dialogService
+      .confirm({
+        title: 'Cambiar de mesa',
+        message:
+          sessionId != null
+            ? `La cuenta abierta de "${t.name}" (sesión #${sessionId}) se moverá a la mesa que elijas. Si la mesa destino está ocupada, ambas cuentas se intercambian.`
+            : `La cuenta abierta de "${t.name}" se moverá a la mesa que elijas. Si la mesa destino está ocupada, ambas cuentas se intercambian.`,
+        confirmText: 'Elegir destino',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
+      })
+      .then((ok: boolean) => {
+        if (!ok) {
+          this.transferringTableId.set(null);
+          return;
+        }
+        this.transferSource.set(t);
+        this.isTransferOpen.set(true);
+      });
+  }
+
+  closeTransfer(): void {
+    this.isTransferOpen.set(false);
+    this.transferSource.set(null);
+    this.transferringTableId.set(null);
+  }
+
+  onTransferConfirmed(result: TransferResult): void {
+    this.toastService.success(
+      result.mode === 'swap'
+        ? 'Cuentas intercambiadas entre mesas'
+        : 'Cuenta trasladada a la mesa de destino',
+    );
+    this.closeTransfer();
+    this.load();
   }
 
   /**

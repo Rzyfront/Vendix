@@ -1,6 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, throwError } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, switchMap, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import {
@@ -26,6 +26,8 @@ import {
   TableQrResponse,
   PaymentPendingView,
   ConfirmTablePaymentResult,
+  TransferResult,
+  TransferTableSessionDto,
 } from '../interfaces';
 import type { IconName } from '../../../../../../shared/components/icon/icons.registry';
 
@@ -342,6 +344,47 @@ export class TablesService {
       )
       .pipe(
         map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * Mueve la cuenta abierta entre mesas ("Cambiar de mesa",
+   * PLAN-cambio-mesa-swap · paso 4).
+   *
+   * Un solo `POST /store/table-sessions/transfer`: traslado cuando el
+   * destino está vacío, swap atómico cuando está ocupado. Nunca se
+   * compone con close+open (destruiría `opened_at`, el id de sesión que
+   * ya referencian KDS y pagos, e `inventory_consumed_at_fire`).
+   *
+   * Refresca el signal `floorTables` vía `getFloorMap()` tras el éxito
+   * para que el plano vea la nueva ubicación sin recarga manual.
+   */
+  transferSession(
+    sourceTableId: number,
+    targetTableId: number,
+  ): Observable<TransferResult> {
+    const dto: TransferTableSessionDto = {
+      source_table_id: sourceTableId,
+      target_table_id: targetTableId,
+    };
+    return this.http
+      .post<ApiResponse<TransferResult>>(
+        `${this.apiUrl}/store/table-sessions/transfer`,
+        dto,
+      )
+      .pipe(
+        map((res) => res.data),
+        tap(() => {
+          // El backend ya movió la sesión; el floor-map local queda
+          // desfasado. `getFloorMap` re-emite `floorTables` en su propio
+          // tap. El observable de HttpClient completa solo, así que no
+          // hay leak; si el refresco falla, la página recarga de todos
+          // modos en `onTransferConfirmed` y aquí se ignora el error.
+          this.getFloorMap()
+            .pipe(catchError(() => of([] as Table[])))
+            .subscribe();
+        }),
         catchError(this.handleError),
       );
   }

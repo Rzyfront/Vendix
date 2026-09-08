@@ -1,0 +1,83 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="isOpenChange.emit($event)"
+  (cancel)="close()"
+  [size]="'md'"
+  [dialog]="true"
+  [title]="title()"
+  subtitle="Elige la mesa destino. Si está ocupada, ambas cuentas se intercambian."
+>
+  @if (isLoadingTables()) {
+    <div class="loading">
+      <app-spinner size="md"></app-spinner>
+      <p>Cargando mesas…</p>
+    </div>
+  } @else if (allTables().length === 0) {
+    <div class="empty text-center text-text-secondary py-6">
+      <app-icon name="table" [size]="32"></app-icon>
+      <p class="mt-2 text-sm">No hay mesas para elegir destino.</p>
+    </div>
+  } @else {
+    <ul class="transfer-list">
+      @for (t of allTables(); track trackById($index, t)) {
+        <li>
+          <button
+            type="button"
+            class="transfer-row"
+            [class.selected]="isSelected(t)"
+            [class.disabled]="!isSelectable(t)"
+            [disabled]="!isSelectable(t)"
+            [title]="isReserved(t) ? 'Reservada — elige otra mesa' : ''"
+            (click)="select(t)"
+          >
+            <span class="row-main">
+              <span class="row-title">
+                {{ t.name }}
+                @if (t.zone) {
+                  <span class="row-zone">· {{ t.zone }}</span>
+                }
+              </span>
+              @if (accountLine(t); as account) {
+                <span class="row-account">{{ account }}</span>
+              }
+            </span>
+            <span class="row-badges">
+              @if (isOrigin(t)) {
+                <span class="origin-pill">Origen</span>
+              }
+              <span
+                class="status-pill"
+                [style.background-color]="statusColor(statusOf(t))"
+              >
+                {{ statusLabel(statusOf(t)) }}
+              </span>
+              @if (isSelected(t)) {
+                <app-icon name="check" [size]="16"></app-icon>
+              }
+            </span>
+          </button>
+        </li>
+      }
+    </ul>
+
+    @if (previewMessage(); as preview) {
+      <p class="preview">
+        <app-icon name="arrow-right-left" [size]="14"></app-icon>
+        {{ preview }}
+      </p>
+    }
+  }
+
+  <div slot="footer" class="flex justify-end gap-2">
+    <app-button variant="ghost" (clicked)="close()">Cancelar</app-button>
+    <app-button
+      variant="primary"
+      [loading]="isConfirming()"
+      [disabled]="!canConfirm()"
+      (clicked)="confirm()"
+    >
+      <app-icon slot="icon" name="arrow-right-left" [size]="16"></app-icon>
+      Confirmar
+    </app-button>
+  </div>
+</app-modal>

@@ -135,4 +135,12 @@
     [table]="qrTable()"
     (isOpenChange)="closeQr()"
   />
+
+  <app-transfer-table-modal
+    [isOpen]="isTransferOpen()"
+    [table]="transferSource()"
+    [tables]="tables()"
+    (isOpenChange)="closeTransfer()"
+    (confirmed)="onTransferConfirmed($event)"
+  />
 </div>
