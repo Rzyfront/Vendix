@@ -67,6 +67,9 @@ export interface DispatchNotePdfData {
   // Transportador (solo si hay ruta activa asignada)
   transporter?: DispatchNoteTransporter;
 
+  // Domiciliario (texto libre registrado en deliver(); solo se pinta si hay nombre)
+  courier_name?: string;
+
   // Observaciones
   notes?: string;
 }
@@ -140,7 +143,7 @@ export class DispatchNotePdfBuilder {
         this.hr(doc);
         this.drawLegalLegend(doc);
 
-        this.drawSignatures(doc);
+        this.drawSignatures(doc, data.courier_name);
 
         this.drawFooter(doc);
 
@@ -477,7 +480,10 @@ export class DispatchNotePdfBuilder {
     doc.moveDown(0.3);
   }
 
-  private static drawSignatures(doc: PDFKit.PDFDocument): void {
+  private static drawSignatures(
+    doc: PDFKit.PDFDocument,
+    courier_name?: string,
+  ): void {
     // Keep the signature block on the current page if there is room; otherwise
     // push it down so it never collides with the table/totals.
     if (doc.y > PAGE_HEIGHT - 120) {
@@ -503,9 +509,24 @@ export class DispatchNotePdfBuilder {
       align: 'center',
     });
 
+    // Domiciliario junto a "Despachado por", solo cuando hay nombre registrado.
+    // Sin nombre no se pinta nada y el bloque queda idéntico al actual.
+    let col1_detail_y = y + 58;
+    if (courier_name) {
+      doc.font('Helvetica-Bold').fontSize(8).fillColor('#000000');
+      doc.text(`Domiciliario: ${courier_name}`, col1_x, y + 57, {
+        width: col_width,
+        align: 'left',
+      });
+      col1_detail_y = y + 69;
+    }
+
     doc.font('Helvetica').fontSize(8).fillColor('#555555');
     const detail_lines = 'Nombre: ____________________\nC.C.: ____________________\nFecha: ____________________';
-    doc.text(detail_lines, col1_x, y + 58, { width: col_width, align: 'left' });
+    doc.text(detail_lines, col1_x, col1_detail_y, {
+      width: col_width,
+      align: 'left',
+    });
     doc.text(detail_lines, col2_x, y + 58, { width: col_width, align: 'left' });
     doc.fillColor('#000000');
   }
