@@ -679,6 +679,14 @@
     (splitByAmount)="onSplitByAmount($event)"
   />
 
+  <app-transfer-table-modal
+    [isOpen]="isTransferOpen()"
+    [table]="transferSourceTable()"
+    [tables]="[]"
+    (isOpenChange)="isTransferOpen.set($event)"
+    (confirmed)="onTransferConfirmed($event)"
+  />
+
   @if (checkoutEnabled()) {
     <app-table-payment-modal
       [isOpen]="isPayOpen()"

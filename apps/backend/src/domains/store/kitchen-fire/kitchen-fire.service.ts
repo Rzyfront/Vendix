@@ -18,7 +18,13 @@ import { KdsSessionsService } from '../kds/sessions/kds-sessions.service';
  * contract stays consistent (`daily_number` lives on the ticket row).
  */
 const KITCHEN_TICKET_INCLUDE = {
-  order: { select: { order_number: true } },
+  order: {
+    select: {
+      order_number: true,
+      customer_alias: true,
+      users: { select: { first_name: true, last_name: true } },
+    },
+  },
   // QUI-756 — anidar `table.name` (rótulo humano, ej. "Mesa 2") para que el KDS
   // muestre el nombre y no el FK. `kitchen_tickets.table_id` es PK autoincrement
   // de `tables.id` (sin columna `number` separada); sólo con el include el frontend
@@ -45,17 +51,16 @@ const KITCHEN_TICKET_INCLUDE = {
           sku: true,
           stock_unit: true,
           preparation_time_minutes: true,
-          // Restaurant Suite — KDS recipe-readiness: nest the recipe so every
+          // Restaurant Suite — KDS recipe-readiness: nest the recipes so every
           // ticket read path (snapshot + all `ticket.*` SSE events use this
           // single include) carries whether the dish has an ACTIVE recipe.
-          // `recipe` is a TO-ONE optional relation on `products`
-          // (`recipes.product_id` is `@unique`), so we select its `id` +
-          // `is_active` and let the KDS card derive
-          // `has_active_recipe = product.recipe?.is_active === true` in O(1)
-          // without an extra per-card fetch. Mirrors the `startPreparation`
-          // guard (`recipes.findFirst({ product_id, is_active: true })`).
-          recipe: {
-            select: { id: true, is_active: true },
+          // Recetas-por-variante (paso 5): `products.recipes` es TO-MANY (una
+          // base + una por variante). Los lectores resuelven por par
+          // `(product_id, product_variant_id)` con caída a la base; el include
+          // lleva `product_variant_id` para que esa resolución sea en memoria,
+          // sin re-consultar `recipes` por línea.
+          recipes: {
+            select: { id: true, is_active: true, product_variant_id: true },
           },
         },
       },
@@ -392,27 +397,60 @@ export class KitchenFireService {
     const bomCache = new Map<number, BomExplosionLine[]>();
     // CP-POLLO-ARABE-727 A.7 — un único `findMany` en vez de un `findFirst` por
     // línea (N+1). Los items que comparten receta cuestan 1 explosión (bomCache).
-    const firedProductIds = firedItemIds.map((itemId) => {
+    // Recetas-por-variante (paso 5): se traen TODAS las recetas activas de los
+    // productos involucrados (base + por variante) y cada línea resuelve la
+    // suya por par `(product_id, product_variant_id)` con caída a la base —
+    // misma regla que `RecipesService.findByProduct(productId, variantId)`, en
+    // memoria para no reintroducir el N+1 (ese método hace 1-2 queries por
+    // línea y lanza RECIPE_NOT_FOUND en vez de devolver «sin receta»).
+    const firedItems = firedItemIds.map((itemId) => {
       const item = order.order_items.find((oi) => oi.id === itemId)!;
-      return item.product_id!;
+      return item;
     });
+    const firedProductIds = [
+      ...new Set(firedItems.map((item) => item.product_id!)),
+    ];
     const activeRecipes =
       firedProductIds.length > 0
         ? await this.prisma.recipes.findMany({
             where: {
-              product_id: { in: [...new Set(firedProductIds)] },
+              product_id: { in: firedProductIds },
               is_active: true,
             },
-            select: { id: true, product_id: true, is_active: true },
+            select: {
+              id: true,
+              product_id: true,
+              product_variant_id: true,
+              is_active: true,
+            },
           })
         : [];
-    const recipeByProduct = new Map<
-      number,
-      { id: number; product_id: number | null; is_active: boolean }
-    >(activeRecipes.map((r) => [r.product_id, r]));
+    type ActiveRecipeRow = {
+      id: number;
+      product_id: number;
+      product_variant_id: number | null;
+      is_active: boolean;
+    };
+    const exactRecipeByPair = new Map<string, ActiveRecipeRow>();
+    const baseRecipeByProduct = new Map<number, ActiveRecipeRow>();
+    for (const r of activeRecipes as ActiveRecipeRow[]) {
+      if (r.product_variant_id != null) {
+        exactRecipeByPair.set(
+          this.recipeKey(r.product_id, r.product_variant_id),
+          r,
+        );
+      } else {
+        baseRecipeByProduct.set(r.product_id, r);
+      }
+    }
     for (const itemId of firedItemIds) {
       const item = order.order_items.find((oi) => oi.id === itemId)!;
-      const recipe = recipeByProduct.get(item.product_id!);
+      const recipe = this.resolveRecipeForVariant(
+        exactRecipeByPair,
+        baseRecipeByProduct,
+        item.product_id!,
+        item.product_variant_id ?? null,
+      );
       if (!recipe || !recipe.is_active) {
         // No active recipe → cooked by hand, no inventory consume.
         recipeLessItems.push(item);
@@ -1613,15 +1651,49 @@ export class KitchenFireService {
     // the same recipe cost 1 explosion, not N. Mirrors prepareFireContext.
     const bomCache = new Map<number, BomExplosionLine[]>();
 
+    // Recetas-por-variante (paso 5): índice por par (producto, variante) sobre
+    // TODAS las recetas que ya viajan en el include — cada línea resuelve la
+    // suya con la misma regla del fire (exacta → base → sin receta). `[0]` era
+    // correcto con ≤1 receta por producto; con N elegiría la variante vecina.
+    // `KITCHEN_TICKET_INCLUDE` ya carga `product.recipes[]`, así que no hay que
+    // re-consultar `recipes.findFirst` por línea — ese era el N+1 del modal de
+    // verificación de QUI-655 (10 platos = 10 round-trips).
+    const exactRecipeByPair = new Map<string, { id: number }>();
+    const baseRecipeByProduct = new Map<number, { id: number }>();
     for (const it of rawItems) {
-      // `KITCHEN_TICKET_INCLUDE` ya carga `product.recipe {id, is_active}`, así
-      // que no hay que re-consultar `recipes.findFirst` por línea — ese era el
-      // N+1 del modal de verificación de QUI-655 (10 platos = 10 round-trips).
-      const recipe = it.product?.recipe ?? null;
+      if (it.product_id == null) continue;
+      for (const r of (it.product?.recipes ?? []) as Array<{
+        id: number;
+        is_active: boolean;
+        product_variant_id: number | null;
+      }>) {
+        if (r.is_active !== true) continue;
+        if (r.product_variant_id != null) {
+          exactRecipeByPair.set(
+            this.recipeKey(it.product_id, r.product_variant_id),
+            r,
+          );
+        } else {
+          baseRecipeByProduct.set(it.product_id, r);
+        }
+      }
+    }
+
+    for (const it of rawItems) {
+      const recipe =
+        it.product_id != null
+          ? this.resolveRecipeForVariant(
+              exactRecipeByPair,
+              baseRecipeByProduct,
+              it.product_id,
+              it.product_variant_id ?? null,
+            )
+          : null;
       // Sin receta activa se devuelve igual, con `components: []`: el cocinero debe
-      // verlo en el modal y poder confirmarlo, no que desaparezca.
+      // verlo en el modal y poder confirmarlo, no que desaparezca. El índice ya
+      // solo contiene recetas activas, así que `null` equivale a «sin receta».
       let bom: BomExplosionLine[];
-      if (!recipe || !recipe.is_active) {
+      if (!recipe) {
         bom = [];
       } else {
         const cached = bomCache.get(recipe.id);
@@ -1811,27 +1883,57 @@ export class KitchenFireService {
     // línea, y por `client` (el tx de la transacción abierta del llamador), no
     // por `this.prisma`: esto era la fuga de pool documentada (1 conexión
     // retenida por la tx + N secuenciales del mismo pool).
-    const firedProductIds = firedItemIds.map((itemId) => {
+    // Recetas-por-variante (paso 5): misma resolución por par que
+    // `fireOrderItems` (exacta → base → sin receta; ver nota ahí sobre por qué
+    // no se reutiliza `RecipesService.findByProduct` en el camino batch).
+    const firedItems = firedItemIds.map((itemId) => {
       const item = order.order_items.find((oi) => oi.id === itemId)!;
-      return item.product_id!;
+      return item;
     });
+    const firedProductIds = [
+      ...new Set(firedItems.map((item) => item.product_id!)),
+    ];
     const activeRecipes =
       firedProductIds.length > 0
         ? await client.recipes.findMany({
             where: {
-              product_id: { in: [...new Set(firedProductIds)] },
+              product_id: { in: firedProductIds },
               is_active: true,
             },
-            select: { id: true, product_id: true, is_active: true },
+            select: {
+              id: true,
+              product_id: true,
+              product_variant_id: true,
+              is_active: true,
+            },
           })
         : [];
-    const recipeByProduct = new Map<
-      number,
-      { id: number; product_id: number | null; is_active: boolean }
-    >(activeRecipes.map((r) => [r.product_id, r]));
+    type ActiveRecipeRow = {
+      id: number;
+      product_id: number;
+      product_variant_id: number | null;
+      is_active: boolean;
+    };
+    const exactRecipeByPair = new Map<string, ActiveRecipeRow>();
+    const baseRecipeByProduct = new Map<number, ActiveRecipeRow>();
+    for (const r of activeRecipes as ActiveRecipeRow[]) {
+      if (r.product_variant_id != null) {
+        exactRecipeByPair.set(
+          this.recipeKey(r.product_id, r.product_variant_id),
+          r,
+        );
+      } else {
+        baseRecipeByProduct.set(r.product_id, r);
+      }
+    }
     for (const itemId of firedItemIds) {
       const item = order.order_items.find((oi) => oi.id === itemId)!;
-      const recipe = recipeByProduct.get(item.product_id!);
+      const recipe = this.resolveRecipeForVariant(
+        exactRecipeByPair,
+        baseRecipeByProduct,
+        item.product_id!,
+        item.product_variant_id ?? null,
+      );
       if (!recipe || !recipe.is_active) {
         recipeLessItems.push(item);
         continue;
@@ -2101,14 +2203,41 @@ export class KitchenFireService {
     // nothing to deduct stock from. We check every product on the
     // ticket against the recipes table.
     const recipeLessItemIds: number[] = [];
+    // Recetas-por-variante (paso 5): el guard es por par (producto, variante),
+    // no por producto — `.some(is_active)` dejaba pasar una línea cuya variante
+    // no tiene receta mientras OTRA variante sí la tuviera (y no distingue la
+    // base heredada de la exacta). `KITCHEN_TICKET_INCLUDE` ya carga
+    // `product.recipes[]`, así que la resolución es en memoria: re-consultar
+    // `recipes.findFirst` por línea era el N+1 que F.1 eliminó acá.
+    const exactRecipeByPair = new Map<string, { id: number }>();
+    const baseRecipeByProduct = new Map<number, { id: number }>();
+    for (const item of ticket.items ?? []) {
+      if (item.product_id == null) continue;
+      for (const r of (item.product?.recipes ?? []) as Array<{
+        id: number;
+        is_active: boolean;
+        product_variant_id: number | null;
+      }>) {
+        if (r.is_active !== true) continue;
+        if (r.product_variant_id != null) {
+          exactRecipeByPair.set(
+            this.recipeKey(item.product_id, r.product_variant_id),
+            r,
+          );
+        } else {
+          baseRecipeByProduct.set(item.product_id, r);
+        }
+      }
+    }
     for (const item of ticket.items ?? []) {
       if (!item.product_id) continue;
-      // CP-POLLO-ARABE-727 F.1 — `KITCHEN_TICKET_INCLUDE` ya carga
-      // `product.recipe {id, is_active}` (su comentario dice "Mirrors the
-      // startPreparation guard"). Re-consultar `recipes.findFirst` por línea
-      // era el mismo N+1 que A.7 eliminó en `fireOrderItems`/`prepareFireContext`
-      // y quedó vivo acá: N round-trips secuenciales al pool por ticket.
-      const hasActiveRecipe = item.product?.recipe?.is_active === true;
+      const hasActiveRecipe =
+        this.resolveRecipeForVariant(
+          exactRecipeByPair,
+          baseRecipeByProduct,
+          item.product_id,
+          item.product_variant_id ?? null,
+        ) != null;
       if (!hasActiveRecipe) {
         recipeLessItemIds.push(item.id);
       }
@@ -2954,6 +3083,43 @@ export class KitchenFireService {
         product_id: item.product_id,
       });
     }
+  }
+
+  /**
+   * Recetas-por-variante (paso 5) — clave compuesta del índice de recetas:
+   * `${product_id}:${product_variant_id ?? 'base'}`. Una receta base y una por
+   * variante del mismo producto nunca colisionan; dos variantes distintas del
+   * mismo plato tampoco.
+   */
+  private recipeKey(productId: number, variantId: number | null): string {
+    return `${productId}:${variantId ?? 'base'}`;
+  }
+
+  /**
+   * Recetas-por-variante (paso 5) — resolución por par con caída a la base:
+   * receta exacta de la variante primero; si la variante no tiene la suya, la
+   * receta base del producto (compatibilidad con recetas creadas antes del
+   * cambio — la UI ya no permite crear bases sobre productos variantizados);
+   * si no hay ninguna, `null` y la línea sigue siendo «sin receta» (Fase K).
+   * Misma regla que `RecipesService.findByProduct(productId, variantId)`.
+   *
+   * La caché de `explodeBom` se indexa por `recipe_id` — único por variante —
+   * así que sigue siendo correcta sin cambios.
+   */
+  private resolveRecipeForVariant<T>(
+    exactByPair: Map<string, T>,
+    baseByProduct: Map<number, T>,
+    productId: number,
+    variantId: number | null,
+  ): T | null {
+    if (variantId != null) {
+      return (
+        exactByPair.get(this.recipeKey(productId, variantId)) ??
+        baseByProduct.get(productId) ??
+        null
+      );
+    }
+    return baseByProduct.get(productId) ?? null;
   }
 
   /**

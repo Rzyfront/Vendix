@@ -47,6 +47,15 @@ export class CreateStoreUserDto {
   @Matches(/^[a-zA-Z0-9_]+$/)
   username?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  @Matches(/^[\d+#*\s()-]*$/, {
+    message:
+      'El teléfono solo puede contener números y los símbolos + # * ( ) -',
+  })
+  phone?: string | null;
+
   /**
    * Rol operativo a asignar. Por defecto `employee` (preserva el
    * comportamiento previo). `carrier` ⇒ app_type=STORE_DELIVERY.

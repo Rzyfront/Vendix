@@ -1,6 +1,6 @@
 /**
  * CP-print-token-flow A.1 — `users.addresses[0]` → `StandardPrintParty`.
- * Sin dirección: `{}` para que el compositor no emita fila (invariante 1).
+ * Sin dirección: default Colombia / Bogotá D.C. (siempre emite).
  */
 import { mapUserAddress } from '../customer-address';
 
@@ -24,16 +24,22 @@ describe('mapUserAddress', () => {
     });
   });
 
-  it('sin dirección devuelve objeto vacío (sin claves que pintar)', () => {
-    expect(mapUserAddress(null)).toEqual({});
-    expect(mapUserAddress(undefined)).toEqual({});
-    expect(mapUserAddress({})).toEqual({});
+  it('sin dirección devuelve el default CO/Bogotá (siempre emite)', () => {
+    const expected = {
+      address: 'Bogotá D.C., CO',
+      city: 'Bogotá D.C.',
+      country: 'CO',
+    };
+    expect(mapUserAddress(null)).toEqual(expected);
+    expect(mapUserAddress(undefined)).toEqual(expected);
+    expect(mapUserAddress({})).toEqual(expected);
   });
 
-  it('solo ciudad produce `address` con la ciudad', () => {
+  it('solo ciudad produce `address` con la ciudad (más país fallback CO)', () => {
     expect(mapUserAddress({ city: 'Cali' })).toEqual({
       address: 'Cali',
       city: 'Cali',
+      country: 'CO',
     });
   });
 });

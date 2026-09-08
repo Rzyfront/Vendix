@@ -51,6 +51,9 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       products: {
         findMany: jest.fn(),
       },
+      product_variants: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       store_settings: {
         findFirst: jest.fn().mockResolvedValue({ currency: 'COP' }),
       },
@@ -272,6 +275,80 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           where: { id: 100 },
           data: expect.objectContaining({
             grand_total: expect.any(Prisma.Decimal),
+          }),
+        }),
+      );
+    });
+
+    it('rejects a line without variant on ANY product with variants (not just prepared)', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue({
+        id: 1,
+        order_id: 100,
+        closed_at: null,
+        table_id: 5,
+        order: { state: 'draft', order_items: [] },
+        table: { id: 5, name: 'Mesa 5', zone: null, status: 'occupied' },
+      });
+      prismaMock.products.findMany.mockResolvedValue([
+        {
+          id: 60,
+          name: 'Camiseta',
+          base_price: 50000,
+          is_sellable: true,
+          product_type: 'physical',
+          track_inventory: false,
+          product_variants: [{ id: 61 }],
+        },
+      ]);
+
+      await expect(
+        service.addItems(1, { items: [{ product_id: 60, quantity: 1 }] } as any),
+      ).rejects.toMatchObject({ errorCode: 'PRODUCT_VARIANT_REQUIRED' });
+      expect(prismaMock.order_items.create).not.toHaveBeenCalled();
+    });
+
+    it('prices the line with the VARIANT value (override), not the base price', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue({
+        id: 1,
+        order_id: 100,
+        closed_at: null,
+        table_id: 5,
+        order: { state: 'draft', order_items: [] },
+        table: { id: 5, name: 'Mesa 5', zone: null, status: 'occupied' },
+      });
+      prismaMock.products.findMany.mockResolvedValue([
+        {
+          id: 60,
+          name: 'Camiseta',
+          base_price: 50000,
+          is_sellable: true,
+          product_type: 'physical',
+          track_inventory: false,
+          product_variants: [{ id: 61 }],
+        },
+      ]);
+      prismaMock.product_variants.findMany.mockResolvedValue([
+        {
+          id: 61,
+          product_id: 60,
+          price_override: new Prisma.Decimal(65000),
+          is_on_sale: false,
+          sale_price: null,
+        },
+      ]);
+      prismaMock.order_items.findMany.mockResolvedValue([]);
+      prismaMock.order_items.create.mockResolvedValue({});
+      prismaMock.orders.update.mockResolvedValue({});
+
+      await service.addItems(1, {
+        items: [{ product_id: 60, product_variant_id: 61, quantity: 2 }],
+      } as any);
+      expect(prismaMock.order_items.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            product_variant_id: 61,
+            unit_price: new Prisma.Decimal(65000),
+            total_price: new Prisma.Decimal(130000),
           }),
         }),
       );
@@ -613,6 +690,315 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       // Los counters siguen en los valores del primer close (no se duplican).
       expect(prismaMock.table_sessions.update).toHaveBeenCalledTimes(1);
       expect(prismaMock.tables.update).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('transferSession (cambio de mesa)', () => {
+    const SRC = 5;
+    const DST = 7;
+    const SRC_SESSION_ID = 77;
+    const DST_SESSION_ID = 88;
+    const SRC_ORDER_ID = 9001;
+    const DST_ORDER_ID = 9002;
+
+    const tableRow = (id: number, name: string, status: string) => ({
+      id,
+      store_id: STORE_ID,
+      name,
+      zone: null,
+      capacity: 4,
+      status,
+      pos_x: null,
+      pos_y: null,
+      public_token: `tok-${id}`,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    const sessionRow = (id: number, tableId: number, orderId: number) => ({
+      id,
+      store_id: STORE_ID,
+      table_id: tableId,
+      order_id: orderId,
+      opened_by: USER_ID,
+      opened_at: new Date(),
+      closed_at: null,
+      paid_at: null,
+      guest_count: 2,
+    });
+    const sessionView = (id: number, tableId: number, orderId: number) => ({
+      ...sessionRow(id, tableId, orderId),
+      order: {
+        id: orderId,
+        state: 'draft',
+        grand_total: new Prisma.Decimal(50000),
+        subtotal_amount: new Prisma.Decimal(50000),
+        tax_amount: new Prisma.Decimal(0),
+        discount_amount: new Prisma.Decimal(0),
+        customer_alias: null,
+        users: null,
+        order_items: [],
+      },
+      table: {
+        id: tableId,
+        name: `Mesa ${tableId}`,
+        zone: null,
+        status: 'occupied',
+        table_waiters: [],
+      },
+    });
+
+    const ssePush = () =>
+      (service as any).notificationsSseService.push as jest.Mock;
+
+    beforeEach(() => {
+      prismaMock.kitchen_tickets = {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      };
+      prismaMock.table_sessions.update.mockResolvedValue({});
+      prismaMock.tables.update.mockResolvedValue({});
+    });
+
+    function mockTablesForTransfer(opts: {
+      srcSession: boolean;
+      dstSession: boolean;
+      dstStatus: string;
+    }) {
+      (tablesService.getById as jest.Mock).mockImplementation(
+        async (id: number) => {
+          if (id === SRC) return tableRow(SRC, 'Mesa 5', 'occupied');
+          if (id === DST) return tableRow(DST, 'Mesa 7', opts.dstStatus);
+          throw new Error(`unexpected table ${id}`);
+        },
+      );
+      (tablesService.getActiveSession as jest.Mock).mockImplementation(
+        async (id: number) => {
+          if (id === SRC)
+            return opts.srcSession
+              ? sessionRow(SRC_SESSION_ID, SRC, SRC_ORDER_ID)
+              : null;
+          if (id === DST)
+            return opts.dstSession
+              ? sessionRow(DST_SESSION_ID, DST, DST_ORDER_ID)
+              : null;
+          return null;
+        },
+      );
+    }
+
+    /**
+     * `findFirst` backs BOTH the in-tx re-reads (no `include`) and the
+     * post-commit `findOne` views (`include` present). Dispatch on that.
+     */
+    function mockTransferReads(opts: {
+      dstSession: boolean;
+      raceOnTarget?: any;
+      freshSrc?: any;
+      freshDst?: any;
+    }) {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockImplementation(
+        async (args: any) => {
+          if (args?.include) {
+            if (args?.where?.id === SRC_SESSION_ID)
+              return sessionView(SRC_SESSION_ID, DST, SRC_ORDER_ID);
+            if (args?.where?.id === DST_SESSION_ID)
+              return sessionView(DST_SESSION_ID, SRC, DST_ORDER_ID);
+            return null;
+          }
+          if (args?.where?.id === SRC_SESSION_ID)
+            return (
+              opts.freshSrc ?? sessionRow(SRC_SESSION_ID, SRC, SRC_ORDER_ID)
+            );
+          if (args?.where?.id === DST_SESSION_ID)
+            return (
+              opts.freshDst ??
+              (opts.dstSession
+                ? sessionRow(DST_SESSION_ID, DST, DST_ORDER_ID)
+                : null)
+            );
+          if (
+            args?.where?.table_id === DST &&
+            args?.where?.closed_at === null
+          )
+            return opts.raceOnTarget ?? null;
+          return null;
+        },
+      );
+    }
+
+    it('moves the session to an empty target (transfer)', async () => {
+      mockTablesForTransfer({
+        srcSession: true,
+        dstSession: false,
+        dstStatus: 'available',
+      });
+      mockTransferReads({ dstSession: false });
+
+      const result = await service.transferSession(SRC, DST);
+
+      expect(result.mode).toBe('transfer');
+      expect(result.source_session.id).toBe(SRC_SESSION_ID);
+      expect(result.source_session.table_id).toBe(DST);
+      expect(result.target_session).toBeNull();
+      // Session row re-pointed, id stable.
+      expect(prismaMock.table_sessions.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: SRC_SESSION_ID },
+          data: expect.objectContaining({ table_id: DST }),
+        }),
+      );
+      // KDS tickets re-stamped by order.
+      expect(prismaMock.kitchen_tickets.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ order_id: SRC_ORDER_ID }),
+          data: expect.objectContaining({ table_id: DST }),
+        }),
+      );
+      // Statuses flip only in transfer mode.
+      expect(prismaMock.tables.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: SRC },
+          data: expect.objectContaining({ status: 'available' }),
+        }),
+      );
+      expect(prismaMock.tables.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: DST },
+          data: expect.objectContaining({ status: 'occupied' }),
+        }),
+      );
+      // Orders / inventory untouched (anti-double-discount).
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+      expect(prismaMock.order_items.create).not.toHaveBeenCalled();
+      // Post-commit emits: session_moved + one table_status_changed/table.
+      const types = ssePush().mock.calls.map((c: any) => c[1]?.type);
+      expect(types).toContain('session_moved');
+      expect(types.filter((t: string) => t === 'table_status_changed'))
+        .toHaveLength(2);
+    });
+
+    it('swaps both sessions when the target is occupied (swap)', async () => {
+      mockTablesForTransfer({
+        srcSession: true,
+        dstSession: true,
+        dstStatus: 'occupied',
+      });
+      mockTransferReads({ dstSession: true });
+
+      const result = await service.transferSession(SRC, DST);
+
+      expect(result.mode).toBe('swap');
+      expect(result.source_session.id).toBe(SRC_SESSION_ID);
+      expect(result.source_session.table_id).toBe(DST);
+      expect(result.target_session!.id).toBe(DST_SESSION_ID);
+      expect(result.target_session!.table_id).toBe(SRC);
+      // Ordered 3-step swap: transient close, move target, move+reopen source.
+      const sessionWrites = (
+        prismaMock.table_sessions.update as jest.Mock
+      ).mock.calls.map((c: any) => c[0]);
+      expect(sessionWrites).toHaveLength(3);
+      expect(sessionWrites[0]).toEqual(
+        expect.objectContaining({
+          where: { id: SRC_SESSION_ID },
+          data: expect.objectContaining({ closed_at: expect.any(Date) }),
+        }),
+      );
+      expect(sessionWrites[0].data).not.toHaveProperty('table_id');
+      expect(sessionWrites[1]).toEqual(
+        expect.objectContaining({
+          where: { id: DST_SESSION_ID },
+          data: expect.objectContaining({ table_id: SRC }),
+        }),
+      );
+      expect(sessionWrites[2]).toEqual(
+        expect.objectContaining({
+          where: { id: SRC_SESSION_ID },
+          data: expect.objectContaining({ table_id: DST, closed_at: null }),
+        }),
+      );
+      // Both orders' KDS tickets re-stamped to the opposite table.
+      expect(prismaMock.kitchen_tickets.updateMany).toHaveBeenCalledTimes(2);
+      expect(prismaMock.kitchen_tickets.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ order_id: SRC_ORDER_ID }),
+          data: expect.objectContaining({ table_id: DST }),
+        }),
+      );
+      expect(prismaMock.kitchen_tickets.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ order_id: DST_ORDER_ID }),
+          data: expect.objectContaining({ table_id: SRC }),
+        }),
+      );
+      // Both tables stay occupied.
+      expect(prismaMock.tables.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: SRC },
+          data: expect.objectContaining({ status: 'occupied' }),
+        }),
+      );
+      expect(prismaMock.tables.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: DST },
+          data: expect.objectContaining({ status: 'occupied' }),
+        }),
+      );
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+      const types = ssePush().mock.calls.map((c: any) => c[1]?.type);
+      expect(types).toContain('session_moved');
+    });
+
+    it('rejects when the source has no open session', async () => {
+      mockTablesForTransfer({
+        srcSession: false,
+        dstSession: false,
+        dstStatus: 'available',
+      });
+
+      await expect(service.transferSession(SRC, DST)).rejects.toMatchObject({
+        errorCode: 'TABLE_SESSION_NOT_FOUND',
+      });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(ssePush()).not.toHaveBeenCalled();
+    });
+
+    it('rejects a reserved target', async () => {
+      mockTablesForTransfer({
+        srcSession: true,
+        dstSession: false,
+        dstStatus: 'reserved',
+      });
+
+      await expect(service.transferSession(SRC, DST)).rejects.toMatchObject({
+        errorCode: 'TABLE_INVALID_STATUS',
+      });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(ssePush()).not.toHaveBeenCalled();
+    });
+
+    it('rejects when source and target are the same table', async () => {
+      await expect(service.transferSession(SRC, SRC)).rejects.toMatchObject({
+        errorCode: 'SYS_INVALID_FIELD_VALUE_001',
+      });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(ssePush()).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the target is taken mid-flight (race guard)', async () => {
+      mockTablesForTransfer({
+        srcSession: true,
+        dstSession: false,
+        dstStatus: 'available',
+      });
+      mockTransferReads({
+        dstSession: false,
+        raceOnTarget: sessionRow(999, DST, 1234),
+      });
+
+      await expect(service.transferSession(SRC, DST)).rejects.toMatchObject({
+        errorCode: 'TABLE_SESSION_ALREADY_OPEN',
+      });
+      expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+      expect(ssePush()).not.toHaveBeenCalled();
     });
   });
 });

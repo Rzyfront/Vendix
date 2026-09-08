@@ -202,3 +202,26 @@
 > - Skill `vendix-error-handling` — `PRODUCT_VARIANT_MISMATCH`
 >   (ERR-15), `RECIPE_COMPONENT_HAS_VARIANTS` (ERR-08),
 >   `PRODUCT_VARIANT_REQUIRED` (ERR-07).
+
+> ## 7. Enmienda recetas-por-variante — el yield se parte por variante (2026-09-08)
+>
+> ADR-1 queda **enmendado en su mitad de yield y reafirmado en su mitad de
+> insumos**: cada variante de un plato tiene su propia receta con su propio
+> BOM (`docs/planes/recetas-por-variante-plan.md`).
+>
+> - Esquema: `recipes.product_variant_id Int?` con FK RESTRICT a
+>   `product_variants`. Unicidad en dos índices parciales
+>   (`recipes_product_base_uq`, `recipes_product_variant_uq`) — un
+>   `@@unique([product_id, product_variant_id])` no sirve porque Postgres
+>   considera distintos dos NULL y permitiría N recetas base.
+> - Escritura: producto CON variantes exige `product_variant_id`
+>   (`RECIPE_VARIANT_REQUIRED` 422); producto SIN variantes lo prohíbe y la
+>   variante debe pertenecer al producto (`RECIPE_VARIANT_MISMATCH` 422).
+> - Lectura: coincidencia exacta `(product_id, product_variant_id)` primero,
+>   caída a la receta base solo por compatibilidad con recetas creadas antes
+>   del cambio (la UI ya no permite crear bases sobre variantizados).
+> - Cocina: `kitchen-fire` resuelve por par con clave compuesta
+>   `${product_id}:${product_variant_id ?? 'base'}` (exacta → base → sin
+>   receta); la caché de `explodeBom` sigue indexada por `recipe_id`.
+> - `recipe_items` **no cambió**: el insumo sigue sin variante
+>   (`RECIPE_COMPONENT_HAS_VARIANTS` intacto).

@@ -238,6 +238,7 @@ export class DispatchTicketPrintService {
         <p>${data.customer.addressLine1}</p>
         <p>${data.customer.addressLine2 || ''}</p>
         <p>${data.customer.city || ''}</p>
+        ${data.courierName ? `<p>Domiciliario: ${data.courierName}</p>` : ''}
       </section>
       <table class="dt-items">
         <thead><tr><th>#</th><th>SKU</th><th>Producto</th><th>Cant.pedida</th><th>Cant.despachada</th></tr></thead>

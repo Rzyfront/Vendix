@@ -229,3 +229,87 @@ describe('DispatchTicketDataProvider — customer_alias (ADR-9 / 2026-08-31)', (
     expect('customer_alias' in data.document).toBe(false);
   });
 });
+
+/**
+ * Plan despacho-rapido-domiciliario (paso 3) — `courier_name` (domiciliario
+ * de la entrega rápida) viaja en `custom_variables` desde la ÚLTIMA remisión
+ * no anulada de la orden. Tres sondas al estilo ADR-9: la verificación cuenta
+ * el valor en el modelo devuelto, no se queda en el status.
+ */
+describe('DispatchTicketDataProvider — courier_name (domiciliario)', () => {
+  function makeOrderWithNote(courierName: string | null): any {
+    return {
+      id: 1001,
+      order_number: 'ORD-1001',
+      created_at: new Date('2026-09-08T12:00:00Z'),
+      state: 'delivered',
+      notes: null,
+      customer_alias: null,
+      stores: {
+        name: 'Tienda 10',
+        nit: '900123456',
+        phone: '+57 1 234 5678',
+        email: null,
+        logo_url: null,
+        addresses: [{ address_line1: 'Cra 1', address_line2: null }],
+        organizations: { name: 'Org 10' },
+      },
+      users: null,
+      order_items: [
+        {
+          id: 1,
+          order_id: 1001,
+          product_name: 'Pollo Asado',
+          product_id: 1,
+          product_variant_id: null,
+          quantity: 1,
+          variant_sku: 'POLLO-A',
+          notes: null,
+        },
+      ],
+      dispatch_notes: [
+        {
+          id: 55,
+          courier_name: courierName,
+          dispatch_note_items: [],
+        },
+      ],
+    };
+  }
+
+  it('10. remisión con courier_name → custom_variables.courier_name con trim', async () => {
+    const prisma = {
+      orders: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(makeOrderWithNote('  Juan Pérez  ')),
+      },
+    } as any;
+    const p = new DispatchTicketDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 1001);
+
+    expect(data.custom_variables?.courier_name).toBe('Juan Pérez');
+  });
+
+  it('11. remisión sin courier_name → la llave NO existe (nunca vacía)', async () => {
+    const prisma = {
+      orders: {
+        findFirst: jest.fn().mockResolvedValue(makeOrderWithNote(null)),
+      },
+    } as any;
+    const p = new DispatchTicketDataProvider(prisma);
+
+    const data = await p.fetchDocumentData(10, 1001);
+
+    // El consumidor pinta la línea solo cuando hay valor: la propiedad
+    // tiene que NO existir, no existir como string vacío.
+    expect('courier_name' in (data.custom_variables ?? {})).toBe(false);
+  });
+
+  it('12. getAvailableTokens() expone {{ courier_name }}', () => {
+    const p = new DispatchTicketDataProvider(null as any);
+    const paths = p.getAvailableTokens().map((t) => t.path);
+    expect(paths).toContain('custom_variables.courier_name');
+  });
+});

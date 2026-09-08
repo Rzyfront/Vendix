@@ -1,7 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { RecipesService } from './recipes.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { RequestContextService } from '@common/context/request-context.service';
+import {
+  RequestContextService,
+  type RequestContext,
+} from '@common/context/request-context.service';
 import { VendixHttpException } from 'src/common/errors';
 
 /**
@@ -20,8 +23,12 @@ describe('RecipesService — cycle detection & explosion', () => {
 
   const STORE_ID = 100;
 
-  const makeCtx = (overrides: Partial<{ store_id: number }> = {}) => ({
+  const makeCtx = (
+    overrides: Partial<{ store_id: number }> = {},
+  ): RequestContext => ({
     store_id: STORE_ID,
+    is_super_admin: false,
+    is_owner: true,
     ...overrides,
   });
 
@@ -124,7 +131,13 @@ describe('RecipesService — cycle detection & explosion', () => {
     // —vacía en un producto variantizado— y descontaría de un saldo inexistente.
     // Por defecto el componente es simple; los tests que prueban el bloqueo
     // sobrescriben este contador.
-    variants = { count: jest.fn().mockResolvedValue(0) };
+    //
+    // Recetas-por-variante: el mismo mock sirve al yield (`create` cuenta las
+    // variantes del producto y valida que la variante pertenezca al producto).
+    variants = {
+      count: jest.fn().mockResolvedValue(0),
+      findFirst: jest.fn().mockResolvedValue(null),
+    };
 
     return {
       recipes,
@@ -248,6 +261,117 @@ describe('RecipesService — cycle detection & explosion', () => {
 
       // Lo que importa: no llegó a escribirse el renglón.
       expect(items.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('create — variant guards (recetas-por-variante, paso 3)', () => {
+    const baseDto = {
+      product_id: 1,
+      yield_quantity: 1,
+      yield_unit: 'unidad',
+    };
+
+    // `create` exige store en el contexto (requireStoreId lee el ESTATICO
+    // RequestContextService via ALS). Los tests de addItem/explodeBom nunca lo
+    // tocan; aqui hay que forjarlo con `run`.
+    const inStore = <T>(fn: () => Promise<T>): Promise<T> =>
+      Promise.resolve(
+        RequestContextService.run(
+          { ...makeCtx(), is_super_admin: false, is_owner: true },
+          fn,
+        ) as Promise<T>,
+      );
+
+    const errorCodeOf = async (fn: () => Promise<unknown>) => {
+      try {
+        await inStore(fn);
+      } catch (e) {
+        expect(e).toBeInstanceOf(VendixHttpException);
+        return (e as VendixHttpException).errorCode;
+      }
+      throw new Error('se esperaba un VendixHttpException y no se lanzó');
+    };
+
+    it('rechaza con RECIPE_VARIANT_REQUIRED la receta base sobre un producto con variantes', async () => {
+      const service = await buildService({
+        ownRecipe: {},
+        items: {},
+      });
+
+      variants.count.mockResolvedValue(2);
+      recipes.create.mockClear();
+
+      const code = await errorCodeOf(() => service.create({ ...baseDto }));
+      expect(code).toBe('RECIPE_VARIANT_REQUIRED');
+      expect(recipes.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con RECIPE_VARIANT_MISMATCH la variante sobre un producto sin variantes', async () => {
+      const service = await buildService({
+        ownRecipe: {},
+        items: {},
+      });
+
+      variants.count.mockResolvedValue(0);
+      recipes.create.mockClear();
+
+      const code = await errorCodeOf(() =>
+        service.create({ ...baseDto, product_variant_id: 470 }),
+      );
+      expect(code).toBe('RECIPE_VARIANT_MISMATCH');
+      expect(recipes.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza con RECIPE_VARIANT_MISMATCH la variante que pertenece a otro producto', async () => {
+      const service = await buildService({
+        ownRecipe: {},
+        items: {},
+      });
+
+      variants.count.mockResolvedValue(2);
+      // La variante existe pero NO es de este producto.
+      variants.findFirst.mockResolvedValue(null);
+      recipes.create.mockClear();
+
+      const code = await errorCodeOf(() =>
+        service.create({ ...baseDto, product_variant_id: 999 }),
+      );
+      expect(code).toBe('RECIPE_VARIANT_MISMATCH');
+      expect(recipes.create).not.toHaveBeenCalled();
+    });
+
+    it('crea la receta con product_variant_id cuando la variante pertenece al producto', async () => {
+      const service = await buildService({
+        ownRecipe: {},
+        items: {},
+      });
+
+      variants.count.mockResolvedValue(2);
+      variants.findFirst.mockResolvedValue({ id: 470 });
+      recipes.create.mockClear();
+
+      const result = await inStore(() =>
+        service.create({
+          ...baseDto,
+          product_variant_id: 470,
+        }),
+      );
+      expect(recipes.create).toHaveBeenCalled();
+      expect(result.product_variant_id).toBe(470);
+    });
+
+    it('crea la receta base (null) sobre un producto simple: sin regresión', async () => {
+      const service = await buildService({
+        ownRecipe: {},
+        items: {},
+      });
+
+      variants.count.mockResolvedValue(0);
+      recipes.create.mockClear();
+
+      const result = await inStore(() => service.create({ ...baseDto }));
+      expect(recipes.create).toHaveBeenCalled();
+      expect(result.product_variant_id).toBeNull();
     });
   });
 

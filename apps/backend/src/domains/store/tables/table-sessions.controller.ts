@@ -27,6 +27,7 @@ import {
   AssignCustomerDto,
   ConfirmTablePaymentDto,
   CancelOrderItemDto,
+  TransferTableSessionDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -63,6 +64,9 @@ const STAFF_EVENT_WHITELIST = (type: string): boolean => {
   // Mesa abierta (POS open / QR `open_tab` / `confirmStaff`) — el floor-map
   // refresca la mesa a `occupied` con sesión activa en vivo.
   if (type === 'session_opened') return true;
+  // Cambio de mesa (traslado o swap) — el floor-map reubica la(s) cuenta(s)
+  // en vivo sin polling.
+  if (type === 'session_moved') return true;
   // Transiciones y cambios en mesas (limpieza, disponible, reservada, creada, eliminada)
   if (type === 'table_status_changed') return true;
   if (type === 'table_updated') return true;
@@ -82,6 +86,7 @@ const STAFF_EVENT_WHITELIST = (type: string): boolean => {
  * REST seam for the `table_sessions` domain (open checks).
  *
  *   POST  /api/store/table-sessions                       open session (creates order draft)
+ *   POST  /api/store/table-sessions/transfer              move check between tables (transfer or swap)
  *   GET   /api/store/table-sessions/stream                staff real-time SSE (declared before :id)
  *   GET   /api/store/table-sessions/:id                   session detail with current draft order
  *   POST  /api/store/table-sessions/:id/add-items         append items to the draft order
@@ -94,7 +99,7 @@ const STAFF_EVENT_WHITELIST = (type: string): boolean => {
  * Permission policy:
  *   - GET detail  → store:table_sessions:read
  *   - POST open   → store:table_sessions:create
- *   - POST add-items / PATCH customer / close / confirm payment → store:table_sessions:update
+ *   - POST add-items / PATCH customer / close / confirm payment / transfer → store:table_sessions:update
  *   - GET pending payments → store:table_sessions:read
  *
  * Error handling: handlers do NOT catch-and-return. Business errors are
@@ -120,6 +125,30 @@ export class TableSessionsController {
     return this.responseService.created(
       result,
       'Sesión de mesa abierta exitosamente',
+    );
+  }
+
+  /**
+   * Move an open check between tables ("Cambiar de mesa").
+   * POST /api/store/table-sessions/transfer
+   *
+   * Transfer when the target is empty, atomic swap when it is occupied.
+   * Session ids are stable; KDS tickets are re-stamped by order. Thin
+   * seam: validation errors surface as typed `VendixHttpException` from
+   * the service (no catch-and-return here — QUI-571).
+   */
+  @Post('transfer')
+  @Permissions('store:table_sessions:update')
+  async transfer(@Body() dto: TransferTableSessionDto) {
+    const result = await this.tableSessionsService.transferSession(
+      dto.source_table_id,
+      dto.target_table_id,
+    );
+    return this.responseService.updated(
+      result,
+      result.mode === 'swap'
+        ? 'Cuentas intercambiadas entre mesas'
+        : 'Cuenta trasladada a la mesa de destino',
     );
   }
 

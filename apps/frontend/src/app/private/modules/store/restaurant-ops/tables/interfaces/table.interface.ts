@@ -433,3 +433,28 @@ export interface ConfirmTablePaymentResult {
   state: 'succeeded';
   payment_id: number;
 }
+
+/**
+ * Body de `POST /store/table-sessions/transfer` ("Cambiar de mesa").
+ * Traslado cuando el destino está vacío, swap atómico cuando está
+ * ocupado. Los ids usan snake_case como el DTO del backend
+ * (`TransferTableSessionDto`).
+ */
+export interface TransferTableSessionDto {
+  source_table_id: number;
+  target_table_id: number;
+}
+
+export type TransferMode = 'transfer' | 'swap';
+
+/**
+ * Respuesta de `POST /store/table-sessions/transfer` (en `data` del
+ * envelope). En traslado `target_session` es `null` y el origen queda
+ * `available`; en swap ambas sesiones viven y ambas mesas siguen
+ * `occupied` con la cuenta contraria.
+ */
+export interface TransferResult {
+  mode: TransferMode;
+  source_session: TableSession;
+  target_session: TableSession | null;
+}

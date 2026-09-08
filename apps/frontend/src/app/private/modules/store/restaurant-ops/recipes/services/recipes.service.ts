@@ -62,6 +62,14 @@ export class RecipesService {
     if (query.product_id != null) {
       params = params.set('product_id', String(query.product_id));
     }
+    // Recetas por variante (paso 4 del backend): filtro opcional por variante.
+    // Aditivo — no se envía hasta que algún consumidor lo pida.
+    if (query.product_variant_id != null) {
+      params = params.set(
+        'product_variant_id',
+        String(query.product_variant_id),
+      );
+    }
 
     return this.http
       .get<PaginatedApiResponse<Recipe>>(`${this.apiUrl}${this.basePath}`, {

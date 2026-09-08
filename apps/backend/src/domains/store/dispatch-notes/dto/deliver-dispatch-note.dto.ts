@@ -1,4 +1,9 @@
-import { IsOptional, IsString, IsDateString } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsDateString,
+  MaxLength,
+} from 'class-validator';
 
 export class DeliverDispatchNoteDto {
   @IsOptional()
@@ -8,4 +13,9 @@ export class DeliverDispatchNoteDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  courier_name?: string;
 }

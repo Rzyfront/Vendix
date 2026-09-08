@@ -67,7 +67,7 @@ export class WithholdingEmployeeCertificateDataProvider implements IDocumentData
             document_number: true,
             email: true,
             // CP-print-token-flow A.3 — dirección del empleado.
-            addresses: { take: 1, select: { address_line1: true, address_line2: true, city: true, state_province: true, country: true } },
+            addresses: { take: 1, select: { address_line1: true, address_line2: true, city: true, state_province: true, country_code: true } },
           },
         },
         invoice: { select: { invoice_number: true, issue_date: true } },

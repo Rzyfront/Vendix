@@ -47,19 +47,21 @@
             Solo se muestran productos
             <span class="font-semibold">preparados</span> o marcados como
             <span class="font-semibold">producidos en lote</span>.
+            Si un plato tiene variantes, elige la variante: el producto base
+            no es seleccionable.
           </p>
         </div>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <app-selector
-          formControlName="product_id"
+          formControlName="yield_selection"
           label="Producto"
           placeholder="Selecciona un plato o sub-receta"
           [options]="yieldOptions()"
           [required]="true"
           [disabled]="isEditMode() || isLoadingProducts()"
-          tooltipText="El plato o sub-receta que produces con estos insumos. Una receta por producto. En modo edición este campo se bloquea."
+          tooltipText="El plato o sub-receta que produces con estos insumos. Una receta por producto o por variante. En modo edición este campo se bloquea."
         />
 
         <app-selector
@@ -72,6 +74,20 @@
           tooltipText="En qué unidad mides lo que produce la receta (porción, plato, g, ml…)."
         />
       </div>
+
+      <!--
+        Paso 7 (detalle) — la variante va como SUB-LÍNEA propia bajo el
+        selector, NUNCA concatenada en el nombre del producto. Mismo contrato
+        que el KDS (QUI-736): el <span class="sr-only"> evita que un lector de
+        pantalla oiga "Pollo… Picante" indistinguible de otro plato. Solo se
+        pinta cuando la API devuelve `product_variant` (include del paso 4).
+      -->
+      @if (loadedRecipe()?.product_variant; as variant) {
+        <p class="recipe-variant-line">
+          <span class="sr-only">Variante: </span
+          >{{ variantDisplayName(variant) }}
+        </p>
+      }
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <app-input

@@ -144,6 +144,26 @@ export class TableSessionAddItemDto {
 }
 
 /**
+ * DTO to move an open check from one table to another ("Cambiar de mesa").
+ *
+ * Restaurant Suite — cambio de mesa. Both ids are physical tables; the
+ * cross-field rule (source !== target) is validated in
+ * `TableSessionsService.transferSession` (400), not here, because
+ * class-validator cannot compare two sibling fields.
+ */
+export class TransferTableSessionDto {
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  source_table_id!: number;
+
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  target_table_id!: number;
+}
+
+/**
  * DTO to add a batch of items to an existing open table session.
  *
  * The server appends the items to the draft order and updates the

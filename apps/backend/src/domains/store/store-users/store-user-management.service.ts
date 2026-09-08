@@ -126,6 +126,8 @@ export class StoreUserManagementService {
     // StaffProvisioningService handles store_users + user_roles + user_settings
     // (default panel_ui) + users.main_store_id, satisfying CD7 (role +
     // main_store_id were previously missing here).
+    const normalized_phone = dto.phone?.trim() ? dto.phone.trim() : null;
+
     return this.prisma.withoutScope().$transaction(async (tx) => {
       const user = await tx.users.create({
         data: {
@@ -134,6 +136,7 @@ export class StoreUserManagementService {
           email: dto.email,
           username,
           password: hashed_password,
+          phone: normalized_phone,
           organization_id,
           state: 'active',
           updated_at: new Date(),
@@ -352,6 +355,10 @@ export class StoreUserManagementService {
     }
     if (dto.last_name) {
       update_data.last_name = toTitleCase(dto.last_name);
+    }
+    if (dto.phone !== undefined) {
+      const trimmed = dto.phone?.trim();
+      update_data.phone = trimmed ? trimmed : null;
     }
 
     const updated_user = await this.prisma.users.update({

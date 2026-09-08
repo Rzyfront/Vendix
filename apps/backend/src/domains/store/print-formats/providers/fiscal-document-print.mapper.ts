@@ -135,7 +135,8 @@ export const FISCAL_DOCUMENT_PRINT_INCLUDE = {
       phone: true,
       email: true,
       // CP-print-token-flow A.2 — dirección del adquirente. Solo las
-      // columnas que `mapUserAddress` lee (patrón del comentario de arriba).
+      // columnas que `mapUserAddress` lee (`addresses` NO tiene `country`,
+      // solo `country_code` — ver schema.prisma `model addresses`).
       addresses: {
         take: 1,
         select: {
@@ -143,7 +144,7 @@ export const FISCAL_DOCUMENT_PRINT_INCLUDE = {
           address_line2: true,
           city: true,
           state_province: true,
-          country: true,
+          country_code: true,
         },
       },
     },
@@ -341,7 +342,7 @@ export function mapFiscalDocumentToPrintData(
       email: cust.email,
       // CP-print-token-flow A.2 — dirección del adquirente desde
       // `users.addresses[0]` (los providers la incluyen). Sin direcciones
-      // queda ausente: el compositor no emite fila (invariante 1).
+      // `mapUserAddress` devuelve el default CO/Bogotá: siempre emite.
       ...mapUserAddress(cust.addresses?.[0]),
     },
     document: {

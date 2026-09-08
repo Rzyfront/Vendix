@@ -10,6 +10,7 @@ export {
   OpenTableSessionDto,
   AddItemsToTableSessionDto,
   TableSessionAddItemDto,
+  TransferTableSessionDto,
 } from './table-session.dto';
 
 export { AssignCustomerDto } from './assign-customer.dto';

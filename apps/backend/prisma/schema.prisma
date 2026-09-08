@@ -1795,6 +1795,9 @@ model product_variants {
   layaway_items                 layaway_items[]
   dispatch_note_items           dispatch_note_items[]
   kitchen_ticket_items          kitchen_ticket_items[]
+  /// Recipes owned by THIS variant (recetas-por-variante: the yield can be a
+  /// variant; components in `recipe_items` still cannot — see ADR-1).
+  recipes                       recipes[]
 
   // Multi-tarifa overrides (Phase 1: price tiers)
   price_tier_overrides product_price_tier_overrides[]
@@ -1984,7 +1987,9 @@ model products {
   product_price_tier_assignments product_price_tier_assignments[]
 
   // Restaurant Suite Foundation (Fase A) — back-relations
-  recipe                    recipes?
+  // Recetas-por-variante: un producto tiene 0..N recetas (base + una por
+  // variante). Era `recipe recipes?` (1:1 por el UNIQUE de product_id).
+  recipes                   recipes[]
   recipe_items_as_component recipe_items[]         @relation("recipe_items_component_product")
   production_orders         production_orders[]
   menu_section_items        menu_section_items[]
@@ -8901,6 +8906,12 @@ model dispatch_notes {
   notes                String?                      @db.Text
   internal_notes       String?                      @db.Text
   void_reason          String?                      @db.Text
+  // Domiciliario de la entrega rapida (plan docs/plans/despacho-rapido-domiciliario.md).
+  // Texto libre con solo el nombre (sin cedula, decision del usuario). NULL = la
+  // remision no registro domiciliario (todo el historico + flujo normal sin el campo).
+  // Distinto de delivered_by_user_id (FK al usuario interno que registra) y de
+  // carrier/shipping_carrier (transportadora-empresa, no persona).
+  courier_name         String?                      @db.VarChar(255)
   created_by_user_id   Int?
   confirmed_by_user_id Int?
   delivered_by_user_id Int?
@@ -10564,14 +10575,28 @@ enum waste_mode_enum {
 }
 
 /// A bill of materials / recipe for a single sellable product. One recipe
-/// per product (UNIQUE on product_id). Components are stored in
+/// per (product, variant) pair: either the BASE recipe of the product
+/// (`product_variant_id` NULL, only for products WITHOUT variants) or one
+/// recipe per variant. Components are stored in
 /// recipe_items and must themselves be products in the same store
 /// (is_ingredient=true is a soft signal, not enforced at DB level so
 /// stock items and prepared items can be mixed).
+///
+/// Uniqueness lives in two PARTIAL indexes declared in migration
+/// `20260908000000_recipes_por_variante` — Prisma cannot declare partial
+/// uniques, and Postgres treats two NULLs as distinct, so a plain
+/// `@@unique([product_id, product_variant_id])` would allow N base recipes
+/// for the same product:
+///   - `recipes_product_base_uq` on (product_id) WHERE product_variant_id IS NULL
+///   - `recipes_product_variant_uq` on (product_id, product_variant_id) WHERE product_variant_id IS NOT NULL
 model recipes {
   id                Int       @id @default(autoincrement())
   store_id          Int
-  product_id        Int       @unique
+  product_id        Int
+  /// Yield variant this recipe belongs to. NULL = base recipe (only valid
+  /// for products WITHOUT variants — enforced in RecipesService.create).
+  /// FK RESTRICT: a variant with its own recipe cannot be deleted silently.
+  product_variant_id Int?
   yield_quantity    Decimal   @db.Decimal(12, 4)
   yield_unit        String    @db.VarChar(20)
   waste_percent     Decimal   @default(0) @db.Decimal(5, 2)
@@ -10582,10 +10607,13 @@ model recipes {
 
   store             stores              @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   product           products            @relation(fields: [product_id], references: [id], onUpdate: NoAction)
+  product_variant   product_variants?   @relation(fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   items             recipe_items[]
   production_orders production_orders[]
 
   @@index([store_id, is_active])
+  @@index([product_id])
+  @@index([product_variant_id])
 }
 
 /// A single component line of a recipe. The component is itself a product

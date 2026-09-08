@@ -196,6 +196,7 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
       { token: '{{ items.product_name }}', path: 'items[].product_name', description: 'Nombre del producto despachado', example: 'Camiseta Polo Azul' },
       { token: '{{ items.ordered_qty }}', path: 'items[].quantity', description: 'Cantidad pedida (de la orden)', example: '3' },
       { token: '{{ items.dispatched_qty }}', path: 'items[].dispatched_qty', description: 'Cantidad despachada (del último despacho)', example: '2' },
+      { token: '{{ courier_name }}', path: 'custom_variables.courier_name', description: 'Domiciliario de la entrega rápida (última remisión no anulada)', example: 'Juan Pérez' },
       { token: '{{ store.name }}', path: 'store.name', description: 'Nombre comercial de la tienda', example: 'Tienda Principal' },
     ];
   }
@@ -360,6 +361,16 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
           if (it.variant_sku) acc[it.variant_sku] = it.quantity;
           return acc;
         }, {}),
+        // Plan despacho-rapido-domiciliario (paso 3): domiciliario de la
+        // ÚLTIMA remisión no anulada de la orden — la misma fuente que ya usa
+        // este provider para `dispatched_qty`. `courier_name` es columna escalar
+        // de `dispatch_notes`, así que el `include` de arriba ya la trae sin
+        // necesidad de select explícito. Sin nombre no se publica (nunca vacío:
+        // el consumidor pinta la línea solo cuando hay valor).
+        ...(typeof latestDispatch?.courier_name === 'string' &&
+        latestDispatch.courier_name.trim()
+          ? { courier_name: latestDispatch.courier_name.trim() }
+          : {}),
       },
     };
   }
