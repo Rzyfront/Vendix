@@ -18,7 +18,13 @@ import { KdsSessionsService } from '../kds/sessions/kds-sessions.service';
  * contract stays consistent (`daily_number` lives on the ticket row).
  */
 const KITCHEN_TICKET_INCLUDE = {
-  order: { select: { order_number: true } },
+  order: {
+    select: {
+      order_number: true,
+      customer_alias: true,
+      users: { select: { first_name: true, last_name: true } },
+    },
+  },
   // QUI-756 — anidar `table.name` (rótulo humano, ej. "Mesa 2") para que el KDS
   // muestre el nombre y no el FK. `kitchen_tickets.table_id` es PK autoincrement
   // de `tables.id` (sin columna `number` separada); sólo con el include el frontend
