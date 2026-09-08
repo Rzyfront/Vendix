@@ -676,6 +676,7 @@
                         canShowKitchenDispatch() &&
                         item.products?.product_type === 'prepared' &&
                         !item.skip_kds &&
+                        !item.cancelled_at &&
                         !item.inventory_consumed_at_fire
                       ) {
                         <!-- Plan KDS fire-flows (F3): the item is
@@ -738,6 +739,41 @@
                           } @else {
                             Entregar
                           }
+                        </app-button>
+                      }
+                      <!-- Paso 2 PLAN-order-detail-cancel-item — badge de
+                           cancelado + motivo persistido (misma data que ya
+                           viaja en el GET), y botón Cancelar con el guard
+                           `canCancelItem`: oculto en cancelados, entregados
+                           y cocina en in_preparation/ready/delivered;
+                           permite pending como merma, igual que mesa. -->
+                      @if (item.cancelled_at) {
+                        <span
+                          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 ml-1 bg-red-100 text-red-700 border border-red-200"
+                          [title]="'Cancelado el ' + (item.cancelled_at | date: 'short')"
+                        >
+                          <app-icon name="x-circle" [size]="10" />
+                          Cancelado
+                        </span>
+                        @if (item.cancellation_reason) {
+                          <p
+                            class="mt-1 ml-1 text-[11px] text-red-700"
+                            [title]="item.cancellation_reason"
+                          >
+                            Motivo: {{ item.cancellation_reason }}
+                          </p>
+                        }
+                      } @else if (canCancelItem(item)) {
+                        <app-button
+                          variant="outline-danger"
+                          size="xsm"
+                          customClasses="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 ml-1 disabled:opacity-50"
+                          title="Cancelar este ítem del pedido (queda visible, se excluye del total)"
+                          [loading]="cancellingItemId() === item.id"
+                          (clicked)="cancelItem(item)"
+                        >
+                          <app-icon slot="icon" name="x-circle" [size]="10" />
+                          Cancelar
                         </app-button>
                       }
                       @if (parseVariantAttributes(item.variant_attributes); as attrs) {

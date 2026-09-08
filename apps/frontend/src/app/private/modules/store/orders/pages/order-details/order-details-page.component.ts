@@ -307,6 +307,7 @@ export class OrderDetailsPageComponent {
         it.product_id != null &&
         it.skip_kds !== true &&
         it.inventory_consumed_at_fire !== true &&
+        it.cancelled_at == null &&
         (it.kitchen_ticket_items?.length ?? 0) === 0 &&
         it.products?.product_type === 'prepared',
     );
@@ -3449,6 +3450,8 @@ export class OrderDetailsPageComponent {
    * no ofrezco acciones que el backend rechazaría con 422.
    */
   canResend(item: OrderItem): boolean {
+    // Fila cancelada: excluida de acciones posteriores (badge + motivo).
+    if (item.cancelled_at) return false;
     return canResendOrderItem(item, this.order()?.state);
   }
 
@@ -3506,6 +3509,8 @@ export class OrderDetailsPageComponent {
    */
   canDeliver(item: OrderItem): boolean {
     if (item.delivered_at) return false;
+    // Fila cancelada: excluida de acciones posteriores (badge + motivo).
+    if (item.cancelled_at) return false;
     const order = this.order();
     if (!order) return false;
     const terminalStates: OrderState[] = [
@@ -3549,6 +3554,112 @@ export class OrderDetailsPageComponent {
           this.toastService.error('No se pudo marcar como entregado');
           console.error('Deliver item failed', err);
         },
+      });
+  }
+
+  // ─── Paso 2 PLAN-order-detail-cancel-item — cancelar un ítem ──────
+  /**
+   * Ítem actualmente en tránsito de cancelación (PATCH en vuelo). `null`
+   * cuando ninguna cancelación está pendiente. Misma forma que
+   * `deliveringItemId`: un solo ítem a la vez; alimenta el `[loading]`
+   * del botón Cancelar mientras corre el backend.
+   */
+  readonly cancellingItemId = signal<number | null>(null);
+
+  /**
+   * Espejo del gate de mesa (`canRemoveItem` en
+   * `table-session-page.component.ts:701`). Ofrece "Cancelar" SOLO si:
+   *  - El ítem NO está ya cancelado (`cancelled_at` IS NULL).
+   *  - El ítem NO está entregado (hecho de servicio irreversible).
+   *  - Si pasó por cocina, su estado es `pending` (se cancela como merma
+   *    in-tx con SSE post-commit) o nunca fue disparado (exclusión directa
+   *    del total). En `in_preparation` / `ready` / `delivered` el backend
+   *    rechazaría, así que no ofrezco un botón que sé que va a fallar.
+   *
+   * Predicado inline (no `can-cancel.ts` aparte): reutiliza
+   * `kitchenStateFor` como única fuente de verdad del estado de cocina,
+   * igual que `canDeliver` — un helper extra duplicaría esa resolución
+   * y divergiría de ella.
+   */
+  canCancelItem(item: OrderItem): boolean {
+    if (item.cancelled_at) return false;
+    if (item.delivered_at) return false;
+    const ks = this.kitchenStateFor(item);
+    if (ks == null) return true;
+    return ks.status === 'pending';
+  }
+
+  /**
+   * Acción: cancela el ítem vía
+   * PATCH /store/orders/:id/flow/items/:itemId/cancel con motivo
+   * obligatorio. Mismo copy de dos pasos que mesa (`onRemoveItem`):
+   * `confirm` "Cancelar plato" (variante danger, copy de merma cuando el
+   * ticket está en `pending`) + `prompt` de motivo (mín 3 chars).
+   * Tras éxito, toast + refreshOrder() (el PATCH responde la orden SIN
+   * ítems proyectados, igual que deliver — patrón de `deliverItem`).
+   */
+  cancelItem(item: OrderItem): void {
+    if (!this.canCancelItem(item)) return;
+    const orderId = this.order()?.id;
+    if (!orderId) return;
+    const firedPending = this.kitchenStateFor(item)?.status === 'pending';
+    this.dialogService
+      .confirm({
+        title: 'Cancelar plato',
+        message: firedPending
+          ? `¿Cancelar "${item.product_name}" del pedido? Se cancelará su ticket de cocina. Si el ticket ya pasó a preparación, queda como merma sin reversión de stock.`
+          : `¿Cancelar "${item.product_name}" del pedido? El plato queda visible marcado como cancelado, pero se excluye del total.`,
+        confirmText: 'Continuar',
+        cancelText: 'Atrás',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (!confirmed) return;
+        this.dialogService
+          .prompt({
+            title: 'Motivo de cancelación',
+            message: firedPending
+              ? 'Quedará registrado como merma.'
+              : 'Quedará registrado en el pedido.',
+            placeholder: 'Describe el motivo (mínimo 3 caracteres)',
+            confirmText: 'Cancelar plato',
+            cancelText: 'Atrás',
+          })
+          .then((reasonInput) => {
+            if (reasonInput === undefined) {
+              this.toastService.error('Cancelación abortada');
+              return;
+            }
+            const reason = reasonInput.trim();
+            if (reason.length < 3) {
+              this.toastService.error(
+                'El motivo debe tener al menos 3 caracteres',
+              );
+              return;
+            }
+            this.cancellingItemId.set(item.id);
+            this.ordersFlowService
+              .cancelOrderItem(orderId, item.id, { reason })
+              .pipe(takeUntilDestroyed(this.destroyRef))
+              .subscribe({
+                next: () => {
+                  this.cancellingItemId.set(null);
+                  this.toastService.success(
+                    firedPending
+                      ? 'Plato cancelado como merma'
+                      : 'Plato cancelado del pedido',
+                  );
+                  this.refreshOrder();
+                },
+                error: (err: unknown) => {
+                  this.cancellingItemId.set(null);
+                  this.toastService.error(
+                    typeof err === 'string' ? err : 'Error al cancelar el plato',
+                  );
+                  console.error('Cancel item failed', err);
+                },
+              });
+          });
       });
   }
 

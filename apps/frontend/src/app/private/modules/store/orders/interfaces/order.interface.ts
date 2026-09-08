@@ -343,6 +343,18 @@ export interface OrderItem {
    */
   delivered_at?: string | null;
   delivered_by_user_id?: number | null;
+  /**
+   * Paso 2 del plan PLAN-order-detail-cancel-item — soft-cancel de ítem
+   * a nivel de orden (PATCH /store/orders/:id/flow/items/:itemId/cancel).
+   * `cancelled_at` no nulo = cancelado (visible, excluido del total).
+   * `cancellation_reason` es el motivo obligatorio (3-500 chars) que la
+   * fila muestra como merma. `orders.service.ts:findOne` usa `include`
+   * sin `select`, así que los 3 campos YA viajan por el cable — esta
+   * declaración es declarar lo que ya llega (igual que `delivered_at`).
+   */
+  cancelled_at?: string | null;
+  cancellation_reason?: string | null;
+  cancellation_type?: string | null;
 }
 
 export interface Address {
