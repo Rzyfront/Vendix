@@ -383,6 +383,12 @@ export class EcommerceComponent {
 
   readonly ecommerceHeaderActions = computed<StickyHeaderActionButton[]>(() => {
     this.formValueSignal();
+    // Footer is a child form whose valueChanges do NOT bubble into settingsForm,
+    // so settingsForm.valueChanges won't fire when the user edits redes sociales.
+    // Reading the footerSettings signal here makes the computed re-evaluate when
+    // onFooterChange() calls footerSettings.set(...), which is what flips
+    // settingsForm.pristine → false via the subsequent markAsDirty().
+    this.footerSettings();
     const actions: StickyHeaderActionButton[] = [];
     const isPristine = this.settingsForm.pristine;
     const isInvalid = this.settingsForm.invalid;

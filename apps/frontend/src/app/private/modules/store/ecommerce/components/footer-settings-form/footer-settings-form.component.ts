@@ -74,9 +74,7 @@ export class FooterSettingsFormComponent implements OnInit, OnChanges {
         debounceTime(300),
       )
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
-        if (this.footerForm.valid) {
-          this.valueChange.emit(this.getFormValue());
-        }
+        this.valueChange.emit(this.getFormValue());
       });
   }
 
