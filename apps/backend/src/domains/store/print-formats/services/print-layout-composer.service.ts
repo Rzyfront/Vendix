@@ -1129,9 +1129,23 @@ export class PrintLayoutComposerService {
         </table>
       `;
 
+    // Domiciliario de la entrega rápida (plan despacho-rapido-domiciliario):
+    // `dispatch-ticket.provider.ts` lo publica en
+    // `custom_variables.courier_name` desde la ÚLTIMA remisión no anulada.
+    // Sin nombre el footer queda idéntico al histórico (solo la etiqueta).
+    const courierRaw = (data.custom_variables as any)?.courier_name;
+    const courierName =
+      typeof courierRaw === 'string' ? courierRaw.trim() : '';
+    const courierHtml =
+      mode === 'tokenized'
+        ? ' <span class="vendix-token-pill" data-token="custom_variables.courier_name">{{ courier_name }}</span>'
+        : courierName
+          ? ` ${this.compiler.escapeHtml(courierName)}`
+          : '';
+
     const footer = `
       <div class="dt-footer">
-        <div class="dt-dispatched-by">Despachado por:</div>
+        <div class="dt-dispatched-by">Despachado por:${courierHtml}</div>
         <div class="dt-signature"></div>
         <div class="dt-powered">Generado por Vendix</div>
       </div>
