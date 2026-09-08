@@ -1,6 +1,15 @@
 /**
  * CP-print-token-flow A.2 — el adquirente con dirección la conserva en el
- * modelo; sin direcciones llega el default CO/Bogotá (siempre emite).
+ * modelo; sin direcciones NO se emite ninguna clave de ubicación.
+ *
+ * La representación gráfica de una factura electrónica, nota crédito o
+ * documento equivalente POS no puede afirmar un domicilio del adquirente que
+ * nadie capturó: el XML omite la dirección cuando no la hay, y rellenarla en
+ * el papel haría que los dos documentos del mismo hecho se contradigan. Es la
+ * regla que el repositorio ya escribió del lado XML — `dian-geography.ts`
+ * («NUNCA rellenar Bogotá en silencio») y `ubl-common.builder.ts` («produce
+ * uno ACEPTADO que afirma que la operación ocurrió en Bogotá … se anula con
+ * nota crédito y se reemite, gastando dos consecutivos autorizados»).
  */
 import { mapFiscalDocumentToPrintData } from '../fiscal-document-print.mapper';
 
@@ -42,14 +51,39 @@ describe('mapFiscalDocumentToPrintData customer address', () => {
     expect(out.customer?.city).toBe('Bogotá D.C.');
   });
 
-  it('sin direcciones emite el default CO/Bogotá', () => {
+  it('sin direcciones NO emite dirección, ciudad ni país', () => {
     const out = mapFiscalDocumentToPrintData({
       ...BASE_INVOICE,
       customer: { ...BASE_INVOICE.customer, addresses: [] },
     });
-    expect(out.customer?.address).toBe('Bogotá D.C., CO');
-    expect(out.customer?.city).toBe('Bogotá D.C.');
-    expect(out.customer?.country).toBe('CO');
+    expect(out.customer?.address).toBeUndefined();
+    expect(out.customer?.city).toBeUndefined();
+    expect(out.customer?.country).toBeUndefined();
     expect(out.customer?.name).toBe('Ana Ruiz');
+  });
+
+  it('sin `addresses` en el payload tampoco se inventa ubicación', () => {
+    const out = mapFiscalDocumentToPrintData({ ...BASE_INVOICE });
+    expect(out.customer).toBeDefined();
+    expect(out.customer?.address).toBeUndefined();
+    expect(out.customer?.city).toBeUndefined();
+    expect(out.customer?.country).toBeUndefined();
+  });
+
+  it('regresión: «Consumidor Final» de POS no recibe domicilio fabricado', () => {
+    // Caso frecuente del POS: venta sin cliente identificado. El mapper pone
+    // el nombre y el NIT genéricos de la DIAN, pero NO puede afirmar dónde
+    // vive un adquirente que no existe. Este test falla si alguien vuelve a
+    // meter el relleno «Bogotá D.C., CO» en la ruta fiscal.
+    const out = mapFiscalDocumentToPrintData({
+      ...BASE_INVOICE,
+      customer: { addresses: [] },
+    });
+    expect(out.customer?.name).toBe('Consumidor Final');
+    expect(out.customer?.tax_id).toBe('222222222222');
+
+    const printed = JSON.stringify(out.customer);
+    expect(printed).not.toMatch(/Bogot/);
+    expect(printed).not.toMatch(/"country"/);
   });
 });

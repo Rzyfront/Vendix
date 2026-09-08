@@ -1,6 +1,9 @@
 /**
  * CP-print-token-flow A.1 — `users.addresses[0]` → `StandardPrintParty`.
- * Sin dirección: default Colombia / Bogotá D.C. (siempre emite).
+ * Sin dirección devuelve `{}`: el spread no agrega claves y el compositor no
+ * emite fila (invariante 1). NO se fabrica ubicación por defecto — ver el
+ * docblock de `customer-address.ts` y la regla del lado XML
+ * (`dian-geography.ts`: «NUNCA rellenar Bogotá en silencio»).
  */
 import { mapUserAddress } from '../customer-address';
 
@@ -24,15 +27,23 @@ describe('mapUserAddress', () => {
     });
   });
 
-  it('sin dirección devuelve el default CO/Bogotá (siempre emite)', () => {
-    const expected = {
-      address: 'Bogotá D.C., CO',
-      city: 'Bogotá D.C.',
-      country: 'CO',
-    };
-    expect(mapUserAddress(null)).toEqual(expected);
-    expect(mapUserAddress(undefined)).toEqual(expected);
-    expect(mapUserAddress({})).toEqual(expected);
+  it('sin dirección devuelve `{}` (no se inventa ubicación)', () => {
+    expect(mapUserAddress(null)).toEqual({});
+    expect(mapUserAddress(undefined)).toEqual({});
+    expect(mapUserAddress({})).toEqual({});
+  });
+
+  it('campos en blanco cuentan como «sin dirección»', () => {
+    expect(
+      mapUserAddress({
+        address_line1: '   ',
+        address_line2: '',
+        city: '  ',
+        state_province: null,
+        country: '',
+        country_code: '   ',
+      }),
+    ).toEqual({});
   });
 
   it('solo ciudad produce `address` con la ciudad (más país fallback CO)', () => {
@@ -41,5 +52,19 @@ describe('mapUserAddress', () => {
       city: 'Cali',
       country: 'CO',
     });
+  });
+
+  it('solo departamento: `address` usa el departamento, nunca el código ISO', () => {
+    const out = mapUserAddress({ state_province: 'Antioquia' });
+    expect(out.address).toBe('Antioquia');
+    expect(out.state_province).toBe('Antioquia');
+    expect(out.country).toBe('CO');
+  });
+
+  it('con país pero sin calle/ciudad/departamento no se inventa `address`', () => {
+    // Conocer el país no autoriza a escribir un renglón de dirección: caer
+    // hasta el país imprimiría «CO» donde va la calle.
+    expect(mapUserAddress({ country_code: 'CO' })).toEqual({ country: 'CO' });
+    expect(mapUserAddress({ country_code: 'CO' }).address).toBeUndefined();
   });
 });
