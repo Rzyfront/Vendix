@@ -66,6 +66,19 @@ export interface ResolveByTokenResult {
    * never exposed — only these derived flags.
    */
   customer: { id: number; name: string } | null;
+  /**
+   * HIGH-6 (cambio de mesa) — sólo presente, y siempre `true`, cuando el
+   * cliente mandó el parámetro OPCIONAL `session_id` con la sesión que su
+   * `localStorage` creía tener y esa sesión sigue ABIERTA pero en OTRA mesa.
+   *
+   * Es el aviso en frío: el comensal recargó la página (o cerró y volvió) sin
+   * haber recibido el `session_moved` por SSE, y el `public_token` que trae
+   * apunta a una mesa que hoy tiene una cuenta que no es la suya. Ausente
+   * cuando no se manda el parámetro, cuando la sesión conocida sigue siendo
+   * la activa de esta mesa, o cuando ya se cerró (ese caso lo cubre el
+   * carril `session_closed`, cuyo mensaje al comensal es distinto).
+   */
+  session_moved?: boolean;
 }
 
 /**
@@ -266,8 +279,16 @@ export class EcommerceTablesService {
    * The token is scoped to the current store (StorePrismaService
    * auto-scope), so a token from store A can never resolve a table
    * from store B.
+   *
+   * @param knownSessionId HIGH-6 — OPCIONAL. Sesión que el cliente creía
+   *   tener persistida para este token. Su ausencia preserva exactamente el
+   *   comportamiento anterior; cuando llega, habilita el marcador
+   *   `session_moved` (ver `ResolveByTokenResult`).
    */
-  async resolveByToken(token: string): Promise<ResolveByTokenResult> {
+  async resolveByToken(
+    token: string,
+    knownSessionId?: number,
+  ): Promise<ResolveByTokenResult> {
     if (!token || typeof token !== 'string') {
       throw new VendixHttpException(
         ErrorCodes.TABLE_NOT_FOUND,
@@ -348,6 +369,24 @@ export class EcommerceTablesService {
       customer = await this.resolveOrderCustomer(activeSession.order_id);
     }
 
+    // HIGH-6 — defensa en frío contra el cambio de mesa. El comensal puede
+    // llegar sin SSE (recarga dura, pestaña reabierta) trayendo en su
+    // `localStorage` una sesión que ya no vive aquí. Sólo se marca
+    // `session_moved` cuando esa sesión sigue ABIERTA en OTRA mesa: si se
+    // cerró, el carril correcto es `session_closed`, no éste.
+    let session_moved = false;
+    if (
+      knownSessionId != null &&
+      knownSessionId !== (activeSession?.id ?? null)
+    ) {
+      const previousSession = await this.prisma.table_sessions.findFirst({
+        where: { id: knownSessionId, closed_at: null },
+        select: { table_id: true },
+      });
+      session_moved =
+        !!previousSession && previousSession.table_id !== table.id;
+    }
+
     return {
       store_id,
       table: { id: table.id, name: table.name },
@@ -358,6 +397,7 @@ export class EcommerceTablesService {
       anonymous_default: anonymous_sales_as_default,
       customer,
       ...(session_id !== undefined && { session_id }),
+      ...(session_moved && { session_moved: true }),
     };
   }
 

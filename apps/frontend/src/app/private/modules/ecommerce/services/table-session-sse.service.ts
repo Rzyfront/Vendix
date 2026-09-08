@@ -385,6 +385,22 @@ export class TableSessionSseService {
         return;
       }
 
+      case 'session_moved': {
+        // HIGH-6 — el staff trasladó (o intercambió) la cuenta a otra mesa
+        // desde el POS. El `public_token` de este dispositivo está pegado a la
+        // MESA, no a la sesión, así que a partir de aquí apunta a una cuenta
+        // que ya no es la de este comensal.
+        //
+        // El backend sólo entrega este evento a quien le concierne
+        // (`matchesDiner` filtra por sesión origen/destino o por mesa
+        // origen/destino), y la proyección trae únicamente
+        // `{ type, mode, source_table_id, target_table_id, ts }` — ni ids de
+        // orden ni de sesión del otro grupo. No hace falta inspeccionar nada:
+        // si el evento llegó, el vínculo murió.
+        this.handleSessionMoved();
+        return;
+      }
+
       case 'guest_count_changed': {
         const ev = parsed as { guest_count?: unknown };
         if (typeof ev.guest_count === 'number') {
@@ -482,6 +498,35 @@ export class TableSessionSseService {
     // Immediate diner-facing farewell via the global toast overlay — visible
     // even though the persistent banner lives in the (out-of-scope) layout.
     this.toast.info('Mesa cerrada. ¡Gracias por tu visita!');
+  }
+
+  /**
+   * HIGH-6 — reacciona a `session_moved`: invalida el vínculo del comensal
+   * (`TableContextService.applySessionMoved()` borra la cuenta, anula el
+   * `sessionId`, purga el `localStorage` y bloquea toda mutación) y corta el
+   * stream.
+   *
+   * NO se reconecta a propósito. Reconectar volvería a resolver el binding
+   * SERVER-SIDE desde el token, que apunta a la MESA: el servidor devolvería
+   * la sesión que ahora ocupa esa mesa y el comensal empezaría a recibir en
+   * vivo los eventos de la cuenta del otro grupo. La única salida correcta es
+   * que reescanee el QR de la mesa donde está sentado ahora.
+   *
+   * Se decidió invalidar y NO re-vincular en silencio porque en un `swap` las
+   * dos cuentas se cruzan: re-apuntar el token serviría a un grupo y le
+   * entregaría al otro una cuenta ajena, y el servidor no puede probar qué
+   * grupo físico se movió.
+   */
+  private handleSessionMoved(): void {
+    this.tableContext.applySessionMoved();
+    this.clearReconnectTimer();
+    this.teardownSource();
+    this.currentToken = null;
+    this.connectionState.set('closed');
+    // Aviso inmediato por el overlay global de toasts — mismo camino que usa
+    // la despedida de `session_closed`, cuyo banner persistente vive en el
+    // layout (fuera de alcance en este cambio).
+    this.toast.info(TableContextService.SESSION_MOVED_MESSAGE);
   }
 
   private scheduleReconnect(token: string): void {

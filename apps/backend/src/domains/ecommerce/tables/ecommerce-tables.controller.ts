@@ -88,8 +88,23 @@ export class EcommerceTablesController {
    */
   @Get('resolve')
   @OptionalAuth()
-  async resolve(@Query('token') token: string) {
-    const data = await this.service.resolveByToken(token);
+  async resolve(
+    @Query('token') token: string,
+    @Query('session_id') sessionId?: string,
+  ) {
+    // HIGH-6 — `session_id` es OPCIONAL y su ausencia preserva exactamente el
+    // contrato anterior (hay clientes viejos en la calle). Cuando el comensal
+    // sí lo manda, es la sesión que su `localStorage` creía tener: el servidor
+    // la compara contra la sesión abierta HOY en esta mesa y devuelve
+    // `session_moved: true` si la vieja sigue viva pero en otra mesa.
+    //
+    // Se lee como `@Query('<nombre>')` primitivo — no como DTO — porque el
+    // ValidationPipe global con `forbidNonWhitelisted` rechazaría un query
+    // DTO con campos no declarados (mismo motivo documentado en `stream`).
+    const parsed = Number.parseInt(String(sessionId ?? ''), 10);
+    const knownSessionId =
+      Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+    const data = await this.service.resolveByToken(token, knownSessionId);
     return { success: true, data };
   }
 
@@ -593,6 +608,9 @@ export class EcommerceTablesController {
    *     (pre-session window), so a comensal in `menu_only` / `mark_occupied`
    *     / `require_staff` can flip to "cuenta abierta" when staff opens the
    *     tab from the POS side or confirms a `require_staff` scan.
+   *   - `session_moved` events (HIGH-6, cambio de mesa) that touch the
+   *     comensal's binding, sea por sesión (origen/destino) o por mesa
+   *     (origen/destino) — esta última rama cubre la ventana pre-sesión.
    * Everything else — including all other notification types and any
    * event for a different table — is dropped.
    */
@@ -619,6 +637,38 @@ export class EcommerceTablesController {
       // effectively a no-op match for the staff.
       const data = ev.data as { table_id?: number } | undefined;
       return data?.table_id === binding.table_id;
+    }
+    if (type === 'session_moved') {
+      // HIGH-6 — Cambio de mesa. El `public_token` está pegado a la MESA, no
+      // a la sesión, así que un traslado (o un intercambio entre dos mesas
+      // ocupadas) deja el vínculo del comensal apuntando a una cuenta que ya
+      // no es la suya. El evento se acepta SÓLO cuando toca su binding:
+      //   - por sesión: la suya es la origen o la destino del movimiento; o
+      //   - por mesa: su `table_id` es una de las dos involucradas — cubre al
+      //     comensal en ventana pre-sesión (`session_id === null`), que igual
+      //     quedó mirando una mesa cuyo contenido cambió debajo.
+      // Cualquier otro comensal del salón NO lo recibe (default-deny intacto).
+      const data = ev.data as
+        | {
+            source_session_id?: number;
+            target_session_id?: number | null;
+            source_table_id?: number;
+            target_table_id?: number;
+          }
+        | undefined;
+      if (!data) return false;
+      const boundSessionId = binding.session_id;
+      if (
+        boundSessionId != null &&
+        (data.source_session_id === boundSessionId ||
+          data.target_session_id === boundSessionId)
+      ) {
+        return true;
+      }
+      return (
+        data.source_table_id === binding.table_id ||
+        data.target_table_id === binding.table_id
+      );
     }
     if (EcommerceTablesController.DINER_LIFECYCLE_EVENTS.has(type)) {
       const data = ev.data as
@@ -671,6 +721,28 @@ export class EcommerceTablesController {
         'opened_at',
         'opened_by',
       ];
+      for (const key of allowedKeys) {
+        if (raw[key] !== undefined) {
+          projected[key] = raw[key];
+        }
+      }
+      projected.ts = (ev.ts as number) ?? Date.now();
+      return projected;
+    }
+
+    if (type === 'session_moved') {
+      // HIGH-6 — mínimo privilegio. El comensal sólo necesita saber "esto ya
+      // no es tuyo": con `mode` puede diferenciar la copia ("se trasladó" vs
+      // "se intercambió") y con las dos mesas puede orientarse en el salón.
+      // Se DESCARTAN a propósito `source_order_id` / `target_order_id` y
+      // `source_session_id` / `target_session_id`: son ids internos del otro
+      // grupo y el cliente invalida el vínculo incondicionalmente, así que no
+      // los necesita para nada. Tampoco se añade un booleano derivado del
+      // binding — el evento sólo llega a quien le concierne (`matchesDiner`),
+      // así que ese booleano sería siempre `true` y no informaría nada.
+      const raw = (ev.data ?? {}) as Record<string, unknown>;
+      const projected: Record<string, unknown> = { type };
+      const allowedKeys = ['mode', 'source_table_id', 'target_table_id'];
       for (const key of allowedKeys) {
         if (raw[key] !== undefined) {
           projected[key] = raw[key];
