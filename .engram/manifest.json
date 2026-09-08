@@ -1968,6 +1968,14 @@
       "sessions": 1,
       "memories": 6,
       "prompts": 0
+    },
+    {
+      "id": "fb1144f8",
+      "created_by": "rzy",
+      "created_at": "2026-09-08T20:53:26Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }
