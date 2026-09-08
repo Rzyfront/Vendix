@@ -6,3 +6,67 @@
 :host {
   display: contents;
 }
+
+/**
+ * Soporte layout 30/70 del detalle por plato (refuerzo del Tailwind del HTML).
+ * Móvil: columna apilada. sm+ (>=640px): fila insumos 30% / nota 70%.
+ */
+.kds-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+
+  @media (min-width: 640px) {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+}
+
+.kds-detail-insumos {
+  min-width: 0;
+
+  @media (min-width: 640px) {
+    flex: 0 0 30%;
+    max-width: 30%;
+  }
+}
+
+.kds-detail-nota {
+  min-width: 0;
+  border: 1px solid #fcd34d;
+  background-color: #fffbeb;
+  border-radius: 8px;
+  padding: 0.625rem 0.75rem;
+
+  @media (min-width: 640px) {
+    flex: 1 1 70%;
+    max-width: 70%;
+  }
+}
+
+.kds-detail-nota-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #92400e;
+  font-weight: 700;
+}
+
+.kds-detail-nota-text {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.45;
+  color: #78350f;
+  word-break: break-word;
+
+  @media (min-width: 640px) {
+    font-size: 16px;
+  }
+}
+
+.kds-detail-nota-empty {
+  font-size: 13px;
+  font-style: italic;
+  color: #78716c;
+}
