@@ -1279,6 +1279,69 @@ describe('PaymentsService', () => {
       );
       expect(result.closedSessionId).toBeNull();
     });
+
+    it('cancelled items do NOT resurrect into the close-out totals', async () => {
+      const { tx, posUser } = arrangeCashSale();
+
+      // Pre-existing shim gap (QUI-704): `buildTx` predates the
+      // second-charge guard (`tx.payments.findFirst`), so the shim has
+      // no `payments` client. Scoped to THIS test only (contract:
+      // solo el test nuevo) — no `succeeded` payment, close-out proceeds.
+      tx.payments = { findFirst: jest.fn().mockResolvedValue(null) };
+      // Same staleness one step later: carril D/D1 calls
+      // `tableSessionsService.markSessionPaid`, absent from the module
+      // mock (only `emitSessionClosed` exists). Stub it here, scoped to
+      // this test — the top-level `beforeEach` rebuilds the module per
+      // test, so nothing leaks to siblings.
+      (service as any).tableSessionsService.markSessionPaid = jest
+        .fn()
+        .mockResolvedValue({ id: 99 });
+
+      // The draft order holds one active line ($10.000) and one line the
+      // waiter cancelled earlier. Prisma scoping means `findMany` only
+      // resolves what the `where` allows — the cancelled row must never
+      // reach the mock, mirroring `cancelled_at IS NULL` at the DB level.
+      tx.order_items.findMany.mockResolvedValue([
+        {
+          id: 1,
+          quantity: 1,
+          total_price: 10000,
+          tax_amount_item: 0,
+          order_item_taxes: [],
+        },
+      ]);
+
+      const result = await (
+        service as any
+      ).applyPosPaymentToTableSession(
+        tx,
+        buildDto(),
+        posUser,
+        CONTEXT_STORE_ID,
+      );
+
+      // 1. The re-derive query itself must exclude cancelled rows, or a
+      //    cancelled item resurrects into the amount the customer pays.
+      expect(tx.order_items.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            order_id: 1001,
+            cancelled_at: null,
+          }),
+        }),
+      );
+      // 2. Persisted totals reflect only the active line: the $5.000
+      //    cancelled line is nowhere in subtotal / grand_total.
+      expect(tx.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            subtotal_amount: 10000,
+            grand_total: 10000,
+          }),
+        }),
+      );
+      expect(result.order).toBeDefined();
+    });
   });
 
   // QUI-783 — the `orders` table has `grand_total` but NO `total_amount`

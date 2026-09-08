@@ -3115,7 +3115,7 @@ export class PaymentsService {
     // Re-derive totals from the (now augmented) order. We re-fetch the
     // order with its current items to compute the new sums in one pass.
     const existingItems = await tx.order_items.findMany({
-      where: { order_id: session.order_id },
+      where: { order_id: session.order_id, cancelled_at: null },
     });
     const mergedItems = [...existingItems, ...newItems];
 
