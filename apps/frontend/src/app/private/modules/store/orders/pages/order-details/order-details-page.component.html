@@ -1415,6 +1415,11 @@
                         <p class="text-xs text-text-secondary">
                           {{ dispatchNoteStatusLabel(note) }}
                         </p>
+                        @if (note.courier_name && note.courier_name.trim()) {
+                          <p class="text-xs text-text-secondary">
+                            Domiciliario: {{ note.courier_name.trim() }}
+                          </p>
+                        }
                       </div>
                     </div>
                     <div class="flex flex-wrap items-center gap-2">
