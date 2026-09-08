@@ -164,6 +164,23 @@ export interface CreatedOpenSession {
 }
 
 /**
+ * Cambio de mesa — outcome of `transferSession`.
+ *
+ * `transfer`: target was empty, the source session moved tables.
+ * `swap`: target was occupied, both sessions exchanged tables.
+ * Session ids are stable in both modes (rows move, they are never
+ * closed+reopened), so `source_session` keeps the source session id now
+ * pointing at the target table.
+ */
+export type TransferMode = 'transfer' | 'swap';
+
+export interface TransferTableSessionsResult {
+  mode: TransferMode;
+  source_session: TableSessionView;
+  target_session: TableSessionView | null;
+}
+
+/**
  * TableSessionsService
  *
  * Restaurant Suite — Fase E. Owns the "open check" lifecycle:
@@ -1227,6 +1244,268 @@ export class TableSessionsService {
       `Table session closed: session=${sessionId} table=${session.table_id} order=${session.order_id} (order state unchanged — see docblock)`,
     );
     return this.findOne(sessionId);
+  }
+
+  // ------------------------------------------------------- transfer / swap
+  /**
+   * "Cambiar de mesa" — move the open check of `sourceTableId` to
+   * `targetTableId` (Restaurant Suite — cambio de mesa, swap).
+   *
+   * Two modes, decided by the target occupancy:
+   *   - `transfer` (target empty): the source session row is re-pointed to
+   *     the target table; source flips to `available`, target to `occupied`.
+   *   - `swap` (target occupied): both session rows exchange tables; both
+   *     tables stay `occupied` with the opposite check.
+   *
+   * What travels with the session row (nothing else is touched):
+   * `table_id` (with it `order_id`, `guest_count`, `paid_at`, `opened_*`);
+   * `kitchen_tickets.table_id` is re-stamped by `order_id` so the KDS board
+   * keeps pointing at the right physical table. What does NOT travel:
+   * `public_token` (physical QR), `table_waiters` (table assignment),
+   * `bookings.table_id` (physical-table reservation), `orders.state`, and
+   * `order_items.inventory_consumed_at_fire` (anti-double-discount, Fase D).
+   *
+   * Swap atomicity vs the partial unique index
+   * `table_sessions_one_open_per_table` (table_id WHERE closed_at IS NULL):
+   * swapping the two `table_id` values cannot be done with plain sequential
+   * updates (the second write would collide with the still-present first
+   * row) NOR with a single-statement `UPDATE ... CASE` (Postgres checks a
+   * non-deferrable unique index row-by-row, so one of the two rows always
+   * conflicts mid-statement — and the index was created via
+   * `CREATE UNIQUE INDEX`, which cannot be deferred). Instead the swap runs
+   * three ordered writes inside ONE `$transaction`: (1) transiently stamp
+   * `closed_at` on the source session to free its table slot, (2) move the
+   * target session onto the freed table, (3) move the source session onto
+   * its new table clearing `closed_at` back to NULL. Intermediate states
+   * are invisible outside the transaction; the committed state is exactly
+   * the swap. No schema or migration change required.
+   *
+   * SSE (`session_moved` + `table_status_changed` per table) is emitted
+   * post-commit only — a rollback must never leave a phantom move.
+   */
+  async transferSession(
+    sourceTableId: number,
+    targetTableId: number,
+  ): Promise<TransferTableSessionsResult> {
+    const { storeId } = this.requireContext();
+
+    if (sourceTableId === targetTableId) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_INVALID_FIELD_VALUE_001,
+        'La mesa de origen y la de destino deben ser distintas',
+      );
+    }
+
+    // Store-scoped reads: a table from another store surfaces as
+    // TABLE_NOT_FOUND before any write.
+    const [sourceTable, targetTable] = await Promise.all([
+      this.tablesService.getById(sourceTableId),
+      this.tablesService.getById(targetTableId),
+    ]);
+
+    const sourceSession =
+      await this.tablesService.getActiveSession(sourceTableId);
+    if (!sourceSession) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
+    }
+
+    if (targetTable.status === 'reserved') {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_INVALID_STATUS,
+        'La mesa de destino está reservada; elige otra mesa',
+      );
+    }
+
+    const targetSession =
+      await this.tablesService.getActiveSession(targetTableId);
+    const mode: TransferMode = targetSession ? 'swap' : 'transfer';
+    const now = new Date();
+
+    await this.prisma.$transaction(async (tx) => {
+      if (mode === 'transfer') {
+        // Race guard: someone may have opened the target between the
+        // pre-check and this transaction. Failing here (409) is cheaper
+        // than surfacing a raw P2002 from the partial unique index.
+        const raced = await tx.table_sessions.findFirst({
+          where: { table_id: targetTableId, closed_at: null },
+        });
+        if (raced) {
+          throw new VendixHttpException(
+            ErrorCodes.TABLE_SESSION_ALREADY_OPEN,
+          );
+        }
+        await tx.table_sessions.update({
+          where: { id: sourceSession.id },
+          data: { table_id: targetTableId, updated_at: now },
+        });
+        await tx.kitchen_tickets.updateMany({
+          where: { order_id: sourceSession.order_id, store_id: storeId },
+          data: { table_id: targetTableId },
+        });
+        await tx.tables.update({
+          where: { id: sourceTableId },
+          data: { status: 'available', updated_at: now },
+        });
+        await tx.tables.update({
+          where: { id: targetTableId },
+          data: { status: 'occupied', updated_at: now },
+        });
+        return;
+      }
+
+      // Swap: re-validate inside the tx (TOCTOU guard — the waiter may have
+      // closed or moved either check after the pre-checks above).
+      const [freshSource, freshTarget] = await Promise.all([
+        tx.table_sessions.findFirst({ where: { id: sourceSession.id } }),
+        tx.table_sessions.findFirst({ where: { id: targetSession!.id } }),
+      ]);
+      if (
+        !freshSource ||
+        freshSource.closed_at ||
+        freshSource.table_id !== sourceTableId ||
+        !freshTarget ||
+        freshTarget.closed_at ||
+        freshTarget.table_id !== targetTableId
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.TABLE_SESSION_ALREADY_OPEN,
+          'Las cuentas cambiaron durante el traslado; reintenta la operación',
+        );
+      }
+      // Ordered 3-step swap (see docblock): free the source slot, move the
+      // target session onto it, then move the source session and reopen it.
+      await tx.table_sessions.update({
+        where: { id: sourceSession.id },
+        data: { closed_at: now, updated_at: now },
+      });
+      await tx.table_sessions.update({
+        where: { id: targetSession!.id },
+        data: { table_id: sourceTableId, updated_at: now },
+      });
+      await tx.table_sessions.update({
+        where: { id: sourceSession.id },
+        data: { table_id: targetTableId, closed_at: null, updated_at: now },
+      });
+      await tx.kitchen_tickets.updateMany({
+        where: { order_id: sourceSession.order_id, store_id: storeId },
+        data: { table_id: targetTableId },
+      });
+      await tx.kitchen_tickets.updateMany({
+        where: { order_id: targetSession!.order_id, store_id: storeId },
+        data: { table_id: sourceTableId },
+      });
+      await tx.tables.update({
+        where: { id: sourceTableId },
+        data: { status: 'occupied', updated_at: now },
+      });
+      await tx.tables.update({
+        where: { id: targetTableId },
+        data: { status: 'occupied', updated_at: now },
+      });
+    });
+
+    // Post-commit: notify the staff floor-map. Best-effort — SSE failures
+    // must never break the (already committed) move.
+    this.emitSessionMoved(storeId, {
+      mode,
+      sourceTableId,
+      targetTableId,
+      sourceSessionId: sourceSession.id,
+      targetSessionId: targetSession ? targetSession.id : null,
+      sourceOrderId: sourceSession.order_id,
+      targetOrderId: targetSession ? targetSession.order_id : null,
+    });
+    this.emitTransferTableStatus(storeId, sourceTable, mode === 'swap' ? 'occupied' : 'available');
+    this.emitTransferTableStatus(storeId, targetTable, 'occupied');
+
+    this.logger.log(
+      `Table session ${mode}: session=${sourceSession.id} ${sourceTableId}->${targetTableId}` +
+        (targetSession ? ` swap with session=${targetSession.id}` : ''),
+    );
+
+    const sourceView = await this.findOne(sourceSession.id);
+    const targetView =
+      mode === 'swap' ? await this.findOne(targetSession!.id) : null;
+    return { mode, source_session: sourceView, target_session: targetView };
+  }
+
+  /**
+   * Post-commit `session_moved` push on the per-store subject. Consumed by
+   * the staff floor-map stream (whitelisted in `TableSessionsController`)
+   * so the room map reflects the new location without polling.
+   */
+  private emitSessionMoved(
+    storeId: number,
+    payload: {
+      mode: TransferMode;
+      sourceTableId: number;
+      targetTableId: number;
+      sourceSessionId: number;
+      targetSessionId: number | null;
+      sourceOrderId: number;
+      targetOrderId: number | null;
+    },
+  ): void {
+    try {
+      this.notificationsSseService.push(storeId, {
+        id: 0,
+        type: 'session_moved',
+        title: 'Cuenta trasladada',
+        body:
+          payload.mode === 'swap'
+            ? 'Dos mesas intercambiaron sus cuentas'
+            : 'La cuenta se trasladó a otra mesa',
+        data: {
+          mode: payload.mode,
+          source_table_id: payload.sourceTableId,
+          target_table_id: payload.targetTableId,
+          source_session_id: payload.sourceSessionId,
+          target_session_id: payload.targetSessionId,
+          source_order_id: payload.sourceOrderId,
+          target_order_id: payload.targetOrderId,
+        },
+        created_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to push session_moved for session ${payload.sourceSessionId}: ${
+          (err as Error).message
+        }`,
+      );
+    }
+  }
+
+  /**
+   * Post-commit `table_status_changed` push for one table involved in a
+   * transfer/swap. Same event shape `TablesService.emitTableEvent` sends,
+   * so the floor-map refresh path is shared.
+   */
+  private emitTransferTableStatus(
+    storeId: number,
+    table: { id: number; name?: string; zone?: string | null },
+    status: string,
+  ): void {
+    try {
+      this.notificationsSseService.push(storeId, {
+        id: 0,
+        type: 'table_status_changed',
+        title: 'Mesa actualizada',
+        body: 'El plano de mesas ha sido actualizado',
+        data: {
+          table_id: table.id,
+          status,
+          ...(table.name !== undefined ? { name: table.name } : {}),
+          ...(table.zone !== undefined ? { zone: table.zone } : {}),
+        },
+        created_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to push table_status_changed for table ${table.id}: ${
+          (err as Error).message
+        }`,
+      );
+    }
   }
 
   // --------------------------------------------------------------- mark paid
