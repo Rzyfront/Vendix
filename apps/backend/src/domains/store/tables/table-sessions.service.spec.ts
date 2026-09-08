@@ -1232,4 +1232,108 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       await expect(service.transferSession(SRC, DST)).rejects.toBe(raw);
     });
   });
+
+  describe('cancelOrderItem — proyección del soft cancel (carril D / D2)', () => {
+    // Regresión del false-success: findOne traía cancelled_at /
+    // cancellation_reason / cancellation_type en el select de Prisma pero
+    // el remap los descartaba. El frontend pintaba el ítem como activo y
+    // la guarda de idempotencia (`if orderItem.cancelled_at`) nunca se
+    // activaba porque siempre veía `undefined`.
+    const CANCELLED_AT = new Date('2026-09-01T12:00:00.000Z');
+    const findOneRow = (itemOverrides: Record<string, unknown> = {}) => ({
+      id: 83,
+      store_id: STORE_ID,
+      table_id: 5,
+      order_id: 9001,
+      opened_by: USER_ID,
+      opened_at: new Date(),
+      closed_at: null,
+      paid_at: null,
+      guest_count: 2,
+      table: {
+        id: 5,
+        name: 'Mesa 5',
+        zone: null,
+        status: 'occupied',
+        table_waiters: [],
+      },
+      order: {
+        id: 9001,
+        state: 'created',
+        grand_total: new Prisma.Decimal(50000),
+        subtotal_amount: new Prisma.Decimal(50000),
+        tax_amount: new Prisma.Decimal(0),
+        discount_amount: new Prisma.Decimal(0),
+        customer_alias: null,
+        users: null,
+        order_items: [
+          {
+            id: 501,
+            product_id: 11,
+            product_variant_id: null,
+            product_name: 'Bandeja paisa',
+            quantity: 1,
+            unit_price: new Prisma.Decimal(50000),
+            total_price: new Prisma.Decimal(50000),
+            inventory_consumed_at_fire: false,
+            variant_attributes: null,
+            variant_sku: null,
+            product_variants: null,
+            item_type: 'prepared',
+            notes: null,
+            is_takeaway: false,
+            delivered_at: null,
+            delivered_by_user_id: null,
+            cancelled_at: null,
+            cancellation_reason: null,
+            cancellation_type: null,
+            kitchen_ticket_items: [],
+            ...itemOverrides,
+          },
+        ],
+      },
+    });
+
+    it('findOne expone cancelled_at / cancellation_reason / cancellation_type', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        findOneRow({
+          cancelled_at: CANCELLED_AT,
+          cancellation_reason: 'cliente se arrepintió',
+          cancellation_type: 'before_fire',
+        }),
+      );
+
+      const view = await service.findOne(83);
+      const item = (view.order as any).order_items[0];
+
+      expect(item.cancelled_at).toEqual(CANCELLED_AT);
+      expect(item.cancellation_reason).toBe('cliente se arrepintió');
+      expect(item.cancellation_type).toBe('before_fire');
+    });
+
+    it('cancelOrderItem es idempotente: el segundo llamado ve cancelled_at y no reescribe', async () => {
+      // La sesión ya trae el ítem cancelado → la guarda
+      // `if (orderItem.cancelled_at)` debe cortocircuitar antes del
+      // $transaction (auditoría: cancelled_at queda fijo en la primera
+      // cancelación).
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        findOneRow({
+          cancelled_at: CANCELLED_AT,
+          cancellation_reason: 'cliente se arrepintió',
+          cancellation_type: 'before_fire',
+        }),
+      );
+
+      const view = await service.cancelOrderItem(
+        83,
+        501,
+        'segundo intento con otro motivo',
+      );
+      const item = (view.order as any).order_items[0];
+
+      expect(item.cancelled_at).toEqual(CANCELLED_AT);
+      expect(item.cancellation_reason).toBe('cliente se arrepintió');
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -2069,6 +2069,15 @@ export class TableSessionsService {
               is_takeaway: it.is_takeaway,
               delivered_at: it.delivered_at,
               delivered_by_user_id: it.delivered_by_user_id,
+              // carril D / lina — D2: proyectar el soft cancel. Sin esto la
+              // guarda de idempotencia en `cancelOrderItem` ve siempre
+              // `undefined` y el frontend pinta el ítem como activo.
+              cancelled_at: it.cancelled_at,
+              cancellation_reason: it.cancellation_reason,
+              cancellation_type: it.cancellation_type as
+                | 'before_fire'
+                | 'after_fire_waste'
+                | null,
               kitchen_ticket_items: it.kitchen_ticket_items.map((kti) => ({
                 id: kti.id,
                 status: kti.status,
