@@ -7,10 +7,10 @@ import {
   input,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { catchError, of } from 'rxjs';
 import {
   ButtonComponent,
   IconComponent,
@@ -65,7 +65,15 @@ export class TransferTableModalComponent {
   readonly selectedId = signal<number | null>(null);
   readonly isConfirming = signal(false);
   readonly isLoadingTables = signal(false);
+  /** Mensaje del último floor-map fallido; se limpia en cada apertura. */
+  readonly loadError = signal<string | null>(null);
   private readonly fetchedTables = signal<Table[]>([]);
+  /**
+   * Memoriza que ya se intentó el GET en ESTA apertura. Es la guarda que
+   * corta el bucle: sin ella, la rama de error volvía a dejar todas las
+   * condiciones en verde y el modal repetía la petición sin tope.
+   */
+  private readonly hasFetched = signal(false);
 
   /**
    * La página ya trae la lista enriquecida (con `active_session` y
@@ -119,38 +127,73 @@ export class TransferTableModalComponent {
   });
 
   constructor() {
-    // Resetea la selección en cada apertura o cambio de origen (mismo
-    // patrón que quick-status-modal con `selectedStatus`).
+    /*
+     * Un ÚNICO effect que depende solo de `isOpen` y `table`, y que hace
+     * todas sus escrituras dentro de `untracked`.
+     *
+     * Antes había dos: el segundo leía `fetchedTables` / `isLoadingTables`
+     * en su guarda y las escribía en la respuesta. En la rama de error
+     * (`catchError(() => of([]))`) volvía a dejar las tres condiciones en
+     * verde, el effect se re-disparaba y el navegador martillaba
+     * `GET floor-map` mientras el modal estuviera abierto. Leer y escribir
+     * la misma señal dentro de un effect es exactamente lo que no se debe
+     * hacer.
+     */
     effect(() => {
+      const open = this.isOpen();
       this.table();
-      this.isOpen();
-      this.selectedId.set(null);
-      this.isConfirming.set(false);
+      untracked(() => {
+        // Reset de selección en cada apertura o cambio de origen (mismo
+        // patrón que quick-status-modal con `selectedStatus`).
+        this.selectedId.set(null);
+        this.isConfirming.set(false);
+        if (!open) return;
+        // Cada apertura invalida la lista cacheada: el modal vive montado
+        // fuera de un `@if`, así que sin esto la primera carga quedaba
+        // congelada de por vida y la vista previa prometía un traslado
+        // donde el backend ya iba a hacer un swap (o ofrecía mesas que
+        // entretanto pasaron a `reserved` y responden 409).
+        this.fetchedTables.set([]);
+        this.loadError.set(null);
+        this.hasFetched.set(false);
+        this.loadFloorMap();
+      });
     });
-    // Carga perezosa del floor-map solo cuando el padre no pasó lista.
-    effect(() => {
-      if (
-        this.isOpen() &&
-        this.tables().length === 0 &&
-        this.fetchedTables().length === 0 &&
-        !this.isLoadingTables()
-      ) {
-        this.isLoadingTables.set(true);
-        this.tablesService
-          .getFloorMap()
-          .pipe(
-            takeUntilDestroyed(this.destroyRef),
-            catchError(() => of([] as Table[])),
-          )
-          .subscribe({
-            next: (list) => {
-              this.fetchedTables.set(list);
-              this.isLoadingTables.set(false);
-            },
-            error: () => this.isLoadingTables.set(false),
-          });
-      }
-    });
+  }
+
+  /**
+   * Carga perezosa del floor-map: solo cuando el padre no pasó lista y
+   * como MUCHO una vez por apertura. `hasFetched` se marca ANTES de
+   * disparar la petición, de modo que ni el éxito ni el error pueden
+   * reabrir el ciclo; para reintentar hay que cerrar y volver a abrir.
+   */
+  private loadFloorMap(): void {
+    if (this.hasFetched() || this.isLoadingTables()) return;
+    if (this.tables().length > 0) return;
+    this.hasFetched.set(true);
+    this.isLoadingTables.set(true);
+    this.tablesService
+      .getFloorMap()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (list) => {
+          this.fetchedTables.set(list ?? []);
+          this.isLoadingTables.set(false);
+        },
+        error: (err: unknown) => {
+          this.isLoadingTables.set(false);
+          // El error deja de disfrazarse de "lista vacía": se guarda y se
+          // toastea para que el mesero sepa que falló la carga y no lea
+          // "No hay mesas para elegir destino" como si el salón estuviera
+          // sin mesas.
+          const message =
+            typeof err === 'string'
+              ? err
+              : 'No se pudieron cargar las mesas destino. Cierra y vuelve a abrir para reintentar.';
+          this.loadError.set(message);
+          this.toastService.error(message);
+        },
+      });
   }
 
   close(): void {

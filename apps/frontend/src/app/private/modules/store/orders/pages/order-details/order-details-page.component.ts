@@ -2860,12 +2860,17 @@ export class OrderDetailsPageComponent {
         ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
         : 'Consumidor Final';
 
-    // Domiciliario de la entrega rápida: última remisión no anulada con
-    // nombre. Si dispatchNotes() aún no cargó, queda vacío (sin línea).
+    // Domiciliario de la entrega rápida: la remisión MÁS RECIENTE que
+    // traiga nombre. `getByOrder` devuelve `orderBy: { created_at: 'desc' }`
+    // — la más nueva primero —, así que la primera coincidencia es la
+    // correcta; el `.at(-1)` anterior tomaba la MÁS VIEJA y en una orden
+    // con remisión parcial previa imprimía el domiciliario equivocado (o
+    // ninguna línea, si esa remisión vieja no tenía `courier_name`).
+    // No se re-filtran las anuladas: ese endpoint ya aplica
+    // `status: { not: 'voided' }` del lado servidor.
+    // Si dispatchNotes() aún no cargó, queda vacío (sin línea).
     const courierName =
-      this.dispatchNotes()
-        .filter((n) => n.status !== 'voided')
-        .at(-1)
+      this.dispatchNotes().find((n) => !!n.courier_name?.trim())
         ?.courier_name?.trim() || undefined;
 
     return {

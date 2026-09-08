@@ -332,13 +332,18 @@ export class TablesManagePageComponent implements OnInit {
 
   /**
    * Abre el selector de mesa destino (paso 5). Pide confirmación con el
-   * mismo `dialogService.confirm` que "Liberar" antes de mostrar el
-   * modal; `transferringTableId` se arma ANTES del confirm para que un
-   * doble clic en la acción no abra dos diálogos ni dos modales.
+   * mismo `dialogService.confirm` que "Liberar" antes de mostrar el modal.
+   *
+   * `transferringTableId` se arma DENTRO del `.then`, igual que hace
+   * `confirmRelease`: la promesa de `DialogService.confirm` solo se
+   * asienta desde los botones Confirmar/Cancelar del modal, así que
+   * descartar el diálogo con la X o con Escape la deja pendiente para
+   * siempre. Armando la bandera antes, ese descarte la dejaba fijada y la
+   * guarda de reentrada convertía "Cambiar de mesa" en un no-op silencioso
+   * hasta recargar la página.
    */
   private openTransfer(t: Table): void {
     if (this.transferringTableId() != null) return;
-    this.transferringTableId.set(t.id);
     const sessionId = t.active_session?.id;
     this.dialogService
       .confirm({
@@ -352,10 +357,8 @@ export class TablesManagePageComponent implements OnInit {
         confirmVariant: 'primary',
       })
       .then((ok: boolean) => {
-        if (!ok) {
-          this.transferringTableId.set(null);
-          return;
-        }
+        if (!ok) return;
+        this.transferringTableId.set(t.id);
         this.transferSource.set(t);
         this.isTransferOpen.set(true);
       });
