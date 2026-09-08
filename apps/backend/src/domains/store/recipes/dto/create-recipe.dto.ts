@@ -14,18 +14,28 @@ import { Transform, Type } from 'class-transformer';
 /**
  * DTO to create a store-scoped recipe (BOM).
  *
- * A recipe is the bill-of-materials for ONE product (the "yield" product). It
- * lists the component products (raw ingredients, sub-preps, stock items) needed
- * to produce the yield, optionally with a per-line waste percent and a
- * recipe-level waste percent and yield.
+ * A recipe is the bill-of-materials for ONE (product, variant) pair (the
+ * "yield"). It lists the component products (raw ingredients, sub-preps,
+ * stock items) needed to produce the yield, optionally with a per-line waste
+ * percent and a recipe-level waste percent and yield.
  *
- * The yield product_id is unique per store, so two recipes for the same
- * product in the same store are not allowed.
+ * Uniqueness is per pair — one base recipe per product
+ * (`product_variant_id` NULL) plus one recipe per variant — enforced by the
+ * two partial indexes; the service surfaces `RECIPE_DUP_PRODUCT` instead of
+ * a raw P2002. The variant rule itself lives in `RecipesService.create`:
+ * a variantized product REQUIRES `product_variant_id`, a simple product
+ * FORBIDS it.
  */
 export class CreateRecipeDto {
   @IsInt()
   @Type(() => Number)
   product_id!: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  product_variant_id?: number;
 
   @IsNumber({ maxDecimalPlaces: 4 })
   @Type(() => Number)

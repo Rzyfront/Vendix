@@ -51,6 +51,9 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       products: {
         findMany: jest.fn(),
       },
+      product_variants: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       store_settings: {
         findFirst: jest.fn().mockResolvedValue({ currency: 'COP' }),
       },
@@ -272,6 +275,80 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           where: { id: 100 },
           data: expect.objectContaining({
             grand_total: expect.any(Prisma.Decimal),
+          }),
+        }),
+      );
+    });
+
+    it('rejects a line without variant on ANY product with variants (not just prepared)', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue({
+        id: 1,
+        order_id: 100,
+        closed_at: null,
+        table_id: 5,
+        order: { state: 'draft', order_items: [] },
+        table: { id: 5, name: 'Mesa 5', zone: null, status: 'occupied' },
+      });
+      prismaMock.products.findMany.mockResolvedValue([
+        {
+          id: 60,
+          name: 'Camiseta',
+          base_price: 50000,
+          is_sellable: true,
+          product_type: 'physical',
+          track_inventory: false,
+          product_variants: [{ id: 61 }],
+        },
+      ]);
+
+      await expect(
+        service.addItems(1, { items: [{ product_id: 60, quantity: 1 }] } as any),
+      ).rejects.toMatchObject({ errorCode: 'PRODUCT_VARIANT_REQUIRED' });
+      expect(prismaMock.order_items.create).not.toHaveBeenCalled();
+    });
+
+    it('prices the line with the VARIANT value (override), not the base price', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue({
+        id: 1,
+        order_id: 100,
+        closed_at: null,
+        table_id: 5,
+        order: { state: 'draft', order_items: [] },
+        table: { id: 5, name: 'Mesa 5', zone: null, status: 'occupied' },
+      });
+      prismaMock.products.findMany.mockResolvedValue([
+        {
+          id: 60,
+          name: 'Camiseta',
+          base_price: 50000,
+          is_sellable: true,
+          product_type: 'physical',
+          track_inventory: false,
+          product_variants: [{ id: 61 }],
+        },
+      ]);
+      prismaMock.product_variants.findMany.mockResolvedValue([
+        {
+          id: 61,
+          product_id: 60,
+          price_override: new Prisma.Decimal(65000),
+          is_on_sale: false,
+          sale_price: null,
+        },
+      ]);
+      prismaMock.order_items.findMany.mockResolvedValue([]);
+      prismaMock.order_items.create.mockResolvedValue({});
+      prismaMock.orders.update.mockResolvedValue({});
+
+      await service.addItems(1, {
+        items: [{ product_id: 60, product_variant_id: 61, quantity: 2 }],
+      } as any);
+      expect(prismaMock.order_items.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            product_variant_id: 61,
+            unit_price: new Prisma.Decimal(65000),
+            total_price: new Prisma.Decimal(130000),
           }),
         }),
       );

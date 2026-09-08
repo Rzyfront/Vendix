@@ -145,3 +145,26 @@
     }
   </app-card>
 </div>
+
+<!--
+  Paso 7 — celda custom de la columna Producto (tabla desktop). FUERA de
+  cualquier @if a propósito: el viewChild debe resolver en el primer ciclo
+  para que el effect la enchufe ANTES de que lleguen los datos (si viviera
+  dentro del @if de datos, la tabla renderizaría una vez sin template y nada
+  la re-renderizaría). La variante va como SUB-LÍNEA propia bajo el nombre,
+  NUNCA concatenada. Mismo contrato que el KDS (QUI-736,
+  kds-ticket-card.component.html:103). En móvil la variante viaja como fila
+  propia (`cardConfig.detailKeys` → "Variante").
+-->
+<ng-template #productCellTemplate let-item>
+  <span class="recipe-product-cell">
+    <span class="recipe-product-name">{{
+      item.product?.name ? item.product.name : ('Receta #' + item.id)
+    }}</span>
+    @if (variantName(item)) {
+      <span class="recipe-variant-line">
+        <span class="sr-only">Variante: </span>{{ variantName(item) }}
+      </span>
+    }
+  </span>
+</ng-template>

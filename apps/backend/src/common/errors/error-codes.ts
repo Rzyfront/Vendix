@@ -5113,6 +5113,28 @@ export const ErrorCodes = {
     devMessage:
       'Este producto se usa como insumo en una receta, así que no admite variantes. Quítalo de las recetas que lo consumen antes de variantizarlo.',
   },
+  /**
+   * Recetas por variante (yield variantizado): si el producto tiene variantes,
+   * la receta EXIGE variante — nunca se crea sobre la base. Molde:
+   * `RECIPE_COMPONENT_HAS_VARIANTS` (misma mitad del invariante, lado yield).
+   */
+  RECIPE_VARIANT_REQUIRED: {
+    code: 'RECIPE_VARIANT_REQUIRED',
+    httpStatus: 422,
+    devMessage:
+      'El producto tiene variantes: la receta debe indicar product_variant_id (nunca se crea sobre el producto base).',
+  },
+  /**
+   * Variante ajena al producto: cubre los dos casos — producto SIN variantes
+   * con `product_variant_id` informado, y variante que pertenece a OTRO
+   * producto. En ambos, la variante no puede ser el yield de esta receta.
+   */
+  RECIPE_VARIANT_MISMATCH: {
+    code: 'RECIPE_VARIANT_MISMATCH',
+    httpStatus: 422,
+    devMessage:
+      'La variante no pertenece al producto de la receta (o el producto no tiene variantes).',
+  },
 
   // Production Orders (sub-recipe batch stock) — Restaurant Suite Fase C
   PRODUCTION_ORDER_NOT_FOUND: {

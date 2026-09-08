@@ -1,3 +1,12 @@
 :host {
   display: block;
 }
+
+/* Paso 7 — sub-línea de variante (contrato KDS QUI-736): línea propia bajo el
+   nombre, nunca concatenada. Proporciones copiadas de `.kds-card__variant`. */
+.recipe-variant-line {
+  margin: 0.125rem 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #4b5563);
+}

@@ -79,8 +79,15 @@ export class RecipesController {
 
   @Get('by-product/:productId')
   @Permissions('store:recipes:read')
-  async findByProduct(@Param('productId', ParseIntPipe) productId: number) {
-    const result = await this.recipesService.findByProduct(productId);
+  async findByProduct(
+    @Param('productId', ParseIntPipe) productId: number,
+    @Query('variant_id', new ParseIntPipe({ optional: true }))
+    variantId?: number,
+  ) {
+    const result = await this.recipesService.findByProduct(
+      productId,
+      variantId,
+    );
     return this.responseService.success(
       result,
       'Receta del producto obtenida exitosamente',

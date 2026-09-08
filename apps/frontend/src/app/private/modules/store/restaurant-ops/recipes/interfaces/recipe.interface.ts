@@ -8,10 +8,29 @@
 
 import { FormControl } from '@angular/forms';
 
+/**
+ * Variante del plato al que pertenece la receta (pasos 6-7 del plan
+ * recetas-por-variante). Solo viaja cuando el backend expone el include
+ * `product_variant` (paso 4 del plan); hasta entonces es `undefined` y la UI
+ * trata la receta como base. Nunca se concatena en `product.name`: se pinta
+ * como sub-línea propia (ver `recipes-list-page`).
+ */
+export interface RecipeProductVariant {
+  id: number;
+  name?: string | null;
+  sku?: string | null;
+  attributes?:
+    | Array<{ attribute_name: string; attribute_value: string }>
+    | Record<string, unknown>
+    | null;
+}
+
 export interface Recipe {
   id: number;
   store_id: number;
   product_id: number;
+  product_variant_id?: number | null;
+  product_variant?: RecipeProductVariant | null;
   yield_quantity: number | string;
   yield_unit: string;
   waste_percent: number | string;
@@ -65,6 +84,10 @@ export interface RecipeItem {
 
 export interface CreateRecipeDto {
   product_id: number;
+  // Recetas por variante (paso 6): la variante del plato producido. Solo se
+  // envía cuando el yield elegido es una variante; el spread condicional del
+  // form lo omite para productos simples (cero cambio de payload para ellos).
+  product_variant_id?: number;
   yield_quantity: number;
   yield_unit: string;
   waste_percent?: number;
@@ -72,9 +95,12 @@ export interface CreateRecipeDto {
   is_active?: boolean;
 }
 
-// product_id binds the recipe to its finished product at creation and is
-// immutable: the backend UpdateRecipeDto whitelist rejects it (400). Omit it.
-export type UpdateRecipeDto = Partial<Omit<CreateRecipeDto, 'product_id'>>;
+// product_id (+ product_variant_id) binds the recipe to its finished product
+// at creation and is immutable: the backend UpdateRecipeDto whitelist rejects
+// it (400). Omit both.
+export type UpdateRecipeDto = Partial<
+  Omit<CreateRecipeDto, 'product_id' | 'product_variant_id'>
+>;
 
 export interface CreateRecipeItemDto {
   component_product_id: number;
@@ -98,6 +124,9 @@ export interface RecipeQuery {
   search?: string;
   is_active?: boolean;
   product_id?: number;
+  // Filtro por variante (paso 4 del backend: `by-product/:id?variant_id=`).
+  // Sin uso hasta que el backend lo exponga; el servicio ya lo reenviaría.
+  product_variant_id?: number;
 }
 
 /**

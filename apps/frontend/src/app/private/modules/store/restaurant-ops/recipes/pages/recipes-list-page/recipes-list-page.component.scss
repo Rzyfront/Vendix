@@ -2,3 +2,20 @@
 :host {
   display: block;
 }
+
+/* Paso 7 — celda de producto con sub-línea de variante (contrato KDS QUI-736:
+   línea propia bajo el nombre, nunca concatenada). Proporciones copiadas de
+   `.kds-card__variant`. */
+.recipe-product-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.3;
+}
+
+.recipe-variant-line {
+  margin: 0.125rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #4b5563);
+}

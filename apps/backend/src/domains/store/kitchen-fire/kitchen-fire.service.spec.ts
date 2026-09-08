@@ -734,4 +734,132 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       data: { notes: 'Sin cebolla, bien cocido', updated_at: expect.any(Date) },
     });
   });
+
+  // --------------------------------------------------------------------------
+  // Recetas-por-variante (paso 5) — consumo a cocina por variante: dos líneas
+  // del mismo plato con distinta variante consumen BOM distintos en el mismo
+  // disparo; sin receta propia la variante cae a la base (compatibilidad); sin
+  // ninguna la línea sigue «sin receta» (Fase K, ya cubierto arriba).
+  // --------------------------------------------------------------------------
+
+  it('paso 5 — two lines of the same product with different variants explode different BOMs', async () => {
+    prismaMock.orders.findFirst.mockResolvedValue({
+      id: 100,
+      store_id: 1,
+      order_number: 'ORD-P5',
+      order_items: [
+        makeVariantOrderItem(10, 50, {
+          variantId: 5,
+          variantName: 'Picante',
+          variantCount: 2,
+        }),
+        makeVariantOrderItem(11, 50, {
+          variantId: 6,
+          variantName: 'No Picante',
+          variantCount: 2,
+        }),
+      ],
+    });
+    prismaMock.recipes.findMany.mockResolvedValue([
+      { id: 7, product_id: 50, product_variant_id: 5, is_active: true },
+      { id: 8, product_id: 50, product_variant_id: 6, is_active: true },
+    ]);
+    // BOM distintos por variante: Picante lleva el insumo exclusivo 201,
+    // No Picante solo el compartido 202.
+    recipesService.explodeBom.mockImplementation(async (recipeId: number) => {
+      if (recipeId === 7) {
+        return [
+          {
+            component_product_id: 201,
+            quantity: 2,
+            depth: 1,
+            path_recipe_ids: [7],
+          },
+        ];
+      }
+      return [
+        {
+          component_product_id: 202,
+          quantity: 3,
+          depth: 1,
+          path_recipe_ids: [8],
+        },
+      ];
+    });
+    stockLevelManager.getDefaultLocationForProduct.mockResolvedValue(1);
+    stockLevelManager.updateStock.mockResolvedValue({
+      cost_snapshot: { total_cost: 100 },
+    } as any);
+    const ticketCreate = setupFireTransaction(10);
+
+    const result = await service.fireOrderItems({
+      order_id: 100,
+      order_item_ids: [10, 11],
+    });
+
+    // Cada variante explotó SU receta (una explosión por recipe_id).
+    expect(recipesService.explodeBom).toHaveBeenCalledTimes(2);
+    const explodedIds = recipesService.explodeBom.mock.calls.map(
+      (c) => c[0] as number,
+    );
+    expect(explodedIds.sort()).toEqual([7, 8]);
+    // El insumo exclusivo de Picante se movió UNA sola vez (qty 2 × 2 uds),
+    // y el de No Picante otra (qty 3 × 2 uds). Contar las filas, no el 201.
+    expect(stockLevelManager.updateStock).toHaveBeenCalledTimes(2);
+    const movements = stockLevelManager.updateStock.mock.calls.map(
+      (c) => ({
+        product_id: c[0].product_id as number,
+        quantity_change: c[0].quantity_change as number,
+      }),
+    );
+    expect(movements).toContainEqual({ product_id: 201, quantity_change: -4 });
+    expect(movements).toContainEqual({ product_id: 202, quantity_change: -6 });
+    expect(result.fired_item_ids).toEqual([10, 11]);
+    expect(result.skipped_item_ids).toEqual([]);
+    expect(ticketCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('paso 5 — variant without its own recipe falls back to the product base recipe', async () => {
+    setupFireableContext(
+      [
+        makeVariantOrderItem(10, 50, {
+          variantId: 6,
+          variantName: 'No Picante',
+          variantCount: 2,
+        }),
+      ],
+      {
+        recipe: {
+          id: 7,
+          product_id: 50,
+          product_variant_id: null,
+          is_active: true,
+        },
+        bom: [
+          {
+            component_product_id: 201,
+            quantity: 2,
+            depth: 1,
+            path_recipe_ids: [7],
+          },
+        ],
+      },
+    );
+    setupFireTransaction(10);
+
+    const result = await service.fireOrderItems({
+      order_id: 100,
+      order_item_ids: [10],
+    });
+
+    // La variante consumió la receta base heredada: no es «sin receta».
+    expect(recipesService.explodeBom).toHaveBeenCalledTimes(1);
+    expect(recipesService.explodeBom.mock.calls[0][0]).toBe(7);
+    expect(stockLevelManager.updateStock).toHaveBeenCalledTimes(1);
+    expect(stockLevelManager.updateStock.mock.calls[0][0]).toMatchObject({
+      product_id: 201,
+      quantity_change: -4,
+    });
+    expect(result.fired_item_ids).toEqual([10]);
+  });
 });

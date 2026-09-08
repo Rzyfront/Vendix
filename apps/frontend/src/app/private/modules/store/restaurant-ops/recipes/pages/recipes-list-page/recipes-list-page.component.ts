@@ -2,9 +2,12 @@ import {
   Component,
   computed,
   DestroyRef,
+  effect,
   inject,
   OnInit,
   signal,
+  TemplateRef,
+  viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -29,7 +32,7 @@ import {
   ToastService,
 } from '../../../../../../../shared/components/index';
 
-import { Recipe } from '../../interfaces';
+import { Recipe, RecipeProductVariant } from '../../interfaces';
 import { RecipesService } from '../../services';
 
 interface RecipesStats {
@@ -79,6 +82,17 @@ export class RecipesListPageComponent implements OnInit {
   readonly statusFilter = signal<'all' | 'active' | 'inactive'>('all');
   filterValues: FilterValues = {};
 
+  /**
+   * Paso 7 — celda custom de la columna Producto (tabla desktop). Mismo patrón
+   * signal-native que `reservation-list` (viewChild + effect): cuando el
+   * template resuelve, se enchufa en la columna `product` para pintar el
+   * nombre + la sub-línea de variante. La tabla re-renderiza con los datos
+   * (carga async posterior), así que el template ya está en su sitio.
+   */
+  readonly productCellTemplate = viewChild<TemplateRef<any>>(
+    'productCellTemplate',
+  );
+
   readonly totalPages = computed(() =>
     Math.ceil(this.totalItems() / this.filters().limit) || 1,
   );
@@ -106,12 +120,38 @@ export class RecipesListPageComponent implements OnInit {
     },
   ]);
 
+  /**
+   * Nombre legible de la variante de una receta (paso 7): atributos → name →
+   * sku → `#id`. Mismo orden que el picker de `add-items-modal` (QUI-736).
+   * Devuelve `null` cuando la receta es base (sin variante).
+   */
+  variantName(row: Recipe): string | null {
+    const variant: RecipeProductVariant | null | undefined =
+      row.product_variant;
+    if (variant == null) return null;
+    const attrs = variant.attributes;
+    if (Array.isArray(attrs) && attrs.length > 0) {
+      return attrs.map((a) => a.attribute_value).join(' / ');
+    }
+    if (attrs != null && typeof attrs === 'object') {
+      const values = Object.values(attrs).filter(
+        (v): v is string | number =>
+          typeof v === 'string' || typeof v === 'number',
+      );
+      if (values.length > 0) return values.join(' / ');
+    }
+    return variant.name || variant.sku || `Variante #${variant.id}`;
+  }
+
   readonly tableColumns: TableColumn[] = [
     {
       key: 'product',
       label: 'Producto',
       sortable: false,
       priority: 1,
+      // Sin template (primer render / SSR): el nombre puro, nunca concatenado
+      // con la variante. Con template (ng-template productCellTemplate): el
+      // nombre + la sub-línea propia `.recipe-variant-line`.
       transform: (_: unknown, row: Recipe) =>
         row.product?.name ? row.product.name : `Receta #${row.id}`,
     },
@@ -186,6 +226,16 @@ export class RecipesListPageComponent implements OnInit {
     badgeTransform: (val: boolean) => (val ? 'Activa' : 'Inactiva'),
     detailKeys: [
       {
+        // Paso 7 (móvil): la variante como fila propia con label, nunca
+        // concatenada en el título. Sin variante, `getDetailValue` devuelve
+        // '-' sin llamar al transform (convención del shared component).
+        key: 'product_variant',
+        label: 'Variante',
+        icon: 'layers',
+        transform: (_v: unknown, row?: Recipe) =>
+          (row ? this.variantName(row) : null) ?? '-',
+      },
+      {
         key: 'waste_percent',
         label: 'Merma',
         icon: 'percent',
@@ -205,6 +255,21 @@ export class RecipesListPageComponent implements OnInit {
       },
     ],
   };
+
+  constructor() {
+    // Enchufa la celda custom en la columna `product` en cuanto el template
+    // resuelve (patrón copiado de `reservation-list`). Solo muta el campo
+    // `template` del objeto columna — no toca signals, no hay loop.
+    effect(() => {
+      const tpl = this.productCellTemplate();
+      if (tpl) {
+        const productCol = this.tableColumns.find(
+          (col) => col.key === 'product',
+        );
+        if (productCol) productCol.template = tpl;
+      }
+    });
+  }
 
   ngOnInit(): void {
     this.loadRecipes();

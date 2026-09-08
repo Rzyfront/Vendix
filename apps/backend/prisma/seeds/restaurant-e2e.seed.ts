@@ -256,8 +256,14 @@ export async function seedRestaurantE2E(
   );
 
   // --- A.4 Receta activa + recipe_items (SOLO insumos, sin variantes — ADR-1) ---
-  let recipe = await client.recipes.findUnique({
-    where: { product_id: preparedProductId },
+  // Recetas-por-variante: `product_id` dejo de ser UNIQUE (una base + una por
+  // variante), asi que el lookup es findFirst. Esta receta BASE sobre un
+  // producto variantizado es intencional: es el caso legacy-compat que
+  // `findByProduct` resuelve por caida cuando la variante no tiene receta
+  // propia (conjunto finito, no crece: `RecipesService.create` ya no permite
+  // crear mas).
+  let recipe = await client.recipes.findFirst({
+    where: { product_id: preparedProductId, product_variant_id: null },
   });
   if (recipe) {
     console.log(`   ⏭  Skipped recipe for "Pollo Árabe E2E" (already exists, id=${recipe.id})`);

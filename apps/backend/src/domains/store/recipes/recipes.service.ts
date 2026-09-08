@@ -107,9 +107,46 @@ export class RecipesService {
       throw new VendixHttpException(ErrorCodes.RECIPE_YIELD_PRODUCT_NOT_FOUND);
     }
 
-    // 2. Recipes are 1:1 with (store_id, product_id) — unique constraint.
-    const dup = await this.prisma.recipes.findFirst({
+    // 2. Variant rule (recetas-por-variante): a variantized product REQUIRES
+    //    `product_variant_id` (never the base row); a simple product FORBIDS
+    //    it. The variant must belong to the yield product — which, through
+    //    the product's store check above, also pins it to this store.
+    //    Scope-safe: `product_variants` is relationally scoped through
+    //    `products` in StorePrismaService, and both reads are findFirst/count.
+    const variantCount = await this.prisma.product_variants.count({
       where: { product_id: dto.product_id },
+    });
+    let variantId: number | null = null;
+    if (variantCount > 0) {
+      if (dto.product_variant_id == null) {
+        throw new VendixHttpException(
+          ErrorCodes.RECIPE_VARIANT_REQUIRED,
+          `El producto ${dto.product_id} tiene ${variantCount} variante(s): la receta debe indicar product_variant_id.`,
+        );
+      }
+      const variant = await this.prisma.product_variants.findFirst({
+        where: { id: dto.product_variant_id, product_id: dto.product_id },
+        select: { id: true },
+      });
+      if (!variant) {
+        throw new VendixHttpException(
+          ErrorCodes.RECIPE_VARIANT_MISMATCH,
+          `La variante ${dto.product_variant_id} no pertenece al producto ${dto.product_id}.`,
+        );
+      }
+      variantId = dto.product_variant_id;
+    } else if (dto.product_variant_id != null) {
+      throw new VendixHttpException(
+        ErrorCodes.RECIPE_VARIANT_MISMATCH,
+        `El producto ${dto.product_id} no tiene variantes: la receta no debe indicar product_variant_id.`,
+      );
+    }
+
+    // 3. Uniqueness is per (product_id, product_variant_id) pair — enforced
+    //    by the two partial indexes; surface a friendly error instead of a
+    //    raw P2002.
+    const dup = await this.prisma.recipes.findFirst({
+      where: { product_id: dto.product_id, product_variant_id: variantId },
     });
     if (dup) {
       throw new VendixHttpException(ErrorCodes.RECIPE_DUP_PRODUCT);
@@ -119,6 +156,7 @@ export class RecipesService {
       data: {
         store_id: storeId,
         product_id: dto.product_id,
+        product_variant_id: variantId,
         yield_quantity: new Prisma.Decimal(dto.yield_quantity),
         yield_unit: dto.yield_unit,
         waste_percent:
@@ -171,12 +209,20 @@ export class RecipesService {
   }
 
   async findAll(query: RecipeQueryDto) {
-    const { page = 1, limit = 10, search, is_active, product_id } = query ?? {};
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      is_active,
+      product_id,
+      product_variant_id,
+    } = query ?? {};
     const skip = (page - 1) * limit;
 
     const where: Prisma.recipesWhereInput = {
       ...(is_active !== undefined && { is_active }),
       ...(product_id !== undefined && { product_id }),
+      ...(product_variant_id !== undefined && { product_variant_id }),
       ...(search && {
         OR: [
           {
@@ -210,6 +256,16 @@ export class RecipesService {
               sku: true,
               base_price: true,
               stock_unit: true,
+            },
+          },
+          // Yield variant as its own object — never concatenated into the
+          // product name (same contract as the KDS ticket card sub-line).
+          // NULL for every recipe created before recetas-por-variante.
+          product_variant: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
             },
           },
           _count: {
@@ -248,6 +304,16 @@ export class RecipesService {
             is_batch_produced: true,
           },
         },
+        // Yield variant as its own object (recetas-por-variante, paso 4);
+        // NULL for recipes created before the change. Needed by the detail
+        // view (paso 7) to paint the variant sub-line.
+        product_variant: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+          },
+        },
         items: {
           orderBy: { id: 'asc' },
           include: {
@@ -273,25 +339,60 @@ export class RecipesService {
     return this.stripCocinaRecipeMoney(recipe);
   }
 
-  async findByProduct(productId: number) {
-    const recipe = await this.prisma.recipes.findFirst({
-      where: { product_id: productId },
-      include: {
-        items: {
-          orderBy: { id: 'asc' },
-          include: {
-            component_product: {
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-                stock_unit: true,
-                is_ingredient: true,
-              },
+  /**
+   * Resolves the recipe for a (product, variant) pair (recetas-por-variante,
+   * paso 4): exact match `(product_id, product_variant_id)` first; if the
+   * variant has no own recipe, falls back to the product's BASE recipe
+   * (`product_variant_id IS NULL`). The fallback exists ONLY for recipes
+   * created before this change — the UI no longer allows creating base
+   * recipes on variantized products, so that set is finite and non-growing.
+   * Without `variantId` the lookup is by product only (unchanged legacy path
+   * for simple products).
+   */
+  async findByProduct(productId: number, variantId?: number) {
+    const include = {
+      product_variant: {
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+        },
+      },
+      items: {
+        orderBy: { id: 'asc' },
+        include: {
+          component_product: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              stock_unit: true,
+              is_ingredient: true,
             },
           },
         },
       },
+    } as const;
+    if (variantId != null) {
+      const exact = await this.prisma.recipes.findFirst({
+        where: { product_id: productId, product_variant_id: variantId },
+        include,
+      });
+      if (exact) {
+        return exact;
+      }
+      const base = await this.prisma.recipes.findFirst({
+        where: { product_id: productId, product_variant_id: null },
+        include,
+      });
+      if (!base) {
+        throw new VendixHttpException(ErrorCodes.RECIPE_NOT_FOUND);
+      }
+      return base;
+    }
+    const recipe = await this.prisma.recipes.findFirst({
+      where: { product_id: productId },
+      include,
     });
     if (!recipe) {
       throw new VendixHttpException(ErrorCodes.RECIPE_NOT_FOUND);
@@ -678,6 +779,12 @@ export class RecipesService {
       const scaled = (perYield * rootMultiplier) / effectiveYield;
 
       // Does the component itself own an active recipe (sub-prep)?
+      //
+      // Recetas-por-variante (paso 4): this lookup is INTENTIONALLY by base
+      // product only and does NOT change. A component (`recipe_items`) can
+      // never have variants — `addItem` rejects variantized components with
+      // RECIPE_COMPONENT_HAS_VARIANTS (ADR-1 yield/components split) — so a
+      // sub-recipe is always the base recipe of the component product.
       const childRecipe = await (tx ?? this.prisma).recipes.findFirst({
         where: {
           product_id: item.component_product_id,

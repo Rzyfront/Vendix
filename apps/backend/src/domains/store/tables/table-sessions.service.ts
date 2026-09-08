@@ -673,11 +673,11 @@ export class TableSessionsService {
           `Producto "${p.name}" no es vendible (is_sellable=false)`,
         );
       }
-      // ERR-07 — un `prepared` con variantes exige que la línea declare cuál.
-      // Sin esto la comanda llega a cocina como el producto base y el descuento
-      // de inventario va contra la fila sin variante (invariante DB-14).
+      // ERR-07 — un producto CON variantes exige que la línea declare cuál
+      // (preparado o no: la cuenta y la cocina trabajan por variante, nunca
+      // por la base). Sin esto la comanda llega como el producto base y el
+      // descuento de inventario va contra la fila sin variante (DB-14).
       if (
-        p.product_type === 'prepared' &&
         (p.product_variants?.length ?? 0) > 0 &&
         item.product_variant_id == null
       ) {
@@ -696,18 +696,31 @@ export class TableSessionsService {
       const variantIds = dto.items
         .map((i) => (i.product_id ? i.product_variant_id : null))
         .filter((v): v is number => typeof v === 'number');
+      type VariantPriceRow = {
+        id: number;
+        product_id: number;
+        price_override: Prisma.Decimal | number | null;
+        is_on_sale: boolean;
+        sale_price: Prisma.Decimal | number | null;
+      };
+      const variantById = new Map<number, VariantPriceRow>();
       if (variantIds.length > 0) {
-        const variants = await tx.product_variants.findMany({
-          where: { id: { in: Array.from(new Set(variantIds)) } },
-          select: { id: true, product_id: true },
-        });
-        const variantProductById = new Map<number, number>(
-          variants.map((v) => [v.id, v.product_id]),
-        );
+        const variants: VariantPriceRow[] =
+          await tx.product_variants.findMany({
+            where: { id: { in: Array.from(new Set(variantIds)) } },
+            select: {
+              id: true,
+              product_id: true,
+              price_override: true,
+              is_on_sale: true,
+              sale_price: true,
+            },
+          });
+        for (const v of variants) variantById.set(v.id, v);
         for (const item of dto.items) {
           if (item.product_id && item.product_variant_id != null) {
-            const variantProductId = variantProductById.get(item.product_variant_id);
-            if (variantProductId === undefined || variantProductId !== item.product_id) {
+            const variant = variantById.get(item.product_variant_id);
+            if (!variant || variant.product_id !== item.product_id) {
               throw new VendixHttpException(
                 ErrorCodes.PRODUCT_VARIANT_MISMATCH,
                 `La variante #${item.product_variant_id} no pertenece al producto #${item.product_id}`,
@@ -719,7 +732,24 @@ export class TableSessionsService {
 
       for (const item of dto.items) {
         const product = productMap.get(item.product_id)!;
-        const unitPrice = Number(product.base_price ?? 0);
+        // La cuenta suma el valor de la VARIANTE (no el base): override de la
+        // variante, oferta vigente, y base como último recurso — misma prioridad
+        // que el POS (`vendix-product-variants`: variant sale/override first).
+        const variant =
+          item.product_variant_id != null
+            ? variantById.get(item.product_variant_id)
+            : undefined;
+        const salePrice =
+          variant?.is_on_sale === true ? Number(variant.sale_price ?? 0) : 0;
+        const overridePrice = Number(
+          (variant?.price_override as number | null | undefined) ?? NaN,
+        );
+        const unitPrice =
+          salePrice > 0
+            ? salePrice
+            : Number.isFinite(overridePrice) && overridePrice > 0
+              ? (overridePrice as number)
+              : Number(product.base_price ?? 0);
         const totalPrice = unitPrice * item.quantity;
 
         const createdItem = await tx.order_items.create({

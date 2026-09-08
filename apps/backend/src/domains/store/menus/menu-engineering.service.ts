@@ -113,7 +113,11 @@ export class MenuEngineeringService {
         sku: true,
         base_price: true,
         cost_price: true,
-        recipe: {
+        // Recetas-por-variante (puente paso 4): `products.recipes` paso de
+        // TO-ONE a TO-MANY. El lector usa `[0]` — identico con los datos
+        // actuales (<=1 receta por producto). El costeo por variante es
+        // knowledge-gap del plan (no se toca esta vista).
+        recipes: {
           where: { is_active: true },
           select: {
             id: true,
@@ -137,7 +141,7 @@ export class MenuEngineeringService {
       sku: string | null;
       base_price: any;
       cost_price: any;
-      recipe: {
+      recipes: Array<{
         id: number;
         yield_quantity: any;
         waste_percent: any;
@@ -146,7 +150,7 @@ export class MenuEngineeringService {
           waste_percent: any;
           component_product: { cost_price: any } | null;
         }>;
-      } | null;
+      }>;
     }>;
 
     const productMap = new Map(products.map((p) => [p.id, p]));
@@ -158,8 +162,10 @@ export class MenuEngineeringService {
         const product = productMap.get(pid);
         const units = Number(r._sum.quantity || 0);
         const revenue = Number(r._sum.total_price || 0);
-        const recipeUnitCost = this.computeRecipeUnitCost(product?.recipe);
-        const hasRecipe = !!product?.recipe;
+        const recipeUnitCost = this.computeRecipeUnitCost(
+          product?.recipes?.[0] ?? null,
+        );
+        const hasRecipe = (product?.recipes?.length ?? 0) > 0;
         const costPerUnit =
           recipeUnitCost ?? Number(product?.cost_price ?? 0);
         const profit = revenue - costPerUnit * units;

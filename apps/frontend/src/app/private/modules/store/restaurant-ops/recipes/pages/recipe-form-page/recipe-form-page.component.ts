@@ -42,12 +42,21 @@ import { RecipesService } from '../../services';
 import {
   CreateRecipeDto,
   CreateRecipeItemDto,
+  Recipe,
   RecipeItemFormControls,
+  RecipeProductVariant,
   UpdateRecipeItemDto,
 } from '../../interfaces';
 
 interface RecipeFormShape {
-  product_id: FormControl<number | null>;
+  // Recetas por variante (paso 6): la selección del yield es una clave
+  // compuesta — `"<product_id>"` para productos simples o
+  // `"<product_id>:<variant_id>"` para variantes. El `app-selector` solo
+  // maneja un escalar (`SelectorOption.value: string | number`), así que el
+  // par viaja codificado y se decodifica en `submit()` (ver
+  // `parseYieldSelection`). Nunca se auto-asigna variante: si la clave no
+  // decodifica, el submit se bloquea con error en línea.
+  yield_selection: FormControl<string | null>;
   yield_quantity: FormControl<number | null>;
   yield_unit: FormControl<string>;
   waste_percent: FormControl<number | null>;
@@ -104,11 +113,19 @@ export class RecipeFormPageComponent implements OnInit {
   readonly isLoadingRecipe = signal(false);
   readonly isSubmitting = signal(false);
   readonly isLoadingProducts = signal(false);
+  // Receta cargada en modo edición. Expone `product_variant` al template para
+  // la sub-línea del paso 7 (el backend la devuelve vía el include del paso 4).
+  readonly loadedRecipe = signal<Recipe | null>(null);
 
   /**
-   * Yield product candidates: `product_type='prepared'` OR `is_batch_produced=true`.
+   * Yield candidates: `product_type='prepared'` OR `is_batch_produced=true`.
    * For new recipes we need to filter client-side because the backend product
    * list endpoint does not yet expose a server-side filter for these flags.
+   *
+   * Recetas por variante (paso 6): cada producto CON variantes se expande en
+   * una opción por variante (`"<id>:<variantId>"`, `"Plato — Variante"`) y la
+   * fila base se descarta — nunca es seleccionable. Un producto SIN variantes
+   * se ofrece tal cual (`"<id>"`). Ver `buildYieldOptions`.
    */
   readonly yieldOptions = signal<SelectorOption[]>([]);
 
@@ -136,7 +153,7 @@ export class RecipeFormPageComponent implements OnInit {
   readonly form: FormGroup<RecipeFormShape> = this.fb.nonNullable.group<
     RecipeFormShape
   >({
-    product_id: this.fb.nonNullable.control<number | null>(null, {
+    yield_selection: this.fb.nonNullable.control<string | null>(null, {
       validators: [Validators.required],
     }),
     yield_quantity: this.fb.nonNullable.control<number | null>(1, {
@@ -204,20 +221,128 @@ export class RecipeFormPageComponent implements OnInit {
     // Deep-link desde el KDS: `recipes/new?product_id=<id>` preselecciona el
     // plato exacto que disparó el atajo "Crear receta" en un ticket sin
     // receta. Solo aplica en modo creación (en edición el producto es
-    // inmutable y viene del recipe cargado).
+    // inmutable y viene del recipe cargado). Si el plato tiene variantes, la
+    // clave base no coincide con ninguna opción (la base nunca se ofrece) y
+    // el usuario elige la variante a mano — nunca se auto-asigna.
     const rawProductId = this.route.snapshot.queryParamMap.get('product_id');
     const productId = rawProductId ? Number(rawProductId) : NaN;
     if (Number.isFinite(productId)) {
-      this.form.controls.product_id.setValue(productId);
+      this.form.controls.yield_selection.setValue(String(productId));
     }
   }
 
   // -------------------------------------------------------- Data loaders
 
+  /**
+   * Clave de opción del selector para un yield: `"<product_id>"` en productos
+   * simples, `"<product_id>:<variant_id>"` en variantes.
+   */
+  yieldKey(productId: number, variantId: number | null): string {
+    return variantId != null ? `${productId}:${variantId}` : `${productId}`;
+  }
+
+  /**
+   * Decodifica la selección del yield en el par `(product_id, variant_id).
+   * Devuelve `null` si la clave no tiene la forma esperada — el submit la
+   * trata como error en línea en vez de adivinar (misma regla que
+   * `PO_VARIANT_001`: la intención de variante del usuario es incognoscible).
+   */
+  private parseYieldSelection(
+    selection: string | null,
+  ): { product_id: number; product_variant_id: number | null } | null {
+    if (selection == null || selection === '') return null;
+    const [rawProduct, rawVariant] = selection.split(':');
+    // `Number('')` es 0, no NaN: una clave como `":470"` pasaría el
+    // `isFinite` con un `product_id: 0` fantasma. Las claves las genera
+    // `yieldKey`, siempre `"<id>"` numérico positivo.
+    if (rawProduct == null || rawProduct.trim() === '') return null;
+    const product_id = Number(rawProduct);
+    if (!Number.isFinite(product_id)) return null;
+    if (rawVariant == null || rawVariant === '') {
+      return { product_id, product_variant_id: null };
+    }
+    const product_variant_id = Number(rawVariant);
+    if (!Number.isFinite(product_variant_id)) return null;
+    return { product_id, product_variant_id };
+  }
+
+  /**
+   * Etiqueta legible de una variante: atributos → name → sku → `#id`. Mismo
+   * orden que el picker de `add-items-modal` (QUI-736) para que la variante se
+   * lea igual en cocina y en recetas. Acepta ambas formas de `attributes` (el
+   * backend las mapea a arreglo `{attribute_name, attribute_value}` pero el
+   * tipo `ProductVariant` las declara como registro).
+   */
+  variantDisplayName(
+    variant: RecipeProductVariant | {
+      id?: number;
+      name?: string | null;
+      sku?: string | null;
+      attributes?:
+        | Array<{ attribute_name: string; attribute_value: string }>
+        | Record<string, unknown>
+        | null;
+    },
+  ): string {
+    const attrs = variant.attributes;
+    if (Array.isArray(attrs) && attrs.length > 0) {
+      return attrs.map((a) => a.attribute_value).join(' / ');
+    }
+    if (attrs != null && typeof attrs === 'object') {
+      const values = Object.values(attrs).filter(
+        (v): v is string | number => typeof v === 'string' || typeof v === 'number',
+      );
+      if (values.length > 0) return values.join(' / ');
+    }
+    return (
+      variant.name ||
+      variant.sku ||
+      (variant.id != null ? `Variante #${variant.id}` : 'Variante')
+    );
+  }
+
+  /**
+   * Expansor del paso 6: envuelve el filtro de candidatos. Cada producto con
+   * variantes emite UNA opción por variante y la fila base se descarta; un
+   * producto sin variantes se ofrece tal cual (cero cambio para ellos).
+   */
+  private buildYieldOptions(rows: Product[]): SelectorOption[] {
+    const options: SelectorOption[] = [];
+    for (const p of rows) {
+      const variants = p.product_variants ?? [];
+      if (variants.length > 0) {
+        for (const v of variants) {
+          options.push({
+            value: this.yieldKey(p.id, v.id),
+            label: `${p.name} — ${this.variantDisplayName(v)}`,
+            description: v.sku
+              ? `${v.sku} · ${p.stock_unit ?? ''}`.trim()
+              : (p.stock_unit ?? undefined),
+          });
+        }
+      } else {
+        options.push({
+          value: this.yieldKey(p.id, null),
+          label: p.name,
+          description: p.sku
+            ? `${p.sku} · ${p.stock_unit ?? ''}`.trim()
+            : (p.stock_unit ?? undefined),
+        });
+      }
+    }
+    return options;
+  }
+
   private loadYieldOptions(): void {
     this.isLoadingProducts.set(true);
     this.productsService
-      .getProducts({ limit: 500, state: 'active' as any })
+      // Sin `include_variants`, `product_variants` llega vacío y el expansor
+      // degradaría a ofrecer la base — exactamente lo prohibido.
+      .getProducts({
+        limit: 500,
+        state: 'active' as any,
+        include_variants: true,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
@@ -226,15 +351,8 @@ export class RecipeFormPageComponent implements OnInit {
             (p: Product) =>
               p.product_type === 'prepared' || p.is_batch_produced === true,
           );
-          this.yieldOptions.set(
-            filtered.map((p: Product) => ({
-              value: p.id,
-              label: p.name,
-              description: p.sku
-                ? `${p.sku} · ${p.stock_unit ?? ''}`.trim()
-                : (p.stock_unit ?? undefined),
-            })),
-          );
+          this.yieldOptions.set(this.buildYieldOptions(filtered));
+          this.ensureEditSelectionVisible();
           this.isLoadingProducts.set(false);
         },
         error: () => {
@@ -242,6 +360,40 @@ export class RecipeFormPageComponent implements OnInit {
           this.isLoadingProducts.set(false);
         },
       });
+  }
+
+  /**
+   * Red de seguridad del modo edición: si la receta cargada apunta a un yield
+   * cuya opción no existe (receta base heredada de un producto variantizado,
+   * creada antes del paso 6), se agrega UNA opción deshabilitada de solo
+   * lectura para que el campo no quede en blanco. El selector ya está
+   * deshabilitado en edición, así que no reintroduce la base como elegible.
+   * Idempotente: solo agrega cuando la clave falta.
+   */
+  private ensureEditSelectionVisible(): void {
+    if (!this.isEditMode()) return;
+    const recipe = this.loadedRecipe();
+    if (recipe == null || this.yieldOptions().length === 0) return;
+    const key = this.yieldKey(
+      recipe.product_id,
+      recipe.product_variant_id ?? null,
+    );
+    if (this.yieldOptions().some((o) => String(o.value) === key)) return;
+    const variantName =
+      recipe.product_variant != null
+        ? this.variantDisplayName(recipe.product_variant)
+        : null;
+    this.yieldOptions.set([
+      ...this.yieldOptions(),
+      {
+        value: key,
+        label:
+          variantName != null
+            ? `${recipe.product?.name ?? `Producto #${recipe.product_id}`} — ${variantName}`
+            : (recipe.product?.name ?? `Producto #${recipe.product_id}`),
+        disabled: true,
+      },
+    ]);
   }
 
   private loadRecipe(id: number | null): void {
@@ -252,14 +404,21 @@ export class RecipeFormPageComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (recipe) => {
+          this.loadedRecipe.set(recipe);
           this.form.patchValue({
-            product_id: recipe.product_id,
+            yield_selection: this.yieldKey(
+              recipe.product_id,
+              recipe.product_variant_id ?? null,
+            ),
             yield_quantity: Number(recipe.yield_quantity ?? 0),
             yield_unit: recipe.yield_unit ?? '',
             waste_percent: Number(recipe.waste_percent ?? 0),
             preparation_notes: recipe.preparation_notes ?? '',
             is_active: recipe.is_active ?? true,
           });
+          // La receta puede llegar antes que las opciones: si la clave aún no
+          // existe como opción, la red de seguridad la agrega deshabilitada.
+          this.ensureEditSelectionVisible();
           this.itemsArray.clear({ emitEvent: false });
           for (const item of recipe.items ?? []) {
             this.itemsArray.push(
@@ -375,9 +534,9 @@ export class RecipeFormPageComponent implements OnInit {
     this.destroyRef.onDestroy(() => clearTimeout(safetyTimer));
 
     const raw = this.form.getRawValue();
-    // Campos mutables compartidos. product_id NO va aquí: es inmutable tras crear
-    // (el backend recipes.service.update lo ignora y el whitelist del DTO lo
-    // rechaza con 400). Solo se envía al crear.
+    // Campos mutables compartidos. El yield NO va aquí: es inmutable tras
+    // crear (el backend recipes.service.update lo ignora y el whitelist del
+    // DTO lo rechaza con 400). Solo se envía al crear.
     const base = {
       yield_quantity: Number(raw.yield_quantity ?? 0),
       yield_unit: raw.yield_unit,
@@ -386,13 +545,37 @@ export class RecipeFormPageComponent implements OnInit {
       is_active: raw.is_active,
     };
 
+    // Recetas por variante (paso 6): al crear, el yield viaja como par
+    // (product_id, product_variant_id). Si la clave no decodifica, no se
+    // adivina — se bloquea con error en línea.
+    let createDto: CreateRecipeDto | null = null;
+    if (!this.isEditMode()) {
+      const parsed = this.parseYieldSelection(raw.yield_selection);
+      if (parsed == null) {
+        const msg =
+          'Selecciona el plato o la variante que produce esta receta. Si el plato tiene variantes, debes elegir una variante, nunca el producto base.';
+        this.submitError.set(msg);
+        this.toastService.warning(
+          'Revisa los campos marcados antes de guardar',
+        );
+        return;
+      }
+      createDto = {
+        product_id: parsed.product_id,
+        // product_variant_id solo viaja cuando el yield es una variante; el
+        // spread condicional deja el payload byte-identico al de hoy para
+        // productos simples.
+        ...(parsed.product_variant_id != null && {
+          product_variant_id: parsed.product_variant_id,
+        }),
+        ...base,
+      };
+    }
+
     this.isSubmitting.set(true);
     const upsert$ = this.isEditMode()
       ? this.recipesService.update(this.recipeId() as number, base)
-      : this.recipesService.create({
-          product_id: raw.product_id as number,
-          ...base,
-        } as CreateRecipeDto);
+      : this.recipesService.create(createDto as CreateRecipeDto);
 
     upsert$
       .pipe(takeUntilDestroyed(this.destroyRef))

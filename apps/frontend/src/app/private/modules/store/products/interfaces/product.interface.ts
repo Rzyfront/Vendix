@@ -566,6 +566,10 @@ export interface ProductQueryDto {
   // Producibles por lote (insumos con stock propio). El form de Producción
   // envía is_batch_produced=true; el backend lo aplica en el WHERE.
   is_batch_produced?: boolean;
+  // Recetas-por-variante (paso 6): el backend lo acepta
+  // (`include_variants?: boolean`, default false) y devuelve
+  // `product_variants` en línea para expandir el selector de yield.
+  include_variants?: boolean;
 }
 
 // Respuestas paginadas

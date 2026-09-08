@@ -35,4 +35,9 @@ export class RecipeQueryDto {
   @Type(() => Number)
   @IsInt()
   product_id?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  product_variant_id?: number;
 }
