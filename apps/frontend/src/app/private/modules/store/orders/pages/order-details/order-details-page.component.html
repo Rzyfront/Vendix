@@ -2462,6 +2462,14 @@
       (closed)="showDispatchSelector.set(false)"
     ></app-dispatch-method-selector-modal>
 
+    <!-- COURIER NAME (despacho rápido: "Entrega completa" pide el domiciliario) -->
+    <app-courier-name-modal
+      [isOpen]="showCourierNameModal()"
+      (isOpenChange)="showCourierNameModal.set($event)"
+      (confirmed)="onCourierNameConfirmed($event)"
+      (closed)="onCourierNameClosed()"
+    ></app-courier-name-modal>
+
     <!-- GENERATE DISPATCH NOTE WIZARD (Items → Datos/Estado → Ruta) -->
     <app-generate-dispatch-wizard
       [isOpen]="showDispatchModal()"

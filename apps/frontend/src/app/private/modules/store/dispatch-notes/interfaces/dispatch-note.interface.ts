@@ -132,6 +132,8 @@ export interface DispatchNote {
   created_by_user_id?: number;
   confirmed_by_user_id?: number;
   delivered_by_user_id?: number;
+  /** Domiciliario (texto libre) capturado en la entrega rápida. Anulable. */
+  courier_name?: string | null;
   voided_by_user_id?: number;
   confirmed_at?: string;
   delivered_at?: string;

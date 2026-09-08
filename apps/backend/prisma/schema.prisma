@@ -8906,6 +8906,12 @@ model dispatch_notes {
   notes                String?                      @db.Text
   internal_notes       String?                      @db.Text
   void_reason          String?                      @db.Text
+  // Domiciliario de la entrega rapida (plan docs/plans/despacho-rapido-domiciliario.md).
+  // Texto libre con solo el nombre (sin cedula, decision del usuario). NULL = la
+  // remision no registro domiciliario (todo el historico + flujo normal sin el campo).
+  // Distinto de delivered_by_user_id (FK al usuario interno que registra) y de
+  // carrier/shipping_carrier (transportadora-empresa, no persona).
+  courier_name         String?                      @db.VarChar(255)
   created_by_user_id   Int?
   confirmed_by_user_id Int?
   delivered_by_user_id Int?

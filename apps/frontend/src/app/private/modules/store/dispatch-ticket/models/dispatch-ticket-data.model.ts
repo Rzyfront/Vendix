@@ -19,4 +19,6 @@ export interface DispatchTicketData {
   storeName: string;
   customer: DispatchTicketCustomer;
   items: DispatchTicketItem[];
+  /** Domiciliario de la entrega rápida (última remisión no anulada). Ausente = sin línea. */
+  courierName?: string;
 }

@@ -176,3 +176,15 @@ export interface StandardPrintDataModel {
   };
   custom_variables?: Record<string, any>;
 }
+
+/**
+ * Plan despacho-rapido-domiciliario (paso 3) — variables propias del tiquete
+ * de despacho (`dispatch_ticket`). `courier_name` es el domiciliario de la
+ * ÚLTIMA remisión no anulada de la orden; ausente cuando la remisión no
+ * registró domiciliario (todo el histórico + flujo normal sin el campo).
+ * El consumidor pinta "Domiciliario: <nombre>" solo cuando llega valor.
+ */
+export interface DispatchTicketCustomVariables {
+  ordered_qty_by_sku?: Record<string, number>;
+  courier_name?: string;
+}

@@ -383,6 +383,13 @@ export class DispatchNoteFlowService {
           ? new Date(dto.actual_delivery_date)
           : new Date(),
         ...(dto.notes && { notes: dto.notes }),
+        // Domiciliario de la entrega rapida (plan despacho-rapido-domiciliario,
+        // paso 2): texto libre con trim. Solo-nombre por decision del usuario;
+        // delivered_by_user_id sigue siendo el usuario interno que registra.
+        // Sin el campo, el update es identico al anterior (flujo normal intacto).
+        ...(dto.courier_name !== undefined
+          ? { courier_name: dto.courier_name?.trim() || null }
+          : {}),
         updated_at: new Date(),
       },
       include: DISPATCH_NOTE_INCLUDE,

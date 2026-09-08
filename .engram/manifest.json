@@ -1944,6 +1944,14 @@
       "sessions": 6,
       "memories": 23,
       "prompts": 0
+    },
+    {
+      "id": "01a13435",
+      "created_by": "rzy",
+      "created_at": "2026-09-08T17:38:04Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }

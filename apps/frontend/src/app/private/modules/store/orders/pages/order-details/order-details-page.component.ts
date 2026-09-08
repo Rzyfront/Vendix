@@ -28,6 +28,7 @@ import {
   DispatchMethodSelectorModalComponent,
   DispatchMethod,
 } from '../../components/dispatch-method-selector-modal/dispatch-method-selector-modal.component';
+import { CourierNameModalComponent } from '../../components/courier-name-modal/courier-name-modal.component';
 import {
   Order,
   OrderItem,
@@ -161,6 +162,7 @@ type RefundState =
     TimelineComponent,
     GenerateDispatchWizardComponent,
     DispatchMethodSelectorModalComponent,
+    CourierNameModalComponent,
     ShippingAddressModalComponent,
     ResendDishModalComponent,
     NgClass,
@@ -244,6 +246,8 @@ export class OrderDetailsPageComponent {
   showDispatchModal = signal(false);
   /** Chooser modal: "con remisión" vs "sin remisión" (single dispatch entry). */
   showDispatchSelector = signal(false);
+  /** Courier-name modal: asked on "Entrega completa" before directFullDelivery. */
+  showCourierNameModal = signal(false);
   /**
    * Post-generación de remisión: modal "Remisión generada" cuando la remisión
    * quedó asignada a una ruta (planilla). Ofrece navegar a la remisión o a la
@@ -1949,7 +1953,10 @@ export class OrderDetailsPageComponent {
         this.openDispatchModal();
         break;
       case 'direct':
-        this.directFullDelivery();
+        // Rapid dispatch asks for the courier name FIRST; the modal's
+        // confirm handler runs directFullDelivery(name). Cancel aborts
+        // without creating anything.
+        this.showCourierNameModal.set(true);
         break;
       case 'to-dispatch':
         this.publishOrderToPool();
@@ -1997,19 +2004,30 @@ export class OrderDetailsPageComponent {
       });
   }
 
+  /** Courier modal confirm: run the rapid delivery with the given name. */
+  onCourierNameConfirmed(name: string): void {
+    this.showCourierNameModal.set(false);
+    void this.directFullDelivery(name);
+  }
+
+  /** Courier modal cancel: abort without creating anything. */
+  onCourierNameClosed(): void {
+    this.showCourierNameModal.set(false);
+  }
+
   /**
    * "Envío directo" (entrega completa): en un solo gesto crea una remisión
    * confirmada SIN ruta, la marca como entregada y finaliza la orden.
    * Encadena tres endpoints existentes en secuencia:
    *   1. `POST /store/dispatch-notes/from-order/:orderId`  (confirmed, mode:none;
    *      `items: []` = quick-accept de todo lo pendiente).
-   *   2. `POST /store/dispatch-notes/:id/deliver`.
+   *   2. `POST /store/dispatch-notes/:id/deliver` (con `courier_name` del modal).
    *   3. `POST /store/orders/:id/flow/confirm-delivery`.
    * Ante un fallo en cualquier paso mostramos el toast y abortamos; al terminar
    * recargamos la orden para reflejar el nuevo estado. Reutiliza el mismo
    * `isProcessingAction` de los demás flujos para el loading.
    */
-  private async directFullDelivery(): Promise<void> {
+  private async directFullDelivery(courierName: string): Promise<void> {
     const orderId = this.orderId;
     if (!orderId) return;
     this.isProcessingAction.set(true);
@@ -2021,7 +2039,9 @@ export class OrderDetailsPageComponent {
           items: [],
         }),
       );
-      await firstValueFrom(this.dispatchNotesService.deliver(note.id, {}));
+      await firstValueFrom(
+        this.dispatchNotesService.deliver(note.id, { courier_name: courierName }),
+      );
       await firstValueFrom(this.ordersService.flowConfirmDelivery(orderId));
       this.toastService.success('Orden entregada y finalizada');
       this.loadData();
@@ -2840,6 +2860,14 @@ export class OrderDetailsPageComponent {
         ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
         : 'Consumidor Final';
 
+    // Domiciliario de la entrega rápida: última remisión no anulada con
+    // nombre. Si dispatchNotes() aún no cargó, queda vacío (sin línea).
+    const courierName =
+      this.dispatchNotes()
+        .filter((n) => n.status !== 'voided')
+        .at(-1)
+        ?.courier_name?.trim() || undefined;
+
     return {
       orderId: order.id,
       orderNumber: order.order_number,
@@ -2852,6 +2880,7 @@ export class OrderDetailsPageComponent {
         city: address?.city,
       },
       items,
+      ...(courierName ? { courierName } : {}),
     };
   }
 
