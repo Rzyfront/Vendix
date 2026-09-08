@@ -631,6 +631,41 @@ export class PaymentCollectorComponent implements OnInit {
     this.amountCollapsed.set(false);
   }
 
+  /**
+   * CP-pos-checkout-enter-focus (step A.1) — Enter dedicado del collector,
+   * invocado desde los inputs del sub-paso Monto/detalle con stopPropagation
+   * para que el shell no lo procese dos veces. Un Enter = máximo un submit:
+   * stepped+credito → submit directo (o flash); stepped contado pre-Monto →
+   * mismo avance que `advanceSubStepOrConfirm` del payment-step (Forma→
+   * modoOffset, Método con método elegido→montoIndex, Método sin elegir→
+   * flash); stepped en Monto → confirmAmount (o flash); flat → submit (o flash).
+   */
+  handleEnter(event?: Event): void {
+    void event;
+    if (this.layout() === 'stepped') {
+      if (this.mode() === 'credito') {
+        if (this.canSubmit()) this.triggerSubmit();
+        else this.flashValidation();
+        return;
+      }
+      if (this.subStep() < this.montoIndex()) {
+        if (this.subStep() < this.modoOffset()) {
+          this.goToSubStep(this.modoOffset());
+        } else if (!this.selectedMethod()) {
+          this.flashValidation();
+        } else {
+          this.goToSubStep(this.montoIndex());
+        }
+        return;
+      }
+      if (this.canConfirmAmount()) this.confirmAmount();
+      else this.flashValidation();
+      return;
+    }
+    if (this.canSubmit()) this.triggerSubmit();
+    else this.flashValidation();
+  }
+
   selectMethod(method: PaymentMethod, opts?: { advance?: boolean }): void {
     const advance = opts?.advance !== false;
     this.amountCollapsed.set(false);

@@ -175,6 +175,7 @@
                     [currencyDecimals]="currencyDecimals()"
                     [formControl]="cashReceivedControl"
                     class="pc-cash-input"
+                    (keydown.enter)="handleEnter($event); $event.stopPropagation()"
                   />
                   <span class="pc-cash-suffix" aria-hidden="true">COP</span>
                 </div>
@@ -239,6 +240,7 @@
                   [formControl]="referenceControl"
                   [placeholder]="referenceLabel()"
                   class="pc-input"
+                  (keydown.enter)="handleEnter($event); $event.stopPropagation()"
                 />
               </section>
             }
@@ -321,6 +323,7 @@
                     inputmode="decimal"
                     class="pc-input"
                     aria-label="Monto o porcentaje de propina"
+                    (keydown.enter)="handleEnter($event); $event.stopPropagation()"
                   />
                 </div>
                 <label class="pc-tip-waiter">
@@ -465,6 +468,7 @@
           [formControl]="amountOverrideControl"
           placeholder="Usar monto sugerido"
           class="pc-input"
+          (keydown.enter)="handleEnter($event); $event.stopPropagation()"
         />
         <span class="pc-hint">Si lo dejas vacío se cobra el monto sugerido.</span>
       </section>
@@ -539,6 +543,7 @@
             [formControl]="cashReceivedControl"
             class="pc-input pc-input-lg"
             [class.error]="isCashInsufficient()"
+            (keydown.enter)="handleEnter($event); $event.stopPropagation()"
           />
 
           @if (quickAmounts().length > 0) {
@@ -619,6 +624,7 @@
             [formControl]="referenceControl"
             [placeholder]="referenceLabel()"
             class="pc-input"
+            (keydown.enter)="handleEnter($event); $event.stopPropagation()"
           />
         </section>
       }
@@ -669,6 +675,7 @@
               inputmode="decimal"
               class="pc-input"
               aria-label="Monto o porcentaje de propina"
+              (keydown.enter)="handleEnter($event); $event.stopPropagation()"
             />
           </div>
           <label class="pc-tip-waiter">

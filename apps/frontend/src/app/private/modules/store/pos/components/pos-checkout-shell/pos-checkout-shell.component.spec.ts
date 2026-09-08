@@ -1,6 +1,7 @@
-import { Component, Pipe, PipeTransform, WritableSignal, input, output, runInInjectionContext, signal } from '@angular/core';
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { Component, Directive, Pipe, PipeTransform, WritableSignal, input, output, runInInjectionContext, signal } from '@angular/core';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
+import { ReactiveFormsModule } from '@angular/forms';
 import { of } from 'rxjs';
 
 import { PosCheckoutShellComponent } from './pos-checkout-shell.component';
@@ -11,6 +12,9 @@ import { StoreOrdersService } from '../../../orders/services/store-orders.servic
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { PaymentCollectorComponent } from '../../../../../../shared/components/payment-collector/payment-collector.component';
+import { PaymentMethodsCatalogService } from '../../../../../../shared/services/payment-methods-catalog.service';
+import type { PaymentMethod } from '../../../../../../shared/models/payment-method.model';
 
 /**
  * CP-POS-CHECKOUT-KEYBOARD — matriz teclado × paso del modal de pago.
@@ -149,6 +153,27 @@ class AddressStub {
   readonly validChange = output<boolean>();
 }
 
+/** CP-pos-checkout-enter-focus — stubs para montar el collector real aislado. */
+@Directive({ selector: '[appCurrencyInput]', standalone: true })
+class CurrencyInputStub {
+  readonly currencyDecimals = input<number | undefined>(undefined);
+}
+
+@Component({ selector: 'app-payment-wompi-fields', standalone: true, template: `` })
+class WompiFieldsStub {
+  readonly slice = input<unknown>(null);
+  readonly sliceChange = output<unknown>();
+}
+
+@Component({ selector: 'app-payment-credit-fields', standalone: true, template: `` })
+class CreditFieldsStub {
+  readonly terms = input<unknown>(null);
+  readonly termsChange = output<unknown>();
+  readonly financeBase = input(0);
+  readonly paymentMethods = input<unknown[]>([]);
+  readonly currencyDecimals = input<number | undefined>(undefined);
+}
+
 describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBOARD)', () => {
   let fixture: ComponentFixture<PosCheckoutShellComponent>;
   let component: PosCheckoutShellComponent;
@@ -199,6 +224,12 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     tagName: 'BUTTON',
     isContentEditable: false,
     closest: () => ({}),
+  };
+  // CP-pos-checkout-enter-focus — SELECT nativo (ej. cuenta bancaria).
+  const selectTarget = {
+    tagName: 'SELECT',
+    isContentEditable: false,
+    closest: () => null,
   };
 
   beforeEach(async () => {
@@ -321,6 +352,33 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     expect(confirm).not.toHaveBeenCalled();
   });
 
+  it('Enter sobre SELECT nativo no avanza ni cobra y no previene el default', () => {
+    // Paso intermedio (Cliente): sin el guard, este Enter avanzaría.
+    expect(component.isLastStep()).toBeFalse();
+    const next = spyOn(component, 'attemptNextStep');
+    const confirm = spyOn(component, 'onPrimaryConfirm');
+    const evt = keyEvent('Enter', selectTarget);
+    let prevented = false;
+    evt.preventDefault = () => {
+      prevented = true;
+    };
+    component.onShellKeydown(evt);
+    expect(next).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(prevented).toBeFalse();
+  });
+
+  it('apertura (false→true) enfoca el panel del paso activo', fakeAsync(() => {
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.detectChanges();
+    tick();
+    const focus = spyOn(component as unknown as { focusActiveStepSoon: () => void }, 'focusActiveStepSoon');
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+    tick();
+    expect(focus).toHaveBeenCalledTimes(1);
+  }));
+
   it('evento ya consumido (radiogroup Tipo) no navega doble', () => {
     const next = spyOn(component, 'attemptNextStep');
     const evt = keyEvent('ArrowRight');
@@ -410,5 +468,72 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     stub.needsTableFlag = false;
     advance.advanceConsumo();
     expect(component.currentStep()).toBe(1);
+  });
+});
+
+describe('PaymentCollectorComponent.handleEnter — CP-pos-checkout-enter-focus', () => {
+  let fixture: ComponentFixture<PaymentCollectorComponent>;
+  let component: PaymentCollectorComponent;
+
+  const cashMethod = (overrides: Partial<PaymentMethod> = {}): PaymentMethod => ({
+    id: '1',
+    type: 'cash',
+    name: 'Efectivo',
+    icon: 'banknote',
+    enabled: true,
+    ...overrides,
+  });
+
+  beforeEach(async () => {
+    TestBed.configureTestingModule({
+      imports: [PaymentCollectorComponent],
+      providers: [
+        { provide: PaymentMethodsCatalogService, useValue: { getEnabledMethods: () => of([]) } },
+        {
+          provide: CurrencyFormatService,
+          useValue: { currencySymbol: signal('$'), loadCurrency: () => {} },
+        },
+      ],
+    });
+
+    TestBed.overrideComponent(PaymentCollectorComponent, {
+      set: {
+        imports: [
+          ReactiveFormsModule,
+          IconStub,
+          CurrencyStubPipe,
+          CurrencyInputStub,
+          WompiFieldsStub,
+          CreditFieldsStub,
+          StepsLineStub,
+        ],
+      },
+    });
+
+    await TestBed.compileComponents();
+    fixture = TestBed.createComponent(PaymentCollectorComponent);
+    component = fixture.componentInstance;
+    fixture.componentRef.setInput('amount', 50000);
+    fixture.componentRef.setInput('layout', 'stepped');
+    fixture.componentRef.setInput('autoLoad', false);
+    fixture.detectChanges();
+  });
+
+  it('confirma el monto con defaults (efectivo) sin duplicar submit', () => {
+    component.selectMethod(cashMethod());
+    fixture.detectChanges();
+    // Método elegido → el collector ya está en el sub-paso Monto.
+    expect(component.subStep()).toBe(component.montoIndex());
+    // Defaults: el efectivo se siembra con el total sin tipear nada.
+    expect(component.canConfirmAmount()).toBeTrue();
+
+    const submit = spyOn(component.submit, 'emit');
+    const confirmed = spyOn(component.amountConfirmed, 'emit');
+    component.handleEnter();
+
+    expect(component.amountCollapsed()).toBeTrue();
+    expect(confirmed).toHaveBeenCalledTimes(1);
+    // La confirmación de monto NO es un submit: el shell cobra tras el colapso.
+    expect(submit).not.toHaveBeenCalled();
   });
 });
