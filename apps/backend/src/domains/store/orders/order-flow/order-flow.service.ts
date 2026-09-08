@@ -3,10 +3,12 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  InternalServerErrorException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { order_state_enum } from '@prisma/client';
+import { Prisma, order_state_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { resolveTip } from '@common/utils/tip.util';
@@ -27,6 +29,7 @@ import { MovementsService } from '../../cash-registers/movements/movements.servi
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
 import { OrderEtaService } from '../services/order-eta.service';
+import { KitchenFireService } from '../../kitchen-fire/kitchen-fire.service';
 import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
 import {
   AuditService,
@@ -127,6 +130,14 @@ export class OrderFlowService {
     // state machine. Injected (not global lookup) so the constructor stays
     // the single source of truth for what the service depends on.
     private readonly auditService: AuditService,
+    // Seam `cancelOrderItem` (item-scope): cancela el ticket KDS en `pending`
+    // in-tx + emite su SSE post-commit vía este servicio. `@Optional()` para
+    // no romper las construcciones manuales de 9 args de los specs
+    // históricos (ts-jest typecheckea); en prod el provider siempre resuelve
+    // vía `KitchenFireModule` (ver `order-flow.module.ts`). Si alguna vez
+    // llega `undefined`, `cancelOrderItem` falla fuerte (500 explícito),
+    // nunca salta el KDS en silencio.
+    @Optional() private readonly kitchenFireService?: KitchenFireService,
   ) {}
 
   /**
@@ -1732,6 +1743,259 @@ export class OrderFlowService {
 
     // 5. Devolver la vista de la orden actualizada (forma `getOrder`,
     //    igual que `shipOrder` / `markKitchenOrderDelivered`).
+    return this.getOrder(orderId);
+  }
+
+  /**
+   * Cancelación de ítem a NIVEL DE ORDEN (seam compartido).
+   *
+   * Mudado verbatim de `TableSessionsService.cancelOrderItem`: la mesa queda
+   * como shim fino (sesión abierta + pertenencia a la cuenta) y TODA la regla
+   * vive acá, igual que el precedente `deliverOrderItem`/`markItemDelivered`
+   * (T9 / QUI-652). Cubre órdenes con mesa y sin mesa (POS, take-away,
+   * domicilio, ecommerce).
+   *
+   * Reglas (única copia):
+   *
+   *   1. GUARDS — bloquea solo si la orden está cobrada o en estado terminal
+   *      (`completed`/`cancelled`/`refunded`). NOTA: el guard de
+   *      `payment_status` es muerto hoy (`orders` no tiene esa columna y el
+   *      select no la trae, así que siempre es `undefined`); se conserva
+   *      verbatim para cero divergencia con mesa — el plan lo deja fuera de
+   *      alcance como follow-up auditado.
+   *   2. MOTIVO obligatorio (mín 3 chars): el DTO lo exige (400 sin `reason`);
+   *      la validación acá queda como defensa en profundidad para callers
+   *      directos.
+   *   3. KDS — si el ticket asociado está en `pending` se cancela in-tx (con
+   *      relectura TOCTOU dentro del tx) y se emite `ticket.cancelled`
+   *      post-commit. Si ya avanzó, la cancelación sigue como merma
+   *      (`after_fire_waste`) sin tocar el ticket del cocinero.
+   *   4. STOCK — reversión SOLO en la rama defensiva `before_fire` + fired
+   *      (inconsistente por construcción; se defiende igual). En
+   *      `after_fire_waste` NO se revierte: queda como merma.
+   *   5. SOFT CANCEL + recálculo filtrando `cancelled_at IS NULL`.
+   *   6. IDEMPOTENCIA — ítem ya cancelado devuelve la vista sin reescribir
+   *      (`cancelled_at` queda fijo en la primera cancelación).
+   *
+   * Scope multi-tenant: `getOrder` (404 si la orden no es de la tienda) +
+   * `order_items.findFirst` con `order_id: orderId` (si el ítem es de otra
+   * orden/tienda, 404 sin filtrar nada).
+   *
+   * Devuelve la vista básica de la orden (forma `getOrder`, igual que
+   * `deliverOrderItem`) para que el frontend reemplace su estado.
+   */
+  async cancelOrderItem(
+    orderId: number,
+    orderItemId: number,
+    reason: string,
+    cancellationType?: 'before_fire' | 'after_fire_waste',
+  ) {
+    // 1. Orden debe existir en la tienda del contexto. `getOrder` lanza 404
+    //    si no la encuentra o no pertenece al scope.
+    const order = await this.getOrder(orderId);
+
+    // Guards paid/terminal — espejo exacto de mesa (ver nota del docblock
+    // sobre el guard muerto de `payment_status`).
+    const BLOCKED_STATES = ['completed', 'cancelled', 'refunded'] as const;
+    const isPaid =
+      (order as any).payment_status === 'paid' ||
+      (order as any).payment_status === 'succeeded';
+    if (isPaid) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        'No se puede cancelar un ítem de una orden ya cobrada',
+      );
+    }
+    if (BLOCKED_STATES.includes(order.state as any)) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        `No se puede cancelar un ítem en estado '${order.state}'`,
+      );
+    }
+
+    // 2. El ítem debe pertenecer a ESTA orden (barrera de scope: 404 sin
+    //    filtrar nada de otra orden/tenant, igual que `deliverOrderItem`).
+    const orderItem = await this.prisma.order_items.findFirst({
+      where: { id: orderItemId, order_id: orderId },
+      select: {
+        id: true,
+        product_name: true,
+        inventory_consumed_at_fire: true,
+        cancelled_at: true,
+        kitchen_ticket_items: {
+          orderBy: { id: 'desc' },
+          select: {
+            id: true,
+            status: true,
+            kitchen_ticket_id: true,
+            kitchen_ticket: {
+              select: { id: true, status: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!orderItem) {
+      throw new NotFoundException(
+        `Order item #${orderItemId} not found on order #${orderId}`,
+      );
+    }
+
+    // 3. Idempotencia: la primera cancelación es la que ocurrió.
+    if (orderItem.cancelled_at) {
+      return this.getOrder(orderId);
+    }
+
+    // 4. Derivar el tipo contable si el caller no lo proveyó + motivo
+    //    obligatorio (defensa en profundidad; el DTO ya lo exige).
+    const wasFired = orderItem.inventory_consumed_at_fire === true;
+    const resolvedType: 'before_fire' | 'after_fire_waste' =
+      cancellationType ?? (wasFired ? 'after_fire_waste' : 'before_fire');
+
+    if (!reason || reason.trim().length < 3) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'Debes proporcionar un motivo de cancelación (mínimo 3 caracteres)',
+      );
+    }
+
+    // 5. Estado KDS: `kitchen_ticket_items` viene desc por id, [0] es el
+    //    más reciente.
+    const activeKti = orderItem.kitchen_ticket_items[0] ?? null;
+    const ticketStatus = activeKti?.kitchen_ticket?.status ?? null;
+    const ticketId = activeKti?.kitchen_ticket?.id ?? null;
+    const isPendingTicket = wasFired && ticketStatus === 'pending';
+
+    // El KDS es obligatorio para este seam (un ticket `pending` huérfano
+    // dejaría al cocinero cocinando un plato cancelado). Falla fuerte si el
+    // DI no lo cableó — nunca se salta en silencio.
+    const kds = this.kitchenFireService;
+    if (!kds) {
+      throw new InternalServerErrorException(
+        'KitchenFireService no disponible en OrderFlowService (revisar imports de OrderFlowModule)',
+      );
+    }
+
+    let cancelledTicketId: number | null = null;
+
+    await this.prisma.$transaction(async (tx) => {
+      // Cancelar el ticket KDS SOLO si está en `pending`.
+      if (isPendingTicket && ticketId != null) {
+        // TOCTOU guard: el cocinero puede haber avanzado el ticket entre la
+        // lectura y este tx. Releer y revalidar dentro del tx.
+        const freshTicket = await tx.kitchen_tickets.findFirst({
+          where: { id: ticketId },
+          select: { status: true },
+        });
+        if (freshTicket && freshTicket.status === 'pending') {
+          await kds.cancelTicketInTx(tx, ticketId);
+          cancelledTicketId = ticketId;
+        }
+        // Si el ticket ya no está pending al iniciar el tx, no lo
+        // cancelamos pero la cancelación del ítem sigue adelante
+        // (registrada como merma).
+      }
+
+      // Reversión de stock SOLO en before_fire (no fired). En
+      // after_fire_waste NO se revierte — queda como merma.
+      if (resolvedType === 'before_fire' && wasFired) {
+        // Esto no debería ocurrir (si `wasFired` es true, resolvedType
+        // sería `after_fire_waste`), pero se defiende igual por si el
+        // caller envía un type explícito inconsistente.
+        const consumptionTxns = await tx.inventory_transactions.findMany({
+          where: {
+            order_item_id: orderItemId,
+            quantity_change: { lt: 0 },
+          },
+          select: {
+            product_id: true,
+            product_variant_id: true,
+            quantity_change: true,
+          },
+        });
+        for (const ct of consumptionTxns) {
+          const locationId =
+            await this.stockLevelManager.getDefaultLocationForProduct(
+              ct.product_id,
+              ct.product_variant_id ?? undefined,
+            );
+          await this.stockLevelManager.updateStock(
+            {
+              product_id: ct.product_id,
+              variant_id: ct.product_variant_id ?? undefined,
+              location_id: locationId,
+              quantity_change: Math.abs(ct.quantity_change),
+              movement_type: 'return',
+              reason: 'Reversa cancelación ítem orden — antes de disparar',
+              source_module: 'order_item_cancellation',
+              // NO order_item_id: la reversa no debe crear un hijo que
+              // apunte al order_item cancelado (FK onDelete: Restrict).
+              create_movement: true,
+              validate_availability: false,
+            },
+            tx,
+          );
+        }
+      }
+
+      // Soft cancel: el ítem queda VISIBLE marcado como cancelado, pero
+      // EXCLUIDO de los totales. Motivo + tipo contable persistidos para
+      // auditoría y para que el KDS / detalle de orden los muestre.
+      await tx.order_items.update({
+        where: { id: orderItemId },
+        data: {
+          cancelled_at: new Date(),
+          cancellation_reason: reason.trim(),
+          cancellation_type: resolvedType,
+          updated_at: new Date(),
+        },
+      });
+
+      // Recálculo excluyendo cancelados (`cancelled_at IS NULL`).
+      const activeItems = await tx.order_items.findMany({
+        where: { order_id: orderId, cancelled_at: null },
+        select: { total_price: true, tax_amount_item: true },
+      });
+      const subtotal = activeItems.reduce(
+        (acc, it) => acc + Number(it.total_price),
+        0,
+      );
+      const tax = activeItems.reduce(
+        (acc, it) => acc + Number(it.tax_amount_item ?? 0),
+        0,
+      );
+      await tx.orders.update({
+        where: { id: orderId },
+        data: {
+          subtotal_amount: new Prisma.Decimal(subtotal),
+          tax_amount: new Prisma.Decimal(tax),
+          grand_total: new Prisma.Decimal(subtotal + tax),
+          updated_at: new Date(),
+        },
+      });
+    });
+
+    // Post-commit: emitir `ticket.cancelled` SOLO si cancelamos un ticket
+    // que efectivamente estaba en `pending`.
+    if (cancelledTicketId != null) {
+      try {
+        await kds.emitTicketCancelledEvent(cancelledTicketId);
+      } catch (err) {
+        this.logger.warn(
+          `Failed to emit ticket.cancelled for ticket #${cancelledTicketId}: ${
+            (err as Error).message
+          }`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Order item cancelled: order=${orderId} item=${orderItemId} type=${resolvedType} fired=${wasFired} ticketCancelled=${cancelledTicketId != null}`,
+    );
+
+    // 6. Devolver la vista de la orden actualizada (forma `getOrder`,
+    //    igual que `deliverOrderItem`).
     return this.getOrder(orderId);
   }
 

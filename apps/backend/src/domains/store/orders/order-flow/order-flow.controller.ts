@@ -41,6 +41,7 @@ import { VendixHttpException } from '@common/errors';
 import { ErrorCodes } from '@common/errors/error-codes';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { CancelOrderItemDto } from '../../tables/dto/cancel-order-item.dto';
 
 @Controller('store/orders/:orderId/flow')
 @UseGuards(PermissionsGuard)
@@ -310,6 +311,39 @@ export class OrderFlowController {
     return this.responseService.success(
       order,
       'Order item delivered successfully',
+    );
+  }
+
+  // Cancelación de ítem a NIVEL DE ORDEN (un plato, una cerveza, etc).
+  // Espejo del seam `deliver` de arriba: antes solo existía el endpoint
+  // nivel-sesión (`POST /store/tables/sessions/:id/items/:orderItemId/cancel`),
+  // inaccesible para órdenes sin mesa (POS / take-away / domicilio). Esta
+  // ruta abre ese hueco con el mismo permiso de flujo de orden que el resto
+  // del namespace, para que un operador con `order_flow:create` pueda
+  // cancelar ítems en cualquier orden no cobrada de su tienda.
+  //
+  // Va acá (no en `orders.controller.ts`) por la misma razón que deliver:
+  // el `@Controller` del namespace de flow agrupa las acciones de progreso
+  // de la orden; el CRUD plano de orden queda para lectura/edición de
+  // borrador. El DTO se reutiliza de mesa (`CancelOrderItemDto`: `reason`
+  // 3–500 + `cancellation_type?` opcional) — sin duplicarlo.
+  @Patch('items/:orderItemId/cancel')
+  @Permissions('store:orders:order_flow:create')
+  @HttpCode(HttpStatus.OK)
+  async cancelOrderItem(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Param('orderItemId', ParseIntPipe) orderItemId: number,
+    @Body() dto: CancelOrderItemDto,
+  ) {
+    const order = await this.orderFlowService.cancelOrderItem(
+      orderId,
+      orderItemId,
+      dto.reason,
+      dto.cancellation_type,
+    );
+    return this.responseService.success(
+      order,
+      'Order item cancelled successfully',
     );
   }
 

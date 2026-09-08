@@ -1,4 +1,8 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { OrderFlowService } from './order-flow.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -55,6 +59,24 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
       // retorna sin tocar cupones. Mock explícito para evitar TypeErrors.
       orders: {
         findFirst: jest.fn().mockResolvedValue(null),
+        // Fix v2 (race-claim FB-10): `payOrder` reclama la orden con
+        // `orders.updateMany` ANTES de leerla. Sin este mock el describe
+        // cae con `updateMany is not a function` (roto desde el PR que metió
+        // el claim, sin relación con el seam cancelOrderItem). `count: 1`
+        // = la orden era pagable y el flujo sigue a la rama que el test
+        // espía (`updateOrderState`).
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      // CP-POS-MODAL-SCOPE-001 / C.4: `payOrder` exige cliente salvo escape
+      // hatch `pos.allow_anonymous_sales`. La orden mockeada no trae
+      // `customer_id`; sin este mock el describe cae con
+      // `store_settings.findFirst is not a function` (misma staleness que
+      // el claim de arriba). Se permite anónimo para preservar la ruta que
+      // el test ejercita desde su creación.
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: { pos: { allow_anonymous_sales: true } },
+        }),
       },
       coupon_uses: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -627,5 +649,284 @@ describe('OrderFlowService.revertKitchenOrderDelivery — kitchen bridge reverse
     await expect(
       service.revertKitchenOrderDelivery(ORDER_ID),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+/**
+ * PLAN-order-detail-cancel-item (paso 1) — contrato del seam compartido
+ * {@link OrderFlowService.cancelOrderItem} (mudado de mesa).
+ *
+ * Cubre: 404 orden / 404 ítem ajeno, guards paid/terminal (409), motivo
+ * obligatorio (422 en llamada directa), idempotencia, derivación del tipo
+ * contable, soft cancel + recálculo con `cancelled_at IS NULL`, cancel KDS
+ * `pending` in-tx + SSE post-commit, TOCTOU (ticket avanzado → merma sin
+ * tocar cocina) y fail-loud si el KDS no está cableado.
+ */
+describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
+  const ORDER_ID = 1017;
+  const ITEM_ID = 501;
+  const TICKET_ID = 77;
+
+  const unfiredItem = (overrides: Record<string, unknown> = {}) => ({
+    id: ITEM_ID,
+    product_name: 'Bandeja paisa',
+    inventory_consumed_at_fire: false,
+    cancelled_at: null,
+    kitchen_ticket_items: [],
+    ...overrides,
+  });
+
+  const firedItemPending = () => ({
+    ...unfiredItem({ inventory_consumed_at_fire: true }),
+    kitchen_ticket_items: [
+      {
+        id: 900,
+        status: 'pending',
+        kitchen_ticket_id: TICKET_ID,
+        kitchen_ticket: { id: TICKET_ID, status: 'pending' },
+      },
+    ],
+  });
+
+  const buildService = (opts: {
+    order?: Record<string, unknown>;
+    orderError?: unknown;
+    // `undefined` → ítem base sin disparar; `null` → ítem inexistente (404).
+    item?: Record<string, unknown> | null;
+    freshTicketStatus?: string | null;
+    activeItems?: Array<{ total_price: number; tax_amount_item: number | null }>;
+    withKds?: boolean;
+  }) => {
+    const txMock: any = {
+      kitchen_tickets: {
+        findFirst: jest.fn().mockResolvedValue(
+          opts.freshTicketStatus == null
+            ? null
+            : { status: opts.freshTicketStatus },
+        ),
+      },
+      inventory_transactions: { findMany: jest.fn().mockResolvedValue([]) },
+      order_items: {
+        update: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue(
+          opts.activeItems ?? [{ total_price: 50000, tax_amount_item: 0 }],
+        ),
+      },
+      orders: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const prismaMock: any = {
+      order_items: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(
+            opts.item === undefined ? unfiredItem() : opts.item,
+          ),
+      },
+      $transaction: jest.fn((cb: any) => cb(txMock)),
+    };
+    const stockLevelManager = {
+      getDefaultLocationForProduct: jest.fn().mockResolvedValue(1),
+      updateStock: jest.fn().mockResolvedValue({}),
+    };
+    const kitchenFireService = {
+      cancelTicketInTx: jest.fn().mockResolvedValue(undefined),
+      emitTicketCancelledEvent: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      stockLevelManager as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      (opts.withKds === false ? undefined : kitchenFireService) as any,
+    );
+
+    if (opts.orderError !== undefined) {
+      jest
+        .spyOn(service as any, 'getOrder')
+        .mockRejectedValue(opts.orderError);
+    } else {
+      jest
+        .spyOn(service as any, 'getOrder')
+        .mockResolvedValue(opts.order ?? { id: ORDER_ID, state: 'created' });
+    }
+
+    return { service, prismaMock, txMock, stockLevelManager, kitchenFireService };
+  };
+
+  it('404 si la orden no existe en la tienda', async () => {
+    const { service, prismaMock } = buildService({
+      orderError: new NotFoundException(`Order #${ORDER_ID} not found`),
+    });
+
+    await expect(
+      service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(prismaMock.order_items.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('404 si el ítem no pertenece a la orden (sin filtrar)', async () => {
+    const { service, prismaMock } = buildService({ item: null });
+
+    await expect(
+      service.cancelOrderItem(ORDER_ID, 999999, 'cliente se arrepintió'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(prismaMock.order_items.findFirst).toHaveBeenCalledWith({
+      where: { id: 999999, order_id: ORDER_ID },
+      select: expect.anything(),
+    });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('idempotencia: ítem ya cancelado devuelve la vista sin reescribir', async () => {
+    const CANCELLED_AT = new Date('2026-09-01T12:00:00.000Z');
+    const { service, prismaMock, kitchenFireService } = buildService({
+      item: unfiredItem({ cancelled_at: CANCELLED_AT }),
+    });
+
+    const result = await service.cancelOrderItem(
+      ORDER_ID,
+      ITEM_ID,
+      'segundo intento con otro motivo',
+    );
+
+    expect((result as any).id).toBe(ORDER_ID);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(kitchenFireService.cancelTicketInTx).not.toHaveBeenCalled();
+    expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
+  });
+
+  it('409 si la orden está cobrada (payment_status paid)', async () => {
+    const { service } = buildService({
+      order: { id: ORDER_ID, state: 'created', payment_status: 'paid' },
+    });
+
+    await expect(
+      service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió'),
+    ).rejects.toMatchObject({
+      errorCode: 'TABLE_SESSION_ITEM_NOT_REMOVABLE',
+    });
+  });
+
+  it('409 si la orden está en estado terminal', async () => {
+    const { service, prismaMock } = buildService({
+      order: { id: ORDER_ID, state: 'completed' },
+    });
+
+    await expect(
+      service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió'),
+    ).rejects.toMatchObject({
+      errorCode: 'TABLE_SESSION_ITEM_NOT_REMOVABLE',
+    });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('422 si el motivo tiene menos de 3 caracteres (defensa en profundidad)', async () => {
+    const { service, prismaMock } = buildService({});
+
+    await expect(
+      service.cancelOrderItem(ORDER_ID, ITEM_ID, 'x'),
+    ).rejects.toMatchObject({
+      errorCode: 'TABLE_SESSION_ADD_ITEMS_INVALID',
+    });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('happy before_fire: soft cancel + recálculo excluyendo cancelados', async () => {
+    const { service, txMock, kitchenFireService } = buildService({
+      activeItems: [
+        { total_price: 50000, tax_amount_item: 8000 },
+        { total_price: 20000, tax_amount_item: 0 },
+      ],
+    });
+
+    await service.cancelOrderItem(
+      ORDER_ID,
+      ITEM_ID,
+      '  cliente se arrepintió  ',
+    );
+
+    expect(txMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({
+        cancellation_reason: 'cliente se arrepintió',
+        cancellation_type: 'before_fire',
+        updated_at: expect.any(Date),
+      }),
+    });
+    const updateData = txMock.orders.update.mock.calls[0][0].data;
+    expect(Number(updateData.subtotal_amount)).toBe(70000);
+    expect(Number(updateData.tax_amount)).toBe(8000);
+    expect(Number(updateData.grand_total)).toBe(78000);
+    expect(kitchenFireService.cancelTicketInTx).not.toHaveBeenCalled();
+    expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
+  });
+
+  it('happy after_fire pending: cancela el ticket in-tx + SSE post-commit', async () => {
+    const { service, txMock, kitchenFireService } = buildService({
+      item: firedItemPending(),
+      freshTicketStatus: 'pending',
+    });
+
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'se quemó el plato');
+
+    expect(kitchenFireService.cancelTicketInTx).toHaveBeenCalledTimes(1);
+    expect(kitchenFireService.cancelTicketInTx.mock.calls[0][1]).toBe(
+      TICKET_ID,
+    );
+    expect(kitchenFireService.emitTicketCancelledEvent).toHaveBeenCalledWith(
+      TICKET_ID,
+    );
+    expect(txMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({ cancellation_type: 'after_fire_waste' }),
+    });
+  });
+
+  it('TOCTOU: ticket avanzado en cocina → merma sin tocar el KDS', async () => {
+    const { service, txMock, kitchenFireService } = buildService({
+      item: firedItemPending(),
+      freshTicketStatus: 'in_preparation',
+    });
+
+    await service.cancelOrderItem(ORDER_ID, ITEM_ID, 'el cliente se fue');
+
+    expect(kitchenFireService.cancelTicketInTx).not.toHaveBeenCalled();
+    expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
+    expect(txMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({ cancellation_type: 'after_fire_waste' }),
+    });
+  });
+
+  it('cancellation_type explícito se respeta aunque sea inconsistente', async () => {
+    const { service, txMock, stockLevelManager } = buildService({});
+
+    await service.cancelOrderItem(
+      ORDER_ID,
+      ITEM_ID,
+      'merma pactada con el dueño',
+      'after_fire_waste',
+    );
+
+    expect(txMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({ cancellation_type: 'after_fire_waste' }),
+    });
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('falla fuerte si KitchenFireService no está cableado', async () => {
+    const { service } = buildService({ withKds: false });
+
+    await expect(
+      service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió'),
+    ).rejects.toBeInstanceOf(InternalServerErrorException);
   });
 });
