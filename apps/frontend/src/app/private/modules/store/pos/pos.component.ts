@@ -564,8 +564,8 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         [tableId]="restaurantIntegration.currentTableSession()?.table_id ?? null"
         [mode]="checkoutMode()"
         [editingOrderId]="editingOrderIdAsNumber()"
-        (isOpenChange)="showCheckoutModal.set($event)"
-        (closed)="showCheckoutModal.set(false)"
+        (isOpenChange)="onCheckoutOpenChange($event)"
+        (closed)="onCheckoutModalClosed()"
         (checkoutCompleted)="onPaymentCompleted($event)"
         (shippingCompleted)="onShippingCompleted($event)"
         (requestCustomer)="onOpenCustomerModal()"
@@ -588,7 +588,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         @defer (when showSessionOpenModal()) {
           <app-pos-session-open-modal
             [isOpen]="showSessionOpenModal()"
-            (isOpenChange)="showSessionOpenModal.set($event)"
+            (isOpenChange)="onSessionOpenChange($event)"
             (sessionOpened)="onSessionOpened($event)"
           ></app-pos-session-open-modal>
         }
@@ -597,7 +597,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           <app-pos-session-close-modal
             [isOpen]="showSessionCloseModal()"
             [session]="activeSession()"
-            (isOpenChange)="showSessionCloseModal.set($event)"
+            (isOpenChange)="onSessionCloseChange($event)"
             (sessionClosed)="onSessionClosed($event)"
           ></app-pos-session-close-modal>
         }
@@ -606,7 +606,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           <app-pos-ai-summary-modal
             [isOpen]="showAISummaryModal()"
             [sessionId]="closedSessionIdForSummary()"
-            (isOpenChange)="showAISummaryModal.set($event)"
+            (isOpenChange)="onAISummaryChange($event)"
           ></app-pos-ai-summary-modal>
         }
 
@@ -614,7 +614,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           <app-pos-cash-movement-modal
             [isOpen]="showCashMovementModal()"
             [sessionId]="activeSession()?.id || null"
-            (isOpenChange)="showCashMovementModal.set($event)"
+            (isOpenChange)="onCashMovementChange($event)"
             (movementCreated)="onMovementCreated($event)"
           ></app-pos-cash-movement-modal>
         }
@@ -623,7 +623,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           <app-pos-session-detail-modal
             [isOpen]="showSessionDetailModal()"
             [session]="activeSession()"
-            (isOpenChange)="showSessionDetailModal.set($event)"
+            (isOpenChange)="onSessionDetailChange($event)"
           ></app-pos-session-detail-modal>
         }
       }
@@ -634,7 +634,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           [businessHours]="businessHours()"
           [isWithinHours]="!isActuallyOutOfHours()"
           [todayKey]="todayKey"
-          (isOpenChange)="showScheduleModal.set($event)"
+          (isOpenChange)="onScheduleChange($event)"
           (goToSettings)="showScheduleModal.set(false); goToSettings()"
         ></app-pos-schedule-modal>
       }
@@ -645,7 +645,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           [posCustomer]="selectedCustomer()"
           (customerSelected)="onCustomerSelected($event)"
           (scheduled)="onPosServiceScheduled($event)"
-          (cancelled)="showReservationModal.set(false)"
+          (cancelled)="onBookingModalClosed()"
         ></app-booking-scheduler-modal>
       }
 
@@ -656,7 +656,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           [customer]="selectedCustomer()"
           [isSaving]="loading()"
           (save)="onLayawayConfigSave($event)"
-          (close)="showLayawayConfigModal.set(false)"
+          (close)="onLayawayConfigClosed()"
         ></app-layaway-config-modal>
       }
     </div>
@@ -691,7 +691,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       [remainingBalance]="0"
       [installments]="[]"
       [isProcessing]="isCharging()"
-      (isOpenChange)="chargeModalOpen.set($event)"
+      (isOpenChange)="onChargeOpenChange($event)"
       (closed)="onChargeModalClosed()"
       (paymentSubmitted)="onPaymentSubmitted($event)"
     ></app-order-payment-modal>
@@ -1189,6 +1189,26 @@ export class PosComponent {
   private readonly productSelectionList = viewChildren(
     PosProductSelectionComponent,
   );
+
+  /**
+   * CP-pos-checkout-enter-focus (step A.2) — devuelve el foco al buscador de
+   * productos tras cerrar cualquier modal del POS. Diferido ~50ms para dejar
+   * que la animación de cierre libere el foco. Recorre todas las instancias
+   * (desktop + móvil, una oculta por CSS); enfocar la oculta es no-op en el
+   * navegador. No-op total si el buscador no está montado (p. ej. overlay de
+   * fuera de horario); jamás lanza en un flujo de cierre.
+   */
+  private focusSearchSoon(): void {
+    setTimeout(() => {
+      try {
+        for (const child of this.productSelectionList()) {
+          child?.focusSearch();
+        }
+      } catch {
+        // El foco nunca debe romper un flujo de cierre.
+      }
+    }, 50);
+  }
   private customerService = inject(PosCustomerService);
   private vexiPos = inject(VexiPosBridgeService);
   private vexiHosts = inject(VexiUiHostRegistry);
@@ -1448,6 +1468,7 @@ export class PosComponent {
     this.showCustomerModal.set(false);
     this.editingCustomer.set(null);
     this.openInQueueMode.set(false);
+    this.focusSearchSoon();
   }
 
   onCustomerCreated(customer: PosCustomer): void {
@@ -1458,6 +1479,7 @@ export class PosComponent {
       .subscribe(() => {
         this.showCustomerModal.set(false);
         this.toastService.success('Cliente agregado correctamente');
+        this.focusSearchSoon();
       });
   }
 
@@ -1469,6 +1491,7 @@ export class PosComponent {
       .subscribe(() => {
         this.showCustomerModal.set(false);
         this.toastService.success('Cliente actualizado correctamente');
+        this.focusSearchSoon();
       });
   }
 
@@ -1480,6 +1503,7 @@ export class PosComponent {
       .subscribe(() => {
         this.showCustomerModal.set(false);
         this.toastService.success('Cliente asignado correctamente');
+        this.focusSearchSoon();
       });
   }
 
@@ -1818,6 +1842,7 @@ export class PosComponent {
 
     this.loading.set(true);
     this.showLayawayConfigModal.set(false);
+    this.focusSearchSoon();
 
     const items = this.cartState()!.items.map((item) => ({
       product_id:
@@ -2078,6 +2103,21 @@ export class PosComponent {
       });
   }
 
+  /**
+   * CP-pos-checkout-enter-focus (step A.2) — cierre del shell de checkout
+   * (cancelar / X / backdrop). Devuelve el foco al buscador.
+   */
+  onCheckoutModalClosed(): void {
+    this.showCheckoutModal.set(false);
+    this.focusSearchSoon();
+  }
+
+  /** Espejo del anterior para el output `isOpenChange` del shell. */
+  onCheckoutOpenChange(open: boolean): void {
+    this.showCheckoutModal.set(open);
+    if (!open) this.focusSearchSoon();
+  }
+
   onCheckout(): void {
     if (!this.cartState() || this.isEmpty) return;
 
@@ -2220,6 +2260,13 @@ export class PosComponent {
    */
   onChargeModalClosed(): void {
     this.chargeModalOpen.set(false);
+    this.focusSearchSoon();
+  }
+
+  /** Espejo del anterior para el output `isOpenChange` del modal de cobro. */
+  onChargeOpenChange(open: boolean): void {
+    this.chargeModalOpen.set(open);
+    if (!open) this.focusSearchSoon();
   }
 
   /**
@@ -2275,6 +2322,7 @@ export class PosComponent {
         next: (response: any) => {
           this.isCharging.set(false);
           this.chargeModalOpen.set(false);
+          this.focusSearchSoon();
           // CP-POS-SVC-PERF-001 / Annotation-4 — once payment clears,
           // any booking blocks the cashier attached during the
           // wizard have to land on the order, regardless of the
@@ -2555,11 +2603,16 @@ export class PosComponent {
       paymentData.order,
       'auto_with_pos',
     );
+
+    // CP-pos-checkout-enter-focus (step A.2) — venta terminada: el foco
+    // vuelve al buscador (la confirmación, si abrió, re-enfoca al cerrarse).
+    this.focusSearchSoon();
   }
 
   onOrderConfirmationClosed(): void {
     this.showOrderConfirmation.set(false);
     this.completedOrder.set(null);
+    this.focusSearchSoon();
   }
 
   onStartNewSale(): void {
@@ -2591,6 +2644,7 @@ export class PosComponent {
     );
 
     this.onClearCart();
+    this.focusSearchSoon();
   }
 
   onBookingRequired(event: any): void {
@@ -2605,6 +2659,7 @@ export class PosComponent {
 
   onPosServiceScheduled(booking: any): void {
     this.showReservationModal.set(false);
+    this.focusSearchSoon();
     const prod = this.pendingBookingProduct();
     const variant = this.pendingBookingVariant();
     if (!prod) return;
@@ -2672,6 +2727,7 @@ export class PosComponent {
 
   onBookingCreated(event?: any): void {
     this.showReservationModal.set(false);
+    this.focusSearchSoon();
 
     const reservationCustomer = event?.customer || event;
     const booking = event?.booking;
@@ -2796,6 +2852,7 @@ export class PosComponent {
     this.showReservationModal.set(false);
     this.pendingBookingProduct.set(null);
     this.pendingBookingVariant.set(null);
+    this.focusSearchSoon();
   }
 
   onViewOrderDetail(orderId: string): void {
@@ -2819,6 +2876,7 @@ export class PosComponent {
 
   onCloseCartModal(): void {
     this.showCartModal.set(false);
+    this.focusSearchSoon();
   }
 
   openCustomItemModal(): void {
@@ -2836,6 +2894,7 @@ export class PosComponent {
 
   closeCustomItemModal(): void {
     this.customItemModalOpen.set(false);
+    this.focusSearchSoon();
   }
 
   /**
@@ -3497,6 +3556,10 @@ export class PosComponent {
       shippingData.order,
       'auto_on_postventa',
     );
+
+    // CP-pos-checkout-enter-focus (step A.2) — envío terminado: el foco
+    // vuelve al buscador (la confirmación, si abrió, re-enfoca al cerrarse).
+    this.focusSearchSoon();
   }
 
   private checkEditMode(): void {
@@ -4283,11 +4346,13 @@ export class PosComponent {
     this.cashRegisterService.activeSession.set(session);
     this.showSessionOpenModal.set(false);
     this.toastService.success(`Caja "${session.register?.name}" abierta`);
+    this.focusSearchSoon();
   }
 
   onSessionClosed(session: CashRegisterSession): void {
     this.cashRegisterService.activeSession.set(null);
     this.showSessionCloseModal.set(false);
+    this.focusSearchSoon();
 
     this.closedSessionIdForSummary.set(session.id);
     this.showAISummaryModal.set(true);
@@ -4304,6 +4369,48 @@ export class PosComponent {
 
   onMovementCreated(_movement: any): void {
     this.showCashMovementModal.set(false);
+    this.focusSearchSoon();
+  }
+
+  /**
+   * CP-pos-checkout-enter-focus (step A.2) — espejos `isOpenChange` para los
+   * modales que solo cierran por esa vía (sesión open/close/movimiento/
+   * detalle, horarios, resumen IA). Devuelven el foco al buscador al cerrar.
+   */
+  onSessionOpenChange(open: boolean): void {
+    this.showSessionOpenModal.set(open);
+    if (!open) this.focusSearchSoon();
+  }
+
+  onSessionCloseChange(open: boolean): void {
+    this.showSessionCloseModal.set(open);
+    if (!open) this.focusSearchSoon();
+  }
+
+  onCashMovementChange(open: boolean): void {
+    this.showCashMovementModal.set(open);
+    if (!open) this.focusSearchSoon();
+  }
+
+  onSessionDetailChange(open: boolean): void {
+    this.showSessionDetailModal.set(open);
+    if (!open) this.focusSearchSoon();
+  }
+
+  onScheduleChange(open: boolean): void {
+    this.showScheduleModal.set(open);
+    if (!open) this.focusSearchSoon();
+  }
+
+  onAISummaryChange(open: boolean): void {
+    this.showAISummaryModal.set(open);
+    if (!open) this.focusSearchSoon();
+  }
+
+  /** Cierre del modal de configuración del plan separé (cancelar / X). */
+  onLayawayConfigClosed(): void {
+    this.showLayawayConfigModal.set(false);
+    this.focusSearchSoon();
   }
   // ------------------------------------------------------------------ QUI-655
   /**
