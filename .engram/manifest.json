@@ -1960,6 +1960,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "70705ab7",
+      "created_by": "rzy",
+      "created_at": "2026-09-08T20:10:04Z",
+      "sessions": 1,
+      "memories": 6,
+      "prompts": 0
     }
   ]
 }
