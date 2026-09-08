@@ -346,8 +346,15 @@ export class RecipesService {
    * (`product_variant_id IS NULL`). The fallback exists ONLY for recipes
    * created before this change — the UI no longer allows creating base
    * recipes on variantized products, so that set is finite and non-growing.
-   * Without `variantId` the lookup is by product only (unchanged legacy path
-   * for simple products).
+   * Without `variantId` the lookup is by product only — el llamador (el picker
+   * "sin papas" del POS y el modal de detalle del KDS) no sabe de que variante
+   * habla. Como `recipes.product_id` dejo de ser unico
+   * (`20260908000000_recipes_por_variante`), ese camino podia devolver la
+   * receta de CUALQUIER variante: `findFirst` sin `orderBy` deja el orden a
+   * Postgres. DECISION: gana la receta BASE (`product_variant_id IS NULL`) y,
+   * si el plato solo tiene recetas por variante, la de menor
+   * `product_variant_id` — arbitraria pero ESTABLE. Ademas solo se consideran
+   * recetas ACTIVAS, que es lo que ambos consumidores piden.
    */
   async findByProduct(productId: number, variantId?: number) {
     const include = {
@@ -391,7 +398,13 @@ export class RecipesService {
       return base;
     }
     const recipe = await this.prisma.recipes.findFirst({
-      where: { product_id: productId },
+      where: { product_id: productId, is_active: true },
+      // `nulls: 'first'` pone la receta BASE por delante de las de variante;
+      // el desempate por `id` cierra cualquier ambiguedad restante.
+      orderBy: [
+        { product_variant_id: { sort: 'asc', nulls: 'first' } },
+        { id: 'asc' },
+      ],
       include,
     });
     if (!recipe) {
@@ -646,8 +659,19 @@ export class RecipesService {
         throw new VendixHttpException(ErrorCodes.RECIPE_CYCLE_DETECTED);
       }
 
+      // Recetas-por-variante: una sub-receta es SIEMPRE la BASE del insumo.
+      // `recipe_items` no guarda variante y `addItem` rechaza componentes
+      // variantizados (`RECIPE_COMPONENT_HAS_VARIANTS`), pero ese guard corre
+      // al dar de alta el renglon y no impide que un producto ya usado como
+      // insumo se variantice DESPUES. Sin el filtro, el recorrido tomaba una
+      // fila arbitraria. Se fija a la base para caminar exactamente el mismo
+      // grafo que recorre `explodeBomRecursive`.
       const ownRecipe = await this.prisma.recipes.findFirst({
-        where: { product_id: productId, is_active: true },
+        where: {
+          product_id: productId,
+          product_variant_id: null,
+          is_active: true,
+        },
         select: { id: true },
       });
       if (!ownRecipe) {
@@ -780,14 +804,19 @@ export class RecipesService {
 
       // Does the component itself own an active recipe (sub-prep)?
       //
-      // Recetas-por-variante (paso 4): this lookup is INTENTIONALLY by base
-      // product only and does NOT change. A component (`recipe_items`) can
-      // never have variants — `addItem` rejects variantized components with
-      // RECIPE_COMPONENT_HAS_VARIANTS (ADR-1 yield/components split) — so a
-      // sub-recipe is always the base recipe of the component product.
+      // Recetas-por-variante: una sub-receta es SIEMPRE la receta BASE del
+      // producto insumo. `recipe_items` no tiene columna de variante y
+      // `addItem` rechaza componentes variantizados
+      // (`RECIPE_COMPONENT_HAS_VARIANTS`, ADR-1 yield/components split) — pero
+      // ese guard corre al dar de alta el renglon y NO impide que un producto
+      // ya usado como insumo se variantice despues. Desde que
+      // `recipes.product_id` dejo de ser unico, sin `product_variant_id: null`
+      // este `findFirst` podia enganchar la receta de una variante y explotar
+      // un BOM que nadie definio para el insumo.
       const childRecipe = await (tx ?? this.prisma).recipes.findFirst({
         where: {
           product_id: item.component_product_id,
+          product_variant_id: null,
           is_active: true,
         },
         select: { id: true },

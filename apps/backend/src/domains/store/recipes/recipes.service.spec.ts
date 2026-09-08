@@ -389,3 +389,308 @@ describe('RecipesService — cycle detection & explosion', () => {
     });
   });
 });
+
+/**
+ * Recetas-por-variante — resolución DETERMINISTA.
+ *
+ * La migración `20260908000000_recipes_por_variante` quitó el `@unique` de
+ * `recipes.product_id`: un producto ahora puede tener la receta BASE
+ * (`product_variant_id IS NULL`) más una por variante. Todo `findFirst` que
+ * buscaba "la receta del producto" sin `orderBy` quedó no determinista — el
+ * orden lo decide Postgres.
+ *
+ * Estos tests fijan el criterio acordado: **base primero**, y si el plato sólo
+ * tiene recetas por variante, la de menor `product_variant_id`. El mock de
+ * Prisma preserva el orden de inserción del arreglo de filas, y los casos
+ * colocan a propósito la fila "equivocada" primero: si se revierte el arreglo
+ * (se quita el `orderBy` / el `product_variant_id: null`), el `findFirst`
+ * devuelve esa primera fila y el test falla.
+ */
+describe('RecipesService — resolución determinista de receta (recetas-por-variante)', () => {
+  const STORE_ID = 100;
+
+  type FakeRecipeRow = {
+    id: number;
+    product_id: number;
+    product_variant_id: number | null;
+    is_active: boolean;
+    yield_quantity?: number;
+    waste_percent?: number;
+    items?: Array<{
+      component_product_id: number;
+      quantity: number;
+      waste_percent: number;
+    }>;
+  };
+
+  /** Réplica mínima del `where` que usa el servicio sobre `recipes`. */
+  const matchesWhere = (row: FakeRecipeRow, where: any): boolean => {
+    if (!where) return true;
+    if (where.id !== undefined && row.id !== where.id) return false;
+    if (where.product_id !== undefined && row.product_id !== where.product_id) {
+      return false;
+    }
+    if (where.is_active !== undefined && row.is_active !== where.is_active) {
+      return false;
+    }
+    if (where.product_variant_id !== undefined) {
+      const cond = where.product_variant_id;
+      if (cond === null) return row.product_variant_id === null;
+      if (typeof cond === 'object' && cond !== null && 'not' in cond) {
+        if (cond.not === null) return row.product_variant_id !== null;
+      }
+      return row.product_variant_id === cond;
+    }
+    return true;
+  };
+
+  /** Réplica mínima del `orderBy` de Prisma, incluido `nulls: 'first' | 'last'`. */
+  const applyOrderBy = (
+    rows: FakeRecipeRow[],
+    orderBy: any,
+  ): FakeRecipeRow[] => {
+    if (!orderBy) return rows;
+    const clauses = Array.isArray(orderBy) ? orderBy : [orderBy];
+    return [...rows].sort((a: any, b: any) => {
+      for (const clause of clauses) {
+        for (const [field, dirRaw] of Object.entries<any>(clause)) {
+          const spec =
+            typeof dirRaw === 'string'
+              ? { sort: dirRaw, nulls: undefined }
+              : dirRaw;
+          const nullsFirst = spec.nulls === 'first';
+          const norm = (v: any) =>
+            v === null || v === undefined
+              ? nullsFirst
+                ? -Infinity
+                : Infinity
+              : v;
+          const av = norm(a[field]);
+          const bv = norm(b[field]);
+          const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+          if (cmp !== 0) return spec.sort === 'desc' ? -cmp : cmp;
+        }
+      }
+      return 0;
+    });
+  };
+
+  const hydrate = (row: FakeRecipeRow) => ({
+    ...row,
+    yield_quantity: row.yield_quantity ?? 1,
+    waste_percent: row.waste_percent ?? 0,
+    items: (row.items ?? []).map((it, i) => ({
+      id: i + 1,
+      ...it,
+      is_optional: false,
+      component_product: { id: it.component_product_id },
+    })),
+  });
+
+  const buildService = async (rows: FakeRecipeRow[]) => {
+    const recipes = {
+      findFirst: jest.fn(({ where, orderBy }: any = {}) => {
+        const matched = rows.filter((r) => matchesWhere(r, where));
+        const ordered = applyOrderBy(matched, orderBy);
+        return Promise.resolve(ordered.length > 0 ? hydrate(ordered[0]) : null);
+      }),
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    };
+    const recipe_items = {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn(({ where }: any = {}) => {
+        const row = rows.find((r) => r.id === where?.recipe_id);
+        return Promise.resolve(
+          (row?.items ?? []).map((it) => ({
+            component_product_id: it.component_product_id,
+          })),
+        );
+      }),
+      create: jest.fn().mockImplementation(({ data }: any) => ({
+        id: 1,
+        ...data,
+      })),
+    };
+    const prisma = {
+      recipes,
+      recipe_items,
+      products: {
+        findFirst: jest.fn(({ where }: any) =>
+          Promise.resolve({ id: where.id, store_id: STORE_ID }),
+        ),
+      },
+      product_variants: {
+        count: jest.fn().mockResolvedValue(0),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+    };
+
+    const mod: TestingModule = await Test.createTestingModule({
+      providers: [
+        RecipesService,
+        { provide: StorePrismaService, useValue: prisma },
+        {
+          provide: RequestContextService,
+          useValue: {
+            getContext: jest.fn().mockReturnValue({
+              store_id: STORE_ID,
+              is_super_admin: false,
+              is_owner: true,
+            }),
+            getOrganizationId: jest.fn().mockReturnValue(STORE_ID),
+          },
+        },
+      ],
+    }).compile();
+
+    return {
+      service: mod.get(RecipesService),
+      recipes,
+      recipe_items,
+    };
+  };
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('findByProduct sin variante (D3)', () => {
+    it('devuelve la receta BASE aunque Postgres liste primero la de una variante', async () => {
+      const { service } = await buildService([
+        // El orden simula el orden ARBITRARIO en que puede llegar el heap:
+        // la base NO es la primera fila.
+        { id: 20, product_id: 1, product_variant_id: 470, is_active: true },
+        { id: 30, product_id: 1, product_variant_id: 471, is_active: true },
+        { id: 10, product_id: 1, product_variant_id: null, is_active: true },
+      ]);
+
+      const recipe = await service.findByProduct(1);
+
+      expect(recipe.id).toBe(10);
+      expect(recipe.product_variant_id).toBeNull();
+    });
+
+    it('sin receta base cae en la variante de MENOR id, no en la primera fila', async () => {
+      const { service } = await buildService([
+        { id: 30, product_id: 1, product_variant_id: 471, is_active: true },
+        { id: 20, product_id: 1, product_variant_id: 470, is_active: true },
+      ]);
+
+      const recipe = await service.findByProduct(1);
+
+      expect(recipe.id).toBe(20);
+      expect(recipe.product_variant_id).toBe(470);
+    });
+
+    it('ignora la receta base INACTIVA y devuelve la variante activa', async () => {
+      const { service } = await buildService([
+        { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        { id: 20, product_id: 1, product_variant_id: 470, is_active: true },
+      ]);
+
+      const recipe = await service.findByProduct(1);
+
+      expect(recipe.id).toBe(20);
+    });
+
+    it('lanza RECIPE_NOT_FOUND cuando ninguna receta del producto esta activa', async () => {
+      const { service } = await buildService([
+        { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+      ]);
+
+      await expect(service.findByProduct(1)).rejects.toBeInstanceOf(
+        VendixHttpException,
+      );
+    });
+
+    it('con variante sigue resolviendo par exacto y luego base (sin regresion)', async () => {
+      const { service } = await buildService([
+        { id: 10, product_id: 1, product_variant_id: null, is_active: true },
+        { id: 20, product_id: 1, product_variant_id: 470, is_active: true },
+      ]);
+
+      await expect(service.findByProduct(1, 470)).resolves.toMatchObject({
+        id: 20,
+      });
+      // La variante 471 no tiene receta propia: cae a la BASE.
+      await expect(service.findByProduct(1, 471)).resolves.toMatchObject({
+        id: 10,
+      });
+    });
+  });
+
+  describe('sub-receta = receta BASE del insumo (D4)', () => {
+    it('explodeBom explota la BASE del componente, no la receta de una variante', async () => {
+      // Receta raiz 10 (producto 1) consume el producto 2.
+      // El producto 2 tiene DOS recetas activas y la de la variante esta
+      // listada primero: sin `product_variant_id: null` el `findFirst`
+      // engancharia la 21 y la explosion emitiria el insumo 99.
+      const { service } = await buildService([
+        {
+          id: 10,
+          product_id: 1,
+          product_variant_id: null,
+          is_active: true,
+          items: [{ component_product_id: 2, quantity: 1, waste_percent: 0 }],
+        },
+        {
+          id: 21,
+          product_id: 2,
+          product_variant_id: 471,
+          is_active: true,
+          items: [{ component_product_id: 99, quantity: 1, waste_percent: 0 }],
+        },
+        {
+          id: 20,
+          product_id: 2,
+          product_variant_id: null,
+          is_active: true,
+          items: [{ component_product_id: 42, quantity: 1, waste_percent: 0 }],
+        },
+      ]);
+
+      const lines = await service.explodeBom(10, { 10: 1 });
+
+      expect(lines).toHaveLength(1);
+      expect(lines[0].component_product_id).toBe(42);
+      expect(lines.map((l) => l.component_product_id)).not.toContain(99);
+    });
+
+    it('el anticiclos camina la BASE del insumo y detecta el ciclo que ella cierra', async () => {
+      // Producto 2: receta de variante 21 (vacia, listada PRIMERO) + receta
+      // BASE 20 que consume el producto 1. Agregar el producto 2 como insumo
+      // de la receta 10 (cuyo yield es el producto 1) cierra 1 -> 2 -> 1.
+      // Si el recorrido toma la receta 21 (sin el filtro de base) no ve el
+      // ciclo y deja pasar el renglon.
+      const { service, recipe_items } = await buildService([
+        {
+          id: 10,
+          product_id: 1,
+          product_variant_id: null,
+          is_active: true,
+          items: [],
+        },
+        {
+          id: 21,
+          product_id: 2,
+          product_variant_id: 471,
+          is_active: true,
+          items: [],
+        },
+        {
+          id: 20,
+          product_id: 2,
+          product_variant_id: null,
+          is_active: true,
+          items: [{ component_product_id: 1, quantity: 1, waste_percent: 0 }],
+        },
+      ]);
+
+      await expect(
+        service.addItem(10, { component_product_id: 2, quantity: 1 }),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+      expect(recipe_items.create).not.toHaveBeenCalled();
+    });
+  });
+});

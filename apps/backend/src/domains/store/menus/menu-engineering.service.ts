@@ -113,14 +113,21 @@ export class MenuEngineeringService {
         sku: true,
         base_price: true,
         cost_price: true,
-        // Recetas-por-variante (puente paso 4): `products.recipes` paso de
-        // TO-ONE a TO-MANY. El lector usa `[0]` — identico con los datos
-        // actuales (<=1 receta por producto). El costeo por variante es
-        // knowledge-gap del plan (no se toca esta vista).
+        // Recetas-por-variante: `products.recipes` paso de TO-ONE a TO-MANY
+        // (la migracion `20260908000000_recipes_por_variante` quito el unique
+        // de `recipes.product_id`). Un plato variantizado trae aqui varias
+        // filas; sin `orderBy` el orden lo decidia Postgres y el lector tomaba
+        // `[0]`, asi que el cuadrante BCG podia cambiar entre cargas. Se pide
+        // orden estable y se elige con `pickCanonicalRecipe` (base primero).
         recipes: {
           where: { is_active: true },
+          orderBy: [
+            { product_variant_id: { sort: 'asc', nulls: 'first' } },
+            { id: 'asc' },
+          ],
           select: {
             id: true,
+            product_variant_id: true,
             yield_quantity: true,
             waste_percent: true,
             items: {
@@ -143,6 +150,7 @@ export class MenuEngineeringService {
       cost_price: any;
       recipes: Array<{
         id: number;
+        product_variant_id: number | null;
         yield_quantity: any;
         waste_percent: any;
         items: Array<{
@@ -163,7 +171,7 @@ export class MenuEngineeringService {
         const units = Number(r._sum.quantity || 0);
         const revenue = Number(r._sum.total_price || 0);
         const recipeUnitCost = this.computeRecipeUnitCost(
-          product?.recipes?.[0] ?? null,
+          this.pickCanonicalRecipe(product?.recipes),
         );
         const hasRecipe = (product?.recipes?.length ?? 0) > 0;
         const costPerUnit =
@@ -235,6 +243,39 @@ export class MenuEngineeringService {
   }
 
   // ----------------------------------------------------------------- helpers
+
+  /**
+   * Recetas-por-variante: un producto puede tener N recetas activas (la BASE
+   * mas una por variante) desde que la migracion
+   * `20260908000000_recipes_por_variante` quito el `@unique` de
+   * `recipes.product_id`. Esta vista agrega por producto y no sabe que
+   * variante se vendio, asi que `recipes[0]` era una eleccion ARBITRARIA.
+   *
+   * DECISION (no es un detalle): gana la receta BASE
+   * (`product_variant_id === null`), que representa el plato tal cual; si el
+   * plato solo tiene recetas por variante se toma la de menor
+   * `product_variant_id` — arbitraria pero ESTABLE entre cargas. Es la misma
+   * preferencia base-primero de `KitchenFireService.resolveRecipeForVariant`
+   * cuando el consumidor no conoce la variante.
+   */
+  private pickCanonicalRecipe<
+    T extends { id: number; product_variant_id: number | null },
+  >(recipes: T[] | null | undefined): T | null {
+    if (!recipes || recipes.length === 0) return null;
+    // Base = -1 para que ordene antes que cualquier variante (id > 0).
+    const rank = (r: T): number => r.product_variant_id ?? -1;
+    let best = recipes[0];
+    for (let i = 1; i < recipes.length; i++) {
+      const candidate = recipes[i];
+      if (
+        rank(candidate) < rank(best) ||
+        (rank(candidate) === rank(best) && candidate.id < best.id)
+      ) {
+        best = candidate;
+      }
+    }
+    return best;
+  }
 
   private computeRecipeUnitCost(
     recipe:
