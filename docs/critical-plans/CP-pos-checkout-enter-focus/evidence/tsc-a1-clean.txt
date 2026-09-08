@@ -1,0 +1,1 @@
+tsc probe 2026-09-08: 0 errores en pos-checkout-shell.component.ts, payment-collector.component.ts/.html, spec, pos-product-selection.component.ts, pos.component.ts (errores solo pre-existentes en archivos no tocados: theme.service, pos-scale, dian-console, gallery-block, modal, fullscreen)

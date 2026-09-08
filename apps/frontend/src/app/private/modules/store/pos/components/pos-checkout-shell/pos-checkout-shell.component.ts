@@ -497,6 +497,12 @@ export class PosCheckoutShellComponent {
   readonly showAnonymousInvoiceCapture = signal(false);
   /** Guard: apply the config-driven anonymous default only on the first render. */
   private readonly anonymousDefaultSynced = signal(false);
+  /**
+   * CP-pos-checkout-enter-focus (step A.1) — previous `isOpen()` value for the
+   * open-transition focus effect. Plain field (never read by the template, so
+   * no signal needed); only written inside `untracked()`.
+   */
+  private wasOpen = false;
 
   readonly allowAnonymousSales = computed(
     () => this.settingsFacade.pos()?.allow_anonymous_sales ?? false,
@@ -819,6 +825,19 @@ export class PosCheckoutShellComponent {
         // original auto-fire behaviour.
         this.suppressAutoExecute.set(false);
         this.postEditPaymentMode.set(false);
+      });
+    });
+
+    // CP-pos-checkout-enter-focus (step A.1) — al abrir el modal (transición
+    // isOpen false→true) llevar el foco al panel del paso activo. Sin esto, el
+    // foco queda en el botón de fondo que abrió el modal y el primer Enter se
+    // pierde fuera del wizard. QUI-482 intacto: solo mueve el foco, no resetea
+    // ningún estado.
+    effect(() => {
+      const open = this.isOpen();
+      untracked(() => {
+        if (open && !this.wasOpen) this.focusActiveStepSoon();
+        this.wasOpen = open;
       });
     });
 
@@ -1538,6 +1557,10 @@ export class PosCheckoutShellComponent {
     }
     if (event.key === 'Enter') {
       if (tag === 'TEXTAREA') return;
+      // CP-pos-checkout-enter-focus — Enter sobre un SELECT nativo abre/cierra
+      // el desplegable (ej. cuenta bancaria): no avanzar, no cobrar y SIN
+      // preventDefault para no romper la interacción nativa.
+      if (tag === 'SELECT') return;
       // Un Enter sobre un botón ya dispara su click nativo: no duplicar.
       if (target?.closest?.('button')) return;
       // ADR-2: Enter en el buscador de Cliente = solo buscar, nunca avanzar.

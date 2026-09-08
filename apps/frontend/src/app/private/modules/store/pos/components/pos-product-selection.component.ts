@@ -8,6 +8,7 @@ import {
   signal,
   computed,
   DestroyRef,
+  viewChild,
 } from '@angular/core';
 import { Subject, distinctUntilChanged } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -1011,6 +1012,20 @@ export class PosProductSelectionComponent {
   onClearSearch(): void {
     this.searchQuery.set('');
     this.searchSubject$.next('');
+  }
+
+  private readonly searchInput = viewChild(InputsearchComponent);
+
+  /**
+   * CP-pos-checkout-enter-focus (step A.2) — devuelve el foco al buscador de
+   * productos. No-op total si el input no está montado; nunca lanza.
+   */
+  focusSearch(): void {
+    try {
+      this.searchInput()?.focusInput();
+    } catch {
+      // El foco nunca debe romper un flujo de cierre.
+    }
   }
 
   onCategoryChange(event: any): void {
