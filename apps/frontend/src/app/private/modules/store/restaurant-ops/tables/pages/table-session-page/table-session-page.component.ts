@@ -34,12 +34,14 @@ import {
 } from '../../../../../../../shared/components/timeline/timeline.interfaces';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/index';
 import {
+  Table,
   TableSession,
   TableSessionOrderItem,
   TableSessionAddItem,
   TableStatus,
   KitchenTicketItemRefStatus,
   PaymentPendingView,
+  TransferResult,
 } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
 import {
@@ -68,10 +70,11 @@ import {
 } from '../../components/table-payment-modal/table-payment-modal.component';
 import { AssignCustomerModalComponent } from '../../components/assign-customer-modal/assign-customer-modal.component';
 import { QuickStatusModalComponent } from '../../components/quick-status-modal/quick-status-modal.component';
+import { TransferTableModalComponent } from '../../components/transfer-table-modal/transfer-table-modal.component';
 
 /** One entry of the `Opciones` overflow menu (desktop dropdown + mobile action sheet). */
 interface SecondaryAction {
-  id: 'pay' | 'split' | 'customer' | 'table-status' | 'history' | 'close';
+  id: 'pay' | 'split' | 'transfer' | 'customer' | 'table-status' | 'history' | 'close';
   label: string;
   icon: string;
   disabled?: boolean;
@@ -118,6 +121,7 @@ interface SecondaryAction {
     AssignCustomerModalComponent,
     KitchenConfirmModalComponent,
     QuickStatusModalComponent,
+    TransferTableModalComponent,
   ],
   templateUrl: './table-session-page.component.html',
   styleUrl: './table-session-page.component.scss',
@@ -180,6 +184,8 @@ export class TableSessionPageComponent implements OnInit {
   /** Quick-status modal (table status change + history). */
   readonly isQuickStatusOpen = signal(false);
   readonly statusModalShowsHistory = signal(false);
+  /** Transfer modal (cambiar de mesa / swap de cuentas). */
+  readonly isTransferOpen = signal(false);
   /** Mobile-only: collapses the account detail below the totals row. */
   readonly summaryExpanded = signal(false);
 
@@ -394,6 +400,29 @@ export class TableSessionPageComponent implements OnInit {
    */
   readonly pendingCount = computed(() => this.pendingPreparedItems().length);
 
+  /**
+   * Mesa actual como origen del transfer, en `Table` mínimo: la sesión
+   * solo trae la proyección `{ id, name, zone, status }`, así que el
+   * resto viaja en nulos (el modal solo lee `id`/`name`/estado).
+   */
+  readonly transferSourceTable = computed<Table | null>(() => {
+    const s = this.session();
+    const t = s?.table;
+    if (!s || !t) return null;
+    return {
+      id: t.id,
+      store_id: s.store_id,
+      name: t.name,
+      zone: t.zone,
+      capacity: null,
+      status: (t.status as TableStatus) ?? 'occupied',
+      pos_x: null,
+      pos_y: null,
+      created_at: s.opened_at,
+      updated_at: s.opened_at,
+    };
+  });
+
   /** Current table status (drives the collapsed status timeline). */
   readonly tableStatus = computed<TableStatus | null>(
     () => (this.session()?.table?.status as TableStatus) ?? null,
@@ -505,6 +534,11 @@ export class TableSessionPageComponent implements OnInit {
         label: 'Dividir cuenta',
         icon: 'split',
         disabled: this.items().length < 2,
+      },
+      {
+        id: 'transfer',
+        label: 'Cambiar de mesa',
+        icon: 'arrow-right-left',
       },
       {
         id: 'customer',
@@ -1361,6 +1395,9 @@ export class TableSessionPageComponent implements OnInit {
       case 'split':
         this.openSplit();
         return;
+      case 'transfer':
+        this.isTransferOpen.set(true);
+        return;
       case 'customer':
         this.openAssignCustomer();
         return;
@@ -1394,6 +1431,22 @@ export class TableSessionPageComponent implements OnInit {
   onTableStatusChanged(_status: TableStatus): void {
     const id = this.session()?.id;
     if (id) this.loadSession(id, { silent: true });
+  }
+
+  /**
+   * Transfer confirmado: el modal ya hizo el POST y toasteó sus propios
+   * errores, así que aquí solo va el toast de éxito + refetch silencioso
+   * (mismo `id` de sesión, sin blankeo) + cierre.
+   */
+  onTransferConfirmed(result: TransferResult): void {
+    this.toastService.success(
+      result.mode === 'swap'
+        ? 'Cuentas intercambiadas entre mesas'
+        : 'Cuenta trasladada a la mesa de destino',
+    );
+    const id = this.session()?.id;
+    if (id) this.loadSession(id, { silent: true });
+    this.isTransferOpen.set(false);
   }
 
   // ── Assign / change customer ───────────────────────────────────────────
