@@ -1,6 +1,6 @@
 /**
  * CP-print-token-flow A.2 — el adquirente con dirección la conserva en el
- * modelo; sin direcciones no aparece la clave (invariante 1).
+ * modelo; sin direcciones llega el default CO/Bogotá (siempre emite).
  */
 import { mapFiscalDocumentToPrintData } from '../fiscal-document-print.mapper';
 
@@ -42,12 +42,14 @@ describe('mapFiscalDocumentToPrintData customer address', () => {
     expect(out.customer?.city).toBe('Bogotá D.C.');
   });
 
-  it('sin direcciones no agrega claves de dirección', () => {
+  it('sin direcciones emite el default CO/Bogotá', () => {
     const out = mapFiscalDocumentToPrintData({
       ...BASE_INVOICE,
       customer: { ...BASE_INVOICE.customer, addresses: [] },
     });
-    expect(out.customer).not.toHaveProperty('address');
+    expect(out.customer?.address).toBe('Bogotá D.C., CO');
+    expect(out.customer?.city).toBe('Bogotá D.C.');
+    expect(out.customer?.country).toBe('CO');
     expect(out.customer?.name).toBe('Ana Ruiz');
   });
 });

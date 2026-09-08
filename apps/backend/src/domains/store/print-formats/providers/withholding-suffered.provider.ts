@@ -50,7 +50,7 @@ export class WithholdingSufferedDataProvider implements IDocumentDataProvider {
         concept: { select: { code: true, name: true, rate: true, withholding_type: true } },
         supplier: { select: { name: true, tax_id: true, verification_digit: true } },
         // CP-print-token-flow A.3 — dirección solo si la contraparte es el cliente.
-        customer: { select: { first_name: true, last_name: true, document_number: true, addresses: { take: 1, select: { address_line1: true, address_line2: true, city: true, state_province: true, country: true } } } },
+        customer: { select: { first_name: true, last_name: true, document_number: true, addresses: { take: 1, select: { address_line1: true, address_line2: true, city: true, state_province: true, country_code: true } } } },
         invoice: { select: { invoice_number: true, issue_date: true } },
       },
     });

@@ -196,7 +196,7 @@ export class PrintFormatsController {
   }
 
   @Post('render')
-  @Permissions('store:pos:access', 'store:orders:read', 'store:settings:read')
+  @Permissions('store:pos:access', 'store:orders:read', 'store:settings:read', 'invoicing:read')
   @ApiOperation({ summary: 'Render a document via Print Gateway' })
   async renderDocument(@Body() dto: RenderPrintDocumentDto) {
     const context = RequestContextService.getContext();
