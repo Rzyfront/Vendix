@@ -1253,7 +1253,9 @@ export class TableSessionsService {
    *
    * Two modes, decided by the target occupancy:
    *   - `transfer` (target empty): the source session row is re-pointed to
-   *     the target table; source flips to `available`, target to `occupied`.
+   *     the target table; source flips to `cleaning` (same reset step as
+   *     `closeSession` — ver F3 en el bloque de invariantes abajo), target
+   *     to `occupied`.
    *   - `swap` (target occupied): both session rows exchange tables; both
    *     tables stay `occupied` with the opposite check.
    *
@@ -1282,6 +1284,25 @@ export class TableSessionsService {
    *
    * SSE (`session_moved` + `table_status_changed` per table) is emitted
    * post-commit only — a rollback must never leave a phantom move.
+   *
+   * Invariantes que sostienen la rama de TRASLADO (no borrar sin leer):
+   *  - F1 · re-lectura in-tx de la sesión ORIGEN. `sourceSession` se lee
+   *    fuera de la transacción; entre esa lectura y el write la cuenta pudo
+   *    cerrarse o moverse (swap concurrente). Sin re-leer, el traslado
+   *    (a) re-apunta una sesión CERRADA al destino y lo marca `occupied` sin
+   *    cuenta abierta, y (b) libera una mesa origen que ya recibió OTRA
+   *    cuenta abierta — el mismo invariante que `TablesService.update`
+   *    (`tables.service.ts`, guard de `available`/`reserved`) protege.
+   *  - F2 · los dos guards (`raced` y la re-lectura) son check-then-act SIN
+   *    lock: el índice único parcial sigue siendo la última defensa y su
+   *    `P2002` se mapea explícitamente a `TABLE_SESSION_ALREADY_OPEN` en el
+   *    catch de la transacción, igual que hace `openSession` con su `create`.
+   *    El filtro global NO traduce errores de Prisma.
+   *  - F3 · la mesa origen queda en `cleaning`, NO en `available`. Es el
+   *    mismo estado que deja `closeSession` y el que exige el ciclo
+   *    documentado en `payments.service.ts` («session closed → cleaning →
+   *    staff marca lista → available»). Saltarse `cleaning` permitiría
+   *    sentar un grupo nuevo en una mesa sin resetear.
    */
   async transferSession(
     sourceTableId: number,
@@ -1321,88 +1342,155 @@ export class TableSessionsService {
     const mode: TransferMode = targetSession ? 'swap' : 'transfer';
     const now = new Date();
 
-    await this.prisma.$transaction(async (tx) => {
-      if (mode === 'transfer') {
-        // Race guard: someone may have opened the target between the
-        // pre-check and this transaction. Failing here (409) is cheaper
-        // than surfacing a raw P2002 from the partial unique index.
-        const raced = await tx.table_sessions.findFirst({
-          where: { table_id: targetTableId, closed_at: null },
-        });
-        if (raced) {
+    /**
+     * Estado final de la mesa ORIGEN. Se resuelve DENTRO de la transacción
+     * (la rama de traslado puede degradarlo a `occupied` si detecta otra
+     * cuenta encima de la mesa origen) y se lee POST-COMMIT para el push
+     * SSE, de modo que el plano de mesas nunca anuncie un estado que la
+     * base de datos no tiene.
+     */
+    let sourceFinalStatus: 'occupied' | 'cleaning' =
+      mode === 'swap' ? 'occupied' : 'cleaning';
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        if (mode === 'transfer') {
+          // TOCTOU guard de la rama de TRASLADO — simétrico al del swap.
+          // `sourceSession` viene de una lectura FUERA de la transacción:
+          // entre esa lectura y este punto la cuenta pudo cerrarse (pago /
+          // cierre por otro mesero) o MOVERSE de mesa (swap concurrente).
+          // Sin esta re-lectura los writes de abajo van a ciegas y rompen
+          // el invariante "una mesa con cuenta abierta no se libera".
+          const freshSource = await tx.table_sessions.findFirst({
+            where: { id: sourceSession.id },
+          });
+          if (
+            !freshSource ||
+            freshSource.closed_at ||
+            freshSource.table_id !== sourceTableId
+          ) {
+            throw new VendixHttpException(
+              ErrorCodes.TABLE_SESSION_ALREADY_OPEN,
+              'Las cuentas cambiaron durante el traslado; reintenta la operación',
+            );
+          }
+
+          // Race guard: someone may have opened the target between the
+          // pre-check and this transaction. Failing here (409) is cheaper
+          // than surfacing a raw P2002 from the partial unique index.
+          // Sigue siendo check-then-act (findFirst no toma lock): el P2002
+          // residual lo mapea el catch que envuelve esta transacción.
+          const raced = await tx.table_sessions.findFirst({
+            where: { table_id: targetTableId, closed_at: null },
+          });
+          if (raced) {
+            throw new VendixHttpException(
+              ErrorCodes.TABLE_SESSION_ALREADY_OPEN,
+            );
+          }
+          await tx.table_sessions.update({
+            where: { id: sourceSession.id },
+            data: { table_id: targetTableId, updated_at: now },
+          });
+          await tx.kitchen_tickets.updateMany({
+            where: { order_id: sourceSession.order_id, store_id: storeId },
+            data: { table_id: targetTableId },
+          });
+          // La sesión trasladada ya NO apunta a la mesa origen, así que
+          // cualquier fila abierta que quede sobre ella es AJENA (aterrizó
+          // por un swap concurrente). Liberarla la huérfanaría, así que en
+          // ese caso la mesa origen se queda `occupied`.
+          const stillOpenOnSource = await tx.table_sessions.findFirst({
+            where: { table_id: sourceTableId, closed_at: null },
+          });
+          sourceFinalStatus = stillOpenOnSource ? 'occupied' : 'cleaning';
+          await tx.tables.update({
+            where: { id: sourceTableId },
+            data: { status: sourceFinalStatus, updated_at: now },
+          });
+          await tx.tables.update({
+            where: { id: targetTableId },
+            data: { status: 'occupied', updated_at: now },
+          });
+          return;
+        }
+
+        // Swap: re-validate inside the tx (TOCTOU guard — the waiter may have
+        // closed or moved either check after the pre-checks above).
+        const [freshSource, freshTarget] = await Promise.all([
+          tx.table_sessions.findFirst({ where: { id: sourceSession.id } }),
+          tx.table_sessions.findFirst({ where: { id: targetSession!.id } }),
+        ]);
+        if (
+          !freshSource ||
+          freshSource.closed_at ||
+          freshSource.table_id !== sourceTableId ||
+          !freshTarget ||
+          freshTarget.closed_at ||
+          freshTarget.table_id !== targetTableId
+        ) {
           throw new VendixHttpException(
             ErrorCodes.TABLE_SESSION_ALREADY_OPEN,
+            'Las cuentas cambiaron durante el traslado; reintenta la operación',
           );
         }
+        // Ordered 3-step swap (see docblock): free the source slot, move the
+        // target session onto it, then move the source session and reopen it.
         await tx.table_sessions.update({
           where: { id: sourceSession.id },
-          data: { table_id: targetTableId, updated_at: now },
+          data: { closed_at: now, updated_at: now },
+        });
+        await tx.table_sessions.update({
+          where: { id: targetSession!.id },
+          data: { table_id: sourceTableId, updated_at: now },
+        });
+        await tx.table_sessions.update({
+          where: { id: sourceSession.id },
+          data: { table_id: targetTableId, closed_at: null, updated_at: now },
         });
         await tx.kitchen_tickets.updateMany({
           where: { order_id: sourceSession.order_id, store_id: storeId },
           data: { table_id: targetTableId },
         });
+        await tx.kitchen_tickets.updateMany({
+          where: { order_id: targetSession!.order_id, store_id: storeId },
+          data: { table_id: sourceTableId },
+        });
         await tx.tables.update({
           where: { id: sourceTableId },
-          data: { status: 'available', updated_at: now },
+          data: { status: 'occupied', updated_at: now },
         });
         await tx.tables.update({
           where: { id: targetTableId },
           data: { status: 'occupied', updated_at: now },
         });
-        return;
+      });
+    } catch (error) {
+      // El índice único parcial `table_sessions_one_open_per_table`
+      // (`table_id WHERE closed_at IS NULL`, migración
+      // 20260829094000_table_sessions_one_open_per_table) es la ÚLTIMA
+      // defensa detrás de los guards check-then-act de arriba: dos traslados
+      // concurrentes al mismo destino pueden ver `raced === null` y el
+      // perdedor viola el único. Sin este catch salía un P2002 crudo → 500,
+      // porque el filtro global NO traduce errores de Prisma
+      // (`common/filters/http-exception.filter.ts`). Mismo mapeo que ya usa
+      // `openSession` alrededor de su `create`.
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          throw new VendixHttpException(ErrorCodes.TABLE_SESSION_ALREADY_OPEN);
+        }
+        // P2034 — Prisma envuelve acá el write-conflict / deadlock de
+        // Postgres (`40P01`, `40001`). Es reintentable por el cliente, así
+        // que se expone como 409 y no como 500.
+        if (error.code === 'P2034') {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_CONFLICT_001,
+            'Conflicto de escritura al cambiar de mesa; reintenta la operación',
+          );
+        }
       }
-
-      // Swap: re-validate inside the tx (TOCTOU guard — the waiter may have
-      // closed or moved either check after the pre-checks above).
-      const [freshSource, freshTarget] = await Promise.all([
-        tx.table_sessions.findFirst({ where: { id: sourceSession.id } }),
-        tx.table_sessions.findFirst({ where: { id: targetSession!.id } }),
-      ]);
-      if (
-        !freshSource ||
-        freshSource.closed_at ||
-        freshSource.table_id !== sourceTableId ||
-        !freshTarget ||
-        freshTarget.closed_at ||
-        freshTarget.table_id !== targetTableId
-      ) {
-        throw new VendixHttpException(
-          ErrorCodes.TABLE_SESSION_ALREADY_OPEN,
-          'Las cuentas cambiaron durante el traslado; reintenta la operación',
-        );
-      }
-      // Ordered 3-step swap (see docblock): free the source slot, move the
-      // target session onto it, then move the source session and reopen it.
-      await tx.table_sessions.update({
-        where: { id: sourceSession.id },
-        data: { closed_at: now, updated_at: now },
-      });
-      await tx.table_sessions.update({
-        where: { id: targetSession!.id },
-        data: { table_id: sourceTableId, updated_at: now },
-      });
-      await tx.table_sessions.update({
-        where: { id: sourceSession.id },
-        data: { table_id: targetTableId, closed_at: null, updated_at: now },
-      });
-      await tx.kitchen_tickets.updateMany({
-        where: { order_id: sourceSession.order_id, store_id: storeId },
-        data: { table_id: targetTableId },
-      });
-      await tx.kitchen_tickets.updateMany({
-        where: { order_id: targetSession!.order_id, store_id: storeId },
-        data: { table_id: sourceTableId },
-      });
-      await tx.tables.update({
-        where: { id: sourceTableId },
-        data: { status: 'occupied', updated_at: now },
-      });
-      await tx.tables.update({
-        where: { id: targetTableId },
-        data: { status: 'occupied', updated_at: now },
-      });
-    });
+      throw error;
+    }
 
     // Post-commit: notify the staff floor-map. Best-effort — SSE failures
     // must never break the (already committed) move.
@@ -1415,7 +1503,7 @@ export class TableSessionsService {
       sourceOrderId: sourceSession.order_id,
       targetOrderId: targetSession ? targetSession.order_id : null,
     });
-    this.emitTransferTableStatus(storeId, sourceTable, mode === 'swap' ? 'occupied' : 'available');
+    this.emitTransferTableStatus(storeId, sourceTable, sourceFinalStatus);
     this.emitTransferTableStatus(storeId, targetTable, 'occupied');
 
     this.logger.log(
