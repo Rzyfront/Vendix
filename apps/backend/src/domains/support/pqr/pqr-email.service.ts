@@ -76,10 +76,27 @@ export class PqrEmailService {
     const terminal = new Set(['RESOLVED', 'CLOSED']);
     if (!terminal.has(payload.new_status)) return;
 
-    const contact = this.parseRequester(payload.description);
+    let contact = this.parseRequester(payload.description);
+    if (!contact?.email) {
+      const ticket = await this.globalPrisma.support_tickets.findFirst({
+        where: { ticket_number: payload.ticket_number },
+        select: {
+          requester_email: true,
+          requester_first_name: true,
+          requester_last_name: true,
+        },
+      });
+      if (ticket?.requester_email) {
+        contact = {
+          email: ticket.requester_email,
+          name:
+            `${ticket.requester_first_name ?? ''} ${ticket.requester_last_name ?? ''}`.trim(),
+        };
+      }
+    }
     if (!contact?.email) {
       this.logger.warn(
-        `PQR ${payload.ticket_number}: cannot notify requester — no email parsed from description`,
+        `PQR ${payload.ticket_number}: cannot notify requester — no email parsed from description or database`,
       );
       return;
     }
@@ -93,14 +110,11 @@ export class PqrEmailService {
     contact: PqrCreatedEvent['contact'],
     ip: string,
   ) {
-    let storeName: string | null = null;
-    if (ticket.store_id) {
-      const store = await this.globalPrisma.stores.findUnique({
-        where: { id: ticket.store_id },
-        select: { name: true },
-      });
-      storeName = store?.name ?? null;
-    }
+    const storeInfo = await this.getStoreInfo(
+      ticket.store_id,
+      ticket.organization_id,
+    );
+    const storeName = storeInfo?.name ?? null;
 
     const typeLabel = this.pqrTypeLabel(contact.pqr_type);
     const capitalizedType =
@@ -155,68 +169,7 @@ export class PqrEmailService {
       </p>
     `;
 
-    let recipientEmail = PqrEmailService.ADMIN_EMAIL;
-    if (ticket.store_id) {
-      const storeAdmin = await this.globalPrisma.users.findFirst({
-        where: {
-          state: 'active',
-          OR: [
-            {
-              store_users: { some: { store_id: ticket.store_id } },
-              user_roles: {
-                some: {
-                  roles: {
-                    name: {
-                      in: [
-                        'owner',
-                        'admin',
-                        'manager',
-                        'STORE_ADMIN',
-                        'store_admin',
-                      ],
-                    },
-                  },
-                },
-              },
-            },
-            {
-              main_store_id: ticket.store_id,
-              user_roles: {
-                some: {
-                  roles: {
-                    name: {
-                      in: [
-                        'owner',
-                        'admin',
-                        'manager',
-                        'STORE_ADMIN',
-                        'store_admin',
-                      ],
-                    },
-                  },
-                },
-              },
-            },
-            {
-              organization_id: ticket.organization_id,
-              user_roles: {
-                some: {
-                  roles: {
-                    name: {
-                      in: ['owner', 'admin', 'ORG_ADMIN', 'org_admin'],
-                    },
-                  },
-                },
-              },
-            },
-          ],
-        },
-        select: { email: true },
-      });
-      if (storeAdmin?.email) {
-        recipientEmail = storeAdmin.email;
-      }
-    }
+    const recipientEmail = storeInfo?.email || PqrEmailService.ADMIN_EMAIL;
 
     // Configurar el Reply-To con los datos del solicitante para que si el
     // administrador responde al correo, la respuesta vaya directamente al cliente
@@ -249,14 +202,11 @@ export class PqrEmailService {
     ticket: PqrCreatedEvent['ticket'],
     contact: PqrCreatedEvent['contact'],
   ) {
-    let storeName: string | null = null;
-    if (ticket.store_id) {
-      const store = await this.globalPrisma.stores.findUnique({
-        where: { id: ticket.store_id },
-        select: { name: true },
-      });
-      storeName = store?.name ?? null;
-    }
+    const storeInfo = await this.getStoreInfo(
+      ticket.store_id,
+      ticket.organization_id,
+    );
+    const storeName = storeInfo?.name ?? null;
 
     const teamSignature = storeName
       ? `Equipo de ${storeName}`
@@ -283,8 +233,23 @@ export class PqrEmailService {
       <p>— ${this.escape(teamSignature)}</p>
     `;
 
+    // Si pertenece a una tienda, el remitente lleva directamente el nombre
+    // de la tienda (ej. "Nike") y Reply-To va hacia el dueño/admin de la tienda
+    const fromOverride = storeInfo
+      ? {
+          name: storeInfo.name,
+          email: storeInfo.email,
+        }
+      : undefined;
+
     try {
-      await this.emailService.sendEmail(contact.email, subject, html, text);
+      await this.emailService.sendEmail(
+        contact.email,
+        subject,
+        html,
+        text,
+        fromOverride,
+      );
     } catch (e) {
       this.logger.error(
         `[pqr-email] Failed to send requester acknowledgement for ${ticket.ticket_number}`,
@@ -301,13 +266,18 @@ export class PqrEmailService {
   ) {
     const ticket = await this.globalPrisma.support_tickets.findFirst({
       where: { ticket_number: payload.ticket_number },
-      select: { store: { select: { name: true } } },
+      select: { store_id: true, organization_id: true },
     });
-    const teamSignature = ticket?.store?.name
-      ? `Equipo de ${ticket.store.name}`
+    const storeInfo = await this.getStoreInfo(
+      ticket?.store_id,
+      ticket?.organization_id,
+    );
+    const storeName = storeInfo?.name ?? null;
+    const teamSignature = storeName
+      ? `Equipo de ${storeName}`
       : 'Equipo Vendix';
 
-    const subject = `Actualización de tu PQRS #${payload.ticket_number}`;
+    const subject = `Actualización de tu PQRS #${payload.ticket_number}${storeName ? ` — ${storeName}` : ''}`;
 
     const text =
       `Hola ${contact.name || ''},\n\n` +
@@ -323,8 +293,21 @@ export class PqrEmailService {
       <p>— ${this.escape(teamSignature)}</p>
     `;
 
+    const fromOverride = storeInfo
+      ? {
+          name: storeInfo.name,
+          email: storeInfo.email,
+        }
+      : undefined;
+
     try {
-      await this.emailService.sendEmail(contact.email, subject, html, text);
+      await this.emailService.sendEmail(
+        contact.email,
+        subject,
+        html,
+        text,
+        fromOverride,
+      );
     } catch (e) {
       this.logger.error(
         `[pqr-email] Failed to send response notification for ${payload.ticket_number}`,
@@ -339,16 +322,21 @@ export class PqrEmailService {
   ) {
     const ticket = await this.globalPrisma.support_tickets.findFirst({
       where: { ticket_number: payload.ticket_number },
-      select: { store: { select: { name: true } } },
+      select: { store_id: true, organization_id: true },
     });
-    const teamSignature = ticket?.store?.name
-      ? `Equipo de ${ticket.store.name}`
+    const storeInfo = await this.getStoreInfo(
+      ticket?.store_id,
+      ticket?.organization_id,
+    );
+    const storeName = storeInfo?.name ?? null;
+    const teamSignature = storeName
+      ? `Equipo de ${storeName}`
       : 'Equipo Vendix';
 
     const isResolved = payload.new_status === 'RESOLVED';
     const subject = isResolved
-      ? `Tu PQRS #${payload.ticket_number} fue respondida`
-      : `Tu PQRS #${payload.ticket_number} fue cerrada`;
+      ? `Tu PQRS #${payload.ticket_number} fue respondida${storeName ? ` — ${storeName}` : ''}`
+      : `Tu PQRS #${payload.ticket_number} fue cerrada${storeName ? ` — ${storeName}` : ''}`;
 
     const headline = isResolved
       ? 'Tu PQRS fue respondida'
@@ -380,14 +368,101 @@ export class PqrEmailService {
       <p>— ${this.escape(teamSignature)}</p>
     `;
 
+    const fromOverride = storeInfo
+      ? {
+          name: storeInfo.name,
+          email: storeInfo.email,
+        }
+      : undefined;
+
     try {
-      await this.emailService.sendEmail(contact.email, subject, html, text);
+      await this.emailService.sendEmail(
+        contact.email,
+        subject,
+        html,
+        text,
+        fromOverride,
+      );
     } catch (e) {
       this.logger.error(
         `[pqr-email] Failed to send status notification for ${payload.ticket_number}`,
         e instanceof Error ? e.stack : String(e),
       );
     }
+  }
+
+  private async getStoreInfo(
+    storeId?: number | null,
+    organizationId?: number | null,
+  ): Promise<{ name: string; email: string } | null> {
+    if (!storeId) return null;
+    const store = await this.globalPrisma.stores.findUnique({
+      where: { id: storeId },
+      select: { name: true, organization_id: true },
+    });
+    if (!store) return null;
+
+    const orgId = organizationId ?? store.organization_id;
+
+    const storeAdmin = await this.globalPrisma.users.findFirst({
+      where: {
+        state: 'active',
+        OR: [
+          {
+            store_users: { some: { store_id: storeId } },
+            user_roles: {
+              some: {
+                roles: {
+                  name: {
+                    in: [
+                      'owner',
+                      'admin',
+                      'manager',
+                      'STORE_ADMIN',
+                      'store_admin',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+          {
+            main_store_id: storeId,
+            user_roles: {
+              some: {
+                roles: {
+                  name: {
+                    in: [
+                      'owner',
+                      'admin',
+                      'manager',
+                      'STORE_ADMIN',
+                      'store_admin',
+                    ],
+                  },
+                },
+              },
+            },
+          },
+          {
+            organization_id: orgId,
+            user_roles: {
+              some: {
+                roles: {
+                  name: { in: ['owner', 'admin', 'ORG_ADMIN', 'org_admin'] },
+                },
+              },
+            },
+          },
+        ],
+      },
+      select: { email: true },
+    });
+
+    return {
+      name: store.name,
+      email: storeAdmin?.email || PqrEmailService.ADMIN_EMAIL,
+    };
   }
 
   /* ────────────────────────────────── Helpers ──────────────────────────────── */

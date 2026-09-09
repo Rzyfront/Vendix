@@ -70,7 +70,7 @@ export class SesProvider implements EmailProvider {
     // Declared outside the `try` so the `catch` can name the sender in its
     // diagnostic — SES rejections are almost always sender-identity issues.
     const fromAddress = from
-      ? `"${from.name} via ${this.config.fromName}" <${this.config.fromEmail}>`
+      ? `"${from.name}" <${this.config.fromEmail}>`
       : `"${this.config.fromName}" <${this.config.fromEmail}>`;
     const replyToAddress = from
       ? { name: from.name, address: from.email }
