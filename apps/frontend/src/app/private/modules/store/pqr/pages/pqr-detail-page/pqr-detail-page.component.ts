@@ -73,8 +73,8 @@ export class PqrDetailPageComponent {
 
   // Comment composer
   readonly newComment = signal('');
-  readonly isInternal = signal(true);
-  readonly notifyRequester = signal(false);
+  readonly isInternal = signal(false);
+  readonly notifyRequester = signal(true);
 
   readonly id = computed(() => Number(this.route.snapshot.paramMap.get('id')));
 
@@ -200,6 +200,8 @@ export class PqrDetailPageComponent {
     this.adminService.addComment(detail.id, dto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.newComment.set('');
+        this.isInternal.set(false);
+        this.notifyRequester.set(true);
         this.fetch(detail.id);
         this.submitting.set(false);
       },
