@@ -513,6 +513,7 @@ export class CheckoutService {
 
   private async getCheckoutSettings(): Promise<{
     require_registration: boolean;
+    require_payment_receipt: boolean;
   }> {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) {
@@ -528,6 +529,8 @@ export class CheckoutService {
 
     return {
       require_registration: !!checkout.require_registration,
+      // Opt-in por tienda (default `false` ⇒ comprobante opcional).
+      require_payment_receipt: !!checkout.require_payment_receipt,
     };
   }
 
@@ -1131,6 +1134,24 @@ export class CheckoutService {
       throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_005);
     }
 
+    // Soporte obligatorio por tienda: con
+    // `ecommerce.checkout.require_payment_receipt` activo, bank_transfer /
+    // voucher sin `file` se rechaza aquí (fail-fast, antes de crear orden y
+    // pago). Con el flag apagado el flujo queda idéntico al actual.
+    if (
+      (payment_method.system_payment_method.type === 'bank_transfer' ||
+        payment_method.system_payment_method.type === 'voucher') &&
+      !file
+    ) {
+      const checkoutSettings = await this.getCheckoutSettings();
+      if (checkoutSettings.require_payment_receipt) {
+        throw new VendixHttpException(
+          ErrorCodes.ECOM_CHECKOUT_001,
+          'El comprobante de pago es obligatorio para este método de pago',
+        );
+      }
+    }
+
     // Strict carta schedule gate (same OR window semantics as the public menu).
     await this.assertCartItemsWithinMenuWindows(cart_items);
 
@@ -1462,6 +1483,12 @@ export class CheckoutService {
       channel: dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
     });
 
+    // Online/whatsapp para enviar: los platos KDS (`prepared`) se crean con
+    // `is_takeaway=true` para que el KDS los muestre "Para llevar" (empacar).
+    const markTakeawayForDelivery = this.shouldMarkTakeawayForDelivery(
+      dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
+      delivery_type,
+    );
     // store_id y customer_id (user_id) se inyectan automáticamente
     const order = await this.prisma.orders.create({
       data: {
@@ -1488,6 +1515,10 @@ export class CheckoutService {
         placed_at: new Date(),
         order_items: {
           create: itemsWithTaxes.map((item) => ({
+            // Online/whatsapp para enviar: el plato KDS se empaca.
+            is_takeaway:
+              markTakeawayForDelivery &&
+              (item as any).product?.product_type === 'prepared',
             product_id: item.product_id,
             product_variant_id: item.product_variant_id,
             product_name: item.product.name,
@@ -2190,6 +2221,12 @@ export class CheckoutService {
       channel: 'whatsapp',
     });
 
+    // Online/whatsapp para enviar: los platos KDS (`prepared`) se crean con
+    // `is_takeaway=true` para que el KDS los muestre "Para llevar" (empacar).
+    const markTakeawayForDelivery = this.shouldMarkTakeawayForDelivery(
+      'whatsapp',
+      wa_delivery_type,
+    );
     const order = await this.prisma.orders.create({
       data: {
         order_number,
@@ -2211,6 +2248,10 @@ export class CheckoutService {
         placed_at: new Date(),
         order_items: {
           create: itemsWithTaxes.map((item) => ({
+            // Online/whatsapp para enviar: el plato KDS se empaca.
+            is_takeaway:
+              markTakeawayForDelivery &&
+              (item as any).product?.product_type === 'prepared',
             product_id: item.product_id,
             product_variant_id: item.product_variant_id,
             product_name: item.product.name,
@@ -2356,6 +2397,32 @@ export class CheckoutService {
       customer: customer_data,
       message: 'Order placed successfully via WhatsApp',
     };
+  }
+
+  /**
+   * Orden online/whatsapp para enviar -> los platos que van al KDS se empacan.
+   *
+   * La cocina es quien empaca, y el KDS solo muestra el badge "Para llevar"
+   * desde `order_items.is_takeaway`. Una orden de delivery que llega sin ese
+   * flag hace que el plato se sirva en loza. Por eso el checkout marca
+   * `is_takeaway=true` en la creacion cuando:
+   *   - `channel` es online (`ecommerce`) o `whatsapp`, y
+   *   - `delivery_type` es de envio (`home_delivery` u `other`/custom).
+   * `pickup` (para recoger), `direct_delivery` (mostrador) y `dine_in` (mesa)
+   * no entran: no son ordenes para enviar.
+   *
+   * El flag es por item y solo se marca en platos KDS
+   * (`product_type='prepared'`): la mercancia retail/bebidas nunca pasa por
+   * cocina, asi que su flag no afecta al KDS y se deja intacto.
+   */
+  private shouldMarkTakeawayForDelivery(
+    channel: string,
+    delivery_type: string,
+  ): boolean {
+    const isOnlineChannel = channel === 'ecommerce' || channel === 'whatsapp';
+    const isSendOrder =
+      delivery_type === 'home_delivery' || delivery_type === 'other';
+    return isOnlineChannel && isSendOrder;
   }
 
   private async generateOrderNumber(): Promise<string> {

@@ -1019,6 +1019,11 @@ export class ProductsAnalyticsService {
    * (Fase B cycle detection already prevents recursion). Products with
    * no recipe resolve to `null` so the caller can fall back to
    * `product.cost_price`.
+   *
+   * Recetas-por-variante: un producto puede tener varias recetas activas (la
+   * BASE y una por variante). Este mapa esta indexado por `product_id`, asi
+   * que elige UNA de forma determinista — base primero, si no la variante de
+   * menor id (ver paso 1.b). No hay costeo por variante en esta vista.
    */
   private async computeRecipeUnitCostMap(
     productIds: number[],
@@ -1027,11 +1032,21 @@ export class ProductsAnalyticsService {
     if (!productIds || productIds.length === 0) return result;
 
     // 1. Pull every active recipe whose yield product is in the set.
+    //
+    // Recetas-por-variante: `recipes.product_id` YA NO es unico — la migracion
+    // `20260908000000_recipes_por_variante` movio la unicidad a dos indices
+    // parciales (base / por variante), asi que un mismo producto puede traer
+    // aqui su receta BASE mas una por cada variante. Sin `orderBy` el orden de
+    // las filas lo decide Postgres, y como abajo se colapsan en un Map por
+    // `product_id` ganaba la ULTIMA que iterara: dos corridas identicas del
+    // reporte podian devolver `unit_cost`, `profit` y `margin` distintos.
     const recipes = await this.prisma.recipes.findMany({
       where: { product_id: { in: productIds }, is_active: true },
+      orderBy: [{ product_id: 'asc' }, { id: 'asc' }],
       select: {
         id: true,
         product_id: true,
+        product_variant_id: true,
         yield_quantity: true,
         waste_percent: true,
         items: {
@@ -1048,10 +1063,39 @@ export class ProductsAnalyticsService {
 
     if (recipes.length === 0) return result;
 
+    // 1.b Elegir UNA receta por producto. Es una DECISION, no un detalle:
+    //     este reporte agrega por `product_id` y no sabe que variante se
+    //     vendio, asi que no existe "la" receta correcta. Criterio: gana la
+    //     receta BASE (`product_variant_id IS NULL`), que representa el plato
+    //     tal cual; si el plato solo tiene recetas por variante, se toma la de
+    //     menor `product_variant_id` — arbitraria pero ESTABLE entre corridas,
+    //     que es justo lo que faltaba. Es la misma preferencia base-primero de
+    //     `KitchenFireService.resolveRecipeForVariant` cuando el consumidor no
+    //     conoce la variante.
+    //
+    //     Limitacion conocida: el costeo por variante real exigiria agrupar
+    //     `order_items` por `(product_id, product_variant_id)`, lo que cambia
+    //     la forma de las filas del reporte (contrato de respuesta).
+    type RecipeRow = (typeof recipes)[number];
+    /** Base = -1 para que siempre ordene antes que cualquier variante (id > 0). */
+    const variantRank = (r: RecipeRow): number => r.product_variant_id ?? -1;
+    const canonicalByProduct = new Map<number, RecipeRow>();
+    for (const recipe of recipes) {
+      const current = canonicalByProduct.get(recipe.product_id);
+      if (
+        !current ||
+        variantRank(recipe) < variantRank(current) ||
+        (variantRank(recipe) === variantRank(current) && recipe.id < current.id)
+      ) {
+        canonicalByProduct.set(recipe.product_id, recipe);
+      }
+    }
+    const canonicalRecipes = Array.from(canonicalByProduct.values());
+
     // 2. Identify component products that may themselves own a sub-recipe
     //    so we can resolve their cost recursively in a second pass.
     const componentIds = new Set<number>();
-    for (const r of recipes) {
+    for (const r of canonicalRecipes) {
       for (const it of r.items) {
         if (it.component_product) componentIds.add(it.component_product.id);
       }
@@ -1061,6 +1105,12 @@ export class ProductsAnalyticsService {
         ? await this.prisma.recipes.findMany({
             where: {
               product_id: { in: Array.from(componentIds) },
+              // Una sub-receta es SIEMPRE la receta base del insumo: un insumo
+              // no puede tener variantes (`RECIPE_COMPONENT_HAS_VARIANTS`) y
+              // `recipe_items` no guarda variante. Sin este filtro, un producto
+              // que se variantizo despues de usarse como insumo marcaba
+              // `hasSubRecipe` por una receta que la explosion nunca recorre.
+              product_variant_id: null,
               is_active: true,
             },
             select: { product_id: true },
@@ -1083,8 +1133,8 @@ export class ProductsAnalyticsService {
       return fallback;
     };
 
-    // 4. Compute per-recipe unit cost.
-    for (const recipe of recipes) {
+    // 4. Compute per-recipe unit cost (una receta canonica por producto).
+    for (const recipe of canonicalRecipes) {
       const yieldQty = Number(recipe.yield_quantity);
       if (yieldQty <= 0) {
         result.set(recipe.product_id, null);

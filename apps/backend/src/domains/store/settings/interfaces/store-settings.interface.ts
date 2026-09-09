@@ -186,6 +186,9 @@ export interface EcommerceSettings {
     create_account_after_order: boolean;
     terms_required: boolean;
     guest_newsletter_opt_in: boolean;
+    // Opt-in: comprobante obligatorio para bank_transfer/voucher en el
+    // checkout ecommerce. Ausente ⇒ opcional (default `false`).
+    require_payment_receipt?: boolean;
   };
   shipping?: {
     free_shipping_threshold?: number;

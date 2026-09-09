@@ -23,6 +23,7 @@ import { OrderStockCommitModule } from '../../inventory/shared/order-stock-commi
 import { WalletModule } from '../../wallet/wallet.module'; // QUI-457
 import { PaymentsModule } from '../../payments/payments.module'; // refund-gateway-fix: W2-A needs PaymentGatewayService
 import { OrdersModule } from '../orders.module'; // QUI-777: OrderSseService vive acá — el listener KDS lo usa para emitir `order.status_changed`
+import { KitchenFireModule } from '../../kitchen-fire/kitchen-fire.module'; // Seam cancelOrderItem: cancel KDS pending in-tx + SSE post-commit (sin ciclo: KitchenFireModule no importa este módulo)
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { OrdersModule } from '../orders.module'; // QUI-777: OrderSseService viv
     SettingsModule,
     InventorySerialNumbersModule,
     OrderStockCommitModule,
+    KitchenFireModule,
     WalletModule,
     // QUI-777: OrderSseService vive en OrdersModule y OrdersModule ya importa
     // OrderFlowModule (línea 54) — ciclo. `forwardRef` rompe el ciclo en DI.

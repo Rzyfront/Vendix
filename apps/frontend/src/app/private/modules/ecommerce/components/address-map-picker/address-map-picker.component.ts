@@ -72,6 +72,12 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   readonly center = input<LatLng | null>(null);
   /** Emitted with the new coordinate whenever the marker is moved. */
   readonly located = output<LatLng>();
+  /**
+   * Emitted once the map is ready to consume a coordinate (MapLibre `load`
+   * event). Also emitted on the error path so the parent never blocks a
+   * manual flow waiting for a map that will never load.
+   */
+  readonly mapReady = output<void>();
 
   readonly mapContainer =
     viewChild.required<ElementRef<HTMLDivElement>>('mapContainer');
@@ -88,7 +94,9 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
   private maplibregl: any = null;
   private map: any = null;
   private marker: any = null;
-  private mapReady = false;
+  private mapLoaded = false;
+  /** Guards the `mapReady` output so it fires exactly once. */
+  private mapReadyEmitted = false;
   private loadTimer: ReturnType<typeof setTimeout> | null = null;
   /** Delays collapsing the map credit so it flashes briefly (~0.3s) on load. */
   private attribTimer: ReturnType<typeof setTimeout> | null = null;
@@ -98,7 +106,7 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
     // coordinate (GPS, forward-geocode, etc.). Guarded until the map has loaded.
     effect(() => {
       const next = this.center();
-      if (next && this.mapReady && this.map) {
+      if (next && this.mapLoaded && this.map) {
         this.ensureMarker(next);
         this.map.flyTo({ center: [next.lng, next.lat], zoom: POINT_ZOOM });
       }
@@ -165,9 +173,10 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       });
 
       this.map.on('load', () => {
-        this.mapReady = true;
+        this.mapLoaded = true;
         this.loading.set(false);
         this.clearLoadTimer();
+        this.emitMapReady();
         // Let the OSM/OpenFreeMap credit flash briefly (~0.3s) on load so it is
         // seen, then collapse it to the ⓘ button (maplibre-gl v5 renders it
         // expanded). Hover or click re-expands it (see the .scss :hover rule and
@@ -186,9 +195,10 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       // If the basemap never loads (tiles unreachable), fall back to the
       // placeholder instead of leaving the skeleton spinning forever.
       this.loadTimer = setTimeout(() => {
-        if (!this.mapReady) {
+        if (!this.mapLoaded) {
           this.loading.set(false);
           this.error.set(true);
+          this.emitMapReady();
         }
       }, LOAD_TIMEOUT_MS);
     } catch {
@@ -196,6 +206,7 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       // placeholder; the customer fills the address manually (form still works).
       this.loading.set(false);
       this.error.set(true);
+      this.emitMapReady();
     }
   }
 
@@ -246,6 +257,16 @@ export class AddressMapPickerComponent implements AfterViewInit, OnDestroy {
       clearTimeout(this.loadTimer);
       this.loadTimer = null;
     }
+  }
+
+  /**
+   * Emits `mapReady` exactly once (success or error path) so the parent can
+   * gate geolocation prompts on a settled map without double-firing.
+   */
+  private emitMapReady(): void {
+    if (this.mapReadyEmitted) return;
+    this.mapReadyEmitted = true;
+    this.mapReady.emit();
   }
 
   ngOnDestroy(): void {

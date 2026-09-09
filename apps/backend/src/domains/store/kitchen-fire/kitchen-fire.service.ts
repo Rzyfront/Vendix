@@ -55,10 +55,12 @@ const KITCHEN_TICKET_INCLUDE = {
           // ticket read path (snapshot + all `ticket.*` SSE events use this
           // single include) carries whether the dish has an ACTIVE recipe.
           // Recetas-por-variante (paso 5): `products.recipes` es TO-MANY (una
-          // base + una por variante). Los lectores resuelven por par
-          // `(product_id, product_variant_id)` con caída a la base; el include
-          // lleva `product_variant_id` para que esa resolución sea en memoria,
-          // sin re-consultar `recipes` por línea.
+          // base + una por variante). Los lectores de solo-lectura resuelven
+          // por par `(product_id, product_variant_id)` con caída a la base;
+          // el include lleva `product_variant_id` para que esa resolución sea
+          // en memoria, sin re-consultar `recipes` por línea. `startPreparation`
+          // NO usa este snapshot: re-lee la tabla fresca (plan recetas-kds
+          // paso 2) para liberar tickets creados antes de reactivar/crear.
           recipes: {
             select: { id: true, is_active: true, product_variant_id: true },
           },
@@ -2201,32 +2203,61 @@ export class KitchenFireService {
     // delivered/cancelled directly, but moving the ticket into
     // `in_preparation` is blocked because the kitchen would have
     // nothing to deduct stock from. We check every product on the
-    // ticket against the recipes table.
+    // ticket against the recipes table. ONLY this transition is gated:
+    // `markReady`, `markDelivered` and `cancelTicket` never check recipes,
+    // so a stuck ticket can always be delivered/cancelled without re-fire.
+    //
+    // Plan recetas-kds paso 2 ("una sola verdad"): resolve against the FRESH
+    // `recipes` table (`is_active=true`, exact→base→null per
+    // `(product_id, product_variant_id)` via `recipeKey` /
+    // `resolveRecipeForVariant` — the same rule as `fireOrderItems` /
+    // `prepareFireContext`), NOT the `product.recipes[]` snapshot carried by
+    // `KITCHEN_TICKET_INCLUDE`. A ticket fired while its recipe was inactive
+    // (or missing) is released by retrying `start` as soon as the recipe is
+    // reactivated/created — no re-fire needed and no refresh endpoint: the
+    // board just retries `POST /tickets/:id/start`, which re-reads here.
     const recipeLessItemIds: number[] = [];
     // Recetas-por-variante (paso 5): el guard es por par (producto, variante),
     // no por producto — `.some(is_active)` dejaba pasar una línea cuya variante
     // no tiene receta mientras OTRA variante sí la tuviera (y no distingue la
-    // base heredada de la exacta). `KITCHEN_TICKET_INCLUDE` ya carga
-    // `product.recipes[]`, así que la resolución es en memoria: re-consultar
-    // `recipes.findFirst` por línea era el N+1 que F.1 eliminó acá.
-    const exactRecipeByPair = new Map<string, { id: number }>();
-    const baseRecipeByProduct = new Map<number, { id: number }>();
-    for (const item of ticket.items ?? []) {
-      if (item.product_id == null) continue;
-      for (const r of (item.product?.recipes ?? []) as Array<{
-        id: number;
-        is_active: boolean;
-        product_variant_id: number | null;
-      }>) {
-        if (r.is_active !== true) continue;
-        if (r.product_variant_id != null) {
-          exactRecipeByPair.set(
-            this.recipeKey(item.product_id, r.product_variant_id),
-            r,
-          );
-        } else {
-          baseRecipeByProduct.set(item.product_id, r);
-        }
+    // base heredada de la exacta). Un único `findMany` sobre la tabla fresca
+    // (sin N+1 por línea) y resolución en memoria con la misma regla del fire.
+    const ticketProductIds = [
+      ...new Set(
+        (ticket.items ?? [])
+          .map((i) => i.product_id)
+          .filter((v): v is number => v != null),
+      ),
+    ];
+    type FreshRecipeRow = {
+      id: number;
+      product_id: number;
+      product_variant_id: number | null;
+      is_active: boolean;
+    };
+    const freshRecipes =
+      ticketProductIds.length > 0
+        ? ((await this.prisma.recipes.findMany({
+            where: { product_id: { in: ticketProductIds }, is_active: true },
+            select: {
+              id: true,
+              product_id: true,
+              product_variant_id: true,
+              is_active: true,
+            },
+          })) as FreshRecipeRow[])
+        : [];
+    const exactRecipeByPair = new Map<string, FreshRecipeRow>();
+    const baseRecipeByProduct = new Map<number, FreshRecipeRow>();
+    for (const r of freshRecipes) {
+      if (r.is_active !== true) continue;
+      if (r.product_variant_id != null) {
+        exactRecipeByPair.set(
+          this.recipeKey(r.product_id, r.product_variant_id),
+          r,
+        );
+      } else {
+        baseRecipeByProduct.set(r.product_id, r);
       }
     }
     for (const item of ticket.items ?? []) {

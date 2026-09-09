@@ -160,6 +160,15 @@ export class DispatchNotePdfService {
 
     const transporter = this.resolveTransporter(note.dispatch_route_stops);
 
+    // Domiciliario: texto libre registrado en deliver(). Trim; ausente si vacío.
+    // DISPATCH_NOTE_PDF_INCLUDE no restringe escalares, así que la columna
+    // llega por defecto sin necesidad de select explícito.
+    const courier_name =
+      typeof note.courier_name === 'string' &&
+      note.courier_name.trim().length > 0
+        ? note.courier_name.trim()
+        : undefined;
+
     const data: DispatchNotePdfData = {
       dispatch_number: note.dispatch_number,
       status: note.status,
@@ -189,6 +198,8 @@ export class DispatchNotePdfService {
       currency: note.currency || 'COP',
 
       transporter,
+
+      courier_name,
 
       notes: note.notes || undefined,
     };

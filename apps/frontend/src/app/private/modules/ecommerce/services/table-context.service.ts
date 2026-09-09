@@ -7,7 +7,14 @@ import {
 } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { isPlatformBrowser } from '@angular/common';
-import { Observable, finalize, firstValueFrom, map, tap } from 'rxjs';
+import {
+  Observable,
+  finalize,
+  firstValueFrom,
+  map,
+  tap,
+  throwError,
+} from 'rxjs';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 import { QrScanBehavior } from '../../../../core/models/store-settings.interface';
@@ -96,6 +103,12 @@ interface ResolveTableResponse {
     allow_anonymous: boolean;
     anonymous_default: boolean;
     customer: TableIdentityCustomer | null;
+    /**
+     * HIGH-6 — el servidor confirma que la sesión que este dispositivo creía
+     * tener sigue abierta pero en OTRA mesa (hubo cambio de mesa). Sólo llega
+     * cuando el cliente mandó `session_id` en el query de `resolve`.
+     */
+    session_moved?: boolean;
   };
 }
 
@@ -372,6 +385,28 @@ export class TableContextService {
    */
   readonly sessionClosed = signal(false);
 
+  /**
+   * HIGH-6 — la cuenta de este comensal SE MOVIÓ a otra mesa (traslado o
+   * intercambio hecho por el staff desde el POS). Distinta de `sessionClosed`:
+   * la cuenta NO se cerró, sólo dejó de vivir en la mesa cuyo QR tiene este
+   * dispositivo, así que el mensaje al usuario es otro.
+   *
+   * Se activa por dos caminos:
+   *  - En caliente: evento SSE `session_moved` (`TableSessionSseService`).
+   *  - En frío: `resolve()` detecta que la sesión persistida ya no es la
+   *    activa de esta mesa (recarga dura / pestaña reabierta sin SSE).
+   *
+   * Mientras esté en `true` el vínculo está MUERTO: `sessionId` es `null`,
+   * `bill` está vacío, `hideDineInPurchase()` es `true` y toda mutación del
+   * comensal falla en el Observable (ver `movedGuard`). Se limpia en
+   * `clear()` / `leaveTable()` y en un `resolve()` sano.
+   */
+  readonly sessionMoved = signal(false);
+
+  /** Copia única del aviso de cambio de mesa — reutilizada por toast y modal. */
+  static readonly SESSION_MOVED_MESSAGE =
+    'Tu cuenta se movió a otra mesa. Escanea el QR de tu mesa actual para continuar.';
+
   // ── Live counters (D1 — diner presence SSE) ─────────────────────
   /** Number of active devices on the current table (from `comensal_joined` / `comensal_left`). */
   readonly activeDevicesCount = signal<number>(1);
@@ -415,6 +450,11 @@ export class TableContextService {
    *    straight from the QR).
    */
   readonly hideDineInPurchase = computed<boolean>(() => {
+    // HIGH-6 — el vínculo con la mesa está muerto tras un cambio de mesa.
+    // Se corta ANTES de mirar el modo: en `open_tab` el modo por sí solo
+    // nunca esconde los CTA, y sin esta rama el comensal seguiría pudiendo
+    // mandar platos a la cuenta del OTRO grupo que ahora ocupa la mesa.
+    if (this.sessionMoved()) return true;
     const mode = this.behavior();
     if (mode === null) return false;
     if (mode === 'menu_only') return true;
@@ -450,6 +490,23 @@ export class TableContextService {
     return token;
   }
 
+  /**
+   * HIGH-6 — cortacircuito para toda llamada del comensal cuando su vínculo
+   * murió por un cambio de mesa. Devuelve un Observable en ERROR (no lanza de
+   * forma síncrona) a propósito: `getMyBill()` se invoca dentro de un
+   * `effect()` del layout y una excepción síncrona ahí sería un error no
+   * capturado; el error del Observable, en cambio, cae en los `subscribe({
+   * error })` que ya existen en todos los call-sites.
+   *
+   * Devuelve `null` cuando el vínculo está sano, para que el llamante siga.
+   */
+  private movedGuard<T>(): Observable<T> | null {
+    if (!this.sessionMoved()) return null;
+    return throwError(
+      () => new Error(TableContextService.SESSION_MOVED_MESSAGE),
+    );
+  }
+
   private getHeaders(): HttpHeaders {
     const domainConfig = this.tenant_facade.getCurrentDomainConfig();
     const storeId = domainConfig?.store_id;
@@ -466,7 +523,21 @@ export class TableContextService {
    * persists to localStorage on success.
    */
   resolve(token: string): Observable<ResolveTableResponse> {
-    const params = new HttpParams().set('token', token);
+    // HIGH-6 — defensa en frío del cambio de mesa. Se fotografía el vínculo
+    // que este dispositivo traía ANTES de que la respuesta lo pise. Sólo
+    // interesa cuando el token es el MISMO: si el comensal escaneó el QR de
+    // otra mesa, un `sessionId` distinto es lo normal, no un traslado.
+    const previousToken = this.tableToken();
+    const previousSessionId = this.sessionId();
+    const sameToken = previousToken === token;
+
+    let params = new HttpParams().set('token', token);
+    if (sameToken && previousSessionId != null) {
+      // Parámetro OPCIONAL: le dice al servidor qué sesión creíamos tener para
+      // que confirme si sigue viva en otra mesa (`session_moved`).
+      params = params.set('session_id', String(previousSessionId));
+    }
+
     return this.http
       .get<ResolveTableResponse>(`${this.api_url}/resolve`, {
         params,
@@ -474,9 +545,26 @@ export class TableContextService {
       })
       .pipe(
         tap((response) => {
-          if (response.success && response.data) {
-            this.setResolveResponse(response.data, token);
-            this.persist();
+          if (!response.success || !response.data) return;
+          this.setResolveResponse(response.data, token);
+          this.persist();
+
+          // Dos señales concurrentes, misma conclusión: el vínculo murió.
+          //  1. El servidor lo afirma (`session_moved`), con el dato duro de
+          //     que la sesión vieja sigue abierta en otra mesa.
+          //  2. Discordancia local: traíamos una sesión persistida para ESTE
+          //     token y el servidor responde otra distinta y no nula. Cubre a
+          //     los clientes que aún no mandan `session_id` y a los modos que
+          //     no eco-devuelven la sesión activa.
+          const serverSessionId = response.data.session_id ?? null;
+          const mismatch =
+            sameToken &&
+            previousSessionId != null &&
+            serverSessionId != null &&
+            serverSessionId !== previousSessionId;
+
+          if (response.data.session_moved === true || mismatch) {
+            this.applySessionMoved();
           }
         }),
       );
@@ -527,6 +615,10 @@ export class TableContextService {
     this.activeDevicesCount.set(1);
     this.lastJoinEvent.set(null);
     this.sessionClosed.set(false);
+    // HIGH-6 — un resolve sano rehabilita el vínculo. Si la respuesta trae el
+    // marcador de traslado, `resolve()` vuelve a levantar la bandera justo
+    // después de esta línea.
+    this.sessionMoved.set(false);
   }
 
   /**
@@ -592,6 +684,10 @@ export class TableContextService {
         observer.complete();
       });
     }
+    // HIGH-6 — vínculo muerto tras un cambio de mesa: nunca escribir ni
+    // leer contra la cuenta que ahora ocupa esta mesa.
+    const moved = this.movedGuard<AddTableOrderResponse>();
+    if (moved) return moved;
     const token = this.tableToken();
     if (!token) {
       throw new Error('TableContextService.addOrder: no active table token');
@@ -620,6 +716,10 @@ export class TableContextService {
    * to the call-site (404 when there is no active session).
    */
   getMyBill(): Observable<TableBill> {
+    // HIGH-6 — vínculo muerto tras un cambio de mesa: nunca escribir ni
+    // leer contra la cuenta que ahora ocupa esta mesa.
+    const moved = this.movedGuard<TableBill>();
+    if (moved) return moved;
     const token = this.requireToken();
     this.loading_bill.set(true);
     return this.http
@@ -645,6 +745,10 @@ export class TableContextService {
     note?: string,
     customer?: { id?: number; name?: string },
   ): Observable<TableActionResponse> {
+    // HIGH-6 — vínculo muerto tras un cambio de mesa: nunca escribir ni
+    // leer contra la cuenta que ahora ocupa esta mesa.
+    const moved = this.movedGuard<TableActionResponse>();
+    if (moved) return moved;
     const token = this.requireToken();
     this.calling_waiter.set(true);
     const body: { note?: string; customer?: { id?: number; name?: string } } = {
@@ -670,6 +774,10 @@ export class TableContextService {
     note?: string,
     payment_preference?: TablePaymentPreference,
   ): Observable<TableActionResponse> {
+    // HIGH-6 — vínculo muerto tras un cambio de mesa: nunca escribir ni
+    // leer contra la cuenta que ahora ocupa esta mesa.
+    const moved = this.movedGuard<TableActionResponse>();
+    if (moved) return moved;
     const token = this.requireToken();
     this.requesting_bill.set(true);
     return this.http
@@ -689,6 +797,10 @@ export class TableContextService {
     n_splits: number,
     mode: TableSplitMode,
   ): Observable<TableActionResponse> {
+    // HIGH-6 — vínculo muerto tras un cambio de mesa: nunca escribir ni
+    // leer contra la cuenta que ahora ocupa esta mesa.
+    const moved = this.movedGuard<TableActionResponse>();
+    if (moved) return moved;
     const token = this.requireToken();
     this.requesting_bill.set(true);
     return this.http
@@ -705,6 +817,10 @@ export class TableContextService {
    * (`TABLE_GUEST_COUNT_EXCEEDS_CAPACITY`) when it exceeds table capacity.
    */
   setGuests(guest_count: number): Observable<SetGuestsResponse> {
+    // HIGH-6 — vínculo muerto tras un cambio de mesa: nunca escribir ni
+    // leer contra la cuenta que ahora ocupa esta mesa.
+    const moved = this.movedGuard<SetGuestsResponse>();
+    if (moved) return moved;
     const token = this.requireToken();
     return this.http.post<SetGuestsResponse>(
       `${this.api_url}/${token}/guests`,
@@ -770,9 +886,48 @@ export class TableContextService {
     this.activeDevicesCount.set(1);
     this.lastJoinEvent.set(null);
     this.sessionClosed.set(false);
+    this.sessionMoved.set(false);
     if (this.is_browser) {
       localStorage.removeItem(this.storage_key);
     }
+  }
+
+  /**
+   * HIGH-6 — invalida el vínculo con la mesa tras un cambio de mesa.
+   *
+   * NO se re-vincula en silencio a la sesión que ahora ocupa la mesa: en un
+   * `swap` las dos cuentas se cruzan, así que re-apuntar el token de la mesa
+   * origen a la sesión que se movió serviría a un grupo y le entregaría al
+   * otro una cuenta ajena. Y el token identifica una MESA, no a un comensal:
+   * el servidor no puede probar qué grupo físico se levantó. Ante la duda, se
+   * corta el vínculo y se pide reescanear el QR de la mesa donde el comensal
+   * está sentado AHORA.
+   *
+   * Se conservan `tableToken` / `tableName` a propósito — igual que hace el
+   * carril `session_closed` — para que el aviso pueda nombrar la mesa y para
+   * no arrancar/parar el `EventSource` desde aquí (el efecto que lo gobierna
+   * observa `tableToken()`). El comensal termina de salir con
+   * `acknowledgeSessionMoved()`.
+   */
+  applySessionMoved(): void {
+    this.sessionMoved.set(true);
+    // El vínculo con la cuenta muere: sin sesión no hay `canCheckout()` ni
+    // pago, y `hideDineInPurchase()` ya devuelve `true` por `sessionMoved`.
+    this.sessionId.set(null);
+    // La cuenta en pantalla es de la mesa, no del comensal: se borra para que
+    // no quede a la vista un total que puede ser de otro grupo.
+    this.bill.set(null);
+    this.loading_bill.set(false);
+    this.paymentPending.set(null);
+    this.paymentConfirmed.set(null);
+    this._paymentMethods.set([]);
+    this.activeDevicesCount.set(1);
+    this.lastJoinEvent.set(null);
+    // No se cerró la cuenta, se movió — el mensaje de despedida no aplica.
+    this.sessionClosed.set(false);
+    // Purga el `sessionId` de localStorage: sin esto una recarga resucitaría
+    // el vínculo muerto y volvería a mostrar la cuenta ajena.
+    this.persist();
   }
 
   /**
@@ -781,6 +936,15 @@ export class TableContextService {
    * farewell CTA so the storefront returns to normal browsing after a close.
    */
   acknowledgeSessionClosed(): void {
+    this.leaveTable();
+  }
+
+  /**
+   * HIGH-6 — el comensal acusa recibo del aviso "tu cuenta se movió". Sale de
+   * la mesa por completo para que el siguiente escaneo (el QR de la mesa
+   * donde está sentado ahora) arranque un vínculo limpio.
+   */
+  acknowledgeSessionMoved(): void {
     this.leaveTable();
   }
 
@@ -847,6 +1011,10 @@ export class TableContextService {
     token: string,
     dto: PayTableRequestPayload,
   ): Observable<PayTableResult> {
+    // HIGH-6 — vínculo muerto tras un cambio de mesa: nunca escribir ni
+    // leer contra la cuenta que ahora ocupa esta mesa.
+    const moved = this.movedGuard<PayTableResult>();
+    if (moved) return moved;
     this.paying_table.set(true);
     return this.http
       .post<{ success: boolean; data: PayTableResult }>(

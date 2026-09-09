@@ -170,6 +170,40 @@ export class OrdersService {
   }
 
   /**
+   * Paso 2 del plan PLAN-order-detail-cancel-item — cancelar un ítem
+   * desde el detalle de la orden (mismo flujo de mesa).
+   *
+   * Endpoint: PATCH /api/store/orders/:orderId/flow/items/:orderItemId/cancel
+   * con body `{reason}` (3-500 chars). El seam vive en
+   * `order-flow/order-flow.service.ts:cancelOrderItem` y aplica los mismos
+   * guards de mesa (bloquea orden cobrada o en `completed/cancelled/refunded`;
+   * ticket KDS en `pending` se cancela in-tx con SSE post-commit, si avanzó
+   * queda como merma sin tocar cocina; recálculo excluyendo cancelados).
+   *
+   * La respuesta trae la orden SIN los ítems proyectados (igual que deliver),
+   * así que la página NO usa este payload: refresca con `refreshOrder()`
+   * (patrón de `deliverItem`).
+   */
+  cancelOrderItem(
+    orderId: number,
+    itemId: number,
+    body: { reason: string },
+  ): Observable<Order> {
+    return this.http
+      .patch<Order>(
+        `${this.api_url}/store/orders/${orderId}/flow/items/${itemId}/cancel`,
+        body,
+      )
+      .pipe(
+        map((res) => unwrap<Order>(res)),
+        catchError((error) => {
+          console.error('Error cancelling order item:', error);
+          throw error;
+        }),
+      );
+  }
+
+  /**
    * Get orders by customer. Backend envelope: `{success, data: Order[], pagination}`.
    */
   getOrdersByCustomer(

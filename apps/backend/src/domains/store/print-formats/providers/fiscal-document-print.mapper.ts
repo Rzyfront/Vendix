@@ -342,7 +342,10 @@ export function mapFiscalDocumentToPrintData(
       email: cust.email,
       // CP-print-token-flow A.2 — dirección del adquirente desde
       // `users.addresses[0]` (los providers la incluyen). Sin direcciones
-      // `mapUserAddress` devuelve el default CO/Bogotá: siempre emite.
+      // `mapUserAddress` devuelve `{}` y el compositor no emite la fila
+      // (invariante 1): NO se fabrica un domicilio en Bogotá para el
+      // Consumidor Final — eso mandaba a la DIAN la ubicación de un
+      // adquirente que nadie capturó.
       ...mapUserAddress(cust.addresses?.[0]),
     },
     document: {

@@ -4,8 +4,10 @@
  * `model addresses` en schema.prisma). Pedir `country: true` en un `select`
  * lanza `Unknown field 'country' for select statement` (500).
  *
- * Fija además el fallback CO/Bogotá de `mapUserAddress` (siempre emite) y la
- * prioridad `country_code` real > `country` legacy > `'CO'`.
+ * Fija además la prioridad `country_code` real > `country` legacy > `'CO'`, y
+ * el candado anti-relleno: `mapUserAddress` NO fabrica ubicación cuando el
+ * adquirente no tiene dirección (ver `customer-address.ts` y la regla del lado
+ * XML en `dian-geography.ts` / `ubl-common.builder.ts`).
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -35,16 +37,11 @@ describe('print-formats: selects de direcciones usan country_code (no country)',
   );
 });
 
-describe('mapUserAddress: fallback CO/Bogotá + prioridad country_code', () => {
-  it('sin dirección (null/undefined/vacía) devuelve el default CO/Bogotá', () => {
-    const expected = {
-      address: 'Bogotá D.C., CO',
-      city: 'Bogotá D.C.',
-      country: 'CO',
-    };
-    expect(mapUserAddress(null)).toEqual(expected);
-    expect(mapUserAddress(undefined)).toEqual(expected);
-    expect(mapUserAddress({})).toEqual(expected);
+describe('mapUserAddress: sin relleno + prioridad country_code', () => {
+  it('sin dirección (null/undefined/vacía) devuelve `{}`', () => {
+    expect(mapUserAddress(null)).toEqual({});
+    expect(mapUserAddress(undefined)).toEqual({});
+    expect(mapUserAddress({})).toEqual({});
   });
 
   it('`country_code` real manda sobre `country` legacy', () => {
@@ -67,5 +64,25 @@ describe('mapUserAddress: fallback CO/Bogotá + prioridad country_code', () => {
     });
     expect(out.country).toBe('CO');
     expect(out.address).toBe('Calle 45 # 12-30, Bogotá D.C.');
+  });
+});
+
+describe('candado anti-relleno: `customer-address.ts` no fabrica domicilio', () => {
+  const SRC = fs.readFileSync(
+    path.join(__dirname, '../../lib/customer-address.ts'),
+    'utf8',
+  );
+  // Se quitan comentarios: el docblock SÍ menciona Bogotá — explica por qué
+  // no se rellena, citando la regla del XML. Lo prohibido es el literal vivo.
+  const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+  it('ningún literal ejecutable menciona Bogotá', () => {
+    expect(CODE).not.toMatch(/Bogot/);
+  });
+
+  it('el camino «sin datos» retorna vacío, no un objeto con claves', () => {
+    // Falla si alguien reintroduce `return { address: ..., city: ... }` en la
+    // rama de «no hay dirección».
+    expect(CODE).toMatch(/if\s*\(!hasAny\)\s*return\s*\{\s*\}\s*;/);
   });
 });

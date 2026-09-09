@@ -206,9 +206,10 @@ export class KdsTicketDetailModalComponent {
         if (typeof pid !== 'number') continue;
         if (this.recipeCache.has(pid)) continue;
         // Short-circuit: si el payload ya indica que el plato no tiene receta
-        // activa (`product.recipe` ausente o `is_active === false`), lo
-        // marcamos 'missing' sin pegar a la API — evita un fetch que de todas
-        // formas degradaría a "no disponible".
+        // activa —resolución por par `(product_id, product_variant_id)` sobre
+        // `product.recipes[]` con caída a la base, ver `itemHasActiveRecipe`—
+        // lo marcamos 'missing' sin pegar a la API: evita un fetch que de
+        // todas formas degradaría a "no disponible".
         if (!itemHasActiveRecipe(item)) {
           this.recipeCache.set(pid, { status: 'missing' });
           continue;

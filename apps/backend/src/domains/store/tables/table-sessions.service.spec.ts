@@ -792,6 +792,16 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
     function mockTransferReads(opts: {
       dstSession: boolean;
       raceOnTarget?: any;
+      /**
+       * Fila abierta que quedó sobre la mesa ORIGEN DESPUÉS de mover la
+       * sesión trasladada (llegó por un swap concurrente). La rama de
+       * traslado la consulta antes de liberar la mesa.
+       */
+      openOnSource?: any;
+      /**
+       * Re-lecturas in-tx. Se leen con `in` y no con `??` para poder
+       * simular explícitamente `null` (fila borrada / no visible).
+       */
       freshSrc?: any;
       freshDst?: any;
     }) {
@@ -805,21 +815,25 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
             return null;
           }
           if (args?.where?.id === SRC_SESSION_ID)
-            return (
-              opts.freshSrc ?? sessionRow(SRC_SESSION_ID, SRC, SRC_ORDER_ID)
-            );
+            return 'freshSrc' in opts
+              ? opts.freshSrc
+              : sessionRow(SRC_SESSION_ID, SRC, SRC_ORDER_ID);
           if (args?.where?.id === DST_SESSION_ID)
-            return (
-              opts.freshDst ??
-              (opts.dstSession
+            return 'freshDst' in opts
+              ? opts.freshDst
+              : opts.dstSession
                 ? sessionRow(DST_SESSION_ID, DST, DST_ORDER_ID)
-                : null)
-            );
+                : null;
           if (
             args?.where?.table_id === DST &&
             args?.where?.closed_at === null
           )
             return opts.raceOnTarget ?? null;
+          if (
+            args?.where?.table_id === SRC &&
+            args?.where?.closed_at === null
+          )
+            return opts.openOnSource ?? null;
           return null;
         },
       );
@@ -853,8 +867,17 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           data: expect.objectContaining({ table_id: DST }),
         }),
       );
-      // Statuses flip only in transfer mode.
+      // Statuses flip only in transfer mode. La mesa ORIGEN queda en
+      // `cleaning` (mismo estado que deja `closeSession`), NUNCA en
+      // `available`: saltarse el reset dejaría sentar un grupo nuevo en una
+      // mesa sucia.
       expect(prismaMock.tables.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: SRC },
+          data: expect.objectContaining({ status: 'cleaning' }),
+        }),
+      );
+      expect(prismaMock.tables.update).not.toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: SRC },
           data: expect.objectContaining({ status: 'available' }),
@@ -999,6 +1022,318 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       });
       expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
       expect(ssePush()).not.toHaveBeenCalled();
+    });
+
+    // ------------------------------------------------------------------
+    // F1 — re-lectura TOCTOU de la sesión ORIGEN en la rama de TRASLADO.
+    // `sourceSession` se lee FUERA de la transacción; sin re-leerla dentro
+    // el traslado escribe a ciegas. Estos tres tests fallan si se quita la
+    // re-lectura (el servicio resolvería en vez de rechazar).
+    // ------------------------------------------------------------------
+    it('transfer: rejects when the source check was closed mid-flight (TOCTOU)', async () => {
+      mockTablesForTransfer({
+        srcSession: true,
+        dstSession: false,
+        dstStatus: 'available',
+      });
+      mockTransferReads({
+        dstSession: false,
+        freshSrc: {
+          ...sessionRow(SRC_SESSION_ID, SRC, SRC_ORDER_ID),
+          closed_at: new Date(),
+        },
+      });
+
+      await expect(service.transferSession(SRC, DST)).rejects.toMatchObject({
+        errorCode: 'TABLE_SESSION_ALREADY_OPEN',
+      });
+      // Nada se escribió: ni se re-apuntó una sesión CERRADA al destino ni
+      // se marcó el destino `occupied` sin cuenta abierta (mesa fantasma).
+      expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+      expect(prismaMock.tables.update).not.toHaveBeenCalled();
+      expect(prismaMock.kitchen_tickets.updateMany).not.toHaveBeenCalled();
+      expect(ssePush()).not.toHaveBeenCalled();
+    });
+
+    it('transfer: rejects when the source check already moved to another table (TOCTOU)', async () => {
+      mockTablesForTransfer({
+        srcSession: true,
+        dstSession: false,
+        dstStatus: 'available',
+      });
+      // Un swap concurrente ya movió la cuenta de SRC a la mesa 999.
+      mockTransferReads({
+        dstSession: false,
+        freshSrc: sessionRow(SRC_SESSION_ID, 999, SRC_ORDER_ID),
+      });
+
+      await expect(service.transferSession(SRC, DST)).rejects.toMatchObject({
+        errorCode: 'TABLE_SESSION_ALREADY_OPEN',
+      });
+      expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+      // Clave: la mesa ORIGEN no se tocó. Liberarla habría huérfanado la
+      // cuenta que el swap dejó encima de ella.
+      expect(prismaMock.tables.update).not.toHaveBeenCalled();
+      expect(ssePush()).not.toHaveBeenCalled();
+    });
+
+    it('transfer: rejects when the source session row is gone mid-flight (TOCTOU)', async () => {
+      mockTablesForTransfer({
+        srcSession: true,
+        dstSession: false,
+        dstStatus: 'available',
+      });
+      mockTransferReads({ dstSession: false, freshSrc: null });
+
+      await expect(service.transferSession(SRC, DST)).rejects.toMatchObject({
+        errorCode: 'TABLE_SESSION_ALREADY_OPEN',
+      });
+      expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+      expect(prismaMock.tables.update).not.toHaveBeenCalled();
+    });
+
+    it('transfer: keeps the source table occupied when another open check landed on it', async () => {
+      mockTablesForTransfer({
+        srcSession: true,
+        dstSession: false,
+        dstStatus: 'available',
+      });
+      // La sesión origen sigue válida (pasa el TOCTOU), pero al momento de
+      // liberar la mesa un swap concurrente ya dejó OTRA cuenta abierta
+      // sobre SRC. Liberar la mesa la huérfanaría.
+      mockTransferReads({
+        dstSession: false,
+        openOnSource: sessionRow(555, SRC, 7777),
+      });
+
+      const result = await service.transferSession(SRC, DST);
+
+      expect(result.mode).toBe('transfer');
+      expect(prismaMock.tables.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: SRC },
+          data: expect.objectContaining({ status: 'occupied' }),
+        }),
+      );
+      expect(prismaMock.tables.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: SRC },
+          data: expect.objectContaining({ status: 'cleaning' }),
+        }),
+      );
+      expect(prismaMock.tables.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: SRC },
+          data: expect.objectContaining({ status: 'available' }),
+        }),
+      );
+      // El SSE anuncia el MISMO estado que quedó en base de datos.
+      const srcStatusPush = ssePush().mock.calls.find(
+        (c: any) =>
+          c[1]?.type === 'table_status_changed' && c[1]?.data?.table_id === SRC,
+      );
+      expect(srcStatusPush![1].data.status).toBe('occupied');
+    });
+
+    it('transfer: announces `cleaning` for the source table over SSE (F3)', async () => {
+      mockTablesForTransfer({
+        srcSession: true,
+        dstSession: false,
+        dstStatus: 'available',
+      });
+      mockTransferReads({ dstSession: false });
+
+      await service.transferSession(SRC, DST);
+
+      const srcStatusPush = ssePush().mock.calls.find(
+        (c: any) =>
+          c[1]?.type === 'table_status_changed' && c[1]?.data?.table_id === SRC,
+      );
+      expect(srcStatusPush![1].data.status).toBe('cleaning');
+      const dstStatusPush = ssePush().mock.calls.find(
+        (c: any) =>
+          c[1]?.type === 'table_status_changed' && c[1]?.data?.table_id === DST,
+      );
+      expect(dstStatusPush![1].data.status).toBe('occupied');
+    });
+
+    // ------------------------------------------------------------------
+    // F2 — el índice único parcial `table_sessions_one_open_per_table` es
+    // la última defensa detrás de los guards check-then-act. Su P2002 debe
+    // salir como 409 tipado, no como 500 crudo (el filtro global no
+    // traduce errores de Prisma).
+    // ------------------------------------------------------------------
+    it('maps the partial-unique P2002 to TABLE_SESSION_ALREADY_OPEN instead of a raw 500', async () => {
+      mockTablesForTransfer({
+        srcSession: true,
+        dstSession: false,
+        dstStatus: 'available',
+      });
+      mockTransferReads({ dstSession: false });
+      // Los dos traslados concurrentes vieron `raced === null`; el perdedor
+      // choca contra el índice al escribir.
+      prismaMock.table_sessions.update.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError(
+          'Unique constraint failed on the fields: (`table_id`)',
+          {
+            code: 'P2002',
+            clientVersion: 'test',
+            meta: { target: ['table_id'] },
+          },
+        ),
+      );
+
+      const err = await service
+        .transferSession(SRC, DST)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err).toMatchObject({ errorCode: 'TABLE_SESSION_ALREADY_OPEN' });
+      // Nada de SSE: la transacción no llegó a commitear.
+      expect(ssePush()).not.toHaveBeenCalled();
+    });
+
+    it('maps a Prisma write-conflict/deadlock (P2034) to a retryable 409', async () => {
+      mockTablesForTransfer({
+        srcSession: true,
+        dstSession: true,
+        dstStatus: 'occupied',
+      });
+      mockTransferReads({ dstSession: true });
+      prismaMock.table_sessions.update.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError(
+          'Transaction failed due to a write conflict or a deadlock',
+          { code: 'P2034', clientVersion: 'test' },
+        ),
+      );
+
+      const err = await service
+        .transferSession(SRC, DST)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err).toMatchObject({ errorCode: 'SYS_CONFLICT_001' });
+      expect(ssePush()).not.toHaveBeenCalled();
+    });
+
+    it('rethrows unrelated Prisma errors untouched (no blanket swallow)', async () => {
+      mockTablesForTransfer({
+        srcSession: true,
+        dstSession: false,
+        dstStatus: 'available',
+      });
+      mockTransferReads({ dstSession: false });
+      const raw = new Prisma.PrismaClientKnownRequestError('boom', {
+        code: 'P2025',
+        clientVersion: 'test',
+      });
+      prismaMock.table_sessions.update.mockRejectedValueOnce(raw);
+
+      await expect(service.transferSession(SRC, DST)).rejects.toBe(raw);
+    });
+  });
+
+  describe('cancelOrderItem — proyección del soft cancel (carril D / D2)', () => {
+    // Regresión del false-success: findOne traía cancelled_at /
+    // cancellation_reason / cancellation_type en el select de Prisma pero
+    // el remap los descartaba. El frontend pintaba el ítem como activo y
+    // la guarda de idempotencia (`if orderItem.cancelled_at`) nunca se
+    // activaba porque siempre veía `undefined`.
+    const CANCELLED_AT = new Date('2026-09-01T12:00:00.000Z');
+    const findOneRow = (itemOverrides: Record<string, unknown> = {}) => ({
+      id: 83,
+      store_id: STORE_ID,
+      table_id: 5,
+      order_id: 9001,
+      opened_by: USER_ID,
+      opened_at: new Date(),
+      closed_at: null,
+      paid_at: null,
+      guest_count: 2,
+      table: {
+        id: 5,
+        name: 'Mesa 5',
+        zone: null,
+        status: 'occupied',
+        table_waiters: [],
+      },
+      order: {
+        id: 9001,
+        state: 'created',
+        grand_total: new Prisma.Decimal(50000),
+        subtotal_amount: new Prisma.Decimal(50000),
+        tax_amount: new Prisma.Decimal(0),
+        discount_amount: new Prisma.Decimal(0),
+        customer_alias: null,
+        users: null,
+        order_items: [
+          {
+            id: 501,
+            product_id: 11,
+            product_variant_id: null,
+            product_name: 'Bandeja paisa',
+            quantity: 1,
+            unit_price: new Prisma.Decimal(50000),
+            total_price: new Prisma.Decimal(50000),
+            inventory_consumed_at_fire: false,
+            variant_attributes: null,
+            variant_sku: null,
+            product_variants: null,
+            item_type: 'prepared',
+            notes: null,
+            is_takeaway: false,
+            delivered_at: null,
+            delivered_by_user_id: null,
+            cancelled_at: null,
+            cancellation_reason: null,
+            cancellation_type: null,
+            kitchen_ticket_items: [],
+            ...itemOverrides,
+          },
+        ],
+      },
+    });
+
+    it('findOne expone cancelled_at / cancellation_reason / cancellation_type', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        findOneRow({
+          cancelled_at: CANCELLED_AT,
+          cancellation_reason: 'cliente se arrepintió',
+          cancellation_type: 'before_fire',
+        }),
+      );
+
+      const view = await service.findOne(83);
+      const item = (view.order as any).order_items[0];
+
+      expect(item.cancelled_at).toEqual(CANCELLED_AT);
+      expect(item.cancellation_reason).toBe('cliente se arrepintió');
+      expect(item.cancellation_type).toBe('before_fire');
+    });
+
+    it('cancelOrderItem es idempotente: el segundo llamado ve cancelled_at y no reescribe', async () => {
+      // La sesión ya trae el ítem cancelado → la guarda
+      // `if (orderItem.cancelled_at)` debe cortocircuitar antes del
+      // $transaction (auditoría: cancelled_at queda fijo en la primera
+      // cancelación).
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        findOneRow({
+          cancelled_at: CANCELLED_AT,
+          cancellation_reason: 'cliente se arrepintió',
+          cancellation_type: 'before_fire',
+        }),
+      );
+
+      const view = await service.cancelOrderItem(
+        83,
+        501,
+        'segundo intento con otro motivo',
+      );
+      const item = (view.order as any).order_items[0];
+
+      expect(item.cancelled_at).toEqual(CANCELLED_AT);
+      expect(item.cancellation_reason).toBe('cliente se arrepintió');
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
     });
   });
 });

@@ -5135,6 +5135,21 @@ export const ErrorCodes = {
     devMessage:
       'La variante no pertenece al producto de la receta (o el producto no tiene variantes).',
   },
+  /**
+   * Borrado DURO de receta bloqueado: hay tickets de cocina abiertos
+   * (`pending` / `in_preparation` / `ready`) que referencian el par
+   * (producto, variante) u órdenes de producción abiertas (`draft` /
+   * `in_progress`) sobre esta receta. El borrado físico rompería el
+   * historial de COGS/producción y dejaría tickets huérfanos: primero se
+   * resuelven los tickets/órdenes y después se elimina. La vía normal
+   * sigue siendo el soft-delete (`DELETE /:id` → `is_active=false`).
+   */
+  RECIPE_HAS_OPEN_TICKETS: {
+    code: 'RECIPE_HAS_OPEN_TICKETS',
+    httpStatus: 409,
+    devMessage:
+      'La receta no puede eliminarse definitivamente: tiene tickets de cocina u órdenes de producción abiertas',
+  },
 
   // Production Orders (sub-recipe batch stock) — Restaurant Suite Fase C
   PRODUCTION_ORDER_NOT_FOUND: {

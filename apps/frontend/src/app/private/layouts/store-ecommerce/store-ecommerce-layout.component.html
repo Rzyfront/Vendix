@@ -903,6 +903,31 @@
      triggered when the mesa is closed by staff. NOT just a toast — the
      diner sees a modal with two explicit CTAs (view summary / leave) so the
      close is acknowledged explicitly instead of being silently swallowed. -->
+<!-- Cambio de mesa — el vínculo del comensal con este token quedó
+     invalidado porque su cuenta se movió a otra mesa (o dos mesas
+     intercambiaron cuentas). Se usa un modal y no sólo el toast porque
+     seguir en esta pantalla mostraría la cuenta de OTRO grupo: el comensal
+     tiene que reconocerlo y reescanear. Hermano del farewell de
+     `sessionClosed`, pero con un mensaje distinto: aquí NADA se cerró. -->
+@if (table_context.sessionMoved()) {
+<app-modal
+  [isOpen]="true"
+  [closeOnBackdrop]="false"
+  [closeOnEscape]="false"
+  [showCloseButton]="false"
+  title="Tu cuenta cambió de mesa"
+  size="md">
+  <div class="farewell-modal-body">
+    <p class="farewell-modal-text">{{ session_moved_message }}</p>
+  </div>
+  <div slot="footer" class="mesa-modal-footer farewell-modal-footer">
+    <app-button variant="primary" size="md" (clicked)="sessionMovedLeave()">
+      Salir de la mesa
+    </app-button>
+  </div>
+</app-modal>
+}
+
 @if (table_context.sessionClosed()) {
 <app-modal
   [isOpen]="true"

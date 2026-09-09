@@ -1,8 +1,10 @@
 /**
  * Plan despacho-rapido-domiciliario — el footer del tiquete de despacho
- * (`renderDispatchTicketSection`) debe pintar al domiciliario cuando el
- * provider lo publica en `custom_variables.courier_name`, y quedar
- * idéntico al histórico cuando no hay nombre.
+ * (`renderDispatchTicketSection` y el `renderFooterSection` genérico que
+ * usa la plantilla maestra dispatch_ticket, id 12, vía gateway) debe
+ * pintar al domiciliario cuando el provider lo publica en
+ * `custom_variables.courier_name`, y quedar idéntico al histórico
+ * cuando no hay nombre.
  */
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrintLayoutComposerService } from '../print-layout-composer.service';
@@ -61,6 +63,16 @@ describe('PrintLayoutComposerService — dispatch ticket courier_name', () => {
     return (composer as any).renderDispatchTicketSection({}, data, mode);
   }
 
+  function renderFooter(
+    data: StandardPrintDataModel,
+    mode: 'dummy' | 'tokenized' = 'dummy',
+  ): string {
+    // El `sec_footer` de la plantilla maestra dispatch_ticket (id 12) es
+    // de tipo 'footer' (render genérico), no 'dispatch_ticket': por eso el
+    // gateway pinta esta ruta y no `renderDispatchTicketSection`.
+    return (composer as any).renderFooterSection({}, data, mode);
+  }
+
   it('1. con courier_name → el footer pinta el nombre tras "Despachado por:"', () => {
     const html = renderTicket(baseData('Juan Pérez'));
     expect(html).toContain('Despachado por: Juan Pérez');
@@ -80,6 +92,35 @@ describe('PrintLayoutComposerService — dispatch ticket courier_name', () => {
 
   it('4. modo tokenized → pill {{ courier_name }} para el editor', () => {
     const html = renderTicket(baseData(), 'tokenized');
+    expect(html).toContain('data-token="custom_variables.courier_name"');
+    expect(html).toContain('{{ courier_name }}');
+  });
+
+  it('5. footer con courier_name → pinta "Despachado por: <nombre>"', () => {
+    const html = renderFooter(baseData('test2'));
+    expect(html).toContain('Despachado por: test2');
+  });
+
+  it('6. footer sin courier_name → salida idéntica a la histórica', () => {
+    const html = renderFooter(baseData());
+    expect(html).not.toContain('Despachado por');
+    expect(html).toContain('¡Gracias por su compra!');
+    expect(html).toContain('Generado por Vendix');
+  });
+
+  it('7. footer con nombre en blanco → como sin nombre', () => {
+    const html = renderFooter(baseData('   '));
+    expect(html).not.toContain('Despachado por');
+  });
+
+  it('8. footer escapa el nombre (nunca HTML crudo)', () => {
+    const html = renderFooter(baseData('<script>alert(1)</script>'));
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('9. footer en modo tokenized → pill {{ courier_name }} para el editor', () => {
+    const html = renderFooter(baseData(), 'tokenized');
     expect(html).toContain('data-token="custom_variables.courier_name"');
     expect(html).toContain('{{ courier_name }}');
   });

@@ -1010,6 +1010,15 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La orden ya esta finalizada; no se puede revertir la entrega del ticket.',
   KITCHEN_TICKET_NOT_FOUND: 'Ticket de cocina no encontrado.',
 
+  // Recetas por variante (`RecipesService.create`). El rendimiento de una
+  // receta es el par (plato, variante): un plato CON variantes exige indicar
+  // la variante y nunca admite la receta base; un plato SIN variantes prohíbe
+  // la variante, igual que si la variante pertenece a otro plato.
+  RECIPE_VARIANT_REQUIRED:
+    'Este plato tiene variantes, así que la receta se crea sobre una variante concreta y no sobre el plato base. Elige en el campo de rendimiento la variante que produce esta receta.',
+  RECIPE_VARIANT_MISMATCH:
+    'La variante elegida no pertenece a este plato, o el plato no tiene variantes y por eso no admite ninguna. Vuelve a elegir el rendimiento de la receta.',
+
   // QR Table dine-in (comensal — cuenta de mesa)
   TABLE_NOT_FOUND:
     'No encontramos esta mesa. Vuelve a escanear el código QR.',

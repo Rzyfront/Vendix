@@ -203,6 +203,12 @@
                 <span class="text-[var(--color-text-primary)] font-medium">{{ formatDate(dispatch_note().actual_delivery_date) }}</span>
               </div>
             }
+            @if (hasCourierName()) {
+              <div class="flex justify-between text-sm">
+                <span class="text-[var(--color-text-secondary)]">Domiciliario</span>
+                <span class="text-[var(--color-text-primary)] font-medium">{{ courierName() }}</span>
+              </div>
+            }
             @if (dispatch_note().sales_order) {
               <div class="flex justify-between text-sm">
                 <span class="text-[var(--color-text-secondary)]">Orden de Venta</span>

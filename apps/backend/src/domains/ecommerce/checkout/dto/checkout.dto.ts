@@ -109,6 +109,13 @@ export class CheckoutShippingAddressDto {
   longitude?: number;
 }
 
+/**
+ * NOTA comprobante: el soporte de pago NO viaja en este DTO sino como
+ * multipart `file` (`POST /ecommerce/checkout`, `FileInterceptor('file')`,
+ * 5 MB). Con `ecommerce.checkout.require_payment_receipt` activo, el backend
+ * rechaza bank_transfer/voucher sin archivo (ECOM_CHECKOUT_001); con el flag
+ * apagado el archivo es opcional y se ignora en métodos no elegibles.
+ */
 export class CheckoutDto {
   // Booking selections for bookable services
   @IsOptional()

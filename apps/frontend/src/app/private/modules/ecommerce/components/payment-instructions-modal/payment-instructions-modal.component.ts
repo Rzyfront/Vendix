@@ -157,14 +157,18 @@ type InstructionField = {
           <!-- /pi-row -->
 
           <!-- Receipt upload -->
-          <section class="pi-card pi-upload">
+          <section class="pi-card pi-upload" [class.pi-upload--highlight]="uploadHighlighted()">
             <header class="pi-card-header">
               <app-icon name="upload-cloud" size="16" class="text-primary-500" />
-              <span>Soporte de pago (opcional)</span>
+              <span>Soporte de pago {{ required() ? '(obligatorio)' : '(opcional)' }}</span>
             </header>
             <p class="pi-upload-hint">
-              Sube una foto, comprobante o PDF para acelerar la validación de
-              tu pago.
+              @if (required()) {
+                Adjunta tu comprobante (foto o PDF) para poder continuar.
+              } @else {
+                Sube una foto, comprobante o PDF para acelerar la validación de
+                tu pago.
+              }
             </p>
 
             @if (currentFile()) {
@@ -229,7 +233,7 @@ type InstructionField = {
 
       <div slot="footer" class="pi-footer">
         <app-button
-          variant="ghost"
+          variant="outline-danger"
           size="md"
           (clicked)="onCancel()"
         >
@@ -726,14 +730,21 @@ type InstructionField = {
       .pi-footer {
         display: flex;
         gap: 0.5rem;
-        justify-content: flex-end;
+        justify-content: space-between;
+        align-items: center;
         width: 100%;
         flex-wrap: wrap;
       }
 
       .pi-footer app-button {
-        flex: 1;
         min-width: 130px;
+      }
+
+      /* Highlight temporal cuando el modo obligatorio bloquea el avance
+         sin comprobante: revela la sección de upload. */
+      .pi-upload.pi-upload--highlight {
+        border-color: var(--color-error-500, #ef4444);
+        box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25);
       }
 
       /* ---------- ANIMATIONS ---------- */
@@ -870,6 +881,14 @@ export class PaymentInstructionsModalComponent {
   readonly currentFile = input<File | null>(null);
 
   /**
+   * Modo obligatorio: con true, `onConfirm()` bloquea el avance sin
+   * comprobante (alerta + scroll al upload) y el título dice
+   * "(obligatorio)". Default false; la integración serial pasará
+   * `[required]` después.
+   */
+  readonly required = input(false);
+
+  /**
    * Catálogo de cuentas activas del método actual (provisto por el padre).
    * Si está vacío, el modal renderiza las `payment_instructions` legacy
    * del método (`PaymentMethod.payment_instructions`).
@@ -889,6 +908,7 @@ export class PaymentInstructionsModalComponent {
 
   readonly errorMsg = signal<string | null>(null);
   readonly copiedKey = signal<string | null>(null);
+  readonly uploadHighlighted = signal(false);
 
   private readonly ALLOWED_MIME = [
     'image/jpeg',
@@ -1046,6 +1066,7 @@ export class PaymentInstructionsModalComponent {
       return;
     }
     this.errorMsg.set(null);
+    this.uploadHighlighted.set(false);
     this.fileChange.emit(file);
   }
 
@@ -1055,8 +1076,29 @@ export class PaymentInstructionsModalComponent {
   }
 
   onConfirm(): void {
+    if (this.required() && this.currentFile() == null) {
+      this.errorMsg.set(
+        'El comprobante es obligatorio para continuar. Adjunta una foto o PDF de tu pago.',
+      );
+      this.revealUploadSection();
+      return;
+    }
     this.confirmed.emit();
     this.isOpenChange.emit(false);
+  }
+
+  /**
+   * Revela la sección de upload cuando el modo obligatorio bloquea el
+   * avance: scroll suave + highlight temporal. No cierra el modal.
+   */
+  private revealUploadSection(): void {
+    if (typeof document !== 'undefined') {
+      document
+        .querySelector('app-payment-instructions-modal .pi-upload')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    this.uploadHighlighted.set(true);
+    setTimeout(() => this.uploadHighlighted.set(false), 1600);
   }
 
   onCancel(): void {

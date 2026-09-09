@@ -189,6 +189,12 @@ export class StoreEcommerceLayoutComponent {
 
   // Table QR context (exposed read-only for template)
   readonly table_context = this.table_context_service;
+  /**
+   * Copia del aviso de cambio de mesa. El template no puede leer un miembro
+   * `static` de la clase del servicio, así que se expone aquí; la cadena
+   * sigue viviendo en un único sitio (`TableContextService`).
+   */
+  readonly session_moved_message = TableContextService.SESSION_MOVED_MESSAGE;
   // Live table-session stream (auto-connects on active table token)
   readonly table_sse = this.table_sse_service;
 
@@ -883,6 +889,16 @@ export class StoreEcommerceLayoutComponent {
 
   farewellLeave(): void {
     this.table_context_service.acknowledgeSessionClosed();
+  }
+
+  /**
+   * Cambio de mesa: el vínculo con el token ya está invalidado (el servicio
+   * lo hizo al recibir `session_moved` o al detectar la discordancia en
+   * `resolve()`). Aquí sólo se acepta el aviso y se suelta la mesa, para
+   * que el comensal vuelva a escanear el QR de donde está sentado ahora.
+   */
+  sessionMovedLeave(): void {
+    this.table_context_service.acknowledgeSessionMoved();
   }
 
   /** Cash / bank transfer — backend keeps the payment `pending` until staff confirm. */

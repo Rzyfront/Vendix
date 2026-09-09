@@ -143,13 +143,31 @@ export class RecipesService {
     }
 
     // 3. Uniqueness is per (product_id, product_variant_id) pair — enforced
-    //    by the two partial indexes; surface a friendly error instead of a
-    //    raw P2002.
+    //    by the two partial indexes (`recipes_product_base_uq` /
+    //    `recipes_product_variant_uq`), which cover INACTIVE rows too. So an
+    //    inactive row still blocks the INSERT at the DB level: the dup-check
+    //    cannot "ignore" it by creating a second row. Instead the 409 carries
+    //    actionable context (`existing_recipe_id` + `is_active`) so the
+    //    frontend offers "Reactivar existente" (POST /:id/restore) when the
+    //    only row for the pair is inactive, instead of a dead-end error.
     const dup = await this.prisma.recipes.findFirst({
       where: { product_id: dto.product_id, product_variant_id: variantId },
+      select: { id: true, is_active: true },
     });
     if (dup) {
-      throw new VendixHttpException(ErrorCodes.RECIPE_DUP_PRODUCT);
+      const isActive = (dup as { is_active?: boolean }).is_active !== false;
+      throw new VendixHttpException(
+        ErrorCodes.RECIPE_DUP_PRODUCT,
+        isActive
+          ? `Ya existe una receta activa para este producto en la tienda (receta ${dup.id}).`
+          : `Ya existe una receta inactiva para este producto en la tienda (receta ${dup.id}). Reactivala en vez de crear otra.`,
+        {
+          existing_recipe_id: dup.id,
+          is_active: isActive,
+          product_id: dto.product_id,
+          product_variant_id: variantId,
+        },
+      );
     }
 
     return this.prisma.recipes.create({
@@ -346,8 +364,15 @@ export class RecipesService {
    * (`product_variant_id IS NULL`). The fallback exists ONLY for recipes
    * created before this change — the UI no longer allows creating base
    * recipes on variantized products, so that set is finite and non-growing.
-   * Without `variantId` the lookup is by product only (unchanged legacy path
-   * for simple products).
+   * Without `variantId` the lookup is by product only — el llamador (el picker
+   * "sin papas" del POS y el modal de detalle del KDS) no sabe de que variante
+   * habla. Como `recipes.product_id` dejo de ser unico
+   * (`20260908000000_recipes_por_variante`), ese camino podia devolver la
+   * receta de CUALQUIER variante: `findFirst` sin `orderBy` deja el orden a
+   * Postgres. DECISION: gana la receta BASE (`product_variant_id IS NULL`) y,
+   * si el plato solo tiene recetas por variante, la de menor
+   * `product_variant_id` — arbitraria pero ESTABLE. Ademas solo se consideran
+   * recetas ACTIVAS, que es lo que ambos consumidores piden.
    */
   async findByProduct(productId: number, variantId?: number) {
     const include = {
@@ -374,15 +399,27 @@ export class RecipesService {
       },
     } as const;
     if (variantId != null) {
+      // "Receta vigente" = `is_active=true`: la rama exacta TAMBIÉN filtra
+      // activas (antes devolvía inactivas y el KDS pintaba "sin receta" sobre
+      // un plato cuya receta existía pero estaba desactivada, mientras `create`
+      // respondía duplicado — el 409 fantasma del plan recetas-kds).
       const exact = await this.prisma.recipes.findFirst({
-        where: { product_id: productId, product_variant_id: variantId },
+        where: {
+          product_id: productId,
+          product_variant_id: variantId,
+          is_active: true,
+        },
         include,
       });
       if (exact) {
         return exact;
       }
       const base = await this.prisma.recipes.findFirst({
-        where: { product_id: productId, product_variant_id: null },
+        where: {
+          product_id: productId,
+          product_variant_id: null,
+          is_active: true,
+        },
         include,
       });
       if (!base) {
@@ -391,7 +428,13 @@ export class RecipesService {
       return base;
     }
     const recipe = await this.prisma.recipes.findFirst({
-      where: { product_id: productId },
+      where: { product_id: productId, is_active: true },
+      // `nulls: 'first'` pone la receta BASE por delante de las de variante;
+      // el desempate por `id` cierra cualquier ambiguedad restante.
+      orderBy: [
+        { product_variant_id: { sort: 'asc', nulls: 'first' } },
+        { id: 'asc' },
+      ],
       include,
     });
     if (!recipe) {
@@ -439,12 +482,93 @@ export class RecipesService {
 
   async restore(id: number) {
     await this.findOne(id);
-    // Block restoring a recipe whose BOM has invalid items.
+    // Block restoring a recipe whose BOM has invalid items. The error carries
+    // the offending component so the caller can fix it instead of retrying
+    // blindly (see assertItemsValidForActivation).
     await this.assertItemsValidForActivation(id);
     return this.prisma.recipes.update({
       where: { id },
       data: { is_active: true, updated_at: new Date() },
     });
+  }
+
+  /**
+   * Borrado DURO (físico) de una receta. La vía normal sigue siendo el
+   * soft-delete (`DELETE /:id` → `is_active=false`); este método solo se usa
+   * desde `DELETE /:id/hard` con doble confirmación en la UI.
+   *
+   * Guardas (ambas responden `RECIPE_HAS_OPEN_TICKETS` con contexto
+   * accionable):
+   *  - Tickets de cocina ABIERTOS (`pending` / `in_preparation` / `ready`)
+   *    que referencian el par: la receta de variante solo sirve a su par
+   *    exacto; la BASE además sirve por caída (fallback) a líneas con
+   *    variante sin receta propia, así que su guarda cubre todo el producto.
+   *  - Órdenes de producción ABIERTAS (`draft` / `in_progress`) sobre esta
+   *    receta (`production_orders.recipe_id`).
+   *
+   * Los `recipe_items` caen por el `onDelete: Cascade` de la FK; el historial
+   * de tickets entregados/cancelados y de producciones cerradas NO se toca
+   * (auditoría intacta).
+   */
+  async hardDelete(id: number) {
+    const recipe = await this.findOne(id);
+
+    const OPEN_TICKET_STATUSES = ['pending', 'in_preparation', 'ready'] as const;
+    const ticketItemWhere =
+      recipe.product_variant_id != null
+        ? {
+            product_id: recipe.product_id,
+            product_variant_id: recipe.product_variant_id,
+            kitchen_ticket: {
+              status: { in: [...OPEN_TICKET_STATUSES] },
+            },
+          }
+        : {
+            product_id: recipe.product_id,
+            kitchen_ticket: {
+              status: { in: [...OPEN_TICKET_STATUSES] },
+            },
+          };
+    const openTicketItem = await this.prisma.kitchen_ticket_items.findFirst({
+      where: ticketItemWhere,
+      select: { id: true, kitchen_ticket_id: true },
+    });
+    if (openTicketItem) {
+      throw new VendixHttpException(
+        ErrorCodes.RECIPE_HAS_OPEN_TICKETS,
+        `La receta ${id} no puede eliminarse: el ticket de cocina ${openTicketItem.kitchen_ticket_id} sigue abierto sobre este plato. Resolvelo (entregar/cancelar) antes de eliminar.`,
+        {
+          recipe_id: id,
+          blocker: 'kitchen_ticket',
+          open_ticket_id: openTicketItem.kitchen_ticket_id,
+          product_id: recipe.product_id,
+          product_variant_id: recipe.product_variant_id,
+        },
+      );
+    }
+
+    const openProductionOrder =
+      await this.prisma.production_orders.findFirst({
+        where: {
+          recipe_id: id,
+          status: { in: ['draft', 'in_progress'] },
+        },
+        select: { id: true, status: true },
+      });
+    if (openProductionOrder) {
+      throw new VendixHttpException(
+        ErrorCodes.RECIPE_HAS_OPEN_TICKETS,
+        `La receta ${id} no puede eliminarse: la orden de producción ${openProductionOrder.id} sigue abierta (${openProductionOrder.status}). Cerrala o cancelala antes de eliminar.`,
+        {
+          recipe_id: id,
+          blocker: 'production_order',
+          open_production_order_id: openProductionOrder.id,
+        },
+      );
+    }
+
+    await this.prisma.recipes.delete({ where: { id } });
+    return { deleted: true };
   }
 
   // ----------------------------------------------------- Recipe items CRUD
@@ -646,8 +770,19 @@ export class RecipesService {
         throw new VendixHttpException(ErrorCodes.RECIPE_CYCLE_DETECTED);
       }
 
+      // Recetas-por-variante: una sub-receta es SIEMPRE la BASE del insumo.
+      // `recipe_items` no guarda variante y `addItem` rechaza componentes
+      // variantizados (`RECIPE_COMPONENT_HAS_VARIANTS`), pero ese guard corre
+      // al dar de alta el renglon y no impide que un producto ya usado como
+      // insumo se variantice DESPUES. Sin el filtro, el recorrido tomaba una
+      // fila arbitraria. Se fija a la base para caminar exactamente el mismo
+      // grafo que recorre `explodeBomRecursive`.
       const ownRecipe = await this.prisma.recipes.findFirst({
-        where: { product_id: productId, is_active: true },
+        where: {
+          product_id: productId,
+          product_variant_id: null,
+          is_active: true,
+        },
         select: { id: true },
       });
       if (!ownRecipe) {
@@ -780,14 +915,19 @@ export class RecipesService {
 
       // Does the component itself own an active recipe (sub-prep)?
       //
-      // Recetas-por-variante (paso 4): this lookup is INTENTIONALLY by base
-      // product only and does NOT change. A component (`recipe_items`) can
-      // never have variants — `addItem` rejects variantized components with
-      // RECIPE_COMPONENT_HAS_VARIANTS (ADR-1 yield/components split) — so a
-      // sub-recipe is always the base recipe of the component product.
+      // Recetas-por-variante: una sub-receta es SIEMPRE la receta BASE del
+      // producto insumo. `recipe_items` no tiene columna de variante y
+      // `addItem` rechaza componentes variantizados
+      // (`RECIPE_COMPONENT_HAS_VARIANTS`, ADR-1 yield/components split) — pero
+      // ese guard corre al dar de alta el renglon y NO impide que un producto
+      // ya usado como insumo se variantice despues. Desde que
+      // `recipes.product_id` dejo de ser unico, sin `product_variant_id: null`
+      // este `findFirst` podia enganchar la receta de una variante y explotar
+      // un BOM que nadie definio para el insumo.
       const childRecipe = await (tx ?? this.prisma).recipes.findFirst({
         where: {
           product_id: item.component_product_id,
+          product_variant_id: null,
           is_active: true,
         },
         select: { id: true },

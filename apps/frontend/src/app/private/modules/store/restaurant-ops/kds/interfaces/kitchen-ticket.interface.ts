@@ -30,13 +30,20 @@ export interface KitchenTicketProductRef {
    */
   preparation_time_minutes?: number | null;
   /**
-   * Restaurant Suite — KDS recipe-readiness: the recipe for this product
-   * (TO-ONE optional relation; `recipes.product_id` is `@unique`, so at most
-   * one row) nested by the kitchen-fire service include. The KDS card/modal
-   * derive ACTIVE-recipe presence from `recipe.is_active` without an extra
-   * per-card fetch — see `itemHasActiveRecipe`.
+   * Restaurant Suite — KDS recipe-readiness: las recetas del producto,
+   * anidadas por el include del kitchen-fire service. Recetas-por-variante
+   * (paso 5): `products.recipes` es TO-MANY — `recipes.product_id` ya NO es
+   * `@unique`, así que llega la receta BASE (`product_variant_id === null`)
+   * más una receta por variante. La card y el modal derivan la presencia de
+   * receta ACTIVA resolviendo por par `(product_id, product_variant_id)` con
+   * caída a la base, en memoria y sin un fetch extra por línea — ver
+   * `itemHasActiveRecipe`.
    */
-  recipe?: { id: number; is_active: boolean } | null;
+  recipes?: Array<{
+    id: number;
+    is_active: boolean;
+    product_variant_id: number | null;
+  }> | null;
 }
 
 export interface KitchenTicketItem {
@@ -76,18 +83,44 @@ export interface KitchenTicketItem {
 }
 
 /**
- * Restaurant Suite — KDS recipe-readiness helper. O(1) derivation of
- * "does this dish have an active recipe?" from the nested `product.recipe`
- * relation carried in the ticket payload (snapshot + every `ticket.*` SSE
- * event). Mirrors the backend guard exactly: a recipe row that exists AND is
- * `is_active === true`. A recipe-less (or inactive-recipe) item blocks the
- * ticket's `in_preparation` transition (backend guard
- * `KITCHEN_TICKET_NO_RECIPE`), so the KDS surfaces it proactively on the card.
+ * Restaurant Suite — KDS recipe-readiness helper. Derivación en memoria de
+ * "¿este plato tiene receta activa?" sobre `product.recipes[]`, que viaja con
+ * el ticket (snapshot + todo evento SSE `ticket.*`), sin un fetch por línea.
+ *
+ * Recetas-por-variante (paso 5): la relación es TO-MANY (una receta BASE más
+ * una por variante), así que la resolución replica exactamente el guard del
+ * backend `KitchenFireService.startPreparation` /
+ * `resolveRecipeForVariant`:
+ *   1. se consideran SÓLO las recetas con `is_active === true` (una receta
+ *      inactiva de la variante no bloquea la caída a la base);
+ *   2. si la línea trae `product_variant_id`, gana la receta activa con ESE
+ *      `product_variant_id`;
+ *   3. si esa variante no tiene la suya, cae a la receta BASE activa
+ *      (`product_variant_id === null`);
+ *   4. si no hay ninguna, la línea es «sin receta».
+ *
+ * Una línea sin receta activa bloquea la transición a `in_preparation`
+ * (guard backend `KITCHEN_TICKET_NO_RECIPE`), así que el KDS lo anticipa en
+ * la card en vez de esperar al clic fallido.
  */
 export function itemHasActiveRecipe(item: KitchenTicketItem): boolean {
-  // `recipe` is a to-one optional relation; an "active" recipe is one that
-  // both exists and has `is_active === true` (mirrors the backend guard).
-  return item.product?.recipe?.is_active === true;
+  const recipes = item.product?.recipes;
+  if (!recipes?.length) return false;
+
+  const variantId = item.product_variant_id ?? null;
+  let base: { id: number; is_active: boolean } | null = null;
+
+  for (const recipe of recipes) {
+    if (recipe.is_active !== true) continue;
+    if (recipe.product_variant_id == null) {
+      base = recipe;
+    } else if (variantId != null && recipe.product_variant_id === variantId) {
+      // Receta exacta de la variante: gana sobre la base, corta la búsqueda.
+      return true;
+    }
+  }
+
+  return base != null;
 }
 
 export interface KitchenTicket {

@@ -129,6 +129,12 @@ export class CheckoutComponent implements OnInit {
   readonly show_location_modal = signal(false);
   /** Current map center / captured coordinate (never rendered as text). */
   readonly map_center = signal<{ lat: number; lng: number } | null>(null);
+  /**
+   * True once the address map reported ready (`mapReady`: MapLibre `load` or
+   * its error fallback). Gates the location prompt so the browser permission
+   * is only requested when a live map can consume the coordinate.
+   */
+  readonly map_ready = signal(false);
 
   /** Mirror of the selected country code so the template can branch reactively (zoneless). */
   readonly selected_country_code = signal('CO');
@@ -225,6 +231,16 @@ export class CheckoutComponent implements OnInit {
     const t = this.selectedPaymentMethodObj()?.type;
     return t === 'bank_transfer' || t === 'voucher';
   });
+  /**
+   * True cuando el método actual exige instrucciones Y la tienda marcó el
+   * soporte como obligatorio (`ecommerce.checkout.require_payment_receipt`).
+   * Ausente/false ⇒ comprobante opcional (flujo actual sin cambios).
+   */
+  readonly requiresPaymentReceipt = computed(
+    () =>
+      this.requiresPaymentInstructions() &&
+      this.checkout_service.getRequirePaymentReceipt(),
+  );
 
   // ====== Cuentas bancarias (bank_transfer / voucher) ======
   /**
@@ -406,22 +422,28 @@ export class CheckoutComponent implements OnInit {
     this.initForm();
 
     // Offer location capture ONCE — the first time the customer is on the
-    // address step of a physical-item cart with the new-address form open, and
-    // only when the browser supports geolocation. Reads step/cart/use_new as
-    // reactive deps; the guard runs untracked so writing the flag signals does
-    // not re-trigger the effect. The actual decision (use GPS directly vs. show
-    // the opt-in modal vs. stay manual) is delegated to maybeOfferLocation()
-    // based on the current permission state.
+    // address step of a physical-item cart with home delivery selected, the
+    // new-address form open AND the map ready to consume a coordinate, and
+    // only when the browser supports geolocation. Never fires in pickup mode
+    // or before a delivery mode is chosen. Reads step/cart/use_new/delivery/
+    // map_ready as reactive deps; the guard runs untracked so writing the
+    // flag signals does not re-trigger the effect. The actual decision (use
+    // GPS directly vs. show the opt-in modal vs. stay manual) is delegated to
+    // maybeOfferLocation() based on the current permission state.
     effect(() => {
       const isAddressStep = this.step() === 1;
       const cart = this.cart();
       const useNew = this.use_new_address();
+      const deliveryMode = this.selected_delivery();
+      const mapReady = this.map_ready();
       untracked(() => {
         if (
           isAddressStep &&
           cart != null &&
           !this.cartHasOnlyServices &&
           useNew &&
+          deliveryMode === 'home' &&
+          mapReady &&
           !this.location_prompt_shown() &&
           this.geolocation.isSupported()
         ) {
@@ -984,6 +1006,15 @@ export class CheckoutComponent implements OnInit {
     this.applyReverseGeocode(coords);
   }
 
+  /**
+   * The address map settled (loaded, or failed and fell back to manual):
+   * mark it ready so the deferred location effect may offer the opt-in
+   * prompt in home mode.
+   */
+  onMapReady(): void {
+    this.map_ready.set(true);
+  }
+
   /** Stores the exact coordinate on the form and prefills the address fields. */
   private applyReverseGeocode(coords: { lat: number; lng: number }): void {
     this.address_form.get('latitude')?.setValue(coords.lat);
@@ -1350,6 +1381,16 @@ export class CheckoutComponent implements OnInit {
   readonly hasNoShippingCoverage = computed(
     () => this.shipping_coverage() === 'none',
   );
+
+  /**
+   * Opciones de despacho a domicilio (excluye retiro). Es la fuente de verdad
+   * del modo domicilio: el backend puede devolver una tarifa `pickup` de zona
+   * (`is_fallback:false`) cuando ninguna tarifa a domicilio aplica, y esa
+   * opción no debe contar como cobertura ni renderizar la lista.
+   */
+  readonly shippableOptions = computed(() =>
+    this.shipping_options().filter((o: any) => o.method_type !== 'pickup'),
+  );
   loading_payment_methods = false;
 
   // ========== ENTREGA delivery-first (CP-tienda-checkout-whatsapp) ==========
@@ -1680,18 +1721,45 @@ export class CheckoutComponent implements OnInit {
             this.shipping_coverage.set(isFallbackOnly ? 'pickup_only' : 'zone');
 
             // No pisar la elección del comprador en cada recotización: si la
-            // opción elegida sigue existiendo se conserva; solo se
-            // autoselecciona cuando no hay selección válida. Se prefiere la
-            // primera opción de despacho y se cae a `pickup` cuando es lo
-            // único que hay (el modo "recoger" la filtra por su cuenta).
+            // opción elegida sigue existiendo se conserva. Single-only: solo
+            // se autoselecciona cuando queda exactamente UNA opción no-pickup;
+            // con 2+ (p. ej. Riohacha céntrica vs. alejada) se limpia la
+            // selección y el comprador elige explícitamente — preseleccionar
+            // la barata subcobra el envío remoto. `nextStep` bloquea avanzar
+            // sin selección, así que limpiar equivale a exigir la elección.
             const stillValid = options.some(
               (o: any) => o.id === this.selected_shipping_option_id,
             );
-            if (!stillValid) {
-              const preferred =
-                options.find((o: any) => o.method_type !== 'pickup') ??
-                options[0];
-              this.selectShippingMethod(preferred, preferred.cost);
+            // Solo hay retiro (típico: la zona matcheó pero su única tarifa
+            // aplicable es pickup): para el domicilio es sin cobertura — se
+            // muestra el estado vacío accionable en vez de una lista vacía.
+            const shippable = options.filter(
+              (o: any) => o.method_type !== 'pickup',
+            );
+            if (shippable.length === 0) {
+              this.selected_shipping_option_id = null;
+              this.selected_shipping_method_id = null;
+              this.selected_shipping_method_type = null;
+              this.shipping_cost.set(0);
+              this.shipping_coverage.set('none');
+              if (notify) {
+                this.error_message.set(
+                  ERROR_MESSAGES['ORD_SHIP_NO_ZONE_001'],
+                );
+                this.toast.error(
+                  ERROR_MESSAGES['ORD_SHIP_NO_ZONE_001'],
+                  'Sin cobertura de envío',
+                );
+              }
+            } else if (!stillValid) {
+              if (shippable.length === 1) {
+                this.selectShippingMethod(shippable[0], shippable[0].cost);
+              } else {
+                this.selected_shipping_option_id = null;
+                this.selected_shipping_method_id = null;
+                this.selected_shipping_method_type = null;
+                this.shipping_cost.set(0);
+              }
             }
 
             if (isFallbackOnly) {
@@ -1916,12 +1984,17 @@ export class CheckoutComponent implements OnInit {
           this.selected_shipping_option_id == null)
       ) {
         await this.refreshShippingQuote(key);
-        if (
-          this.shipping_options().length === 0 ||
-          this.selected_shipping_option_id == null
-        ) {
-          // Sin opciones no hay a dónde avanzar: el paso 1 ya muestra el
-          // estado vacío accionable (otra dirección o recoger).
+        if (this.shippableOptions().length === 0) {
+          // Sin despacho a domicilio no hay a dónde avanzar: el paso 1
+          // muestra el estado vacío accionable (otra dirección o recoger).
+          this.error_message.set(
+            'No hay envío a domicilio para esta dirección. Prueba con otra dirección o elige "Recoger en tienda".',
+          );
+          return;
+        }
+        if (this.selected_shipping_option_id == null) {
+          // Hay tarifas pero el comprador aún no elige (caso 2+ tarifas).
+          this.error_message.set('Por favor selecciona una opción de envío');
           return;
         }
       }
@@ -1978,6 +2051,21 @@ export class CheckoutComponent implements OnInit {
         !this.payment_instructions_acknowledged()
       ) {
         this.error_message.set('');
+        this.show_payment_instructions_modal.set(true);
+        return;
+      }
+
+      // Soporte obligatorio (flag require_payment_receipt de la tienda): sin
+      // archivo no hay avance al pago. Se abre el modal, que al pulsar
+      // Continuar muestra la alerta y revela la sección de soporte.
+      if (this.requiresPaymentReceipt() && !this.payment_receipt_file()) {
+        this.error_message.set(
+          'Debes subir el soporte de pago para continuar.',
+        );
+        this.toast.warning(
+          'Debes subir el soporte de pago para continuar.',
+          'Soporte requerido',
+        );
         this.show_payment_instructions_modal.set(true);
         return;
       }
@@ -2136,6 +2224,20 @@ export class CheckoutComponent implements OnInit {
   placeOrder(): void {
     if (!this.selected_payment_method_id()) {
       this.error_message.set('Por favor selecciona un método de pago');
+      return;
+    }
+
+    // Soporte obligatorio: sin comprobante no se finaliza la compra (defensa
+    // en profundidad junto al gate de nextStep y al bloqueo del modal).
+    if (this.requiresPaymentReceipt() && !this.payment_receipt_file()) {
+      this.error_message.set(
+        'Debes subir el soporte de pago para finalizar la compra.',
+      );
+      this.toast.warning(
+        'Debes subir el soporte de pago para finalizar la compra.',
+        'Soporte requerido',
+      );
+      this.show_payment_instructions_modal.set(true);
       return;
     }
 

@@ -204,6 +204,11 @@ export class DispatchNoteDetailComponent {
     return a && typeof a === 'object' ? a.phone_number || '' : '';
   });
 
+  /** Domiciliario (texto libre) capturado en la entrega; solo se muestra con contenido no vacío. */
+  readonly courierName = computed<string>(() => (this.dispatch_note().courier_name ?? '').trim());
+
+  readonly hasCourierName = computed<boolean>(() => this.courierName().length > 0);
+
   // ── Items for ResponsiveDataView ────────────────────
   readonly computedItems = computed(() => {
     const items = this.dispatch_note().dispatch_note_items || [];

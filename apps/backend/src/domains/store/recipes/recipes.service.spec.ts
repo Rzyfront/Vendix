@@ -389,3 +389,732 @@ describe('RecipesService — cycle detection & explosion', () => {
     });
   });
 });
+
+/**
+ * Recetas-por-variante — resolución DETERMINISTA.
+ *
+ * La migración `20260908000000_recipes_por_variante` quitó el `@unique` de
+ * `recipes.product_id`: un producto ahora puede tener la receta BASE
+ * (`product_variant_id IS NULL`) más una por variante. Todo `findFirst` que
+ * buscaba "la receta del producto" sin `orderBy` quedó no determinista — el
+ * orden lo decide Postgres.
+ *
+ * Estos tests fijan el criterio acordado: **base primero**, y si el plato sólo
+ * tiene recetas por variante, la de menor `product_variant_id`. El mock de
+ * Prisma preserva el orden de inserción del arreglo de filas, y los casos
+ * colocan a propósito la fila "equivocada" primero: si se revierte el arreglo
+ * (se quita el `orderBy` / el `product_variant_id: null`), el `findFirst`
+ * devuelve esa primera fila y el test falla.
+ */
+describe('RecipesService — resolución determinista de receta (recetas-por-variante)', () => {
+  const STORE_ID = 100;
+
+  type FakeRecipeRow = {
+    id: number;
+    product_id: number;
+    product_variant_id: number | null;
+    is_active: boolean;
+    yield_quantity?: number;
+    waste_percent?: number;
+    items?: Array<{
+      component_product_id: number;
+      quantity: number;
+      waste_percent: number;
+    }>;
+  };
+
+  /** Réplica mínima del `where` que usa el servicio sobre `recipes`. */
+  const matchesWhere = (row: FakeRecipeRow, where: any): boolean => {
+    if (!where) return true;
+    if (where.id !== undefined && row.id !== where.id) return false;
+    if (where.product_id !== undefined && row.product_id !== where.product_id) {
+      return false;
+    }
+    if (where.is_active !== undefined && row.is_active !== where.is_active) {
+      return false;
+    }
+    if (where.product_variant_id !== undefined) {
+      const cond = where.product_variant_id;
+      if (cond === null) return row.product_variant_id === null;
+      if (typeof cond === 'object' && cond !== null && 'not' in cond) {
+        if (cond.not === null) return row.product_variant_id !== null;
+      }
+      return row.product_variant_id === cond;
+    }
+    return true;
+  };
+
+  /** Réplica mínima del `orderBy` de Prisma, incluido `nulls: 'first' | 'last'`. */
+  const applyOrderBy = (
+    rows: FakeRecipeRow[],
+    orderBy: any,
+  ): FakeRecipeRow[] => {
+    if (!orderBy) return rows;
+    const clauses = Array.isArray(orderBy) ? orderBy : [orderBy];
+    return [...rows].sort((a: any, b: any) => {
+      for (const clause of clauses) {
+        for (const [field, dirRaw] of Object.entries<any>(clause)) {
+          const spec =
+            typeof dirRaw === 'string'
+              ? { sort: dirRaw, nulls: undefined }
+              : dirRaw;
+          const nullsFirst = spec.nulls === 'first';
+          const norm = (v: any) =>
+            v === null || v === undefined
+              ? nullsFirst
+                ? -Infinity
+                : Infinity
+              : v;
+          const av = norm(a[field]);
+          const bv = norm(b[field]);
+          const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+          if (cmp !== 0) return spec.sort === 'desc' ? -cmp : cmp;
+        }
+      }
+      return 0;
+    });
+  };
+
+  const hydrate = (row: FakeRecipeRow) => ({
+    ...row,
+    yield_quantity: row.yield_quantity ?? 1,
+    waste_percent: row.waste_percent ?? 0,
+    items: (row.items ?? []).map((it, i) => ({
+      id: i + 1,
+      ...it,
+      is_optional: false,
+      component_product: { id: it.component_product_id },
+    })),
+  });
+
+  const buildService = async (rows: FakeRecipeRow[]) => {
+    const recipes = {
+      findFirst: jest.fn(({ where, orderBy }: any = {}) => {
+        const matched = rows.filter((r) => matchesWhere(r, where));
+        const ordered = applyOrderBy(matched, orderBy);
+        return Promise.resolve(ordered.length > 0 ? hydrate(ordered[0]) : null);
+      }),
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    };
+    const recipe_items = {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn(({ where }: any = {}) => {
+        const row = rows.find((r) => r.id === where?.recipe_id);
+        return Promise.resolve(
+          (row?.items ?? []).map((it) => ({
+            component_product_id: it.component_product_id,
+          })),
+        );
+      }),
+      create: jest.fn().mockImplementation(({ data }: any) => ({
+        id: 1,
+        ...data,
+      })),
+    };
+    const prisma = {
+      recipes,
+      recipe_items,
+      products: {
+        findFirst: jest.fn(({ where }: any) =>
+          Promise.resolve({ id: where.id, store_id: STORE_ID }),
+        ),
+      },
+      product_variants: {
+        count: jest.fn().mockResolvedValue(0),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+    };
+
+    const mod: TestingModule = await Test.createTestingModule({
+      providers: [
+        RecipesService,
+        { provide: StorePrismaService, useValue: prisma },
+        {
+          provide: RequestContextService,
+          useValue: {
+            getContext: jest.fn().mockReturnValue({
+              store_id: STORE_ID,
+              is_super_admin: false,
+              is_owner: true,
+            }),
+            getOrganizationId: jest.fn().mockReturnValue(STORE_ID),
+          },
+        },
+      ],
+    }).compile();
+
+    return {
+      service: mod.get(RecipesService),
+      recipes,
+      recipe_items,
+    };
+  };
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('findByProduct sin variante (D3)', () => {
+    it('devuelve la receta BASE aunque Postgres liste primero la de una variante', async () => {
+      const { service } = await buildService([
+        // El orden simula el orden ARBITRARIO en que puede llegar el heap:
+        // la base NO es la primera fila.
+        { id: 20, product_id: 1, product_variant_id: 470, is_active: true },
+        { id: 30, product_id: 1, product_variant_id: 471, is_active: true },
+        { id: 10, product_id: 1, product_variant_id: null, is_active: true },
+      ]);
+
+      const recipe = await service.findByProduct(1);
+
+      expect(recipe.id).toBe(10);
+      expect(recipe.product_variant_id).toBeNull();
+    });
+
+    it('sin receta base cae en la variante de MENOR id, no en la primera fila', async () => {
+      const { service } = await buildService([
+        { id: 30, product_id: 1, product_variant_id: 471, is_active: true },
+        { id: 20, product_id: 1, product_variant_id: 470, is_active: true },
+      ]);
+
+      const recipe = await service.findByProduct(1);
+
+      expect(recipe.id).toBe(20);
+      expect(recipe.product_variant_id).toBe(470);
+    });
+
+    it('ignora la receta base INACTIVA y devuelve la variante activa', async () => {
+      const { service } = await buildService([
+        { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        { id: 20, product_id: 1, product_variant_id: 470, is_active: true },
+      ]);
+
+      const recipe = await service.findByProduct(1);
+
+      expect(recipe.id).toBe(20);
+    });
+
+    it('lanza RECIPE_NOT_FOUND cuando ninguna receta del producto esta activa', async () => {
+      const { service } = await buildService([
+        { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+      ]);
+
+      await expect(service.findByProduct(1)).rejects.toBeInstanceOf(
+        VendixHttpException,
+      );
+    });
+
+    it('con variante sigue resolviendo par exacto y luego base (sin regresion)', async () => {
+      const { service } = await buildService([
+        { id: 10, product_id: 1, product_variant_id: null, is_active: true },
+        { id: 20, product_id: 1, product_variant_id: 470, is_active: true },
+      ]);
+
+      await expect(service.findByProduct(1, 470)).resolves.toMatchObject({
+        id: 20,
+      });
+      // La variante 471 no tiene receta propia: cae a la BASE.
+      await expect(service.findByProduct(1, 471)).resolves.toMatchObject({
+        id: 10,
+      });
+    });
+  });
+
+  describe('sub-receta = receta BASE del insumo (D4)', () => {
+    it('explodeBom explota la BASE del componente, no la receta de una variante', async () => {
+      // Receta raiz 10 (producto 1) consume el producto 2.
+      // El producto 2 tiene DOS recetas activas y la de la variante esta
+      // listada primero: sin `product_variant_id: null` el `findFirst`
+      // engancharia la 21 y la explosion emitiria el insumo 99.
+      const { service } = await buildService([
+        {
+          id: 10,
+          product_id: 1,
+          product_variant_id: null,
+          is_active: true,
+          items: [{ component_product_id: 2, quantity: 1, waste_percent: 0 }],
+        },
+        {
+          id: 21,
+          product_id: 2,
+          product_variant_id: 471,
+          is_active: true,
+          items: [{ component_product_id: 99, quantity: 1, waste_percent: 0 }],
+        },
+        {
+          id: 20,
+          product_id: 2,
+          product_variant_id: null,
+          is_active: true,
+          items: [{ component_product_id: 42, quantity: 1, waste_percent: 0 }],
+        },
+      ]);
+
+      const lines = await service.explodeBom(10, { 10: 1 });
+
+      expect(lines).toHaveLength(1);
+      expect(lines[0].component_product_id).toBe(42);
+      expect(lines.map((l) => l.component_product_id)).not.toContain(99);
+    });
+
+    it('el anticiclos camina la BASE del insumo y detecta el ciclo que ella cierra', async () => {
+      // Producto 2: receta de variante 21 (vacia, listada PRIMERO) + receta
+      // BASE 20 que consume el producto 1. Agregar el producto 2 como insumo
+      // de la receta 10 (cuyo yield es el producto 1) cierra 1 -> 2 -> 1.
+      // Si el recorrido toma la receta 21 (sin el filtro de base) no ve el
+      // ciclo y deja pasar el renglon.
+      const { service, recipe_items } = await buildService([
+        {
+          id: 10,
+          product_id: 1,
+          product_variant_id: null,
+          is_active: true,
+          items: [],
+        },
+        {
+          id: 21,
+          product_id: 2,
+          product_variant_id: 471,
+          is_active: true,
+          items: [],
+        },
+        {
+          id: 20,
+          product_id: 2,
+          product_variant_id: null,
+          is_active: true,
+          items: [{ component_product_id: 1, quantity: 1, waste_percent: 0 }],
+        },
+      ]);
+
+      await expect(
+        service.addItem(10, { component_product_id: 2, quantity: 1 }),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+      expect(recipe_items.create).not.toHaveBeenCalled();
+    });
+  });
+});
+
+/**
+ * PLAN-recetas-kds-ciclo-completo, paso 1 — vigencia + ciclo completo.
+ *
+ * "Receta vigente" = una sola fila con `is_active=true` por par
+ * (product_id, product_variant_id). Estos tests fijan:
+ *  - `create` responde 409 con contexto accionable (`existing_recipe_id` +
+ *    `is_active`) en vez de un duplicado fantasma — la unicidad TOTAL por par
+ *    vive en DB (`recipes_product_base_uq` / `recipes_product_variant_uq`,
+ *    que cubren inactivas), así que crear una segunda fila no es opción: la
+ *    salida es reactivar.
+ *  - `findByProduct` filtra activas en TODAS las ramas, incluida la exacta
+ *    por variante.
+ *  - `restore` sigue bloqueado por ítems inválidos y `hardDelete` exige no
+ *    tener tickets ni producciones abiertas.
+ */
+describe('RecipesService — vigencia + ciclo completo (recetas-kds paso 1)', () => {
+  const STORE_ID = 100;
+
+  type VigenciaRow = {
+    id: number;
+    product_id: number;
+    product_variant_id: number | null;
+    is_active: boolean;
+  };
+
+  type TicketItemRow = {
+    id: number;
+    kitchen_ticket_id: number;
+    product_id: number;
+    product_variant_id: number | null;
+    ticket_status: string;
+  };
+
+  type ProdOrderRow = { id: number; recipe_id: number; status: string };
+
+  const matchesRecipeWhere = (row: VigenciaRow, where: any): boolean => {
+    if (!where) return true;
+    if (where.id !== undefined && row.id !== where.id) return false;
+    if (
+      where.product_id !== undefined &&
+      row.product_id !== where.product_id
+    ) {
+      return false;
+    }
+    if (where.is_active !== undefined && row.is_active !== where.is_active) {
+      return false;
+    }
+    if (where.product_variant_id !== undefined) {
+      if (where.product_variant_id === null) {
+        if (row.product_variant_id !== null) return false;
+      } else if (row.product_variant_id !== where.product_variant_id) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const buildVigenciaService = async (opts: {
+    recipes: VigenciaRow[];
+    ticketItems?: TicketItemRow[];
+    prodOrders?: ProdOrderRow[];
+    variantCount?: number;
+    itemQuantities?: Array<number | null>;
+  }) => {
+    const rows = opts.recipes.map((r) => ({ ...r }));
+    const ticketItems = opts.ticketItems ?? [];
+    const prodOrders = opts.prodOrders ?? [];
+
+    const recipes = {
+      // El mock ignora `select`/`include` y devuelve la fila completa: al
+      // servicio solo le importan `id` + `is_active` (+ escalares en findOne).
+      findFirst: jest.fn(({ where }: any = {}) => {
+        const found = rows.find((r) => matchesRecipeWhere(r, where));
+        if (!found) return Promise.resolve(null);
+        return Promise.resolve({
+          ...found,
+          product: { id: found.product_id },
+          items: [],
+        });
+      }),
+      create: jest.fn(({ data }: any) =>
+        Promise.resolve({ id: 999, ...data }),
+      ),
+      update: jest.fn(({ where, data }: any) =>
+        Promise.resolve({ id: where.id, ...data }),
+      ),
+      delete: jest.fn(({ where }: any) => {
+        const idx = rows.findIndex((r) => r.id === where.id);
+        const [removed] = idx >= 0 ? rows.splice(idx, 1) : [null];
+        return Promise.resolve(removed ?? { id: where.id });
+      }),
+    };
+    const kitchen_ticket_items = {
+      findFirst: jest.fn(({ where }: any = {}) => {
+        const statuses: string[] | undefined =
+          where?.kitchen_ticket?.status?.in;
+        const found = ticketItems.find((t) => {
+          if (
+            where?.product_id !== undefined &&
+            t.product_id !== where.product_id
+          ) {
+            return false;
+          }
+          if (
+            where?.product_variant_id !== undefined &&
+            t.product_variant_id !== where.product_variant_id
+          ) {
+            return false;
+          }
+          if (statuses && !statuses.includes(t.ticket_status)) return false;
+          return true;
+        });
+        return Promise.resolve(
+          found
+            ? { id: found.id, kitchen_ticket_id: found.kitchen_ticket_id }
+            : null,
+        );
+      }),
+    };
+    const production_orders = {
+      findFirst: jest.fn(({ where }: any = {}) => {
+        const statuses: string[] | undefined = where?.status?.in;
+        const found = prodOrders.find((o) => {
+          if (where?.recipe_id !== undefined && o.recipe_id !== where.recipe_id)
+            return false;
+          if (statuses && !statuses.includes(o.status)) return false;
+          return true;
+        });
+        return Promise.resolve(
+          found ? { id: found.id, status: found.status } : null,
+        );
+      }),
+    };
+    const prisma = {
+      recipes,
+      recipe_items: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue(
+          (opts.itemQuantities ?? [1]).map((q, i) => ({
+            id: i + 1,
+            component_product_id: 900 + i,
+            quantity: q,
+          })),
+        ),
+      },
+      products: {
+        findFirst: jest.fn(({ where }: any) =>
+          Promise.resolve({ id: where.id, store_id: STORE_ID }),
+        ),
+      },
+      product_variants: {
+        count: jest.fn().mockResolvedValue(opts.variantCount ?? 0),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      kitchen_ticket_items,
+      production_orders,
+    };
+
+    const mod: TestingModule = await Test.createTestingModule({
+      providers: [
+        RecipesService,
+        { provide: StorePrismaService, useValue: prisma },
+        {
+          provide: RequestContextService,
+          useValue: {
+            getContext: jest.fn().mockReturnValue({
+              store_id: STORE_ID,
+              is_super_admin: false,
+              is_owner: true,
+            }),
+            getOrganizationId: jest.fn().mockReturnValue(STORE_ID),
+          },
+        },
+      ],
+    }).compile();
+
+    return {
+      service: mod.get(RecipesService),
+      recipes,
+      kitchen_ticket_items,
+      production_orders,
+    };
+  };
+
+  const inStore = <T>(fn: () => Promise<T>): Promise<T> =>
+    Promise.resolve(
+      RequestContextService.run(
+        {
+          store_id: STORE_ID,
+          is_super_admin: false,
+          is_owner: true,
+        },
+        fn,
+      ) as Promise<T>,
+    );
+
+  const catchVendix = async (fn: () => Promise<unknown>) => {
+    try {
+      await inStore(fn);
+    } catch (e) {
+      expect(e).toBeInstanceOf(VendixHttpException);
+      return e as VendixHttpException;
+    }
+    throw new Error('se esperaba un VendixHttpException y no se lanzó');
+  };
+
+  const detailsOf = (e: VendixHttpException): any =>
+    (e.getResponse() as { details?: any }).details ?? {};
+
+  describe('create — 409 accionable (reactivar en vez de callejón)', () => {
+    const baseDto = {
+      product_id: 1,
+      yield_quantity: 1,
+      yield_unit: 'unidad',
+    };
+
+    it('con duplicada INACTIVA responde RECIPE_DUP_PRODUCT con existing_recipe_id + is_active:false', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+      });
+      recipes.create.mockClear();
+
+      const err = await catchVendix(() => service.create({ ...baseDto }));
+      expect(err.errorCode).toBe('RECIPE_DUP_PRODUCT');
+      expect(detailsOf(err)).toMatchObject({
+        existing_recipe_id: 10,
+        is_active: false,
+      });
+      expect(recipes.create).not.toHaveBeenCalled();
+    });
+
+    it('con duplicada ACTIVA responde RECIPE_DUP_PRODUCT con is_active:true', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 11, product_id: 1, product_variant_id: null, is_active: true },
+        ],
+      });
+      recipes.create.mockClear();
+
+      const err = await catchVendix(() => service.create({ ...baseDto }));
+      expect(err.errorCode).toBe('RECIPE_DUP_PRODUCT');
+      expect(detailsOf(err)).toMatchObject({
+        existing_recipe_id: 11,
+        is_active: true,
+      });
+      expect(recipes.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findByProduct — solo vigentes en todas las ramas', () => {
+    it('con variante ignora la exacta INACTIVA y cae a la base ACTIVA', async () => {
+      const { service } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: true },
+          { id: 20, product_id: 1, product_variant_id: 470, is_active: false },
+        ],
+      });
+
+      const recipe = await service.findByProduct(1, 470);
+      expect(recipe.id).toBe(10);
+    });
+
+    it('con variante devuelve la exacta ACTIVA sin caer a la base', async () => {
+      const { service } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: true },
+          { id: 20, product_id: 1, product_variant_id: 470, is_active: true },
+        ],
+      });
+
+      const recipe = await service.findByProduct(1, 470);
+      expect(recipe.id).toBe(20);
+    });
+
+    it('con variante lanza RECIPE_NOT_FOUND si solo hay inactivas', async () => {
+      const { service } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+          { id: 20, product_id: 1, product_variant_id: 470, is_active: false },
+        ],
+      });
+
+      const err = await catchVendix(() => service.findByProduct(1, 470));
+      expect(err.errorCode).toBe('RECIPE_NOT_FOUND');
+    });
+  });
+
+  describe('restore — bloqueado por ítems inválidos, liberado en caso contrario', () => {
+    it('reactiva cuando todos los ítems tienen cantidad válida', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+        itemQuantities: [1, 2.5],
+      });
+
+      const result = await inStore(() => service.restore(10));
+      expect(recipes.update).toHaveBeenCalledWith({
+        where: { id: 10 },
+        data: { is_active: true, updated_at: expect.any(Date) },
+      });
+      expect(result.is_active).toBe(true);
+    });
+
+    it('responde RECIPE_ACTIVATION_BLOCKED_INVALID_ITEMS si un ítem tiene cantidad 0', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+        itemQuantities: [1, 0],
+      });
+
+      const err = await catchVendix(() => service.restore(10));
+      expect(err.errorCode).toBe(
+        'RECIPE_ACTIVATION_BLOCKED_INVALID_ITEMS',
+      );
+      expect(recipes.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('hardDelete — guardas + borrado físico', () => {
+    it('bloquea con RECIPE_HAS_OPEN_TICKETS si hay ticket abierto sobre el par', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+        ticketItems: [
+          {
+            id: 5,
+            kitchen_ticket_id: 77,
+            product_id: 1,
+            product_variant_id: null,
+            ticket_status: 'in_preparation',
+          },
+        ],
+      });
+
+      const err = await catchVendix(() => service.hardDelete(10));
+      expect(err.errorCode).toBe('RECIPE_HAS_OPEN_TICKETS');
+      expect(detailsOf(err)).toMatchObject({
+        recipe_id: 10,
+        blocker: 'kitchen_ticket',
+        open_ticket_id: 77,
+      });
+      expect(recipes.delete).not.toHaveBeenCalled();
+    });
+
+    it('NO bloquea la receta de una variante por un ticket abierto de OTRA variante', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 20, product_id: 1, product_variant_id: 470, is_active: false },
+        ],
+        ticketItems: [
+          {
+            id: 6,
+            kitchen_ticket_id: 78,
+            product_id: 1,
+            product_variant_id: 471,
+            ticket_status: 'pending',
+          },
+        ],
+      });
+
+      const result = await inStore(() => service.hardDelete(20));
+      expect(result).toMatchObject({ deleted: true });
+      expect(recipes.delete).toHaveBeenCalledWith({ where: { id: 20 } });
+    });
+
+    it('ignora tickets terminales (delivered/cancelled): sí borra', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+        ticketItems: [
+          {
+            id: 7,
+            kitchen_ticket_id: 79,
+            product_id: 1,
+            product_variant_id: null,
+            ticket_status: 'delivered',
+          },
+        ],
+      });
+
+      const result = await inStore(() => service.hardDelete(10));
+      expect(result).toMatchObject({ deleted: true });
+      expect(recipes.delete).toHaveBeenCalledWith({ where: { id: 10 } });
+    });
+
+    it('bloquea con RECIPE_HAS_OPEN_TICKETS si hay producción abierta sobre la receta', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+        prodOrders: [{ id: 33, recipe_id: 10, status: 'in_progress' }],
+      });
+
+      const err = await catchVendix(() => service.hardDelete(10));
+      expect(err.errorCode).toBe('RECIPE_HAS_OPEN_TICKETS');
+      expect(detailsOf(err)).toMatchObject({
+        recipe_id: 10,
+        blocker: 'production_order',
+        open_production_order_id: 33,
+      });
+      expect(recipes.delete).not.toHaveBeenCalled();
+    });
+
+    it('borra físicamente cuando no hay bloqueadores', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+        prodOrders: [{ id: 34, recipe_id: 10, status: 'completed' }],
+      });
+
+      const result = await inStore(() => service.hardDelete(10));
+      expect(result).toMatchObject({ deleted: true });
+      expect(recipes.delete).toHaveBeenCalledWith({ where: { id: 10 } });
+    });
+  });
+});

@@ -346,12 +346,15 @@ export class TableSessionsController {
    * Cancel one item from the order backing an open table session.
    * POST /api/store/table-sessions/:id/items/:orderItemId/cancel
    *
-   * carril D / lina — D2: este endpoint es DEFINITIVO en este controller
-   * (no migra a `orders.controller.ts`): la cancelación tiene aquí su
-   * contexto completo (sesión abierta, KDS disparado, stock comprometido,
-   * motivo obligatorio) y moverla dejaría un segundo callsite duplicado.
+   * PLAN-order-detail-cancel-item (paso 1, aprobado): la regla de cancelación
+   * vive en el seam compartido `OrderFlowService.cancelOrderItem` (orden-scope
+   * `PATCH /store/orders/:orderId/flow/items/:orderItemId/cancel`, mismo DTO
+   * `CancelOrderItemDto`). Este endpoint queda como seam de UI de mesa:
+   * valida sesión abierta + pertenencia a la cuenta y delega — ya no es la
+   * única copia de la regla. Se revierte el docblock "definitivo, no migra"
+   * con la aprobación de ese plan.
    *
-   * Comportamiento (ver `TableSessionsService.cancelOrderItem`):
+   * Comportamiento (ver `OrderFlowService.cancelOrderItem`):
    *  - Soft cancel: el ítem NO se borra; queda VISIBLE marcado como
    *    cancelado pero EXCLUIDO del subtotal/tax/grand_total (filtro
    *    `cancelled_at IS NULL` en el recálculo).

@@ -89,6 +89,7 @@ export interface EcommerceSettings {
     whatsapp_checkout?: boolean;
     whatsapp_number?: string;
     whatsapp_pitch?: string;
+    require_payment_receipt?: boolean;
   };
 
   // Envíos

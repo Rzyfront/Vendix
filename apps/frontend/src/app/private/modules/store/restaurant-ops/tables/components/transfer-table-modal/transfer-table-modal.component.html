@@ -12,6 +12,11 @@
       <app-spinner size="md"></app-spinner>
       <p>Cargando mesas…</p>
     </div>
+  } @else if (loadError()) {
+    <div class="empty text-center text-text-secondary py-6">
+      <app-icon name="alert-triangle" [size]="32"></app-icon>
+      <p class="mt-2 text-sm">{{ loadError() }}</p>
+    </div>
   } @else if (allTables().length === 0) {
     <div class="empty text-center text-text-secondary py-6">
       <app-icon name="table" [size]="32"></app-icon>

@@ -44,6 +44,18 @@ const ADMINISTRATIVE_PREFIX_PATTERNS: RegExp[] = [
 ];
 
 /**
+ * Artículos iniciales que el comerciante omite o agrega de forma
+ * inconsistente al configurar zonas ("Guajira" vs "La Guajira", "Rosario" vs
+ * "El Rosario"). Se describen como patrón, no como lista de lugares: aplica a
+ * cualquier nombre que los traiga.
+ *
+ * Caso real: el catálogo manda `"La Guajira"` pero la zona se configuró como
+ * `"Guajira"`; sin esto la zona se descartaba y el comprador quedaba sin
+ * tarifas a domicilio aunque existieran.
+ */
+const LEADING_ARTICLE_PATTERN = /^(el|la|los|las|del|de)\s+/;
+
+/**
  * Mapa ISO 3166-1 alfa-3 → alfa-2 acotado a los países que la plataforma
  * ofrece (espejo de `country.service.ts` en el frontend). Es dato de estándar,
  * no configuración de tenant: existe sólo porque hay direcciones históricas
@@ -131,6 +143,11 @@ export function normalizeGeoName(value?: string | null): string {
 
   for (const pattern of ADMINISTRATIVE_PREFIX_PATTERNS) {
     normalized = normalized.replace(pattern, '');
+  }
+  // Artículos iniciales ("la guajira" → "guajira"). En bucle por si la
+  // división traía doble prefijo ("departamento de la guajira").
+  while (LEADING_ARTICLE_PATTERN.test(normalized)) {
+    normalized = normalized.replace(LEADING_ARTICLE_PATTERN, '');
   }
   for (const pattern of ADMINISTRATIVE_SUFFIX_PATTERNS) {
     normalized = normalized.replace(pattern, '');
@@ -224,14 +241,35 @@ export function normalizePostalCode(value?: string | null): string {
   return String(value).replace(/[\s-]+/g, '').toUpperCase().trim();
 }
 
-/** Compara un código postal contra una lista de patrones exactos. */
+/**
+ * Compara un código postal contra una lista de patrones de zona.
+ *
+ * Además del exacto, acepta prefijo en ambos sentidos: el comerciante suele
+ * configurar el CP recortado (`"44001"`) mientras el comprador manda el
+ * completo (`"440001"`), o viceversa. El prefijo mínimo es de 4 caracteres
+ * para no colisionar por una sola cifra (`"4"` matchearía medio país).
+ *
+ * Caso real: zona con `zip_codes: ["44001"]` descartaba la dirección con
+ * `postal_code: "440001"` y el comprador quedaba sin tarifas a domicilio
+ * aunque existieran.
+ */
+const MIN_POSTAL_PREFIX_MATCH = 4;
+
 export function postalCodeInList(
   value: string | null | undefined,
   candidates: readonly (string | null | undefined)[],
 ): boolean {
   const target = normalizePostalCode(value);
   if (!target) return false;
-  return candidates.some(
-    (candidate) => normalizePostalCode(candidate) === target,
-  );
+  return candidates.some((candidate) => {
+    const pattern = normalizePostalCode(candidate);
+    if (!pattern) return false;
+    if (pattern === target) return true;
+    const shorter = pattern.length <= target.length ? pattern : target;
+    const longer = pattern.length <= target.length ? target : pattern;
+    return (
+      shorter.length >= MIN_POSTAL_PREFIX_MATCH &&
+      longer.startsWith(shorter)
+    );
+  });
 }

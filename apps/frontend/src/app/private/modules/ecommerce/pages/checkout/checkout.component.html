@@ -193,6 +193,7 @@
               <app-address-map-picker
                 [center]="map_center()"
                 (located)="onMapLocated($event)"
+                (mapReady)="onMapReady()"
               />
               </div>
               <form [formGroup]="address_form" class="address-form">
@@ -320,7 +321,7 @@
                   Calculando opciones de envío para tu dirección…
                 </p>
               </div>
-            } @else if (shipping_options().length > 0) {
+            } @else if (shippableOptions().length > 0) {
               <h2 class="delivery-subhead">Elige el envío</h2>
               <div class="payment-list">
                 @for (option of shipping_options(); track option.id) {
@@ -500,6 +501,7 @@
                   <app-address-map-picker
                     [center]="map_center()"
                     (located)="onMapLocated($event)"
+                    (mapReady)="onMapReady()"
                   />
                   <form [formGroup]="address_form" class="address-form">
                     <app-input
@@ -1132,6 +1134,7 @@
     [accounts]="currentBankAccounts()"
     [(selectedBankAccountId)]="selected_bank_account_id"
     [currentFile]="payment_receipt_file()"
+    [required]="requiresPaymentReceipt()"
     (isOpenChange)="show_payment_instructions_modal.set($event)"
     (fileChange)="onReceiptFile($event)"
     (confirmed)="onPaymentInstructionsConfirmed()"
