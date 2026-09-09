@@ -862,4 +862,185 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     });
     expect(result.fired_item_ids).toEqual([10]);
   });
+
+  // --------------------------------------------------------------------------
+  // Plan recetas-kds paso 2 — `startPreparation` re-resuelve contra la tabla
+  // FRESCA (`is_active=true`, exacta→base→null por par): un ticket atascado se
+  // libera tras reactivar/crear sin re-fire; entregar/cancelar nunca se
+  // bloquean por falta de receta (solo `pending → in_preparation` se bloquea).
+  // --------------------------------------------------------------------------
+  describe('paso 2 — startPreparation contra recetas frescas (desatascar ticket)', () => {
+    const makeTicketItem = (
+      id: number,
+      productId: number,
+      variantId: number | null = null,
+    ) => ({
+      id,
+      product_id: productId,
+      product_variant_id: variantId,
+      // Snapshot viejo del ticket: la receta figuraba inactiva al firear.
+      // `startPreparation` debe IGNORARLO y mandar la tabla fresca.
+      product: {
+        recipes: [{ id: 7, is_active: false, product_variant_id: null }],
+      },
+    });
+    const makeTicket = (status: string, items: any[]) => ({
+      id: 555,
+      store_id: 1,
+      order_id: 100,
+      kds_id: 1,
+      status,
+      items,
+    });
+
+    beforeEach(() => {
+      (service as any).kdsSessionsService = {
+        assertCanMutateStationTicket: jest.fn().mockResolvedValue(undefined),
+        attributeOpenSessionToTicketConsumption: jest
+          .fn()
+          .mockResolvedValue(undefined),
+      };
+      prismaMock.kitchen_tickets = {
+        findFirst: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([]),
+      };
+      prismaMock.kitchen_ticket_items = {
+        updateMany: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([]),
+      };
+      prismaMock.order_items.updateMany = jest
+        .fn()
+        .mockResolvedValue({ count: 1 });
+    });
+
+    const setupStartTx = () => {
+      prismaMock.$transaction.mockImplementation(async (cb: any) =>
+        cb({
+          kitchen_tickets: {
+            update: jest.fn().mockResolvedValue({}),
+          },
+          kitchen_ticket_items: {
+            updateMany: jest.fn().mockResolvedValue({}),
+          },
+        }),
+      );
+    };
+
+    it('libera el ticket atascado tras reactivar: el snapshot viejo decía inactiva pero la tabla fresca manda', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('pending', [makeTicketItem(11, 50)]),
+      );
+      // Tabla FRESCA: la receta se reactivó DESPUÉS del fire.
+      prismaMock.recipes.findMany.mockResolvedValue([
+        { id: 7, product_id: 50, product_variant_id: null, is_active: true },
+      ]);
+      setupStartTx();
+
+      const result = await service.startPreparation(555);
+
+      expect(prismaMock.recipes.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { product_id: { in: [50] }, is_active: true },
+        }),
+      );
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({ id: 555 });
+    });
+
+    it('conserva KITCHEN_TICKET_NO_RECIPE con recipe_less_item_ids + hint cuando de verdad no hay activa', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('pending', [makeTicketItem(11, 50)]),
+      );
+      prismaMock.recipes.findMany.mockResolvedValue([]);
+
+      const err = await service.startPreparation(555).catch((e) => e);
+      expect(err).toMatchObject({ errorCode: 'KITCHEN_TICKET_NO_RECIPE' });
+      const body = (err as any).getResponse?.() ?? {};
+      expect(body.details).toMatchObject({
+        ticket_id: 555,
+        recipe_less_item_ids: [11],
+      });
+      expect(body.details.hint).toMatch(/receta activa/);
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('variante disparada sin product_variant_id resuelve la receta base', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('pending', [makeTicketItem(11, 50, null)]),
+      );
+      prismaMock.recipes.findMany.mockResolvedValue([
+        { id: 7, product_id: 50, product_variant_id: null, is_active: true },
+      ]);
+      setupStartTx();
+
+      await service.startPreparation(555);
+
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('variante sin receta propia cae a la base (compatibilidad pre-variantes)', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('pending', [makeTicketItem(11, 50, 6)]),
+      );
+      prismaMock.recipes.findMany.mockResolvedValue([
+        { id: 7, product_id: 50, product_variant_id: null, is_active: true },
+      ]);
+      setupStartTx();
+
+      await service.startPreparation(555);
+
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('variante con receta exacta propia pasa aunque solo exista esa', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('pending', [makeTicketItem(11, 50, 5)]),
+      );
+      prismaMock.recipes.findMany.mockResolvedValue([
+        { id: 8, product_id: 50, product_variant_id: 5, is_active: true },
+      ]);
+      setupStartTx();
+
+      await service.startPreparation(555);
+
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('entregar/cancelar nunca se bloquean por falta de receta', async () => {
+      // Entregar: ticket en ready SIN receta activa en la tabla fresca.
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('ready', [makeTicketItem(11, 50)]),
+      );
+      prismaMock.kitchen_ticket_items.findMany.mockResolvedValue([
+        { order_item_id: 10 },
+      ]);
+      prismaMock.kitchen_tickets.findMany.mockResolvedValue([
+        { status: 'delivered' },
+      ]);
+
+      await service.markDelivered(555);
+
+      expect(prismaMock.recipes.findMany).not.toHaveBeenCalled();
+
+      // Cancelar: ticket en pending SIN receta activa en la tabla fresca.
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('pending', [makeTicketItem(11, 50)]),
+      );
+      prismaMock.$transaction.mockImplementation(async (cb: any) =>
+        cb({
+          kitchen_tickets: {
+            update: jest.fn().mockResolvedValue({}),
+          },
+          kitchen_ticket_items: {
+            updateMany: jest.fn().mockResolvedValue({}),
+          },
+        }),
+      );
+
+      await service.cancelTicket(555);
+
+      expect(prismaMock.recipes.findMany).not.toHaveBeenCalled();
+    });
+  });
 });
