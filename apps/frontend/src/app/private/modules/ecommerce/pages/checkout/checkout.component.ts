@@ -231,6 +231,16 @@ export class CheckoutComponent implements OnInit {
     const t = this.selectedPaymentMethodObj()?.type;
     return t === 'bank_transfer' || t === 'voucher';
   });
+  /**
+   * True cuando el método actual exige instrucciones Y la tienda marcó el
+   * soporte como obligatorio (`ecommerce.checkout.require_payment_receipt`).
+   * Ausente/false ⇒ comprobante opcional (flujo actual sin cambios).
+   */
+  readonly requiresPaymentReceipt = computed(
+    () =>
+      this.requiresPaymentInstructions() &&
+      this.checkout_service.getRequirePaymentReceipt(),
+  );
 
   // ====== Cuentas bancarias (bank_transfer / voucher) ======
   /**
@@ -2011,6 +2021,21 @@ export class CheckoutComponent implements OnInit {
         this.show_payment_instructions_modal.set(true);
         return;
       }
+
+      // Soporte obligatorio (flag require_payment_receipt de la tienda): sin
+      // archivo no hay avance al pago. Se abre el modal, que al pulsar
+      // Continuar muestra la alerta y revela la sección de soporte.
+      if (this.requiresPaymentReceipt() && !this.payment_receipt_file()) {
+        this.error_message.set(
+          'Debes subir el soporte de pago para continuar.',
+        );
+        this.toast.warning(
+          'Debes subir el soporte de pago para continuar.',
+          'Soporte requerido',
+        );
+        this.show_payment_instructions_modal.set(true);
+        return;
+      }
     }
 
     this.error_message.set('');
@@ -2166,6 +2191,20 @@ export class CheckoutComponent implements OnInit {
   placeOrder(): void {
     if (!this.selected_payment_method_id()) {
       this.error_message.set('Por favor selecciona un método de pago');
+      return;
+    }
+
+    // Soporte obligatorio: sin comprobante no se finaliza la compra (defensa
+    // en profundidad junto al gate de nextStep y al bloqueo del modal).
+    if (this.requiresPaymentReceipt() && !this.payment_receipt_file()) {
+      this.error_message.set(
+        'Debes subir el soporte de pago para finalizar la compra.',
+      );
+      this.toast.warning(
+        'Debes subir el soporte de pago para finalizar la compra.',
+        'Soporte requerido',
+      );
+      this.show_payment_instructions_modal.set(true);
       return;
     }
 
