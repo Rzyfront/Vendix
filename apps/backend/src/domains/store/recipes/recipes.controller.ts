@@ -28,8 +28,9 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
  * Permission policy (Phase B):
  *   - GET list/detail  → store:recipes:read
  *   - POST create      → store:recipes:create
- *   - PATCH update     → store:recipes:update
+ *   - PATCH update     → store:recipes:update (incluye toggle `is_active`)
  *   - DELETE/Restore   → store:recipes:delete (soft delete: deactivate)
+ *   - DELETE /:id/hard → store:recipes:delete (borrado físico con guardas)
  *   - Items: POST/PATCH/DELETE under /:id/items
  *
  * Notes:
@@ -129,6 +130,18 @@ export class RecipesController {
       result,
       'Receta restaurada exitosamente',
     );
+  }
+
+  /**
+   * Borrado DEFINITIVO (físico). Solo procede sin tickets de cocina abiertos
+   * sobre el par ni órdenes de producción abiertas; en caso contrario
+   * responde 409 `RECIPE_HAS_OPEN_TICKETS` con el bloqueador en `details`.
+   */
+  @Delete(':id/hard')
+  @Permissions('store:recipes:delete')
+  async hardDelete(@Param('id', ParseIntPipe) id: number) {
+    await this.recipesService.hardDelete(id);
+    return this.responseService.deleted('Receta eliminada definitivamente');
   }
 
   // ----------------------------------------------------- Recipe items CRUD

@@ -694,3 +694,427 @@ describe('RecipesService — resolución determinista de receta (recetas-por-var
     });
   });
 });
+
+/**
+ * PLAN-recetas-kds-ciclo-completo, paso 1 — vigencia + ciclo completo.
+ *
+ * "Receta vigente" = una sola fila con `is_active=true` por par
+ * (product_id, product_variant_id). Estos tests fijan:
+ *  - `create` responde 409 con contexto accionable (`existing_recipe_id` +
+ *    `is_active`) en vez de un duplicado fantasma — la unicidad TOTAL por par
+ *    vive en DB (`recipes_product_base_uq` / `recipes_product_variant_uq`,
+ *    que cubren inactivas), así que crear una segunda fila no es opción: la
+ *    salida es reactivar.
+ *  - `findByProduct` filtra activas en TODAS las ramas, incluida la exacta
+ *    por variante.
+ *  - `restore` sigue bloqueado por ítems inválidos y `hardDelete` exige no
+ *    tener tickets ni producciones abiertas.
+ */
+describe('RecipesService — vigencia + ciclo completo (recetas-kds paso 1)', () => {
+  const STORE_ID = 100;
+
+  type VigenciaRow = {
+    id: number;
+    product_id: number;
+    product_variant_id: number | null;
+    is_active: boolean;
+  };
+
+  type TicketItemRow = {
+    id: number;
+    kitchen_ticket_id: number;
+    product_id: number;
+    product_variant_id: number | null;
+    ticket_status: string;
+  };
+
+  type ProdOrderRow = { id: number; recipe_id: number; status: string };
+
+  const matchesRecipeWhere = (row: VigenciaRow, where: any): boolean => {
+    if (!where) return true;
+    if (where.id !== undefined && row.id !== where.id) return false;
+    if (
+      where.product_id !== undefined &&
+      row.product_id !== where.product_id
+    ) {
+      return false;
+    }
+    if (where.is_active !== undefined && row.is_active !== where.is_active) {
+      return false;
+    }
+    if (where.product_variant_id !== undefined) {
+      if (where.product_variant_id === null) {
+        if (row.product_variant_id !== null) return false;
+      } else if (row.product_variant_id !== where.product_variant_id) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const buildVigenciaService = async (opts: {
+    recipes: VigenciaRow[];
+    ticketItems?: TicketItemRow[];
+    prodOrders?: ProdOrderRow[];
+    variantCount?: number;
+    itemQuantities?: Array<number | null>;
+  }) => {
+    const rows = opts.recipes.map((r) => ({ ...r }));
+    const ticketItems = opts.ticketItems ?? [];
+    const prodOrders = opts.prodOrders ?? [];
+
+    const recipes = {
+      // El mock ignora `select`/`include` y devuelve la fila completa: al
+      // servicio solo le importan `id` + `is_active` (+ escalares en findOne).
+      findFirst: jest.fn(({ where }: any = {}) => {
+        const found = rows.find((r) => matchesRecipeWhere(r, where));
+        if (!found) return Promise.resolve(null);
+        return Promise.resolve({
+          ...found,
+          product: { id: found.product_id },
+          items: [],
+        });
+      }),
+      create: jest.fn(({ data }: any) =>
+        Promise.resolve({ id: 999, ...data }),
+      ),
+      update: jest.fn(({ where, data }: any) =>
+        Promise.resolve({ id: where.id, ...data }),
+      ),
+      delete: jest.fn(({ where }: any) => {
+        const idx = rows.findIndex((r) => r.id === where.id);
+        const [removed] = idx >= 0 ? rows.splice(idx, 1) : [null];
+        return Promise.resolve(removed ?? { id: where.id });
+      }),
+    };
+    const kitchen_ticket_items = {
+      findFirst: jest.fn(({ where }: any = {}) => {
+        const statuses: string[] | undefined =
+          where?.kitchen_ticket?.status?.in;
+        const found = ticketItems.find((t) => {
+          if (
+            where?.product_id !== undefined &&
+            t.product_id !== where.product_id
+          ) {
+            return false;
+          }
+          if (
+            where?.product_variant_id !== undefined &&
+            t.product_variant_id !== where.product_variant_id
+          ) {
+            return false;
+          }
+          if (statuses && !statuses.includes(t.ticket_status)) return false;
+          return true;
+        });
+        return Promise.resolve(
+          found
+            ? { id: found.id, kitchen_ticket_id: found.kitchen_ticket_id }
+            : null,
+        );
+      }),
+    };
+    const production_orders = {
+      findFirst: jest.fn(({ where }: any = {}) => {
+        const statuses: string[] | undefined = where?.status?.in;
+        const found = prodOrders.find((o) => {
+          if (where?.recipe_id !== undefined && o.recipe_id !== where.recipe_id)
+            return false;
+          if (statuses && !statuses.includes(o.status)) return false;
+          return true;
+        });
+        return Promise.resolve(
+          found ? { id: found.id, status: found.status } : null,
+        );
+      }),
+    };
+    const prisma = {
+      recipes,
+      recipe_items: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue(
+          (opts.itemQuantities ?? [1]).map((q, i) => ({
+            id: i + 1,
+            component_product_id: 900 + i,
+            quantity: q,
+          })),
+        ),
+      },
+      products: {
+        findFirst: jest.fn(({ where }: any) =>
+          Promise.resolve({ id: where.id, store_id: STORE_ID }),
+        ),
+      },
+      product_variants: {
+        count: jest.fn().mockResolvedValue(opts.variantCount ?? 0),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      kitchen_ticket_items,
+      production_orders,
+    };
+
+    const mod: TestingModule = await Test.createTestingModule({
+      providers: [
+        RecipesService,
+        { provide: StorePrismaService, useValue: prisma },
+        {
+          provide: RequestContextService,
+          useValue: {
+            getContext: jest.fn().mockReturnValue({
+              store_id: STORE_ID,
+              is_super_admin: false,
+              is_owner: true,
+            }),
+            getOrganizationId: jest.fn().mockReturnValue(STORE_ID),
+          },
+        },
+      ],
+    }).compile();
+
+    return {
+      service: mod.get(RecipesService),
+      recipes,
+      kitchen_ticket_items,
+      production_orders,
+    };
+  };
+
+  const inStore = <T>(fn: () => Promise<T>): Promise<T> =>
+    Promise.resolve(
+      RequestContextService.run(
+        {
+          store_id: STORE_ID,
+          is_super_admin: false,
+          is_owner: true,
+        },
+        fn,
+      ) as Promise<T>,
+    );
+
+  const catchVendix = async (fn: () => Promise<unknown>) => {
+    try {
+      await inStore(fn);
+    } catch (e) {
+      expect(e).toBeInstanceOf(VendixHttpException);
+      return e as VendixHttpException;
+    }
+    throw new Error('se esperaba un VendixHttpException y no se lanzó');
+  };
+
+  const detailsOf = (e: VendixHttpException): any =>
+    (e.getResponse() as { details?: any }).details ?? {};
+
+  describe('create — 409 accionable (reactivar en vez de callejón)', () => {
+    const baseDto = {
+      product_id: 1,
+      yield_quantity: 1,
+      yield_unit: 'unidad',
+    };
+
+    it('con duplicada INACTIVA responde RECIPE_DUP_PRODUCT con existing_recipe_id + is_active:false', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+      });
+      recipes.create.mockClear();
+
+      const err = await catchVendix(() => service.create({ ...baseDto }));
+      expect(err.errorCode).toBe('RECIPE_DUP_PRODUCT');
+      expect(detailsOf(err)).toMatchObject({
+        existing_recipe_id: 10,
+        is_active: false,
+      });
+      expect(recipes.create).not.toHaveBeenCalled();
+    });
+
+    it('con duplicada ACTIVA responde RECIPE_DUP_PRODUCT con is_active:true', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 11, product_id: 1, product_variant_id: null, is_active: true },
+        ],
+      });
+      recipes.create.mockClear();
+
+      const err = await catchVendix(() => service.create({ ...baseDto }));
+      expect(err.errorCode).toBe('RECIPE_DUP_PRODUCT');
+      expect(detailsOf(err)).toMatchObject({
+        existing_recipe_id: 11,
+        is_active: true,
+      });
+      expect(recipes.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findByProduct — solo vigentes en todas las ramas', () => {
+    it('con variante ignora la exacta INACTIVA y cae a la base ACTIVA', async () => {
+      const { service } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: true },
+          { id: 20, product_id: 1, product_variant_id: 470, is_active: false },
+        ],
+      });
+
+      const recipe = await service.findByProduct(1, 470);
+      expect(recipe.id).toBe(10);
+    });
+
+    it('con variante devuelve la exacta ACTIVA sin caer a la base', async () => {
+      const { service } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: true },
+          { id: 20, product_id: 1, product_variant_id: 470, is_active: true },
+        ],
+      });
+
+      const recipe = await service.findByProduct(1, 470);
+      expect(recipe.id).toBe(20);
+    });
+
+    it('con variante lanza RECIPE_NOT_FOUND si solo hay inactivas', async () => {
+      const { service } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+          { id: 20, product_id: 1, product_variant_id: 470, is_active: false },
+        ],
+      });
+
+      const err = await catchVendix(() => service.findByProduct(1, 470));
+      expect(err.errorCode).toBe('RECIPE_NOT_FOUND');
+    });
+  });
+
+  describe('restore — bloqueado por ítems inválidos, liberado en caso contrario', () => {
+    it('reactiva cuando todos los ítems tienen cantidad válida', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+        itemQuantities: [1, 2.5],
+      });
+
+      const result = await inStore(() => service.restore(10));
+      expect(recipes.update).toHaveBeenCalledWith({
+        where: { id: 10 },
+        data: { is_active: true, updated_at: expect.any(Date) },
+      });
+      expect(result.is_active).toBe(true);
+    });
+
+    it('responde RECIPE_ACTIVATION_BLOCKED_INVALID_ITEMS si un ítem tiene cantidad 0', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+        itemQuantities: [1, 0],
+      });
+
+      const err = await catchVendix(() => service.restore(10));
+      expect(err.errorCode).toBe(
+        'RECIPE_ACTIVATION_BLOCKED_INVALID_ITEMS',
+      );
+      expect(recipes.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('hardDelete — guardas + borrado físico', () => {
+    it('bloquea con RECIPE_HAS_OPEN_TICKETS si hay ticket abierto sobre el par', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+        ticketItems: [
+          {
+            id: 5,
+            kitchen_ticket_id: 77,
+            product_id: 1,
+            product_variant_id: null,
+            ticket_status: 'in_preparation',
+          },
+        ],
+      });
+
+      const err = await catchVendix(() => service.hardDelete(10));
+      expect(err.errorCode).toBe('RECIPE_HAS_OPEN_TICKETS');
+      expect(detailsOf(err)).toMatchObject({
+        recipe_id: 10,
+        blocker: 'kitchen_ticket',
+        open_ticket_id: 77,
+      });
+      expect(recipes.delete).not.toHaveBeenCalled();
+    });
+
+    it('NO bloquea la receta de una variante por un ticket abierto de OTRA variante', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 20, product_id: 1, product_variant_id: 470, is_active: false },
+        ],
+        ticketItems: [
+          {
+            id: 6,
+            kitchen_ticket_id: 78,
+            product_id: 1,
+            product_variant_id: 471,
+            ticket_status: 'pending',
+          },
+        ],
+      });
+
+      const result = await inStore(() => service.hardDelete(20));
+      expect(result).toMatchObject({ deleted: true });
+      expect(recipes.delete).toHaveBeenCalledWith({ where: { id: 20 } });
+    });
+
+    it('ignora tickets terminales (delivered/cancelled): sí borra', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+        ticketItems: [
+          {
+            id: 7,
+            kitchen_ticket_id: 79,
+            product_id: 1,
+            product_variant_id: null,
+            ticket_status: 'delivered',
+          },
+        ],
+      });
+
+      const result = await inStore(() => service.hardDelete(10));
+      expect(result).toMatchObject({ deleted: true });
+      expect(recipes.delete).toHaveBeenCalledWith({ where: { id: 10 } });
+    });
+
+    it('bloquea con RECIPE_HAS_OPEN_TICKETS si hay producción abierta sobre la receta', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+        prodOrders: [{ id: 33, recipe_id: 10, status: 'in_progress' }],
+      });
+
+      const err = await catchVendix(() => service.hardDelete(10));
+      expect(err.errorCode).toBe('RECIPE_HAS_OPEN_TICKETS');
+      expect(detailsOf(err)).toMatchObject({
+        recipe_id: 10,
+        blocker: 'production_order',
+        open_production_order_id: 33,
+      });
+      expect(recipes.delete).not.toHaveBeenCalled();
+    });
+
+    it('borra físicamente cuando no hay bloqueadores', async () => {
+      const { service, recipes } = await buildVigenciaService({
+        recipes: [
+          { id: 10, product_id: 1, product_variant_id: null, is_active: false },
+        ],
+        prodOrders: [{ id: 34, recipe_id: 10, status: 'completed' }],
+      });
+
+      const result = await inStore(() => service.hardDelete(10));
+      expect(result).toMatchObject({ deleted: true });
+      expect(recipes.delete).toHaveBeenCalledWith({ where: { id: 10 } });
+    });
+  });
+});
