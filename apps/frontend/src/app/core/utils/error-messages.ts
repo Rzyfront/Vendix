@@ -1019,6 +1019,18 @@ export const ERROR_MESSAGES: Record<string, string> = {
   RECIPE_VARIANT_MISMATCH:
     'La variante elegida no pertenece a este plato, o el plato no tiene variantes y por eso no admite ninguna. Vuelve a elegir el rendimiento de la receta.',
 
+  // Ciclo de vida de recetas (desactivar/reactivar/eliminar). Red de
+  // seguridad: el backend redacta el detalle accionable (receta existente,
+  // ticket abierto, componente inválido) y `parseApiError` lo prefiere cuando
+  // es presentable; estos textos solo aparecen si ese detalle no llega.
+  RECIPE_NOT_FOUND: 'Receta no encontrada.',
+  RECIPE_DUP_PRODUCT:
+    'Ya existe una receta para este plato. Si está inactiva, reactívala desde la lista en vez de crear otra.',
+  RECIPE_ACTIVATION_BLOCKED_INVALID_ITEMS:
+    'La receta no se puede activar porque tiene componentes con cantidad inválida. Corrige las cantidades antes de activarla.',
+  RECIPE_HAS_OPEN_TICKETS:
+    'La receta no se puede eliminar definitivamente porque tiene tickets de cocina u órdenes de producción abiertas. Resuélvelos primero.',
+
   // QR Table dine-in (comensal — cuenta de mesa)
   TABLE_NOT_FOUND:
     'No encontramos esta mesa. Vuelve a escanear el código QR.',

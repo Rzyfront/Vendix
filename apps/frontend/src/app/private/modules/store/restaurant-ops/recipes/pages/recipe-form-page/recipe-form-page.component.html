@@ -28,6 +28,35 @@
       </div>
     </div>
   }
+  <!--
+    Conflicto reactivable (409 RECIPE_DUP_PRODUCT con inactiva): el error no
+    es un callejón — ofrece reactivar la receta existente y volver a la lista.
+  -->
+  @if (conflictingRecipeId(); as existingId) {
+    <div
+      role="alert"
+      aria-live="assertive"
+      class="flex items-center gap-3 p-3 rounded-md border border-amber-200 bg-amber-50 text-amber-900 text-sm"
+    >
+      <app-icon name="refresh-cw" [size]="18" class="text-amber-600 shrink-0" />
+      <div class="flex-1">
+        <p class="font-semibold">Existe una receta inactiva para este plato</p>
+        <p class="mt-0.5">
+          Puedes reactivarla en vez de crear una nueva (receta #{{ existingId }}).
+        </p>
+      </div>
+      <app-button
+        variant="primary"
+        size="sm"
+        [loading]="isReactivating()"
+        [disabled]="isReactivating()"
+        (clicked)="reactivateExisting()"
+      >
+        <app-icon slot="icon" name="refresh-cw" [size]="16" />
+        Reactivar existente
+      </app-button>
+    </div>
+  }
   <!-- overflow visible so the searchable selector dropdown (yield_unit)
        is not clipped by the card's md:overflow-hidden. -->
   <app-card [responsive]="true" [padding]="true" [overflow]="'visible'">

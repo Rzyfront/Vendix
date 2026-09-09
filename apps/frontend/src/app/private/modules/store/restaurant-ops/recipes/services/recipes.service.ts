@@ -4,6 +4,11 @@ import { Observable, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import {
+  isPresentableApiMessage,
+  parseApiError,
+} from '../../../../../../../app/core/utils/parse-api-error';
+import { DEFAULT_ERROR_MESSAGE } from '../../../../../../../app/core/utils/error-messages';
+import {
   Recipe,
   CreateRecipeDto,
   UpdateRecipeDto,
@@ -32,6 +37,22 @@ interface PaginatedApiResponse<T> {
       pages?: number;
     };
   };
+}
+
+/**
+ * Structured error thrown by recipe mutations (create/update/restore/
+ * hardDelete). Unlike the read paths (which throw a plain string), mutations
+ * preserve the backend `error_code` so callers can branch on specific cases —
+ * e.g. `RECIPE_DUP_PRODUCT` con inactiva → "Reactivar existente", o
+ * `RECIPE_HAS_OPEN_TICKETS` → toast de tickets abiertos — instead of showing
+ * a generic toast. Mismo patrón que `KitchenMutationError` en
+ * `kitchen-tickets.service.ts`.
+ */
+export interface RecipeMutationError {
+  code: string | null;
+  message: string;
+  details?: any;
+  request_id?: string;
 }
 
 /**
@@ -87,10 +108,21 @@ export class RecipesService {
       );
   }
 
-  getByProduct(productId: number): Observable<Recipe> {
+  /**
+   * Resuelve la receta vigente de un (producto, variante). `variantId` es
+   * opcional: sin variante replica el llamado de siempre; con variante viaja
+   * como `?variant_id=` y el backend aplica exacta→base→null sobre activas
+   * (misma regla que `itemHasActiveRecipe` en el KDS).
+   */
+  getByProduct(productId: number, variantId?: number | null): Observable<Recipe> {
+    let params = new HttpParams();
+    if (variantId != null) {
+      params = params.set('variant_id', String(variantId));
+    }
     return this.http
       .get<ApiResponse<Recipe>>(
         `${this.apiUrl}${this.basePath}/by-product/${productId}`,
+        { params },
       )
       .pipe(
         map((res) => res.data),
@@ -113,7 +145,7 @@ export class RecipesService {
           }
           return res.data;
         }),
-        catchError(this.handleError),
+        catchError(this.handleMutationError),
       );
   }
 
@@ -125,7 +157,7 @@ export class RecipesService {
       )
       .pipe(
         map((res) => res.data),
-        catchError(this.handleError),
+        catchError(this.handleMutationError),
       );
   }
 
@@ -143,8 +175,23 @@ export class RecipesService {
       )
       .pipe(
         map((res) => res.data),
-        catchError(this.handleError),
+        catchError(this.handleMutationError),
       );
+  }
+
+  /**
+   * Borrado DEFINITIVO (físico). Solo procede sin tickets de cocina abiertos
+   * sobre el par ni órdenes de producción abiertas; en caso contrario el
+   * backend responde 409 `RECIPE_HAS_OPEN_TICKETS` con el bloqueador en
+   * `details` (ver `RecipeMutationError`). La UI lo llama con doble
+   * confirmación y solo sobre recetas inactivas.
+   */
+  hardDelete(id: number): Observable<{ deleted: boolean }> {
+    return this.http
+      .delete<{ deleted: boolean }>(
+        `${this.apiUrl}${this.basePath}/${id}/hard`,
+      )
+      .pipe(catchError(this.handleMutationError));
   }
 
   // ─── Items ─────────────────────────────────────────────────────────────
@@ -189,6 +236,58 @@ export class RecipesService {
   }
 
   // ─── Error mapping ─────────────────────────────────────────────────────
+
+  /**
+   * Mensaje UX para mutaciones. `parseApiError` es la aduana única: el texto
+   * presentable del backend (p. ej. el 409 de duplicado, que nombra la receta
+   * existente) gana al copy enlatado. La red por status solo actúa cuando el
+   * parser cayó al DEFAULT, y el `Error` plano del envelope legacy
+   * (`success:false` con HTTP 200) conserva su texto si es presentable.
+   */
+  private deriveMutationMessage(error: any): string {
+    const parsed = parseApiError(error);
+    if (parsed.userMessage !== DEFAULT_ERROR_MESSAGE) {
+      return parsed.userMessage;
+    }
+    if (error instanceof Error && isPresentableApiMessage(error.message)) {
+      return error.message;
+    }
+    switch (error?.status) {
+      case 401:
+        return 'No autorizado';
+      case 403:
+        return 'No tienes permisos suficientes';
+      case 404:
+        return 'Receta no encontrada';
+      case 409:
+        return 'Conflicto: ya existe un registro relacionado';
+      case 422:
+        return 'Operación no permitida';
+      default:
+        return typeof error?.status === 'number' && error.status >= 500
+          ? 'Error del servidor. Inténtalo más tarde'
+          : DEFAULT_ERROR_MESSAGE;
+    }
+  }
+
+  /**
+   * Error handler para mutaciones. Preserva `error_code` + `details` (p. ej.
+   * `RECIPE_DUP_PRODUCT` con `existing_recipe_id`, o
+   * `RECIPE_HAS_OPEN_TICKETS` con el bloqueador) para que la lista y el
+   * formulario ramifiquen a diálogos accionables en vez de un toast genérico.
+   * Las lecturas conservan `handleError` (string) para no cambiar su contrato.
+   */
+  private handleMutationError = (error: any): Observable<never> => {
+    // eslint-disable-next-line no-console
+    console.error('RecipesService Error:', error);
+    const mutationError: RecipeMutationError = {
+      code: error?.error?.error_code ?? error?.error?.code ?? null,
+      message: this.deriveMutationMessage(error),
+      details: error?.error?.details ?? null,
+      request_id: parseApiError(error).request_id,
+    };
+    return throwError(() => mutationError);
+  };
 
   private handleError = (error: any): Observable<never> => {
     // eslint-disable-next-line no-console
