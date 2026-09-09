@@ -10,6 +10,12 @@ import { CustomersAnalyticsService } from './services/customers-analytics.servic
 import { FinancialAnalyticsService } from './services/financial-analytics.service';
 import { PurchasesAnalyticsService } from './services/purchases-analytics.service';
 import { ReviewsAnalyticsService } from './services/reviews-analytics.service';
+import { DispatchAnalyticsService } from './services/dispatch-analytics.service';
+import {
+  DispatchPlanillasQueryDto,
+  DispatchRemisionesQueryDto,
+  DispatchVehiculosQueryDto,
+} from './dto/dispatch-report-query.dto';
 import {
   AnalyticsQueryDto,
   PurchasesBySupplierQueryDto,
@@ -53,6 +59,7 @@ export class AnalyticsController {
     private readonly financial_analytics_service: FinancialAnalyticsService,
     private readonly purchases_analytics_service: PurchasesAnalyticsService,
     private readonly reviews_analytics_service: ReviewsAnalyticsService,
+    private readonly dispatch_analytics_service: DispatchAnalyticsService,
     private readonly response_service: ResponseService,
     private readonly prisma: StorePrismaService,
   ) {}
@@ -1180,6 +1187,160 @@ export class AnalyticsController {
 
     await this.emitReport(res, 'sesiones_caja', tz, [
       this.toSheet('Sesiones de Caja', columns, rows, tz),
+    ]);
+  }
+
+  // ==================== DISPATCH (CP-despachos-reportes B.1 + B.2) ====================
+  // Reportes de lectura del módulo Despachos. Servicios devuelven crudo (Date
+  // + números); el formato vive en estas columnas. Pantalla y export comparten
+  // la misma fuente del servicio (ADR-03), con el mismo permiso analytics.
+
+  @Get('dispatch/remisiones')
+  @Permissions('store:analytics:read')
+  async getDispatchRemisiones(@Query() query: DispatchRemisionesQueryDto) {
+    const result =
+      await this.dispatch_analytics_service.getRemisiones(query);
+    return this.response_service.paginated(
+      result.data,
+      result.total,
+      result.page,
+      result.limit,
+    );
+  }
+
+  @Get('dispatch/remisiones/export')
+  @Permissions('store:analytics:read')
+  async exportDispatchRemisiones(
+    @Query() query: DispatchRemisionesQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const { rows } =
+      await this.dispatch_analytics_service.getRemisionesForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'dispatch_number', header: 'Nº Remisión', type: 'text' },
+      { key: 'emission_date', header: 'Emisión', type: 'date' },
+      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'subtype', header: 'Subtipo', type: 'text' },
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'grand_total', header: 'Total', type: 'currency' },
+      { key: 'numero_ruta', header: 'Nº Ruta', type: 'text' },
+      { key: 'placa_vehiculo', header: 'Placa', type: 'text' },
+      { key: 'portador_nombre', header: 'Portador', type: 'text' },
+      { key: 'portador_tipo', header: 'Tipo Portador', type: 'text' },
+      { key: 'reasignada', header: 'Reasignada', type: 'text' },
+      { key: 'parada_estado', header: 'Estado Parada', type: 'text' },
+      { key: 'is_prepaid', header: 'Prepaga', type: 'text' },
+      { key: 'delivered_at', header: 'Entrega', type: 'date' },
+    ];
+
+    const sheetRows = rows.map((r) => ({
+      ...r,
+      reasignada: r.reasignada ? 'Sí' : 'No',
+      is_prepaid: r.is_prepaid ? 'Sí' : 'No',
+    }));
+
+    await this.emitReport(res, 'remisiones_despacho', tz, [
+      this.toSheet('Remisiones', columns, sheetRows, tz),
+    ]);
+  }
+
+  @Get('dispatch/planillas')
+  @Permissions('store:analytics:read')
+  async getDispatchPlanillas(@Query() query: DispatchPlanillasQueryDto) {
+    const result =
+      await this.dispatch_analytics_service.getPlanillas(query);
+    return this.response_service.paginated(
+      result.data,
+      result.total,
+      result.page,
+      result.limit,
+    );
+  }
+
+  @Get('dispatch/planillas/export')
+  @Permissions('store:analytics:read')
+  async exportDispatchPlanillas(
+    @Query() query: DispatchPlanillasQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const { rows } =
+      await this.dispatch_analytics_service.getPlanillasForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'route_number', header: 'Nº Planilla', type: 'text' },
+      { key: 'route_code', header: 'Código', type: 'text' },
+      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'planned_date', header: 'Fecha Planificada', type: 'date' },
+      { key: 'conductor_nombre', header: 'Conductor', type: 'text' },
+      { key: 'conductor_tipo', header: 'Tipo Conductor', type: 'text' },
+      { key: 'placa_vehiculo', header: 'Placa', type: 'text' },
+      { key: 'vehiculo', header: 'Vehículo', type: 'text' },
+      { key: 'paradas_total', header: 'Paradas', type: 'number' },
+      { key: 'paradas_entregadas', header: 'Entregadas', type: 'number' },
+      { key: 'paradas_rechazadas', header: 'Rechazadas', type: 'number' },
+      { key: 'paradas_liberadas', header: 'Liberadas', type: 'number' },
+      { key: 'paradas_pendientes', header: 'Pendientes', type: 'number' },
+      { key: 'total_to_collect', header: 'Por Cobrar', type: 'currency' },
+      { key: 'total_collected', header: 'Recaudado', type: 'currency' },
+      { key: 'total_prepaid', header: 'Prepago', type: 'currency' },
+      { key: 'total_changes', header: 'Cambios', type: 'currency' },
+      { key: 'total_withholdings', header: 'Retenciones', type: 'currency' },
+      { key: 'declared_cash', header: 'Efectivo Declarado', type: 'currency' },
+      { key: 'cash_variance', header: 'Diferencia', type: 'currency' },
+      { key: 'closed_at', header: 'Cierre', type: 'date' },
+    ];
+
+    await this.emitReport(res, 'planillas_despacho', tz, [
+      this.toSheet('Planillas', columns, rows, tz),
+    ]);
+  }
+
+  @Get('dispatch/vehiculos')
+  @Permissions('store:analytics:read')
+  async getDispatchVehiculos(@Query() query: DispatchVehiculosQueryDto) {
+    const result =
+      await this.dispatch_analytics_service.getVehiculos(query);
+    return this.response_service.paginated(
+      result.data,
+      result.total,
+      result.page,
+      result.limit,
+    );
+  }
+
+  @Get('dispatch/vehiculos/export')
+  @Permissions('store:analytics:read')
+  async exportDispatchVehiculos(
+    @Query() query: DispatchVehiculosQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const { rows } =
+      await this.dispatch_analytics_service.getVehiculosForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'plate', header: 'Placa', type: 'text' },
+      { key: 'type', header: 'Tipo', type: 'text' },
+      { key: 'brand', header: 'Marca', type: 'text' },
+      { key: 'model_name', header: 'Modelo', type: 'text' },
+      { key: 'conductor_principal', header: 'Conductor Principal', type: 'text' },
+      { key: 'rutas_activas', header: 'Rutas Activas', type: 'number' },
+      { key: 'rutas_cerradas', header: 'Rutas Cerradas', type: 'number' },
+      { key: 'rutas_total', header: 'Total Rutas', type: 'number' },
+      { key: 'ultimo_uso', header: 'Último Uso', type: 'date' },
+      { key: 'is_active', header: 'Activo', type: 'text' },
+    ];
+
+    const sheetRows = rows.map((r) => ({
+      ...r,
+      is_active: r.is_active ? 'Sí' : 'No',
+    }));
+
+    await this.emitReport(res, 'vehiculos_despacho', tz, [
+      this.toSheet('Vehículos', columns, sheetRows, tz),
     ]);
   }
 }
