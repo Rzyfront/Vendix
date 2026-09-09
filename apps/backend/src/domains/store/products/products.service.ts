@@ -74,6 +74,7 @@ import type {
   ActiveProductPromotion,
   ActivePromotionProductInput,
 } from '../promotions/dto/promotion-quote.interface';
+import { ProductRelevanceEngine } from './services/product-relevance.engine';
 
 /**
  * Tope de ids materializados por `ProductsService.findIds()`.
@@ -1355,13 +1356,8 @@ export class ProductsService {
         ],
       }),
       ...(search &&
-        !barcode && {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { description: { contains: search, mode: 'insensitive' } },
-            { sku: { contains: search, mode: 'insensitive' } },
-          ],
-        }),
+        !barcode &&
+        (ProductRelevanceEngine.buildPrismaSearchFilter(search) ?? {})),
       ...(brand_id && { brand_id }),
       ...(category_id && {
         product_categories: {
@@ -1518,11 +1514,19 @@ export class ProductsService {
     // denormalized cross-location aggregate.
     const includeStockEffective = pos_optimized ? true : include_stock;
 
+    const hasSearch = Boolean(
+      query.search && query.search.trim() && !barcode,
+    );
+    // Cuando hay búsqueda de texto libre, recuperamos un conjunto de candidatos
+    // para aplicar el scoring y reordenamiento multifactorial antes de paginar.
+    const querySkip = hasSearch ? 0 : skip;
+    const queryTake = hasSearch ? Math.max(limit * 5, 200) : limit;
+
     const [products, total, settings] = await Promise.all([
       this.prisma.products.findMany({
         where,
-        skip,
-        take: limit,
+        skip: querySkip,
+        take: queryTake,
         include: {
           stores: {
             select: {
@@ -1635,17 +1639,32 @@ export class ProductsService {
       this.loadMergedSettings(),
     ]);
 
+    // Scoring y reordenamiento multifactorial por relevancia cuando hay búsqueda
+    let rankedProducts = products;
+    let effectiveTotal = total;
+
+    if (hasSearch) {
+      const scored = ProductRelevanceEngine.rankProducts(
+        products,
+        query.search!,
+      );
+      effectiveTotal = scored.length;
+      rankedProducts = scored
+        .slice(skip, skip + limit)
+        .map((s) => s.product);
+    }
+
     // Resolve active auto-apply promotions for every product in the listing
     // (batch query). Cards use the promotional unit price computed off the
     // tax-inclusive `final_price`, so the displayed savings stay consistent
     // with the rest of the listing pricing math.
     const activePromotionsByProductId =
-      await this.resolveActivePromotionsForListing(products);
+      await this.resolveActivePromotionsForListing(rankedProducts);
 
     // Para POS optimizado, retornar productos directamente con imágenes firmadas
     if (pos_optimized) {
       const productsWithSignedImages = await Promise.all(
-        products.map(async (product) => {
+        rankedProducts.map(async (product) => {
           const raw_image_url = product.product_images?.[0]?.image_url || null;
           const signed_image_url = await this.s3Service.signUrl(raw_image_url);
           const lowStockThreshold = resolveProductLowStockThreshold(
@@ -1726,6 +1745,7 @@ export class ProductsService {
             id: product.id,
             name: product.name,
             slug: product.slug,
+            relevance_score: (product as any).relevance_score ?? null,
             description: product.description,
             base_price: product.base_price,
             sale_price: product.sale_price,
@@ -1817,10 +1837,10 @@ export class ProductsService {
       return {
         data,
         meta: {
-          total,
+          total: effectiveTotal,
           page,
           limit,
-          totalPages: Math.ceil(total / limit),
+          totalPages: Math.ceil(effectiveTotal / limit),
         },
       };
     }
@@ -1828,7 +1848,7 @@ export class ProductsService {
     // Calcular stock totals dinámicamente para cada producto.
     // Cuando el producto tiene variantes, excluir filas base para no duplicar stock.
     const productsWithStock = await Promise.all(
-      products.map(async (product) => {
+      rankedProducts.map(async (product) => {
         const lowStockThreshold = resolveProductLowStockThreshold(
           settings,
           product,
@@ -1898,6 +1918,7 @@ export class ProductsService {
           id: product.id,
           name: product.name,
           slug: product.slug,
+          relevance_score: (product as any).relevance_score ?? null,
           description: product.description,
           base_price: product.base_price,
           sale_price: product.sale_price,
@@ -2001,10 +2022,10 @@ export class ProductsService {
     return {
       data,
       meta: {
-        total,
+        total: effectiveTotal,
         page,
         limit,
-        totalPages: Math.ceil(total / limit),
+        totalPages: Math.ceil(effectiveTotal / limit),
       },
     };
   }
