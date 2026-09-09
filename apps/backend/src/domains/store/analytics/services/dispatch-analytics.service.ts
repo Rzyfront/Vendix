@@ -113,6 +113,23 @@ export interface CarrierRouteInput {
   assistant_names: (string | null)[];
 }
 
+/**
+ * Fila de parada tal como la devuelve el include de `buildRemisionRows`.
+ * Se declara explícita porque `StorePrismaService.scoped_client` es `any` y
+ * el genérico de `pickActiveStop` colapsaría al constraint sin ella.
+ */
+export interface DispatchStopRow extends StopPickInput {
+  route: {
+    is_primary_driver_external: boolean | null;
+    external_driver_name: string | null;
+    driver_user: { first_name: string; last_name: string } | null;
+    assistants: unknown;
+    route_number: string;
+    vehicle: { plate: string | null } | null;
+  } | null;
+  settled_by_user: { first_name: string; last_name: string } | null;
+}
+
 /** Entrada mínima de remisión/parada (ADR-01, pasos 3-5). */
 export interface CarrierNoteInput {
   courier_name: string | null;
@@ -373,7 +390,8 @@ export class DispatchAnalyticsService {
     );
 
     const rows: RemisionRow[] = capped.map((n) => {
-      const { stop, reasignada } = pickActiveStop(n.dispatch_route_stops);
+      const stops = n.dispatch_route_stops as DispatchStopRow[];
+      const { stop, reasignada } = pickActiveStop(stops);
       const route = stop?.route ?? null;
       const carrier = resolveCarrier(
         route
