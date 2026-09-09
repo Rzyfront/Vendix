@@ -1381,6 +1381,16 @@ export class CheckoutComponent implements OnInit {
   readonly hasNoShippingCoverage = computed(
     () => this.shipping_coverage() === 'none',
   );
+
+  /**
+   * Opciones de despacho a domicilio (excluye retiro). Es la fuente de verdad
+   * del modo domicilio: el backend puede devolver una tarifa `pickup` de zona
+   * (`is_fallback:false`) cuando ninguna tarifa a domicilio aplica, y esa
+   * opción no debe contar como cobertura ni renderizar la lista.
+   */
+  readonly shippableOptions = computed(() =>
+    this.shipping_options().filter((o: any) => o.method_type !== 'pickup'),
+  );
   loading_payment_methods = false;
 
   // ========== ENTREGA delivery-first (CP-tienda-checkout-whatsapp) ==========
@@ -1720,10 +1730,28 @@ export class CheckoutComponent implements OnInit {
             const stillValid = options.some(
               (o: any) => o.id === this.selected_shipping_option_id,
             );
-            if (!stillValid) {
-              const shippable = options.filter(
-                (o: any) => o.method_type !== 'pickup',
-              );
+            // Solo hay retiro (típico: la zona matcheó pero su única tarifa
+            // aplicable es pickup): para el domicilio es sin cobertura — se
+            // muestra el estado vacío accionable en vez de una lista vacía.
+            const shippable = options.filter(
+              (o: any) => o.method_type !== 'pickup',
+            );
+            if (shippable.length === 0) {
+              this.selected_shipping_option_id = null;
+              this.selected_shipping_method_id = null;
+              this.selected_shipping_method_type = null;
+              this.shipping_cost.set(0);
+              this.shipping_coverage.set('none');
+              if (notify) {
+                this.error_message.set(
+                  ERROR_MESSAGES['ORD_SHIP_NO_ZONE_001'],
+                );
+                this.toast.error(
+                  ERROR_MESSAGES['ORD_SHIP_NO_ZONE_001'],
+                  'Sin cobertura de envío',
+                );
+              }
+            } else if (!stillValid) {
               if (shippable.length === 1) {
                 this.selectShippingMethod(shippable[0], shippable[0].cost);
               } else {
@@ -1956,12 +1984,17 @@ export class CheckoutComponent implements OnInit {
           this.selected_shipping_option_id == null)
       ) {
         await this.refreshShippingQuote(key);
-        if (
-          this.shipping_options().length === 0 ||
-          this.selected_shipping_option_id == null
-        ) {
-          // Sin opciones no hay a dónde avanzar: el paso 1 ya muestra el
-          // estado vacío accionable (otra dirección o recoger).
+        if (this.shippableOptions().length === 0) {
+          // Sin despacho a domicilio no hay a dónde avanzar: el paso 1
+          // muestra el estado vacío accionable (otra dirección o recoger).
+          this.error_message.set(
+            'No hay envío a domicilio para esta dirección. Prueba con otra dirección o elige "Recoger en tienda".',
+          );
+          return;
+        }
+        if (this.selected_shipping_option_id == null) {
+          // Hay tarifas pero el comprador aún no elige (caso 2+ tarifas).
+          this.error_message.set('Por favor selecciona una opción de envío');
           return;
         }
       }

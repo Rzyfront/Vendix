@@ -321,7 +321,7 @@
                   Calculando opciones de envío para tu dirección…
                 </p>
               </div>
-            } @else if (shipping_options().length > 0) {
+            } @else if (shippableOptions().length > 0) {
               <h2 class="delivery-subhead">Elige el envío</h2>
               <div class="payment-list">
                 @for (option of shipping_options(); track option.id) {
