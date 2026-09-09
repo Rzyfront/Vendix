@@ -2201,11 +2201,16 @@ export class CheckoutComponent implements OnInit {
     }
 
     // Add required fields for the API
-    return {
+    const payload = {
       ...value,
       type: 'shipping',
       is_primary: this.addresses().length === 0, // Make it primary if it's the first address
     };
+    // `municipality_code` es un artefacto de la cotización (id interno del
+    // catálogo, no código DANE) y el endpoint de guardado lo rechaza con 400
+    // `property municipality_code should not exist`. No se persiste.
+    delete payload.municipality_code;
+    return payload;
   }
 
   /**

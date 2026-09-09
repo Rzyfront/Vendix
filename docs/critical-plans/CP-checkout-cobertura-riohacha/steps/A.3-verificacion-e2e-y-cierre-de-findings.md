@@ -24,6 +24,7 @@ skills: [vendix-ecommerce-checkout, vendix-zoneless-signals, buildcheck-dev]
   - Domicilio Riohacha lista las 2 tarifas gratis y Continuar sin elegir avisa; con 1 tarifa avanza; pickup intacto
   - `zoneless-audit` sin regresiones nuevas; evidencias en `evidence/`
 - **Acceptance checklist:**
-  - [ ] Matriz E2E en verde con evidencia en `evidence/`
+  - [x] Matriz E2E en verde con evidencia en `evidence/e2e-matriz.md`
   - [ ] Todos los findings cerrados (fix + evidencia) o aceptados por humano
+  - [ ] F-006 — guardar direccion falla 400 por municipality_code (major)
 - **Status:** pending

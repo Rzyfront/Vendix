@@ -24,10 +24,10 @@ skills: [vendix-ecommerce-checkout, vendix-backend-api, buildcheck-dev]
   - `gh run list --workflow deploy-s3.yml --limit 5` y `deploy-backend-ec2.yml` muestran qué rama/commit desplegó prod
   - SELECTs de zonas/tarifas de la tienda 10 guardados en `evidence/` y cada criterio comparado contra el payload anotado
 - **Acceptance checklist:**
-  - [ ] Versión prod frontend/backend fijada con evidencia en `evidence/prod-version.md`
-  - [ ] Snapshot de zonas y tarifas de la tienda 10 en `evidence/zonas-tienda-10.md`
+  - [x] Versión bajo prueba fijada en `evidence/prod-version.md` (local, no prod)
+  - [x] Snapshot de zonas y tarifas tienda 10 en `evidence/zonas-tienda-10.md`
   - [-] F-001 — Descartado: pruebas eran locales, autoriza usuario (blocker)
   - [ ] F-002 — zona domicilio no matchea pese a existir tarifas (major)
-  - [ ] F-003 — tarifas free con rangos que excluyen el carrito (minor)
+  - [-] F-003 — Descartado: rangos null, ver evidence (minor)
   - [ ] F-004 — descarte de zona solo deja huella en warn-log (minor)
 - **Status:** in-progress
