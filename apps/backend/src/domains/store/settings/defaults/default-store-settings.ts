@@ -45,6 +45,22 @@ export function getDefaultStoreSettings(): StoreSettings {
       allow_public_access: false,
     },
 
+    // Ecommerce storefront — solo defaults del bloque checkout. Todo en
+    // `false` preserva el comportamiento actual (las lecturas usan `!!` o
+    // comparan contra `false`). `require_payment_receipt` es opt-in: ausente
+    // ⇒ comprobante opcional.
+    ecommerce: {
+      enabled: false,
+      checkout: {
+        require_registration: false,
+        guest_email_required: false,
+        create_account_after_order: false,
+        terms_required: false,
+        guest_newsletter_opt_in: false,
+        require_payment_receipt: false,
+      },
+    },
+
     // ============================================================================
     // SECCIONES EXISTENTES
     // ============================================================================

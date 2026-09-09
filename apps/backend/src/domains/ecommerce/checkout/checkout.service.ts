@@ -513,6 +513,7 @@ export class CheckoutService {
 
   private async getCheckoutSettings(): Promise<{
     require_registration: boolean;
+    require_payment_receipt: boolean;
   }> {
     const store_id = RequestContextService.getStoreId();
     if (!store_id) {
@@ -528,6 +529,8 @@ export class CheckoutService {
 
     return {
       require_registration: !!checkout.require_registration,
+      // Opt-in por tienda (default `false` ⇒ comprobante opcional).
+      require_payment_receipt: !!checkout.require_payment_receipt,
     };
   }
 
@@ -1129,6 +1132,24 @@ export class CheckoutService {
       !RequestContextService.getUserId()
     ) {
       throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_005);
+    }
+
+    // Soporte obligatorio por tienda: con
+    // `ecommerce.checkout.require_payment_receipt` activo, bank_transfer /
+    // voucher sin `file` se rechaza aquí (fail-fast, antes de crear orden y
+    // pago). Con el flag apagado el flujo queda idéntico al actual.
+    if (
+      (payment_method.system_payment_method.type === 'bank_transfer' ||
+        payment_method.system_payment_method.type === 'voucher') &&
+      !file
+    ) {
+      const checkoutSettings = await this.getCheckoutSettings();
+      if (checkoutSettings.require_payment_receipt) {
+        throw new VendixHttpException(
+          ErrorCodes.ECOM_CHECKOUT_001,
+          'El comprobante de pago es obligatorio para este método de pago',
+        );
+      }
     }
 
     // Strict carta schedule gate (same OR window semantics as the public menu).

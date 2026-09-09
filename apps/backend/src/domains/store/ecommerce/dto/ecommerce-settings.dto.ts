@@ -469,6 +469,15 @@ export class EcommerceCheckoutDto {
     message: 'El pitch de WhatsApp no puede superar los 500 caracteres',
   })
   whatsapp_pitch?: string;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Hace obligatorio el soporte/comprobante de pago en checkout bank_transfer/voucher. Ausente ⇒ opcional (default false).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  require_payment_receipt?: boolean;
 }
 
 /**

@@ -34,6 +34,18 @@ export interface BankAccountOption {
   image_url: string | null;
 }
 
+/**
+ * Subconjunto de `ecommerce.checkout` del domain config que consume el
+ * storefront. `require_payment_receipt` llega por el canal existente
+ * (`PublicDomainsService` expone `ecommerce` completo en el domain config,
+ * sin endpoint nuevo). Ausente ⇒ comprobante opcional.
+ */
+export interface EcommerceCheckoutSettings {
+  require_registration?: boolean;
+  whatsapp_checkout?: boolean;
+  require_payment_receipt?: boolean;
+}
+
 export interface BookingSelection {
   product_id: number;
   product_variant_id?: number;
@@ -225,6 +237,24 @@ export class CheckoutService {
       `${this.api_url}/delivery-options`,
       { headers: this.getHeaders() },
     );
+  }
+
+  /**
+   * Flag por tienda `ecommerce.checkout.require_payment_receipt` leído del
+   * domain config actual (mismo canal que `whatsapp_checkout` /
+   * `require_registration` en el cart: `customConfig.ecommerce.checkout`).
+   * Se lee con `=== true`: ausente ⇒ `false` (comprobante opcional).
+   *
+   * NOTA: `EcommerceConfig.checkout` aún no declara la clave, por eso el
+   * cast estructural. La integración serial lo tipará en
+   * `domain-config.interface.ts` y este accessor seguirá compilando.
+   */
+  getRequirePaymentReceipt(): boolean {
+    const checkout = this.domain_service.getCurrentDomainConfig()
+      ?.customConfig?.ecommerce?.checkout as
+      | EcommerceCheckoutSettings
+      | undefined;
+    return checkout?.require_payment_receipt === true;
   }
 
   getPaymentMethods(
