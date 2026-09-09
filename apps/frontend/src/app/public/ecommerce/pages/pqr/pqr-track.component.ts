@@ -20,6 +20,7 @@ import type {
   TimelineStep,
   TimelineStepStatus,
 } from '../../../../shared/components/timeline/timeline.interfaces';
+import { TenantFacade } from '../../../../core/store';
 
 type TrackState = 'idle' | 'loading' | 'loaded' | 'not_found' | 'error';
 
@@ -47,6 +48,12 @@ export class PqrTrackComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly pqrService = inject(PqrService);
+  private readonly tenantFacade = inject(TenantFacade);
+
+  readonly isStoreContext = computed(() => !!this.tenantFacade.getCurrentStoreId());
+  readonly storeName = computed(
+    () => this.tenantFacade.storeName() || this.tenantFacade.getCurrentStore()?.name || '',
+  );
 
   readonly state = signal<TrackState>('idle');
   readonly view = signal<PublicPqrView | null>(null);

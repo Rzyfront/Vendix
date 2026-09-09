@@ -2,15 +2,22 @@
   <div class="top-bar">
     <a routerLink="/" class="back-link" aria-label="Volver al inicio">
       <app-icon name="arrow-left" [size]="16" color="currentColor"></app-icon>
-      Volver al inicio de Vendix
+      @if (storeName()) {
+        Volver a {{ storeName() }}
+      } @else {
+        Volver al inicio de Vendix
+      }
     </a>
   </div>
 
   <header class="hero">
     <h1>Consultar estado de PQRS</h1>
     <p class="lead">
-      Ingresa tu número de ticket para ver el estado y las respuestas
-      públicas que el equipo de Vendix haya publicado.
+      @if (storeName()) {
+        Ingresa tu número de ticket para ver el estado y las respuestas públicas que el equipo de {{ storeName() }} haya publicado.
+      } @else {
+        Ingresa tu número de ticket para ver el estado y las respuestas públicas que nuestro equipo haya publicado.
+      }
     </p>
   </header>
 

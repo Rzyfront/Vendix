@@ -140,6 +140,7 @@ export interface FooterHelp {
   faq?: FooterFaqItem[];
   shipping_info?: string;
   returns_info?: string;
+  pqr_url?: string;
 }
 
 /**
