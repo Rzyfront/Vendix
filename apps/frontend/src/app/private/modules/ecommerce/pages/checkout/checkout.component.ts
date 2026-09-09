@@ -129,6 +129,12 @@ export class CheckoutComponent implements OnInit {
   readonly show_location_modal = signal(false);
   /** Current map center / captured coordinate (never rendered as text). */
   readonly map_center = signal<{ lat: number; lng: number } | null>(null);
+  /**
+   * True once the address map reported ready (`mapReady`: MapLibre `load` or
+   * its error fallback). Gates the location prompt so the browser permission
+   * is only requested when a live map can consume the coordinate.
+   */
+  readonly map_ready = signal(false);
 
   /** Mirror of the selected country code so the template can branch reactively (zoneless). */
   readonly selected_country_code = signal('CO');
@@ -406,22 +412,28 @@ export class CheckoutComponent implements OnInit {
     this.initForm();
 
     // Offer location capture ONCE — the first time the customer is on the
-    // address step of a physical-item cart with the new-address form open, and
-    // only when the browser supports geolocation. Reads step/cart/use_new as
-    // reactive deps; the guard runs untracked so writing the flag signals does
-    // not re-trigger the effect. The actual decision (use GPS directly vs. show
-    // the opt-in modal vs. stay manual) is delegated to maybeOfferLocation()
-    // based on the current permission state.
+    // address step of a physical-item cart with home delivery selected, the
+    // new-address form open AND the map ready to consume a coordinate, and
+    // only when the browser supports geolocation. Never fires in pickup mode
+    // or before a delivery mode is chosen. Reads step/cart/use_new/delivery/
+    // map_ready as reactive deps; the guard runs untracked so writing the
+    // flag signals does not re-trigger the effect. The actual decision (use
+    // GPS directly vs. show the opt-in modal vs. stay manual) is delegated to
+    // maybeOfferLocation() based on the current permission state.
     effect(() => {
       const isAddressStep = this.step() === 1;
       const cart = this.cart();
       const useNew = this.use_new_address();
+      const deliveryMode = this.selected_delivery();
+      const mapReady = this.map_ready();
       untracked(() => {
         if (
           isAddressStep &&
           cart != null &&
           !this.cartHasOnlyServices &&
           useNew &&
+          deliveryMode === 'home' &&
+          mapReady &&
           !this.location_prompt_shown() &&
           this.geolocation.isSupported()
         ) {
@@ -982,6 +994,15 @@ export class CheckoutComponent implements OnInit {
    */
   onMapLocated(coords: { lat: number; lng: number }): void {
     this.applyReverseGeocode(coords);
+  }
+
+  /**
+   * The address map settled (loaded, or failed and fell back to manual):
+   * mark it ready so the deferred location effect may offer the opt-in
+   * prompt in home mode.
+   */
+  onMapReady(): void {
+    this.map_ready.set(true);
   }
 
   /** Stores the exact coordinate on the form and prefills the address fields. */
@@ -1680,18 +1701,27 @@ export class CheckoutComponent implements OnInit {
             this.shipping_coverage.set(isFallbackOnly ? 'pickup_only' : 'zone');
 
             // No pisar la elección del comprador en cada recotización: si la
-            // opción elegida sigue existiendo se conserva; solo se
-            // autoselecciona cuando no hay selección válida. Se prefiere la
-            // primera opción de despacho y se cae a `pickup` cuando es lo
-            // único que hay (el modo "recoger" la filtra por su cuenta).
+            // opción elegida sigue existiendo se conserva. Single-only: solo
+            // se autoselecciona cuando queda exactamente UNA opción no-pickup;
+            // con 2+ (p. ej. Riohacha céntrica vs. alejada) se limpia la
+            // selección y el comprador elige explícitamente — preseleccionar
+            // la barata subcobra el envío remoto. `nextStep` bloquea avanzar
+            // sin selección, así que limpiar equivale a exigir la elección.
             const stillValid = options.some(
               (o: any) => o.id === this.selected_shipping_option_id,
             );
             if (!stillValid) {
-              const preferred =
-                options.find((o: any) => o.method_type !== 'pickup') ??
-                options[0];
-              this.selectShippingMethod(preferred, preferred.cost);
+              const shippable = options.filter(
+                (o: any) => o.method_type !== 'pickup',
+              );
+              if (shippable.length === 1) {
+                this.selectShippingMethod(shippable[0], shippable[0].cost);
+              } else {
+                this.selected_shipping_option_id = null;
+                this.selected_shipping_method_id = null;
+                this.selected_shipping_method_type = null;
+                this.shipping_cost.set(0);
+              }
             }
 
             if (isFallbackOnly) {
