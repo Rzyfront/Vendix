@@ -176,6 +176,8 @@ export function fullName(
 
 /** Una línea por `dispatch_note` del rango (ADR-02). */
 export interface RemisionRow {
+  /** PK de `dispatch_notes`: alimenta el `trackKey: 'id'` del viewer. */
+  id: number;
   dispatch_number: string;
   /** Instante crudo de emisión. La fase de emisión lo pinta en TZ tienda. */
   emission_date: Date | null;
@@ -318,9 +320,11 @@ export class DispatchAnalyticsService {
     const { startDate, endDate } = parseDateRange(query, tz);
     this.validateRange(startDate, endDate);
 
+    const storeId = this.requireStoreId();
     const notes = await this.prisma.dispatch_notes.findMany({
       where: {
-        emission_date: { gte: startDate, lte: endDate },
+        store_id: storeId,
+        emission_date: { gte: startDate, lte: endDate }, // tz-audit:ignore — TIMESTAMP real, ventana de parseDateRange en TZ tienda
         ...(query.status && { status: query.status as never }),
         ...(query.subtype && { subtype: query.subtype as never }),
         ...(query.search && {
@@ -390,6 +394,7 @@ export class DispatchAnalyticsService {
         },
       );
       return {
+        id: n.id,
         dispatch_number: n.dispatch_number,
         emission_date: n.emission_date,
         status: n.status,
@@ -447,9 +452,11 @@ export class DispatchAnalyticsService {
     const { startDate, endDate } = parseDateRange(query, tz);
     this.validateRange(startDate, endDate);
 
+    const storeId = this.requireStoreId();
     const routes = await this.prisma.dispatch_routes.findMany({
       where: {
-        planned_date: { gte: startDate, lte: endDate },
+        store_id: storeId,
+        planned_date: { gte: startDate, lte: endDate }, // tz-audit:ignore — TIMESTAMP real, ventana de parseDateRange en TZ tienda
         ...(query.status && { status: query.status as never }),
         ...(query.search && {
           OR: [
@@ -571,8 +578,10 @@ export class DispatchAnalyticsService {
   ): Promise<{ rows: VehiculoRow[]; truncated: boolean }> {
     this.requireStoreId();
 
+    const storeId = this.requireStoreId();
     const vehicles = await this.prisma.vehicles.findMany({
       where: {
+        store_id: storeId,
         ...(query.is_active !== undefined && { is_active: query.is_active }),
         ...(query.search && {
           OR: [
@@ -597,6 +606,7 @@ export class DispatchAnalyticsService {
     // Agregado de uso por vehículo en UNA query (respeta `UNIQUE(store_id,
     // plate)` solo leyendo; nunca escribe).
     const routeUsage = await this.prisma.dispatch_routes.findMany({
+      where: { store_id: storeId },
       select: { vehicle_id: true, status: true, planned_date: true },
     });
     const usageByVehicle = new Map<
