@@ -51,21 +51,6 @@ export class PqrNotificationsListener {
   @OnEvent('pqr.created')
   async handlePqrCreated(payload: PqrCreatedEvent) {
     try {
-      const superAdmins = await this.globalPrisma.users.findMany({
-        where: {
-          state: 'active',
-          user_roles: {
-            some: { roles: { name: 'SUPER_ADMIN' } },
-          },
-        },
-        select: { id: true },
-      });
-
-      if (superAdmins.length === 0) {
-        this.logger.warn('pqr.created: no super-admin user found');
-        return;
-      }
-
       const ticket = payload.ticket;
       // pqr_type lives on `payload.contact`, not on `ticket` (the
       // ticket row stores it as a category enum + a `pqr` tag).
@@ -76,6 +61,124 @@ export class PqrNotificationsListener {
         CLAIM: 'Reclamo',
         SUGGESTION: 'Sugerencia',
       }[pqrType] ?? pqrType;
+
+      if (ticket.store_id) {
+        // Store PQR: Notify store admins, owners, managers of this store
+        const storeAdmins = await this.globalPrisma.users.findMany({
+          where: {
+            state: 'active',
+            OR: [
+              {
+                store_users: { some: { store_id: ticket.store_id } },
+                user_roles: {
+                  some: {
+                    roles: {
+                      name: {
+                        in: [
+                          'owner',
+                          'admin',
+                          'manager',
+                          'STORE_ADMIN',
+                          'store_admin',
+                          'ORG_ADMIN',
+                          'org_admin',
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+              {
+                main_store_id: ticket.store_id,
+                user_roles: {
+                  some: {
+                    roles: {
+                      name: {
+                        in: [
+                          'owner',
+                          'admin',
+                          'manager',
+                          'STORE_ADMIN',
+                          'store_admin',
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+              {
+                organization_id: ticket.organization_id,
+                user_roles: {
+                  some: {
+                    roles: {
+                      name: {
+                        in: [
+                          'owner',
+                          'admin',
+                          'ORG_ADMIN',
+                          'org_admin',
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+          select: { id: true },
+        });
+
+        if (storeAdmins.length === 0) {
+          this.logger.warn(
+            `pqr.created: no store-admin or org-admin user found for store_id=${ticket.store_id}`,
+          );
+          return;
+        }
+
+        await this.globalPrisma.notifications.createMany({
+          data: storeAdmins.map((u) => ({
+            store_id: ticket.store_id,
+            type: 'pqr_new' as any,
+            severity: 'info' as any,
+            title: `Nueva ${typeLabel}: ${ticket.ticket_number}`,
+            body: `${ticket.title} — de ${payload.contact.name} (${payload.contact.email}).`,
+            data: {
+              kind: 'pqr.created',
+              ticket_id: ticket.id,
+              ticket_number: ticket.ticket_number,
+              organization_id: ticket.organization_id,
+              store_id: ticket.store_id,
+              pqr_type: pqrType,
+              target_user_id: u.id,
+            },
+          })),
+          skipDuplicates: false,
+        });
+
+        this.logger.log(
+          `pqr.created: notified ${storeAdmins.length} store/org admin(s) for store PQR ${ticket.ticket_number}`,
+        );
+        return;
+      }
+
+      const superAdmins = await this.globalPrisma.users.findMany({
+        where: {
+          state: 'active',
+          user_roles: {
+            some: {
+              roles: {
+                name: { in: ['super_admin', 'SUPER_ADMIN'] },
+              },
+            },
+          },
+        },
+        select: { id: true },
+      });
+
+      if (superAdmins.length === 0) {
+        this.logger.warn('pqr.created: no super-admin user found');
+        return;
+      }
 
       await this.globalPrisma.notifications.createMany({
         data: superAdmins.map((u) => ({

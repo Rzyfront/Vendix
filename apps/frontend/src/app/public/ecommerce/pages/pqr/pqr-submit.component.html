@@ -2,8 +2,11 @@
   <header class="hero">
     <h1>Peticiones, Quejas, Reclamos y Sugerencias</h1>
     <p class="lead">
-      Tu mensaje será recibido directamente por el equipo de Vendix y
-      recibirás una respuesta en tu correo electrónico.
+      @if (storeName()) {
+        Tu mensaje será recibido directamente por el equipo de {{ storeName() }} y recibirás una respuesta en tu correo electrónico.
+      } @else {
+        Tu mensaje será recibido directamente por nuestro equipo y recibirás una respuesta en tu correo electrónico.
+      }
     </p>
   </header>
 
@@ -55,8 +58,11 @@
           (click)="setType('SUGGESTION')"
         >
           <app-icon name="lightbulb" [size]="24"></app-icon>
-          <strong>Sugerencia</strong>
-          <span>Proponer una mejora o nueva funcionalidad para Vendix.</span>
+          @if (storeName()) {
+            <span>Proponer una mejora o sugerencia para {{ storeName() }}.</span>
+          } @else {
+            <span>Proponer una mejora o sugerencia para nuestro servicio.</span>
+          }
         </button>
       </div>
       @if (hasError('pqr_type', 'required')) {

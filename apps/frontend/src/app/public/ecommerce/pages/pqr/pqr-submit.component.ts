@@ -21,6 +21,7 @@ import {
   PqrType,
 } from '../../../../shared/services/pqr.service';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
+import { TenantFacade } from '../../../../core/store';
 
 type SubmitState = 'idle' | 'submitting' | 'success' | 'error';
 
@@ -47,6 +48,12 @@ export class PqrSubmitComponent {
   private readonly fb = inject(FormBuilder);
   private readonly pqrService = inject(PqrService);
   private readonly router = inject(Router);
+  private readonly tenantFacade = inject(TenantFacade);
+
+  readonly isStoreContext = computed(() => !!this.tenantFacade.getCurrentStoreId());
+  readonly storeName = computed(
+    () => this.tenantFacade.storeName() || this.tenantFacade.getCurrentStore()?.name || '',
+  );
 
   readonly state = signal<SubmitState>('idle');
   readonly serverError = signal<string | null>(null);
@@ -110,7 +117,11 @@ export class PqrSubmitComponent {
    * success, so this only handles the user-initiated exit.
    */
   goBack(): void {
-    this.router.navigate(['/ayuda']);
+    if (this.isStoreContext()) {
+      this.router.navigate(['/']);
+    } else {
+      this.router.navigate(['/ayuda']);
+    }
   }
 
   hasFormError(error: string): boolean {
@@ -166,6 +177,15 @@ export class PqrSubmitComponent {
       this.form.markAllAsTouched();
       return;
     }
+    const storeId = this.tenantFacade.getCurrentStoreId();
+    const currentOrg = this.tenantFacade.currentOrganization();
+    const currentStore = this.tenantFacade.getCurrentStore();
+    const orgId = currentOrg?.id
+      ? parseInt(currentOrg.id.toString(), 10)
+      : currentStore?.organizationId
+      ? parseInt(currentStore.organizationId.toString(), 10)
+      : undefined;
+
     const dto: CreatePqrPublicDto = {
       pqr_type: this.form.controls['pqr_type'].value as PqrType,
       name: this.form.controls['name'].value.trim(),
@@ -173,6 +193,8 @@ export class PqrSubmitComponent {
       phone: this.form.controls['phone'].value?.trim() || undefined,
       subject: this.form.controls['subject'].value.trim(),
       description: this.form.controls['description'].value.trim(),
+      store_id: storeId ?? undefined,
+      organization_id: orgId,
     };
     this.state.set('submitting');
     this.serverError.set(null);

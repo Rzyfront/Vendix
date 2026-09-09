@@ -133,9 +133,72 @@ export class PqrEmailService {
       <pre style="white-space:pre-wrap;font-family:inherit">${this.escape(ticket.description)}</pre>
     `;
 
+    let recipientEmail = PqrEmailService.ADMIN_EMAIL;
+    if (ticket.store_id) {
+      const storeAdmin = await this.globalPrisma.users.findFirst({
+        where: {
+          state: 'active',
+          OR: [
+            {
+              store_users: { some: { store_id: ticket.store_id } },
+              user_roles: {
+                some: {
+                  roles: {
+                    name: {
+                      in: [
+                        'owner',
+                        'admin',
+                        'manager',
+                        'STORE_ADMIN',
+                        'store_admin',
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+            {
+              main_store_id: ticket.store_id,
+              user_roles: {
+                some: {
+                  roles: {
+                    name: {
+                      in: [
+                        'owner',
+                        'admin',
+                        'manager',
+                        'STORE_ADMIN',
+                        'store_admin',
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+            {
+              organization_id: ticket.organization_id,
+              user_roles: {
+                some: {
+                  roles: {
+                    name: {
+                      in: ['owner', 'admin', 'ORG_ADMIN', 'org_admin'],
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+        select: { email: true },
+      });
+      if (storeAdmin?.email) {
+        recipientEmail = storeAdmin.email;
+      }
+    }
+
     try {
       await this.emailService.sendEmail(
-        PqrEmailService.ADMIN_EMAIL,
+        recipientEmail,
         subject,
         html,
         text,

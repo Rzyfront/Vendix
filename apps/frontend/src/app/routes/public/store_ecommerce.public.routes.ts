@@ -228,6 +228,34 @@ export const storeEcommercePublicRoutes: Routes = [
             (c) => c.MyReservationsComponent,
           ),
       },
+      {
+        path: 'pqr',
+        loadComponent: () =>
+          import('../../public/ecommerce/pages/pqr/pqr-submit.component').then(
+            (c) => c.PqrSubmitComponent,
+          ),
+      },
+      {
+        path: 'pqr/gracias/:ticket_number',
+        loadComponent: () =>
+          import(
+            '../../public/ecommerce/pages/pqr/pqr-thank-you.component'
+          ).then((c) => c.PqrThankYouComponent),
+      },
+      {
+        path: 'pqr/consultar',
+        loadComponent: () =>
+          import(
+            '../../public/ecommerce/pages/pqr/pqr-track.component'
+          ).then((c) => c.PqrTrackComponent),
+      },
+      {
+        path: 'pqr/consultar/:ticket_number',
+        loadComponent: () =>
+          import(
+            '../../public/ecommerce/pages/pqr/pqr-track.component'
+          ).then((c) => c.PqrTrackComponent),
+      },
     ],
   },
 ];
