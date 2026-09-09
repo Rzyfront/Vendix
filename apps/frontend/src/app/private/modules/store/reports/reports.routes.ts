@@ -157,6 +157,21 @@ export const reportsRoutes: Routes = [
         ],
       },
       {
+        path: 'dispatch',
+        loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
+        data: { categoryId: 'dispatch' },
+        children: [
+          {
+            path: '',
+            loadComponent: () => import('./pages/category-reports-catalog/category-reports-catalog.component').then(c => c.CategoryReportsCatalogComponent),
+            data: { categoryId: 'dispatch' },
+          },
+          { path: 'dispatch-remisiones',  data: { reportId: 'dispatch-remisiones' },  loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'dispatch-planillas',   data: { reportId: 'dispatch-planillas' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'dispatch-vehiculos',   data: { reportId: 'dispatch-vehiculos' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+        ],
+      },
+      {
         path: 'accounting',
         loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
         data: { categoryId: 'accounting' },
