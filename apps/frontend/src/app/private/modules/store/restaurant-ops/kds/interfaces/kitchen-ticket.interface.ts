@@ -123,6 +123,36 @@ export function itemHasActiveRecipe(item: KitchenTicketItem): boolean {
   return base != null;
 }
 
+/**
+ * Restaurant Suite — paso 4 recetas-kds: id de la receta INACTIVA que
+ * bloquea el plato, o `null` si no hay ninguna que reactivar.
+ *
+ * Replica la MISMA regla exacta→base→null de `itemHasActiveRecipe`, pero
+ * sobre `is_active === false`: si la línea trae variante, gana la inactiva
+ * con ESE `product_variant_id`; si no, cae a la BASE inactiva. El board usa
+ * este id para ofrecer "Ver receta / Reactivarla" (deep-link a
+ * `recipes/:id/edit`) además del "Crear receta" — sin bifurcar el predicado
+ * de presencia, que sigue siendo `itemHasActiveRecipe`.
+ */
+export function itemInactiveRecipeId(item: KitchenTicketItem): number | null {
+  const recipes = item.product?.recipes;
+  if (!recipes?.length) return null;
+
+  const variantId = item.product_variant_id ?? null;
+  let baseId: number | null = null;
+
+  for (const recipe of recipes) {
+    if (recipe.is_active !== false) continue;
+    if (recipe.product_variant_id == null) {
+      baseId = recipe.id;
+    } else if (variantId != null && recipe.product_variant_id === variantId) {
+      return recipe.id;
+    }
+  }
+
+  return baseId;
+}
+
 export interface KitchenTicket {
   id: number;
   store_id: number;

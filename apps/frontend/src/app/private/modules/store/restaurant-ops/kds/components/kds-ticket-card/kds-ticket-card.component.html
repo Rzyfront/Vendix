@@ -117,8 +117,22 @@
         }
         @if (!itemHasRecipe(item)) {
           <!-- Direct shortcut to create the recipe for THIS dish.
-               stopPropagation so it never opens the detail modal. -->
+               stopPropagation so it never opens the detail modal.
+               Paso 4 recetas-kds: si el snapshot revela una receta INACTIVA
+               del par exacto, se ofrece "Ver receta" (reactivarla en el
+               formulario) ADEMÁS de "Crear receta" — crear a ciegas chocaría
+               contra el 409 fantasma. -->
           <div class="kds-card__item-cta" (click)="$event.stopPropagation()">
+            @if (inactiveRecipeIdFor(item) != null) {
+              <app-button
+                variant="outline"
+                size="xsm"
+                (clicked)="onViewRecipe(item)"
+              >
+                <app-icon slot="icon" name="eye" [size]="12" />
+                Ver receta
+              </app-button>
+            }
             <app-button
               variant="outline"
               size="xsm"

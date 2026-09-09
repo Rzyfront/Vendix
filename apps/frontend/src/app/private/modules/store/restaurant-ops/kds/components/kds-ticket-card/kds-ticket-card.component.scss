@@ -173,6 +173,15 @@
   line-height: 1.2;
 }
 
+// Paso 4 recetas-kds — fila de CTAs bajo un plato sin receta activa:
+// "Ver receta" (reactivar la inactiva) + "Crear receta", lado a lado.
+.kds-card__item-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  margin: 0.375rem 0 0 2.25rem;
+}
+
 .kds-card__qty {
   font-weight: 700;
   color: var(--color-text-primary, #111827);

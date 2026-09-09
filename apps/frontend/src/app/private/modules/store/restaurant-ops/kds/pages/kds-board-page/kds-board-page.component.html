@@ -203,6 +203,7 @@
                   (deliverClicked)="markTicketDelivered($event)"
                   (cancelClicked)="cancelTicket($event)"
                   (createRecipeClicked)="onCreateRecipe($event)"
+                  (viewRecipeClicked)="onViewRecipe($event)"
                 />
               }
             }
@@ -223,6 +224,7 @@
     (cancelClicked)="cancelTicket($event)"
     (revertClicked)="revertTicket($event)"
     (createRecipeClicked)="onCreateRecipe($event)"
+    (viewRecipeClicked)="onViewRecipe($event)"
     (closed)="closeDetail()"
   />
 

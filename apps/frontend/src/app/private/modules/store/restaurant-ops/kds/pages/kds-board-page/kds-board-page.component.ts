@@ -13,7 +13,9 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, NavigationEnd, Router } from '@angular/router';
+import { catchError, filter } from 'rxjs/operators';
+import { forkJoin, of } from 'rxjs';
 import {
   DialogService,
   StickyHeaderComponent,
@@ -23,10 +25,13 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 import { BadgeComponent } from '../../../../../../../shared/components/badge/badge.component';
 
 import {
+  itemHasActiveRecipe,
+  itemInactiveRecipeId,
   KdsColumn,
   KitchenTicket,
   KitchenTicketItem,
 } from '../../interfaces';
+import { RecipesService } from '../../../recipes/services/recipes.service';
 import type {
   FireConfirmPayload,
   FirePreview,
@@ -113,6 +118,7 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   readonly openingSession = signal(false);
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
+  private readonly recipesService = inject(RecipesService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly router = inject(Router);
@@ -308,12 +314,174 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
    */
   onCreateRecipe(item: KitchenTicketItem): void {
     const variantId = item.product_variant_id ?? null;
+    this.stashPendingRecipeReturn(item);
     void this.router.navigate(['/admin/restaurant-ops/recipes/new'], {
       queryParams:
         variantId != null
           ? { product_id: item.product_id, product_variant_id: variantId }
           : { product_id: item.product_id },
     });
+  }
+
+  /**
+   * Restaurant Suite — paso 4 recetas-kds: "Ver receta / Reactivarla".
+   *
+   * El snapshot del ticket ya trae el id de la receta INACTIVA del par exacto
+   * (ver `itemInactiveRecipeId`), así que el deep-link va al formulario de
+   * EDICIÓN (`recipes/:id/edit`) donde el operador la reactiva — no a `new`,
+   * que chocaría contra el 409 fantasma. Si el snapshot no revela inactiva
+   * (caso borde: el include no viajó), se cae a la lista de recetas.
+   */
+  onViewRecipe(item: KitchenTicketItem): void {
+    this.stashPendingRecipeReturn(item);
+    const inactiveId = itemInactiveRecipeId(item);
+    if (inactiveId != null) {
+      void this.router.navigate([
+        '/admin/restaurant-ops/recipes',
+        inactiveId,
+        'edit',
+      ]);
+      return;
+    }
+    void this.router.navigate(['/admin/restaurant-ops/recipes']);
+  }
+
+  /**
+   * Paso 4 recetas-kds: recuerda a QUÉ ticket volver tras el formulario de
+   * receta. `sessionStorage` (no un signal) porque navegar al formulario
+   * DESTRUYE este componente — el signal moriría con él y el retorno llegaría
+   * a una instancia nueva vía `ngOnInit` → `consumePendingRecipeReturn`.
+   */
+  private static readonly PENDING_RECIPE_KEY = 'kds:pending-recipe-ticket';
+
+  private stashPendingRecipeReturn(item: KitchenTicketItem): void {
+    try {
+      const ticketId = this.findTicketIdForItem(item);
+      sessionStorage.setItem(
+        KdsBoardPageComponent.PENDING_RECIPE_KEY,
+        JSON.stringify({
+          ticketId,
+          productId: item.product_id,
+          variantId: item.product_variant_id ?? null,
+        }),
+      );
+    } catch {
+      // sessionStorage no disponible (SSR/prerender): el snapshot de
+      // `ngOnInit` ya cubre el retorno; el re-resolve es best-effort.
+    }
+  }
+
+  /** Lee y limpia el retorno pendiente (one-shot). `null` = nada pendiente. */
+  private consumePendingRecipeReturn(): { ticketId: number | null } | null {
+    try {
+      const raw = sessionStorage.getItem(
+        KdsBoardPageComponent.PENDING_RECIPE_KEY,
+      );
+      if (!raw) return null;
+      sessionStorage.removeItem(KdsBoardPageComponent.PENDING_RECIPE_KEY);
+      const parsed = JSON.parse(raw) as { ticketId?: unknown };
+      return {
+        ticketId:
+          typeof parsed?.ticketId === 'number' ? parsed.ticketId : null,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private findTicketIdForItem(item: KitchenTicketItem): number | null {
+    const found = this.tickets().find((t) =>
+      (t.items ?? []).some((it) => it.id === item.id),
+    );
+    return found?.id ?? null;
+  }
+
+  /**
+   * Paso 4 recetas-kds: re-resuelve las recetas de UN ticket contra el
+   * backend fresco (`GET by-product` con `variant_id`) y parcha el snapshot
+   * en memoria para que la card deje de pintar "sin receta".
+   *
+   * El board congela el snapshot al fire y la creación/restauración de la
+   * receta NO emite ningún evento `ticket.*` por SSE — sin este re-fetch el
+   * badge mentiría hasta el próximo cambio de estado. Solo se consulta por
+   * los items que TODAVÍA se ven sin receta activa (si el snapshot ya vino
+   * fresco, cero llamadas); cada éxito inserta la ref activa en
+   * `product.recipes[]` para que `itemHasActiveRecipe` pase sin bifurcar.
+   */
+  refreshTicketRecipes(ticketId: number | null): void {
+    const ticket =
+      ticketId != null
+        ? this.tickets().find((t) => t.id === ticketId) ?? null
+        : null;
+    const candidates = (ticketId != null ? (ticket ? [ticket] : []) : this.tickets())
+      .flatMap((t) => t.items ?? [])
+      .filter((item) => !itemHasActiveRecipe(item));
+    if (candidates.length === 0) return;
+
+    forkJoin(
+      candidates.map((item) =>
+        this.recipesService
+          .getByProduct(item.product_id, item.product_variant_id ?? null)
+          .pipe(catchError(() => of(null))),
+      ),
+    )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((recipes) => {
+        const resolvedByPair = new Map<string, { id: number; product_variant_id: number | null }>();
+        for (const recipe of recipes) {
+          if (recipe?.id == null) continue;
+          const key =
+            recipe.product_variant_id != null
+              ? `${recipe.product_id}:${recipe.product_variant_id}`
+              : `${recipe.product_id}`;
+          resolvedByPair.set(key, {
+            id: recipe.id,
+            product_variant_id: recipe.product_variant_id ?? null,
+          });
+        }
+        if (resolvedByPair.size === 0) return;
+
+        let patched = 0;
+        this.kdsSse.tickets.update((list) =>
+          list.map((t) => {
+            if (ticketId != null && t.id !== ticketId) return t;
+            let changed = false;
+            const items = (t.items ?? []).map((it) => {
+              if (itemHasActiveRecipe(it)) return it;
+              const key =
+                it.product_variant_id != null
+                  ? `${it.product_id}:${it.product_variant_id}`
+                  : `${it.product_id}`;
+              const resolved = resolvedByPair.get(key);
+              if (!resolved) return it;
+              changed = true;
+              patched += 1;
+              return {
+                ...it,
+                product: {
+                  ...it.product,
+                  id: it.product?.id ?? it.product_id,
+                  name: it.product?.name ?? `Producto #${it.product_id}`,
+                  recipes: [
+                    ...(it.product?.recipes ?? []),
+                    {
+                      id: resolved.id,
+                      is_active: true,
+                      product_variant_id: resolved.product_variant_id,
+                    },
+                  ],
+                },
+              };
+            });
+            return changed ? { ...t, items } : t;
+          }),
+        );
+        if (patched > 0) {
+          this.toastService.success(
+            'Receta sincronizada — el plato ya muestra su receta',
+          );
+        }
+      });
   }
 
   /**
@@ -523,9 +691,43 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     // `connect()` abre el SSE en paralelo y, cuando llega su propio
     // snapshot/eventos, reconcilia por id. Catch silencioso: si el REST
     // falla, el SSE (o el botón Refrescar) cubre la carga.
-    this.kdsSse.refreshSnapshot(120).catch(() => {
-      /* el SSE/polling reconciliará */
-    });
+    //
+    // Paso 4 recetas-kds: tras el snapshot se consume el retorno pendiente
+    // del formulario de receta (ver `stashPendingRecipeReturn`) — si el
+    // operador viene de crear/reactivar, el ticket se re-resuelve contra el
+    // backend fresco en vez de seguir pintando "sin receta".
+    this.kdsSse
+      .refreshSnapshot(120)
+      .then(() => {
+        const pending = this.consumePendingRecipeReturn();
+        if (pending) this.refreshTicketRecipes(pending.ticketId);
+      })
+      .catch(() => {
+        /* el SSE/polling reconciliará */
+      });
+    // Misma re-resolución cuando el board YA está montado y el router vuelve
+    // a él (reuso de ruta sin ngOnInit): el retorno pendiente se atiende
+    // contra el snapshot vigente sin refetch completo.
+    this.router.events
+      .pipe(
+        filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((e) => {
+        if (!e.urlAfterRedirects.startsWith('/admin/restaurant-ops/kds')) {
+          return;
+        }
+        const pending = this.consumePendingRecipeReturn();
+        if (!pending) return;
+        if (pending.ticketId != null) {
+          this.refreshTicketRecipes(pending.ticketId);
+        } else {
+          this.kdsSse
+            .refreshSnapshot(120)
+            .then(() => this.refreshTicketRecipes(null))
+            .catch(() => {});
+        }
+      });
     this.kdsSse.connect(120);
 
     // QUI-651 — cargar estaciones y, si ya hay una elegida, su turno abierto.
