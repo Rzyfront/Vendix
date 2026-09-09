@@ -8,7 +8,8 @@ export type ReportCategoryId =
   | 'reviews'
   | 'financial'
   | 'accounting'
-  | 'payroll';
+  | 'payroll'
+  | 'dispatch';
 
 export type ReportType = 'summary' | 'list' | 'nested';
 

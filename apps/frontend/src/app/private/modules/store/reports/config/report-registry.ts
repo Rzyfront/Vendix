@@ -11,6 +11,7 @@ export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'financial', label: 'Financiero', description: 'Reportes de gastos, perdidas y ganancias, caja y cuentas por pagar', icon: 'wallet', color: 'var(--color-destructive)' },
   { id: 'accounting', label: 'Contabilidad', description: 'Reportes contables: balance de prueba, balance general, libro mayor e impuestos', icon: 'scale', color: 'var(--color-info)' },
   { id: 'payroll', label: 'Nómina', description: 'Reportes de nómina: resumen por período, detalle por empleado y provisiones laborales', icon: 'banknote', color: 'var(--color-primary)' },
+  { id: 'dispatch', label: 'Despachos', description: 'Reportes de remisiones, planillas y vehículos de reparto', icon: 'truck', color: 'var(--color-warning)' },
 ];
 
 export const REPORT_DEFINITIONS: ReportDefinition[] = [
@@ -1294,6 +1295,119 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'total_provisions', label: 'Total Provisiones', type: 'currency', icon: 'dollar-sign' },
     ],
     dataEndpoint: 'store/reports/payroll/provisions',
+  },
+
+  // ─── DESPACHOS (3) ──────────────────────────────────────────────────────────
+  // CP-despachos-reportes C.1 (FB-01..FB-04, ADR-03): la categoría consume los
+  // endpoints /store/analytics/dispatch/* vía report-viewer + el effect único
+  // exportReport$. Sin CSV/XLSX en cliente: el export descarga el blob del
+  // backend. Reutiliza report-viewer y filtros de fecha; solo señales zoneless.
+
+  {
+    // FB-01/FB-02: una línea por dispatch_note (ADR-02); portador resuelto por
+    // cascada ADR-01. portador_nombre va PRIMERO para que siempre sea visible:
+    // cardConfig deriva el título de la primera columna text y el viewer la
+    // muestra tanto en tabla como en tarjeta móvil.
+    id: 'dispatch-remisiones',
+    category: 'dispatch',
+    title: 'Remisiones',
+    description: 'Órdenes remitidas con portador, ruta y vehículo del período',
+    detailedDescription:
+      'Una línea por remisión despachada: quién la llevó (portador por cascada ADR-01), tipo de portador, placa del vehículo, número de ruta y si fue reasignada. Útil para auditar entregas y conciliar el total despachado.',
+    icon: 'file-text',
+    route: '/admin/reports/dispatch/dispatch-remisiones',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'id',
+    columns: [
+      { key: 'portador_nombre', header: 'Portador', type: 'text' },
+      { key: 'portador_tipo', header: 'Tipo Portador', type: 'text' },
+      { key: 'placa_vehiculo', header: 'Placa', type: 'text' },
+      { key: 'numero_ruta', header: 'Ruta', type: 'text' },
+      { key: 'reasignada', header: 'Reasignada', type: 'text' },
+      { key: 'dispatch_number', header: 'Remisión', type: 'text' },
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'created_at', header: 'Fecha', type: 'date' },
+      { key: 'grand_total', header: 'Total', type: 'currency', footer: 'sum' },
+    ],
+    exportFilename: 'remisiones_despacho',
+    stats: [
+      { key: 'total', label: 'Total Remisiones', type: 'number', icon: 'file-text' },
+      { key: 'grand_total', label: 'Total Despachado', type: 'currency', icon: 'dollar-sign' },
+    ],
+    dataEndpoint: 'store/analytics/dispatch/remisiones',
+    exportEndpoint: 'store/analytics/dispatch/remisiones/export',
+  },
+
+  {
+    // FB-03: una línea por dispatch_route; cash_variance se MUESTRA, nunca se
+    // recalcula (B.2). Montos de despacho, no de P&L: no tratarlos como ingreso.
+    id: 'dispatch-planillas',
+    category: 'dispatch',
+    title: 'Planillas',
+    description: 'Planillas de ruta con conductor, vehículo, paradas y varianza de caja',
+    detailedDescription:
+      'Una línea por planilla: conductor, placa, paradas, total por recaudar vs recaudado, efectivo declarado y diferencia de caja. Útil para liquidar rutas y detectar descuadres.',
+    icon: 'clipboard-list',
+    route: '/admin/reports/dispatch/dispatch-planillas',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'route_number',
+    columns: [
+      { key: 'route_number', header: 'Planilla', type: 'text' },
+      { key: 'planned_date', header: 'Fecha', type: 'date' },
+      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'conductor_nombre', header: 'Conductor', type: 'text' },
+      { key: 'placa_vehiculo', header: 'Placa', type: 'text' },
+      { key: 'total_paradas', header: 'Paradas', type: 'number', footer: 'sum' },
+      { key: 'total_to_collect', header: 'Por Recaudar', type: 'currency', footer: 'sum' },
+      { key: 'total_collected', header: 'Recaudado', type: 'currency', footer: 'sum' },
+      { key: 'declared_cash', header: 'Efectivo Declarado', type: 'currency', footer: 'sum' },
+      { key: 'cash_variance', header: 'Diferencia', type: 'currency', footer: 'sum' },
+    ],
+    exportFilename: 'planillas_despacho',
+    stats: [
+      { key: 'total_collected', label: 'Total Recaudado', type: 'currency', icon: 'dollar-sign' },
+      { key: 'cash_variance', label: 'Diferencia Total', type: 'currency', icon: 'alert-triangle' },
+      { key: '_count', label: 'Planillas', type: 'number', icon: 'clipboard-list' },
+    ],
+    dataEndpoint: 'store/analytics/dispatch/planillas',
+    exportEndpoint: 'store/analytics/dispatch/planillas/export',
+  },
+
+  {
+    // FB-04: una línea por vehículo con uso agregado (rutas activas/cerradas).
+    id: 'dispatch-vehiculos',
+    category: 'dispatch',
+    title: 'Vehículos',
+    description: 'Uso de vehículos: rutas activas, cerradas y conductor principal',
+    detailedDescription:
+      'Un renglón por vehículo con su conductor principal y el conteo de rutas activas y cerradas del período. Útil para medir la utilización de la flota.',
+    icon: 'truck',
+    route: '/admin/reports/dispatch/dispatch-vehiculos',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'plate',
+    columns: [
+      { key: 'plate', header: 'Placa', type: 'text' },
+      { key: 'type', header: 'Tipo', type: 'text' },
+      { key: 'conductor_principal', header: 'Conductor Principal', type: 'text' },
+      { key: 'rutas_activas', header: 'Rutas Activas', type: 'number', footer: 'sum' },
+      { key: 'rutas_cerradas', header: 'Rutas Cerradas', type: 'number', footer: 'sum' },
+      { key: 'total_rutas', header: 'Total Rutas', type: 'number', footer: 'sum' },
+      { key: 'is_active', header: 'Activo', type: 'text' },
+    ],
+    exportFilename: 'vehiculos_despacho',
+    stats: [
+      { key: 'total_rutas', label: 'Total Rutas', type: 'number', icon: 'truck' },
+      { key: 'rutas_activas', label: 'Rutas Activas', type: 'number', icon: 'navigation' },
+      { key: '_count', label: 'Vehículos', type: 'number', icon: 'clipboard-list' },
+    ],
+    dataEndpoint: 'store/analytics/dispatch/vehiculos',
+    exportEndpoint: 'store/analytics/dispatch/vehiculos/export',
   },
 ];
 
