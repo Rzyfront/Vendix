@@ -1051,10 +1051,31 @@ export class PrintLayoutComposerService {
       'f_msg', 'f_powered',
     ]);
 
+    // Domiciliario del despacho vía gateway: la plantilla maestra
+    // dispatch_ticket declara su `sec_footer` de tipo 'footer' (render
+    // genérico), así que nunca pasa por `renderDispatchTicketSection`,
+    // que es el único que pintaba al courier. Solo el provider
+    // dispatch_ticket publica `custom_variables.courier_name`, de modo
+    // que ningún otro formato cambia; sin nombre la salida queda
+    // idéntica a la histórica.
+    const courierRaw = (data.custom_variables as any)?.courier_name;
+    const courierName =
+      typeof courierRaw === 'string' ? courierRaw.trim() : '';
+    const courierHtml =
+      mode === 'tokenized'
+        ? ' <span class="vendix-token-pill" data-token="custom_variables.courier_name">{{ courier_name }}</span>'
+        : courierName
+          ? ` ${this.compiler.escapeHtml(courierName)}`
+          : '';
+    const courierLine =
+      mode === 'tokenized' || courierName
+        ? `<div class="dt-dispatched-by" data-element-id="f_courier" data-section-id="sec_footer" data-token="custom_variables.courier_name">Despachado por:${courierHtml}</div>`
+        : '';
+
     return `
       <div class="print-section section-footer" data-section-id="sec_footer">
         ${showMsg ? `<div class="footer-msg" data-element-id="f_msg" data-section-id="sec_footer" data-token="receipts.receipt_footer">${msgVal}</div>` : ''}
-        ${extraFooter}
+        ${extraFooter}${courierLine ? `\n        ${courierLine}` : ''}
         ${showPowered ? `<div class="powered-by" data-element-id="f_powered" data-section-id="sec_footer" data-token="system.powered_by">${poweredVal}</div>` : ''}
       </div>
     `;
