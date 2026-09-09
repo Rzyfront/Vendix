@@ -26,7 +26,7 @@ skills: [vendix-ecommerce-checkout, vendix-backend-api, buildcheck-dev]
 - **Acceptance checklist:**
   - [ ] Versión prod frontend/backend fijada con evidencia en `evidence/prod-version.md`
   - [ ] Snapshot de zonas y tarifas de la tienda 10 en `evidence/zonas-tienda-10.md`
-  - [ ] F-001 — prod muestra string de develop sin release a main (blocker)
+  - [-] F-001 — Descartado: pruebas eran locales, autoriza usuario (blocker)
   - [ ] F-002 — zona domicilio no matchea pese a existir tarifas (major)
   - [ ] F-003 — tarifas free con rangos que excluyen el carrito (minor)
   - [ ] F-004 — descarte de zona solo deja huella en warn-log (minor)
