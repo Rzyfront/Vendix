@@ -4,6 +4,7 @@ import {
   NotFoundException,
   MessageEvent,
   Logger,
+  Inject,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -15,7 +16,17 @@ import { OpenSessionDto } from '../dto/open-session.dto';
 import { CloseSessionDto } from '../dto/close-session.dto';
 import { QuerySessionDto } from '../dto/query-session.dto';
 import { MovementsService } from '../movements/movements.service';
-import { SettingsService } from '../../settings/settings.service';
+import type { SettingsService } from '../../settings/settings.service';
+
+/**
+ * QUI-784 — token de inyección para el `SettingsService` dentro del dominio de
+ * cajas. `sessions.service` ↔ `settings.service` tienen dependencia mutua real
+ * (caja usa la moneda de la tienda; settings consulta sesiones abiertas para
+ * bloquear el apagado del módulo). Si ambas clases se importan por valor, SWC
+ * emite `design:paramtypes` con un require circular que revienta en TDZ al
+ * arrancar el backend. El token rompe el ciclo a nivel de archivo.
+ */
+export const SETTINGS_SERVICE = Symbol('SETTINGS_SERVICE');
 
 /**
  * Resumen de sesiones de caja abiertas en una tienda. `registers` está
@@ -61,7 +72,7 @@ export class SessionsService {
     private readonly movements_service: MovementsService,
     private readonly event_emitter: EventEmitter2,
     private readonly aiEngine: AIEngineService,
-    private readonly settingsService: SettingsService,
+    @Inject(SETTINGS_SERVICE) private readonly settingsService: SettingsService,
   ) {}
 
   async getActiveSession(user_id?: number) {
