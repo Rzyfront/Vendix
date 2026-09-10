@@ -6,8 +6,11 @@ import { OrdersListSseService } from './orders-list-sse.service';
  * `EventSource` global para no abrir una conexión real. Probamos:
  *  - parseo del payload canónico `order.status_changed` desde el subject
  *    compartido por tienda;
- *  - filtrado de OTROS tipos de evento (`order.created`, `ticket.*`,
- *    notificaciones, etc.) — esta vista SOLO consume `order.status_changed`;
+ *  - parseo de `order.created` en `lastCreatedEvent` (sin tocar
+ *    `lastRelevantEvent`) — CP-orders-sales-sse-realtime;
+ *  - filtrado de OTROS tipos de evento (`ticket.*`, notificaciones,
+ *    `order.items.updated`, etc.) — esta vista consume `order.status_changed`
+ *    y `order.created`;
  *  - idempotencia del signal `lastRelevantEvent` (puede sobrescribirse con
  *    el mismo evento);
  *  - manejo de heartbeat (líneas que empiezan con ":");
@@ -38,7 +41,12 @@ describe('OrdersListSseService — QUI-777', () => {
   }
 
   beforeEach(() => {
-    (global as any).EventSource = EventSourceStub;
+    // `lastInstance` es module-level: sin reset, el test "sin token" ve el
+    // stub del test anterior y falla por polución entre tests.
+    lastInstance = undefined;
+    // `globalThis` en vez de `global`: el spec corre en Chrome (Karma),
+    // donde `global` de Node no existe y tumbaba los 13 tests en beforeEach.
+    (globalThis as any).EventSource = EventSourceStub;
     localStorage.setItem(
       'vendix_auth_state',
       JSON.stringify({ tokens: { access_token: 'fake-jwt' } }),
@@ -48,8 +56,12 @@ describe('OrdersListSseService — QUI-777', () => {
   });
 
   afterEach(() => {
-    service.disconnect();
-    delete (global as any).EventSource;
+    try {
+      service.disconnect();
+    } catch {
+      // beforeEach pudo fallar antes de crear el servicio.
+    }
+    delete (globalThis as any).EventSource;
     localStorage.removeItem('vendix_auth_state');
   });
 
@@ -94,7 +106,7 @@ describe('OrdersListSseService — QUI-777', () => {
     expect(evt?.data.order_number).toBe('ORD-2026-001');
   });
 
-  it('onmessage con OTRO tipo (order.created) NO actualiza lastRelevantEvent', () => {
+  it('onmessage con order.created actualiza lastCreatedEvent sin tocar lastRelevantEvent', () => {
     service.connect();
     lastInstance.onopen?.();
     lastInstance.onmessage?.({
@@ -102,11 +114,54 @@ describe('OrdersListSseService — QUI-777', () => {
         id: 2,
         type: 'order.created',
         created_at: '2026-09-03T10:00:00.000Z',
-        data: { order_id: 99, kind: 'order.created' },
+        data: {
+          order_id: 99,
+          kind: 'order.created',
+          order_number: 'ORD-2026-099',
+          grand_total: 45000,
+          currency: 'COP',
+        },
+      }),
+    });
+    // El canal de estado no se contamina con eventos de creacion.
+    expect(service.lastRelevantEvent()).toBeNull();
+    const created = service.lastCreatedEvent();
+    expect(created).toBeTruthy();
+    expect(created?.data.order_id).toBe(99);
+    expect(created?.data.order_number).toBe('ORD-2026-099');
+    // El último evento del subject sí se registra para debug/UI.
+    expect(service.lastEvent()).toBeTruthy();
+  });
+
+  it('onmessage con order.created SIN order_id numerico se ignora', () => {
+    service.connect();
+    lastInstance.onopen?.();
+    lastInstance.onmessage?.({
+      data: JSON.stringify({
+        id: 3,
+        type: 'order.created',
+        created_at: '2026-09-03T10:00:00.000Z',
+        data: { kind: 'order.created' },
+      }),
+    });
+    expect(service.lastCreatedEvent()).toBeNull();
+    expect(service.lastRelevantEvent()).toBeNull();
+    expect(service.lastEvent()).toBeNull();
+  });
+
+  it('onmessage con OTRO tipo (ticket.*) NO actualiza ningun signal', () => {
+    service.connect();
+    lastInstance.onopen?.();
+    lastInstance.onmessage?.({
+      data: JSON.stringify({
+        id: 4,
+        type: 'ticket.fired',
+        created_at: '2026-09-03T10:00:00.000Z',
+        data: { order_id: 99, kind: 'ticket.fired' },
       }),
     });
     expect(service.lastRelevantEvent()).toBeNull();
-    // El último evento del subject sí se registra, pero no es "relevant".
+    expect(service.lastCreatedEvent()).toBeNull();
     expect(service.lastEvent()).toBeNull();
   });
 

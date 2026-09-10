@@ -27,9 +27,9 @@ const ORDER_STATES: ReadonlySet<string> = new Set<string>([
  * tienda para refrescar la lista de Órdenes de Venta sin F5. Mismo shape
  * que consume `OrderDetailSseService` (envuelto por `OrderSseService.pushOrderEvent`).
  *
- * Solo nos importan los eventos `order.status_changed`. El subject compartido
- * emite muchos otros tipos (`ticket.*`, notificaciones, etc.) — esta vista
- * los ignora.
+ * Nos importan `order.status_changed` (refresca la fila) y `order.created`
+ * (inserta la fila nueva). El subject compartido emite muchos otros tipos
+ * (`ticket.*`, notificaciones, etc.) — esta vista los ignora.
  */
 export interface OrderListStateChangedEvent {
   /** ID incremental monotónico del backend (vía `OrderSseService.seq`). */
@@ -43,6 +43,27 @@ export interface OrderListStateChangedEvent {
     old_state: string;
     new_state: OrderState;
     order_number?: string;
+  };
+}
+
+/**
+ * CP-orders-sales-sse-realtime: payload de orden nueva. El backend solo
+ * envia identificadores y totales (ver `OrdersService.onOrderCreated`); la
+ * fila completa se hidrata por REST en el componente para reutilizar la
+ * normalizacion de `loadOrders` (mesa, customer_name, numeros).
+ */
+export interface OrderListCreatedEvent {
+  /** ID incremental monotónico del backend (vía `OrderSseService.seq`). */
+  id: number;
+  type: 'order.created';
+  /** ISO timestamp del backend. */
+  occurred_at: string;
+  data: {
+    order_id: number;
+    kind: 'order.created';
+    order_number?: string;
+    grand_total?: number;
+    currency?: string;
   };
 }
 
@@ -68,16 +89,20 @@ const BACKOFF_MAX_MS = 30_000;
  * correspondiente sin F5 cuando el KDS marca todos los tickets de una orden
  * como delivered (o revierte uno).
  *
+ * CP-orders-sales-sse-realtime: además expone `order.created` para que la
+ * lista inserte la orden nueva sin F5.
+ *
  * Replica el patrón de `OrderDetailSseService` (EventSource manual con
  * backoff, no auto-reconnect del browser) pero:
- *  - NO filtra por un orderId específico: la lista ve TODAS las
- *    `order.status_changed` de la tienda.
+ *  - NO filtra por un orderId específico: la lista ve TODOS los
+ *    `order.status_changed` y `order.created` de la tienda.
  *  - El componente consumidor reconcilia con un signal upsert:
  *    `orders.update(prev => prev.map(o => o.id === evt.data.order_id
  *      ? { ...o, state: evt.data.new_state } : o))`.
- *  - El servicio solo expone `lastRelevantEvent` (signal); el componente
- *    decide si la fila está en su página actual antes de aplicar el upsert
- *    (si la orden no está en `orders()`, el evento se ignora silencioso).
+ *  - El servicio expone `lastRelevantEvent` (status) y `lastCreatedEvent`
+ *    (creadas); el componente decide si la fila está en su página actual
+ *    antes de aplicar el upsert (si la orden no está en `orders()`, el
+ *    evento de estado se ignora silencioso).
  *  - Idempotencia: el upsert siempre overwrite. Si llega el mismo evento
  *    dos veces (re-conexión SSE), el resultado es el mismo `state`.
  *
@@ -102,8 +127,15 @@ export class OrdersListSseService {
    * aplicarlo para que el effect corra de nuevo en el próximo cambio.
    */
   readonly lastRelevantEvent = signal<OrderListStateChangedEvent | null>(null);
+  /**
+   * Último evento `order.created` que vio el stream. El componente lo
+   * hidrata por REST y lo limpia a `null` igual que `lastRelevantEvent`.
+   */
+  readonly lastCreatedEvent = signal<OrderListCreatedEvent | null>(null);
   /** Último evento que vio el stream, sea relevante o no (debug/UI). */
-  readonly lastEvent = signal<OrderListStateChangedEvent | null>(null);
+  readonly lastEvent = signal<
+    OrderListStateChangedEvent | OrderListCreatedEvent | null
+  >(null);
 
   /**
    * Abre el SSE para la lista. Idempotente: si ya está abierto, no-op.
@@ -187,7 +219,7 @@ export class OrdersListSseService {
     let payload: {
       id?: number;
       type?: string;
-      data?: OrderListStateChangedEvent['data'];
+      data?: Record<string, unknown>;
       created_at?: string;
     } | null = null;
     try {
@@ -196,21 +228,49 @@ export class OrdersListSseService {
       return; // payload binario o mal formado — ignoramos
     }
     if (!payload || !payload.data || typeof payload.data !== 'object') return;
+    if (typeof payload.data['order_id'] !== 'number') return;
 
-    // La lista SOLO se interesa en `order.status_changed`. Otros eventos
-    // del subject compartido (notificaciones, ticket.*, order.created,
-    // order.items.updated, etc.) los descartamos sin procesarlos.
+    // CP-orders-sales-sse-realtime: la lista consume `order.status_changed`
+    // y `order.created`. Otros eventos del subject compartido
+    // (notificaciones, ticket.*, order.items.updated, etc.) se descartan
+    // sin procesarlos.
+    if (
+      payload.type === 'order.created' &&
+      payload.data['kind'] === 'order.created'
+    ) {
+      const evt: OrderListCreatedEvent = {
+        id: payload.id ?? 0,
+        type: 'order.created',
+        occurred_at: payload.created_at ?? new Date().toISOString(),
+        data: {
+          order_id: payload.data['order_id'] as number,
+          kind: 'order.created',
+          ...(typeof payload.data['order_number'] === 'string'
+            ? { order_number: payload.data['order_number'] }
+            : {}),
+          ...(typeof payload.data['grand_total'] === 'number'
+            ? { grand_total: payload.data['grand_total'] }
+            : {}),
+          ...(typeof payload.data['currency'] === 'string'
+            ? { currency: payload.data['currency'] }
+            : {}),
+        },
+      };
+      this.lastEvent.set(evt);
+      this.lastCreatedEvent.set(evt);
+      return;
+    }
+
     if (payload.type !== 'order.status_changed') return;
-    if (payload.data.kind !== 'order.status_changed') return;
-    if (typeof payload.data.order_id !== 'number') return;
+    if (payload.data['kind'] !== 'order.status_changed') return;
 
     // Validación runtime del new_state: si el backend pushea un estado que
     // ya no existe (typo, refactor, versión vieja del cliente), descartamos
     // el evento silencioso. El upsert downstream nunca ve un valor fuera
     // del union `OrderState` — sin necesidad de cast en el componente.
     if (
-      typeof payload.data.new_state !== 'string' ||
-      !ORDER_STATES.has(payload.data.new_state)
+      typeof payload.data['new_state'] !== 'string' ||
+      !ORDER_STATES.has(payload.data['new_state'])
     ) {
       return;
     }
@@ -219,7 +279,18 @@ export class OrdersListSseService {
       id: payload.id ?? 0,
       type: 'order.status_changed',
       occurred_at: payload.created_at ?? new Date().toISOString(),
-      data: payload.data as OrderListStateChangedEvent['data'],
+      data: {
+        order_id: payload.data['order_id'] as number,
+        kind: 'order.status_changed',
+        old_state:
+          typeof payload.data['old_state'] === 'string'
+            ? payload.data['old_state']
+            : '',
+        new_state: payload.data['new_state'] as OrderState,
+        ...(typeof payload.data['order_number'] === 'string'
+          ? { order_number: payload.data['order_number'] }
+          : {}),
+      },
     };
     this.lastEvent.set(evt);
     this.lastRelevantEvent.set(evt);
