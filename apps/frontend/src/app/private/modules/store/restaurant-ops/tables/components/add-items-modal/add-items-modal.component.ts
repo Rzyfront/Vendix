@@ -54,6 +54,15 @@ interface AddItemsVariant {
   effective_track_inventory?: boolean;
   stock_quantity?: number;
   is_available?: boolean;
+  /**
+   * Precios de la variante (contrato global-final-prices, backend en
+   * paralelo). Todo opcional: el display usa
+   * `final_price ?? price_override ?? final del producto ?? base`.
+   */
+  price_override?: number | string | null;
+  sale_price?: number | string | null;
+  is_on_sale?: boolean;
+  final_price?: number | string | null;
 }
 
 interface AddItemsProductOption extends SellableProductOption {
@@ -172,7 +181,7 @@ export class AddItemsModalComponent {
     let sum = 0;
     for (const [id, qty] of this.selectedQty()) {
       const p = byId.get(id);
-      if (p) sum += Number(p.base_price ?? 0) * qty;
+      if (p) sum += this.rowDisplayPrice(p) * qty;
     }
     return sum;
   });
@@ -377,6 +386,38 @@ export class AddItemsModalComponent {
   /** ¿Este producto exige elegir variante? */
   hasVariants(product: AddItemsProductOption): boolean {
     return (product.product_variants?.length ?? 0) > 0;
+  }
+
+  /**
+   * Precio final (con impuesto) de una variante para DISPLAY.
+   * `final_price` del backend ?? override ?? final del producto ?? base.
+   * Nunca toca el payload: `onSubmit` solo envía ids/cantidades/flags.
+   */
+  variantFinalPrice(
+    variant: AddItemsVariant,
+    product: AddItemsProductOption,
+  ): number {
+    return Number(
+      variant.final_price ??
+        variant.price_override ??
+        product.final_price ??
+        product.base_price ??
+        0,
+    );
+  }
+
+  /**
+   * Precio de la fila del producto para DISPLAY: final de la variante
+   * seleccionada ?? `final_price` del producto ?? base.
+   */
+  rowDisplayPrice(row: AddItemsProductOption): number {
+    const variantId = this.selectedVariantOf(row.id);
+    const variant =
+      variantId != null
+        ? row.product_variants?.find((v) => v.id === variantId)
+        : undefined;
+    if (variant) return this.variantFinalPrice(variant, row);
+    return Number(row.final_price ?? row.base_price ?? 0);
   }
 
   /** Etiqueta legible de la variante (atributos → name → sku). */
