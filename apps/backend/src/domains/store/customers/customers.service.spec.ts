@@ -488,6 +488,89 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
       expect(result.was_created).toBe(true);
       expect(result.matched_by).toBe(null);
     });
+
+    describe('PAVS3 — backfill de documento en match por email/nombre', () => {
+      const existingNoDoc = {
+        id: 9,
+        first_name: 'Andres',
+        last_name: 'Meza',
+        phone: '3007858751',
+        document_type: null,
+        document_number: null,
+        email: 'andres@x.com',
+        state: 'active',
+        user_roles: [],
+        store_users: [{ store_id: 1 }],
+        addresses: [],
+      };
+
+      it('rellena tipo+numero cuando el match fue por email y el doc esta vacio', async () => {
+        mockPrismaService.users.findFirst.mockResolvedValueOnce(existingNoDoc);
+
+        const result = await service.findOrCreateByEmailOrDocument(1, {
+          email: 'andres@x.com',
+          first_name: 'Andres',
+          last_name: 'Meza',
+          document_type: 'CC',
+          document_number: '1119392217',
+        } as any);
+
+        expect(result.was_created).toBe(false);
+        expect(result.was_updated).toBe(true);
+        expect(result.matched_by).toBe('email');
+        expect(result.document_conflict).toBe(false);
+        const updateData = mockPrismaService.users.update.mock.calls[0][0].data;
+        expect(updateData).toEqual({
+          document_type: 'CC',
+          document_number: '1119392217',
+        });
+        expect(result.customer.document_number).toBe('1119392217');
+      });
+
+      it('no escribe nada cuando el documento traido es el mismo guardado', async () => {
+        mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByEmail);
+
+        const result = await service.findOrCreateByEmailOrDocument(1, {
+          email: 'juan@x.com',
+          document_type: 'CC',
+          document_number: '12345678',
+        } as any);
+
+        expect(result.was_created).toBe(false);
+        expect(result.was_updated).toBe(false);
+        expect(result.document_conflict).toBe(false);
+        expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+      });
+
+      it('NO sobreescribe un documento distinto y reporta document_conflict', async () => {
+        mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByEmail);
+
+        const result = await service.findOrCreateByEmailOrDocument(1, {
+          email: 'juan@x.com',
+          document_type: 'CC',
+          document_number: '99999999',
+        } as any);
+
+        expect(result.was_created).toBe(false);
+        expect(result.was_updated).toBe(false);
+        expect(result.document_conflict).toBe(true);
+        expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+        expect(result.customer.document_number).toBe('12345678');
+      });
+
+      it('normaliza antes de comparar (puntos y espacios no disparan conflicto)', async () => {
+        mockPrismaService.users.findFirst.mockResolvedValueOnce(existingByEmail);
+
+        const result = await service.findOrCreateByEmailOrDocument(1, {
+          email: 'juan@x.com',
+          document_type: 'cc',
+          document_number: '12.345.678',
+        } as any);
+
+        expect(result.document_conflict).toBe(false);
+        expect(mockPrismaService.users.update).not.toHaveBeenCalled();
+      });
+    });
   });
 
   /**
