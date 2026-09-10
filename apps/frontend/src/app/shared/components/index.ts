@@ -41,6 +41,7 @@ export { ProductPickerModalComponent } from './product-picker-modal';
 export type { ProductPickerOption } from './product-picker-modal';
 export { TaxSelectorComponent } from './tax-selector';
 export type { TaxOption, TaxSelection } from './tax-selector';
+export { TaxInclusiveChipComponent } from './tax-inclusive-chip/tax-inclusive-chip.component';
 export { ToggleComponent } from './toggle/toggle.component';
 export { SettingToggleComponent } from './setting-toggle/setting-toggle.component';
 export { PanelUiModulesEditorComponent } from './panel-ui-modules-editor/panel-ui-modules-editor.component';

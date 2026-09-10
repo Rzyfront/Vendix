@@ -40,6 +40,7 @@ import {
   StickyHeaderActionButton,
   BadgeComponent,
   TooltipComponent,
+  TaxInclusiveChipComponent,
 } from '../../../../../../shared/components';
 import {
   CurrencyPipe,
@@ -220,6 +221,7 @@ interface PriceTierOverrideRow {
     SaveRequirementsModalComponent,
     SaleConfigHintComponent,
     AccountCodeSelectComponent,
+    TaxInclusiveChipComponent,
   ],
   templateUrl: './product-create-page.component.html',
   styles: [
@@ -1015,6 +1017,69 @@ export class ProductCreatePageComponent {
       };
     });
   });
+
+  /**
+   * Mapa de estado inclusivo (true = impuesto incluido en PVP, false = adicional)
+   * indexado por id de categoría de impuesto.
+   */
+  readonly taxInclusiveMap = signal<Record<number, boolean>>({});
+
+  /**
+   * Ids de impuestos seleccionados en el formulario, leídos reactivamente vía señal.
+   */
+  readonly selectedTaxCategoryIds = toSignal(
+    this.productForm.get('tax_category_ids')!.valueChanges.pipe(
+      startWith(this.productForm.get('tax_category_ids')!.value || []),
+      map((ids: any) => (Array.isArray(ids) ? ids.map(Number) : [])),
+    ),
+    { initialValue: [] as number[] },
+  );
+
+  /**
+   * Categorías de impuestos seleccionadas en el formulario, para pintar sus chips
+   * interactivos de inclusión / adición.
+   */
+  readonly selectedTaxCategories = computed<TaxCategory[]>(() => {
+    const ids = this.selectedTaxCategoryIds() || [];
+    const all = this.taxCategoriesSig();
+    return ids
+      .map((id) => all.find((c) => c.id === id))
+      .filter((c): c is TaxCategory => !!c);
+  });
+
+  isTaxInclusive(taxId: number): boolean {
+    const map = this.taxInclusiveMap();
+    if (map[taxId] !== undefined) return map[taxId];
+    const cat = this.allTaxCategories.find((c) => c.id === taxId);
+    return !!(cat?.is_inclusive ?? cat?.tax_rates?.[0]?.is_inclusive ?? false);
+  }
+
+  setTaxInclusive(taxId: number, isInclusive: boolean): void {
+    this.taxInclusiveMap.update((m) => ({ ...m, [taxId]: isInclusive }));
+  }
+
+  removeTaxCategory(taxId: number): void {
+    const current: number[] =
+      this.productForm.get('tax_category_ids')?.value || [];
+    this.productForm
+      .get('tax_category_ids')
+      ?.setValue(current.filter((id) => id !== taxId));
+  }
+
+  taxInclusiveHint(taxId: number): string {
+    return this.isTaxInclusive(taxId)
+      ? 'El impuesto ya está dentro del precio unitario. Click para cambiarlo a adicional.'
+      : 'El impuesto se suma sobre el precio unitario. Click para cambiarlo a incluido.';
+  }
+
+  getTaxRatePercent(tax: TaxCategory): number {
+    const raw = tax.rate ?? tax.tax_rates?.[0]?.rate ?? 0;
+    const val = Number(raw);
+    if (!Number.isFinite(val) || val < 0) return 0;
+    const percent = val > 1 ? val : val * 100;
+    return Math.round(percent * 100) / 100;
+  }
+
   stateOptions: SelectorOption[] = [
     { value: ProductState.ACTIVE, label: 'Activo' },
     { value: ProductState.INACTIVE, label: 'Inactivo' },
@@ -1650,6 +1715,12 @@ export class ProductCreatePageComponent {
       state: draft.state || ProductState.ACTIVE,
       account_code: draft.account_code ?? null,
     });
+    if (draft.tax_inclusive_map) {
+      this.taxInclusiveMap.set({
+        ...this.taxInclusiveMap(),
+        ...draft.tax_inclusive_map,
+      });
+    }
   }
 
   loadPromotionOptions(): void {
@@ -1991,28 +2062,55 @@ export class ProductCreatePageComponent {
     const ivaIds = this.ivaTaxCategoryIdSet();
     const blocked = this.isVatBlocked();
 
-    let totalTaxRate = 0;
+    let inclusiveRate = 0;
+    let additionalRate = 0;
+
     selectedTaxIds.forEach((id: number) => {
       if (blocked && ivaIds.has(id)) return;
       const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
       if (taxCat) {
-        // Extraer la tasa del primer tax_rate si no existe en el nivel superior
         const rawRate = taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0;
         const rate = parseFloat(String(rawRate));
-        totalTaxRate += isNaN(rate) ? 0 : rate;
+        const finalRate = isNaN(rate) ? 0 : rate > 1 ? rate / 100 : rate;
+        if (this.isTaxInclusive(id)) {
+          inclusiveRate += finalRate;
+        } else {
+          additionalRate += finalRate;
+        }
       }
     });
 
-    return basePrice * (1 + totalTaxRate);
+    const netBase =
+      inclusiveRate > 0 ? basePrice / (1 + inclusiveRate) : basePrice;
+    return basePrice + netBase * additionalRate;
   }
 
-  get taxBreakdown(): { name: string; rate: number; amount: number }[] {
+  get taxBreakdown(): {
+    name: string;
+    rate: number;
+    amount: number;
+    is_inclusive: boolean;
+  }[] {
     const basePrice = Number(this.productForm.get('base_price')?.value || 0);
     const selectedTaxIds =
       this.productForm.get('tax_category_ids')?.value || [];
     // F4 — excluir IVA del desglose cuando el comercio no es responsable.
     const ivaIds = this.ivaTaxCategoryIdSet();
     const blocked = this.isVatBlocked();
+
+    let inclusiveRate = 0;
+    selectedTaxIds.forEach((id: number) => {
+      if (blocked && ivaIds.has(id)) return;
+      const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
+      if (taxCat && this.isTaxInclusive(id)) {
+        const rawRate = taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0;
+        const rate = parseFloat(String(rawRate));
+        inclusiveRate += isNaN(rate) ? 0 : rate > 1 ? rate / 100 : rate;
+      }
+    });
+
+    const netBase =
+      inclusiveRate > 0 ? basePrice / (1 + inclusiveRate) : basePrice;
 
     return selectedTaxIds
       .map((id: number) => {
@@ -2021,14 +2119,31 @@ export class ProductCreatePageComponent {
         if (!taxCat) return null;
         const rawRate = taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0;
         const rate = parseFloat(String(rawRate));
-        if (isNaN(rate) || rate === 0) return null;
-        return { name: taxCat.name, rate, amount: basePrice * rate };
+        const finalRate = isNaN(rate) ? 0 : rate > 1 ? rate / 100 : rate;
+        if (finalRate === 0) return null;
+        const isInc = this.isTaxInclusive(id);
+        const amount = netBase * finalRate;
+        return {
+          name: taxCat.name,
+          rate: finalRate,
+          amount,
+          is_inclusive: isInc,
+        };
       })
       .filter(
         (
-          entry: { name: string; rate: number; amount: number } | null,
-        ): entry is { name: string; rate: number; amount: number } =>
-          entry !== null,
+          entry: {
+            name: string;
+            rate: number;
+            amount: number;
+            is_inclusive: boolean;
+          } | null,
+        ): entry is {
+          name: string;
+          rate: number;
+          amount: number;
+          is_inclusive: boolean;
+        } => entry !== null,
       );
   }
 
@@ -2163,6 +2278,20 @@ export class ProductCreatePageComponent {
       this.imageUrls = [];
       this.imageIds = [];
     }
+
+    if (
+      product.product_tax_assignments &&
+      product.product_tax_assignments.length > 0
+    ) {
+      const map = { ...this.taxInclusiveMap() };
+      for (const ta of product.product_tax_assignments as any[]) {
+        if (ta.tax_categories?.is_inclusive !== undefined) {
+          map[ta.tax_category_id] = !!ta.tax_categories.is_inclusive;
+        }
+      }
+      this.taxInclusiveMap.set(map);
+    }
+
     this.activeImageIndex = 0;
     this.mainImageIndex = Math.max(
       0,
@@ -2277,6 +2406,17 @@ export class ProductCreatePageComponent {
         // deriva las opciones (con candado en IVA si el comercio no es
         // responsable). Ver declaración de `taxCategoryOptions`.
         this.taxCategoriesSig.set(taxCategories);
+        const map = { ...this.taxInclusiveMap() };
+        for (const cat of taxCategories) {
+          if (map[cat.id] === undefined) {
+            map[cat.id] = !!(
+              cat.is_inclusive ??
+              cat.tax_rates?.[0]?.is_inclusive ??
+              false
+            );
+          }
+        }
+        this.taxInclusiveMap.set(map);
       },
       error: (error: any) => {
         console.error('Error loading tax categories:', error);

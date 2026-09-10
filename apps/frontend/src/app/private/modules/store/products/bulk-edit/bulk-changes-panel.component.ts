@@ -85,6 +85,7 @@ import {
   type SelectorOption,
 } from '../../../../../shared/components/index';
 import { BulkEditFieldControlComponent } from './bulk-edit-field-control.component';
+import type { TaxCategory } from '../interfaces';
 import type {
   BulkEditFieldOption,
   BulkEditVisibleGroup,
@@ -142,6 +143,10 @@ export class BulkChangesPanelComponent {
   readonly uomOptions = input<readonly SelectorOption[]>([]);
   /** Catálogo de plantillas de consulta (`optionsRef: 'document-templates'`). */
   readonly templateOptions = input<readonly SelectorOption[]>([]);
+  /** Catálogo de categorías de impuestos (`optionsRef: 'tax-categories'`). */
+  readonly taxOptions = input<readonly SelectorOption[]>([]);
+  /** Lista completa de categorías de impuestos para chips y metadatos fiscales. */
+  readonly taxCategories = input<readonly TaxCategory[]>([]);
   /** Cuántos productos hay en el stack, para el aviso de alcance. */
   readonly selectionCount = input<number>(0);
   /**
@@ -293,6 +298,8 @@ export class BulkChangesPanelComponent {
         return this.uomOptions();
       case 'document-templates':
         return this.templateOptions();
+      case 'tax-categories':
+        return this.taxOptions();
       default:
         return [];
     }
@@ -336,7 +343,13 @@ export class BulkChangesPanelComponent {
       return;
     }
     if (control instanceof FormGroup) {
-      control.reset({ length: null, width: null, height: null });
+      if (key === 'dimensions') {
+        control.reset({ length: null, width: null, height: null });
+      } else if (key === 'tax_category_action') {
+        control.reset({ mode: 'add', ids: [] });
+      } else {
+        control.reset();
+      }
       return;
     }
     // Los toggles son `nonNullable` con default `false`; `reset()` los devuelve

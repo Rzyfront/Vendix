@@ -74,7 +74,17 @@ export interface BulkEditDimensions {
  * y los relacionales `category_ids`/`tax_category_ids`/`brand_id`/
  * `enabled_price_tier_ids`.
  */
+export type RelationalActionMode = 'add' | 'remove' | 'replace';
+
+export interface BulkRelationalTaxAction {
+  mode: RelationalActionMode;
+  ids: number[];
+}
+
 export interface BulkEditableChanges {
+  // ===== Impuestos =====
+  tax_category_action?: BulkRelationalTaxAction;
+
   // ===== Tipo y estado =====
   product_type?: BulkEditProductTypeValue;
   state?: BulkEditProductStateValue;
@@ -336,7 +346,8 @@ export type BulkEditControlType =
   | 'currency'
   | 'text'
   | 'textarea'
-  | 'dimensions';
+  | 'dimensions'
+  | 'tax-action';
 
 /**
  * Bloque de UI al que pertenece un campo. Cada clave replica una sección real
@@ -376,7 +387,8 @@ export interface BulkEditFieldOption {
 export type BulkEditOptionsRef =
   | 'uom-purchase'
   | 'uom-stock'
-  | 'document-templates';
+  | 'document-templates'
+  | 'tax-categories';
 
 /**
  * Capacidad de tienda requerida por un campo, resuelta con el helper

@@ -77,7 +77,13 @@ import {
   type StickyHeaderActionButton,
 } from '../../../../../shared/components/index';
 import { UomService } from '../../inventory/services/uom.service';
-import { ProductState, type Product, type ProductQueryDto } from '../interfaces';
+import {
+  ProductState,
+  type Product,
+  type ProductQueryDto,
+  type TaxCategory,
+} from '../interfaces';
+import { TaxesService } from '../services/taxes.service';
 import { BulkArchiveConfirmModalComponent } from './bulk-archive-confirm-modal.component';
 import { BulkChangesPanelComponent } from './bulk-changes-panel.component';
 import { BulkConfirmModalComponent } from './bulk-confirm-modal.component';
@@ -139,6 +145,7 @@ export class ProductsBulkEditPageComponent {
   private readonly bulkEditService = inject(ProductsBulkEditService);
   private readonly authFacade = inject(AuthFacade);
   private readonly uomService = inject(UomService);
+  private readonly taxesService = inject(TaxesService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -347,6 +354,22 @@ export class ProductsBulkEditPageComponent {
 
   readonly uomOptions = signal<SelectorOption[]>([]);
   readonly templateOptions = signal<SelectorOption[]>([]);
+  readonly taxCategories = signal<TaxCategory[]>([]);
+
+  readonly taxSelectorOptions = computed<SelectorOption[]>(() => {
+    return this.taxCategories().map((cat) => {
+      const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;
+      const rate = parseFloat(String(rawRate));
+      const percentStr =
+        !isNaN(rate) && rate > 0
+          ? ` (${rate > 1 ? rate : (rate * 100).toFixed(0)}%)`
+          : '';
+      return {
+        value: cat.id,
+        label: `${cat.name}${percentStr}`,
+      };
+    });
+  });
 
   // ───────────────────────────────────────────────────────────────────────────
   // Confirmación
@@ -426,6 +449,7 @@ export class ProductsBulkEditPageComponent {
     this.fetchPage();
     this.loadUomCatalog();
     this.loadTemplateCatalog();
+    this.loadTaxCategories();
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -484,6 +508,16 @@ export class ProductsBulkEditPageComponent {
       .subscribe({
         next: (templates) => this.templateOptions.set(templates),
         error: () => this.templateOptions.set([]),
+      });
+  }
+
+  private loadTaxCategories(): void {
+    this.taxesService
+      .getTaxCategories()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (taxes) => this.taxCategories.set(taxes),
+        error: () => this.taxCategories.set([]),
       });
   }
 
@@ -737,6 +771,8 @@ function buildChangesFormDefaults(): Record<string, unknown> {
   for (const field of BULK_EDITABLE_FIELDS) {
     if (field.control === 'dimensions') {
       defaults[field.key] = { length: null, width: null, height: null };
+    } else if (field.control === 'tax-action') {
+      defaults[field.key] = { mode: 'add', ids: [] };
     } else if (field.control === 'toggle') {
       defaults[field.key] = false;
     } else if (field.key === 'product_type') {
@@ -764,6 +800,13 @@ function buildChangesForm(): FormGroup<{ [key: string]: AbstractControl }> {
         length: new FormControl<number | null>(null),
         width: new FormControl<number | null>(null),
         height: new FormControl<number | null>(null),
+      });
+      continue;
+    }
+    if (field.control === 'tax-action') {
+      controls[field.key] = new FormGroup({
+        mode: new FormControl<string>('add', { nonNullable: true }),
+        ids: new FormControl<number[]>([], { nonNullable: true }),
       });
       continue;
     }
@@ -804,6 +847,22 @@ export function coerceBulkEditValue(
   switch (field.control) {
     case 'toggle':
       return Boolean(raw);
+
+    case 'tax-action': {
+      if (!raw || typeof raw !== 'object') {
+        return undefined;
+      }
+      const action = raw as { mode?: unknown; ids?: unknown };
+      const mode = String(action.mode || 'add');
+      if (!['add', 'remove', 'replace'].includes(mode)) {
+        return undefined;
+      }
+      const rawIds = Array.isArray(action.ids) ? action.ids : [];
+      const ids = rawIds
+        .map((id) => Number(id))
+        .filter((n) => Number.isFinite(n) && n > 0);
+      return { mode, ids };
+    }
 
     case 'number':
     case 'currency': {

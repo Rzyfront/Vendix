@@ -55,11 +55,38 @@ export type BulkEditItemStatus = 'ok' | 'warning' | 'error';
  * - `variants`: reescribe la matriz de variantes del producto.
  * - `name`, `description`: no tiene sentido darle el mismo nombre o la misma
  *   descripción a N productos.
- * - `category_ids`, `tax_category_ids`, `brand_id`, `enabled_price_tier_ids`:
+ * - `category_ids`, `brand_id`, `enabled_price_tier_ids`:
  *   son relacionales y requieren semántica de añadir / quitar / reemplazar;
  *   fuera del alcance de esta iteración.
  */
+export enum RelationalActionMode {
+  ADD = 'add',
+  REMOVE = 'remove',
+  REPLACE = 'replace',
+}
+
+export class BulkRelationalTaxActionDto {
+  @IsEnum(RelationalActionMode, {
+    message: 'El modo de operación debe ser add, remove o replace',
+  })
+  mode: RelationalActionMode;
+
+  @IsArray()
+  @ArrayNotEmpty({
+    message: 'Debes seleccionar al menos una categoría de impuesto',
+  })
+  @IsInt({ each: true })
+  @Type(() => Number)
+  ids: number[];
+}
+
 export class BulkEditableChangesDto {
+  // ===== Impuestos =====
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BulkRelationalTaxActionDto)
+  tax_category_action?: BulkRelationalTaxActionDto;
+
   // ===== Tipo y estado =====
   @IsOptional()
   @IsEnum(ProductType)

@@ -271,6 +271,21 @@
                 <app-icon slot="icon" name="plus" size="20"></app-icon>
               </app-button>
             </div>
+
+            @if (selectedTaxCategories().length > 0) {
+              <div class="flex flex-wrap items-center gap-1.5 md:col-span-2 -mt-3 mb-2">
+                @for (tax of selectedTaxCategories(); track tax.id) {
+                  <vendix-tax-inclusive-chip
+                    [name]="tax.name"
+                    [rate]="getTaxRatePercent(tax)"
+                    [inclusive]="isTaxInclusive(tax.id)"
+                    [hint]="taxInclusiveHint(tax.id)"
+                    (inclusiveChange)="setTaxInclusive(tax.id, $event)"
+                    (remove)="removeTaxCategory(tax.id)"
+                  />
+                }
+              </div>
+            }
           </div>
 
           <!-- Row 3: Desglose de precio + Oferta -->
@@ -298,8 +313,11 @@
               @for (tax of taxBreakdown; track tax.name) {
                 <span class="text-gray-300 font-medium">+</span>
                 <span class="font-medium text-gray-600"
-                  >{{ tax.rate * 100 | number: "1.0-1" }}% {{ tax.name }}</span
-                >
+                  >{{ tax.rate * 100 | number: "1.0-1" }}% {{ tax.name }}
+                  @if (tax.is_inclusive) {
+                    <span class="text-xs text-primary-600 font-normal">(incl.)</span>
+                  }
+                </span>
                 <span class="text-gray-500">({{ tax.amount | currency }})</span>
               }
               <span class="text-gray-300 font-medium">=</span>
