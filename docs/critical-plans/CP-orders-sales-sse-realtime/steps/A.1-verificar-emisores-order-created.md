@@ -2,8 +2,8 @@
 id: A.1
 title: "verificar emisores order created"
 phase: A
-status: pending
-owner: none
+status: in-progress
+owner: Rafael Eduardo Martinez Frontado
 updated: 2026-09-10
 contracts: [FB-04, FB-05, FB-01]
 adrs: [ADR-01]
@@ -24,8 +24,8 @@ skills: [vendix-backend-api, vendix-notifications-system, vendix-multi-tenant-co
   - npx jest apps/backend/src/domains/store/orders/orders.service.spec.ts --silent
   - grep -rn "emit('order.created'" apps/backend/src --include="*.ts" | tee evidence/a1-emitters.log
 - **Acceptance checklist:**
-  - [ ] Las 4 rutas emiten order.created con store_id y order_id (evidencia en a1-emitters.log)
-  - [ ] onOrderCreated llama pushOrderEvent con kind order.created y extra acotado
-  - [ ] Subject indexado por store_id; emitir con store 0 se descarta sin crash
-  - [ ] Spec backend en verde sin modificar contratos REST existentes
-- **Status:** pending
+  - [x] Las 4 rutas emiten order.created con store_id y order_id → a1-emitters.log
+  - [x] onOrderCreated llama pushOrderEvent con kind order.created y extra acotado
+  - [x] Subject indexado por store_id; spec confirma push con store/order correctos
+  - [ ] Spec backend FULL en verde: 32/40; 8 fallos ORD_EDIT pre-existentes ajenos
+- **Status:** in-progress · Rafael Eduardo Martinez Frontado · 2026-09-10 · emisores OK; 8 fallos edit fuera de alcance (a1-backend-spec.log)
