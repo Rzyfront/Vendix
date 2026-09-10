@@ -829,6 +829,16 @@ export const storeAdminRoutes: Routes = [
         redirectTo: 'accounting/taxes/ica',
         pathMatch: 'full',
       },
+      // Impuestos (tax_categories) — módulo standalone de categorías
+      // fiscales. Va DESPUÉS del redirect 'taxes/ica' para que ese deep-link
+      // antiguo siga resolviendo al canónico de contabilidad.
+      {
+        path: 'taxes',
+        loadChildren: () =>
+          import(
+            '../../private/modules/store/taxes/routes/taxes.routes'
+          ).then((m) => m.taxesRoutes),
+      },
       // Price Tiers (Precios y Tarifas)
       {
         path: 'price-tiers',
