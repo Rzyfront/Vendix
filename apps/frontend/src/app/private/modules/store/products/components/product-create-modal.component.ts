@@ -46,6 +46,15 @@ import { CategoriesService } from '../services/categories.service';
 import { BrandsService } from '../services/brands.service';
 import { TaxesService } from '../services/taxes.service';
 import { PosBarcodeService } from '../../pos/services/pos-barcode.service';
+import {
+  buildTaxInclusivePayload,
+  catalogInclusiveDefault,
+  estimatePriceWithTax,
+  hydrateTaxInclusiveMap,
+  parseTaxRateFraction,
+  resolveTaxInclusive,
+  withoutTaxFromMap,
+} from '../utils/product-tax-inclusive.util';
 import { CategoryQuickCreateComponent } from './category-quick-create.component';
 import { TaxQuickCreateComponent } from './tax-quick-create.component';
 import { AccountCodeSelectComponent } from './account-code-select.component';
@@ -116,10 +125,7 @@ export class ProductCreateModalComponent {
   });
 
   isTaxInclusive(taxId: number): boolean {
-    const map = this.taxInclusiveMap();
-    if (map[taxId] !== undefined) return map[taxId];
-    const cat = this.allTaxCategories.find((c) => c.id === taxId);
-    return !!(cat?.is_inclusive ?? cat?.tax_rates?.[0]?.is_inclusive ?? false);
+    return resolveTaxInclusive(taxId, this.taxInclusiveMap(), this.allTaxCategories);
   }
 
   setTaxInclusive(taxId: number, isInclusive: boolean): void {
@@ -132,6 +138,9 @@ export class ProductCreateModalComponent {
     this.productForm
       .get('tax_category_ids')
       ?.setValue(current.filter((id) => id !== taxId));
+    // F-032: quitar el impuesto borra su entrada; al re-añadirlo rige el
+    // catálogo, no un valor resucitado.
+    this.taxInclusiveMap.set(withoutTaxFromMap(this.taxInclusiveMap(), taxId));
   }
 
   taxInclusiveHint(taxId: number): string {
@@ -232,6 +241,8 @@ export class ProductCreateModalComponent {
       state: ProductState.ACTIVE,
       account_code: null,
     });
+    // F-023: el mapa no sobrevive entre productos (scope por producto).
+    this.taxInclusiveMap.set({});
     this.isAccountingOpen.set(false);
   }
 
@@ -250,7 +261,10 @@ export class ProductCreateModalComponent {
       state: val.state || 'active',
       // Viaja al formulario avanzado para que el salto no pierda la cuenta.
       account_code: val.account_code || null,
-      tax_inclusive_map: this.taxInclusiveMap(),
+      tax_inclusive_map: buildTaxInclusivePayload(
+        val.tax_category_ids || [],
+        this.taxInclusiveMap(),
+      ),
     };
 
     this.router.navigate(['/admin/products/create'], {
@@ -259,31 +273,28 @@ export class ProductCreateModalComponent {
     this.onCancel();
   }
 
+  /**
+   * Estimado de exhibición (F-013): especificación de signo, no oráculo de
+   * centavos. El total facturable lo define el backend.
+   */
   get priceWithTax(): number {
     const basePrice = Number(this.productForm.get('base_price')?.value || 0);
     const selectedIds: number[] =
       this.productForm.get('tax_category_ids')?.value || [];
     if (!basePrice || selectedIds.length === 0) return basePrice;
 
-    let inclusiveRate = 0;
-    let additionalRate = 0;
-
-    for (const tc of this.allTaxCategories) {
-      if (selectedIds.includes(tc.id)) {
-        const rawRate = tc.rate ?? tc.tax_rates?.[0]?.rate ?? 0;
-        const rate = parseFloat(String(rawRate));
-        const finalRate = isNaN(rate) ? 0 : rate > 1 ? rate / 100 : rate;
-        if (this.isTaxInclusive(tc.id)) {
-          inclusiveRate += finalRate;
-        } else {
-          additionalRate += finalRate;
-        }
-      }
-    }
-
-    const netBase =
-      inclusiveRate > 0 ? basePrice / (1 + inclusiveRate) : basePrice;
-    return basePrice + netBase * additionalRate;
+    return estimatePriceWithTax(
+      basePrice,
+      selectedIds.map((id) => {
+        const tc = this.allTaxCategories.find((c) => c.id === id);
+        return {
+          rateFraction: parseTaxRateFraction(
+            tc?.rate ?? tc?.tax_rates?.[0]?.rate ?? 0,
+          ),
+          inclusive: this.isTaxInclusive(id),
+        };
+      }),
+    );
   }
 
   private loadCategoriesAndBrands(): void {
@@ -317,14 +328,20 @@ export class ProductCreateModalComponent {
       account_code: prod.account_code ?? null,
     });
 
+    // F-007/F-022/F-024: hidratación assignment-first
+    // (`ta.is_inclusive ?? embebido ?? catálogo`), reconstruida desde cero
+    // para que el orden populate-vs-catálogo no decida el resultado.
     if (prod.product_tax_assignments) {
-      const map = { ...this.taxInclusiveMap() };
-      for (const ta of prod.product_tax_assignments as any[]) {
-        if (ta.tax_categories?.is_inclusive !== undefined) {
-          map[ta.tax_category_id] = !!ta.tax_categories.is_inclusive;
-        }
-      }
-      this.taxInclusiveMap.set(map);
+      this.taxInclusiveMap.set(
+        hydrateTaxInclusiveMap(
+          prod.product_tax_assignments,
+          this.allTaxCategories,
+        ),
+      );
+    } else {
+      this.taxInclusiveMap.set(
+        hydrateTaxInclusiveMap([], this.allTaxCategories),
+      );
     }
 
     if (prod.account_code) {
@@ -353,14 +370,12 @@ export class ProductCreateModalComponent {
     this.taxesService.getTaxCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (taxCategories: TaxCategory[]) => {
         this.allTaxCategories = taxCategories;
+        // F-024: solo rellena entradas ausentes; la asignación ya hidratada
+        // nunca se sobrescribe con el default del catálogo.
         const map = { ...this.taxInclusiveMap() };
         for (const cat of taxCategories) {
           if (map[cat.id] === undefined) {
-            map[cat.id] = !!(
-              cat.is_inclusive ??
-              cat.tax_rates?.[0]?.is_inclusive ??
-              false
-            );
+            map[cat.id] = catalogInclusiveDefault(cat);
           }
         }
         this.taxInclusiveMap.set(map);
@@ -466,6 +481,9 @@ export class ProductCreateModalComponent {
 
     // Construct simplified DTO
     const val = this.productForm.value;
+    const effectiveTaxIds: number[] = (val.tax_category_ids || []).map(
+      (id: unknown) => Number(id),
+    );
     const dto: any = {
       name: val.name,
       base_price: val.base_price,
@@ -475,6 +493,12 @@ export class ProductCreateModalComponent {
       category_ids: val.category_ids || [],
       brand_id: val.brand_ids?.[0] ? Number(val.brand_ids[0]) : null,
       tax_category_ids: val.tax_category_ids || [],
+      // F-021: el mapa viaja en el camino principal, filtrado a ids efectivos
+      // (contrato A.2; deploy backend-primero, F-030).
+      tax_inclusive_map: buildTaxInclusivePayload(
+        effectiveTaxIds,
+        this.taxInclusiveMap(),
+      ),
       allow_pos_price_override: !!val.allow_pos_price_override,
       state: val.state,
       // Se envía siempre, incluso en null: omitirlo en una edición dejaría
