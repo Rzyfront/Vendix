@@ -85,6 +85,16 @@
       </div>
 
       <form [formGroup]="rate_form" class="rate-form">
+        <div class="form-field">
+          <label class="form-label">Nombre de la tarifa (opcional)</label>
+          <app-input
+            type="text"
+            formControlName="name"
+            placeholder="Ej: Uniguajira, Tarifa Riohacha"
+            hint="Si se deja vacío, se mostrará el nombre de la zona"
+          />
+        </div>
+
         @if (rate_form.get('type')?.value !== 'free') {
           <div class="form-field">
             <label class="form-label">Costo base</label>

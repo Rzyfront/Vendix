@@ -120,6 +120,7 @@ export class ShippingCalculatorService {
       },
       include: {
         shipping_method: true,
+        shipping_zone: true,
       },
       orderBy: [
         { shipping_method: { display_order: 'asc' } },
@@ -226,11 +227,18 @@ export class ShippingCalculatorService {
         }
 
         const isPostalMatch = zoneZipMatch.get(rate.shipping_zone_id) ?? false;
+        const optionName =
+          (rate.name && rate.name.trim().length > 0)
+            ? rate.name.trim()
+            : (rate.shipping_zone?.display_name?.trim() ||
+               rate.shipping_zone?.name?.trim() ||
+               rate.shipping_method.name);
+
         options.push({
           id: rate.id,
           rate_id: rate.id,
           method_id: rate.shipping_method_id,
-          method_name: rate.name || rate.shipping_method.name,
+          method_name: optionName,
           method_type: rate.shipping_method.type,
           cost: cost,
           currency: storeCurrency,
@@ -359,11 +367,18 @@ export class ShippingCalculatorService {
       if (seenMethods.has(rate.shipping_method_id)) continue;
       seenMethods.add(rate.shipping_method_id);
 
+      const optionName =
+        (rate.name && rate.name.trim().length > 0)
+          ? rate.name.trim()
+          : (rate.shipping_zone?.display_name?.trim() ||
+             rate.shipping_zone?.name?.trim() ||
+             rate.shipping_method.name);
+
       options.push({
         id: rate.id,
         rate_id: rate.id,
         method_id: rate.shipping_method_id,
-        method_name: rate.name || rate.shipping_method.name,
+        method_name: optionName,
         method_type: rate.shipping_method.type,
         cost: rate.type === shipping_rate_type_enum.free ? 0 : Number(rate.base_cost),
         currency: storeCurrency,
