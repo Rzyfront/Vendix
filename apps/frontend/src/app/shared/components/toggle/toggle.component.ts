@@ -37,8 +37,16 @@ import { FormStyleVariant } from '../../types/form.types';
       [disabled]="isDisabled()"
       (click)="onToggle()"
       [class]="buttonClasses"
-      [class.bg-[var(--color-primary)]]="isOn() && !isDisabled()"
-      [class.bg-[var(--color-muted)]]="!isOn() && !isDisabled()"
+      <!--
+        FIX QUI-801 — sólo 2 estados (verde / rojo):
+        - Habilitado (prendido o apagado): verde `--color-primary`
+        - Deshabilitado: rojo opaco `--color-danger`
+        Se quita el estado gris muted intermedio: el reporte pide señalización
+        binaria para que un toggle deshabilitado sea inequívoco a un golpe de
+        vista. La posición del knob (`translate-x-5` vs `translate-x-0`)
+        sigue indicando prendido/apagado, así que la información no se pierde.
+      -->
+      [class.bg-[var(--color-primary)]]="!isDisabled()"
       [class.bg-\[var\(--color-danger\)\]]="isDisabled()"
     >
       <span
