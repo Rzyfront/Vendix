@@ -13,7 +13,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   BookingMode,
   PricingType,
@@ -22,6 +22,154 @@ import {
   ServiceModality,
   ServicePricingType,
 } from './product-enums';
+import type { ErrorCodeEntry } from '@common/errors/error-codes';
+import { VendixHttpException } from '@common/errors/vendix-http.exception';
+
+// ===========================================================================
+// Mapa impuesto incluido/agregado — CP-impuesto-incluido-agregado (A.2, ADR-01)
+// ===========================================================================
+//
+// ESTE archivo (y NO el barrel `./index`) es la casa de los helpers del mapa.
+// `index.ts` hace `export *` de este módulo, así que importar valores DESDE el
+// barrel crearía el ciclo que `product-enums.ts` documenta (swc iza el
+// `export *` y el importador recibiría `undefined`). La dirección aquí es
+// hoja: este módulo solo importa de `./product-enums` y de `@common/errors`.
+//
+// El registro central de códigos (`src/common/errors/error-codes.ts`) lo owns
+// otro agente del run paralelo: `PROD_TAXMAP_001` vive aquí temporalmente con
+// el MISMO shape (`ErrorCodeEntry`: code + httpStatus 400 + devMessage) para
+// no bloquear A.2. Cuando se promueva al registro, este const se elimina y los
+// lanzamientos pasan a `ErrorCodes.PROD_TAXMAP_001` sin cambiar ni el `code`
+// ni el `httpStatus` que ven clientes y specs.
+
+/**
+ * Entrada local de error para `tax_inclusive_map`. Ver el bloque de arriba
+ * para por qué no está (todavía) en el registro central.
+ */
+export const PROD_TAXMAP_001: ErrorCodeEntry = {
+  code: 'PROD_TAXMAP_001',
+  httpStatus: 400,
+  devMessage: 'El mapa de impuestos incluidos contiene valores inválidos',
+};
+
+/**
+ * Normalizador de claves para `@Transform()` sobre `tax_inclusive_map`
+ * (F-025). JSON solo tiene claves string: `{"19": true}` debe resolverse como
+ * la categoría 19, no como una clave fantasma.
+ *
+ * - Clave con valor numérico entero (`"19"`, `"19.0"`) ⇒ forma canónica
+ *   (`"19"`). Si dos claves colisionan al canonicalizar, gana la última.
+ * - Clave no entera (`"abc"`, `"1.5"`) ⇒ SE CONSERVA TAL CUAL para que el
+ *   validador la rechace con 400 PROD_TAXMAP_001 (NaN=400 sin perder la
+ *   evidencia del error).
+ * - Los VALORES no se tocan: el booleano es ESTRICTO y `"true"` / `1` deben
+ *   llegar intactos al validador para ser rechazados.
+ * - No-objeto (`null`, array, string) ⇒ se devuelve tal cual: lo rechaza el
+ *   validador del servicio con el mismo código, en vez del 400 genérico del
+ *   `ValidationPipe` (que no lleva `error_code`).
+ */
+export function normalizeTaxInclusiveMapKeys(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return value;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [rawKey, v] of Object.entries(value)) {
+    const n = Number(rawKey);
+    const key = Number.isInteger(n) ? String(n) : rawKey;
+    // `defineProperty`: una asignación directa perdería la clave `"__proto__"`
+    // (setea el prototipo en vez de crear la entrada) y el validador nunca la
+    // vería para rechazarla con PROD_TAXMAP_001.
+    Object.defineProperty(out, key, {
+      value: v,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return out;
+}
+
+/**
+ * Default canónico del catálogo (F-012): categoría ?? primera tasa ?? false.
+ * El histórico es `false` (agregado, sin cambio de totales).
+ */
+export function resolveCatalogInclusiveDefault(cat: {
+  is_inclusive?: boolean | null;
+  tax_rates?: Array<{ is_inclusive?: boolean | null }>;
+}): boolean {
+  return cat.is_inclusive ?? cat.tax_rates?.[0]?.is_inclusive ?? false;
+}
+
+/**
+ * Resolvedor compartido create/update/bulk (F-027): el mapa gana; sin entrada
+ * rige el default del catálogo. NO implementa "preservar": eso lo decide el
+ * llamador comparando contra la asignación existente (solo update y bulk-ADD
+ * tienen con qué comparar; create siempre hereda).
+ */
+export function resolveIsInclusive(
+  catId: number,
+  map: Record<string, boolean> | Map<number, boolean> | undefined,
+  catalogDefault: boolean,
+): boolean {
+  if (map instanceof Map) return map.get(catId) ?? catalogDefault;
+  return map?.[String(catId)] ?? catalogDefault;
+}
+
+/**
+ * Validador del mapa (F-026, F-035). Puro: no toca base. El scope tienda/org
+ * se hereda de la validación de `tax_category_ids` porque el mapa es
+ * SUBCONJUNTO de esos ids (toda clave fuera de ellos ⇒ 400 aquí mismo, antes
+ * de pisar la base).
+ *
+ * Regla cerrada (F-026):
+ * - mapa ausente (`undefined`/`null`) ⇒ `undefined` (sin efecto).
+ * - `tax_category_ids` ausente ⇒ el mapa SE IGNORA (`undefined`): el mapa
+ *   solo anota ids del mismo payload, nunca crea asignaciones por sí solo.
+ * - no-objeto, clave no-entera-positiva, valor no-booleano-estricto, o clave
+ *   fuera de `tax_category_ids` ⇒ 400 PROD_TAXMAP_001.
+ * - entrada FALTANTE ⇒ no es error: quien resuelve hereda o preserva
+ *   (matriz F-034).
+ */
+export function validateTaxInclusiveMap(
+  map: unknown,
+  taxCategoryIds: number[] | undefined,
+): Map<number, boolean> | undefined {
+  if (map === undefined || map === null) return undefined;
+  if (taxCategoryIds === undefined) return undefined;
+  if (typeof map !== 'object' || Array.isArray(map)) {
+    throw new VendixHttpException(
+      PROD_TAXMAP_001,
+      'tax_inclusive_map debe ser un objeto { tax_category_id: boolean }',
+    );
+  }
+  const out = new Map<number, boolean>();
+  for (const [rawKey, v] of Object.entries(map)) {
+    const n = Number(rawKey);
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new VendixHttpException(
+        PROD_TAXMAP_001,
+        `Clave inválida en tax_inclusive_map: "${rawKey}". Usa el id entero positivo de la categoría.`,
+        { key: rawKey },
+      );
+    }
+    if (typeof v !== 'boolean') {
+      throw new VendixHttpException(
+        PROD_TAXMAP_001,
+        `Valor inválido en tax_inclusive_map para la categoría ${n}: debe ser boolean estricto (true/false).`,
+        { tax_category_id: n },
+      );
+    }
+    if (!taxCategoryIds.includes(n)) {
+      throw new VendixHttpException(
+        PROD_TAXMAP_001,
+        `La categoría ${n} del mapa no está en tax_category_ids de la petición.`,
+        { tax_category_id: n },
+      );
+    }
+    out.set(n, v);
+  }
+  return out;
+}
 
 /**
  * Tope duro de productos por lote. El `ValidationPipe` global lo aplica vía
@@ -78,6 +226,23 @@ export class BulkRelationalTaxActionDto {
   @IsInt({ each: true })
   @Type(() => Number)
   ids: number[];
+
+  /**
+   * Mapa opcional catId → is_inclusive, con semántica POR MODO (F-017, FB-03).
+   * Sin decoradores de validación a propósito: TODA violación (forma, claves,
+   * boolean no estricto, reglas por modo) la rechaza el servicio con 400
+   * PROD_TAXMAP_001, que el `ValidationPipe` no puede emitir.
+   *
+   * - ADD: solo se lee para categorías NUEVAS (las ya asignadas conservan su
+   *   flag); la ausente hereda el default del catálogo.
+   * - REPLACE: si viene debe cubrir TODOS los `ids` (parcial ⇒ 400); ausente
+   *   ⇒ todos heredan.
+   * - REMOVE: PROHIBIDO (cualquier mapa, incluso `{}`, ⇒ 400): quitar la
+   *   categoría elimina su flag con ella.
+   */
+  @IsOptional()
+  @Transform(({ value }) => normalizeTaxInclusiveMapKeys(value))
+  tax_inclusive_map?: Record<string, boolean>;
 }
 
 export class BulkEditableChangesDto {

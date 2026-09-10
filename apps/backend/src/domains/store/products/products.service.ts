@@ -18,6 +18,9 @@ import {
   ProductImageDto,
   ProductState,
   ProductType,
+  resolveCatalogInclusiveDefault,
+  resolveIsInclusive,
+  validateTaxInclusiveMap,
 } from './dto';
 import { Prisma } from '@prisma/client';
 import { generateSlug } from '@common/utils/slug.util';
@@ -882,6 +885,10 @@ export class ProductsService {
         store_id: dto_store_id,
         category_ids,
         tax_category_ids,
+        // F-027 — el mapa NO es columna de `products`: si viaja en
+        // `...productData` Prisma responde "Unknown argument" (500). Se
+        // desestructura aquí y se consume en el bloque de asignaciones.
+        tax_inclusive_map,
         image_urls,
         images,
         stock_quantity,
@@ -1002,6 +1009,13 @@ export class ProductsService {
             // Obtener contexto para validación
             const current_context = RequestContextService.getContext();
 
+            // F-026 — el mapa solo anota ids del mismo payload: forma, boolean
+            // estricto y subconjunto (cada violación ⇒ 400 PROD_TAXMAP_001).
+            const normalizedMap = validateTaxInclusiveMap(
+              tax_inclusive_map,
+              tax_category_ids,
+            );
+
             // Validar que las categorías de impuestos existan y estén dentro del scope
             const tax_categories = await prisma.tax_categories.findMany({
               where: {
@@ -1014,6 +1028,18 @@ export class ProductsService {
                         { store_id: null }, // Categorías globales
                       ],
                     }),
+              },
+              // La herencia necesita el flag del catálogo (F-027): default
+              // canónico categoría ?? tasa ?? false (F-012). `tax_type` sigue
+              // alimentando el gate de IVA no responsable (F4).
+              select: {
+                id: true,
+                tax_type: true,
+                is_inclusive: true,
+                tax_rates: {
+                  select: { is_inclusive: true },
+                  orderBy: { id: 'asc' },
+                },
               },
             });
 
@@ -1028,11 +1054,22 @@ export class ProductsService {
             // F4 — comercio no responsable de IVA no puede asignar IVA.
             await this.assertProductVatAssignmentAllowed(tax_categories);
 
+            // Matriz F-034 (CREATE): sin entrada ⇒ hereda el catálogo. El
+            // flag `false` se OMITE (la columna defaultea a false): la fila
+            // queda byte-idéntica a la histórica.
             await prisma.product_tax_assignments.createMany({
-              data: tax_categories.map((tax_category) => ({
-                product_id: product.id,
-                tax_category_id: tax_category.id,
-              })),
+              data: tax_categories.map((tax_category) => {
+                const is_inclusive = resolveIsInclusive(
+                  tax_category.id,
+                  normalizedMap,
+                  resolveCatalogInclusiveDefault(tax_category),
+                );
+                return {
+                  product_id: product.id,
+                  tax_category_id: tax_category.id,
+                  ...(is_inclusive ? { is_inclusive: true } : {}),
+                };
+              }),
             });
           }
 
@@ -2664,6 +2701,8 @@ export class ProductsService {
       const {
         category_ids,
         tax_category_ids,
+        // F-027 — igual que en create: el mapa no es columna de `products`.
+        tax_inclusive_map,
         image_urls,
         images,
         stock_quantity,
@@ -2818,26 +2857,108 @@ export class ProductsService {
             }
           }
 
-          // Actualizar categorías de impuestos si se proporcionan
+          // Actualizar categorías de impuestos si se proporcionan.
+          //
+          // Matriz F-034 (UPDATE, F-006): el CONJUNTO se reemplaza, el FLAG se
+          // fusiona por categoría — sin mapa se PRESERVA el flag guardado
+          // (reenviar los mismos ids sin mapa no escribe nada: byte-idéntico);
+          // con mapa parcial la entrada gana y la ausente preserva si la
+          // asignación existía o hereda el catálogo si es nueva. Upsert por
+          // (product_id, tax_category_id): nunca delete+create ciego (F-018),
+          // que borraba decisiones para re-heredarlas.
           if (tax_category_ids !== undefined) {
-            await prisma.product_tax_assignments.deleteMany({
-              where: { product_id: id },
+            // Mapa sin ids se ignora (F-026); aquí los ids SÍ vienen, así que
+            // un mapa presente se valida: forma, boolean estricto y
+            // subconjunto (cada violación ⇒ 400 PROD_TAXMAP_001).
+            const normalizedMap = validateTaxInclusiveMap(
+              tax_inclusive_map,
+              tax_category_ids,
+            );
+
+            // F-035 — el update NO filtraba por scope (el create sí): una
+            // categoría de otra tienda entraba en silencio. Mismo predicado
+            // que el create, anclado a la tienda DEL PRODUCTO. La herencia
+            // necesita además el flag del catálogo (F-027).
+            const tax_categories = await prisma.tax_categories.findMany({
+              where: {
+                id: { in: tax_category_ids },
+                ...(context?.is_super_admin
+                  ? {}
+                  : {
+                      OR: [
+                        { store_id: existingProduct.store_id },
+                        { store_id: null },
+                      ],
+                    }),
+              },
+              select: {
+                id: true,
+                tax_type: true,
+                is_inclusive: true,
+                tax_rates: {
+                  select: { is_inclusive: true },
+                  orderBy: { id: 'asc' },
+                },
+              },
             });
+            if (tax_categories.length !== tax_category_ids.length) {
+              throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_001);
+            }
+            // F4 — resolver tax_type de las categorías para bloquear IVA en
+            // comercios no responsables antes de escribir las asignaciones.
+            await this.assertProductVatAssignmentAllowed(tax_categories);
 
-            if (tax_category_ids.length > 0) {
-              // F4 — resolver tax_type de las categorías para bloquear IVA en
-              // comercios no responsables antes de escribir las asignaciones.
-              const tax_categories = await prisma.tax_categories.findMany({
-                where: { id: { in: tax_category_ids } },
-                select: { id: true, tax_type: true },
-              });
-              await this.assertProductVatAssignmentAllowed(tax_categories);
+            const catalogById = new Map<number, (typeof tax_categories)[number]>(
+              tax_categories.map((tc): [number, (typeof tax_categories)[number]] => [
+                tc.id,
+                tc,
+              ]),
+            );
+            const previous = await prisma.product_tax_assignments.findMany({
+              where: { product_id: id },
+              select: { tax_category_id: true, is_inclusive: true },
+            });
+            const previousById = new Map<number, boolean>(
+              previous.map(
+                (a): [number, boolean] => [a.tax_category_id, a.is_inclusive],
+              ),
+            );
 
-              await prisma.product_tax_assignments.createMany({
-                data: tax_category_ids.map((tax_category_id) => ({
+            const removedIds = [...previousById.keys()].filter(
+              (cid) => !tax_category_ids.includes(cid),
+            );
+            if (removedIds.length > 0) {
+              await prisma.product_tax_assignments.deleteMany({
+                where: {
                   product_id: id,
-                  tax_category_id: tax_category_id,
-                })),
+                  tax_category_id: { in: removedIds },
+                },
+              });
+            }
+
+            for (const tax_category_id of tax_category_ids) {
+              const prev = previousById.get(tax_category_id);
+              const is_inclusive =
+                normalizedMap?.get(tax_category_id) ??
+                prev ??
+                resolveCatalogInclusiveDefault(
+                  catalogById.get(tax_category_id)!,
+                );
+              // Sin cambio no se escribe: reenviar ids sin mapa es no-op.
+              if (prev !== undefined && prev === is_inclusive) continue;
+              await prisma.product_tax_assignments.upsert({
+                where: {
+                  product_id_tax_category_id: {
+                    product_id: id,
+                    tax_category_id,
+                  },
+                },
+                update: { is_inclusive },
+                create: {
+                  product_id: id,
+                  tax_category_id,
+                  ...(is_inclusive ? { is_inclusive: true } : {}),
+                },
               });
             }
           }

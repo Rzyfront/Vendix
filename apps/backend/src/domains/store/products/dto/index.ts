@@ -40,6 +40,11 @@ import {
 
 export * from './product-enums';
 
+// El normalizador del mapa vive en el módulo hoja de bulk-edit (NO importar
+// valores desde este barrel: ver la cabecera de `product-enums.ts` y de
+// `bulk-edit-products.dto.ts` para el porqué del ciclo con swc).
+import { normalizeTaxInclusiveMapKeys } from './bulk-edit-products.dto';
+
 /**
  * Forma sintáctica de una subcuenta PUC colombiana (`products.account_code`,
  * `product_variants.account_code`).
@@ -698,6 +703,14 @@ export class CreateProductDto {
   @Type(() => CreateVariantWithStockDto)
   variants?: CreateVariantWithStockDto[];
 
+  @ApiPropertyOptional({
+    description:
+      'Por categoría, si el impuesto va INCLUIDO en el precio (true) o se suma encima (false). Las claves son ids de tax_category_ids del mismo payload; sin entrada rige el default del catálogo. Sin tax_category_ids se ignora.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => normalizeTaxInclusiveMapKeys(value))
+  tax_inclusive_map?: Record<string, boolean>;
+
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
@@ -1177,6 +1190,14 @@ export class UpdateProductDto {
   @ValidateNested({ each: true })
   @Type(() => ProductImageDto)
   images?: ProductImageDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Por categoría, si el impuesto va INCLUIDO en el precio (true) o se suma encima (false). Las claves son ids de tax_category_ids del mismo payload; sin entrada se preserva el flag guardado (o se hereda el catálogo si la asignación es nueva). Sin tax_category_ids se ignora.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => normalizeTaxInclusiveMapKeys(value))
+  tax_inclusive_map?: Record<string, boolean>;
 }
 
 export class ProductQueryDto {

@@ -18,8 +18,12 @@ import {
   BulkEditResultItemDto,
   BulkEditableChangesDto,
   BulkRelationalTaxActionDto,
+  PROD_TAXMAP_001,
   RelationalActionMode,
+  resolveCatalogInclusiveDefault,
+  resolveIsInclusive,
   UpdateProductDto,
+  validateTaxInclusiveMap,
 } from './dto';
 // Los enums SIEMPRE desde el módulo hoja: importarlos desde `./dto` (barrel con
 // `export *`) los recibiría `undefined` por el ciclo que swc iza al inicio del
@@ -215,44 +219,42 @@ export class ProductsBulkEditService {
     );
 
     const taxAction = dto.changes.tax_category_action;
-    const taxCategoriesMap = new Map<
+    // F-017/F-009 — contexto del lote: reglas por modo + scope tienda (mismo
+    // predicado que el create unitario) + catálogo para heredar. Preview y
+    // apply() comparten este resolvedor y el de por-producto (F-029): lo que
+    // el preview anuncia es lo que el apply escribe.
+    const bulkTax = await this.resolveBulkTaxContext(taxAction);
+    const productTaxesMap = new Map<
       number,
-      { id: number; name: string; tax_type: string | null }
+      Map<number, { name: string; is_inclusive: boolean }>
     >();
-    const productTaxesMap = new Map<number, { id: number; name: string }[]>();
 
-    if (taxAction) {
-      const allActionTaxes = await this.prisma.tax_categories.findMany({
-        where: { id: { in: taxAction.ids } },
-        select: { id: true, name: true, tax_type: true },
-      });
-      for (const cat of allActionTaxes) {
-        taxCategoriesMap.set(cat.id, cat);
-      }
-
-      if (allActionTaxes.length !== taxAction.ids.length) {
-        throw new VendixHttpException(
-          ErrorCodes.PROD_VALIDATE_001,
-          'Una o más categorías de impuestos seleccionadas no existen o no pertenecen a la tienda',
-        );
-      }
-
+    if (taxAction && bulkTax) {
       const existingAssignments =
         await this.prisma.product_tax_assignments.findMany({
           where: { product_id: { in: editableIds } },
           select: {
             product_id: true,
             tax_category_id: true,
+            // F-031 — el flag viaja en las lecturas del bulk igual que en el
+            // detalle: sin esto el preview no ve un cambio solo-de-flag (F-029).
+            is_inclusive: true,
             tax_categories: { select: { id: true, name: true } },
           },
         });
 
       for (const a of existingAssignments) {
-        const list = productTaxesMap.get(a.product_id) || [];
-        if (a.tax_categories) {
-          list.push({ id: a.tax_category_id, name: a.tax_categories.name });
+        let perProduct = productTaxesMap.get(a.product_id);
+        if (!perProduct) {
+          perProduct = new Map();
+          productTaxesMap.set(a.product_id, perProduct);
         }
-        productTaxesMap.set(a.product_id, list);
+        if (a.tax_categories) {
+          perProduct.set(a.tax_category_id, {
+            name: a.tax_categories.name,
+            is_inclusive: a.is_inclusive,
+          });
+        }
       }
     }
 
@@ -285,47 +287,47 @@ export class ProductsBulkEditService {
       );
       const changes = this.buildDiff(product, effective.payload);
 
-      if (taxAction) {
-        const currentTaxes = productTaxesMap.get(product.id) || [];
-        const currentIds = currentTaxes.map((t) => t.id);
-        let nextTaxes: { id: number; name: string }[] = [];
+      // Estado fiscal siguiente según el MISMO resolvedor que usa apply().
+      let nextTaxIds: number[] = [];
+      if (taxAction && bulkTax) {
+        const current = productTaxesMap.get(product.id) ?? new Map();
+        const { targetIds, nextFlags } = this.resolveBulkTaxTarget(
+          taxAction,
+          bulkTax.normalizedMap,
+          new Map(
+            [...current].map(([cid, v]) => [cid, v.is_inclusive] as const),
+          ),
+          (cid) => bulkTax.catalogById.get(cid)?.catalogDefault ?? false,
+        );
+        nextTaxIds = targetIds;
 
-        if (taxAction.mode === RelationalActionMode.REPLACE) {
-          nextTaxes = taxAction.ids
-            .map((tid) => taxCategoriesMap.get(tid))
-            .filter(
-              (
-                t,
-              ): t is { id: number; name: string; tax_type: string | null } =>
-                !!t,
-            )
-            .map((t) => ({ id: t.id, name: t.name }));
-        } else if (taxAction.mode === RelationalActionMode.ADD) {
-          const toAdd = taxAction.ids
-            .filter((tid) => !currentIds.includes(tid))
-            .map((tid) => taxCategoriesMap.get(tid))
-            .filter(
-              (
-                t,
-              ): t is { id: number; name: string; tax_type: string | null } =>
-                !!t,
-            )
-            .map((t) => ({ id: t.id, name: t.name }));
-          nextTaxes = [...currentTaxes, ...toAdd];
-        } else if (taxAction.mode === RelationalActionMode.REMOVE) {
-          nextTaxes = currentTaxes.filter((t) => !taxAction.ids.includes(t.id));
-        }
+        // F-029 — el diff difunde flags, no solo nombres: un cambio
+        // solo-de-flag con el mismo conjunto de ids SÍ se anuncia.
+        const byId = (a: { id: number }, b: { id: number }) => a.id - b.id;
+        const nameOf = (cid: number) =>
+          current.get(cid)?.name ??
+          bulkTax.catalogById.get(cid)?.name ??
+          `Categoría ${cid}`;
+        const currentEntries = [...current]
+          .map(([cid, v]) => ({
+            id: cid,
+            name: v.name,
+            is_inclusive: v.is_inclusive,
+          }))
+          .sort(byId);
+        const nextEntries = targetIds
+          .map((cid) => ({
+            id: cid,
+            name: nameOf(cid),
+            is_inclusive: nextFlags.get(cid) ?? false,
+          }))
+          .sort(byId);
 
-        const nextIds = nextTaxes.map((t) => t.id);
-        const hasTaxChanged =
-          currentIds.length !== nextIds.length ||
-          currentIds.some((cid) => !nextIds.includes(cid));
-
-        if (hasTaxChanged) {
+        if (JSON.stringify(currentEntries) !== JSON.stringify(nextEntries)) {
           changes.push({
             field: 'tax_categories',
-            current: currentTaxes.map((t) => t.name),
-            next: nextTaxes.map((t) => t.name),
+            current: currentEntries,
+            next: nextEntries,
           });
         }
       }
@@ -355,15 +357,9 @@ export class ProductsBulkEditService {
         activeRecipeProductIds,
       );
 
-      if (taxAction) {
-        const currentTaxes = productTaxesMap.get(product.id) || [];
-        const remainingCount =
-          taxAction.mode === RelationalActionMode.REMOVE
-            ? currentTaxes.filter((t) => !taxAction.ids.includes(t.id)).length
-            : taxAction.mode === RelationalActionMode.REPLACE
-              ? taxAction.ids.length
-              : currentTaxes.length + taxAction.ids.length;
-        if (remainingCount === 0 && currentTaxes.length > 0) {
+      if (taxAction && bulkTax) {
+        const currentSize = productTaxesMap.get(product.id)?.size ?? 0;
+        if (nextTaxIds.length === 0 && currentSize > 0) {
           warnings.push(
             'El producto quedará sin categorías de impuestos configuradas.',
           );
@@ -406,17 +402,27 @@ export class ProductsBulkEditService {
     }
 
     const taxAction = dto.changes.tax_category_action;
-    const productTaxesMap = new Map<number, number[]>();
-    if (taxAction) {
+    // Validación de LOTE (falla rápido, igual que el preview): reglas por
+    // modo + scope + forma del mapa. Lo por-producto va en el try/catch.
+    const bulkTax = await this.resolveBulkTaxContext(taxAction);
+    const productTaxesMap = new Map<number, Map<number, boolean>>();
+    if (taxAction && bulkTax) {
       const existingAssignments =
         await this.prisma.product_tax_assignments.findMany({
           where: { product_id: { in: ids } },
-          select: { product_id: true, tax_category_id: true },
+          select: {
+            product_id: true,
+            tax_category_id: true,
+            is_inclusive: true,
+          },
         });
       for (const a of existingAssignments) {
-        const list = productTaxesMap.get(a.product_id) || [];
-        list.push(a.tax_category_id);
-        productTaxesMap.set(a.product_id, list);
+        let perProduct = productTaxesMap.get(a.product_id);
+        if (!perProduct) {
+          perProduct = new Map();
+          productTaxesMap.set(a.product_id, perProduct);
+        }
+        perProduct.set(a.tax_category_id, a.is_inclusive);
       }
     }
 
@@ -431,17 +437,20 @@ export class ProductsBulkEditService {
           ...(scalarChanges as UpdateProductDto),
         };
 
-        if (taxAction) {
-          const currentIds = productTaxesMap.get(id) || [];
-          let targetIds: number[] = [];
-          if (taxAction.mode === RelationalActionMode.REPLACE) {
-            targetIds = [...taxAction.ids];
-          } else if (taxAction.mode === RelationalActionMode.ADD) {
-            targetIds = Array.from(new Set([...currentIds, ...taxAction.ids]));
-          } else if (taxAction.mode === RelationalActionMode.REMOVE) {
-            targetIds = currentIds.filter((cid) => !taxAction.ids.includes(cid));
-          }
+        if (taxAction && bulkTax) {
+          // MISMO resolvedor que el preview (F-029). El mapa viaja completo:
+          // `update()` preserva lo idéntico sin escribir y valida scope,
+          // subconjunto y VAT por producto.
+          const { targetIds, nextFlags } = this.resolveBulkTaxTarget(
+            taxAction,
+            bulkTax.normalizedMap,
+            productTaxesMap.get(id) ?? new Map(),
+            (cid) => bulkTax.catalogById.get(cid)?.catalogDefault ?? false,
+          );
           productPayload.tax_category_ids = targetIds;
+          if (nextFlags.size > 0) {
+            productPayload.tax_inclusive_map = Object.fromEntries(nextFlags);
+          }
         }
 
         const updated = await this.productsService.update(
@@ -1341,6 +1350,157 @@ export class ProductsBulkEditService {
       );
     }
     return capability;
+  }
+
+  // ===========================================================================
+  // Impuestos del lote — resolvedores compartidos preview/apply (F-029)
+  // ===========================================================================
+
+  /**
+   * Contexto fiscal del LOTE (una sola lectura de catálogo). Lo usan preview
+   * y apply() con las MISMAS reglas, para que lo anunciado sea lo escrito:
+   *
+   * - Reglas por modo (F-017): REMOVE prohíbe el mapa; REPLACE con mapa
+   *   parcial (sin cubrir todos los `ids`) ⇒ 400 PROD_TAXMAP_001.
+   * - Forma del mapa: `validateTaxInclusiveMap` (claves enteras positivas,
+   *   boolean estricto, subconjunto de `ids`) ⇒ 400 PROD_TAXMAP_001.
+   * - Scope tienda como el create unitario (F-009): ids inexistentes o de
+   *   otra tienda ⇒ 400 PROD_VALIDATE_001 (mismo código y mensaje que antes).
+   */
+  private async resolveBulkTaxContext(
+    action: BulkRelationalTaxActionDto | undefined,
+  ): Promise<{
+    normalizedMap: Map<number, boolean> | undefined;
+    catalogById: Map<number, { name: string; catalogDefault: boolean }>;
+  } | null> {
+    if (!action) return null;
+
+    if (
+      action.mode === RelationalActionMode.REMOVE &&
+      action.tax_inclusive_map !== undefined
+    ) {
+      throw new VendixHttpException(
+        PROD_TAXMAP_001,
+        'tax_category_action REMOVE no admite tax_inclusive_map: quitar la categoría elimina su flag con ella.',
+      );
+    }
+
+    const normalizedMap = validateTaxInclusiveMap(
+      action.tax_inclusive_map,
+      action.ids,
+    );
+
+    if (
+      action.mode === RelationalActionMode.REPLACE &&
+      normalizedMap !== undefined
+    ) {
+      const missing = action.ids.filter((cid) => !normalizedMap.has(cid));
+      if (missing.length > 0) {
+        throw new VendixHttpException(
+          PROD_TAXMAP_001,
+          'tax_category_action REPLACE exige el mapa completo: cada categoría de ids debe traer su flag.',
+          { missing_ids: missing },
+        );
+      }
+    }
+
+    // F-009 — el bulk NO filtraba por scope: ids de otra tienda entraban al
+    // preview. Mismo predicado que el create unitario (tienda o globales).
+    const context = RequestContextService.getContext();
+    const catalog = await this.prisma.tax_categories.findMany({
+      where: {
+        id: { in: action.ids },
+        ...(context?.is_super_admin
+          ? {}
+          : {
+              OR: [
+                { store_id: context?.store_id ?? -1 },
+                { store_id: null },
+              ],
+            }),
+      },
+      select: {
+        id: true,
+        name: true,
+        is_inclusive: true,
+        tax_rates: {
+          select: { is_inclusive: true },
+          orderBy: { id: 'asc' },
+        },
+      },
+    });
+
+    if (catalog.length !== action.ids.length) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
+        'Una o más categorías de impuestos seleccionadas no existen o no pertenecen a la tienda',
+      );
+    }
+
+    return {
+      normalizedMap,
+      catalogById: new Map(
+        catalog.map((cat) => [
+          cat.id,
+          {
+            name: cat.name,
+            catalogDefault: resolveCatalogInclusiveDefault(cat),
+          },
+        ]),
+      ),
+    };
+  }
+
+  /**
+   * Estado fiscal SIGUIENTE de un producto del lote. Puro: sin base, misma
+   * función para preview (diff) y apply (payload de `update()`).
+   *
+   * - ADD: las ya asignadas CONSERVAN su flag (el mapa no las toca); las
+   *   nuevas resuelven mapa ?? catálogo (F-009: sin reversión silenciosa).
+   * - REPLACE: el conjunto es `ids`; cada flag es mapa ?? catálogo (con mapa
+   *   presente la cobertura total ya se exigió en el contexto).
+   * - REMOVE: el conjunto excluye `ids`; los que quedan conservan su flag.
+   */
+  private resolveBulkTaxTarget(
+    action: BulkRelationalTaxActionDto,
+    normalizedMap: Map<number, boolean> | undefined,
+    current: Map<number, boolean>,
+    catalogDefault: (catId: number) => boolean,
+  ): { targetIds: number[]; nextFlags: Map<number, boolean> } {
+    if (action.mode === RelationalActionMode.REMOVE) {
+      const targetIds = [...current.keys()].filter(
+        (cid) => !action.ids.includes(cid),
+      );
+      return {
+        targetIds,
+        nextFlags: new Map(targetIds.map((cid) => [cid, current.get(cid)!])),
+      };
+    }
+
+    if (action.mode === RelationalActionMode.REPLACE) {
+      const nextFlags = new Map<number, boolean>();
+      for (const cid of action.ids) {
+        nextFlags.set(
+          cid,
+          resolveIsInclusive(cid, normalizedMap, catalogDefault(cid)),
+        );
+      }
+      return { targetIds: [...action.ids], nextFlags };
+    }
+
+    const targetIds = Array.from(new Set([...current.keys(), ...action.ids]));
+    const nextFlags = new Map<number, boolean>();
+    for (const cid of targetIds) {
+      if (current.has(cid)) {
+        nextFlags.set(cid, current.get(cid)!);
+      } else {
+        nextFlags.set(
+          cid,
+          resolveIsInclusive(cid, normalizedMap, catalogDefault(cid)),
+        );
+      }
+    }
+    return { targetIds, nextFlags };
   }
 
   // ===========================================================================
