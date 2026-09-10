@@ -43,6 +43,11 @@ export interface ShippingOption {
    * comprador que no hay despacho a su dirección antes de que confirme.
    */
   is_fallback?: boolean;
+  /**
+   * `true` cuando la zona que originó la opción coincide exactamente con el
+   * código postal de la dirección del comprador.
+   */
+  postal_code_match?: boolean;
 }
 
 @Injectable()
@@ -74,23 +79,40 @@ export class ShippingCalculatorService {
     items: CartItemDTO[],
     address: AddressDTO,
   ): Promise<ShippingOption[]> {
-    // 1. Resolve Zone
-    const zone = await this.resolveZone(storeId, address);
-    if (!zone) {
-      // Sin zona que cubra la dirección. Antes esto devolvía `[]` a secas y el
-      // checkout quedaba sin salida. Ahora ofrecemos retiro en tienda si —y
-      // sólo si— la tienda tiene un punto físico en la misma ciudad.
+    // 1. Resolve Matching Zones (ADR-01)
+    const matchingZones = await this.resolveMatchingZones(storeId, address);
+    if (matchingZones.length === 0) {
+      this.logger.warn(
+        `Sin zonas coincidentes para store ${storeId} en dirección ` +
+          `${JSON.stringify({
+            country_code: address.country_code,
+            state_province: address.state_province,
+            city: address.city,
+            postal_code: address.postal_code,
+          })}. Evaluando retiro en tienda.`,
+      );
       return this.getPickupFallbackOptions(storeId, address);
     }
 
-    // 2. Fetch available methods and rates for this zone.
-    //    El `orderBy` es obligatorio: el storefront auto-selecciona la primera
-    //    opción, y sin orden estable esa elección cambiaba entre requests
-    //    (y con ella los métodos de pago ofrecidos, que se filtran por el
-    //    tipo del método de envío elegido).
+    const matchingZoneIds = matchingZones.map((z) => z.id);
+    const zoneSpecificity = new Map<number, number>();
+    const zoneZipMatch = new Map<number, boolean>();
+    for (const zone of matchingZones) {
+      zoneSpecificity.set(zone.id, this.getSpecificityScore(zone, address));
+      const hasZipMatch = Boolean(
+        address.postal_code &&
+          zone.zip_codes &&
+          zone.zip_codes.length > 0 &&
+          postalCodeInList(address.postal_code, zone.zip_codes),
+      );
+      zoneZipMatch.set(zone.id, hasZipMatch);
+    }
+
+    // 2. Fetch available methods and rates for all matching zones.
+    //    El `orderBy` es obligatorio para orden determinístico.
     const rates = await this.prisma.shipping_rates.findMany({
       where: {
-        shipping_zone_id: zone.id,
+        shipping_zone_id: { in: matchingZoneIds },
         is_active: true,
         shipping_method: {
           is_active: true,
@@ -106,11 +128,25 @@ export class ShippingCalculatorService {
       ],
     });
 
-    const options: ShippingOption[] = [];
     const cartTotals = this.getCartTotals(items);
     const storeCurrency = await this.settingsService.getStoreCurrency();
 
-    // 3. Process rates
+    // Determinar la máxima especificidad territorial para cada método de envío.
+    // Si una zona de nivel ciudad (score >= 100) ya define tarifas para un método,
+    // se descarta la tarifa genérica nacional (score < 100) para ese mismo método.
+    const maxScoreByMethod = new Map<number, number>();
+    for (const rate of rates) {
+      const score = zoneSpecificity.get(rate.shipping_zone_id) ?? 0;
+      const prev = maxScoreByMethod.get(rate.shipping_method_id) ?? -1;
+      if (score > prev) {
+        maxScoreByMethod.set(rate.shipping_method_id, score);
+      }
+    }
+
+    const options: ShippingOption[] = [];
+
+    // 3. Process rates. Todas las tarifas aplicables del municipio se presentan,
+    //    priorizando las que coincidan exactamente con el código postal.
     for (const rate of rates) {
       let cost = 0;
       let isApplicable = false;
@@ -122,7 +158,6 @@ export class ShippingCalculatorService {
           break;
 
         case shipping_rate_type_enum.weight_based:
-          // Check if cart weight is within range
           if (
             this.isInRange(
               cartTotals.totalWeight,
@@ -138,7 +173,6 @@ export class ShippingCalculatorService {
           break;
 
         case shipping_rate_type_enum.price_based:
-          // Check if cart price is within range
           if (
             this.isInRange(
               cartTotals.totalPrice,
@@ -147,15 +181,11 @@ export class ShippingCalculatorService {
             )
           ) {
             isApplicable = true;
-            cost = Number(rate.base_cost); // Usually base cost for price tier
+            cost = Number(rate.base_cost);
           }
           break;
 
         case shipping_rate_type_enum.free:
-          // Free shipping usually applies if criteria met, often used as override.
-          // For now, simple implementation logic can be: always applicable if in zone?
-          // Or maybe it has conditions in min_val (price)?
-          // Let's assume it checks min price (min_val)
           if (
             this.isInRange(
               cartTotals.totalPrice,
@@ -169,18 +199,13 @@ export class ShippingCalculatorService {
           break;
 
         default:
-          // `carrier_calculated` (y cualquier tipo futuro) cae acá. Antes se
-          // descartaba en silencio con `isApplicable = false`, dejando al
-          // comprador sin opciones y sin rastro en los logs.
           this.logger.warn(
-            `Tarifa ${rate.id} (zona ${zone.id}) usa el tipo '${rate.type}', ` +
-              'que el calculador todavía no sabe cotizar: se omite de las ' +
-              'opciones de envío.',
+            `Tarifa ${rate.id} (zona ${rate.shipping_zone_id}) usa tipo '${rate.type}', ` +
+              'no soportado actualmente.',
           );
           break;
       }
 
-      // Free shipping threshold override (common in flat/weight strategies)
       if (
         isApplicable &&
         rate.free_shipping_threshold &&
@@ -190,35 +215,65 @@ export class ShippingCalculatorService {
       }
 
       if (isApplicable) {
+        const rateZoneScore = zoneSpecificity.get(rate.shipping_zone_id) ?? 0;
+        const maxScoreForMethod =
+          maxScoreByMethod.get(rate.shipping_method_id) ?? 0;
+
+        // Si una zona de nivel ciudad ya define tarifas para este método,
+        // se descarta la tarifa genérica nacional para ese mismo método.
+        if (rateZoneScore < 100 && maxScoreForMethod >= 100) {
+          continue;
+        }
+
+        const isPostalMatch = zoneZipMatch.get(rate.shipping_zone_id) ?? false;
         options.push({
           id: rate.id,
           rate_id: rate.id,
           method_id: rate.shipping_method_id,
           method_name: rate.name || rate.shipping_method.name,
-          method_type: rate.shipping_method.type, // 'pickup' | 'own_fleet' | 'carrier' | etc.
+          method_type: rate.shipping_method.type,
           cost: cost,
           currency: storeCurrency,
           estimated_days: {
             min: rate.shipping_method.min_days || 0,
             max: rate.shipping_method.max_days || 0,
           },
-          zone_id: zone.id,
+          zone_id: rate.shipping_zone_id,
           is_fallback: false,
+          postal_code_match: isPostalMatch,
         });
       }
     }
 
+    // Ordenar opciones:
+    // 1. Coincidencia exacta de código postal primero.
+    // 2. Mayor especificidad de zona.
+    // 3. Menor costo.
+    // 4. ID determinístico.
+    options.sort((a, b) => {
+      if (a.postal_code_match && !b.postal_code_match) return -1;
+      if (!a.postal_code_match && b.postal_code_match) return 1;
+
+      const scoreA = zoneSpecificity.get(a.zone_id ?? 0) ?? 0;
+      const scoreB = zoneSpecificity.get(b.zone_id ?? 0) ?? 0;
+      if (scoreA !== scoreB) return scoreB - scoreA;
+
+      if (a.cost !== b.cost) return a.cost - b.cost;
+      return a.id - b.id;
+    });
+
     if (options.length === 0) {
-      // La zona cubre la dirección pero ninguna tarifa resultó aplicable
-      // (rangos de peso/precio, tipos no soportados, todas inactivas). Para el
-      // comprador es indistinguible de "no hay cobertura", así que le damos la
-      // misma salida.
       this.logger.warn(
-        `Zona ${zone.id} cubre la dirección pero ninguna de sus ${rates.length} ` +
-          'tarifas resultó aplicable al carrito.',
+        `${matchingZones.length} zonas coinciden para store ${storeId} pero ninguna ` +
+          `de sus ${rates.length} tarifas resultó aplicable al carrito.`,
       );
       return this.getPickupFallbackOptions(storeId, address);
     }
+
+    this.logger.log(
+      `Cotización store ${storeId}: ${matchingZones.length} zonas coincidentes ` +
+        `([${matchingZones.map((z) => z.name).join(', ')}]), ${options.length} opciones calculadas.`,
+    );
 
     return options;
   }
@@ -325,52 +380,63 @@ export class ShippingCalculatorService {
   }
 
   /**
-   * Finds the most specific matching zone for an address
+   * Resuelve todas las zonas activas que cubren la dirección, ordenadas por
+   * especificidad descendente (ADR-01).
    */
-  async resolveZone(storeId: number, address: AddressDTO) {
-    // Fetch all active zones for the store
+  async resolveMatchingZones(storeId: number, address: AddressDTO) {
     const zones = await this.prisma.shipping_zones.findMany({
       where: { store_id: storeId, is_active: true },
     });
 
-    // Priority Logic:
-    // 1. Exact Zip Code Match
-    // 2. City Match
-    // 3. Region/State Match
-    // 4. Country Match
-    // 5. Cobertura amplia: una zona sin `regions`/`cities`/`zip_codes` cubre
-    //    todo el país. No es un caso especial en el código — cae solo, con el
-    //    menor puntaje de especificidad, así que cualquier zona más precisa le
-    //    gana. Es la forma de configurar "resto del país".
-    //
-    // Todas las comparaciones son por forma NORMALIZADA (sin tildes, sin
-    // mayúsculas, sin espacios de más, sin sufijos administrativos). Compararlas
-    // crudas hacía que `"Bogotá D.C."` no matcheara una zona escrita `"Bogotá"`
-    // y el comprador quedara sin ninguna opción de envío.
     const candidates = zones.filter((zone) => {
-      // Check Country (Mandatory match if zone has countries defined)
+      // 1. País (obligatorio si la zona restringe países)
       if (zone.countries && zone.countries.length > 0) {
         if (!countryCodeInList(address.country_code, zone.countries)) {
           return false;
         }
       }
 
-      // Check State/Region. Jerarquía estricta: si la zona restringe por
-      // región y la dirección no trae una región utilizable, la zona NO aplica.
-      // Antes la restricción se omitía y la zona matcheaba de más.
-      if (zone.regions && zone.regions.length > 0) {
-        if (!geoNameInList(address.state_province, zone.regions)) return false;
+      // 2. Prevalencia de coincidencia de Ciudad (ADR-02 / F-002):
+      // Si la zona restringe por ciudades específicas, la ciudad es la restricción
+      // más granular. Si la ciudad coincide explícitamente, dicha coincidencia
+      // prevalece sobre discrepancias o ausencia en el departamento.
+      const hasCityConstraint = Boolean(zone.cities && zone.cities.length > 0);
+      const cityMatches =
+        hasCityConstraint && geoNameInList(address.city, zone.cities);
+
+      if (hasCityConstraint) {
+        if (!cityMatches) return false;
+        // Si la zona también define regiones, sólo descartamos si la dirección
+        // trae un departamento utilizable que pertenezca explícitamente a otra
+        // región distinta (evita descartar por IDs numéricos como "19" o nombres vacíos).
+        if (
+          zone.regions &&
+          zone.regions.length > 0 &&
+          isUsableGeoName(address.state_province) &&
+          !geoNameInList(address.state_province, zone.regions)
+        ) {
+          return false;
+        }
+      } else {
+        // Zona sin ciudades: jerarquía por departamento/región estricta
+        if (zone.regions && zone.regions.length > 0) {
+          if (!geoNameInList(address.state_province, zone.regions)) return false;
+        }
       }
 
-      // Check City — misma regla estricta que la región.
-      if (zone.cities && zone.cities.length > 0) {
-        if (!geoNameInList(address.city, zone.cities)) return false;
-      }
-
-      // Check Zip — el código postal es opcional en la mayoría de las
-      // direcciones colombianas, así que sólo descarta cuando la dirección
-      // efectivamente trae uno y no coincide.
-      if (zone.zip_codes && zone.zip_codes.length > 0 && address.postal_code) {
+      // 3. Código Postal:
+      // Si la zona coincide explícitamente por municipio/ciudad (hasCityConstraint && cityMatches),
+      // el código postal NO descarta la zona: todas las tarifas del municipio
+      // aplican y se presentan al comprador. El código postal se utiliza para
+      // priorizar y preseleccionar la tarifa exacta.
+      // Si la zona NO tiene restricción de ciudad pero sí de código postal,
+      // ahí sí el código postal es filtro excluyente.
+      if (
+        !hasCityConstraint &&
+        zone.zip_codes &&
+        zone.zip_codes.length > 0 &&
+        address.postal_code
+      ) {
         if (!postalCodeInList(address.postal_code, zone.zip_codes)) {
           return false;
         }
@@ -379,30 +445,45 @@ export class ShippingCalculatorService {
       return true;
     });
 
-    if (candidates.length === 0 && zones.length > 0) {
+    candidates.sort((a, b) => {
+      const scoreA = this.getSpecificityScore(a, address);
+      const scoreB = this.getSpecificityScore(b, address);
+      return scoreB - scoreA; // Descendente por especificidad
+    });
+
+    return candidates;
+  }
+
+  /**
+   * Encuentra la zona más específica coincidente para una dirección (compatibilidad histórica).
+   */
+  async resolveZone(storeId: number, address: AddressDTO) {
+    const candidates = await this.resolveMatchingZones(storeId, address);
+
+    if (candidates.length === 0) {
       this.logger.warn(
-        `Ninguna de las ${zones.length} zonas activas de la tienda ${storeId} ` +
-          `cubre la dirección ${JSON.stringify({
+        `Ninguna zona activa de la tienda ${storeId} cubre la dirección ` +
+          `${JSON.stringify({
             country_code: address.country_code,
             state_province: address.state_province,
             city: address.city,
+            postal_code: address.postal_code,
           })}.`,
       );
     }
 
-    // Sort candidates by specificity (more constraints = more specific)
-    candidates.sort((a, b) => {
-      const scoreA = this.getSpecificityScore(a);
-      const scoreB = this.getSpecificityScore(b);
-      return scoreB - scoreA; // Descending score
-    });
-
     return candidates.length > 0 ? candidates[0] : null;
   }
 
-  private getSpecificityScore(zone: any): number {
+  private getSpecificityScore(zone: any, address?: AddressDTO): number {
     let score = 0;
-    if (zone.zip_codes && zone.zip_codes.length > 0) score += 1000;
+    const hasExactZipMatch = Boolean(
+      address?.postal_code &&
+        zone.zip_codes &&
+        zone.zip_codes.length > 0 &&
+        postalCodeInList(address.postal_code, zone.zip_codes),
+    );
+    if (hasExactZipMatch) score += 1000;
     if (zone.cities && zone.cities.length > 0) score += 100;
     if (zone.regions && zone.regions.length > 0) score += 10;
     if (zone.countries && zone.countries.length > 0) score += 1;
