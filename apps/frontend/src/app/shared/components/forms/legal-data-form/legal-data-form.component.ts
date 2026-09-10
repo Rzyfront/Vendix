@@ -902,7 +902,9 @@ export class LegalDataFormComponent implements OnInit {
       }),
       tax_responsibilities: new FormControl<string[]>([], {
         nonNullable: true,
-        validators: [Validators.minLength(1)],
+        // required SÍ invalida el arreglo vacío (minLength lo considera
+        // "vacío = válido" y jamás dispara): contrato estricto post-F4.
+        validators: [Validators.required, Validators.minLength(1)],
       }),
       tax_scheme: new FormControl('', { nonNullable: true }),
       municipality_code: new FormControl('', { nonNullable: true }),
