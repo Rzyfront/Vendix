@@ -119,6 +119,7 @@
             [form]="form()"
             [active]="isActive(field.key)"
             [dynamicOptions]="dynamicOptionsFor(field)"
+            [taxCategories]="taxCategories()"
             [dependencyPending]="dependencyPending(field)"
             (activeChange)="onFieldActiveChange(field.key, $event)"
           />

@@ -133,6 +133,75 @@
             />
           </div>
         }
+
+        @case ('tax-action') {
+          <div class="space-y-3" [formGroupName]="field().key">
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold text-text-primary">
+                Modo de operación
+              </label>
+              <app-input-buttons
+                formControlName="mode"
+                [options]="taxActionModeOptions"
+              />
+            </div>
+
+            @switch (taxActionMode) {
+              @case ('add') {
+                <div class="rounded-lg border border-blue-200 bg-blue-50/80 p-2.5 text-[11px] leading-relaxed text-blue-700">
+                  <div class="flex items-start gap-1.5">
+                    <app-icon name="info" [size]="13" class="mt-0.5 shrink-0" />
+                    <span><b>Añadir:</b> Los impuestos seleccionados se sumarán a los productos que no los tengan aún, sin alterar sus otros impuestos.</span>
+                  </div>
+                </div>
+              }
+              @case ('remove') {
+                <div class="rounded-lg border border-amber-200 bg-amber-50/80 p-2.5 text-[11px] leading-relaxed text-amber-700">
+                  <div class="flex items-start gap-1.5">
+                    <app-icon name="alert-triangle" [size]="13" class="mt-0.5 shrink-0" />
+                    <span><b>Quitar:</b> Se eliminarán únicamente los impuestos seleccionados en los productos que los tengan. Los demás impuestos se mantendrán.</span>
+                  </div>
+                </div>
+              }
+              @case ('replace') {
+                <div class="rounded-lg border border-rose-200 bg-rose-50/80 p-2.5 text-[11px] leading-relaxed text-rose-700">
+                  <div class="flex items-start gap-1.5">
+                    <app-icon name="alert-circle" [size]="13" class="mt-0.5 shrink-0" />
+                    <span><b>Reemplazar:</b> Se sobrescribirán completamente los impuestos. Si no seleccionas ningún impuesto, los productos quedarán sin ningún impuesto asignado.</span>
+                  </div>
+                </div>
+              }
+            }
+
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold text-text-primary">
+                Impuestos a {{ taxActionMode === 'remove' ? 'quitar' : (taxActionMode === 'add' ? 'añadir' : 'asignar') }}
+              </label>
+              <app-multi-selector
+                formControlName="ids"
+                [options]="multiSelectorTaxOptions()"
+                placeholder="Selecciona uno o varios impuestos..."
+                size="sm"
+                (valueChange)="onTaxIdsChange($event)"
+              />
+
+              @if (selectedTaxChips().length > 0) {
+                <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
+                  @for (chip of selectedTaxChips(); track chip.id) {
+                    <vendix-tax-inclusive-chip
+                      [name]="chip.name"
+                      [rate]="chip.rate"
+                      [inclusive]="chip.inclusive"
+                      [hint]="chip.hint"
+                      (inclusiveChange)="setTaxInclusive(chip.id, $event)"
+                      (remove)="removeTaxId(chip.id)"
+                    />
+                  }
+                </div>
+              }
+            </div>
+          </div>
+        }
       }
     </div>
   }

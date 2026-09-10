@@ -25,8 +25,11 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
   input,
   output,
+  signal,
+  untracked,
 } from '@angular/core';
 import { FormGroup, ReactiveFormsModule } from '@angular/forms';
 
@@ -34,14 +37,18 @@ import {
   IconComponent,
   InputButtonsComponent,
   InputComponent,
+  MultiSelectorComponent,
   SelectorComponent,
   SettingToggleComponent,
+  TaxInclusiveChipComponent,
   TextareaComponent,
   type InputButtonOption,
+  type MultiSelectorOption,
   type SelectorOption,
 } from '../../../../../shared/components/index';
 import { describeBulkEditIndustryRequirement } from './bulk-editable-fields.constant';
 import type { BulkEditableField } from './bulk-edit.interface';
+import type { TaxCategory } from '../interfaces';
 
 @Component({
   selector: 'app-bulk-edit-field-control',
@@ -52,6 +59,8 @@ import type { BulkEditableField } from './bulk-edit.interface';
     IconComponent,
     InputComponent,
     SelectorComponent,
+    MultiSelectorComponent,
+    TaxInclusiveChipComponent,
     TextareaComponent,
     SettingToggleComponent,
     InputButtonsComponent,
@@ -67,12 +76,31 @@ export class BulkEditFieldControlComponent {
   readonly active = input<boolean>(false);
   /** Opciones del catálogo dinámico que corresponda (`optionsRef`). */
   readonly dynamicOptions = input<readonly SelectorOption[]>([]);
+  /** Catálogo completo de categorías de impuestos para chips interactivos. */
+  readonly taxCategories = input<readonly TaxCategory[]>([]);
   /**
    * `true` cuando el campo del que este depende (`dependsOn`) no está activado.
    * No bloquea nada — el backend no valida la dependencia — pero se avisa para
    * que el operador no active `sale_price` creyendo que activó la oferta.
    */
   readonly dependencyPending = input<boolean>(false);
+
+  /** IDs de impuestos actualmente seleccionados (reactivo para los chips). */
+  readonly selectedTaxIds = signal<number[]>([]);
+  /** Mapa local de conmutación de estado inclusivo (true = incluido, false = adicional). */
+  readonly taxInclusiveMap = signal<Record<number, boolean>>({});
+
+  constructor() {
+    effect(() => {
+      if (this.active() && this.field().key === 'tax_category_action') {
+        const group = this.form().get(this.field().key) as FormGroup | null;
+        const current = group?.get('ids')?.value;
+        if (Array.isArray(current)) {
+          untracked(() => this.selectedTaxIds.set(current.map(Number)));
+        }
+      }
+    });
+  }
 
   /** El usuario activó o desactivó el campo. */
   readonly activeChange = output<boolean>();
@@ -99,6 +127,76 @@ export class BulkEditFieldControlComponent {
       label: option.label,
     })),
   );
+
+  /** Modos de operación para edición masiva de impuestos. */
+  readonly taxActionModeOptions: InputButtonOption[] = [
+    { value: 'add', label: 'Añadir' },
+    { value: 'remove', label: 'Quitar' },
+    { value: 'replace', label: 'Reemplazar' },
+  ];
+
+  /** Opciones de impuestos formateadas para `app-multi-selector`. */
+  readonly multiSelectorTaxOptions = computed<MultiSelectorOption[]>(() =>
+    this.options().map((option) => ({
+      value: option.value,
+      label: option.label,
+    })),
+  );
+
+  /** Chips de impuestos seleccionados con estado de inclusión y botón de remoción rápida. */
+  readonly selectedTaxChips = computed(() => {
+    const ids = this.selectedTaxIds();
+    const allTaxes = this.taxCategories();
+    const map = this.taxInclusiveMap();
+
+    return ids
+      .map((id) => allTaxes.find((t) => t.id === id))
+      .filter((t): t is TaxCategory => !!t)
+      .map((tax) => {
+        const rawRate = tax.rate ?? tax.tax_rates?.[0]?.rate ?? 0;
+        const rate = parseFloat(String(rawRate));
+        const finalRate = isNaN(rate) ? 0 : rate > 1 ? rate : rate * 100;
+        const isInclusive =
+          map[tax.id] !== undefined
+            ? map[tax.id]
+            : !!(tax.is_inclusive ?? tax.tax_rates?.[0]?.is_inclusive ?? false);
+
+        return {
+          id: tax.id,
+          name: tax.name,
+          rate: Math.round(finalRate * 100) / 100,
+          inclusive: isInclusive,
+          hint: isInclusive
+            ? 'Impuesto configurado como incluido en el precio unitario.'
+            : 'Impuesto configurado como adicional sobre el subtotal.',
+        };
+      });
+  });
+
+  onTaxIdsChange(values: (string | number)[]): void {
+    this.selectedTaxIds.set(values.map(Number));
+  }
+
+  setTaxInclusive(taxId: number, isInclusive: boolean): void {
+    this.taxInclusiveMap.update((m) => ({ ...m, [taxId]: isInclusive }));
+  }
+
+  removeTaxId(id: number): void {
+    const next = this.selectedTaxIds().filter((val) => val !== id);
+    this.selectedTaxIds.set(next);
+    const group = this.form().get(this.field().key) as FormGroup | null;
+    const idsCtrl = group?.get('ids');
+    if (idsCtrl) {
+      idsCtrl.setValue(next);
+      idsCtrl.markAsDirty();
+    }
+  }
+
+  /** Modo actual de la acción de impuestos para renderizado condicional del aviso. */
+  get taxActionMode(): string {
+    const group = this.form().get(this.field().key) as FormGroup | null;
+    return group?.get('mode')?.value ?? 'add';
+  }
 
   /** Etiqueta de la industria/capacidad que exige el campo (badge de motivo). */
   readonly industryRequirement = computed<string | null>(() =>
