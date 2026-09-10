@@ -91,6 +91,10 @@ export interface AIEngineConfig {
     image_model?: string;
     modalities?: string[];
     encoding_format?: string;
+    // Embeddings (model_type='embedding'). Se gobiernan por panel, no por env
+    // (CP-embeddings-openrouter B.2); aqui viven planas porque el formulario las edita.
+    embedding_model?: string;
+    dimensions?: number;
     // Transporte de audio (model_type='audio'). El backend las traduce a la
     // forma anidada del proveedor en `VexiRealtimeService.buildSessionPatch()`;
     // aqui viven planas porque es como el formulario las edita.

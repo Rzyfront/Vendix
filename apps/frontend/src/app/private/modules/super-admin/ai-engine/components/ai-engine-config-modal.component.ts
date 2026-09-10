@@ -181,6 +181,53 @@ import {
             ></app-input>
           </div>
 
+          <!-- Embeddings -->
+          @if (isEmbedding()) {
+            <div
+              class="space-y-4 rounded-lg border border-border p-4 bg-background-secondary"
+            >
+              <div>
+                <h4 class="text-sm font-medium text-text-primary">
+                  Embeddings
+                </h4>
+                <p class="text-xs text-text-secondary mt-1">
+                  Modelo y dimensiones para generacion de vectores. El modelo se
+                  gobierna por panel, no por variable de entorno.
+                </p>
+              </div>
+
+              <app-input
+                formControlName="embedding_model"
+                label="Modelo de embeddings"
+                placeholder="Ej: openai/text-embedding-3-small"
+                [control]="form.get('embedding_model')"
+                [disabled]="isSubmitting()"
+                helpText="Identificador del modelo de embeddings del proveedor"
+              ></app-input>
+
+              <div class="grid grid-cols-2 gap-4">
+                <app-input
+                  formControlName="dimensions"
+                  label="Dimensiones"
+                  type="number"
+                  placeholder="1536"
+                  [control]="form.get('dimensions')"
+                  [disabled]="isSubmitting()"
+                  helpText="Vaciar para usar el default del modelo"
+                ></app-input>
+
+                <app-input
+                  formControlName="encoding_format"
+                  label="Formato de codificacion"
+                  placeholder="float"
+                  [control]="form.get('encoding_format')"
+                  [disabled]="isSubmitting()"
+                  helpText="float o base64 (OpenRouter usa float)"
+                ></app-input>
+              </div>
+            </div>
+          }
+
           <!-- Audio / voz en tiempo real -->
           @if (isAudio()) {
             <div
@@ -420,6 +467,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
   private currentTurnDetection = signal<string>('');
 
   isAudio = computed(() => this.currentModelType() === 'audio');
+  isEmbedding = computed(() => this.currentModelType() === 'embedding');
   isServerVad = computed(() => this.currentTurnDetection() === 'server_vad');
   hasTurnDetection = computed(() => {
     const value = this.currentTurnDetection();
@@ -436,6 +484,9 @@ export class AIEngineConfigModalComponent implements OnChanges {
     api_key_ref: [''],
     temperature: [null],
     max_tokens: [null],
+    embedding_model: [''],
+    dimensions: [null],
+    encoding_format: [''],
     is_default: [false],
     is_active: [true],
     thinking: [false],
@@ -529,6 +580,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
         is_default: c.is_default,
         is_active: c.is_active,
         thinking: c.settings?.thinking ?? false,
+        ...this.embeddingFormValues(c),
         ...this.audioFormValues(c),
       });
       this.syncAudioSignals();
@@ -547,6 +599,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
         is_default: false,
         is_active: p.is_active,
         thinking: p.settings?.thinking ?? false,
+        ...this.embeddingFormValues(p),
         ...this.audioFormValues(p),
       });
       this.syncAudioSignals();
@@ -595,7 +648,17 @@ export class AIEngineConfigModalComponent implements OnChanges {
     } else if (this.config()) {
       data.base_url = null;
     }
-    if (raw.api_key_ref) data.api_key_ref = raw.api_key_ref;
+    // F-001: en edicion la ref enmascarada ('****1234') nunca se re-envia.
+    // El control se abre vacio, asi que solo se incluye cuando el operador lo
+    // edito explicitamente (dirty) con un valor no vacio.
+    const apiKeyControl = this.form.get('api_key_ref');
+    const apiKeyValue =
+      typeof raw.api_key_ref === 'string' ? raw.api_key_ref.trim() : '';
+    if (!this.config()) {
+      if (apiKeyValue) data.api_key_ref = apiKeyValue;
+    } else if (apiKeyControl?.dirty && apiKeyValue) {
+      data.api_key_ref = apiKeyValue;
+    }
 
     this.submit.emit(data);
   }
@@ -616,6 +679,9 @@ export class AIEngineConfigModalComponent implements OnChanges {
       api_key_ref: '',
       temperature: null,
       max_tokens: null,
+      embedding_model: '',
+      dimensions: null,
+      encoding_format: '',
       is_default: false,
       is_active: true,
       thinking: false,
@@ -630,6 +696,21 @@ export class AIEngineConfigModalComponent implements OnChanges {
     this.suggestedModels.set([]);
     this.modelOptions.set([]);
     this.syncAudioSignals();
+  }
+
+  /**
+   * Valores planos de embeddings desde `settings`. Mismo motivo que audio: el
+   * formulario es una instancia reutilizada y no debe arrastrar valores de la
+   * config que se edito antes.
+   */
+  private embeddingFormValues(config: AIEngineConfig): Record<string, unknown> {
+    const s = config.settings ?? {};
+
+    return {
+      embedding_model: s.embedding_model ?? '',
+      dimensions: s.dimensions ?? null,
+      encoding_format: s.encoding_format ?? '',
+    };
   }
 
   /**
@@ -685,6 +766,16 @@ export class AIEngineConfigModalComponent implements OnChanges {
       return 'image';
     }
 
+    if (
+      settings.embedding_model != null ||
+      settings.dimensions != null ||
+      settings.encoding_format != null ||
+      settings.modalities?.includes('embedding') ||
+      modelId.includes('embed')
+    ) {
+      return 'embedding';
+    }
+
     return 'text';
   }
 
@@ -695,17 +786,13 @@ export class AIEngineConfigModalComponent implements OnChanges {
     raw: Record<string, any>,
   ): void {
     this.applyAudioSettings(settings, modelType, raw);
+    this.applyEmbeddingSettings(settings, modelType, baseUrl, raw);
 
     if (modelType !== 'image') {
       delete settings['image_generation_mode'];
       delete settings['image_endpoint'];
       delete settings['image_model'];
       delete settings['modalities'];
-      if (modelType === 'embedding' && baseUrl.includes('openrouter.ai')) {
-        settings['encoding_format'] = settings['encoding_format'] || 'float';
-      } else if (modelType !== 'embedding') {
-        delete settings['encoding_format'];
-      }
       return;
     }
 
@@ -714,6 +801,47 @@ export class AIEngineConfigModalComponent implements OnChanges {
       settings['modalities'] = ['image'];
     }
     delete settings['encoding_format'];
+  }
+
+  /**
+   * Escribe o limpia las claves de embeddings.
+   *
+   * Se limpian al salir de `embedding` por la misma razon que las de
+   * imagen/audio: una config que dejo de ser de embeddings no debe arrastrar
+   * un modelo ni dimensiones que ya nadie lee. En OpenRouter se conserva el
+   * default previo (`float`) cuando el operador deja el formato vacio.
+   */
+  private applyEmbeddingSettings(
+    settings: Record<string, any>,
+    modelType: AIModelType,
+    baseUrl: string,
+    raw: Record<string, any>,
+  ): void {
+    if (modelType !== 'embedding') {
+      delete settings['embedding_model'];
+      delete settings['dimensions'];
+      delete settings['encoding_format'];
+      return;
+    }
+
+    this.setOrDelete(
+      settings,
+      'embedding_model',
+      this.trimmed(raw['embedding_model']),
+    );
+    this.setOrDelete(
+      settings,
+      'dimensions',
+      this.numeric(raw['dimensions']),
+    );
+    this.setOrDelete(
+      settings,
+      'encoding_format',
+      this.trimmed(raw['encoding_format']),
+    );
+    if (baseUrl.includes('openrouter.ai')) {
+      settings['encoding_format'] = settings['encoding_format'] || 'float';
+    }
   }
 
   /**
