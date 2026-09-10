@@ -260,6 +260,31 @@ export class StorefrontPriceService {
   }
 
   /**
+   * Tasas tipadas por asignación para el camino tipado de `resolveLine`
+   * (F-004 pendiente). Precedencia canónica F-012 por asignación:
+   * `assignment ?? categoría ?? primera tasa ?? agregado`. Una entrada por
+   * TASA (no por asignación) para que el mixto desglose bien.
+   */
+  getTypedTaxRates(product: any): StorefrontTaxRateInput[] {
+    const out: StorefrontTaxRateInput[] = [];
+    if (product?.product_tax_assignments) {
+      for (const assignment of product.product_tax_assignments) {
+        const flag =
+          assignment?.is_inclusive ??
+          assignment?.tax_categories?.is_inclusive ??
+          assignment?.tax_categories?.tax_rates?.[0]?.is_inclusive ??
+          false;
+        if (assignment?.tax_categories?.tax_rates) {
+          for (const tax of assignment.tax_categories.tax_rates) {
+            out.push({ rate: Number(tax.rate), is_inclusive: !!flag });
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
    * Unidades de stock que ocupa 1 paquete de esta presentación, para el caller
    * que necesita convertir stock↔paquetes sin resolver el precio (la vitrina
    * decidiendo si el producto está agotado, por ejemplo).

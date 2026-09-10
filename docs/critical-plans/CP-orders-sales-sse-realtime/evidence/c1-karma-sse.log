@@ -1,0 +1,14 @@
+# C.1 — Karma spec OrdersListSseService (CP-orders-sales-sse-realtime)
+# Comando: CHROME_BIN="...(Google Chrome)" npx ng test --watch=false
+#   --browsers=ChromeHeadlessNoSandbox
+#   --include='**/orders-list-sse.service.spec.ts'   (desde apps/frontend)
+# Fecha: 2026-09-10. Head: feature/orders-sales-sse-realtime.
+
+Chrome Headless 152.0.0.0 (Mac OS 10.15.7): Executed 13 of 13 SUCCESS (0.018 secs / 0.011 secs)
+TOTAL: 13 SUCCESS
+
+# Hallazgos del camino (spec pre-existente, harness roto en Karma):
+# - `(global as any).EventSource` -> ReferenceError: global is not defined
+#   (13/13 FAILED antes del fix; `global` no existe en Chrome). Fix:
+#   `globalThis` + reset de `lastInstance` en beforeEach (polucion entre tests).
+# - Los 11 tests originales nunca habian corrido en verde en este entorno.

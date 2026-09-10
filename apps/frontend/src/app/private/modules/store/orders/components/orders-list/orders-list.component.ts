@@ -122,6 +122,13 @@ export class OrdersListComponent {
   readonly create = output<void>();
   readonly viewOrder = output<string>();
   readonly refresh = output<void>();
+  /**
+   * CP-orders-sales-sse-realtime: se emite tras insertar una orden creada en
+   * vivo para que el padre refresque SOLO los stats (`loadOrderStats`),
+   * sin recargar la lista. No se reutiliza `refresh` porque ese tickea
+   * `reloadTrigger` y recargaria toda la tabla (flicker + GET redundante).
+   */
+  readonly statsChanged = output<void>();
 
   /**
    * QUI-599: afordancia del item "Operaciones masivas". El permiso lo lee el
@@ -604,6 +611,31 @@ export class OrdersListComponent {
       this.ordersListSse.lastRelevantEvent.set(null);
     });
 
+    // CP-orders-sales-sse-realtime: inserción en vivo de órdenes nuevas.
+    // El servicio ya validó el shape; acá hidratamos por REST para aplicar
+    // la misma normalización de `loadOrders` (mesa, customer_name, números)
+    // y respetar filtros/paginación. Mismo patrón effect+clear del effect
+    // de `status_changed`: sin riesgo de loop infinito.
+    effect(() => {
+      const evt = this.ordersListSse.lastCreatedEvent();
+      if (!evt) return;
+      const orderId = evt.data.order_id;
+      const orderNumber = evt.data.order_number ?? `#${orderId}`;
+      // Limpiar primero: el fetch es async y un segundo evento no debe
+      // perderse mientras el anterior vuela.
+      this.ordersListSse.lastCreatedEvent.set(null);
+      // Idempotencia: doble evento por reconexión SSE con la fila ya
+      // insertada es no-op.
+      if (this.orders().some((o) => o.id === orderId)) return;
+      if (!this.canPrependLiveOrder()) {
+        this.toastService.info(
+          `Nueva orden ${orderNumber} recibida. Quita los filtros o vuelve a la página 1 para verla.`,
+        );
+        return;
+      }
+      this.fetchAndPrependLiveOrder(orderId, orderNumber);
+    });
+
     // QUI-777: abrir/cerrar el stream al ciclo de vida del componente.
     // root-provided + connect/disconnect manual: si el usuario navega a
     // otra ruta, la suscripción se cierra limpiamente (el subject
@@ -964,6 +996,139 @@ export class OrdersListComponent {
           this.loading.set(false);
         },
       });
+  }
+
+  /**
+   * CP-orders-sales-sse-realtime: el prepend en vivo solo es honesto en la
+   * página 1 sin filtros restrictivos ni ordenamiento distinto al default.
+   * Con filtros activos o en otra página, insertar mentiría sobre el
+   * resultado (la orden podría no pertenecer a ese filtro) o saltaría la
+   * paginación; en ese caso el effect muestra un toast informativo.
+   */
+  private canPrependLiveOrder(): boolean {
+    const f = this._filters;
+    return (
+      (f.page ?? 1) === 1 &&
+      !f.search &&
+      !f.status &&
+      !f.channel &&
+      !f.payment_status &&
+      !f.date_range &&
+      f.table_id == null &&
+      !f.dispatchable &&
+      (f.sort_by ?? 'created_at') === 'created_at' &&
+      (f.sort_order ?? 'desc') === 'desc'
+    );
+  }
+
+  /** Ventana de ráfaga para colapsar toasts cuando llegan >10 creadas/min. */
+  private recentCreatedAt: number[] = [];
+
+  /**
+   * Hidrata la orden creada por REST y la inserta arriba sin recargar la
+   * lista. Aplica la misma normalización de `loadOrders` (mesa plana,
+   * números, customer_name) para que la fila viva sea idéntica a una fila
+   * cargada por REST. Emite `statsChanged` para que el padre refresque
+   * solo los stats. Un GET 404 (orden borrada entre evento y fetch) se
+   * descarta en silencio sin mutar lista ni totalItems (ERR-03).
+   */
+  private fetchAndPrependLiveOrder(orderId: number, orderNumber: string): void {
+    this.ordersService
+      .getOrderById(String(orderId))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (order: any) => {
+          if (!order || typeof order !== 'object' || order.id == null) return;
+          // Dedup tardío: la fila pudo llegar por REST mientras el GET volaba.
+          if (this.orders().some((o) => o.id === order.id)) return;
+          const row = this.normalizeLiveOrderRow(order);
+          const limit = this._filters.limit || 10;
+          this.orders.update((prev) => [row, ...prev].slice(0, limit));
+          this.totalItems.update((t) => t + 1);
+          this.announceLiveOrder(orderNumber);
+          this.statsChanged.emit();
+        },
+        error: () => {
+          // ERR-03: descartar sin mutar.
+        },
+      });
+  }
+
+  /**
+   * Normaliza una fila hidratada en vivo con las mismas reglas de
+   * `loadOrders`. El nombre del cliente se resuelve async cuando hay
+   * `customer_id`; mientras tanto se pinta alias o fallback, igual que
+   * la rama de error de `loadOrders`.
+   */
+  private normalizeLiveOrderRow(order: any): any {
+    const ts = order?.table_sessions?.[0];
+    const mesa = ts?.table?.name
+      ? ts.table.zone
+        ? `${ts.table.name} (${ts.table.zone})`
+        : ts.table.name
+      : null;
+    const toNum = (v: unknown): number =>
+      typeof v === 'string' ? parseFloat(v) : (v as number);
+    const row: any = {
+      ...order,
+      mesa,
+      customer_id:
+        typeof order.customer_id === 'string'
+          ? parseInt(order.customer_id)
+          : order.customer_id,
+      grand_total: toNum(order.grand_total),
+      subtotal_amount: toNum(order.subtotal_amount),
+      tax_amount: toNum(order.tax_amount),
+      shipping_cost: toNum(order.shipping_cost),
+      discount_amount: toNum(order.discount_amount),
+      customer_name:
+        order.customer_alias?.trim() ||
+        (order.customer_id ? 'N/A' : 'Consumidor Final'),
+    };
+    // La fila nueva no está en `seenOrderIds` y su `created_at` es reciente,
+    // así que `isNewOrder`/`rowClassFn` la resaltan sin más wiring.
+    if (order.customer_id) {
+      this.customersService
+        .getCustomer(row.customer_id)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (c: any) => {
+            const name =
+              order.customer_alias?.trim() ||
+              `${c?.first_name || ''} ${c?.last_name || ''}`.trim() ||
+              'N/A';
+            this.orders.update((prev) =>
+              prev.map((o: any) =>
+                o.id === row.id ? { ...o, customer_name: name } : o,
+              ),
+            );
+          },
+          error: () => {
+            // Se conserva el fallback 'N/A'; no bloquea la inserción.
+          },
+        });
+    }
+    return row;
+  }
+
+  /**
+   * Anuncia la orden nueva. En ráfaga (>10 creadas en 60s) colapsa en un
+   * único toast resumen para no spamear al vendedor (tormenta de toasts).
+   */
+  private announceLiveOrder(orderNumber: string): void {
+    const now = Date.now();
+    this.recentCreatedAt = this.recentCreatedAt.filter(
+      (t) => now - t < 60_000,
+    );
+    this.recentCreatedAt.push(now);
+    if (this.recentCreatedAt.length > 10) {
+      this.toastService.info(
+        `${this.recentCreatedAt.length} órdenes nuevas en el último minuto.`,
+        'Órdenes en vivo',
+      );
+    } else {
+      this.toastService.success(`Nueva orden ${orderNumber} recibida`);
+    }
   }
 
   // Pagination and sorting

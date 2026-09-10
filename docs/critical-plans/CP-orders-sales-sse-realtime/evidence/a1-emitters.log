@@ -1,0 +1,4 @@
+apps/backend/src/domains/ecommerce/checkout/checkout.service.ts:1629:    this.eventEmitter.emit('order.created', {
+apps/backend/src/domains/ecommerce/checkout/checkout.service.ts:2382:    this.eventEmitter.emit('order.created', {
+apps/backend/src/domains/store/payments/payments.service.ts:1427:          this.eventEmitter.emit('order.created', {
+apps/backend/src/domains/store/orders/orders.service.ts:596:        this.eventEmitter.emit('order.created', {
