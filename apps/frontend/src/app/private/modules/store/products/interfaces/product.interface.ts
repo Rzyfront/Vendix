@@ -327,6 +327,12 @@ export interface ProductTaxAssignment {
   product_id: number;
   tax_category_id: number;
   tax_categories?: TaxCategory;
+  /**
+   * Override por producto del flag "incluido en el precio" (F-007/F-022).
+   * GANA sobre `tax_categories.is_inclusive` y sobre el default del catálogo.
+   * `undefined` en un GET viejo (pre-A.2) ⇒ se cae al catálogo (F-030).
+   */
+  is_inclusive?: boolean;
 }
 
 export interface TaxCategory {
@@ -415,6 +421,12 @@ export interface CreateProductDto {
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
+  /**
+   * Flag "incluido en el precio" por impuesto, filtrado a `tax_category_ids`
+   * (contrato backend A.2 → `product_tax_assignments.is_inclusive`).
+   * Claves string por JSON. Requiere deploy backend-primero (whitelist 400).
+   */
+  tax_inclusive_map?: Record<string, boolean>;
   images?: CreateProductImageDto[];
   variants?: CreateProductVariantDto[];
   stock_by_location?: StockByLocationDto[];
@@ -483,6 +495,12 @@ export interface UpdateProductDto {
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
+  /**
+   * Flag "incluido en el precio" por impuesto, filtrado a `tax_category_ids`
+   * (contrato backend A.2 → `product_tax_assignments.is_inclusive`).
+   * Claves string por JSON. Requiere deploy backend-primero (whitelist 400).
+   */
+  tax_inclusive_map?: Record<string, boolean>;
   images?: CreateProductImageDto[];
   variants?: CreateProductVariantDto[];
   stock_by_location?: StockByLocationDto[];

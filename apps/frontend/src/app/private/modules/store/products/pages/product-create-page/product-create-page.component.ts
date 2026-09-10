@@ -76,6 +76,17 @@ import {
   PreselectedProduct,
 } from '../../../inventory/interfaces';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import {
+  buildTaxInclusivePayload,
+  catalogInclusiveDefault,
+  estimateNetBase,
+  estimatePriceWithTax,
+  hydrateTaxInclusiveMap,
+  normalizeTaxInclusiveMap,
+  parseTaxRateFraction,
+  resolveTaxInclusive,
+  withoutTaxFromMap,
+} from '../../utils/product-tax-inclusive.util';
 import { ProductUtils } from '../../utils/product.utils';
 import { ValidationUtils } from '../../utils/validation.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
@@ -1048,10 +1059,7 @@ export class ProductCreatePageComponent {
   });
 
   isTaxInclusive(taxId: number): boolean {
-    const map = this.taxInclusiveMap();
-    if (map[taxId] !== undefined) return map[taxId];
-    const cat = this.allTaxCategories.find((c) => c.id === taxId);
-    return !!(cat?.is_inclusive ?? cat?.tax_rates?.[0]?.is_inclusive ?? false);
+    return resolveTaxInclusive(taxId, this.taxInclusiveMap(), this.allTaxCategories);
   }
 
   setTaxInclusive(taxId: number, isInclusive: boolean): void {
@@ -1064,12 +1072,17 @@ export class ProductCreatePageComponent {
     this.productForm
       .get('tax_category_ids')
       ?.setValue(current.filter((id) => id !== taxId));
+    // F-032: quitar el impuesto borra su entrada; al re-añadirlo rige el
+    // catálogo, no un valor resucitado.
+    this.taxInclusiveMap.set(withoutTaxFromMap(this.taxInclusiveMap(), taxId));
   }
 
   taxInclusiveHint(taxId: number): string {
+    // F-019: el hint deja claro que lo guardado por producto manda y el
+    // catálogo solo es el punto de partida para productos nuevos.
     return this.isTaxInclusive(taxId)
-      ? 'El impuesto ya está dentro del precio unitario. Click para cambiarlo a adicional.'
-      : 'El impuesto se suma sobre el precio unitario. Click para cambiarlo a incluido.';
+      ? 'Incluido en el precio de ESTE producto (el catálogo solo propone el inicial). Click para cambiarlo a adicional.'
+      : 'Adicional sobre el precio de ESTE producto (el catálogo solo propone el inicial). Click para cambiarlo a incluido.';
   }
 
   getTaxRatePercent(tax: TaxCategory): number {
@@ -1718,7 +1731,7 @@ export class ProductCreatePageComponent {
     if (draft.tax_inclusive_map) {
       this.taxInclusiveMap.set({
         ...this.taxInclusiveMap(),
-        ...draft.tax_inclusive_map,
+        ...normalizeTaxInclusiveMap(draft.tax_inclusive_map),
       });
     }
   }
@@ -2053,6 +2066,10 @@ export class ProductCreatePageComponent {
     }
   }
 
+  /**
+   * Estimado de exhibición (F-013): especificación de signo, no oráculo de
+   * centavos. El total facturable lo define el backend.
+   */
   get priceWithTax(): number {
     const basePrice = Number(this.productForm.get('base_price')?.value || 0);
     const selectedTaxIds =
@@ -2062,27 +2079,22 @@ export class ProductCreatePageComponent {
     const ivaIds = this.ivaTaxCategoryIdSet();
     const blocked = this.isVatBlocked();
 
-    let inclusiveRate = 0;
-    let additionalRate = 0;
-
-    selectedTaxIds.forEach((id: number) => {
-      if (blocked && ivaIds.has(id)) return;
-      const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
-      if (taxCat) {
-        const rawRate = taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0;
-        const rate = parseFloat(String(rawRate));
-        const finalRate = isNaN(rate) ? 0 : rate > 1 ? rate / 100 : rate;
-        if (this.isTaxInclusive(id)) {
-          inclusiveRate += finalRate;
-        } else {
-          additionalRate += finalRate;
-        }
-      }
-    });
-
-    const netBase =
-      inclusiveRate > 0 ? basePrice / (1 + inclusiveRate) : basePrice;
-    return basePrice + netBase * additionalRate;
+    return estimatePriceWithTax(
+      basePrice,
+      selectedTaxIds
+        .filter((id: number) => !(blocked && ivaIds.has(id)))
+        .map((id: number) => {
+          const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
+          return {
+            rateFraction: taxCat
+              ? parseTaxRateFraction(
+                  taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0,
+                )
+              : 0,
+            inclusive: this.isTaxInclusive(id),
+          };
+        }),
+    );
   }
 
   get taxBreakdown(): {
@@ -2103,23 +2115,23 @@ export class ProductCreatePageComponent {
       if (blocked && ivaIds.has(id)) return;
       const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
       if (taxCat && this.isTaxInclusive(id)) {
-        const rawRate = taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0;
-        const rate = parseFloat(String(rawRate));
-        inclusiveRate += isNaN(rate) ? 0 : rate > 1 ? rate / 100 : rate;
+        inclusiveRate += parseTaxRateFraction(
+          taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0,
+        );
       }
     });
 
-    const netBase =
-      inclusiveRate > 0 ? basePrice / (1 + inclusiveRate) : basePrice;
+    // F-013: montos de exhibición sobre la base neta estimada, no oráculo.
+    const netBase = estimateNetBase(basePrice, inclusiveRate);
 
     return selectedTaxIds
       .map((id: number) => {
         if (blocked && ivaIds.has(id)) return null;
         const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
         if (!taxCat) return null;
-        const rawRate = taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0;
-        const rate = parseFloat(String(rawRate));
-        const finalRate = isNaN(rate) ? 0 : rate > 1 ? rate / 100 : rate;
+        const finalRate = parseTaxRateFraction(
+          taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0,
+        );
         if (finalRate === 0) return null;
         const isInc = this.isTaxInclusive(id);
         const amount = netBase * finalRate;
@@ -2279,18 +2291,16 @@ export class ProductCreatePageComponent {
       this.imageIds = [];
     }
 
-    if (
-      product.product_tax_assignments &&
-      product.product_tax_assignments.length > 0
-    ) {
-      const map = { ...this.taxInclusiveMap() };
-      for (const ta of product.product_tax_assignments as any[]) {
-        if (ta.tax_categories?.is_inclusive !== undefined) {
-          map[ta.tax_category_id] = !!ta.tax_categories.is_inclusive;
-        }
-      }
-      this.taxInclusiveMap.set(map);
-    }
+    // F-007/F-008/F-022/F-024: la página avanzada es el tercer escritor y usa
+    // la MISMA hidratación assignment-first que el modal (helper compartido,
+    // registrada como consumidora FB-01/02). Reconstruida desde cero para que
+    // el orden patchForm-vs-catálogo no decida el resultado.
+    this.taxInclusiveMap.set(
+      hydrateTaxInclusiveMap(
+        product.product_tax_assignments ?? [],
+        this.allTaxCategories,
+      ),
+    );
 
     this.activeImageIndex = 0;
     this.mainImageIndex = Math.max(
@@ -2406,14 +2416,12 @@ export class ProductCreatePageComponent {
         // deriva las opciones (con candado en IVA si el comercio no es
         // responsable). Ver declaración de `taxCategoryOptions`.
         this.taxCategoriesSig.set(taxCategories);
+        // F-024: solo rellena entradas ausentes; la asignación ya hidratada
+        // nunca se sobrescribe con el default del catálogo.
         const map = { ...this.taxInclusiveMap() };
         for (const cat of taxCategories) {
           if (map[cat.id] === undefined) {
-            map[cat.id] = !!(
-              cat.is_inclusive ??
-              cat.tax_rates?.[0]?.is_inclusive ??
-              false
-            );
+            map[cat.id] = catalogInclusiveDefault(cat);
           }
         }
         this.taxInclusiveMap.set(map);
@@ -3988,6 +3996,11 @@ export class ProductCreatePageComponent {
     const isPureIngredient = !!formValue.is_ingredient && !formValue.is_sellable;
     const neutral = (v: any, fallback: any) => (isPureIngredient ? fallback : v);
 
+    // F-008: ids efectivos (F4 ya aplicado) para filtrar el mapa inclusivo.
+    const effectiveTaxIds = this.sanitizeTaxCategoryIds(
+      formValue.tax_category_ids || [],
+    );
+
     // Basic DTO
     const productData: CreateProductDto = {
       name: formValue.name,
@@ -4012,8 +4025,13 @@ export class ProductCreatePageComponent {
           : undefined,
       category_ids: formValue.category_ids || [],
       // F4 — filtro defensivo de ids IVA cuando el comercio no es responsable.
-      tax_category_ids: this.sanitizeTaxCategoryIds(
-        formValue.tax_category_ids || [],
+      tax_category_ids: effectiveTaxIds,
+      // F-008: la página avanzada envía el MISMO mapa filtrado que el modal
+      // (contrato A.2; deploy backend-primero, F-030). Filtrado a los ids ya
+      // sanitizados: un IVA bloqueado no deja rastro en el mapa.
+      tax_inclusive_map: buildTaxInclusivePayload(
+        effectiveTaxIds,
+        this.taxInclusiveMap(),
       ),
       brand_id: formValue.brand_ids?.[0]
         ? Number(formValue.brand_ids[0])

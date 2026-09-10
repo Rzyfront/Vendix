@@ -3,6 +3,11 @@ import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prism
 import { RequestContextService } from '@common/context/request-context.service';
 import { CartService } from '../cart/cart.service';
 import { TaxesService } from '../../store/taxes/taxes.service';
+// A.4 (F-003): dueño único del despeje. Se importa la función pura —el
+// método del servicio delega en ella con números idénticos— para no cambiar
+// el contrato mockeado del servicio en los specs (la pura se ejecuta de
+// verdad también bajo test). Sin imports de invoicing: cero ciclos.
+import { resolveLineTotals } from '../../store/taxes/utils/tax-inclusive-math.util';
 import { CheckoutDto } from './dto/checkout.dto';
 import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -1435,15 +1440,38 @@ export class CheckoutService {
               ? Number(productWithTaxes.cost_price)
               : null;
 
+        // A.4 (F-003): el total de la línea sale del dueño único.
+        // `netPrice` es el precio FINAL publicado (F-011: para inclusivo ya
+        // trae el impuesto dentro): inclusivo NO crece el total, agregado
+        // suma sobre la base neta. La línea persiste la BASE despejada
+        // (convención convergente con el cobro POS, A.3); `net_price`
+        // conserva el publicado para descuentos y visualización.
+        const lineTotals = resolveLineTotals(
+          netPrice,
+          taxInfo.taxes.map((t: any) => ({
+            rate: t.rate,
+            is_inclusive: t.is_inclusive,
+          })),
+        );
+
         return {
           ...item,
           net_price: netPrice,
+          base_unit_price: lineTotals.base,
           cost_price,
-          tax_rate: taxInfo.total_rate,
-          tax_amount_item: taxInfo.total_tax_amount,
-          total_tax: taxInfo.total_tax_amount * item.quantity,
-          total_net: netPrice * item.quantity,
-          item_taxes: taxInfo.taxes,
+          tax_rate: lineTotals.total_rate,
+          tax_amount_item: lineTotals.total_tax_amount,
+          total_tax: lineTotals.total_tax_amount * item.quantity,
+          total_net: lineTotals.base * item.quantity,
+          item_taxes: lineTotals.taxes.map((t, index) => ({
+            tax_rate_id: (taxInfo.taxes[index] as any)?.tax_rate_id ?? null,
+            name: (taxInfo.taxes[index] as any)?.name ?? '',
+            rate: t.rate,
+            amount: t.amount,
+            base: t.base,
+            tax_type: (taxInfo.taxes[index] as any)?.tax_type ?? 'iva',
+            is_inclusive: t.is_inclusive,
+          })),
           applied_price_tier_id: line.applied_price_tier_id,
           applied_price_tier_name_snapshot: line.applied_price_tier_name,
           stock_units_consumed: stockUnitsConsumed,
@@ -1555,7 +1583,7 @@ export class CheckoutService {
               ? JSON.stringify(item.product_variant.attributes)
               : null,
             quantity: item.quantity,
-            unit_price: item.net_price,
+            unit_price: item.base_unit_price,
             total_price: item.total_net,
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
@@ -1574,6 +1602,8 @@ export class CheckoutService {
                 tax_rate: t.rate,
                 tax_amount: t.amount * item.quantity,
                 tax_type: t.tax_type,
+                // A.4 (F-002): el flag viaja por fila (N filas por tasa).
+                is_inclusive: t.is_inclusive ?? false,
               })),
             },
           })),
@@ -1793,7 +1823,7 @@ export class CheckoutService {
         name: item.product.name,
         variant_sku: item.product_variant?.sku ?? null,
         quantity: item.quantity,
-        unit_price: item.net_price,
+        unit_price: item.base_unit_price,
         total_price: item.total_net,
       })),
       channel: dto.channel === 'whatsapp' ? 'whatsapp' : 'ecommerce',
@@ -2138,15 +2168,35 @@ export class CheckoutService {
               ? Number(productWithTaxes.cost_price)
               : null;
 
+        // A.4 (F-003): el total de la línea sale del dueño único (misma
+        // semántica que el checkout principal: base despejada persistida,
+        // `net_price` publicado para descuentos).
+        const lineTotals = resolveLineTotals(
+          netPrice,
+          taxInfo.taxes.map((t: any) => ({
+            rate: t.rate,
+            is_inclusive: t.is_inclusive,
+          })),
+        );
+
         return {
           ...item,
           net_price: netPrice,
+          base_unit_price: lineTotals.base,
           cost_price,
-          tax_rate: taxInfo.total_rate,
-          tax_amount_item: taxInfo.total_tax_amount,
-          total_tax: taxInfo.total_tax_amount * item.quantity,
-          total_net: netPrice * item.quantity,
-          item_taxes: taxInfo.taxes,
+          tax_rate: lineTotals.total_rate,
+          tax_amount_item: lineTotals.total_tax_amount,
+          total_tax: lineTotals.total_tax_amount * item.quantity,
+          total_net: lineTotals.base * item.quantity,
+          item_taxes: lineTotals.taxes.map((t, index) => ({
+            tax_rate_id: (taxInfo.taxes[index] as any)?.tax_rate_id ?? null,
+            name: (taxInfo.taxes[index] as any)?.name ?? '',
+            rate: t.rate,
+            amount: t.amount,
+            base: t.base,
+            tax_type: (taxInfo.taxes[index] as any)?.tax_type ?? 'iva',
+            is_inclusive: t.is_inclusive,
+          })),
           applied_price_tier_id: line.applied_price_tier_id,
           applied_price_tier_name_snapshot: line.applied_price_tier_name,
           stock_units_consumed: stockUnitsConsumed,
@@ -2288,7 +2338,7 @@ export class CheckoutService {
               ? JSON.stringify(item.product_variant.attributes)
               : null,
             quantity: item.quantity,
-            unit_price: item.net_price,
+            unit_price: item.base_unit_price,
             total_price: item.total_net,
             tax_rate: item.tax_rate,
             tax_amount_item: item.tax_amount_item,
@@ -2307,6 +2357,8 @@ export class CheckoutService {
                 tax_rate: t.rate,
                 tax_amount: t.amount * item.quantity,
                 tax_type: t.tax_type,
+                // A.4 (F-002): el flag viaja por fila (N filas por tasa).
+                is_inclusive: t.is_inclusive ?? false,
               })),
             },
           })),

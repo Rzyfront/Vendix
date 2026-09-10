@@ -1,0 +1,103 @@
+# Auditoría adversarial PERSPECTIVA 2 — Implementation
+
+Lente: archivos, orden, dependencias, código muerto, duplicación. Código leído en vivo (solo lectura).
+
+---
+
+**[H1] Severidad: Blocker — Step: A.1/A.2 — Location: `apps/backend/prisma/schema.prisma:2297` + `:2320` vs `docs/critical-plans/CP-impuesto-incluido-agregado/registry/db.md:5`**
+
+Título: Triple fuente de default — el backfill elige una, el frontend otra.
+
+Escenario concreto: el catálogo tiene DOS flags: `tax_categories.is_inclusive` (`schema.prisma:2297`) y `tax_rates.is_inclusive` (`schema.prisma:2320`). El frontend resuelve default como `cat.is_inclusive ?? cat.tax_rates[0].is_inclusive ?? false` en tres sitios (`product-create-modal.component.ts:122`, `:360-361`, `bulk-edit-field-control.component.ts:162`). El backfill del plan (`registry/db.md:5`) solo hereda desde `tax_categories.is_inclusive`. Si una categoría dice `false` pero su tasa dice `true` (o viceversa — ambos `Boolean?` nulables, sin constraint que los sincronice), el backfill persiste A y el estimado/hidratación del modal calcula con B. Producto 119.000 con IVA 19% inclusivo a nivel tasa pero agregado a nivel categoría: backfill `false` → cobra 141.610; modal muestra 119.000. El conteo de verificación de DB-01 daría verde con datos divergentes.
+
+Fix propuesto: declarar en A.1 cuál columna del catálogo es el default canónico (recomendado: categoría, y congelar/deprecar `tax_rates.is_inclusive` para ventas o sincronizarlo en el mismo backfill con regla de precedencia explícita), y cambiar la verificación de conteo por reconciliación de divergencias categoría-vs-tasa antes del `UPDATE`.
+
+---
+
+**[H2] Severidad: Major — Step: A.3 — Location: `apps/frontend/src/app/private/modules/store/products/components/product-create-modal.component.ts:262-287` vs `apps/backend/src/domains/store/taxes/taxes.service.ts:86-150`**
+
+Título: `priceWithTax` del modal vs fórmula backend quedarán duplicadas y con distinto redondeo.
+
+Escenario concreto: el modal calcula mixto como `netBase = base/(1+inclusiveRate); return base + netBase*additionalRate` (`:285-287`), sin prorrata por tasa, sin truncado DIAN, sin residuo a mayor tasa. ADR-02/A.3 exigen prorrata + residuo a mayor tasa + centavo exacto. Con inclusivo 8% + agregado 19% sobre 100.000, el modal da un escalar; el backend con prorrata+`dianAmount` (trunca, no redondea — ver `invoice-calculator.service.ts:902-917`) da ±1-2 centavos distinto. Peor: la acceptance de A.3 dice "mixto iguala el estimado del modal al centavo" — invierte la dependencia (el backend debe igualar al frontend decorativo en vez del frontend consumir la verdad).
+
+Fix propuesto: invertir la aserción — el modal es especificación de signo (no crece), no oráculo de centavos; el oráculo es `invoice-calculator.resolveTaxableBase` + `dianAmount`. En A.5 hacer que `priceWithTax` llame al contrato A.3 o a un helper compartido de despeje, y marcar el cálculo inline del modal como código a eliminar, no a conservar ("estimado existente se conserva" en A.5 perpetúa la duplicación).
+
+---
+
+**[H3] Severidad: Major — Step: A.3 — Location: `apps/backend/src/domains/store/invoicing/services/invoice-calculator.service.ts:902-999` + `invoice-flow.service.ts:2945-3031` vs `steps/A.3-impuesto-incluido-agregado.md:18`**
+
+Título: El redondeo/prorrata YA existe en factura — el plan lo reinventa en tres sitios.
+
+Escenario concreto: factura ya tiene despeje inclusivo probado y con specs (`invoice-calculator.service.spec.ts:221-339`, `line-taxes.spec.ts:146-147`): `line_is_inclusive`, `resolveTaxableBase`, `dianAmount` (truncado a 2 dec antes de gravar), `resolveInclusiveLineOverrides` (no recalcular la base al emitir, reutilizar la persistida o difiere 1 centavo y rompe FAU14). A.3 crea una segunda fórmula (`base=p/(1+r)`, `imp=p−base`, prorrata, residuo mayor tasa) en `taxes.service.ts`, `storefront-price` y `rescaleTaxInfo`, cada una con su propio redondeo (`roundMoney` en vitrina/POS vs `dianAmount` en factura). Venta inclusiva 19% sobre 119.000: resolver nuevo da base 100.000/implícito, factura trunca a 100.000/19.000 por otro camino → `HEADER_LINE_EXTENSION_MISMATCH` o diferencia de 1 centavo entre checkout y factura, exactamente el defecto que `invoice-flow.service.ts:2927-2935` documenta ("se RECIBE, no se recalcula").
+
+Fix propuesto: no escribir fórmula nueva en A.3; extraer o reutilizar `resolveTaxableBase` + `dianAmount`/`dianLineExtension` como único helper de despeje para `calculateProductTaxes`, vitrina y POS, con la misma regla de truncado. Añadir a A.3 parity-test checkout-vs-factura al centavo, no solo vitrina-vs-resolver.
+
+---
+
+**[H4] Severidad: Major — Step: A.4 — Location: `apps/backend/src/domains/store/orders/orders.service.ts:3471-3518`**
+
+Título: "Honrar el flag sin cambiar el desempate" es imposible — el ganador puede ser el flag equivocado.
+
+Escenario concreto: el segundo resolver hace `take: 1` por categoría y `break` en la primera categoría sin `orderBy` en el loop externo (`:3480-3511`, CAVEAT QUI-772 citado en el propio código). Producto con categoría A (agregada 19%) + categoría B (inclusiva 8%): el ganador lo decide Postgres. Si gana A, A.4 le suma el flag de A y cobra agregado sobre un precio que el usuario marcó inclusivo en B → cobra de más Y despeja mal. El "spec caso multi sin cambio de ganador" de A.4 congela en verde un total incorrecto conocido. Además el `select` actual no trae `is_inclusive` en ningún nivel (`:3475-3490` solo `tax_type`, `id/name/rate/is_compound/priority`) — ni siquiera está definido si el flag se lee de categoría o de tasa.
+
+Fix propuesto: o bien sacar el caso multi del "sin cambio" y definir desempate fiscal antes de A.4 (bloquea A.4), o bien alcance explícito: segundo resolver solo soporta 1 categoría / 1 tasa y multi-categoría falla ruidoso (ERR, no silent-wrong-total). En cualquier caso el `select` debe traer ambos flags con precedencia declarada.
+
+---
+
+**[H5] Severidad: Major — Step: A.3/A.4 — Location: `apps/backend/src/domains/store/payments/payments.service.ts:2671-2740` + `:2787-2803`**
+
+Título: `rescaleTaxInfo` "sin recalcular" rompe mixtos y pierde granularidad por tasa.
+
+Escenario concreto: el contrato actual de `calculateProductTaxes` no tiene campo `is_inclusive` por tasa (`taxes.service.ts:114-133`: solo `tax_rate_id/name/rate/amount/tax_type`). `rescaleTaxInfo` (`payments.service.ts:2787-2803`) hace `amount = base*rate` — fórmula exclusivamente agregada. A.3 dice "propaga el flag sin recalcular", pero sin campo por tasa no hay nada que propagar (spread de un campo inexistente). Y aunque se añada, reescalar linealmente un mixto es incorrecto: `unitBasePrice = finalUnitPrice/(1+total_rate)` (`:2731-2734`) despeja con la tasa TOTAL, mezclando inclusiva y agregada; luego reescalar cada tasa sobre esa base con `base*rate` vuelve a sumar la parte inclusiva. Línea mixta 8% incl + 19% agr: total cobrado > precio publicado.
+
+Fix propuesto: cambiar el contrato a por-tasa `{rate, amount, is_inclusive, base}` ANTES de tocar `rescaleTaxInfo` (orden interno de A.3), y definir rescale como re-despeje (reparto inclusivo + suma agregada sobre base neta), no reescalado lineal. Spec mixto a través de `buildPosOrderItem`, no solo del resolver aislado.
+
+---
+
+**[H6] Severidad: Major — Step: A.3 — Location: `apps/backend/src/domains/ecommerce/shared/services/storefront-price.service.ts:60-120` + `:196-210`**
+
+Título: A.3 viola el invariante de diseño de vitrina (síncrono, sin DB) y el tipo `taxRate: number` no puede expresar mixto.
+
+Escenario concreto: el header del servicio declara "Es SÍNCRONO y SIN acceso a base de datos por diseño" y `resolveLine` recibe un único `taxRate?: number` plano; `getTotalTaxRate` suma todas las tasas sin flags. Un `number` no distingue 8% inclusivo + 19% agregado de 27% agregado — la fórmula mixta de ADR-02 no es computable desde ese input. DB-04 dice "lectura flag anidado" en `storefront-price.service.ts:196` pero ningún caller actual pasa asignaciones (el caller pasa `taxRate` ya sumado). Sin cambiar el contrato de `StorefrontLineInput` y TODOS sus callers (catálogo, carrito, checkout), A.3 compila pero vitrina sigue sumando.
+
+Fix propuesto: incluir en A.3 el cambio de contrato (`taxRate` → desglose por tasa con flags o `taxInfo`), listar los callers a migrar, y test de paridad que construya la vitrina desde asignaciones reales, no desde un `taxRate` inyectado a mano (ese test daría verde sin probar el bug).
+
+---
+
+**[H7] Severidad: Major — Step: A.2/A.5 (orden) — Location: `apps/backend/src/domains/store/products/products.service.ts:2822-2837` + `products-bulk-edit.service.ts:408-440` + `dto/bulk-edit-products.dto.ts:69-84`**
+
+Título: El mapa bulk no cabe en `{mode, ids}` — ADD/REMOVE/REPLACE lo destruyen; preview y apply divergen.
+
+Escenario concreto: `BulkRelationalTaxActionDto` es solo `{mode, ids}`. A.5 promete "masiva incluye `inclusive?`" pero A.2 solo diseña `Record<number,boolean>` para create/update simple. Casos sin respuesta: ADD de id 5 con `inclusive=true` sobre productos que ya tienen id 5 asignado agregado — ¿sobrescribe el flag o lo ignora? REMOVE con mapa adjunto — ¿se valida o se ignora silenciosamente? REPLACE con mapa parcial (solo 1 de 2 ids) — el apply delega en `update()` por producto, que según A.2 "sin entrada rige default del catálogo" → un REPLACE masivo borra overrides por-producto y los resetea a catálogo. Además preview (`products-bulk-edit.service.ts:217-260`) y apply (`:408-440`) resuelven impuestos por separado; preview no conoce flags → FB-04 "preview == apply" falla por construcción.
+
+Fix propuesto: diseñar en A.2 (no en A.5) el DTO bulk completo: `tax_category_action: {mode, ids, tax_inclusive_map?}` con semántica por modo (ADD: soloids nuevos toman mapa, existentes conservan; REPLACE: mapa parcial = error 400, no default silencioso; REMOVE: mapa prohibido), y unificar preview/apply sobre el mismo resolvedor. Sin esto, A.5 no es implementable.
+
+---
+
+**[H8] Severidad: Minor — Step: A.2 — Location: `apps/backend/src/domains/store/products/products.service.ts:1001-1035` + `:2822-2837`**
+
+Título: `tax_inclusive_map: Record<number,boolean>` sin reglas de validación ni de reemplazo atómico.
+
+Escenario concreto: claves JSON siempre llegan como string (`{"19": true}`); `tax_category_ids=[19]` + mapa `{20: true}` (id huérfano) o mapa con id removido del producto pasan si solo se valida forma. El update hace `deleteMany` + `createMany` full-replace (`:2822-2837`): dos ediciones concurrentes del mismo producto (detalle + masiva) — la última borra los flags de la primera. GET `:2057` expone asignaciones pero el include actual en `:1180` trae `tax_categories: true` sin `tax_rates`/flags — FB-02 "GET expone is_inclusive" exige cambiar includes que A.2 no lista.
+
+Fix propuesto: especificar en A.2: coerción string→number, rechazo `PROD_TAXMAP_001` para (a) id del mapa fuera de `tax_category_ids`, (b) id inexistente/fuera de scope, (c) valor no booleano; upsert por `(product_id, tax_category_id)` en vez de delete+create; e incluir el cambio de `include` del GET en los archivos tocados.
+
+---
+
+**[H9] Severidad: Minor — Step: A.1/A.5 — Location: `apps/backend/prisma/schema.prisma:2292-2297` + `product-create-modal.component.ts:321-327,356-366`**
+
+Título: Tras ADR-01 el toggle del catálogo queda como configuración muerta que miente; el modal hidrata del sitio equivocado.
+
+Escenario concreto: ADR-01 congela asignaciones contra cambios del catálogo, pero `tax_categories.is_inclusive` sigue editable (comentario schema: "UI toggle in `app-tax-selector`") y A.5 hidrata chips desde `ta.tax_categories.is_inclusive` (`modal:323`) y desde `cat.is_inclusive ?? rate.is_inclusive` al cargar catálogo (`:360-361`), NO desde `ta.is_inclusive` (columna que aún no existe — el código actual no puede hidratarla). Tras el deploy, un admin cambia el toggle del catálogo esperando cambiar ventas (comportamiento histórico asumido), no pasa nada en ventas existentes, y el modal al reabrir muestra el default del catálogo recién cambiado en vez de la asignación congelada → "al reabrir conserva" (objetivo 2) falla exactamente en el caso que ADR-01 dice congelar. Ningún step renombra, deshabilita o re-etiqueta el toggle del catálogo como "default para futuras asignaciones".
+
+Fix propuesto: en A.5 cambiar hidratación a `ta.is_inclusive ?? ta.tax_categories.is_inclusive` (con migración de lectura), y en el mismo step re-etiquetar el admin del catálogo ("default para productos nuevos") o ponerle guard informativo. Sin esto queda código muerto con affordance viva.
+
+---
+
+**[H10] Severidad: Note — Step: A.4 — Location: `apps/backend/src/domains/store/invoicing/invoicing.service.ts:3656,3721-3725` vs `registry/db.md:11` (DB-07)**
+
+Título: DB-07 duplica herencia que factura ya implementa — falta precedencia asignación > override > catálogo.
+
+Escenario concreto: `invoicing.service.ts:3656` (`row.is_inclusive ?? row.tax_categories?.is_inclusive`) y `:3725` (`tax.is_inclusive ?? known.is_inclusive`) YA heredan línea/catálogo. DB-07 añade "hereda de la asignación" como tercera fuente sin orden total. Venta inclusiva por asignación + línea de factura con override explícito agregado (caso POS con override de precio): ¿gana asignación o línea? Si gana asignación siempre, se rompe el override que `:3721-3724` documenta como intencional.
+
+Fix propuesto: declarar precedencia en A.4: override explícito de línea > asignación de producto > catálogo/tasa, y spec del conflicto (no solo del caso feliz e2e).

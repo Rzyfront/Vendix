@@ -79,6 +79,13 @@ export type RelationalActionMode = 'add' | 'remove' | 'replace';
 export interface BulkRelationalTaxAction {
   mode: RelationalActionMode;
   ids: number[];
+  /**
+   * Flag "incluido en el precio" por impuesto, filtrado a `ids` (F-028).
+   * Espejo de `tax_category_action.inclusive?` del DTO backend (contrato A.2;
+   * deploy backend-primero, F-030). Ausente ⇒ el backend conserva el flag que
+   * cada producto ya tenga.
+   */
+  inclusive?: Record<string, boolean>;
 }
 
 export interface BulkEditableChanges {

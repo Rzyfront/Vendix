@@ -1,0 +1,59 @@
+## Hallazgos — auditoría adversarial de arquitectura (PERSPECTIVA 1: límites, acoplamiento, ownership)
+
+### 1. blocker · Step A.3 · `apps/backend/src/domains/store/payments/payments.service.ts:2734-2737` + `:2666-2673`
+**Título:** A.3 no nombra las dos líneas POS que más dinero mueven (base y catálogo asumen todo-agregado).
+**Escenario:** producto inclusivo 19% publicado a 119000 → `catalogFinalPrice = 119000 + 22610 = 141610` (`:2671-2673`); luego `unitBasePrice = finalUnitPrice / (1 + total_rate)` (`:2734-2737`) vuelve a tratar toda la tasa como agregada. Inputs: vender por POS una línea inclusiva → wrong outcome: el guard de price-override dispara contra un catálogo inflado, o el cobro persiste base e impuesto duplicados aunque `calculateProductTaxes` ya esté corregido.
+**Fix:** agregar `:2660-2740` a Resources de A.3; derivar `catalogFinalPrice = precio publicado` cuando toda la tasa es inclusiva, y despejar la base solo con la porción inclusiva (`p/(1+r_incl)`) antes de sumar la agregada.
+
+### 2. blocker · Step A.4 · `apps/backend/src/domains/store/orders/orders.service.ts:3513-3524` + `:3545-3564`
+**Título:** Remendar el segundo resolver no sirve: cardinalidad winner-takes-all vs. mixto (el resolver debería morir, no honrar el flag).
+**Escenario:** producto con cat. A inclusiva 8% + cat. B agregada 19% vendido por POS → `resolveLineTaxesForOrder` hace `break` en la primera categoría que devuelva Postgres (`:3513-3523`, sin `orderBy`) y `buildOrderItemTaxesCreate` persiste UNA sola fila con el monto del snapshot (`:3552-3564`). Inputs: mixto por canal POS→orden→`createFromOrder`→factura → wrong outcome: la tasa perdedora desaparece del desglose heredado; "honrar el flag del ganador" (plan actual) conserva la pérdida. El Non-Goal ("desempate sin cambiar") vuelve inalcanzable el acceptance "ningún canal suma encima / factura despejada" para mixtos POS.
+**Fix:** eliminar el segundo resolver y delegar en `calculateProductTaxes` (una verdad = una función), o persistir N filas `order_item_taxes` (una por tasa, cada una con su `is_inclusive`). Decisión fiscal explícita del usuario antes de A.4; "documentar" no cierra el acceptance.
+
+### 3. major · Step A.3/A.4 (ownership partido) · `apps/backend/src/domains/ecommerce/checkout/checkout.service.ts:1426-1450`, `:2129`, `:1454-1502`
+**Título:** La "fuente de la verdad" es una columna + convención, no una función: el assembly `grand_total = subtotal + total_tax` vive en otro step que el resolver.
+**Escenario:** A.3 termina en verde (resolver despeja) pero el checkout sigue ejecutando `subtotal + total_tax - discount + shipping` (`:1497-1502`) → inputs: línea inclusiva 19% a 119000 → wrong outcome: cobro de 138000 hasta que A.4 aterrice; estado intermedio roto entre steps. Agravante: la fórmula está duplicada en dos paths del mismo archivo (`:1426` normal y `:2129` segundo flujo).
+**Fix:** A.3 entrega `resolveLineTotals(precioPublicado, tasasIncl[], tasasAgr[])` en el dominio taxes como único dueño; checkout (ambos paths), POS y orders solo la consumen; A.4 pasa a ser cableado, no reimplementación.
+
+### 4. major · Step A.3 · `apps/backend/src/domains/ecommerce/shared/services/storefront-price.service.ts:120-183` + `:194-206`
+**Título:** Vitrina no puede "igualar la fórmula": contrato escalar + servicio síncrono sin DB.
+**Escenario:** `resolveLine` recibe un escalar `taxRate` y `getTotalTaxRate` (`:194-206`) suma todas las tasas sin flags; el servicio es síncrono y sin acceso a datos por diseño (`:111-115`). Inputs: producto mixto (8% incl + 19% agr) → wrong outcome: la vitrina no tiene de dónde distinguir qué porción despejar; la paridad vitrina-vs-resolver del acceptance A.3 es inexigible sin romper la firma y todos sus callers (vitrina, carrito, checkout).
+**Fix:** cambiar el input a tasas tipadas (`{rate, is_inclusive}[]`) o hacer que el resolver devuelva ambas escalas neta/bruta con desglose; listar todos los callers afectados en el Blast Radius de A.3 (hoy ausentes).
+
+### 5. major · Step A.3 + ADR-02 · `docs/critical-plans/CP-impuesto-incluido-agregado/adr/ADR-02-impuesto-incluido-agregado.md:12` vs `apps/backend/src/domains/store/invoicing/invoicing.service.ts:3219-3223` + `apps/backend/src/domains/store/invoicing/utils/dian-money.util.ts:33`
+**Título:** ADR-02 ordena "residuo a la mayor tasa" pero la factura trunca (ROUND_DOWN, Anexo DIAN 1.9 §11.2): dos criterios de centavos.
+**Escenario:** inclusivo multi-tasa cuya prorrata deja fracciones de centavo → inputs: misma línea por checkout (residuo-mayor-tasa) y por factura (truncado) → wrong outcome: diff de centavos entre total cobrado y total facturado; la matriz A.6 daría verde contra el criterio equivocado y la DIAN vería el otro.
+**Fix:** corregir ADR-02 a truncado DIAN en todos los canales (reutilizar `dian-money.util.ts`) o definir tolerancia explícita checkout-vs-factura; alinear specs A.3/A.6 con ese criterio.
+
+### 6. major · Step A.2 · `apps/backend/src/domains/store/products/products.service.ts:2822-2843` (+ `:1031-1036`)
+**Título:** Omisión destructiva: update sin mapa completo re-hereda catálogo y borra decisiones de usuario.
+**Escenario:** usuario marca cat. A=inclusiva y guarda. Luego edita solo el nombre, pero el frontend reenvía `tax_category_ids` (el modal siempre manda `val.tax_category_ids || []`) con `tax_inclusive_map` ausente o parcial → inputs: PUT con ids sin entrada de mapa → wrong outcome: A.2 ("sin mapa = default catálogo") pisa silenciosamente el `true` guardado. El backend no distingue "no toqué impuestos" de "quiero todo agregado".
+**Fix:** en update, merge por `tax_category_id`: conservar `is_inclusive` existente salvo entrada explícita en el mapa; heredar de catálogo SOLO al crear asignaciones nuevas. Spec: editar campo no-fiscal no altera ningún flag.
+
+### 7. major · Step A.5 (origen en A.2/FB-02) · `apps/frontend/src/app/private/modules/store/products/components/product-create-modal.component.ts:321-328`
+**Título:** La hidratación actual lee el flag del catálogo, exactamente lo que FB-02 prohíbe.
+**Escenario:** asignación con `is_inclusive=true` bajo un catálogo con `is_inclusive=false` → inputs: abrir el detalle tras guardar → wrong outcome: `map[ta.tax_category_id] = !!ta.tax_categories.is_inclusive` muestra "agregado" y, al guardar desde ahí, sobrescribe el valor correcto con el del catálogo (el bug reportado, reintroducido por lectura).
+**Fix:** A.5 debe reescribir ese bloque a `ta.is_inclusive` con fallback a catálogo solo si la asignación no trae flag; spec de hidratación ida-vuelta (guardar inclusivo → reabrir → chip intacto → guardar sin tocar → flag intacto).
+
+### 8. major · Step A.2/A.5 · `apps/frontend/src/app/private/modules/store/products/components/product-create-modal.component.ts:101`, `apps/frontend/src/app/private/modules/store/products/pages/product-create-page/product-create-page.component.ts:1025`, `apps/frontend/src/app/private/modules/store/products/bulk-edit/bulk-edit-field-control.component.ts:91`
+**Título:** Tres escritores frontend del mapa + dos backend, pero FB-01 solo nombra el modal (la page avanzada no está en ningún contrato).
+**Escenario:** `product-create-page` (`:1718-1721` draft, `:2286-2292` submit) y el modal mantienen `taxInclusiveMap` por separado con distinta coerción de claves JSON (string) → number e hidratación distinta → inputs: mismo producto editado por "crear avanzado" vs "modal" → wrong outcome: flags distintos según la puerta de entrada; el contrato FB-01/FB-02 no cubre la page.
+**Fix:** registrar `product-create-page` como consumidor FB-01/FB-02 o extraer un helper compartido del mapa (coerción, hidratación desde asignación, estimado); preview-vs-apply diff-0 también para la page.
+
+### 9. major · Step A.2 · `apps/backend/src/domains/store/products/products-bulk-edit.service.ts:224-238` vs `apps/backend/src/domains/store/products/products.service.ts:1006-1018`
+**Título:** Bulk-edit valida categorías sin scoping por tienda y no define precedencia ADD-vs-flag-existente.
+**Escenario 1:** `findMany({where:{id:{in}}})` sin el filtro `OR store/global` que sí tiene el create unitario → inputs: `ids` de otra tienda → wrong outcome: pasan el conteo y entran al preview con nombres ajenos. **Escenario 2:** bulk ADD con mapa `{A:false}` sobre productos donde A fue marcado `true` por-producto → wrong outcome: revierte decisiones individuales en masa y en silencio (REPLACE al menos es explícito; ADD no).
+**Fix:** replicar el filtro de scope en bulk y fijar regla en A.2 (ADD conserva flag existente salvo entrada explícita con intención documentada; REPLACE usa mapa/default); specs para ambos modos.
+
+### 10. minor · Step A.3 · `apps/backend/src/domains/store/payments/payments.service.ts:2787-2799` + `:2801-2832`
+**Título:** `buildOrderItemSnapshot` duplica el tipo del resolver en vez de importarlo: el nuevo campo morirá en el spread.
+**Escenario:** A.3 agrega `{is_inclusive, base}` al retorno de `calculateProductTaxes`; `rescaleTaxInfo` está tipado contra el retorno (bien) pero el parámetro `taxInfo` de `buildOrderItemSnapshot` (`:2822-2832`) es un inline sin esos campos → inputs: compilar A.3 → wrong outcome: error de tipos o, peor, el `...tax` del rescale se aplana a un snapshot sin flag y órdenes/factura lo pierden aguas abajo.
+**Fix:** importar el tipo del resolver (`Awaited<ReturnType<...>>` ya usado en `:2788`) en el snapshot y persistir `is_inclusive`/`base` por tasa en el snapshot de línea.
+
+### 11. minor · Step A.3/A.4 · `apps/backend/src/domains/ecommerce/checkout/checkout.service.ts:1414-1429` + modal `:262-287`
+**Título:** Checkout es net-first, el inclusivo exige gross-first; el acceptance "iguala al modal al centavo" solo vale sin ofertas/tarifas/variantes.
+**Escenario:** producto inclusivo en oferta o con tarifa/variante (`price_override`) → el modal estima sobre `base_price` del form (`:263`) pero el backend debe despejar sobre el precio final resuelto → inputs: inclusivo con `sale_price` activo → wrong outcome: diff entre estimado del modal y total cobrado aunque la fórmula sea correcta (distinta base, no distinta fórmula).
+**Fix:** acotar el acceptance a "precio base sin modificadores" y agregar spec con sale/tier/override que fije dueño: despejar siempre sobre el precio final resuelto, nunca sobre `base_price`.
+
+### 12. note · Sin step (ataques que resistieron)
+**Ciclo products↔taxes:** no existe import directo en ningún sentido (`products.service.ts` no importa el dominio taxes; `taxes.service.ts` solo usa Prisma/contexto); el puente se coordina vía tabla + DTO, sin ciclo de módulos. **Backfill cross-tenant:** cada asignación referencia una categoría exacta, así que el `IN (SELECT ... WHERE is_inclusive=true)` no fuga defaults entre tiendas. **`tax_type` en minúsculas:** el fallback `'iva'` de orders es consistente con `TaxFiscalType.IVA = 'iva'` (`dto/index.ts:40`). **Race catálogo-vs-venta:** congelado por diseño (ADR-01, herencia solo al crear); auditable y correcto para el alcance solo-producto.

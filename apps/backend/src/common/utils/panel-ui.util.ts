@@ -9,16 +9,13 @@ import { DefaultPanelUIService } from '../services/default-panel-ui.service';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 
 /**
- * Panel UI whitelist + deep-merge helpers.
+ * Panel UI shape validator + deep-merge helpers.
  *
- * Decisión B.3-(b): el catálogo del frontend (`APP_MODULES`,
- * `store-module-catalog.constant`) vive en `apps/frontend` y el backend no
- * puede importarlo cruzando el boundary de apps, y `libs/shared-types` no lo
- * expone. La única fuente de verdad backend es `DefaultPanelUIService.PANEL_UI_FALLBACK`
- * (el mapa por `app_type` que siembra defaults). La whitelist de claves se
- * deriva de ese mapa, y el desajuste con el catálogo del frontend queda
- * registrado como deuda de mantenimiento dual (backend `PANEL_UI_FALLBACK` ↔
- * frontend `APP_MODULES`).
+ * `DefaultPanelUIService.PANEL_UI_FALLBACK` es la fuente de defaults (el mapa
+ * por `app_type` que siembra valores iniciales), NO una whitelist: `panel_ui`
+ * es solo visibilidad, no autorización, así que cualquier `app_type` y
+ * cualquier clave de módulo se acepta. El validador solo exige el contrato de
+ * forma (mapa anidado por `app_type` con hojas booleanas).
  *
  * `PANEL_UI_FALLBACK` es una propiedad privada de instancia (campo con literal
  * sin tocar la base de datos), así que se accede a ella por reflexión para no
@@ -89,13 +86,16 @@ export function mergePanelUiByAppType(
 }
 
 /**
- * Validador de whitelist del shape canónico `panel_ui` anidado por `app_type`:
+ * Validador de forma del shape canónico `panel_ui` anidado por `app_type`:
  * `{ STORE_ADMIN: { pos: true }, ORG_ADMIN: { dashboard: false } }`.
  *
- * - El primer nivel debe ser un `app_type` válido y su valor un objeto (la
- *   forma plana legacy `{ pos: false }` se rechaza: el contrato es anidado).
- * - Cada clave del mapa debe existir en la whitelist derivada de
- *   `PANEL_UI_FALLBACK` para ese `app_type`.
+ * - Valor nulo/no-objeto en el nivel superior: se acepta (`@IsObject` decide
+ *   presencia); arrays se rechazan.
+ * - Cada valor por `app_type` debe ser un objeto no-array (la forma plana
+ *   legacy `{ pos: false }` se rechaza: el contrato es anidado).
+ * - Cualquier `app_type` y cualquier clave de módulo se acepta (`panel_ui`
+ *   es solo visibilidad, no autorización: sin whitelist).
+ * - Cada valor hoja debe ser booleano.
  *
  * Aplicado a `UserConfigDto.panel_ui` y `UpdateUserPanelUIDto.panel_ui`.
  */
@@ -106,14 +106,13 @@ class PanelUiWhitelistConstraint implements ValidatorConstraintInterface {
     if (Array.isArray(value)) return false;
     const panelUi = value as Record<string, unknown>;
 
-    for (const [appType, map] of Object.entries(panelUi)) {
+    for (const [, map] of Object.entries(panelUi)) {
       if (!map || typeof map !== 'object' || Array.isArray(map)) {
         // Forma plana legacy: no es el contrato anidado.
         return false;
       }
-      const allowed = getAllowedPanelUiKeys(appType);
-      for (const key of Object.keys(map as Record<string, unknown>)) {
-        if (!allowed.includes(key)) return false;
+      for (const leaf of Object.values(map as Record<string, unknown>)) {
+        if (typeof leaf !== 'boolean') return false;
       }
     }
     return true;
@@ -121,9 +120,8 @@ class PanelUiWhitelistConstraint implements ValidatorConstraintInterface {
 
   defaultMessage(_args: ValidationArguments): string {
     return (
-      `panel_ui contiene claves que no pertenecen al catálogo del panel ` +
-      `para el tipo de aplicación (claves permitidas por app_type en ` +
-      `PANEL_UI_FALLBACK).`
+      `panel_ui debe ser un objeto anidado por app_type ` +
+      `({ STORE_ADMIN: { pos: true } }) con valores hoja booleanos.`
     );
   }
 }

@@ -39,16 +39,18 @@ export class DefaultPanelUIService {
    * Configuraciones de panel UI por tipo de aplicación (FALLBACK).
    * Estas configuraciones se usan solo si la base de datos falla.
    *
-   * **CONTRATO — whitelist efectivo:** este mapa es el whitelist real que
-   * valida `PanelUiKeysWhitelist` (`apps/backend/src/common/utils/panel-ui.util.ts`).
-   * Toda clave nueva que se agregue al catálogo del frontend
-   * (`APP_MODULES` en `apps/frontend/src/app/shared/constants/app-modules.constant.ts`
-   * o `store-module-catalog.constant.ts`) DEBE agregarse también aquí, o
-   * `PATCH /store/users/management/:id/panel-ui` devolverá HTTP 400 con
-   * `SYS_VALIDATION_001` y el dueño o admin no podrá guardar la
-   * configuración del usuario (QUI-XXX, captura: "no puedo configurar los
-   * módulos"). El catalog del frontend puede ser superconjunto sin romper
-   * nada; lo que rompe es lo inverso.
+   * **CONTRATO — fuente de defaults (NO whitelist):** este mapa siembra
+   * los valores iniciales que `getUnifiedTemplate()` y el merge suave por
+   * rol rellenan cuando faltan. `PanelUiKeysWhitelist`
+   * (`apps/backend/src/common/utils/panel-ui.util.ts`) solo valida forma
+   * (mapa anidado por `app_type` con hojas booleanas): cualquier `app_type`
+   * y cualquier clave se acepta, así que una clave ausente aquí NUNCA
+   * produce HTTP 400 (`SYS_VALIDATION_001`) en
+   * `PATCH /store/users/management/:id/panel-ui`. Agregar aquí las claves
+   * nuevas del catálogo del frontend (`APP_MODULES` en
+   * `apps/frontend/src/app/shared/constants/app-modules.constant.ts` o
+   * `store-module-catalog.constant.ts`) sigue siendo buena higiene para que
+   * aparezcan por defecto, pero ya no es requisito para guardar.
    */
   private readonly PANEL_UI_FALLBACK: Record<string, Record<string, boolean>> =
     {

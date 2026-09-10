@@ -7,10 +7,15 @@
  * de grupos del panel, el template del panel sería ilegible y cada ajuste de un
  * control obligaría a releerlo entero.
  *
- * No tiene estado propio: el `FormGroup` y el conjunto de campos activados
- * viven en la página (`ProductsBulkEditPageComponent`), que es quien necesita
- * construir el payload final. Aquí solo se pinta el control y se emite el
- * toggle de activación.
+ * Casi no tiene estado propio: el `FormGroup` y el conjunto de campos
+ * activados viven en la página (`ProductsBulkEditPageComponent`), que es quien
+ * necesita construir el payload final. Aquí solo se pinta el control y se
+ * emite el toggle de activación.
+ *
+ * Excepción (F-028): el mapa inclusivo SÍ vive en el `FormGroup`, dentro del
+ * grupo `tax_category_action` bajo la clave `inclusive`. Los chips lo leen y
+ * escriben ahí para que viaje con el valor del formulario hasta
+ * `coerceBulkEditValue`; las señales locales son solo espejo de vista.
  *
  * ## Activado ≠ tiene valor
  *
@@ -31,7 +36,14 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { FormGroup, ReactiveFormsModule } from '@angular/forms';
+import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
+import {
+  BULK_TAX_INCLUSIVE_CONTROL,
+  catalogInclusiveDefault,
+  normalizeTaxInclusiveMap,
+  withoutTaxFromMap,
+  type TaxInclusiveMap,
+} from '../utils/product-tax-inclusive.util';
 
 import {
   IconComponent,
@@ -87,8 +99,11 @@ export class BulkEditFieldControlComponent {
 
   /** IDs de impuestos actualmente seleccionados (reactivo para los chips). */
   readonly selectedTaxIds = signal<number[]>([]);
-  /** Mapa local de conmutación de estado inclusivo (true = incluido, false = adicional). */
-  readonly taxInclusiveMap = signal<Record<number, boolean>>({});
+  /**
+   * Espejo de vista del control `inclusive` del FormGroup (fuente de verdad).
+   * `true` = incluido, `false` = adicional; sin entrada rige el catálogo.
+   */
+  readonly taxInclusiveMap = signal<TaxInclusiveMap>({});
 
   constructor() {
     effect(() => {
@@ -98,8 +113,46 @@ export class BulkEditFieldControlComponent {
         if (Array.isArray(current)) {
           untracked(() => this.selectedTaxIds.set(current.map(Number)));
         }
+        // F-028: el control `inclusive` se crea aquí (el builder de la página
+        // aún no lo conoce) y la señal se re-siembra desde él: al reactivar
+        // el campo tras un reset, lo stale se descarta solo.
+        const inclusive = this.ensureInclusiveControl(group);
+        if (inclusive) {
+          untracked(() =>
+            this.taxInclusiveMap.set(
+              normalizeTaxInclusiveMap(inclusive.value),
+            ),
+          );
+        }
       }
     });
+  }
+
+  /**
+   * Devuelve el control `inclusive` del grupo de la acción de impuestos,
+   * creándolo si la página aún no lo declaró. Fuente de verdad del mapa:
+   * todo toggle de chip escribe aquí para que el valor viaje con el
+   * formulario hasta `coerceBulkEditValue` (vía `coerceBulkTaxAction`).
+   */
+  private ensureInclusiveControl(
+    group: FormGroup | null,
+  ): FormControl<TaxInclusiveMap | null> | null {
+    if (!group) return null;
+    let control = group.get(
+      BULK_TAX_INCLUSIVE_CONTROL,
+    ) as FormControl<TaxInclusiveMap | null> | null;
+    if (!control) {
+      control = new FormControl<TaxInclusiveMap | null>({});
+      group.addControl(BULK_TAX_INCLUSIVE_CONTROL, control);
+    }
+    return control;
+  }
+
+  /** Escribe el mapa en el FormGroup (y espejea la señal de vista). */
+  private writeInclusiveMap(next: TaxInclusiveMap): void {
+    this.taxInclusiveMap.set(next);
+    const group = this.form().get(this.field().key) as FormGroup | null;
+    this.ensureInclusiveControl(group)?.setValue(next);
   }
 
   /** El usuario activó o desactivó el campo. */
@@ -159,7 +212,7 @@ export class BulkEditFieldControlComponent {
         const isInclusive =
           map[tax.id] !== undefined
             ? map[tax.id]
-            : !!(tax.is_inclusive ?? tax.tax_rates?.[0]?.is_inclusive ?? false);
+            : catalogInclusiveDefault(tax);
 
         return {
           id: tax.id,
@@ -174,11 +227,21 @@ export class BulkEditFieldControlComponent {
   });
 
   onTaxIdsChange(values: (string | number)[]): void {
-    this.selectedTaxIds.set(values.map(Number));
+    const next = values.map(Number);
+    this.selectedTaxIds.set(next);
+    // F-032: el mapa vive acotado a la selección; desmarcar poda la entrada
+    // (re-marcar vuelve al default del catálogo, no a un valor resucitado).
+    const allowed = new Set(next);
+    const pruned: TaxInclusiveMap = {};
+    for (const [key, value] of Object.entries(this.taxInclusiveMap())) {
+      const id = Number(key);
+      if (allowed.has(id)) pruned[id] = value;
+    }
+    this.writeInclusiveMap(pruned);
   }
 
   setTaxInclusive(taxId: number, isInclusive: boolean): void {
-    this.taxInclusiveMap.update((m) => ({ ...m, [taxId]: isInclusive }));
+    this.writeInclusiveMap({ ...this.taxInclusiveMap(), [taxId]: isInclusive });
   }
 
   removeTaxId(id: number): void {
@@ -190,6 +253,8 @@ export class BulkEditFieldControlComponent {
       idsCtrl.setValue(next);
       idsCtrl.markAsDirty();
     }
+    // F-032: quitar el impuesto borra también su entrada del mapa.
+    this.writeInclusiveMap(withoutTaxFromMap(this.taxInclusiveMap(), id));
   }
 
   /** Modo actual de la acción de impuestos para renderizado condicional del aviso. */

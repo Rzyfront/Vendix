@@ -1,0 +1,11 @@
+# Database Contract Registry
+
+| Id | Model / table | Columns | R/W | Tenant scoping | Migration | Consumers | Invariant | Verification | Status |
+|----|---------------|---------|-----|----------------|-----------|-----------|-----------|--------------|--------|
+| DB-01 | `product_tax_assignments` | `+ is_inclusive Boolean NOT NULL DEFAULT false` | W (DDL) | N/A (tabla puente; scoping vía `products.store_id`) | `20260910XXXXXX_tax_assignment_inclusive` aditiva, backfill desde `tax_categories.is_inclusive` | todos | histórico queda `false` salvo backfill de catálogo | `SELECT` conteo backfill == asignaciones con catálogo inclusivo | [ ] |
+| DB-02 | `product_tax_assignments` | `product_id, tax_category_id, is_inclusive` | W | `store_id` vía producto (validación `:1001` existente) | — (código) | `products.service.ts:1031` createMany, update `:2057`, bulk vía `update()` | cada asignación guarda el flag del mapa; sin mapa = default catálogo | spec create/update con mapa mixto | [ ] |
+| DB-03 | `product_tax_assignments → tax_categories → tax_rates` | lectura `assignment.is_inclusive + rate` | R | client con `store_id` (parámetro existente) | — | `taxes.service.ts:86` | inclusivo: `amount = p − p/(1+r)`, total NO crece; agregado: `p*r` | spec matriz incluido/agregado/mixto/0% | [ ] |
+| DB-04 | `products + product_tax_assignments` | lectura flag anidado | R | storefront por `store_id` | — | `storefront-price.service.ts:196` | misma semántica que DB-03, sin segundo cómputo divergente | paridad vitrina vs `calculateProductTaxes` | [ ] |
+| DB-05 | `product_tax_assignments` | lectura primera categoría + flag | R | vía orden/tienda | — | `orders.service.ts:3501` segundo resolver | honra flag; desempate multi-categoría SIN cambiar (documentado, no fiscal en este plan) | spec regresión 1:1 + caso multi sin cambio | [ ] |
+| DB-06 | snapshot en memoria | propaga `is_inclusive` por tasa | — | — | — | `payments.service.ts:2788 rescaleTaxInfo` | re-escalar conserva flag y semántica (no recalcular) | spec rescale con inclusivo | [ ] |
+| DB-07 | `invoice_items`, `invoice_taxes` | `is_inclusive` existente | W | vía factura/tienda | — | `invoicing.service.ts` al emitir | línea inclusiva hereda flag de la asignación y despeja base | factura e2e desde venta inclusiva | [ ] |

@@ -50,7 +50,8 @@ export class UserConfigDto {
     description:
       'UI configuration for the panel. Shape canónica anidada por app_type: ' +
       '{ STORE_ADMIN: { pos: true }, ORG_ADMIN: { dashboard: false } }. ' +
-      'Claves fuera del catálogo PANEL_UI_FALLBACK se rechazan (422).',
+      'Solo se valida forma (mapas por app_type con hojas booleanas): ' +
+      'cualquier app_type y cualquier clave se acepta.',
   })
   @IsOptional()
   @IsObject()

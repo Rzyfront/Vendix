@@ -8,6 +8,10 @@ import {
   resolveStockUnitsConsumed,
 } from '../../../store/products/services/packaging.util';
 import type { DefaultSaleUnit } from '../../../store/products/services/default-sale-unit.util';
+import {
+  resolveLineTotals,
+  type ResolvedTaxAmount,
+} from '../../../store/taxes/utils/tax-inclusive-math.util';
 
 /**
  * Producto tal como lo leen las tres superficies del storefront. Es
@@ -51,8 +55,36 @@ export interface StorefrontLineInput {
   /**
    * Omitir → 0 → `gross_unit_price === net_unit_price`. Es exactamente lo que
    * necesita el checkout, que persiste el NETO y arma el impuesto aparte.
+   *
+   * LEGACY para mixto: un escalar no distingue 8%incl+19%agr de 27%agr (F-004).
+   * Se conserva por compatibilidad; quien pueda, pase `taxRates`.
    */
   taxRate?: number;
+  /**
+   * Tasas tipadas (F-004). Opcional y SIN romper la firma: sin esto, el
+   * comportamiento es el histórico (`net × (1 + taxRate)`). Con esto, la
+   * vitrina aplica la semántica nueva (inclusivo despejado con truncado DIAN,
+   * agregado sobre base neta) y expone `tax_breakdown`.
+   *
+   * PENDING CALLERS (los migra otro agente, A.4): mientras pasen solo el
+   * escalar, esos canales siguen en semántica legacy —
+   * - catalog.service.ts: `resolvePriceForDisplay` (~:1300), bloque
+   *   `final_price` (~:1484-1518), `resolvePrice` (~:1582 + `getTotalTaxRate`
+   *   ~:1732-1758)
+   * - cart.service.ts: línea del carrito (~:756) y recálculo (~:1157)
+   * - checkout.service.ts: escala neta + `calculateProductTaxes` (~:1414 y
+   *   ~:2117; el cableado a `TaxesService.resolveLineTotals` lo hace A.4)
+   */
+  taxRates?: StorefrontTaxRateInput[];
+}
+
+/**
+ * Tasa tipada para la vitrina: fracción decimal (0.19 = 19%) + flag de
+ * incluido. `is_inclusive` ausente = agregado (cero regresión histórica).
+ */
+export interface StorefrontTaxRateInput {
+  rate: number;
+  is_inclusive?: boolean | null;
 }
 
 /**
@@ -83,6 +115,11 @@ export interface StorefrontLinePrice {
   compare_at_price: number | null;
   /** Suma de tasas del producto, en decimal (0.19 = 19%). */
   tax_rate: number;
+  /**
+   * Desglose por tasa (F-004). Solo presente cuando el caller pasó `taxRates`;
+   * `null` en el camino legacy (cero regresión).
+   */
+  tax_breakdown: ResolvedTaxAmount[] | null;
   applied_price_tier_id: number | null;
   applied_price_tier_name: string | null;
   /** Unidades de stock por paquete. `1` cuando no hay empaque. */
@@ -119,7 +156,12 @@ export class StorefrontPriceService {
 
   resolveLine(input: StorefrontLineInput): StorefrontLinePrice {
     const { product, variant, saleUnit, quantity } = input;
-    const taxRate = this.normalizeRate(input.taxRate);
+    // Camino tipado (F-004) vs legacy: el escalar sigue mandando cuando no hay
+    // `taxRates`, así ningún caller actual cambia de cifra.
+    const typedRates = this.normalizeTypedRates(input.taxRates);
+    const taxRate = typedRates
+      ? typedRates.reduce((sum, r) => sum + r.rate, 0)
+      : this.normalizeRate(input.taxRate);
 
     const resolverProduct = {
       base_price: this.toNumber(product?.base_price),
@@ -149,14 +191,23 @@ export class StorefrontPriceService {
         variant: resolverVariant,
         priceTier: saleUnit.tier,
         tierOverrides: saleUnit.overrides,
-        taxRate,
+        // En camino tipado el resolver solo resuelve el precio FINAL (F-011);
+        // el impuesto lo despeja `resolveLineTotals` abajo, no el resolver.
+        taxRate: typedRates ? 0 : taxRate,
       });
     } else {
       result = this.priceResolver.resolvePrice(
         { product: resolverProduct, variant: resolverVariant },
-        taxRate,
+        typedRates ? 0 : taxRate,
       );
     }
+
+    // Camino tipado: `result.unitPrice` es el precio FINAL publicado (F-011) y
+    // el total NO crece con lo inclusivo (ADR-02 + truncado DIAN F-005).
+    // Camino legacy (sin `taxRates`): idéntico a hoy.
+    const resolved = typedRates
+      ? resolveLineTotals(result.unitPrice, typedRates)
+      : null;
 
     // El packSize se toma del RESULTADO del resolver, no de una segunda lectura
     // de la cascada `override ?? tier ?? 1`: el resolver ya eligió la fila de
@@ -171,10 +222,13 @@ export class StorefrontPriceService {
         : null;
 
     return {
-      net_unit_price: result.unitPrice,
-      gross_unit_price: this.roundMoney(result.unitPriceWithTax),
+      net_unit_price: resolved ? resolved.base : result.unitPrice,
+      gross_unit_price: resolved
+        ? this.roundMoney(resolved.total)
+        : this.roundMoney(result.unitPriceWithTax),
       compare_at_price: result.compareAtPrice,
       tax_rate: taxRate,
+      tax_breakdown: resolved ? resolved.taxes : null,
       applied_price_tier_id: result.appliedPriceTierId ?? null,
       applied_price_tier_name: result.appliedPriceTierName ?? null,
       pack_size: packSize,
@@ -228,6 +282,21 @@ export class StorefrontPriceService {
   private normalizeRate(rate?: number): number {
     const n = Number(rate ?? 0);
     return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  /**
+   * Tasas tipadas saneadas, o `null` cuando el caller no las pasó (camino
+   * legacy). Un arreglo vacío equivale a no pasarlas: cero tasas = sin impuesto.
+   */
+  private normalizeTypedRates(
+    rates?: StorefrontTaxRateInput[] | null,
+  ): { rate: number; is_inclusive: boolean }[] | null {
+    if (rates == null) return null;
+    if (!Array.isArray(rates)) return null;
+    return rates.map((r) => ({
+      rate: this.normalizeRate(r?.rate),
+      is_inclusive: r?.is_inclusive === true,
+    }));
   }
 
   private toNumber(value: unknown): number {
