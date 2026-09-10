@@ -99,8 +99,23 @@ export const ASSIGNABLE_SYSTEM_ROLES: Record<
     'employee',
     'cashier',
     'carrier',
+    // QUI-730b — roles de operación restaurante (mesero→waiter,
+    // cocina→kitchen). Espejo exacto del backend: sin estas entradas la UI
+    // los muestra bloqueados aunque el backend sí los acepta.
+    'waiter',
+    'kitchen',
   ],
-  store: ['manager', 'supervisor', 'employee', 'cashier', 'carrier'],
+  store: [
+    'manager',
+    'supervisor',
+    'employee',
+    'cashier',
+    'carrier',
+    // QUI-730b — ver nota en `organization`: sin esto ningún restaurante
+    // puede asignar mesero/cocina desde la tienda.
+    'waiter',
+    'kitchen',
+  ],
 };
 
 /** Roles núcleo: nunca asignables desde una UI de tienda u organización. */
