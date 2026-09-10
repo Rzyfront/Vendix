@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../common/errors';
+import { AIEngineService } from '../ai-engine.service';
 
 export interface StoreEmbeddingParams {
   store_id: number;
@@ -39,6 +40,7 @@ export class EmbeddingService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly configService: ConfigService,
+    private readonly aiEngine: AIEngineService,
   ) {
     this.initializeOpenAI();
   }
@@ -59,7 +61,23 @@ export class EmbeddingService {
   }
 
   /**
+   * App key (if any) that routes generation through the AI Engine instead of
+   * the direct SDK. Resolved per call so setting/unsetting EMBEDDING_APP_KEY
+   * flips the route without a code redeploy.
+   */
+  private resolveEmbeddingAppKey(): string | null {
+    const raw =
+      this.configService.get<string>('EMBEDDING_APP_KEY') ||
+      process.env.EMBEDDING_APP_KEY;
+    const appKey = raw?.trim();
+    return appKey ? appKey : null;
+  }
+
+  /**
    * Whether embeddings can actually run in this environment.
+   *
+   * True when either route is configured: the AI Engine app route
+   * (EMBEDDING_APP_KEY set) or the direct SDK route (OPENAI_API_KEY set).
    *
    * Exposed so callers can decide not to offer a capability instead of
    * offering one that always fails: the agent picks tools from their
@@ -67,10 +85,15 @@ export class EmbeddingService {
    * would have spent on a search that works.
    */
   isAvailable(): boolean {
-    return this.openai !== null;
+    return this.resolveEmbeddingAppKey() !== null || this.openai !== null;
   }
 
   async generateEmbedding(text: string): Promise<number[]> {
+    const appKey = this.resolveEmbeddingAppKey();
+    if (appKey) {
+      return this.generateEmbeddingViaApp(appKey, text);
+    }
+
     if (!this.openai) {
       throw new VendixHttpException(
         ErrorCodes.AI_EMBED_001,
@@ -88,6 +111,43 @@ export class EmbeddingService {
     } catch (error: any) {
       this.logger.error(`Embedding generation failed: ${error.message}`);
       throw new VendixHttpException(ErrorCodes.AI_EMBED_001, error.message);
+    }
+  }
+
+  /**
+   * AI Engine route: generates through the configured application so the
+   * call gets provider config, logging, and cost tracking from ai-config.
+   * Typed engine errors (AI_APP_*, AI_CONFIG_*, AI_PROVIDER_*) propagate
+   * untouched; provider-level failures map to AI_EMBED_001. Never throws raw.
+   */
+  private async generateEmbeddingViaApp(
+    appKey: string,
+    text: string,
+  ): Promise<number[]> {
+    try {
+      const response = await this.aiEngine.runEmbedding(
+        appKey,
+        undefined,
+        text.substring(0, 8000),
+      );
+
+      if (!response.success || !response.embedding?.length) {
+        throw new VendixHttpException(
+          ErrorCodes.AI_EMBED_001,
+          response.error || 'Embedding app returned no data',
+        );
+      }
+
+      return response.embedding;
+    } catch (error: any) {
+      if (error instanceof VendixHttpException) throw error;
+      this.logger.error(
+        `Embedding generation via app failed: ${error?.message}`,
+      );
+      throw new VendixHttpException(
+        ErrorCodes.AI_EMBED_001,
+        error?.message,
+      );
     }
   }
 
