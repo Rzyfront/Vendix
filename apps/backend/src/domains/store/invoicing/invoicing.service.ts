@@ -243,6 +243,27 @@ export interface InvoiceTaxRowInput {
  */
 type DocumentLineTaxes = InvoiceTaxRowInput[][];
 
+/**
+ * ¿El documento nacido de una orden parte sus tributos por línea?
+ *
+ * Incidente factura #81 (FAU02, P0 2026-09-10): con UN solo tributo INCLUSIVO
+ * se escribía la fila agregada de cabecera sin `invoice_item_id`. El
+ * prevalidador no podía usar la base persistida y caía a la recomputación
+ * (`bruto − impuesto`), que asume extensiones en BRUTO; como los canales
+ * persisten unidades NETAS, despejaba dos veces (4629.62 → 4259.26) y la venta
+ * cobrada quedaba sin documento fiscal. Con CUALQUIER línea inclusiva se parte,
+ * para que la base persistida (la misma que suma el subtotal) sea la que valida.
+ */
+export function needsOrderLineTaxSplit(
+  distinctGroupCount: number,
+  orderLineTaxes: DocumentLineTaxes,
+): boolean {
+  if (distinctGroupCount >= 2) return true;
+  return orderLineTaxes.some((line) =>
+    line.some((t) => t.is_inclusive === true),
+  );
+}
+
 @Injectable()
 export class InvoicingService {
   private readonly logger = new Logger(InvoicingService.name);
@@ -2077,11 +2098,16 @@ export class InvoicingService {
       this.buildInvoiceTaxCreateInput(tax_item),
     );
 
-    // Mismo criterio que `create()`: sólo el documento MULTI-TRIBUTO parte sus
-    // filas por línea. Con un solo tributo el emisor ya produce el mismo XML
-    // heredándolo, así que partirlo sería ruido puro. Ver
-    // `needsPersistedLineTaxes`.
-    const split_order_line_taxes = taxGroups.size >= 2;
+    // `needsOrderLineTaxSplit`: multi-tributo O cualquier línea inclusiva.
+    // Con un solo tributo AGREGADO el emisor produce el mismo XML heredándolo;
+    // con uno INCLUSIVO, partir es obligatorio (incidente #81): la fila de
+    // cabecera no lleva `invoice_item_id`, el prevalidador no usa la base
+    // persistida y recomputa `bruto − impuesto` sobre unidades que ya son
+    // netas (doble despeje). Ver `needsPersistedLineTaxes` para create/update.
+    const split_order_line_taxes = needsOrderLineTaxSplit(
+      taxGroups.size,
+      orderLineTaxes,
+    );
 
     const invoiceDataRequest = order.invoice_data_requests?.[0];
     // El adquiriente declarado para ESTE documento sale de UNA sola fuente
