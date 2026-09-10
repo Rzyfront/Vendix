@@ -87,13 +87,20 @@ export class EmbeddingService {
    * True when either route is configured: the AI Engine app route
    * (EMBEDDING_APP_KEY set) or the direct SDK route (OPENAI_API_KEY set).
    *
+   * The silent 'product_embeddings' default does NOT count: no seed
+   * guarantees that app row in every environment, and generateEmbedding
+   * throws AI_EMBED_001 when the app is missing and no SDK is configured.
+   *
    * Exposed so callers can decide not to offer a capability instead of
    * offering one that always fails: the agent picks tools from their
    * descriptions, and a semantic search that throws burns the iteration it
    * would have spent on a search that works.
    */
   isAvailable(): boolean {
-    return this.resolveEmbeddingAppKey() !== null || this.openai !== null;
+    const raw =
+      this.configService.get<string>('EMBEDDING_APP_KEY') ||
+      process.env.EMBEDDING_APP_KEY;
+    return !!raw?.trim() || this.openai !== null;
   }
 
   async generateEmbedding(text: string): Promise<number[]> {
