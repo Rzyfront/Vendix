@@ -209,7 +209,8 @@ export class ShippingCalculatorService {
 
       if (
         isApplicable &&
-        rate.free_shipping_threshold &&
+        rate.free_shipping_threshold != null &&
+        Number(rate.free_shipping_threshold) > 0 &&
         cartTotals.totalPrice >= Number(rate.free_shipping_threshold)
       ) {
         cost = 0;
