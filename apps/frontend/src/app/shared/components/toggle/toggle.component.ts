@@ -37,20 +37,7 @@ import { FormStyleVariant } from '../../types/form.types';
       [disabled]="isDisabled()"
       (click)="onToggle()"
       [class]="buttonClasses"
-      <!--
-        FIX QUI-801 — color ligado al estado lógico del toggle, con un
-        caso aparte para deshabilitado:
-        - prendido + habilitado  → verde `--color-primary`
-        - apagado + habilitado   → rojo opaco `--color-danger`
-        - deshabilitado          → gris `--color-muted` (atenuación, no estado)
-        El estado `disabled` se separa del color de operación: solo bloquea
-        el click y agrega `cursor-not-allowed` (en `buttonClasses`); la
-        posición del knob (`translate-x-5` vs `translate-x-0`) sigue marcando
-        prendido/apagado dentro del estado habilitado.
-      -->
-      [class.bg-[var(--color-primary)]]="isOn() && !isDisabled()"
-      [class.bg-[var(--color-muted)]]="isDisabled()"
-      [class.bg-\[var\(--color-danger\)\]]="!isOn() && !isDisabled()"
+      [style.background-color]="isDisabled() ? 'var(--color-muted)' : isOn() ? 'var(--color-primary)' : 'var(--color-danger)'"
     >
       <span
         class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow ring-0 transition-transform duration-75 ease-out"
