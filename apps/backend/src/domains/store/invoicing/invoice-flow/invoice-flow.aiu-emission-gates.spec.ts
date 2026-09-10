@@ -31,6 +31,7 @@ describe('InvoiceFlowService · compuertas de emisión AIU', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     );
   }
 

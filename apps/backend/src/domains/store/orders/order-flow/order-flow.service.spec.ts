@@ -930,3 +930,89 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     ).rejects.toBeInstanceOf(InternalServerErrorException);
   });
 });
+
+describe('OrderFlowService — charge-time shipping gate (A.2 CP-facturacion-fixes)', () => {
+  const DTO: any = { store_payment_method_id: 1, payment_type: PaymentType.DIRECT };
+
+  const buildService = (probe: any) => {
+    const prismaMock: any = {
+      orders: {
+        findFirst: jest.fn().mockResolvedValue(probe),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+    return { service, prismaMock };
+  };
+
+  const physicalProbe = (over: any = {}) => ({
+    id: 1,
+    state: 'created',
+    customer_id: 5,
+    store_id: 4,
+    delivery_type: 'other',
+    shipping_method_id: null,
+    order_items: [
+      { products: { product_type: 'physical' } },
+    ],
+    ...over,
+  });
+
+  it('blocks charging a shippyless whatsapp-like order BEFORE the state claim', async () => {
+    const { service, prismaMock } = buildService(physicalProbe());
+
+    await expect(service.payOrder(1, DTO)).rejects.toMatchObject({
+      errorCode: ErrorCodes.ORD_SHIP_CHARGE_001.code,
+    });
+    // Read-only gate: the race claim was never taken.
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('lets the charge through once a method is assigned', async () => {
+    const { service, prismaMock } = buildService(
+      physicalProbe({ shipping_method_id: 9 }),
+    );
+
+    try {
+      await service.payOrder(1, DTO);
+    } catch (e: any) {
+      // Fails LATER (payment-method lookup unmocked here), never on the gate.
+      expect(e?.errorCode).not.toBe(ErrorCodes.ORD_SHIP_CHARGE_001.code);
+    }
+    expect(prismaMock.orders.updateMany).toHaveBeenCalled();
+  });
+
+  it('exempts direct_delivery and services-only carts', async () => {
+    const direct = buildService(
+      physicalProbe({ delivery_type: 'direct_delivery' }),
+    );
+    try {
+      await direct.service.payOrder(1, DTO);
+    } catch (e: any) {
+      expect(e?.errorCode).not.toBe(ErrorCodes.ORD_SHIP_CHARGE_001.code);
+    }
+    expect(direct.prismaMock.orders.updateMany).toHaveBeenCalled();
+
+    const servicesOnly = buildService(
+      physicalProbe({
+        order_items: [{ products: { product_type: 'service' } }],
+      }),
+    );
+    try {
+      await servicesOnly.service.payOrder(1, DTO);
+    } catch (e: any) {
+      expect(e?.errorCode).not.toBe(ErrorCodes.ORD_SHIP_CHARGE_001.code);
+    }
+    expect(servicesOnly.prismaMock.orders.updateMany).toHaveBeenCalled();
+  });
+});

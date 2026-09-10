@@ -2383,6 +2383,14 @@ export class CheckoutComponent implements OnInit {
       request.shipping_address_id = this.selected_address_id() ?? undefined;
     }
 
+    // A.4 CP-facturacion-fixes: una key por intento de compra. Los reintentos del
+    // MISMO intento la reutilizan (el backend devuelve la primera respuesta);
+    // un intento nuevo (tras error visible) genera otra.
+    const idempotencyKey =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
     // Wompi payment flow: create order first, then open widget.
     // En canal WhatsApp NO se abre wa.me antes del pago: el mensaje de
     // confirmación saldría con una orden aún impaga. La consulta post-pago
@@ -2392,7 +2400,7 @@ export class CheckoutComponent implements OnInit {
       this.is_submitting.set(false);
 
       this.checkout_service
-        .checkout(request, this.payment_receipt_file())
+        .checkout(request, this.payment_receipt_file(), idempotencyKey)
         .subscribe({
         next: (response) => {
           if (response.success) {
@@ -2440,7 +2448,7 @@ export class CheckoutComponent implements OnInit {
     }
 
     this.checkout_service
-      .checkout(request, this.payment_receipt_file())
+      .checkout(request, this.payment_receipt_file(), idempotencyKey)
       .subscribe({
       next: (response) => {
         if (response.success) {

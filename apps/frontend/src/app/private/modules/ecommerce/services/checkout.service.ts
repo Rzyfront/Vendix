@@ -317,6 +317,9 @@ export class CheckoutService {
   checkout(
     request: CheckoutRequest,
     file?: File | null,
+    // A.4 CP-facturacion-fixes: per-attempt key; the backend replays the first
+    // response on retry instead of creating a second order.
+    idempotencyKey?: string | null,
   ): Observable<{ success: boolean; data: CheckoutResponse }> {
     const formData = new FormData();
     formData.append('data', JSON.stringify(request));
@@ -325,10 +328,14 @@ export class CheckoutService {
     }
     // NOTE: do not set Content-Type manually — the browser sets the
     // multipart boundary automatically.
+    let headers = this.getHeaders();
+    if (idempotencyKey) {
+      headers = headers.set('Idempotency-Key', idempotencyKey);
+    }
     return this.http.post<{ success: boolean; data: CheckoutResponse }>(
       this.api_url,
       formData,
-      { headers: this.getHeaders() },
+      { headers },
     );
   }
 

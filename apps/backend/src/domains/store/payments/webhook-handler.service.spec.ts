@@ -6,6 +6,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
 import { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import { TableSessionsService } from '../tables/table-sessions.service';
+import { InvoicingService } from '../invoicing/invoicing.service';
+import { InvoiceFlowService } from '../invoicing/invoice-flow/invoice-flow.service';
 
 describe('WebhookHandlerService', () => {
   let service: WebhookHandlerService;
@@ -44,6 +46,12 @@ describe('WebhookHandlerService', () => {
       orders: {
         findUnique: jest.fn(),
         update: jest.fn(),
+      },
+      invoices: {
+        findFirst: jest.fn(),
+      },
+      table_sessions: {
+        findFirst: jest.fn().mockResolvedValue(null),
       },
       order_items: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -93,6 +101,15 @@ describe('WebhookHandlerService', () => {
         {
           provide: TableSessionsService,
           useValue: { closeSession: jest.fn() },
+        },
+        // A.3 CP-facturacion-fixes: webhook auto-send deps.
+        {
+          provide: InvoicingService,
+          useValue: { getElectronicEmissionEligibility: jest.fn() },
+        },
+        {
+          provide: InvoiceFlowService,
+          useValue: { validate: jest.fn(), send: jest.fn() },
         },
       ],
     }).compile();
@@ -273,4 +290,75 @@ describe('WebhookHandlerService', () => {
       expect(orderFlow.confirmPayment).not.toHaveBeenCalled();
     });
   });
+
+  describe('confirmOrderPaid — invoice auto-send (A.3 CP-facturacion-fixes)', () => {
+  const pendingOrder = { id: 1, state: 'pending_payment', store_id: 4 };
+
+  const setup = (over: {
+    invoice?: any;
+    eligible?: boolean;
+    sendFails?: boolean;
+  } = {}) => {
+    const { invoice = { id: 50, status: 'draft' }, eligible = true, sendFails = false } = over;
+    (prisma.orders.findUnique as jest.Mock).mockResolvedValue(pendingOrder);
+    (prisma.invoices.findFirst as jest.Mock).mockResolvedValue(invoice);
+    const invoicing = (service as any).invoicing as {
+      getElectronicEmissionEligibility: jest.Mock;
+    };
+    invoicing.getElectronicEmissionEligibility.mockResolvedValue(
+      eligible ? { eligible: true, reason: null } : { eligible: false, reason: 'area off' },
+    );
+    const flow = (service as any).invoiceFlow as {
+      validate: jest.Mock;
+      send: jest.Mock;
+    };
+    flow.validate.mockResolvedValue({ id: 50, status: 'validated' });
+    if (sendFails) {
+      flow.send.mockRejectedValue(new Error('DIAN timeout'));
+    } else {
+      flow.send.mockResolvedValue({ id: 50, status: 'sent' });
+    }
+    return { flow };
+  };
+
+  it('auto-sends the draft after payment confirmation and clears the flag', async () => {
+    const { flow } = setup();
+
+    await expect(
+      (service as any).confirmOrderPaid(1),
+    ).resolves.toBeUndefined();
+    expect(flow.validate).toHaveBeenCalledWith(50);
+    expect(flow.send).toHaveBeenCalledWith(50);
+    expect(prisma.orders.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { fiscal_alert_code: null },
+    });
+  });
+
+  it('flags the order and never throws when emission fails', async () => {
+    setup({ sendFails: true });
+
+    await expect(
+      (service as any).confirmOrderPaid(1),
+    ).resolves.toBeUndefined();
+    expect(prisma.orders.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+    });
+  });
+
+  it('skips silently when the store is not eligible (draft kept for manual send)', async () => {
+    const { flow } = setup({ eligible: false });
+
+    await expect(
+      (service as any).confirmOrderPaid(1),
+    ).resolves.toBeUndefined();
+    expect(flow.validate).not.toHaveBeenCalled();
+    expect(flow.send).not.toHaveBeenCalled();
+    expect(prisma.orders.update).not.toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+    });
+  });
+});
 });

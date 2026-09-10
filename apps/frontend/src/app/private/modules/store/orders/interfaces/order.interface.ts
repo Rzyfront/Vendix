@@ -42,6 +42,9 @@ export interface Order {
   order_number: string;
   state: OrderState;
   channel?: OrderChannel;
+  // A.3 CP-facturacion-fixes: alerta fiscal fijada por el auto-envío del webhook.
+  // null = sin alerta conocida. Viaja en el detalle (include fila completa).
+  fiscal_alert_code?: string | null;
   delivery_type?: DeliveryType;
   shipping_method_id?: number;
   shipping_rate_id?: number;

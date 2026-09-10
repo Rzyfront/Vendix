@@ -203,6 +203,15 @@ describe('InvoiceFlowService support documents', () => {
       ...overrides.technicalKeyVault,
     };
 
+    // A.1 CP-facturacion-fixes: numbering point moved to validate(). Numberless
+    // drafts get FV-numbers here; already-numbered documents must not consume.
+    const numberGenerator = {
+      generateNextNumber: jest.fn().mockResolvedValue({
+        invoice_number: 'FV-NEW-1',
+        resolution_id: 7001,
+      }),
+      ...overrides.numberGenerator,
+    };
     return {
       service: new InvoiceFlowService(
         prisma as any,
@@ -215,6 +224,7 @@ describe('InvoiceFlowService support documents', () => {
         acquirerIdentity as any,
         fiscalDocument as any,
         technicalKeyVault as any,
+        numberGenerator as any,
       ),
       prisma,
       configClient,
@@ -224,6 +234,7 @@ describe('InvoiceFlowService support documents', () => {
       fiscalLedger,
       fiscalGate,
       withholdingFlow,
+      numberGenerator,
     };
   };
 
@@ -587,6 +598,67 @@ describe('InvoiceFlowService support documents', () => {
         ).rejects.toMatchObject({ errorCode: 'INVOICING_PREVALIDATION_004' });
         expect(fuera.provider.sendSupportDocument).not.toHaveBeenCalled();
       });
+    });
+  });
+
+  describe('deferred numbering at validate (A.1 CP-facturacion-fixes)', () => {
+    const numberlessDraft = {
+      ...supportDocument,
+      invoice_type: 'sales_invoice',
+      invoice_number: null,
+      resolution_id: null,
+      status: 'draft',
+    };
+
+    it('assigns a consecutive to a numberless draft during validate', async () => {
+      const update = jest.fn().mockImplementation(async ({ data }: any) => ({
+        ...numberlessDraft,
+        ...data,
+        status: data?.status ?? numberlessDraft.status,
+      }));
+      const { service, prisma, numberGenerator } = createService({
+        prisma: {
+          invoices: {
+            findFirst: jest.fn().mockResolvedValue(numberlessDraft),
+            update,
+          },
+        },
+      });
+
+      await RequestContextService.run(requestContext, () =>
+        service.validate(100),
+      );
+
+      expect(numberGenerator.generateNextNumber).toHaveBeenCalledWith({
+        document_type: 'sales_invoice',
+        accounting_entity_id: 77,
+      });
+      expect(prisma.invoices.update).toHaveBeenCalledWith({
+        where: { id: 100 },
+        data: { invoice_number: 'FV-NEW-1', resolution_id: 7001 },
+        include: expect.anything(),
+      });
+    });
+
+    it('keeps the existing number and consumes nothing when already numbered', async () => {
+      const numbered = { ...numberlessDraft, invoice_number: 'FV-55' };
+      const { service, numberGenerator } = createService({
+        prisma: {
+          invoices: {
+            findFirst: jest.fn().mockResolvedValue(numbered),
+            update: jest.fn().mockImplementation(async ({ data }: any) => ({
+              ...numbered,
+              ...data,
+            })),
+          },
+        },
+      });
+
+      await RequestContextService.run(requestContext, () =>
+        service.validate(100),
+      );
+
+      expect(numberGenerator.generateNextNumber).not.toHaveBeenCalled();
     });
   });
 });

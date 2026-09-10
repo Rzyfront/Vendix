@@ -57,6 +57,7 @@ import type {
   AiuTaxableBasis,
 } from '../profiles/invoice-profile-config.contract';
 import { InvoiceProviderResolver } from '../providers/invoice-provider-resolver.service';
+import { InvoiceNumberGenerator } from '../utils/invoice-number-generator';
 import { InvoiceRetryQueueService } from '../services/invoice-retry-queue.service';
 import { FiscalTransmissionLedgerService } from '../services/fiscal-transmission-ledger.service';
 import {
@@ -134,7 +135,8 @@ export type EmitReadinessReport = Omit<
 > &
   EmitReadinessVerdict & {
   invoice_id: number;
-  invoice_number: string;
+  // A.1: numberless drafts exist — readiness over an unvalidated draft reports null.
+  invoice_number: string | null;
   status: string;
   /**
    * Las transiciones legales desde el estado actual — lo mismo que aplica
@@ -491,6 +493,7 @@ export class InvoiceFlowService {
     private readonly acquirerIdentity: CustomerFiscalIdentityValidator,
     private readonly fiscalDocument: FiscalDocumentValidator,
     private readonly technicalKeyVault: TechnicalKeyVaultService,
+    private readonly invoice_number_generator: InvoiceNumberGenerator,
   ) {}
 
   /**
@@ -1220,7 +1223,7 @@ export class InvoiceFlowService {
   }
 
   async validate(id: number) {
-    const invoice = await this.getInvoice(id);
+    let invoice = await this.getInvoice(id);
     this.validateTransition(invoice.status, 'validated');
     await this.assertFiscalPeriodOpen(
       invoice.accounting_entity_id,
@@ -1265,6 +1268,36 @@ export class InvoiceFlowService {
     for (const warning of identity.warnings) {
       this.logger.warn(
         `Invoice #${id} — ${warning.code} (${warning.field}): ${warning.problem}`,
+      );
+    }
+
+    // A.1 CP-facturacion-fixes — THE numbering point. Numberless drafts (automatic
+    // order-driven creation) get their consecutive HERE: after the cheap gates
+    // (period, lines, identity) and before fiscal prevalidation, which measures the
+    // range against the number. Already-numbered documents (manual create, re-validate)
+    // keep theirs. Abandoned drafts never reach this line, so they burn nothing.
+    if (!invoice.invoice_number) {
+      // Same mapping as `InvoicingService.toFiscalDocumentType` (kept local to
+      // avoid a service cycle): numberless drafts are order-driven sales invoices,
+      // but the line must stay correct if another type ever arrives numberless.
+      const document_type =
+        invoice.invoice_type === 'purchase_invoice'
+          ? 'support_document'
+          : invoice.invoice_type === 'export_invoice'
+            ? 'sales_invoice'
+            : invoice.invoice_type;
+      const { invoice_number, resolution_id } =
+        await this.invoice_number_generator.generateNextNumber({
+          document_type,
+          accounting_entity_id: invoice.accounting_entity_id,
+        });
+      invoice = await this.prisma.invoices.update({
+        where: { id },
+        data: { invoice_number, resolution_id },
+        include: INVOICE_INCLUDE,
+      });
+      this.logger.log(
+        `Invoice #${id} numbered ${invoice_number} at validate (A.1 deferred numbering)`,
       );
     }
 

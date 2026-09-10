@@ -523,6 +523,13 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Wallet payment requires an authenticated customer',
   },
+  // A.4 CP-facturacion-fixes: second submit while the first is still processing.
+  // 409 (not 200-with-old-data): the client must retry, not assume success.
+  ECOM_CHECKOUT_006: {
+    code: 'ECOM_CHECKOUT_006',
+    httpStatus: 409,
+    devMessage: 'Checkout already in progress for this Idempotency-Key, retry shortly',
+  },
   ECOM_ACCOUNT_001: {
     code: 'ECOM_ACCOUNT_001',
     httpStatus: 404,
@@ -1073,6 +1080,14 @@ export const ErrorCodes = {
     code: 'ORD_SHIP_RATE_MISMATCH_001',
     httpStatus: 400,
     devMessage: 'Shipping rate does not belong to the selected method',
+  },
+  // A.2 CP-facturacion-fixes: charging a physical order without shipping method.
+  // Creation (whatsapp/assisted) stays open by design — the gate lives here, at charge time.
+  ORD_SHIP_CHARGE_001: {
+    code: 'ORD_SHIP_CHARGE_001',
+    httpStatus: 422,
+    devMessage:
+      'Shipping method is required to charge this order: assign it first (Elige el método de envío antes de cobrar)',
   },
   // Impresión masiva (QUI-599). El bulk print es tolerante por diseño: omite
   // las órdenes no imprimibles y sigue con el resto. Este código solo se lanza
