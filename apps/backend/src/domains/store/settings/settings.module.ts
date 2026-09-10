@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { SettingsService } from './settings.service';
 import { SettingsController } from './settings.controller';
 import { FiscalStatusController } from './fiscal-status.controller';
@@ -16,9 +16,10 @@ import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 
 @Module({
   // QUI-560 — `SettingsService` consulta las sesiones de caja abiertas para
-  // bloquear el apagado del módulo. `CashRegistersModule` solo importa
-  // `PrismaModule` y `ResponseModule`, así que no hay ciclo.
-  imports: [PrismaModule, AuditModule, EmailModule, CashRegistersModule],
+  // bloquear el apagado del módulo. forwardRef en ambas direcciones porque
+  // QUI-784 agregó la dependencia inversa (sessions→settings vía token) y
+  // CashRegistersModule ahora importa SettingsModule para proveer el token.
+  imports: [PrismaModule, AuditModule, EmailModule, forwardRef(() => CashRegistersModule)],
   controllers: [
     SettingsController,
     FiscalStatusController,

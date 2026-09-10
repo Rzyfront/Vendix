@@ -4,6 +4,8 @@ import {
   NotFoundException,
   BadRequestException,
   Logger,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
@@ -111,6 +113,7 @@ export class SettingsService {
     private auditService: AuditService,
     private migrator: SettingsMigratorService,
     private fiscalScope: FiscalScopeService,
+    @Inject(forwardRef(() => SessionsService))
     private sessionsService: SessionsService,
     private pwaCache: PwaCacheService,
   ) {}
