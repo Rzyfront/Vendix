@@ -340,6 +340,12 @@ export interface MenuItemProduct {
   name: string;
   slug: string;
   base_price: number;
+  /**
+   * Precio final con impuesto, resuelto por el backend (contrato
+   * feat/global-final-prices). Opcional hasta que el endpoint de cartas lo
+   * publique; los consumidores usan `??` fallback a sale/base.
+   */
+  final_price?: number | null;
   sale_price: number | null;
   is_on_sale: boolean;
   is_combo: boolean;
