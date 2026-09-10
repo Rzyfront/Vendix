@@ -13,6 +13,11 @@ import {
   TaxFiscalType,
 } from './dto';
 import { RequestContextService } from '@common/context/request-context.service';
+import {
+  resolveLineTotals as resolveLineTotalsPure,
+  type ResolvedLineTotals,
+  type TaxRateForResolution,
+} from './utils/tax-inclusive-math.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   FiscalScopeService,
@@ -58,7 +63,14 @@ export class TaxesService {
 
   /**
    * Calculates taxes for a product based on its assignments.
-   * Logic: Sums all tax rates from assigned categories.
+   *
+   * Semántica (A.3 / ADR-02 + F-005): `basePrice` es el precio FINAL ya
+   * resuelto (sale/tier/override, F-011) — nunca `base_price` crudo. Lo
+   * inclusivo NO crece el total: se despeja `B = G / (1 + Σ r_incl)` con
+   * truncado DIAN (misma matemática que invoice-calculator.resolveTaxableBase,
+   * ver `utils/tax-inclusive-math.util.ts`); lo agregado suma sobre la base
+   * neta. Agregado puro = fórmula idéntica a la histórica salvo el truncado a
+   * centavos que exige F-005 (solo difiere en fracciones de centavo).
    *
    * `options.client` permite pasar el cliente de una transacción en curso. Sin
    * él, la consulta sale por `this.prisma`, o sea por OTRA conexión del pool:
@@ -113,13 +125,12 @@ export class TaxesService {
       },
     });
 
-    let totalRate = 0;
-    const taxes: {
+    const rows: {
       tax_rate_id: number;
       name: string;
       rate: number;
-      amount: number;
       tax_type: TaxFiscalType;
+      is_inclusive: boolean;
     }[] = [];
 
     for (const assignment of assignments) {
@@ -129,26 +140,57 @@ export class TaxesService {
         const taxType =
           (assignment.tax_categories.tax_type as TaxFiscalType | null) ??
           TaxFiscalType.IVA;
+        // Verdad por asignación (ADR-01): la fila de `product_tax_assignments`
+        // manda; la tasa aporta el default canónico (categoría→tasa→false,
+        // F-012) cuando la asignación no lo trae.
+        const assignmentInclusive =
+          (assignment as { is_inclusive?: boolean | null }).is_inclusive ??
+          undefined;
         for (const rate of assignment.tax_categories.tax_rates) {
           const rateVal = Number(rate.rate);
-          const amount = basePrice * rateVal;
-          totalRate += rateVal;
-          taxes.push({
+          const rateInclusive =
+            (rate as { is_inclusive?: boolean | null }).is_inclusive ?? false;
+          rows.push({
             tax_rate_id: rate.id,
             name: rate.name,
-            rate: rateVal,
-            amount,
+            rate: Number.isFinite(rateVal) && rateVal > 0 ? rateVal : 0,
             tax_type: taxType,
+            is_inclusive: assignmentInclusive ?? rateInclusive,
           });
         }
       }
     }
 
+    // Dueño único del despeje (F-003): la misma función pura que consumen
+    // POS/vitrina/checkout/orders, así ningún canal reimplementa la fórmula.
+    const resolved = this.resolveLineTotals(basePrice, rows);
+
+    const taxes = rows.map((row, index) => ({
+      ...row,
+      amount: resolved.taxes[index].amount,
+      base: resolved.taxes[index].base,
+    }));
+
     return {
-      total_rate: totalRate,
-      total_tax_amount: basePrice * totalRate,
+      total_rate: resolved.total_rate,
+      total_tax_amount: resolved.total_tax_amount,
+      base: resolved.base,
+      total: resolved.total,
       taxes,
     };
+  }
+
+  /**
+   * Dueño único del despeje por línea (F-003): checkout/POS/orders consumen
+   * ESTA función en vez de reimplementar subtotal+impuesto. Síncrona y pura
+   * por delegación (sin DB): `finalPrice` es el precio FINAL resuelto
+   * (sale/tier/override, F-011), `rates` las tasas con su flag.
+   */
+  resolveLineTotals(
+    finalPrice: number,
+    rates: TaxRateForResolution[],
+  ): ResolvedLineTotals {
+    return resolveLineTotalsPure(finalPrice, rates);
   }
 
   async create(createTaxCategoryDto: CreateTaxCategoryDto, user: any) {

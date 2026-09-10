@@ -2663,14 +2663,17 @@ export class PaymentsService {
     // `base-prisma.service.ts:43`), o sea SIN el scoping de la extensión, así que
     // el filtro de tenant que `product_tax_assignments` traía automáticamente hay
     // que escribirlo a mano.
+    // `catalogUnitPrice` es el precio FINAL resuelto (tarifa/sale/override,
+    // F-011): `calculateProductTaxes` despeja SOBRE ÉL, nunca sobre base cruda.
     const catalogTaxInfo = await this.taxes_service.calculateProductTaxes(
       product.id,
       catalogUnitPrice,
       { client: tx, store_id: dtoStoreId },
     );
-    const catalogFinalPrice = this.roundMoney(
-      catalogUnitPrice + catalogTaxInfo.total_tax_amount,
-    );
+    // F-001: el precio publicado YA contiene lo inclusivo — el total NO crece.
+    // Con todo inclusivo, `total === catalogUnitPrice` (119000, no 141610); lo
+    // agregado sí suma encima vía el resolver.
+    const catalogFinalPrice = this.roundMoney(catalogTaxInfo.total);
 
     /**
      * QUI-648 — precio por N unidades de stock en el cobro POS.
@@ -2731,13 +2734,12 @@ export class PaymentsService {
       this.requireActivePermission(user, 'store:pos:price_override');
     }
 
-    const unitBasePrice =
-      catalogTaxInfo.total_rate > 0
-        ? finalUnitPrice / (1 + catalogTaxInfo.total_rate)
-        : finalUnitPrice;
-    // Misma tasa, otra base gravable: se reescala en memoria en vez de volver a
-    // consultar el mismo `product_id` (ver `rescaleTaxInfo`).
-    const taxInfo = this.rescaleTaxInfo(catalogTaxInfo, unitBasePrice);
+    // F-001/F-016: se despeja SOLO la porción inclusiva sobre el precio FINAL
+    // cobrado (`finalUnitPrice`, F-011), y el desglose se RE-DESPEJA por tasa —
+    // nunca reescalado lineal (eso volvería a sumar lo inclusivo en mixto).
+    // Sin override, el re-despeje reproduce `catalogTaxInfo` por construcción.
+    const taxInfo = this.rescaleTaxInfo(catalogTaxInfo, finalUnitPrice);
+    const unitBasePrice = taxInfo.base;
     // Snapshot de costo de venta. La prioridad variante > producto > null vive en
     // `pickCostPrice` (único dueño de la regla); aquí se aplica sobre las filas
     // que esta función ya cargó, así que no cuesta ninguna consulta.
@@ -2770,30 +2772,47 @@ export class PaymentsService {
   }
 
   /**
-   * Reescala un desglose de impuestos ya resuelto sobre otra base gravable.
+   * Re-despeja un desglose de impuestos ya resuelto sobre el precio FINAL
+   * cobrado (F-016): NO es un reescalado lineal.
    *
-   * `TaxesService.calculateProductTaxes` lee la tasa de la DB (un `findMany`
-   * con `include` anidado de dos niveles sobre `product_tax_assignments` →
-   * `tax_categories` → `tax_rates`) y después solo multiplica: `total_rate` no
-   * depende del `basePrice`, y cada `amount` es `basePrice * rate`. Pedir el
-   * mismo `product_id` otra vez para una base distinta era, por eso, una
-   * consulta redundante — y una que sale por `this.prisma` (otra conexión del
-   * pool) mientras la transacción del cobro sostiene locks. Dos de esas por
-   * ítem fue una de las causas medidas del P2028.
+   * El reescalado lineal (`base × rate` por tasa) conserva el `amount` con base
+   * cambiada — imposible en mixto — y vuelve a sumar lo inclusivo. Acá cada
+   * tasa se re-despeja con `TaxesService.resolveLineTotals` (dueño único,
+   * F-003): misma matemática + truncado DIAN que factura (F-005/F-014).
+   *
+   * Sigue sin tocar la DB: `TaxesService.calculateProductTaxes` lee la tasa
+   * con un `findMany` con `include` anidado de dos niveles sobre
+   * `product_tax_assignments` → `tax_categories` → `tax_rates`, y pedir el
+   * mismo `product_id` otra vez era una consulta redundante que sale por
+   * `this.prisma` (otra conexión del pool) mientras la transacción del cobro
+   * sostiene locks. Dos de esas por ítem fue una de las causas medidas del
+   * P2028. Las tasas (con su flag) se reutilizan de `source`; solo cambia el
+   * precio sobre el que se despeja.
    *
    * El tipo se deriva del propio servicio: si su contrato cambia, esto falla en
    * compilación en vez de divergir en silencio.
    */
   private rescaleTaxInfo(
     source: Awaited<ReturnType<TaxesService['calculateProductTaxes']>>,
-    basePrice: number,
+    finalPrice: number,
   ): Awaited<ReturnType<TaxesService['calculateProductTaxes']>> {
+    const resolved = this.taxes_service.resolveLineTotals(
+      finalPrice,
+      source.taxes.map((tax) => ({
+        rate: tax.rate,
+        is_inclusive: tax.is_inclusive,
+      })),
+    );
     return {
-      total_rate: source.total_rate,
-      total_tax_amount: basePrice * source.total_rate,
-      taxes: source.taxes.map((tax) => ({
+      total_rate: resolved.total_rate,
+      total_tax_amount: resolved.total_tax_amount,
+      base: resolved.base,
+      total: resolved.total,
+      taxes: source.taxes.map((tax, index) => ({
         ...tax,
-        amount: basePrice * tax.rate,
+        is_inclusive: resolved.taxes[index].is_inclusive,
+        base: resolved.taxes[index].base,
+        amount: resolved.taxes[index].amount,
       })),
     };
   }
@@ -2819,17 +2838,30 @@ export class PaymentsService {
     priceUnitQuantity?: number;
     unitBasePrice: number;
     finalUnitPrice: number;
-    taxInfo: {
-      total_rate: number;
-      total_tax_amount: number;
-      taxes: {
-        tax_rate_id: number;
-        name: string;
-        rate: number;
-        amount: number;
-        tax_type?: string;
-      }[];
-    };
+    /**
+     * F-010: el desglose viaja con el tipo del resolver
+     * (`Awaited<ReturnType<TaxesService['calculateProductTaxes']>>`: por tasa
+     * `{is_inclusive, base, ...}`). La segunda rama es el camino legacy de
+     * ítems custom (`calculateTaxCategoryTaxes`, sin flag): lo tolera hasta
+     * que ese camino lea `is_inclusive` de su categoría. La `base` por tasa
+     * viaja en memoria — `order_item_taxes` no tiene columna de base (solo
+     * `is_inclusive`), así que en el snapshot persiste el flag, no la base.
+     */
+    taxInfo:
+      | Awaited<ReturnType<TaxesService['calculateProductTaxes']>>
+      | {
+          total_rate: number;
+          total_tax_amount: number;
+          taxes: {
+            tax_rate_id: number;
+            name: string;
+            rate: number;
+            amount: number;
+            tax_type?: string;
+            is_inclusive?: boolean;
+            base?: number;
+          }[];
+        };
     costPrice: number | null;
     catalogUnitPrice: number | null;
     catalogFinalPrice: number | null;
@@ -2930,6 +2962,9 @@ export class PaymentsService {
           tax_amount: this.roundMoney(tax.amount * params.lineUnits),
           tax_type: tax.tax_type ?? 'iva',
           is_compound: false,
+          // F-010: el flag viaja al snapshot (UNA fila por tasa, decisión
+          // N-filas F-002). Histórico y camino custom = FALSE.
+          is_inclusive: tax.is_inclusive ?? false,
         })),
       };
     }
