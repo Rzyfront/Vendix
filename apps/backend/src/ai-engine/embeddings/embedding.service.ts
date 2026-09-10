@@ -64,16 +64,21 @@ export class EmbeddingService {
   }
 
   /**
-   * App key (if any) that routes generation through the AI Engine instead of
-   * the direct SDK. Resolved per call so setting/unsetting EMBEDDING_APP_KEY
-   * flips the route without a code redeploy.
+   * App key that routes generation through the AI Engine instead of the
+   * direct SDK. Convention matches every other caller (hardcoded key like
+   * 'rut_scanner' or 'chat_assistant'); EMBEDDING_APP_KEY only overrides it
+   * when a second embedding app must be targeted without a redeploy.
    */
+  private static readonly DEFAULT_EMBEDDING_APP_KEY = 'product_embeddings';
+
   private resolveEmbeddingAppKey(): string | null {
     const raw =
       this.configService.get<string>('EMBEDDING_APP_KEY') ||
       process.env.EMBEDDING_APP_KEY;
     const appKey = raw?.trim();
-    return appKey ? appKey : null;
+    return (
+      appKey || EmbeddingService.DEFAULT_EMBEDDING_APP_KEY
+    );
   }
 
   /**
@@ -94,9 +99,26 @@ export class EmbeddingService {
   async generateEmbedding(text: string): Promise<number[]> {
     const appKey = this.resolveEmbeddingAppKey();
     if (appKey) {
-      return this.generateEmbeddingViaApp(appKey, text);
+      try {
+        return await this.generateEmbeddingViaApp(appKey, text);
+      } catch (error: any) {
+        // The app row may not exist in every environment (dev without panel
+        // setup). Resolution errors fall back to the direct SDK when it is
+        // configured; anything else propagates untouched.
+        if (this.openai && this.isAppResolutionError(error)) {
+          this.logger.warn(
+            `Embedding app '${appKey}' unusable (${error?.errorCode}); falling back to direct SDK`,
+          );
+          return this.generateEmbeddingDirect(text);
+        }
+        throw error;
+      }
     }
 
+    return this.generateEmbeddingDirect(text);
+  }
+
+  private async generateEmbeddingDirect(text: string): Promise<number[]> {
     if (!this.openai) {
       throw new VendixHttpException(
         ErrorCodes.AI_EMBED_001,
@@ -117,11 +139,23 @@ export class EmbeddingService {
     }
   }
 
+  private isAppResolutionError(error: any): boolean {
+    const code = error?.errorCode;
+    return (
+      code === ErrorCodes.AI_APP_001.code ||
+      code === ErrorCodes.AI_APP_003.code ||
+      code === ErrorCodes.AI_APP_004.code ||
+      code === ErrorCodes.AI_CONFIG_001.code ||
+      code === ErrorCodes.AI_PROVIDER_002.code
+    );
+  }
+
   /**
    * AI Engine route: generates through the configured application so the
    * call gets provider config, logging, and cost tracking from ai-config.
-   * Typed engine errors (AI_APP_*, AI_CONFIG_*, AI_PROVIDER_*) propagate
-   * untouched; provider-level failures map to AI_EMBED_001. Never throws raw.
+   * App/config resolution errors are rethrown typed so the caller can fall
+   * back to the direct SDK; provider-level failures map to AI_EMBED_001.
+   * Never throws raw.
    */
   private async generateEmbeddingViaApp(
     appKey: string,

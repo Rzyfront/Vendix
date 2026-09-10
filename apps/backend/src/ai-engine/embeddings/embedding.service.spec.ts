@@ -66,24 +66,43 @@ describe('EmbeddingService routing (EMBEDDING_APP_KEY vs direct SDK)', () => {
     expect(input).toHaveLength(8000);
   });
 
-  it('uses the direct SDK path when no app key is configured', async () => {
+  it('routes through the default product_embeddings app when no env key is set', async () => {
+    const { service, aiEngine } = buildService(null);
+    aiEngine.runEmbedding.mockResolvedValue({
+      success: true,
+      embedding: EMBEDDING,
+    });
+
+    const result = await service.generateEmbedding('hello world');
+
+    expect(result).toEqual(EMBEDDING);
+    expect(aiEngine.runEmbedding).toHaveBeenCalledWith(
+      'product_embeddings',
+      undefined,
+      'hello world',
+    );
+  });
+
+  it('falls back to the direct SDK when the app is missing and SDK is configured', async () => {
     const { service, aiEngine } = buildService(null);
     const create = jest.fn().mockResolvedValue({
       data: [{ embedding: EMBEDDING }],
     });
     (service as any).openai = { embeddings: { create } };
+    aiEngine.runEmbedding.mockRejectedValue(
+      new VendixHttpException(ErrorCodes.AI_APP_001),
+    );
 
     const result = await service.generateEmbedding('hello world');
 
     expect(result).toEqual(EMBEDDING);
-    expect(aiEngine.runEmbedding).not.toHaveBeenCalled();
     expect(create).toHaveBeenCalledWith({
       model: 'text-embedding-3-small',
       input: 'hello world',
     });
   });
 
-  it('throws AI_EMBED_001 when neither route is configured', async () => {
+  it('throws AI_EMBED_001 when the app fails and no SDK is configured', async () => {
     const { service } = buildService(null);
     (service as any).openai = null;
 
