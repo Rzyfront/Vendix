@@ -23,6 +23,7 @@ import {
   validateTaxInclusiveMap,
 } from './dto';
 import { Prisma } from '@prisma/client';
+import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
 import { generateSlug } from '@common/utils/slug.util';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import {
@@ -4744,20 +4745,26 @@ export class ProductsService {
         ? Number(product.sale_price)
         : Number(product.base_price);
 
-    let totalTaxRate = 0;
-
+    // Fuente de la verdad (F-004): tasas tipadas por asignación con
+    // precedencia canónica F-012. Sin asignaciones, resolveLineTotals
+    // devuelve el precio intacto (cero regresión histórica).
+    const rates: { rate: number; is_inclusive: boolean }[] = [];
     if (product.product_tax_assignments) {
       for (const assignment of product.product_tax_assignments) {
+        const flag =
+          assignment?.is_inclusive ??
+          assignment?.tax_categories?.is_inclusive ??
+          assignment?.tax_categories?.tax_rates?.[0]?.is_inclusive ??
+          false;
         if (assignment.tax_categories?.tax_rates) {
           for (const tax of assignment.tax_categories.tax_rates) {
-            totalTaxRate += Number(tax.rate);
+            rates.push({ rate: Number(tax.rate), is_inclusive: !!flag });
           }
         }
       }
     }
 
-    const finalPrice = basePrice * (1 + totalTaxRate);
-    return Math.round(finalPrice * 100) / 100;
+    return resolveLineTotals(basePrice, rates).total;
   }
 
   private async resolvePosScope(): Promise<ResolvedInventoryScope> {

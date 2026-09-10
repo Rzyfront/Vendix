@@ -754,6 +754,7 @@ export class CartService {
       variant: variant ?? null,
       saleUnit: saleUnit ?? null,
       taxRate: this.storefrontPrice.getTotalTaxRate(product),
+      taxRates: this.storefrontPrice.getTypedTaxRates(product),
     }).gross_unit_price;
   }
 
@@ -1155,6 +1156,7 @@ export class CartService {
             saleUnit,
             quantity: item.quantity,
             taxRate: this.storefrontPrice.getTotalTaxRate(product),
+            taxRates: this.storefrontPrice.getTypedTaxRates(product),
           });
           return {
             product_id: item.product_id,
