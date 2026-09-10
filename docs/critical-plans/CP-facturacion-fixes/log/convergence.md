@@ -22,3 +22,4 @@
 
 | Round | Date | Blockers | Majors | Minors | New steps filed | Findings | Outcome |
 |-------|------|----------|--------|--------|-----------------|----------|---------|
+| 1 | 2026-09-10 | 0 | 0 | 0 | 0 | lead adversarial pass: readiness null-safe (copy fixed), events invariant holds, auto-send race covered, pre-existing failures verified on base | clean; round 2 + fleet + 80% review pending before merge |
