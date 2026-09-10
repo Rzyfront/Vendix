@@ -55,11 +55,13 @@
                 item.variant?.price_override !== undefined
               ) {
                 <span class="price">{{
-                  item.variant!.price_override | currency
+                  item.variant!.final_price ?? item.variant!.price_override
+                    | currency
                 }}</span>
               } @else {
                 <span class="price">{{
-                  item.product.base_price | currency
+                  item.product.final_price ?? item.product.base_price
+                    | currency
                 }}</span>
               }
             </div>

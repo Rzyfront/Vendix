@@ -76,7 +76,7 @@
                 <span class="type">{{ row.product_type }}</span>
               }
               <span class="price">
-                {{ +(row.base_price ?? 0) | currency }}
+                {{ rowDisplayPrice(row) | currency }}
               </span>
             </div>
           </div>
@@ -125,7 +125,8 @@
                     [attr.title]="variantLabel(variant)"
                     (click)="selectVariant(row, variant.id)"
                   >
-                    {{ variantLabel(variant) }}
+                    {{ variantLabel(variant) }} ·
+                    {{ variantFinalPrice(variant, row) | currency }}
                   </button>
                 }
               </div>

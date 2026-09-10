@@ -119,7 +119,7 @@
                 }
                 @if (!isItemCancelled(item)) {
                   <span class="item-meta"
-                    >{{ item.quantity }} × {{ item.unit_price | currency }}</span
+                    >{{ item.quantity }} × {{ item.final_unit_price ?? item.unit_price | currency }}</span
                   >
                 }
                 @if (
@@ -131,7 +131,7 @@
                 }
               </div>
               @if (!isItemCancelled(item)) {
-                <span class="item-total">{{ item.total_price | currency }}</span>
+                <span class="item-total">{{ item.final_total_price ?? item.total_price | currency }}</span>
               }
             </div>
           }

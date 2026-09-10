@@ -474,7 +474,7 @@
                              de alto a cada fila. -->
                         @if (item.quantity > 1) {
                           <span class="item-meta">
-                            {{ item.quantity }} × {{ +item.unit_price | currency }}
+                            {{ item.quantity }} × {{ +(item.final_unit_price ?? item.unit_price) | currency }}
                           </span>
                         }
                       </div>
@@ -533,7 +533,7 @@
 
                       <!-- Money column -->
                       <div class="item-money">
-                        {{ +item.total_price | currency }}
+                        {{ +(item.final_total_price ?? item.total_price) | currency }}
                       </div>
 
                       <!-- Actions -->

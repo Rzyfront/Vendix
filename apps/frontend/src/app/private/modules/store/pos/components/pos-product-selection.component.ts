@@ -1202,7 +1202,8 @@ export class PosProductSelectionComponent {
       product.pricing_type === 'weight' && this.scaleEnabled();
     if (isWeightProduct) {
       const unit = this.defaultWeightUnit();
-      const variantPrice = variant.price_override ?? product.final_price;
+      const variantPrice =
+        variant.final_price ?? variant.price_override ?? product.final_price;
       const weight = await this.getWeightFromScaleOrManual(
         product.name,
         variantPrice,

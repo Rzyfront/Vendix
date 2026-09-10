@@ -13,6 +13,11 @@ import { MovementsService } from '../cash-registers/movements/movements.service'
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { OrderFlowService } from '../orders/order-flow/order-flow.service';
+import {
+  groupRatesByProductId,
+  resolveOrderLineFinals,
+  TypedTaxRate,
+} from '../taxes/utils/final-price.util';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 
 /**
@@ -71,6 +76,12 @@ export interface TableSessionView {
       quantity: number;
       unit_price: Prisma.Decimal | number;
       total_price: Prisma.Decimal | number;
+      // Final con impuesto por línea (display-only, NO persiste): unit persistido
+      // resuelto con las tasas del producto + ese valor × cantidad (2 dec).
+      // SOLO viaja cuando el caller NO es cocina (ADR-10) — cocina recibe el
+      // payload byte-por-byte como antes (campos ausentes, no null).
+      final_unit_price?: number;
+      final_total_price?: number;
       inventory_consumed_at_fire: boolean;
       // Snapshot of `products.product_type` taken at order creation
       // (Restaurant Suite — see addItems at L311 and OrdersService
@@ -1804,6 +1815,28 @@ export class TableSessionsService {
     // `table.waiter` estable para la UI de mesa.
     const { order, ...rest } = session;
     const assignedWaiter = session.table?.table_waiters?.[0]?.user ?? null;
+    // Final con impuesto por línea (display-only): UN batch de asignaciones,
+    // no N+1. Cocina NO recibe finales (ADR-10): `finalsByItemId` queda vacío
+    // y su payload sale byte-por-byte como hoy.
+    const finalsByItemId = new Map<
+      number,
+      { final_unit_price: number; final_total_price: number }
+    >();
+    if (order && !this.isKitchenRole()) {
+      const ratesByProductId = await this.resolveLineRatesByProductId(
+        order.order_items,
+      );
+      for (const it of order.order_items) {
+        const rates =
+          it.product_id != null
+            ? (ratesByProductId.get(it.product_id) ?? [])
+            : [];
+        finalsByItemId.set(
+          it.id,
+          resolveOrderLineFinals(Number(it.unit_price), it.quantity, rates),
+        );
+      }
+    }
     return {
       ...rest,
       table: session.table
@@ -1852,6 +1885,9 @@ export class TableSessionsService {
               quantity: it.quantity,
               unit_price: it.unit_price,
               total_price: it.total_price,
+              // Aditivo y solo no-cocina: el spread de `{}` deja el payload
+              // de cocina con las llaves exactas de hoy.
+              ...(finalsByItemId.get(it.id) ?? {}),
               inventory_consumed_at_fire: it.inventory_consumed_at_fire,
               item_type: it.item_type,
               is_takeaway: it.is_takeaway,
@@ -2415,5 +2451,39 @@ export class TableSessionsService {
       item.variant_sku ??
       null
     );
+  }
+
+  /**
+   * Réplica de `ProductsService.isKitchenRole` (ADR-10): el rol cocina NUNCA
+   * recibe precios. Cuando es cocina, las líneas salen byte-por-byte como hoy
+   * (sin `final_*`); el resto de roles recibe los finales display-only.
+   */
+  private isKitchenRole(): boolean {
+    return RequestContextService.getRoles().includes('kitchen');
+  }
+
+  /**
+   * UN batch por `product_id` (no N+1) de `product_tax_assignments` con sus
+   * tasas, agrupadas por producto. Los items sin `product_id` (cargos manuales)
+   * resuelven a `[]` → el final es el `unit_price` intacto.
+   */
+  private async resolveLineRatesByProductId(
+    items: Array<{ product_id: number | null }>,
+  ): Promise<Map<number, TypedTaxRate[]>> {
+    const ids = [
+      ...new Set(
+        (items ?? [])
+          .map((it) => it?.product_id)
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    if (ids.length === 0) return new Map();
+    const rows = await this.prisma.product_tax_assignments.findMany({
+      where: { product_id: { in: ids } },
+      include: {
+        tax_categories: { include: { tax_rates: true } },
+      },
+    });
+    return groupRatesByProductId(rows as any);
   }
 }

@@ -197,7 +197,7 @@ interface ItemGroup {
                         </div>
                         <div class="item-meta">
                           {{ it.quantity }} ×
-                          {{ formatCurrency(it.unit_price) }}
+                          {{ formatCurrency(it.final_unit_price ?? it.unit_price) }}
                         </div>
                       </div>
                       <div class="item-actions">
@@ -212,7 +212,7 @@ interface ItemGroup {
                           }
                         </select>
                         <span class="item-total">
-                          {{ formatCurrency(it.total_price) }}
+                          {{ formatCurrency(it.final_total_price ?? it.total_price) }}
                         </span>
                       </div>
                     </div>
@@ -472,7 +472,8 @@ export class PosSplitBillModalComponent {
   readonly grandTotal = computed(() => {
     const items = this.orderItems();
     return items.reduce(
-      (acc: number, it: TableSessionOrderItem) => acc + Number(it.total_price || 0),
+      (acc: number, it: TableSessionOrderItem) =>
+        acc + Number(it.final_total_price ?? it.total_price ?? 0),
       0,
     );
   });

@@ -51,6 +51,9 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       products: {
         findMany: jest.fn(),
       },
+      product_tax_assignments: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       product_variants: {
         findMany: jest.fn().mockResolvedValue([]),
       },
@@ -1309,6 +1312,100 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       expect(item.cancelled_at).toEqual(CANCELLED_AT);
       expect(item.cancellation_reason).toBe('cliente se arrepintió');
       expect(item.cancellation_type).toBe('before_fire');
+    });
+
+    it('findOne agrega final_unit_price / final_total_price (agregado 19%)', async () => {
+      // Línea de sesión con variante: unit 10000 + EXC 19% → 11900 × 2.
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        findOneRow({
+          id: 502,
+          product_id: 7,
+          product_variant_id: 31,
+          quantity: 2,
+          unit_price: new Prisma.Decimal(10000),
+          total_price: new Prisma.Decimal(20000),
+        }),
+      );
+      (prismaMock.product_tax_assignments.findMany as jest.Mock)
+        .mockResolvedValue([
+          {
+            product_id: 7,
+            is_inclusive: false,
+            tax_categories: {
+              is_inclusive: false,
+              tax_rates: [{ rate: 0.19, is_inclusive: false }],
+            },
+          },
+        ]);
+
+      const view = await service.findOne(83);
+      const item = (view.order as any).order_items[0];
+
+      expect(
+        prismaMock.product_tax_assignments.findMany,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        prismaMock.product_tax_assignments.findMany,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { product_id: { in: [7] } },
+        }),
+      );
+      expect(item.final_unit_price).toBe(11900);
+      expect(item.final_total_price).toBe(23800);
+      // Payloads existentes intactos.
+      expect(Number(item.unit_price)).toBe(10000);
+      expect(Number(item.total_price)).toBe(20000);
+    });
+
+    it('findOne inclusivo no crece el total: unit 10000 + INC 19% → 10000', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        findOneRow({
+          id: 503,
+          product_id: 7,
+          quantity: 1,
+          unit_price: new Prisma.Decimal(10000),
+          total_price: new Prisma.Decimal(10000),
+        }),
+      );
+      (prismaMock.product_tax_assignments.findMany as jest.Mock)
+        .mockResolvedValue([
+          {
+            product_id: 7,
+            is_inclusive: true,
+            tax_categories: {
+              is_inclusive: true,
+              tax_rates: [{ rate: 0.19, is_inclusive: true }],
+            },
+          },
+        ]);
+
+      const view = await service.findOne(83);
+      const item = (view.order as any).order_items[0];
+
+      expect(item.final_unit_price).toBe(10000);
+      expect(item.final_total_price).toBe(10000);
+    });
+
+    it('findOne cocina NO recibe finales y no dispara el batch (ADR-10)', async () => {
+      (RequestContextService.getContext as jest.Mock).mockReturnValue({
+        ...context,
+        roles: ['kitchen'],
+      });
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        findOneRow(),
+      );
+
+      const view = await service.findOne(83);
+      const item = (view.order as any).order_items[0];
+
+      expect('final_unit_price' in item).toBe(false);
+      expect('final_total_price' in item).toBe(false);
+      expect(
+        prismaMock.product_tax_assignments.findMany,
+      ).not.toHaveBeenCalled();
+      // El resto del payload de cocina sigue igual.
+      expect(Number(item.unit_price)).toBe(50000);
     });
 
     it('cancelOrderItem es idempotente: el segundo llamado ve cancelled_at y no reescribe', async () => {
