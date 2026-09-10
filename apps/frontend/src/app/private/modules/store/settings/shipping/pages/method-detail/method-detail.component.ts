@@ -447,7 +447,9 @@ export class MethodDetailComponent implements OnInit {
   table_data = computed(() => {
     return this.filtered_zones().map((zr) => ({
       _original: zr,
-      zone_name: zr.zone.name,
+      zone_name: zr.rate.name
+        ? `${zr.rate.name} (${zr.zone.name})`
+        : zr.zone.name,
       countries_display: this.formatCountries(zr.zone.countries),
       rate_type_label: this.getRateTypeLabel(zr.rate.type),
       cost_display: this.formatCost(zr.rate),

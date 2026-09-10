@@ -1731,9 +1731,10 @@ export class CheckoutComponent implements OnInit {
             // selección y el comprador elige explícitamente — preseleccionar
             // la barata subcobra el envío remoto. `nextStep` bloquea avanzar
             // sin selección, así que limpiar equivale a exigir la elección.
-            const stillValid = options.some(
+            const matchedOption = options.find(
               (o: any) => o.id === this.selected_shipping_option_id,
             );
+            const stillValid = Boolean(matchedOption);
             // Solo hay retiro (típico: la zona matcheó pero su única tarifa
             // aplicable es pickup): para el domicilio es sin cobertura — se
             // muestra el estado vacío accionable en vez de una lista vacía.
@@ -1755,6 +1756,8 @@ export class CheckoutComponent implements OnInit {
                   'Sin cobertura de envío',
                 );
               }
+            } else if (stillValid && matchedOption) {
+              this.shipping_cost.set(matchedOption.cost);
             } else if (!stillValid) {
               // Preselección de tarifa en checkout:
               // 1. Si alguna opción coincide exactamente con el código postal del comprador, se preselecciona esa.
