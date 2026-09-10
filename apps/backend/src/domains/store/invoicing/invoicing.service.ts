@@ -241,7 +241,7 @@ export interface InvoiceTaxRowInput {
  * creada. Se resuelve ANTES de escribir y se consume DESPUÉS, cuando ya existen
  * los `invoice_items.id` a los que apuntar.
  */
-type DocumentLineTaxes = InvoiceTaxRowInput[][];
+export type DocumentLineTaxes = InvoiceTaxRowInput[][];
 
 /**
  * ¿El documento nacido de una orden parte sus tributos por línea?
@@ -262,6 +262,157 @@ export function needsOrderLineTaxSplit(
   return orderLineTaxes.some((line) =>
     line.some((t) => t.is_inclusive === true),
   );
+}
+
+/**
+ * Fracción de `order_item_taxes` → unidad de `invoice_taxes.tax_rate`.
+ *
+ * La orden guarda la tarifa SIEMPRE como fracción (`0.19` = 19 %,
+ * `0.007` = 7 ‰ — ver `buildOrderItemTaxes` en `orders.service.ts`);
+ * la factura la guarda en porcentaje (19)… SALVO el ICA, que se guarda
+ * POR MIL (7 = 7 ‰: `resolveSchemePercent` lo convierte a % al emitir,
+ * el prevalidador valida `base × tarifa / 1000`, y el motor ya lo
+ * produce en esa unidad vía `rate_basis: 'per_mil'`).
+ *
+ * El `×100` ciego persistía `0.7` para un ICA de 7 ‰: el XML declaraba
+ * `Percent` 0.07 % y el prevalidador frenaba el documento con
+ * `TAX_SUBTOTAL_MISMATCH` (`100000 × 0.7 / 1000 = 70` ≠ 700 de cuota
+ * real). Matriz fiscal 2026-09-10, forma 4 (IVA incluido + ICA agregado
+ * en la misma línea nacida de orden): sin esto esa combinación no emite.
+ */
+export function orderTaxFractionToInvoiceRate(
+  fraction: number,
+  tax_type: string | null | undefined,
+): number {
+  const normalized = (tax_type ?? '').trim().toLowerCase();
+  const factor =
+    normalized === 'ica' || normalized === 'reteica' ? 1000 : 100;
+  return Math.round(fraction * factor * 100) / 100;
+}
+
+/**
+ * Lo mínimo que la agregación necesita leer de cada línea de la orden.
+ * Estructural a propósito: la fila real de Prisma satisface esta forma y
+ * entra tal cual, pero la agregación se ejercita en la matriz fiscal con
+ * literales, sin DB.
+ */
+export interface OrderLineTaxSource {
+  total_price?: unknown;
+  order_item_taxes?: Array<{
+    tax_rate_id?: unknown;
+    tax_name: string;
+    tax_rate?: unknown;
+    tax_amount?: unknown;
+    tax_type?: unknown;
+    is_inclusive?: unknown;
+  }> | null;
+}
+
+/**
+ * Agregación orden→factura de `createFromOrder`, pura y exportada para la
+ * matriz fiscal (`invoicing.service.tax-matrix.spec.ts`).
+ *
+ * Produce las DOS formas a la vez: el desglose por línea
+ * (`order_line_taxes[i]` = tributos de la i-ésima línea, con la base de SU
+ * línea —no la acumulada— para que sumados reproduzcan el agregado al
+ * centavo) y las filas agregadas de cabecera (`header_rows`, una por
+ * (nombre, tarifa, tipo fiscal, id de tarifa, inclusivo)). `createFromOrder`
+ * persiste UNA sola forma según `needsOrderLineTaxSplit` —nunca las dos,
+ * que duplicaría el impuesto—; esta función no decide, sólo agrega.
+ *
+ * La base gravable de la línea es `total_price`, que los canales ya
+ * persisten despejada (A.3): NO se re-deriva por 1+r acá, para no
+ * introducir una segunda verdad que difiera un centavo de la persistida
+ * (A.4/ADR-02). Sin tasas la línea aporta su neto tal cual (ERR-03).
+ */
+export function aggregateOrderTaxes(
+  order_items: OrderLineTaxSource[] | null | undefined,
+): {
+  order_line_taxes: DocumentLineTaxes;
+  header_rows: InvoiceTaxRowInput[];
+  distinct_group_count: number;
+} {
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const taxGroups = new Map<
+    string,
+    {
+      tax_rate_id: number | null;
+      tax_name: string;
+      tax_rate: number;
+      tax_type: string;
+      taxable_amount: number;
+      tax_amount: number;
+      is_inclusive: boolean;
+    }
+  >();
+  /**
+   * El MISMO desglose, pero sin agregar: `orderLineTaxes[i]` son los tributos
+   * de la i-ésima línea de producto. Es el caso que motiva toda esta columna —
+   * una cuenta de restaurante donde unos platos llevan INC y otros IVA nace
+   * justamente por acá, desde `order_item_taxes`.
+   */
+  const orderLineTaxes: DocumentLineTaxes = [];
+  for (const item of order_items || []) {
+    const lineNet = Number(item.total_price || 0);
+    const lineBase = lineNet;
+    const lineTaxes: InvoiceTaxRowInput[] = [];
+    for (const t of item.order_item_taxes || []) {
+      const type = (t.tax_type as string) || 'iva';
+      const ratePct = orderTaxFractionToInvoiceRate(
+        Number(t.tax_rate || 0),
+        type,
+      );
+      // A.4 (F-020): el flag viaja por fila y particiona el bucket — la
+      // misma tasa inclusiva en una línea y agregada en otra NO se
+      // mezclan (igual que `aggregateHeaderTaxes` del calculador).
+      const inclusive = t.is_inclusive === true;
+      const key = `${t.tax_name}|${ratePct}|${type}|${(t.tax_rate_id as number | null) ?? ''}|${inclusive ? '1' : '0'}`;
+      const group = taxGroups.get(key) || {
+        tax_rate_id: (t.tax_rate_id as number | null) ?? null,
+        tax_name: t.tax_name,
+        tax_rate: ratePct,
+        tax_type: type,
+        taxable_amount: 0,
+        tax_amount: 0,
+        is_inclusive: inclusive,
+      };
+      group.taxable_amount += lineBase;
+      group.tax_amount += Number(t.tax_amount || 0);
+      taxGroups.set(key, group);
+
+      // La fila POR LÍNEA lleva la base de SU línea, no la acumulada. Sumadas
+      // reproducen exactamente el agregado de arriba, que es lo que permite
+      // que el `cac:TaxTotal` de cabecera no se mueva un centavo.
+      lineTaxes.push({
+        tax_rate_id: (t.tax_rate_id as number | null) ?? null,
+        tax_name: t.tax_name,
+        tax_rate: ratePct,
+        taxable_amount: round2(lineBase),
+        tax_amount: round2(Number(t.tax_amount || 0)),
+        tax_type: type,
+        is_inclusive: inclusive,
+      });
+    }
+    orderLineTaxes.push(lineTaxes);
+  }
+
+  const invoiceTaxRows: InvoiceTaxRowInput[] = Array.from(
+    taxGroups.values(),
+  ).map((g) => ({
+    tax_rate_id: g.tax_rate_id,
+    tax_name: g.tax_name,
+    tax_rate: g.tax_rate,
+    taxable_amount: round2(g.taxable_amount),
+    tax_amount: round2(g.tax_amount),
+    tax_type: g.tax_type,
+    is_inclusive: g.is_inclusive,
+  }));
+
+  return {
+    order_line_taxes: orderLineTaxes,
+    header_rows: invoiceTaxRows,
+    distinct_group_count: taxGroups.size,
+  };
 }
 
 @Injectable()
@@ -2006,91 +2157,19 @@ export class InvoicingService {
     // header-level invoice_taxes, one row per (name, rate, fiscal type,
     // inclusive flag). Without this, invoices created from an order reached
     // DIAN with NO taxes and fell back to a default 19% IVA.
-    // order_item_taxes.tax_rate is a fraction (0.19); invoice_taxes.tax_rate
-    // is a percentage (19.00) as DIAN UBL expects.
-    const round2 = (n: number) => Math.round(n * 100) / 100;
-    const taxGroups = new Map<
-      string,
-      {
-        tax_rate_id: number | null;
-        tax_name: string;
-        tax_rate: number;
-        tax_type: string;
-        taxable_amount: number;
-        tax_amount: number;
-        is_inclusive: boolean;
-      }
-    >();
-    /**
-     * El MISMO desglose, pero sin agregar: `orderLineTaxes[i]` son los tributos
-     * de la i-ésima línea de producto. Es el caso que motiva toda esta columna —
-     * una cuenta de restaurante donde unos platos llevan INC y otros IVA nace
-     * justamente por acá, desde `order_item_taxes`.
-     *
-     * La línea de ENVÍO, cuando existe, se añade al final de `items` y no lleva
-     * tributos: se representa como un arreglo vacío para que el alineamiento por
-     * posición contra `invoice_items` siga siendo cierto.
-     */
-    const orderLineTaxes: DocumentLineTaxes = [];
-    for (const item of order.order_items || []) {
-      const lineNet = Number(item.total_price || 0);
-      // A.4/ADR-02: la base gravable de la línea es `total_price`, que los
-      // canales ya persisten despejada (A.3). No se re-deriva por 1+r acá
-      // para no introducir una segunda verdad que difiera un centavo de la
-      // persistida.
-      // ERR-03: sin tasas o con tasa 0 no se decide nada ni se lanza — la
-      // línea aporta su neto y su snapshot tal cual.
-      const lineBase = lineNet;
-      const lineTaxes: InvoiceTaxRowInput[] = [];
-      for (const t of (item as any).order_item_taxes || []) {
-        const ratePct = round2(Number(t.tax_rate || 0) * 100);
-        const type = (t.tax_type as string) || 'iva';
-        // A.4 (F-020): el flag viaja por fila y particiona el bucket — la
-        // misma tasa inclusiva en una línea y agregada en otra NO se
-        // mezclan (igual que `aggregateHeaderTaxes` del calculador).
-        const inclusive = t.is_inclusive === true;
-        const key = `${t.tax_name}|${ratePct}|${type}|${t.tax_rate_id ?? ''}|${inclusive ? '1' : '0'}`;
-        const group = taxGroups.get(key) || {
-          tax_rate_id: t.tax_rate_id ?? null,
-          tax_name: t.tax_name,
-          tax_rate: ratePct,
-          tax_type: type,
-          taxable_amount: 0,
-          tax_amount: 0,
-          is_inclusive: inclusive,
-        };
-        group.taxable_amount += lineBase;
-        group.tax_amount += Number(t.tax_amount || 0);
-        taxGroups.set(key, group);
-
-        // La fila POR LÍNEA lleva la base de SU línea, no la acumulada. Sumadas
-        // reproducen exactamente el agregado de arriba, que es lo que permite
-        // que el `cac:TaxTotal` de cabecera no se mueva un centavo.
-        lineTaxes.push({
-          tax_rate_id: t.tax_rate_id ?? null,
-          tax_name: t.tax_name,
-          tax_rate: ratePct,
-          taxable_amount: round2(lineBase),
-          tax_amount: round2(Number(t.tax_amount || 0)),
-          tax_type: type,
-          is_inclusive: inclusive,
-        });
-      }
-      orderLineTaxes.push(lineTaxes);
-    }
+    // Agregación pura en `aggregateOrderTaxes` (cubierta por la matriz
+    // fiscal sin DB); acá sólo se consume. `taxGroups` sobrevive como
+    // `{ size }` para no tocar la decisión de split de abajo.
+    const {
+      order_line_taxes: orderLineTaxes,
+      header_rows: invoiceTaxRows,
+      distinct_group_count: distinctGroupCount,
+    } = aggregateOrderTaxes(order.order_items || []);
+    // La línea de ENVÍO, cuando existe, se añade al final de `items` y no
+    // lleva tributos: se representa como un arreglo vacío para que el
+    // alineamiento por posición contra `invoice_items` siga siendo cierto.
     if (shippingCost > 0) orderLineTaxes.push([]);
-
-    const invoiceTaxRows: InvoiceTaxRowInput[] = Array.from(
-      taxGroups.values(),
-    ).map((g) => ({
-      tax_rate_id: g.tax_rate_id,
-      tax_name: g.tax_name,
-      tax_rate: g.tax_rate,
-      taxable_amount: round2(g.taxable_amount),
-      tax_amount: round2(g.tax_amount),
-      tax_type: g.tax_type,
-      is_inclusive: g.is_inclusive,
-    }));
+    const taxGroups = { size: distinctGroupCount };
     // Se pasa por el mapeador compartido en vez de armar el input a mano: es lo
     // único que garantiza que `tax_type` —la clave con la que el CUFE arma
     // ValImp1/2/3— nunca quede ausente, que es como ya se rompió `update()`.
