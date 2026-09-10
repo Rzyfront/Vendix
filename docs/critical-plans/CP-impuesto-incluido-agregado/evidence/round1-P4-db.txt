@@ -1,0 +1,65 @@
+# Auditoría adversarial P4 — Contratos DB e integridad
+
+Solo hallazgos. Lente: tenant scoping, invariantes, huérfanos, idempotencia, UPDATE con WHERE.
+
+---
+
+**H1 — MAJOR — A.1 — `steps/A.1` + `PLAN.md §Data Integrity Plan` / `schema.prisma:1732`**
+Título: Backfill sin scoping por tenant contamina tiendas vecinas.
+Escenario: `product_tax_assignments` es puente sin `store_id` (`schema.prisma:1732-1739`, PK compuesta + FKs `RESTRICT`, sin columna de tenant; scoping solo ví
+[native child final answer truncated]", "text": "# Auditoría adversarial P4 — Contratos DB e integridad
+
+Solo hallazgos. Lente: tenant scoping, invariantes, huérfanos, idempotencia, UPDATE con WHERE.
+
+---
+
+**H1 — MAJOR — A.1 — `steps/A.1` + `PLAN.md §Data Integrity Plan` / `schema.prisma:1732`**
+Título: Backfill sin scoping por tenant contamina tiendas vecinas.
+Escenario: `product_tax_assignments` es puente sin `store_id` (`schema.prisma:1732-1739`, PK compuesta + FKs `RESTRICT`, sin columna de tenant; scoping solo vía `products.store_id`). El backfill `UPDATE ... WHERE tax_category_id IN (SELECT id FROM tax_categories WHERE is_inclusive)` no joinea contra `products.store_id` ni contra `tax_categories.store_id/organization_id` (`schema.prisma:2287-2288`, scope store-xor-org por `tax_categories_scope_chk`). Si existe una asignación cruzada (producto tienda A → categoría tienda B, legacy o por validación incompleta — ver H4), hereda el flag de un tenant ajeno. Peor: categoría org-scoped (`store_id NULL`) marcada inclusiva propaga a productos de todas las tiendas de la org, aunque solo una lo quisiera.
+Fix: backfill con join y conteo por tienda: `UPDATE pta SET is_inclusive=true FROM products p JOIN tax_categories tc ... WHERE pta.product_id=p.id AND pta.tax_category_id=tc.id AND tc.is_inclusive IS TRUE AND (tc.store_id=p.store_id OR (tc.store_id IS NULL AND tc.organization_id=<org de p.store>))`; más query de huérfanos cross-tenant antes del UPDATE (asignaciones donde `tc.store_id IS DISTINCT FROM p.store_id` y `tc.organization_id` no matchea) y decisión explícita (bloquear migración si >0).
+
+**H2 — MAJOR — A.1/A.3 — `registry/db.md DB-01/DB-03` vs `schema.prisma:2306-2320`**
+Título: `tax_rates.is_inclusive` existe y el diseño lo ignora: doble fuente de verdad.
+Escenario: precedente `20260815011424_tax_inclusive_flag` declara que los defaults de catálogo viven en AMBOS `tax_categories.is_inclusive` Y `tax_rates.is_inclusive` (`schema.prisma:2320`), pero DB-01 backfillea solo desde categoría y DB-03 lee solo `assignment.is_inclusive + rate`. Categoría agregada con una tasa marcada incluida (o viceversa) no tiene regla de precedencia: el resolver la clasifica mal y el backfill ya divergió del intent del catálogo. Nadie define `assignment vs rate` cuando discrepan.
+Fix: regla explícita en ADR-01 (propuesto: asignación gana; `tax_rates.is_inclusive` queda legacy solo-lectura para factura manual) + backfill que reporte divergencias categoría-vs-tasa + spec matriz con caso categoría≠tasa.
+
+**H3 — MAJOR — A.2 — `steps/A.2`, `registry/db.md DB-02` (`products.service.ts:1031, :2057`)**
+Título: Semántica de UPDATE sin mapa indefinida: cualquier edición puede revertir decisiones guardadas.
+Escenario: A.2 dice a la vez "sin entrada rige el default del catálogo" y "sin mapa en la petición, byte-idéntico a hoy" — contradictorio en UPDATE. Producto con asignación `is_inclusive=true` guardada; usuario edita solo el nombre (sin `tax_inclusive_map`). Opción (a) re-heredar catálogo → destruye la decisión si el catálogo es agregado. Opción (b) preservar → entonces "sin mapa = default" es falso y la primera asignación sin mapa queda ambigua. El checklist ("sin mapa: se hereda") no distingue create vs update vs replace.
+Fix: especificar: CREATE sin entrada → hereda catálogo; UPDATE sin mapa → preserva valor almacenado (no toca columna); UPDATE con mapa parcial → solo las claves presentes sobreescriben, ausentes preservan; REPLACE (delete+createMany) → entradas ausentes heredan catálogo. Spec por cada caso.
+
+**H4 — MAJOR — A.2 — `steps/A.2` (`tax_inclusive_map?: Record<number,boolean>`, validación `:1001`)**
+Título: Claves del mapa sin validación de tenant ni de pertenencia: escape cross-tenant y entradas huérfanas.
+Escenario: (a) `POST /store/products` tienda A con `tax_inclusive_map: {"<idCatTiendaB>": true}` — si `:1001` valida `tax_category_ids` pero no las claves del mapa, se persiste flag sobre categoría ajena o falla FK de forma no mapeada a `PROD_TAXMAP_001`. (b) Mapa con ids no incluidos en `tax_category_ids` (map⊃ids): flags sin asignación → se dropean en silencio o se crean asignaciones fantasma según implementación. (c) Claves JSON llegan como string (`Record<number,boolean>`): `"abc"`/`"1.5"`/`"-3"` deben dar 400, no `NaN`-lookup. Nada de esto está en el acceptance.
+Fix: validador que exige mapa ⊆ ids asignados, cada id existe y pertenece al mismo scope (store u org del producto), claves enteras positivas; cualquier violación → 400 `PROD_TAXMAP_001`; test con categoría de otra tienda.
+
+**H5 — MAJOR — A.3/A.4 — `registry/db.md DB-06` (`payments.service.ts:2788 rescaleTaxInfo`)**
+Título: Invariante de rescale aritméticamente imposible ("conserva montos" + "base cambia" + "no recalcular").
+Escenario: línea inclusiva 119000 (base 100000 + imp 19000). Un descuento/re-escalado mueve la base a 90000. No se puede a la vez conservar `amount=19000`, no recalcular, y que `base+imp==total`: o los montos quedan stale (suma ≠ base, rompe `total_tax_amount`/`taxes[]` y factura) o se recalcula (contradice DB-06). El plan no da la fórmula de re-derivación para inclusivos.
+Fix: definir rescale inclusivo como re-despeje (`base'=total'/(1+r)`, `imp'=total'−base'`, prorrata multi-tasa como ADR-02) y spec con redondeo al centavo (residuo a la tasa mayor); DB-06 pasa a "re-deriva con flag", no "conserva montos".
+
+**H6 — MAJOR — A.1/deploy — `steps/A.1` DDL `DEFAULT FALSE` + `:1031` sin flag (código viejo)**
+Título: Ventana de race en deploy: asignaciones creadas entre DDL y código nuevo nacen `false` aunque el catálogo sea inclusivo.
+Escenario: DDL con `NOT NULL DEFAULT FALSE` + backend viejo (`createMany` sin columna) corriendo durante el rollout: todoINSERT en la ventana escribe `false` explícito-por-default, y el backfill ya pasó → esas filas quedan mal para siempre (ningún re-backfill previsto; re-correr el UPDATE las arreglaría solo si nadie las editó después, indistinguible). Silencioso porque `false` = "como hoy".
+Fix: orden de deploy (migración + código en el mismo release, sin tráfico mixto) + re-ejecución del backfill acotada a `created`-en-ventana o segundo pase del mismo UPDATE en A.7 con conteo, documentado en el step.
+
+**H7 — MINOR — A.1 — backfill `UPDATE ... WHERE tax_category_id IN (...)` / `schema.prisma:1738`**
+Título: Backfill sin índice en `tax_category_id` contradice "sin locks largos".
+Escenario: PK es `(product_id, tax_category_id)`; el UPDATE filtra por `tax_category_id` → seq scan + lock de escritura prolongado en tabla caliente (cada venta/asignación la toca). En inventario grande, bloquea `products.service.ts:1031`.
+Fix: `CREATE INDEX CONCURRENTLY IF NOT EXISTS ... ON product_tax_assignments(tax_category_id)` antes del UPDATE (o probar `EXPLAIN` en dry-run y evidenciar tiempo/locks); dropear el índice si no se quiere conservar.
+
+**H8 — MINOR — A.1 — verificación `SELECT COUNT(*) ... ==` conteo catálogo**
+Título: Conteo global enmascara descuadres por tienda que se cancelan.
+Escenario: tienda A sobre-marcada (+5) y tienda B sub-marcada (−5) → conteo global cuadra, verificación en verde, dos tenants facturando mal.
+Fix: verificación `GROUP BY products.store_id` (mismatch por tienda = 0) + lista de ids divergentes vacía; evidencia `A.1-backfill-count.txt` por tienda, no solo total.
+
+**H9 — MINOR — A.1 — `registry/db.md DB-01` ("`Boolean NOT NULL DEFAULT false`") vs precedente `20260815`**
+Título: Nulabilidad Prisma sin especificar choca con el patrón del codebase.
+Escenario: los 4 flags existentes son columna `NOT NULL DEFAULT FALSE` pero Prisma `Boolean? @default(false)` (quirk documentado en la migración). DB-01 escribe `Boolean NOT NULL` sin decir la forma Prisma: si es no-nulleable, `assignment.is_inclusive` es `boolean` mientras sus 4 hermanos son `boolean|null` → fricción de tipos y `?? false` inconsistente; si es nulleable, filas NULL vía SQL crudo rompen `if (is_inclusive)` según como se compare.
+Fix: fijar `is_inclusive Boolean? @default(false)` (igual que hermanos) + regla "comparar con `=== true` / `?? false`" en A.3; o justificar la divergencia.
+
+**H10 — NOTE — A.1 — acceptance "SQL idempotente (`ADD COLUMN IF NOT EXISTS`, `WHERE`, header)"**
+Título: Idempotencia a medias: sin guardia de tipo/default preexistente.
+Escenario: reintento tras apply parcial donde la columna ya existe con otro tipo/default (creada a mano o por rama divergente): `ADD COLUMN IF NOT EXISTS` no-op y el `UPDATE` corre sobre esquema inesperado; el header DATA IMPACT existe pero el step no exige bloque `DO $$` que verifique `information_schema` (tipo boolean, default false) antes del backfill.
+Fix: añadir aserción idempotente de tipo+default al inicio de `migration.sql` (patrón `pg_constraint`/`information_schema` del precedente `20260511150000`), falla ruidosa si diverge.
+", "evidence_refs": ["/Users/rzy/.local/share/muse/sessions/2026/09/08/01a083ef-7d43-73e1-b30a-6eb11172d5e5/session.jsonl"], "artifact_refs": [], "error_kind": null, "result_channel": "final_text", "result_report_outcome": "reported", "result_validation_rejections": 0, "result_not_quiescent_rejections": 0, "result_report_nudges": 0, "final_message_chars": 8766, "transcript_path": "/Users/rzy/.local/share/muse/sessions/2026/09/08/01a083ef-7d43-73e1-b30a-6eb11172d5e5/session.jsonl"}}}

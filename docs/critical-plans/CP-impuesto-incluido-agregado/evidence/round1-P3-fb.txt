@@ -1,0 +1,66 @@
+## Hallazgos — auditoría adversarial FB (A.2 / A.5)
+
+### H1 — severity: blocker — step: A.5 — location: `product-create-modal.component.ts:461-494 (onSubmit)` vs `fb.md FB-01`, `A.2 Output`
+**Título:** El submit real nunca envía el mapa que el contrato dice persistir.
+**Escenario concreto:** el usuario marca "IVA incluido", pulsa Guardar → `onSubmit()` construye `dto` con `tax_category_ids` pero sin `tax_inclusive_map` (la única emisión del mapa está en `:253`, que es el draft de navegación a creación avanzada, no el POST/PUT). Aunque A.2 implemente la persistencia, el flag jamás llega al backend por el camino principal.
+**Fix propuesto:** incluir en `onSubmit()` `tax_inclusive_map` filtrado a los ids efectivos (`Object.fromEntries(ids.filter(...).map(id => [id, isTaxInclusive(id)]))`) y verificar en el padre que el `submit.emit` lo reenvía al POST/PUT; test: guardar mixto → GET con flags.
+
+### H2 — severity: blocker — step: A.5 — location: `product-create-modal.component.ts:320-328`, `product-create-page.component.ts:2286-2292`, `product.interface.ts:326-330`
+**Título:** Hidratación lee el catálogo, no la verdad por asignación (reintroduce el bug que A.5 dice cerrar).
+**Escenario concreto:** categoría IVA en catálogo = agregado, pero asignación del producto = incluida (override que ADR-01 permite explícitamente). Al reabrir el detalle, `populateForm` lee `ta.tax_categories.is_inclusive` e ignora `ta.is_inclusive` → el chip vuelve a "agregado". Además `ProductTaxAssignment` ni siquiera declara `is_inclusive`, así que el fix no compila contra el espejo actual.
+**Fix propuesto:** precedencia explícita `ta.is_inclusive ?? ta.tax_categories.is_inclusive ?? catalog`, añadir `is_inclusive?: boolean` a `ProductTaxAssignment`, y checklist "override inclusivo con catálogo agregado conserva chip".
+
+### H3 — severity: major — step: A.5 — location: `product-create-modal.component.ts:227-236 (resetForm)` + `taxInclusiveMap:101`
+**Título:** El mapa sobrevive entre productos (fuga de estado).
+**Escenario concreto:** abrir producto A (IVA=incluido) → cerrar → abrir producto B sin esa categoría. `resetForm()` no limpia `taxInclusiveMap`; `isTaxInclusive()` consulta el mapa antes que el catálogo → B hereda el flag de A.
+**Fix propuesto:** `resetForm()` hace `taxInclusiveMap.set({})` y `populateForm()` parte de `{}` (no de `{...map actual}`), o scopear el mapa por producto.
+
+### H4 — severity: major — step: A.5 — location: `product-create-modal.component.ts:321,356` (populate vs loadTaxCategories)
+**Título:** Condición de carrera entre las dos fuentes del mapa sin regla de precedencia.
+**Escenario concreto:** `loadTaxCategories` solo rellena `undefined`, pero `populateForm` clona el mapa vivo y lo sobrescribe con valores de catálogo. Según qué respuesta llegue última, la asignación persistida gana o pierde. El plan no fija orden ni precedencia.
+**Fix propuesto:** especificar "asignación siempre gana a catálogo, sin importar orden de llegada" e implementarlo (p. ej. defaults de catálogo primero, overlay de asignaciones después, o rehidratar tras ambas cargas).
+
+### H5 — severity: major — step: A.2 — location: `dto/index.ts:678,1134` (nuevo `tax_inclusive_map?: Record<number,boolean>`) + `fb.md FB-01`
+**Título:** `Record<number,boolean>` no sobrevive a JSON sin normalización.
+**Escenario concreto:** el cliente envía `{"19": true}` (las claves JSON siempre son strings). Sin `@Transform`, el lookup `map[19]` vs `map["19"]` diverge, `class-validator` puede rechazar o aceptar `"true"`/`1` como boolean, y una clave `"abc"` pasa como propiedad. El plan pide "validadores" sin definirlos.
+**Fix propuesto:** `@Transform` que convierta claves a `Number` (descartar/rechazar `NaN`), coerce estricta de valores a boolean real, y `PROD_TAXMAP_001` (400) ante clave no numérica, valor no booleano o id fuera de `tax_category_ids`.
+
+### H6 — severity: major — step: A.2 — location: `A.2 Acceptance` + `products.service.ts:882-892,2666-2676` (destructuring)
+**Título:** Semántica parcial del mapa sin definir en 4 casos que el backend sí va a recibir.
+**Escenarios concretos:** (a) mapa con id fuera de `tax_category_ids`; (b) `tax_inclusive_map` sin `tax_category_ids` en un PATCH; (c) `tax_category_ids=[19]` sin entrada `19` en el mapa; (d) mapa vacío `{}` con ids no vacíos. ¿400, ignorar, o heredar catálogo? Hoy (c) se define ("hereda catálogo") pero (a)/(b)/(d) quedan abiertos → cada implementador elige y el frontend no puede predecir el resultado.
+**Fix propuesto:** regla cerrada en A.2: mapa se filtra a ids efectivos; mapa sin `tax_category_ids` se ignora (documentado) o 400 — una sola opción; entrada faltante = heredar catálogo; entrada sobrante = 400 `PROD_TAXMAP_001`. Tests por caso.
+
+### H7 — severity: blocker — step: A.2 — location: `products.service.ts:1031-1036`, `:2836-2841`, `:2830-2833`, `:2666-2676`
+**Título:** El mapa muere en el destructuring y la herencia de catálogo es imposible en update.
+**Escenarios concretos:** (1) `create` y `update` desestructuran `tax_category_ids` fuera de `productData`; si `tax_inclusive_map` no se desestructura explícitamente, o bien viaja dentro de `productData` hacia Prisma (campo desconocido → 500), o bien se pierde. (2) El `update` solo hace `select {id, tax_type}` (`:2830`) — sin `is_inclusive` del catálogo no puede heredar el default para entradas sin mapa y caerá a `false` (convierte en "agregado" todo lo no mapeado).
+**Fix propuesto:** desestructurar `tax_inclusive_map` en ambas rutas, helper único `resolveIsInclusive(catId, map, catalogDefault)` compartido por create/update/bulk, y `select` ampliado con `is_inclusive`.
+
+### H8 — severity: blocker — step: A.5 — location: `bulk-edit-field-control.component.ts:91,180-182` vs `products-bulk-edit-page.component.ts:323-345,843-865` + `bulk-edit.interface.ts:79-82`
+**Título:** El mapa de masiva vive en el hijo y nunca entra al payload del padre.
+**Escenario concreto:** el operador conmuta chips en masiva → `setTaxInclusive` actualiza un signal local del `field-control`, pero `changes` del padre se construye solo desde `formValue` y `coerceBulkEditValue` (caso `tax-action`) reconstruye `{mode, ids}` descartando `inclusive`. El POST sale sin el campo aunque el DTO lo acepte. El plan ("el padre lo envía") no dice cómo el padre lee un signal del hijo.
+**Fix propuesto:** añadir `inclusive` al `FormGroup` de `tax-action` (o elevar el signal a la página vía output), extender `coerceBulkEditValue` para preservarlo filtrado a `ids`, y espejo `BulkRelationalTaxAction.inclusive?: Record<string,boolean>` en ambos lados.
+
+### H9 — severity: major — step: A.2/A.5 — location: `products-bulk-edit.service.ts:217-331 (preview)`, `:408-445 (apply)`, `fb.md FB-03/FB-04`
+**Título:** Preview y apply divergen por construcción; el plan no cierra la brecha por modo.
+**Escenarios concretos:** (a) preview difunde solo nombres de impuestos (`current/next: string[]`, `:325-330`) — un cambio solo de flag (mismos ids, distinto inclusivo) da `hasTaxChanged=false` y preview vacío aunque apply sí reescriba flags. (b) apply delega en `update` con `targetIds` pero sin mapa (`:444` no setea `tax_inclusive_map`), y su lectura previa (`select {product_id, tax_category_id}`, `:412-415`) no trae flags existentes. (c) Semántica por modo sin definir: en `ADD` sin entrada en el mapa, ¿se preserva el flag existente de la asignación o se resetea al default de catálogo? En `REMOVE`, ¿el mapa se ignora o 400?
+**Fix propuesto:** regla por modo en A.2 (ADD: preservar flags existentes salvo ids nuevos con entrada/mapa→catálogo; REPLACE: mapa→catálogo; REMOVE: ignorar `inclusive`), preview con diff de flags y misma función de resolución que apply, verificación `preview vs apply diff 0` incluyendo solo-cambio-de-flag.
+
+### H10 — severity: major — step: A.5 — location: `A.5 Rollback` ("backend sigue aceptando payloads viejos") + `ValidationPipe whitelist/forbidNonWhitelisted` citado en `bulk-edit.interface.ts:9-11`
+**Título:** La compatibilidad solo se probó en una dirección; el despliegue en orden inverso rompe.
+**Escenarios concretos:** (a) frontend nuevo → backend viejo: `tax_inclusive_map` / `inclusive` son propiedades no blanqueadas → 400 en POST/PUT/bulk durante la ventana de rollout. (b) frontend nuevo → GET viejo sin `is_inclusive`: chips sin dato — si el fallback no está codificado, quedan en `false` (agregado) y el operador "pierde" sus incluidos. El rollback declarado solo cubre frontend-viejo→backend-nuevo.
+**Fix propuesto:** orden de deploy obligatorio (A.2 antes que A.5), fallback explícito "sin `is_inclusive` en GET ⇒ catálogo", y manejo del 400 por backend desactualizado (reintento sin mapa o banner), no solo `ng build` + smoke.
+
+### H11 — severity: major — step: A.2 — location: `products.service.ts:1180-1184`, `:1550`, `:2057-2065` + `GET /store/products?ids=` (hidratación bulk)
+**Título:** "GET expone el flag" es ambiguo entre 3+ selects; la lista que usa bulk puede quedar sin flag.
+**Escenario concreto:** se añade la columna y el `findOne` de detalle la devuelve, pero el `findAll` (lista/paginado, el que consume `getProductsByIds` para hidratar el stack y el preview `currentTaxes`) sigue sin incluirla o sin select explícito → masiva y listado siguen hidratando de catálogo mientras el detalle ya muestra asignación. Verificación de A.2 (`curl GET`) pasa en detalle y falla en lista.
+**Fix propuesto:** exigir `is_inclusive` en todos los selects que incluyan `product_tax_assignments` (create-response, findAll, findOne, bulk-reads) y test por endpoint, no solo `GET /:id`.
+
+### H12 — severity: minor — step: A.5 — location: `bulk-edit-field-control.component.ts:184-193 (removeTaxId)`, `product-create-modal.component.ts:129-135 (removeTaxCategory)`
+**Título:** Quitar un impuesto no limpia su entrada del mapa; al re-añadirlo resucita un flag viejo.
+**Escenario concreto:** marcar IVA=incluido → quitar IVA (el mapa conserva `19:true`) → guardar (si H6 filtra, se ignora; si no, 400 por id sobrante) → re-añadir IVA sin tocar el chip → aparece "incluido" aunque el default de catálogo sea agregado.
+**Fix propuesto:** al remover un id, `delete map[id]` (detalle y masiva) y, al enviar, filtrar el mapa a los ids efectivos.
+
+## Ataques intentados que no prosperaron
+- **Mapa opcional rompe clientes viejos (viejo→nuevo):** resiste — `@IsOptional()` hace la ausencia equivalente a "heredar catálogo", que el plan declara byte-idéntico a hoy.
+- **GET nuevo rompe frontend viejo:** resiste — campo aditivo en `assignments`; el frontend viejo lo ignora (solo reintroduciría el bug visual, no error).
+- **Estimado del modal vs fórmula backend (`p/(1+r)`):** no es hallazgo FB — A.5 lo fija como especificación visible y A.3/A.4 lo implementan; la divergencia real a vigilar es preview-vs-apply (H9), no el estimado.
