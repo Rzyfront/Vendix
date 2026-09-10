@@ -24,6 +24,10 @@ import {
 } from './dto';
 import { Prisma } from '@prisma/client';
 import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
+import {
+  calculateVariantFinalPrice,
+  extractTypedRates,
+} from '../taxes/utils/final-price.util';
 import { generateSlug } from '@common/utils/slug.util';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import {
@@ -922,6 +926,14 @@ export class ProductsService {
           const product = await prisma.products.create({
             data: {
               ...productData,
+              // FIX — el schema Prisma tiene `@default(inactive)` en
+              // products.state, pero la UX del admin ("Activos" como
+              // filtro por default) filtra los productos `inactive`
+              // inmediatamente después de crearlos. Forzamos `active`
+              // salvo que el caller haya pedido explícitamente un
+              // estado distinto (futuro flujo de borrador).
+              state:
+                productData.state ?? ProductState.ACTIVE,
               // Normalizar barcode: '' / whitespace-only → null. Postgres
               // permite múltiples NULL bajo UNIQUE(store_id, barcode) pero NO
               // múltiples '', así que un '' debe persistirse como null.
@@ -1506,6 +1518,9 @@ export class ProductsService {
           profit_margin: _vMargin,
           sale_price: _vSale,
           price_override: _vOverride,
+          // ADR-10: el final con impuesto también es dinero — cocina no lo
+          // recibe (sin esto, el `final_price` de variante filtraría precio).
+          final_price: _vFinal,
           ...variantRest
         } = variant;
         return variantRest;
@@ -1724,6 +1739,10 @@ export class ProductsService {
                 sale_price: variant.sale_price
                   ? Number(variant.sale_price)
                   : null,
+                // Final con impuesto (display-only): efectivo de la variante
+                // resuelto con las tasas heredadas del producto. Sin tocar
+                // los valores persistidos.
+                final_price: calculateVariantFinalPrice(variant, product),
                 stock: variantStock,
                 stock_quantity: variantStock,
                 // Campos explícitos source-of-truth para el frontend POS.
@@ -1916,6 +1935,10 @@ export class ProductsService {
                 sale_price: variant.sale_price
                   ? Number(variant.sale_price)
                   : null,
+                // Final con impuesto (display-only): efectivo de la variante
+                // resuelto con las tasas heredadas del producto. Sin tocar
+                // los valores persistidos.
+                final_price: calculateVariantFinalPrice(variant, product),
                 stock_quantity: variantStock,
                 available_stock: effectiveTracking ? variantStock : null,
                 is_available: !effectiveTracking || variantStock > 0,
@@ -4746,25 +4769,10 @@ export class ProductsService {
         : Number(product.base_price);
 
     // Fuente de la verdad (F-004): tasas tipadas por asignación con
-    // precedencia canónica F-012. Sin asignaciones, resolveLineTotals
-    // devuelve el precio intacto (cero regresión histórica).
-    const rates: { rate: number; is_inclusive: boolean }[] = [];
-    if (product.product_tax_assignments) {
-      for (const assignment of product.product_tax_assignments) {
-        const flag =
-          assignment?.is_inclusive ??
-          assignment?.tax_categories?.is_inclusive ??
-          assignment?.tax_categories?.tax_rates?.[0]?.is_inclusive ??
-          false;
-        if (assignment.tax_categories?.tax_rates) {
-          for (const tax of assignment.tax_categories.tax_rates) {
-            rates.push({ rate: Number(tax.rate), is_inclusive: !!flag });
-          }
-        }
-      }
-    }
-
-    return resolveLineTotals(basePrice, rates).total;
+    // precedencia canónica F-012 (ver `extractTypedRates`). Sin
+    // asignaciones, resolveLineTotals devuelve el precio intacto (cero
+    // regresión histórica).
+    return resolveLineTotals(basePrice, extractTypedRates(product)).total;
   }
 
   private async resolvePosScope(): Promise<ResolvedInventoryScope> {

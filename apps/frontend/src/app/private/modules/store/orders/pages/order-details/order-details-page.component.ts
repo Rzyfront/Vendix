@@ -181,7 +181,7 @@ export class OrderDetailsPageComponent {
       const name = item.applied_price_tier_name_snapshot;
       if (!name) continue;
       const current = groups.get(name) ?? { name, total: 0, count: 0 };
-      current.total += Number(item.total_price || 0);
+      current.total += Number(item.final_total_price ?? item.total_price ?? 0);
       current.count += 1;
       groups.set(name, current);
     }

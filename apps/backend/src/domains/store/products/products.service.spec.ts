@@ -422,6 +422,47 @@ describe('ProductsService', () => {
       });
     });
 
+    it('should default state to active when caller does not pass one', async () => {
+      // FIX — el schema Prisma tiene `@default(active)` (cambiado desde
+      // `@default(inactive)` en la migración 20260910200000), pero además el
+      // servicio lo fuerza explícitamente para defense in depth: cualquier
+      // path que cree productos sin especificar state (CSV import, seed
+      // script, mobile) debe terminar con state='active' para que aparezca
+      // en el filtro default del listado admin.
+      const expectedProduct = {
+        id: 1,
+        ...createProductDto,
+        state: ProductState.ACTIVE,
+        slug: 'test-product',
+        created_at: new Date(),
+        updated_at: new Date(),
+        stores: {
+          id: 1,
+          name: 'Test Store',
+          slug: 'test-store',
+          organization_id: 1,
+        },
+        brands: null,
+        product_categories: [],
+        product_tax_assignments: [],
+        product_images: [],
+        product_variants: [],
+        reviews: [],
+        stock_levels: [],
+        product_price_tier_assignments: [],
+      };
+
+      mockPrismaService.products.create.mockResolvedValue(expectedProduct);
+
+      await service.create(createProductDto as CreateProductDto);
+
+      expect(mockPrismaService.products.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          state: ProductState.ACTIVE,
+        }),
+      });
+    });
+
     it('should generate slug automatically if not provided', async () => {
       const productWithoutSlug = {
         ...createProductDto,

@@ -1,6 +1,9 @@
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '../../../common/context/request-context.service';
-import { InvoicingService } from './invoicing.service';
+import {
+  InvoicingService,
+  needsOrderLineTaxSplit,
+} from './invoicing.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceCalculatorService } from './services/invoice-calculator.service';
 
@@ -15,8 +18,13 @@ import { InvoiceCalculatorService } from './services/invoice-calculator.service'
  * La decisión de modelado que este spec fija —y que no se puede romper sin
  * romper la DIAN— es que un documento usa UNA sola forma, nunca las dos:
  *
- *   · UN tributo  ⇒ fila agregada de cabecera, `invoice_item_id` NULL. El emisor
- *     ya produce el mismo XML heredándola.
+ *   · UN tributo AGREGADO ⇒ fila agregada de cabecera, `invoice_item_id` NULL.
+ *     El emisor ya produce el mismo XML heredándola.
+ *   · UN tributo con CUALQUIER línea inclusiva ⇒ una fila por línea (incidente
+ *     factura #81, FAU02 P0): la fila de cabecera no lleva `invoice_item_id`,
+ *     el prevalidador no usa la base persistida y recomputa `bruto − impuesto`
+ *     sobre unidades que los canales ya persisten netas (doble despeje:
+ *     4629.62 → 4259.26, venta cobrada sin documento fiscal).
  *   · ≥2 tributos ⇒ una fila por (línea × tributo) y NINGUNA agregada. Todo
  *     consumidor de esta tabla SUMA sin filtrar (`cac:TaxTotal` de cabecera,
  *     prevalidador, exógena, declaraciones), así que agregado + desglose juntos
@@ -272,6 +280,53 @@ describe('InvoicingService · desglose de tributos por línea', () => {
         ),
       ).toBe(true);
     });
+
+  describe('needsOrderLineTaxSplit: criterio de createFromOrder', () => {
+    const incl = (base: number) => [
+      {
+        tax_rate_id: 68,
+        tax_name: 'INC',
+        tax_rate: 8,
+        taxable_amount: base,
+        tax_amount: 370.36,
+        tax_type: 'inc',
+        is_inclusive: true,
+      },
+    ];
+    const agr = (base: number) => [
+      {
+        tax_rate_id: 1,
+        tax_name: 'IVA',
+        tax_rate: 19,
+        taxable_amount: base,
+        tax_amount: 950,
+        tax_type: 'iva',
+        is_inclusive: false,
+      },
+    ];
+
+    it('un tributo agregado y líneas normales: cabecera, como siempre', () => {
+      expect(needsOrderLineTaxSplit(1, [agr(5000), agr(3000)])).toBe(false);
+    });
+
+    it('dos o más tributos: parte aunque todo sea agregado', () => {
+      expect(needsOrderLineTaxSplit(2, [agr(5000), agr(3000)])).toBe(true);
+    });
+
+    it('un solo tributo INCLUSIVO (factura #81): parte por línea', () => {
+      // Sin esto, la fila de cabecera queda sin invoice_item_id y el
+      // prevalidador recomputa bruto − impuesto sobre unidades netas.
+      expect(needsOrderLineTaxSplit(1, [incl(4629.62)])).toBe(true);
+    });
+
+    it('mixto con una línea inclusiva entre agregadas: parte', () => {
+      expect(needsOrderLineTaxSplit(2, [agr(5000), incl(4629.62)])).toBe(true);
+    });
+
+    it('sin líneas: no parte', () => {
+      expect(needsOrderLineTaxSplit(0, [])).toBe(false);
+    });
+  });
 
     it('la línea que calla su grupo no cuenta: no declara ninguna base', () => {
       // Administración e imprevistos bajo `'utilidad'` traen `'0.00'` de base y

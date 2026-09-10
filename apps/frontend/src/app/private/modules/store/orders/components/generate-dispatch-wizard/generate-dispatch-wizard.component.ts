@@ -314,8 +314,10 @@ export class GenerateDispatchWizardComponent {
         order_item_id: it.id,
         product_name: it.product_name,
         pending_quantity: Number(it.quantity),
-        unit_price: Number(it.unit_price) || 0,
-        total_price: Number(it.total_price) || 0,
+        // Contexto de venta: el wizard muestra el valor de la mercancía al
+        // precio del cliente (display-only; el DTO solo envía ids+cantidades).
+        unit_price: Number(it.final_unit_price ?? it.unit_price) || 0,
+        total_price: Number(it.final_total_price ?? it.total_price) || 0,
       }));
     this.itemRows.set(rows);
     // Default each line to its full pending quantity.

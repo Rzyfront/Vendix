@@ -75,7 +75,7 @@
                     <span class="item-qty">× {{ item.quantity }}</span>
                   </div>
                   <span class="item-total">
-                    {{ +item.total_price | currency }}
+                    {{ +(item.final_total_price ?? item.total_price) | currency }}
                   </span>
                 </div>
               }

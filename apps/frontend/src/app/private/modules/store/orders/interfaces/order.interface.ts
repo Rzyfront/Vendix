@@ -290,6 +290,13 @@ export interface OrderItem {
   quantity: number;
   unit_price: number;
   total_price: number;
+  /**
+   * Precio final con impuesto por línea (contrato feat/global-final-prices:
+   * final = agregado sumado, incluido = bruto). Opcional hasta que el backend
+   * lo publique; las vistas usan `??` fallback a unit/total_price.
+   */
+  final_unit_price?: number | null;
+  final_total_price?: number | null;
   tax_rate?: number;
   tax_amount_item?: number;
   applied_price_tier_id?: number | null;

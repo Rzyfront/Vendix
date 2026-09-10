@@ -189,7 +189,10 @@ export class MenusPageComponent implements OnInit {
   dishPrice(item: MenuItem): number {
     const p = item.product;
     if (!p) return 0;
-    return p.is_on_sale && p.sale_price != null ? p.sale_price : p.base_price;
+    return (
+      p.final_price ??
+      (p.is_on_sale && p.sale_price != null ? p.sale_price : p.base_price)
+    );
   }
 
   nextLabel(entity: { next_available: MenuNextAvailable | null }): string {
@@ -313,7 +316,7 @@ export class MenusPageComponent implements OnInit {
       stock_quantity: null,
       available_stock: null,
       is_available: item.is_available_now && !item.is_sold_out,
-      final_price: on_sale ? p.sale_price! : p.base_price,
+      final_price: p.final_price ?? (on_sale ? p.sale_price! : p.base_price),
       image_url: p.image_url,
       brand: null,
       categories: [],

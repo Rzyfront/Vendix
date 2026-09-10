@@ -166,6 +166,13 @@ export interface TableSessionOrderItem {
   quantity: number;
   unit_price: number | string;
   total_price: number | string;
+  /**
+   * Precios finales con impuesto (contrato global-final-prices, backend en
+   * paralelo). Opcionales: las vistas usan `final_* ?? <base>` para no
+   * romperse si el backend aún no los devuelve.
+   */
+  final_unit_price?: number | string | null;
+  final_total_price?: number | string | null;
   inventory_consumed_at_fire: boolean;
   /**
    * C3 — nota de preparación por línea
@@ -377,6 +384,12 @@ export interface SellableProductOption {
   name: string;
   sku?: string | null;
   base_price?: number | string | null;
+  /**
+   * Precio final con impuesto (contrato global-final-prices, backend en
+   * paralelo). Opcional: las vistas usan `final_price ?? base_price` para
+   * no romperse si el backend aún no lo devuelve.
+   */
+  final_price?: number | string | null;
   is_sellable?: boolean;
   product_type?: 'physical' | 'service' | 'prepared';
   /**

@@ -19,6 +19,7 @@ import {
   ReportReviewDto,
 } from './dto';
 import { Public } from '@common/decorators/public.decorator';
+import { OptionalAuth } from '@common/decorators/optional-auth.decorator';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 @Controller('ecommerce/reviews')
@@ -32,7 +33,17 @@ export class EcommerceReviewsController {
     return { success: true, data };
   }
 
-  @UseGuards(JwtAuthGuard)
+  /**
+   * QUI-794 — antes `JwtAuthGuard` rechazaba al visitante anónimo con 401,
+   * la UI ocultaba el CTA sin explicación y el cliente nunca sabía que podía
+   * iniciar sesión para escribir la reseña. Con `@OptionalAuth()` el
+   * servicio detecta el caso y devuelve `{ can_review: false, reason:
+   * 'unauthenticated' }`, y el frontend muestra el mensaje honesto.
+   * El resto del flujo (create, vote, report) sigue exigiendo JWT — solo
+   * este `can-review` se vuelve opcional porque es una consulta de
+   * elegibilidad, no una mutación.
+   */
+  @OptionalAuth()
   @Get('can-review/:productId')
   async canReview(@Param('productId', ParseIntPipe) productId: number) {
     const data = await this.reviews_service.canReview(productId);
