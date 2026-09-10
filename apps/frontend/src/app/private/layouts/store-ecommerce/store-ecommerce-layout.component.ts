@@ -256,6 +256,25 @@ export class StoreEcommerceLayoutComponent {
     // Restore body scroll if the actions sheet is torn down mid-open.
     this.destroy_ref.onDestroy(() => this.setBodyScrollLock(false));
 
+    // QUI-795 — purga el carrito invitado vencido sin recargar.
+    // El bug original era que `getLocalCart()` solo corría en mutaciones, así
+    // que una pestaña abierta 3+ horas seguía mostrando ítems viejos. Ahora
+    // (a) se purga al montar el layout y (b) cada vez que la pestaña vuelve
+    // a primer plano (visibilitychange). El método es no-op si no hay nada
+    // vencido, así que no dispara re-renders innecesarios.
+    if (this.is_browser) {
+      this.cart_service.purgeExpiredLocalCart();
+      const onVisibility = () => {
+        if (document.visibilityState === 'visible') {
+          this.cart_service.purgeExpiredLocalCart();
+        }
+      };
+      document.addEventListener('visibilitychange', onVisibility);
+      this.destroy_ref.onDestroy(() => {
+        document.removeEventListener('visibilitychange', onVisibility);
+      });
+    }
+
     // Get store info from domain resolution reactively
     this.domain_service.domainConfig$
       .pipe(takeUntilDestroyed(this.destroy_ref))
