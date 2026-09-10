@@ -203,7 +203,10 @@ export class SplitOrderModalComponent {
     const ids = this.itemGroups()[groupIndex]?.ids ?? [];
     return this.items()
       .filter((it) => ids.includes(it.id))
-      .reduce((acc, it) => acc + Number(it.total_price ?? 0), 0);
+      .reduce(
+        (acc, it) => acc + Number(it.final_total_price ?? it.total_price ?? 0),
+        0,
+      );
   }
 
   setMode(mode: SplitMode): void {
