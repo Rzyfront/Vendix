@@ -37,8 +37,7 @@ import { FormStyleVariant } from '../../types/form.types';
       [disabled]="isDisabled()"
       (click)="onToggle()"
       [class]="buttonClasses"
-      [class.bg-[var(--color-primary)]]="isOn()"
-      [class.bg-[var(--color-muted)]]="!isOn()"
+      [style.background-color]="isDisabled() ? 'var(--color-muted)' : isOn() ? 'var(--color-primary)' : 'var(--color-danger)'"
     >
       <span
         class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow ring-0 transition-transform duration-75 ease-out"
@@ -137,7 +136,13 @@ export class ToggleComponent implements ControlValueAccessor {
     ];
 
     if (this.isDisabled()) {
-      baseClasses.push('opacity-50');
+      // FIX QUI-801: antes se aplicaba `opacity-50` encima del gris muted, lo
+      // que daba un color apagado difícil de distinguir del estado "apagado
+      // pero habilitado". Ahora el template aplica `bg-[var(--color-danger)]`
+      // (rojo opaco) directamente al botón deshabilitado, así que acá solo
+      // mantenemos el cursor y dejamos el color al template — sin opacidad
+      // que apague la señal visual.
+      baseClasses.push('cursor-not-allowed');
     }
 
     if (this.styleVariant() === 'modern') {
