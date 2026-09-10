@@ -3,8 +3,10 @@ core
 !core/
 *.core
 
-# Node
-node_modules/
+# Node — sin slash final: también ignora symlinks/archivos llamados
+# node_modules (el patrón con slash solo cubre directorios y dejó pasar
+# un symlink commiteado por error el 2026-09-10).
+node_modules
 dist/
 .env*
 # Los .env.example son plantillas SIN secretos reales (flags + placeholders):
