@@ -1837,7 +1837,7 @@ model products {
   sku                            String?                          @db.VarChar(100)
   barcode                        String?                          @db.VarChar(64)
   stock_quantity                 Int?                             @default(0)
-  state                          product_state_enum               @default(inactive)
+  state                          product_state_enum               @default(active)
   pricing_type                   pricing_type_enum                @default(unit)
   product_type                   product_type_enum                @default(physical)
   service_duration_minutes       Int?

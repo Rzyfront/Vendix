@@ -926,6 +926,14 @@ export class ProductsService {
           const product = await prisma.products.create({
             data: {
               ...productData,
+              // FIX — el schema Prisma tiene `@default(inactive)` en
+              // products.state, pero la UX del admin ("Activos" como
+              // filtro por default) filtra los productos `inactive`
+              // inmediatamente después de crearlos. Forzamos `active`
+              // salvo que el caller haya pedido explícitamente un
+              // estado distinto (futuro flujo de borrador).
+              state:
+                productData.state ?? ProductState.ACTIVE,
               // Normalizar barcode: '' / whitespace-only → null. Postgres
               // permite múltiples NULL bajo UNIQUE(store_id, barcode) pero NO
               // múltiples '', así que un '' debe persistirse como null.

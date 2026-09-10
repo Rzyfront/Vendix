@@ -1,0 +1,20 @@
+-- FIX — products.state default pasa de 'inactive' a 'active'.
+--
+-- DATA IMPACT:
+-- Tablas afectadas: products
+-- Filas modificadas: 0. Solo cambia el DEFAULT de la columna.
+-- Filas existentes: conservan su state actual; ninguna fila pre-existente
+--   se ve afectada por el cambio del default. El backfill no es necesario.
+--
+-- Por qué: el schema Prisma original tenía `@default(inactive)` para
+-- products.state. Combinado con el filtro "Activos" como default del
+-- listado admin (`PRODUCT_LIST_DEFAULT_QUERY`), un producto recién creado
+-- con state='inactive' desaparecía inmediatamente del listado al
+-- filtrar por estado. El admin veía el toast "Producto guardado" pero
+-- el producto no aparecía en la tabla.
+--
+-- Este cambio es ADITIVO y reversible: cambiar el DEFAULT no es destructivo
+-- (solo afecta inserts futuros que no especifican state). Para volver
+-- atrás, basta con `ALTER TABLE products ALTER COLUMN state SET DEFAULT
+-- 'inactive'`. Ningún dato existente cambia.
+ALTER TABLE products ALTER COLUMN state SET DEFAULT 'active';
