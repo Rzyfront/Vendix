@@ -68,7 +68,10 @@ export function parseTaxRateFraction(raw: unknown): number {
 
 /** Default del catálogo para un impuesto (punto de partida, no veredicto). */
 export function catalogInclusiveDefault(
-  cat: TaxInclusiveCatalogEntry | null | undefined,
+  cat: Pick<
+    TaxInclusiveCatalogEntry,
+    'is_inclusive' | 'tax_rates'
+  > | null | undefined,
 ): boolean {
   return !!(cat?.is_inclusive ?? cat?.tax_rates?.[0]?.is_inclusive ?? false);
 }
