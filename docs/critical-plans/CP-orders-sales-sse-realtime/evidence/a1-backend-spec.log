@@ -1,0 +1,22 @@
+# A.1 — Backend spec orders.service.spec (CP-orders-sales-sse-realtime)
+# Comando: npm run buildcheck:test -- apps/backend/.../orders.service.spec.ts
+# Fecha: 2026-09-10. Rama: feature/orders-sales-sse-realtime.
+
+Test Suites: 1 failed, 1 total
+Tests:       8 failed, 32 passed, 40 total
+
+# Failing (los 8, todos del flujo de EDICION con claim — feature ajena):
+# - ORD_EDIT_STATE_CHANGED_001 / NOT_ALLOWED_001 (x2) / INVALID_STATE_001
+# - actualiza un draft con items + cliente + envio
+# - ORD_EDIT_COUPON_COMMIT_001 / RESPONSE_MISMATCH_001 / idempotency_key nuevo
+# Son mismatches de error-code esperado vs recibido + SYS_NOT_FOUND_001
+# (huele a DB no disponible para esos tests). Ni el spec ni el servicio
+# de edicion los toca esta rama: git diff a origin/develop en
+# apps/backend muestra SOLO el commit ajeno 888c022d9 (cart/catalog/
+# products, pricing fiscal). Pre-existentes, fuera de alcance.
+
+# Fixed por este plan (spec-only, cero impacto productivo):
+# - TypeError: this.orderSse.pushOrderEvent is not a function (x2) -> 0
+#   El mock tenia claves viejas (pushEvent); el hub real expone
+#   pushOrderEvent. Los tests de emisores order.created/status_changed
+#   estan entre los 32 en verde.
