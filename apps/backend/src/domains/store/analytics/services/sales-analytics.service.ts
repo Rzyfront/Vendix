@@ -1589,6 +1589,7 @@ export class SalesAnalyticsService {
     const summaryMap = new Map<
       string,
       {
+        id: string;
         user_id: number | null;
         user_name: string;
         user_email: string;
