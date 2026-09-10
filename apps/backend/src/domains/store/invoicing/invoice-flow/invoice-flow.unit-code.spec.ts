@@ -51,6 +51,7 @@ describe('InvoiceFlowService · unitCode UN/ECE por línea', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     );
     return { service, prisma };
   }
@@ -165,6 +166,7 @@ describe('InvoiceFlowService · unitCode por dimensión (QUI-648)', () => {
       prisma as any,
       {} as any,
       { emit: jest.fn() } as any,
+      {} as any,
       {} as any,
       {} as any,
       {} as any,

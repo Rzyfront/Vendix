@@ -159,7 +159,7 @@ export const FISCAL_RESPONSIBILITIES_CATALOG: FiscalResponsibilityDefinition[] =
     },
     {
       code: 'O-06',
-      label: 'Ingresos y patrimonio',
+      label: 'Declaración de ingresos y patrimonio',
       description:
         'Entidades no contribuyentes de renta pero legalmente obligadas a presentar declaración informativa de ingresos y patrimonio.',
       effects: [
@@ -250,7 +250,7 @@ export const FISCAL_RESPONSIBILITIES_CATALOG: FiscalResponsibilityDefinition[] =
     },
     {
       code: 'O-14',
-      label: 'Informante de exógena',
+      label: 'Informante de información exógena',
       description:
         'Obligado formal a suministrar anualmente a la DIAN información en medios magnéticos (información exógena).',
       effects: [
@@ -273,7 +273,7 @@ export const FISCAL_RESPONSIBILITIES_CATALOG: FiscalResponsibilityDefinition[] =
     },
     {
       code: 'O-16',
-      label: 'Obligado a facturar por ingresos excluidos',
+      label: 'Obligación de facturar por ingresos excluidos',
       description:
         'Personas naturales o jurídicas que venden bienes o servicios excluidos y están formalmente obligadas a emitir factura de venta.',
       effects: [
@@ -325,7 +325,7 @@ export const FISCAL_RESPONSIBILITIES_CATALOG: FiscalResponsibilityDefinition[] =
     },
     {
       code: 'O-21',
-      label: 'Declarar ingreso o salida de divisas o moneda legal',
+      label: 'Declarar ingreso/salida del país de divisas/moneda',
       description:
         'Obligación formal de declarar la entrada o salida física de divisas o moneda legal colombiana que supere los montos reglamentarios.',
       effects: [
@@ -500,7 +500,7 @@ export const FISCAL_RESPONSIBILITIES_CATALOG: FiscalResponsibilityDefinition[] =
     },
     {
       code: 'O-47',
-      label: 'Régimen simple de tributación',
+      label: 'Régimen Simple de Tributación (SIMPLE)',
       description:
         'Estás en el régimen SIMPLE: unificas varios impuestos (renta, ICA consolidado y otros) en anticipos bimestrales y una declaración anual, con tarifas según tu actividad.',
       effects: [
@@ -512,7 +512,7 @@ export const FISCAL_RESPONSIBILITIES_CATALOG: FiscalResponsibilityDefinition[] =
     },
     {
       code: 'O-48',
-      label: 'Responsable de IVA',
+      label: 'Responsable del impuesto sobre las ventas (IVA)',
       description:
         'Debes cobrar IVA en tus ventas, facturarlo y declararlo periódicamente a la DIAN (cada mes, cada dos meses o cada cuatro meses según tu tamaño).',
       effects: [
@@ -663,7 +663,7 @@ export const FISCAL_RESPONSIBILITIES_CATALOG: FiscalResponsibilityDefinition[] =
     },
     {
       code: 'O-60',
-      label: 'Autorretención intereses y rendimientos financieros',
+      label: 'Autorretención por intereses y rendimientos financieros',
       description:
         'Obligación de practicar autorretención en la fuente sobre ingresos provenientes de intereses y rendimientos de capital.',
       effects: [

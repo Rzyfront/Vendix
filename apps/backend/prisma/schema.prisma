@@ -1521,6 +1521,9 @@ model orders {
   notes                                           String?                   @db.VarChar(500)
   created_at                                      DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at                                      DateTime?                 @default(now()) @db.Timestamp(6)
+  // A.3 CP-facturacion-fixes: fiscal surfacing flag. Set when automatic emission
+  // (webhook auto-send) fails; null = no known fiscal issue. Read by panel.
+  fiscal_alert_code                               String?                   @db.VarChar(60)
   coupon_id                                       Int?
   coupon_code                                     String?                   @db.VarChar(50)
   placed_at                                       DateTime?                 @db.Timestamp(6)
@@ -5521,7 +5524,10 @@ model invoices {
   store_id                         Int
   accounting_entity_id             Int
   fiscal_document_type             fiscal_document_type_enum?
-  invoice_number                   String                          @db.VarChar(50)
+  // A.1 CP-facturacion-fixes: nullable until send. Automatic order-driven drafts are
+  // created numberless so abandoned checkouts consume zero DIAN consecutives; the
+  // number is assigned at validate() time. Postgres unique treats NULLs as distinct.
+  invoice_number                   String?                         @db.VarChar(50)
   invoice_type                     invoice_type_enum
   status                           invoice_status_enum             @default(draft)
   transmission_status              fiscal_transmission_status_enum @default(draft)
@@ -9383,6 +9389,23 @@ model invoice_data_requests {
 
   @@index([store_id, status])
   @@index([order_id])
+  @@index([expires_at])
+}
+
+// A.4 CP-facturacion-fixes: Idempotency-Key store for web checkout. One row per
+// (store, key): pending while the first request runs, completed with the stored
+// JSON response after. Concurrent second submit gets 409; failures delete the row.
+model checkout_idempotency_keys {
+  id              Int       @id @default(autoincrement())
+  store_id        Int
+  idempotency_key String    @db.VarChar(100)
+  // pending | completed
+  status          String    @default("pending") @db.VarChar(20)
+  response        Json?
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  expires_at      DateTime  @db.Timestamp(6)
+
+  @@unique([store_id, idempotency_key])
   @@index([expires_at])
 }
 

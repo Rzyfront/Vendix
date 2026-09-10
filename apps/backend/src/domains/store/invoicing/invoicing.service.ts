@@ -1883,11 +1883,10 @@ export class InvoicingService {
 
     await this.assertNotAlreadyInvoiced({ order_id: order.id });
 
-    const { invoice_number, resolution_id } =
-      await this.invoice_number_generator.generateNextNumber({
-        document_type: 'sales_invoice',
-        accounting_entity_id,
-      });
+    // A.1 CP-facturacion-fixes: numberless draft. The consecutive is assigned at
+    // validate() time (after the cheap gates), so abandoned/unpaid orders consume
+    // zero DIAN numbers. `resolution_id` resolves together with the number there.
+    // Manual `create()` keeps numbering at creation (explicit human act, ADR-01 scope).
 
     const productItems = (order.order_items || []).map((item: any) => {
       const description =
@@ -2081,7 +2080,6 @@ export class InvoicingService {
         store_id: context.store_id,
         accounting_entity_id,
         fiscal_document_type: 'sales_invoice',
-        invoice_number,
         invoice_type: 'sales_invoice',
         status: 'draft',
         customer_id: order.customer_id,
@@ -2094,7 +2092,8 @@ export class InvoicingService {
         customer_tax_id: acquirerRail.identity.document_number,
         customer_document_type: acquirerRail.identity.document_type,
         order_id: order.id,
-        resolution_id,
+        invoice_number: null,
+        resolution_id: null,
         subtotal_amount: new Prisma.Decimal(subtotal),
         discount_amount: new Prisma.Decimal(discount),
         tax_amount: new Prisma.Decimal(tax),
@@ -2138,7 +2137,7 @@ export class InvoicingService {
     });
 
     this.logger.log(
-      `Invoice ${created.invoice_number} created from order #${order_id}`,
+      `Invoice #${created.id} created numberless from order #${order_id} (A.1: numbered at validate)`,
     );
     return created;
   }

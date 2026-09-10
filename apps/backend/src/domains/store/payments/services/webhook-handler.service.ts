@@ -14,6 +14,8 @@ import { WebhookEvent } from '../interfaces';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 import { PaymentLinksService } from '../../payment-links/payment-links.service';
 import { TableSessionsService } from '../../tables/table-sessions.service';
+import { InvoicingService } from '../../invoicing/invoicing.service';
+import { InvoiceFlowService } from '../../invoicing/invoice-flow/invoice-flow.service';
 import { buildTaxBreakdown } from '@common/interfaces/tax-breakdown.interface';
 
 // States considered terminal for compare-and-swap and idempotency checks.
@@ -41,6 +43,11 @@ export class WebhookHandlerService {
     // Restaurant Suite (Obj 6): reconcile a deferred table close when a POS
     // digital payment (wompi/wallet) is confirmed by the gateway webhook.
     private readonly tableSessionsService: TableSessionsService,
+    // A.3 CP-facturacion-fixes: web auto-send on payment confirmation (ADR-03).
+    // InvoicingModule exports both; PaymentsModule imports it (no cycle: the
+    // invoicing graph never imports payments/orders/tables).
+    private readonly invoicing: InvoicingService,
+    private readonly invoiceFlow: InvoiceFlowService,
     @Optional()
     @Inject(forwardRef(() => PaymentLinksService))
     private readonly paymentLinksService?: PaymentLinksService,
@@ -641,6 +648,11 @@ export class WebhookHandlerService {
               `Table session ${openSession.id} closed after digital payment confirmation of order ${orderId}`,
             );
           }
+
+          // A.3 CP-facturacion-fixes (ADR-03): web auto-send on payment
+          // confirmation, parity with POS auto_emit. Best-effort inside the
+          // store context: never throws into the confirmation path.
+          await this.autoSendOrderInvoice(orderId);
         },
       );
       this.logger.log(
@@ -650,6 +662,86 @@ export class WebhookHandlerService {
       this.logger.error(
         `Failed to confirm order ${orderId} after payment: ${err.message}`,
         err.stack,
+      );
+    }
+  }
+
+  /**
+   * A.3 CP-facturacion-fixes (ADR-03) — best-effort DIAN auto-send for the order
+   * invoice once its payment is confirmed. Runs inside the store context, AFTER
+   * `confirmPayment`, and NEVER throws: every failure lands on
+   * `orders.fiscal_alert_code` (null = clean) plus a warn log.
+   *
+   * Safety notes: only the CAS-winning webhook reaches here (single owner);
+   * `validate()` assigns the consecutive (A.1), so unpaid orders still burn
+   * nothing; on any error the invoice is reread — a concurrent manual send that
+   * accepted it meanwhile clears the flag instead of raising a false alarm.
+   */
+  private async autoSendOrderInvoice(orderId: number): Promise<void> {
+    try {
+      const invoice = await this.prisma.invoices.findFirst({
+        where: { order_id: orderId, invoice_type: 'sales_invoice' },
+        orderBy: { id: 'desc' },
+        select: { id: true, status: true },
+      });
+      if (!invoice) return;
+      if (invoice.status === 'accepted') {
+        await this.clearFiscalAlert(orderId);
+        return;
+      }
+      const eligibility =
+        await this.invoicing.getElectronicEmissionEligibility();
+      if (!eligibility.eligible) {
+        this.logger.warn(
+          `Order ${orderId}: store not eligible to emit (${eligibility.reason}); draft kept for manual send`,
+        );
+        return;
+      }
+      if (invoice.status === 'draft') {
+        await this.invoiceFlow.validate(invoice.id);
+      }
+      await this.invoiceFlow.send(invoice.id);
+      await this.clearFiscalAlert(orderId);
+      this.logger.log(
+        `Order ${orderId}: invoice #${invoice.id} auto-sent after payment confirmation`,
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error ?? 'unknown');
+      try {
+        const current = await this.prisma.invoices.findFirst({
+          where: { order_id: orderId, invoice_type: 'sales_invoice' },
+          orderBy: { id: 'desc' },
+          select: { status: true },
+        });
+        if (current?.status === 'accepted') {
+          await this.clearFiscalAlert(orderId);
+          return;
+        }
+        await this.prisma.orders.update({
+          where: { id: orderId },
+          data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+        });
+      } catch (flagErr) {
+        this.logger.warn(
+          `Order ${orderId}: could not persist fiscal alert: ${(flagErr as Error)?.message}`,
+        );
+      }
+      this.logger.warn(
+        `Order ${orderId}: invoice auto-send failed (${message}); flagged for manual send`,
+      );
+    }
+  }
+
+  private async clearFiscalAlert(orderId: number): Promise<void> {
+    try {
+      await this.prisma.orders.update({
+        where: { id: orderId },
+        data: { fiscal_alert_code: null },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Order ${orderId}: could not clear fiscal alert: ${(error as Error)?.message}`,
       );
     }
   }

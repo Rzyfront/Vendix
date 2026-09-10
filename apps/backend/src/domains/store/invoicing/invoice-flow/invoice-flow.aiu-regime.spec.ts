@@ -29,6 +29,7 @@ describe('InvoiceFlowService · procedencia del régimen AIU en emisión', () =>
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     );
     return (service as any).resolveAiuRegimeForEmission(invoice, settings);
   }

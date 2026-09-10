@@ -1,4 +1,23 @@
 <div>
+  <!-- A.3 CP-facturacion-fixes — banner de alerta fiscal. `fiscal_alert_code` lo
+       fija el auto-envío del webhook cuando la emisión falla (nunca bloquea el
+       pago); null = sin alerta. Lleva al operador a emitir manualmente. -->
+  @if (order()?.fiscal_alert_code) {
+    <div
+      class="bg-warning-light border border-warning/30 rounded-lg p-4 mb-6 flex items-start gap-3"
+    >
+      <div class="text-warning shrink-0 mt-0.5">⚠️</div>
+      <div class="flex-1">
+        <p class="font-semibold text-text-primary text-sm">
+          Alerta fiscal: factura sin emitir ({{ order()?.fiscal_alert_code }})
+        </p>
+        <p class="text-xs text-text-secondary mt-1">
+          El envío automático a la DIAN falló para esta orden. Revísala en el
+          módulo de facturación y emite el documento manualmente.
+        </p>
+      </div>
+    </div>
+  }
   <!-- Bug 7 — banner para órdenes en estado `pending_delivery`. Informa al
        operador que la orden requiere despacho manual + entrega + finalizado
        (el estado ya no se auto-finaliza al cobrar). Los 2 botones wirean a

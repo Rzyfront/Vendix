@@ -60,8 +60,12 @@ describe('fiscal-responsibilities.constants (Frontend)', () => {
       expect(getFiscalResponsibilityLabel('O-05')).toBe(
         'Impuesto sobre la renta - Régimen ordinario',
       );
-      expect(getFiscalResponsibilityLabel('48')).toBe('Responsable de IVA');
-      expect(getFiscalResponsibilityLabel('O-48')).toBe('Responsable de IVA');
+      expect(getFiscalResponsibilityLabel('48')).toBe(
+        'Responsable del impuesto sobre las ventas (IVA)',
+      );
+      expect(getFiscalResponsibilityLabel('O-48')).toBe(
+        'Responsable del impuesto sobre las ventas (IVA)',
+      );
     });
 
     it('should resolve R-99-PJ to R-99-PN label', () => {

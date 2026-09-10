@@ -35,6 +35,7 @@ describe('InvoiceFlowService · desglose de tributos por línea', () => {
       new CustomerFiscalIdentityValidator(),
       new FiscalDocumentValidator(),
       {} as any,
+      {} as any,
     );
 
   /** Línea del payload UBL, con lo mínimo que `dianLineExtension` necesita. */

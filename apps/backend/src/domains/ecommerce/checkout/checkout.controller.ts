@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   ParseIntPipe,
   Post,
@@ -123,10 +124,13 @@ export class CheckoutController {
   async checkout(
     @Body() body: any,
     @UploadedFile() file?: Express.Multer.File,
+    // A.4 CP-facturacion-fixes: optional per-submit-attempt key (uuid). Retries
+    // of the SAME attempt reuse it; a new attempt mints a new one.
+    @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     const dto = await this.parseCheckoutBody(body);
     // store_id y user_id se resuelven automáticamente
-    const data = await this.checkout_service.checkout(dto, file);
+    const data = await this.checkout_service.checkout(dto, file, idempotencyKey);
     return { success: true, data };
   }
 
