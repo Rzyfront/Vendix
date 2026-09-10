@@ -29,6 +29,10 @@ import { StockLevelManager } from '../inventory/shared/services/stock-level-mana
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
+import {
+  groupRatesByProductId,
+  resolveOrderLineFinals,
+} from '../taxes/utils/final-price.util';
 import { resolvePackSize } from '../products/services/packaging.util';
 import {
   normalizePriceUnitLines,
@@ -1049,7 +1053,56 @@ export class OrdersService {
     // Sign S3 image URLs for order items products
     await this.signOrderItemImages(order);
 
+    // Final con impuesto por línea (display-only, aditivo): `unit_price`
+    // persistido resuelto con las tasas del producto (UN batch, no N+1) +
+    // ese valor × cantidad (2 dec). Mismo criterio que la vista de mesa, para
+    // que ambas pantallas muestren lo mismo. Deriva en memoria (no persiste):
+    // sombrea la columna `final_unit_price` solo en la respuesta.
+    // Cocina NO recibe finales (ADR-10): su payload sale como hoy.
+    if (order.order_items?.length && !this.isKitchenRole()) {
+      const productIds = [
+        ...new Set(
+          order.order_items
+            .map((item: any) => item?.product_id)
+            .filter((id: any) => id != null),
+        ),
+      ];
+      const ratesByProductId =
+        productIds.length > 0
+          ? groupRatesByProductId(
+              (await this.prisma.product_tax_assignments.findMany({
+                where: { product_id: { in: productIds } },
+                include: {
+                  tax_categories: { include: { tax_rates: true } },
+                },
+              })) as any,
+            )
+          : new Map();
+      for (const item of order.order_items) {
+        const rates =
+          item.product_id != null
+            ? (ratesByProductId.get(item.product_id) ?? [])
+            : [];
+        const finals = resolveOrderLineFinals(
+          Number(item.unit_price),
+          item.quantity,
+          rates,
+        );
+        item.final_unit_price = finals.final_unit_price;
+        item.final_total_price = finals.final_total_price;
+      }
+    }
+
     return order;
+  }
+
+  /**
+   * Réplica de `ProductsService.isKitchenRole` (ADR-10): el rol cocina NUNCA
+   * recibe precios. Cuando es cocina, el detalle sale byte-por-byte como hoy
+   * (sin `final_*`).
+   */
+  private isKitchenRole(): boolean {
+    return RequestContextService.getRoles().includes('kitchen');
   }
 
   /**
