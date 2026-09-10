@@ -66,8 +66,9 @@ export class SuperadminPqrsController {
   @ApiResponse({ status: 200, description: 'PQRs retrieved successfully' })
   async findAll(@Query() query: PqrQueryDto) {
     const where: any = {
-      // PQR discriminator — matches pqr.service.ts:143
+      // PQR discriminator — solo PQRs de plataforma Vendix (las de tiendas pertenecen a su respectiva tienda)
       tags: { has: 'pqr' },
+      store_id: null,
     };
 
     if (query.status) where.status = query.status;
@@ -141,7 +142,7 @@ export class SuperadminPqrsController {
   @Get('stats')
   @ApiOperation({ summary: 'Global PQR statistics' })
   async getStats() {
-    const where = { tags: { has: 'pqr' } };
+    const where = { tags: { has: 'pqr' }, store_id: null };
 
     const [
       total,

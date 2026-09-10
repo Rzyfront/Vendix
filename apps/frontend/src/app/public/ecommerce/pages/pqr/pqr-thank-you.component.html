@@ -5,8 +5,11 @@
     </div>
     <h1>¡Recibimos tu PQRS!</h1>
     <p class="lead">
-      Hemos registrado tu mensaje. El equipo de soporte lo revisará y te
-      responderemos por correo electrónico a la dirección que indicaste.
+      @if (storeName()) {
+        Hemos registrado tu mensaje. El equipo de {{ storeName() }} lo revisará y te responderemos por correo electrónico a la dirección que indicaste.
+      } @else {
+        Hemos registrado tu mensaje. El equipo de soporte lo revisará y te responderemos por correo electrónico a la dirección que indicaste.
+      }
     </p>
 
     @if (ticket(); as t) {
@@ -29,7 +32,13 @@
       <a [routerLink]="['/pqr/consultar', ticket()]" class="primary-btn">
         Consultar estado
       </a>
-      <a routerLink="/" class="ghost-btn">Volver al inicio</a>
+      <a routerLink="/" class="ghost-btn">
+        @if (storeName()) {
+          Volver a {{ storeName() }}
+        } @else {
+          Volver al inicio
+        }
+      </a>
     </div>
 
     <p class="legal-note">
