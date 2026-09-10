@@ -412,6 +412,7 @@ export class OrdersService {
         // Use scoped client (creates are not scoped by extension but using correct service is good style)
         const order = await this.prisma.orders.create({
           data: {
+            created_by_user_id: creatingUser?.id ?? context?.user_id ?? null,
             customer_id: createOrderDto.customer_id ?? null,
             // QUI-727 (B.4) / ADR-9 — alias↔cliente mutuamente excluyentes
             // (CHECK orders_customer_xor_alias). Replica el guard de

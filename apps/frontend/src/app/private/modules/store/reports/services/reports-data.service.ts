@@ -25,6 +25,14 @@ export class ReportsDataService {
 
   private withCache<T>(key: string, factory: () => Observable<T>): Observable<T> {
     const now = Date.now();
+
+    // Prune expired entries to keep cache clean and memory-bounded
+    for (const [k, v] of reportsCache.entries()) {
+      if (now - v.lastFetch >= this.CACHE_TTL) {
+        reportsCache.delete(k);
+      }
+    }
+
     const cached = reportsCache.get(key);
     if (cached && now - cached.lastFetch < this.CACHE_TTL) {
       return cached.observable as Observable<T>;
@@ -34,6 +42,22 @@ export class ReportsDataService {
     );
     reportsCache.set(key, { observable: obs$, lastFetch: now });
     return obs$;
+  }
+
+  /**
+   * Clear cache for a specific report or all reports.
+   */
+  clearCache(reportId?: string): void {
+    if (reportId) {
+      const prefix = `${reportId}:`;
+      for (const key of reportsCache.keys()) {
+        if (key.startsWith(prefix)) {
+          reportsCache.delete(key);
+        }
+      }
+    } else {
+      reportsCache.clear();
+    }
   }
 
   /**
@@ -90,7 +114,6 @@ export class ReportsDataService {
     }
     lastRangePerReport.set(report.id, rangeSignature);
 
-    const cacheKey = `${report.id}-${dataEndpoint}-${JSON.stringify(options)}`;
     return this.withCache(cacheKey, () =>
       this.http.get<any>(url, { params }).pipe(
         map((response) => this.adapter.adapt(response, report)),

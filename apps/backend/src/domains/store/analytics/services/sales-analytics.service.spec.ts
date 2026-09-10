@@ -344,4 +344,146 @@ describe('SalesAnalyticsService', () => {
       expect((rows as any).data).toBeUndefined();
     });
   });
+
+  describe('getSalesByUser (QUI-551)', () => {
+    it('aggregates sales by seller, computes avg_order, and handles unassigned sellers', async () => {
+      prisma.orders.findMany.mockResolvedValue([
+        {
+          id: 1,
+          created_at: new Date('2026-07-08T10:00:00.000Z'),
+          grand_total: 200,
+          created_by_user_id: 10,
+          users_orders_created_by: {
+            id: 10,
+            first_name: 'Carlos',
+            last_name: 'Vendedor',
+            email: 'carlos@vendix.com',
+          },
+          order_items: [{ quantity: 2 }, { quantity: 1 }],
+        },
+        {
+          id: 2,
+          created_at: new Date('2026-07-08T12:00:00.000Z'),
+          grand_total: 100,
+          created_by_user_id: 10,
+          users_orders_created_by: {
+            id: 10,
+            first_name: 'Carlos',
+            last_name: 'Vendedor',
+            email: 'carlos@vendix.com',
+          },
+          order_items: [{ quantity: 1 }],
+        },
+        {
+          id: 3,
+          created_at: new Date('2026-07-08T15:00:00.000Z'),
+          grand_total: 150,
+          created_by_user_id: null,
+          users_orders_created_by: null,
+          order_items: [{ quantity: 3 }],
+        },
+      ] as any);
+
+      const result = await service.getSalesByUser({ page: 1, limit: 10 } as any);
+
+      expect(result.data).toHaveLength(2);
+      expect(result.meta.pagination.total).toBe(2);
+
+      const carlos = result.data.find((r) => r.user_id === 10);
+      expect(carlos).toBeDefined();
+      expect(carlos!.user_name).toBe('Carlos Vendedor');
+      expect(carlos!.user_email).toBe('carlos@vendix.com');
+      expect(carlos!.orders_count).toBe(2);
+      expect(carlos!.items_sold).toBe(4);
+      expect(carlos!.grand_total).toBe(300);
+      expect(carlos!.avg_order).toBe(150);
+
+      const unassigned = result.data.find((r) => r.user_id === null);
+      expect(unassigned).toBeDefined();
+      expect(unassigned!.user_name).toBe('Sin asignar');
+      expect(unassigned!.orders_count).toBe(1);
+      expect(unassigned!.items_sold).toBe(3);
+      expect(unassigned!.grand_total).toBe(150);
+      expect(unassigned!.avg_order).toBe(150);
+    });
+  });
+
+  describe('getSalesByUserForExport (QUI-551)', () => {
+    it('returns 3 sheets (summary, byBrand, bySupplier) with matching totals', async () => {
+      prisma.orders.findMany.mockResolvedValue([
+        {
+          id: 101,
+          created_at: new Date('2026-07-08T10:00:00.000Z'),
+          grand_total: 500,
+          created_by_user_id: 20,
+          users_orders_created_by: {
+            id: 20,
+            first_name: 'Laura',
+            last_name: 'Gómez',
+            email: 'laura@vendix.com',
+          },
+          order_items: [
+            {
+              id: 1,
+              order_id: 101,
+              quantity: 2,
+              total_price: 300,
+              products: {
+                id: 50,
+                brands: { name: 'Nike' },
+                supplier_products: [
+                  { is_preferred: true, suppliers: { name: 'Distribuidora Central' } },
+                ],
+              },
+            },
+            {
+              id: 2,
+              order_id: 101,
+              quantity: 1,
+              total_price: 200,
+              products: {
+                id: 51,
+                brands: null,
+                supplier_products: [],
+              },
+            },
+          ],
+        },
+      ] as any);
+
+      const exportData = await service.getSalesByUserForExport({} as any);
+
+      expect(exportData.summary).toHaveLength(1);
+      expect(exportData.summary[0].user_name).toBe('Laura Gómez');
+      expect(exportData.summary[0].orders_count).toBe(1);
+      expect(exportData.summary[0].items_sold).toBe(3);
+      expect(exportData.summary[0].grand_total).toBe(500);
+
+      expect(exportData.byBrand).toHaveLength(2);
+      const nike = exportData.byBrand.find((b) => b.brand_name === 'Nike');
+      expect(nike).toBeDefined();
+      expect(nike!.items_sold).toBe(2);
+      expect(nike!.grand_total).toBe(300);
+
+      const noBrand = exportData.byBrand.find((b) => b.brand_name === 'Sin marca');
+      expect(noBrand).toBeDefined();
+      expect(noBrand!.items_sold).toBe(1);
+      expect(noBrand!.grand_total).toBe(200);
+
+      expect(exportData.bySupplier).toHaveLength(2);
+      const supplier1 = exportData.bySupplier.find(
+        (s) => s.supplier_name === 'Distribuidora Central',
+      );
+      expect(supplier1).toBeDefined();
+      expect(supplier1!.items_sold).toBe(2);
+      expect(supplier1!.grand_total).toBe(300);
+
+      const noSupplier = exportData.bySupplier.find(
+        (s) => s.supplier_name === 'Sin proveedor',
+      );
+      expect(noSupplier).toBeDefined();
+      expect(noSupplier!.items_sold).toBe(1);
+      expect(noSupplier!.grand_total).toBe(200);
+    });
+  });
 });

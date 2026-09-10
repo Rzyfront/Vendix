@@ -3254,12 +3254,19 @@ export class PaymentsService {
       Math.max(0, newSubtotal + newTax - totalDiscount + shippingCost + tip),
     );
 
+    const tableSellerUserId = dto.seller_user_id
+      ? (Number(dto.seller_user_id) || null)
+      : (user?.id ?? null);
+
     // Persist new items + totals on the session's order. Customer is
     // updated here (in case the picker was changed) but only when one is
     // provided; an anonymous sale keeps the existing customer_id.
     const updated = await tx.orders.update({
       where: { id: session.order_id },
       data: {
+        ...(session.order?.created_by_user_id == null && tableSellerUserId
+          ? { created_by_user_id: tableSellerUserId }
+          : {}),
         // ADR-9 (CP-POLLO-ARABE-727): alias↔cliente mutuamente excluyentes
         // (CHECK orders_customer_xor_alias). El alias también aplica a mesas
         // (FB-21 cerrado): al fijar customer_id garantizamos customer_alias NULL,
@@ -3734,6 +3741,10 @@ export class PaymentsService {
           ),
         );
 
+        const sellerUserId = dto.seller_user_id
+          ? (Number(dto.seller_user_id) || null)
+          : (user?.id ?? context?.user_id ?? null);
+
         // Build order data - only include customer_id if provided (for anonymous sales)
         // Initial state is 'created' - state transitions handled by OrderFlowService.
         // Drafts use state='draft' and payment_form=null so they don't get classified
@@ -3741,6 +3752,7 @@ export class PaymentsService {
         const orderData: any = {
           store_id: dto.store_id,
           order_number: orderNumber,
+          created_by_user_id: sellerUserId,
           state: dto.is_draft ? 'draft' : 'created',
           channel: 'pos', // POS orders are assigned 'pos' channel
           subtotal_amount: calculatedSubtotal,

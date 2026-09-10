@@ -26,7 +26,12 @@ export class ReportsEffects {
 
   reloadOnFilterChange$ = createEffect(() =>
     this.actions$.pipe(
-      ofType(ReportsActions.setDateRange, ReportsActions.setFiscalPeriod),
+      ofType(
+        ReportsActions.setDateRange,
+        ReportsActions.setFiscalPeriod,
+        ReportsActions.setPage,
+        ReportsActions.setItemsPerPage,
+      ),
       map(() => ReportsActions.loadReportData()),
     ),
   );

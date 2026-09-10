@@ -1394,4 +1394,377 @@ export class SalesAnalyticsService {
       context.row.unit = display.suffix;
     }
   }
+
+  /**
+   * QUI-551: Ventas por usuario / vendedor (preview paginado).
+   * Desglosa ventas por el usuario/vendedor interno que registró la orden.
+   */
+  async getSalesByUser(query: SalesAnalyticsQueryDto) {
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    const orders = await this.prisma.orders.findMany({
+      where: {
+        state: { in: this.COMPLETED_STATES },
+        created_at: {
+          gte: startDate,
+          lte: endDate,
+        },
+      },
+      select: {
+        id: true,
+        created_at: true,
+        grand_total: true,
+        created_by_user_id: true,
+        users_orders_created_by: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+          },
+        },
+        order_items: {
+          select: {
+            quantity: true,
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    const sellerMap = new Map<
+      string,
+      {
+        id: string;
+        user_id: number | null;
+        user_name: string;
+        user_email: string;
+        orders_count: number;
+        items_sold: number;
+        grand_total: number;
+        last_order_date: Date | null;
+      }
+    >();
+
+    for (const order of orders) {
+      const seller = order.users_orders_created_by;
+      const sellerId = order.created_by_user_id;
+      const sellerKey = sellerId ? String(sellerId) : 'unassigned';
+
+      let entry = sellerMap.get(sellerKey);
+      if (!entry) {
+        const userName = seller
+          ? `${seller.first_name || ''} ${seller.last_name || ''}`.trim() ||
+            seller.email ||
+            'Vendedor'
+          : 'Sin asignar';
+        entry = {
+          id: sellerKey,
+          user_id: sellerId ?? null,
+          user_name: userName,
+          user_email: seller?.email || '',
+          orders_count: 0,
+          items_sold: 0,
+          grand_total: 0,
+          last_order_date: null,
+        };
+        sellerMap.set(sellerKey, entry);
+      }
+
+      entry.orders_count += 1;
+      const orderItemsCount = order.order_items.reduce(
+        (sum, item) => sum + Number(item.quantity),
+        0,
+      );
+      entry.items_sold += orderItemsCount;
+      entry.grand_total += Number(order.grand_total);
+
+      if (order.created_at) {
+        if (!entry.last_order_date || order.created_at > entry.last_order_date) {
+          entry.last_order_date = order.created_at;
+        }
+      }
+    }
+
+    const rows: SalesByUserSummaryRow[] = Array.from(sellerMap.values()).map(
+      (entry) => ({
+        ...entry,
+        grand_total: round2(entry.grand_total),
+        avg_order:
+          entry.orders_count > 0
+            ? round2(entry.grand_total / entry.orders_count)
+            : 0,
+      }),
+    );
+
+    rows.sort((a, b) => b.grand_total - a.grand_total);
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.max(1, Math.min(100, Number(query.limit) || 10));
+    const total = rows.length;
+    const total_pages = Math.ceil(total / limit);
+    const pagedData = rows.slice((page - 1) * limit, page * limit);
+
+    return {
+      data: pagedData,
+      meta: {
+        pagination: {
+          total,
+          page,
+          limit,
+          total_pages,
+        },
+      },
+    };
+  }
+
+  /**
+   * QUI-551: Ventas por usuario / vendedor para exportación XLSX multi-hoja.
+   * Dataset completo en el rango (hasta take: 10000 de seguridad) con 3 hojas:
+   * 1. summary: Vendedor
+   * 2. byBrand: Vendedor × Marca
+   * 3. bySupplier: Vendedor × Proveedor
+   */
+  async getSalesByUserForExport(
+    query: SalesAnalyticsQueryDto,
+  ): Promise<SalesByUserExportResult> {
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    const orders = await this.prisma.orders.findMany({
+      where: {
+        state: { in: this.COMPLETED_STATES },
+        created_at: {
+          gte: startDate,
+          lte: endDate,
+        },
+      },
+      select: {
+        id: true,
+        created_at: true,
+        grand_total: true,
+        created_by_user_id: true,
+        users_orders_created_by: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+          },
+        },
+        order_items: {
+          select: {
+            id: true,
+            order_id: true,
+            quantity: true,
+            total_price: true,
+            products: {
+              select: {
+                id: true,
+                brands: {
+                  select: {
+                    name: true,
+                  },
+                },
+                supplier_products: {
+                  select: {
+                    is_preferred: true,
+                    suppliers: {
+                      select: {
+                        name: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+      take: 10000,
+    });
+
+    const summaryMap = new Map<
+      string,
+      {
+        user_id: number | null;
+        user_name: string;
+        user_email: string;
+        orders_count: number;
+        items_sold: number;
+        grand_total: number;
+        last_order_date: Date | null;
+      }
+    >();
+
+    const brandMap = new Map<
+      string,
+      {
+        user_name: string;
+        brand_name: string;
+        orderIds: Set<number>;
+        items_sold: number;
+        grand_total: number;
+      }
+    >();
+
+    const supplierMap = new Map<
+      string,
+      {
+        user_name: string;
+        supplier_name: string;
+        orderIds: Set<number>;
+        items_sold: number;
+        grand_total: number;
+      }
+    >();
+
+    for (const order of orders) {
+      const seller = order.users_orders_created_by;
+      const sellerId = order.created_by_user_id;
+      const sellerKey = sellerId ? String(sellerId) : 'unassigned';
+
+      const userName = seller
+        ? `${seller.first_name || ''} ${seller.last_name || ''}`.trim() ||
+          seller.email ||
+          'Vendedor'
+        : 'Sin asignar';
+      const userEmail = seller?.email || '';
+
+      let sumEntry = summaryMap.get(sellerKey);
+      if (!sumEntry) {
+        sumEntry = {
+          id: sellerKey,
+          user_id: sellerId ?? null,
+          user_name: userName,
+          user_email: userEmail,
+          orders_count: 0,
+          items_sold: 0,
+          grand_total: 0,
+          last_order_date: null,
+        };
+        summaryMap.set(sellerKey, sumEntry);
+      }
+
+      sumEntry.orders_count += 1;
+      sumEntry.grand_total += Number(order.grand_total);
+      if (order.created_at) {
+        if (!sumEntry.last_order_date || order.created_at > sumEntry.last_order_date) {
+          sumEntry.last_order_date = order.created_at;
+        }
+      }
+
+      for (const item of order.order_items) {
+        const qty = Number(item.quantity);
+        const itemTotal = Number(item.total_price);
+        sumEntry.items_sold += qty;
+
+        const brandName = item.products?.brands?.name || 'Sin marca';
+        const brandKey = `${sellerKey}::${brandName}`;
+        let bEntry = brandMap.get(brandKey);
+        if (!bEntry) {
+          bEntry = {
+            user_name: userName,
+            brand_name: brandName,
+            orderIds: new Set<number>(),
+            items_sold: 0,
+            grand_total: 0,
+          };
+          brandMap.set(brandKey, bEntry);
+        }
+        bEntry.orderIds.add(order.id);
+        bEntry.items_sold += qty;
+        bEntry.grand_total += itemTotal;
+
+        const spList = item.products?.supplier_products || [];
+        const preferredSp = spList.find((sp) => sp.is_preferred) || spList[0];
+        const supplierName = preferredSp?.suppliers?.name || 'Sin proveedor';
+        const supplierKey = `${sellerKey}::${supplierName}`;
+        let sEntry = supplierMap.get(supplierKey);
+        if (!sEntry) {
+          sEntry = {
+            user_name: userName,
+            supplier_name: supplierName,
+            orderIds: new Set<number>(),
+            items_sold: 0,
+            grand_total: 0,
+          };
+          supplierMap.set(supplierKey, sEntry);
+        }
+        sEntry.orderIds.add(order.id);
+        sEntry.items_sold += qty;
+        sEntry.grand_total += itemTotal;
+      }
+    }
+
+    const summary: SalesByUserSummaryRow[] = Array.from(summaryMap.values())
+      .map((entry) => ({
+        ...entry,
+        grand_total: round2(entry.grand_total),
+        avg_order:
+          entry.orders_count > 0
+            ? round2(entry.grand_total / entry.orders_count)
+            : 0,
+      }))
+      .sort((a, b) => b.grand_total - a.grand_total);
+
+    const byBrand: SalesByUserBrandRow[] = Array.from(brandMap.values())
+      .map((b) => ({
+        user_name: b.user_name,
+        brand_name: b.brand_name,
+        orders_count: b.orderIds.size,
+        items_sold: b.items_sold,
+        grand_total: round2(b.grand_total),
+      }))
+      .sort((a, b) => b.grand_total - a.grand_total);
+
+    const bySupplier: SalesByUserSupplierRow[] = Array.from(supplierMap.values())
+      .map((s) => ({
+        user_name: s.user_name,
+        supplier_name: s.supplier_name,
+        orders_count: s.orderIds.size,
+        items_sold: s.items_sold,
+        grand_total: round2(s.grand_total),
+      }))
+      .sort((a, b) => b.grand_total - a.grand_total);
+
+    return { summary, byBrand, bySupplier };
+  }
 }
+
+export interface SalesByUserSummaryRow {
+  id: string;
+  user_id: number | null;
+  user_name: string;
+  user_email: string;
+  orders_count: number;
+  items_sold: number;
+  grand_total: number;
+  avg_order: number;
+  last_order_date: Date | null;
+}
+
+export interface SalesByUserBrandRow {
+  user_name: string;
+  brand_name: string;
+  orders_count: number;
+  items_sold: number;
+  grand_total: number;
+}
+
+export interface SalesByUserSupplierRow {
+  user_name: string;
+  supplier_name: string;
+  orders_count: number;
+  items_sold: number;
+  grand_total: number;
+}
+
+export interface SalesByUserExportResult {
+  summary: SalesByUserSummaryRow[];
+  byBrand: SalesByUserBrandRow[];
+  bySupplier: SalesByUserSupplierRow[];
+}
+
