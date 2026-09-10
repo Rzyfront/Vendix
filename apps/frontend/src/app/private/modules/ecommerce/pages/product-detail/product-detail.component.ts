@@ -543,6 +543,10 @@ import {
                 <span class="rv-tag rv-tag-info">Ya reseñaste</span>
               } @else if (canWriteReview()?.reason === 'no_purchase') {
                 <span class="rv-tag rv-tag-warn">Compra para reseñar</span>
+              } @else if (canWriteReview()?.reason === 'unauthenticated') {
+                <!-- QUI-794 — antes el CTA desaparecía sin decir nada; ahora
+                     el visitante ve el motivo y puede iniciar sesión. -->
+                <span class="rv-tag rv-tag-info">Inicia sesión para reseñar</span>
               }
             </div>
 
@@ -764,6 +768,13 @@ import {
               } @else if (canWriteReview()?.reason === 'no_purchase') {
                 <p class="rv-info">
                   Compra este producto para dejar una reseña.
+                </p>
+              } @else if (canWriteReview()?.reason === 'unauthenticated') {
+                <!-- QUI-794 — mensaje explícito debajo del formulario para
+                     que el visitante anónimo sepa que iniciando sesión puede
+                     escribir (no es un bug, es un paso explícito). -->
+                <p class="rv-info">
+                  Inicia sesión para dejar una reseña de este producto.
                 </p>
               }
               @if (reviewErrorMessage()) {
@@ -2409,6 +2420,32 @@ export class ProductDetailComponent implements OnInit {
           }
         },
       });
+  }
+
+  /**
+   * QUI-794 — la UI antes ocultaba el CTA del formulario sin decir POR QUÉ.
+   * Ahora traduce cada `reason` del backend en un mensaje honesto que el
+   * template muestra bajo la lista de reseñas:
+   *
+   *   unauthenticated     → "Inicia sesión para escribir una reseña"
+   *   no_purchase         → "Necesitas una orden entregada para reseñar"
+   *   already_reviewed    → "Ya escribiste una reseña para este producto"
+   *   reviews_disabled    → null (la sección ya se oculta arriba)
+   *   can_review: true    → null (el CTA del template es el mensaje)
+   */
+  reviewNotEligibleMessage(): string | null {
+    const data = this.canWriteReview();
+    if (!data || data.can_review) return null;
+    switch (data.reason) {
+      case 'unauthenticated':
+        return 'Inicia sesión para escribir una reseña de este producto.';
+      case 'no_purchase':
+        return 'Necesitas una orden entregada de este producto para escribir una reseña.';
+      case 'already_reviewed':
+        return 'Ya escribiste una reseña para este producto.';
+      default:
+        return null;
+    }
   }
 
   onReviewsPageChange(page: number): void {
