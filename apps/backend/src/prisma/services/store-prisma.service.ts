@@ -1625,6 +1625,11 @@ export class StorePrismaService extends BasePrismaService {
     return this.baseClient.invoice_data_requests;
   }
 
+  // Checkout Idempotency Keys (manually scoped by store_id in service layer, compound unique key)
+  get checkout_idempotency_keys() {
+    return this.baseClient.checkout_idempotency_keys;
+  }
+
   // Entity Metadata models
   get entity_metadata_fields() {
     return this.scoped_client.entity_metadata_fields;

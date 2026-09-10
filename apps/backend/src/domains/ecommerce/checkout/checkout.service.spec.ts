@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CheckoutService } from './checkout.service';
+import { CheckoutIdempotencyService } from './checkout-idempotency.service';
 import { StorefrontPriceService } from '../shared/services/storefront-price.service';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -346,6 +347,14 @@ describe('CheckoutService - promotions and coupons', () => {
               stock_units_consumed: null,
               source: 'spec',
             })),
+          },
+        },
+        {
+          provide: CheckoutIdempotencyService,
+          useValue: {
+            begin: jest.fn().mockResolvedValue({ replay: false }),
+            complete: jest.fn().mockResolvedValue(undefined),
+            discard: jest.fn().mockResolvedValue(undefined),
           },
         },
       ],
