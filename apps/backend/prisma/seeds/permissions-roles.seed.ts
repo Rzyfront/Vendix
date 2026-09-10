@@ -5127,6 +5127,16 @@ export async function seedPermissionsAndRoles(
     // preview y no puede disparar (GAP-1 detectado en C.2/QUI-730).
     'store:kitchen_fire:read',
     'store:kitchen_fire:create',
+    // Entregar en mesa — `POST /kitchen-fire/tickets/:id/delivered`
+    // (kitchen-fire.controller.ts:367 exige `kitchen_fire:update`): entregar
+    // es decisión de servicio y la toma el mesero desde su botón del KDS.
+    // Sin este permiso el waiter ve el ticket en `ready` pero recibe 403 al
+    // intentar entregarlo. NOTA: la llave es gruesa (cubre también
+    // `start`/`ready`/`cancel`/`revert` del mismo controller) y no existe
+    // permiso fino de solo-entregar; se acepta porque el waiter ya posee
+    // cancel de items a nivel de sesión y `orders:update`, el tablero KDS
+    // muestra el estado en tiempo real y `revert` permite deshacer.
+    'store:kitchen_fire:update',
     // QUI-730b — pedidos: el waiter crea, lee y actualiza órdenes, y dispara
     // el flujo de orden (create + read del state machine). order_flow:update
     // (reactivate/cancel) queda fuera — es acción de owner/admin.
