@@ -410,8 +410,8 @@ RULES:
 9. "fiscal_address": the dirección principal (box 41 plus complement), as a single line. Use "" if not visible.
 10. "country": ALWAYS "CO" (ISO-3166 alpha-2) for a Colombian RUT.
 11. "department" and "city": names (NOT codes), e.g. "Cundinamarca" / "Bogotá". Use "" if not visible.
-12. "tax_responsibilities" (box 53 "Responsabilidades"): return ONLY the RUT codes present, from this set: "R-99-PN", "O-13", "O-15", "O-23", "O-47", "R-99-PJ". Ignore any responsibility code not in this set. Empty array if none visible.
-13. "tax_scheme": the issuer's primary/most relevant responsibility, as a single RUT code from the same set (e.g. "O-13"). Use "" if none.
+12. "tax_responsibilities" (box 53 "Responsabilidades"): extract ALL 2-digit responsibility numbers printed in box 53 (e.g. "05", "13", "14", "48", "49", "52"). Return them formatted with the "O-" prefix (e.g. "O-05", "O-13", "O-48", "O-52") or as 2-digit numbers. For natural persons with no special tax responsibilities, use "R-99-PN". Never return "R-99-PJ". Empty array if none visible.
+13. "tax_scheme": the issuer's primary or most relevant responsibility code (e.g. "O-48", "O-05", "O-13", "O-47", or "R-99-PN"). Use "" if none.
 14. "confidence": 0-100. 90-100 clear scan, 70-89 partially unclear, below 70 poor quality.
 15. "extraction_notes": short note in Spanish about anything ambiguous or missing, or null if everything was clear.
 16. NEVER invent data. Use "" (or [] / null where specified) when a field is not visible.`,

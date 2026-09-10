@@ -514,6 +514,85 @@ describe('toDianTaxLevelCode — enumeración cerrada (FAJ26)', () => {
   });
 });
 
+describe('Step D.1 — Blindaje UBL 2.1 e invariante de cortafuegos de responsabilidades', () => {
+  function createDoc(): any {
+    return create({ version: '1.0', encoding: 'UTF-8' }).ele(
+      UBL_NAMESPACES.INVOICE,
+      'Invoice',
+      {
+        'xmlns:cac': UBL_NAMESPACES.CAC,
+        'xmlns:cbc': UBL_NAMESPACES.CBC,
+        'xmlns:ext': UBL_NAMESPACES.EXT,
+      },
+    );
+  }
+
+  function serializeIssuer(tax_scheme: string): string {
+    const root = createDoc();
+    const issuer: DianIssuerData = {
+      document_type: '31',
+      nit: '900123456',
+      nit_dv: '7',
+      legal_name: 'Vendix SAS',
+      trade_name: 'Vendix',
+      address_line: 'Calle 1 # 2-3',
+      city_code: '11001',
+      city_name: 'Bogota',
+      department_code: '11',
+      department_name: 'Bogota',
+      country_code: 'CO',
+      postal_code: '110111',
+      email: 'contabilidad@vendix.test',
+      tax_regime: '48',
+      tax_scheme,
+    };
+    UblCommonBuilder.buildSupplierParty(root, issuer);
+    return root.end({ prettyPrint: true });
+  }
+
+  function serializeCustomer(tax_responsibilities: string[]): string {
+    const root = createDoc();
+    const customer: DianCustomerData = {
+      document_type: 'CC',
+      document_number: '12345678',
+      verification_digit: null,
+      legal_name: null,
+      tax_responsibilities,
+      person_type: 'NATURAL',
+      ciiu_code: null,
+    };
+    UblCommonBuilder.buildCustomerParty(root, customer);
+    return root.end({ prettyPrint: true });
+  }
+
+  it('emisor con ["O-05","O-16","O-52"] genera TaxLevelCode>R-99-PN', () => {
+    const xml = serializeIssuer('O-05;O-16;O-52');
+    expect(xml).toMatch(/<cbc:TaxLevelCode[^>]*>R-99-PN<\/cbc:TaxLevelCode>/);
+  });
+
+  it('emisor con ["O-05","O-13","O-48","O-52"] genera TaxLevelCode>O-13', () => {
+    const xml = serializeIssuer('O-05;O-13;O-48;O-52');
+    expect(xml).toMatch(/<cbc:TaxLevelCode[^>]*>O-13<\/cbc:TaxLevelCode>/);
+  });
+
+  it('cliente con ["O-05","O-23","O-55"] genera TaxLevelCode>O-23', () => {
+    const xml = serializeCustomer(['O-05', 'O-23', 'O-55']);
+    expect(xml).toMatch(/<cbc:TaxLevelCode[^>]*>O-23<\/cbc:TaxLevelCode>/);
+  });
+
+  it('resolveTaxCodeFromTax permanece intacto mapeando tax_type IVA a código DIAN 01', () => {
+    const taxProbe = {
+      tax_type: 'IVA',
+      tax_name: 'IVA',
+      tax_rate: '19.00',
+      taxable_amount: '1000.00',
+      tax_amount: '190.00',
+    };
+    const code = UblCommonBuilder.resolveTaxCodeFromTax(taxProbe as any);
+    expect(code).toBe('01');
+  });
+});
+
 /**
  * Regresión del rechazo `FAS01b` del 17/08/2026.
  *

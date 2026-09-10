@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { computeNitDv, onlyDigits } from '@common/utils/nit.util';
+import {
+  FISCAL_RESPONSIBILITIES,
+  normalizeFiscalResponsibilityCode,
+} from '@common/constants/fiscal-responsibilities';
 
 /**
  * PUERTA DE IDENTIDAD DEL ADQUIRIENTE ANTE LA DIAN.
@@ -270,20 +274,12 @@ export const TAX_REGIME_CODES: readonly string[] = Object.freeze([
 ]);
 
 /**
- * Responsabilidades fiscales conocidas (casilla 53 del RUT). Espejo de
- * `domains/fiscal-operations/constants/fiscal-responsibilities.catalog.ts` más
- * `R-99-PJ`, que el escáner de RUT ya emite para personas jurídicas.
+ * Responsabilidades fiscales conocidas (casilla 53 del RUT).
+ * Sincronizado con el catálogo canónico FISCAL_RESPONSIBILITIES (01-61 vigentes y R-99-PN).
+ * Se retira definitivamente R-99-PJ según ADR-04.
  */
-export const KNOWN_TAX_RESPONSIBILITIES: readonly string[] = Object.freeze([
-  'O-13',
-  'O-15',
-  'O-23',
-  'O-47',
-  'O-48',
-  'O-49',
-  'R-99-PN',
-  'R-99-PJ',
-]);
+export const KNOWN_TAX_RESPONSIBILITIES: readonly string[] =
+  FISCAL_RESPONSIBILITIES;
 
 /**
  * FORMA de un código de responsabilidad. Se valida la forma como bloqueante y la
@@ -292,7 +288,7 @@ export const KNOWN_TAX_RESPONSIBILITIES: readonly string[] = Object.freeze([
  * alguien actualice este archivo. Réplica de la expresión que ya usa
  * `store/subscriptions/dto/billing-profile.dto.ts`.
  */
-const TAX_RESPONSIBILITY_PATTERN = /^(O-\d{1,3}|R-99-P[NJ])$/;
+const TAX_RESPONSIBILITY_PATTERN = /^(O-\d{1,3}|R-99-PN)$/;
 
 /** «Ninguna de las anteriores» — el valor por defecto legítimo del Anexo 19. */
 export const DIAN_DEFAULT_TAX_RESPONSIBILITY = 'R-99-PN';
@@ -1127,7 +1123,7 @@ export class CustomerFiscalIdentityValidator {
     }
 
     const responsibilities = (input.tax_responsibilities ?? [])
-      .map((code) => (code ?? '').trim())
+      .map((code) => normalizeFiscalResponsibilityCode(code))
       .filter((code) => code.length > 0);
 
     if (responsibilities.length === 0) {
@@ -1535,7 +1531,7 @@ export class CustomerFiscalIdentityValidator {
     if (!number) return null;
 
     const responsibilities = (input.tax_responsibilities ?? [])
-      .map((code) => (code ?? '').trim())
+      .map((code) => normalizeFiscalResponsibilityCode(code))
       .filter((code) => code.length > 0);
 
     const address = input.address ?? null;

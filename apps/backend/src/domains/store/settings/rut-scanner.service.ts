@@ -3,6 +3,7 @@ import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../ai-engine/interfaces/ai-provider.interface';
 import { parseAiJson } from '../../../ai-engine/utils/ai-json.util';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { normalizeFiscalResponsibilityCode } from '@common/constants/fiscal-responsibilities';
 import sharp = require('sharp');
 
 /**
@@ -32,9 +33,9 @@ export interface RutScanResult {
   department: string;
   /** Nombre de la ciudad/municipio (ej 'Bogotá'). */
   city: string;
-  /** SOLO códigos RUT: R-99-PN, O-13, O-15, O-23, O-47, R-99-PJ. */
+  /** Códigos de responsabilidades del RUT casilla 53 normalizados (01-61 vigentes y R-99-PN). */
   tax_responsibilities: string[];
-  /** Responsabilidad principal del emisor, como código RUT. */
+  /** Responsabilidad principal del emisor, como código RUT normalizado. */
   tax_scheme: string;
   /** 0-100. */
   confidence: number;
@@ -187,9 +188,14 @@ export class RutScannerService {
 
     const responsibilities = Array.isArray(parsed.tax_responsibilities)
       ? parsed.tax_responsibilities
-          .map((r: any) => String(r || '').trim())
+          .map((r: any) => normalizeFiscalResponsibilityCode(String(r || '').trim()))
           .filter((r: string) => r.length > 0)
       : [];
+
+    const rawTaxScheme = String(parsed.tax_scheme ?? '').trim();
+    const taxScheme = rawTaxScheme
+      ? normalizeFiscalResponsibilityCode(rawTaxScheme)
+      : '';
 
     let confidence = Number(parsed.confidence);
     if (!Number.isFinite(confidence)) confidence = 0;
@@ -212,7 +218,7 @@ export class RutScannerService {
       department: String(parsed.department ?? '').trim(),
       city: String(parsed.city ?? '').trim(),
       tax_responsibilities: responsibilities,
-      tax_scheme: String(parsed.tax_scheme ?? '').trim(),
+      tax_scheme: taxScheme,
       confidence,
       extraction_notes:
         parsed.extraction_notes != null && String(parsed.extraction_notes).trim()

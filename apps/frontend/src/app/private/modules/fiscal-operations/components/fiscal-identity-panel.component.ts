@@ -35,9 +35,11 @@ import {
   FiscalDataEnvelope,
   FiscalDataResponse,
   FiscalDataSettings,
+  FiscalResponsibilitiesCatalog,
 } from '../interfaces/fiscal-operations.interface';
 import { FiscalOperationsService } from '../services/fiscal-operations.service';
 import { FiscalOperationsHeaderActionsService } from '../services/fiscal-operations-header-actions.service';
+import { normalizeFiscalResponsibilityCode } from '../../../../shared/constants/fiscal-responsibilities.constants';
 
 const VALID_TAX_REGIMES: TaxRegime[] = [
   'COMUN',
@@ -166,6 +168,7 @@ const VALID_NIT_TYPES: NitType[] = [
           <app-legal-data-form
             #legalForm
             [initialValue]="formSeed()"
+            [catalog]="catalog()"
             [disabled]="saving()"
             [showResponsibilities]="true"
             [requireMunicipalityCode]="true"
@@ -239,6 +242,12 @@ export class FiscalIdentityPanelComponent {
   // ── Re-escaneo de RUT ─────────────────────────────────────
   readonly scannerOpen = signal(false);
 
+  /**
+   * Catálogo de responsabilidades fiscales (casilla 53 del RUT) obtenido del backend.
+   * Si es null o falla la red, el formulario LegalDataFormComponent usa su lista de respaldo.
+   */
+  readonly catalog = signal<FiscalResponsibilitiesCatalog | null>(null);
+
   private readonly legalForm =
     viewChild.required<LegalDataFormComponent>('legalForm');
 
@@ -255,6 +264,19 @@ export class FiscalIdentityPanelComponent {
   load(): void {
     this.loading.set(true);
     this.loadError.set(null);
+
+    this.service
+      .getResponsibilitiesCatalog(this.apiScope)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          if (res?.data) this.catalog.set(res.data);
+        },
+        error: () => {
+          // Best-effort: el formulario cae a su lista de respaldo
+        },
+      });
+
     this.service
       .getFiscalDataSettings(this.apiScope)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -317,7 +339,11 @@ export class FiscalIdentityPanelComponent {
 
     if (result.tax_responsibilities?.length) {
       merged.tax_responsibilities = Array.from(
-        new Set(result.tax_responsibilities),
+        new Set(
+          result.tax_responsibilities.map((r) =>
+            normalizeFiscalResponsibilityCode(r),
+          ),
+        ),
       );
     }
 

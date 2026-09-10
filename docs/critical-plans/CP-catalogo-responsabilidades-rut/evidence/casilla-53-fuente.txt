@@ -1,0 +1,58 @@
+TABLA OFICIAL DE RESPONSABILIDADES FISCALES - CASILLA 53 DEL RUT (DIAN)
+Fuentes normativas: Anexo Tecnico 1.9, Resolucion DIAN 000042 de 2020, Resolucion DIAN 000012 de 2021,
+Resolucion DIAN 000165 de 2023, Estatuto Tributario Nacional (ET).
+
+CODIGO | COD_CANONICO | ESTADO   | DESCRIPCION / RESPONSABILIDAD                            | BASE LEGAL
+-------+--------------+----------+---------------------------------------------------------+----------------------------------------------
+01     | O-01         | Vigente  | Aporte especial para la administracion de justicia      | Ley 6 de 1992 Art. 135 (Notarias)
+02     | O-02         | Vigente  | Gravamen a los movimientos financieros (GMF)            | Art. 871 Estatuto Tributario
+03     | O-03         | Derogada | Impuesto al patrimonio (historico)                      | Ley 1370 de 2009 (Temporal / Derogada)
+04     | O-04         | Vigente  | Impuesto sobre la renta - Regimen tributario especial   | Art. 19 y 356 Estatuto Tributario (ESAL)
+05     | O-05         | Vigente  | Impuesto sobre la renta - Regimen ordinario             | Art. 5 Estatuto Tributario
+06     | O-06         | Vigente  | Declaracion de ingresos y patrimonio                    | Art. 598 Estatuto Tributario
+07     | O-07         | Vigente  | Retencion en la fuente a titulo de renta                | Art. 368 Estatuto Tributario
+08     | O-08         | Vigente  | Retencion timbre nacional                               | Art. 518 Estatuto Tributario
+09     | O-09         | Vigente  | Retencion en la fuente en el impuesto a las ventas      | Art. 437-1 Estatuto Tributario
+10     | O-10         | Vigente  | Obligado aduanero (Usuario aduanero)                    | Decreto 1165 de 2019
+11     | O-11         | Derogada | Ventas regimen comun (historico)                        | Ley 1943 de 2018 / Ley 2010 de 2019 (a 48)
+12     | O-12         | Derogada | Ventas regimen simplificado (historico)                 | Ley 1943 de 2018 / Ley 2010 de 2019 (a 49)
+13     | O-13         | Vigente  | Gran contribuyente                                      | Art. 562 Estatuto Tributario
+14     | O-14         | Vigente  | Informante de informacion exogena                       | Art. 631 Estatuto Tributario
+15     | O-15         | Vigente  | Autorretenedor                                          | Art. 365 Estatuto Tributario
+16     | O-16         | Vigente  | Obligacion de facturar por ingresos excluidos           | Art. 616-1 Estatuto Tributario
+17     | O-17         | Vigente  | Profesionales de compra y venta de divisas              | Res. Externa 8/2000 Banco de la Republica
+18     | O-18         | Vigente  | Precios de transferencia                                | Art. 260-1 Estatuto Tributario
+19     | O-19         | Vigente  | Productor y/o exportador de bienes exentos              | Art. 477, 479 y 481 Estatuto Tributario
+20     | O-20         | Vigente  | Obtencion de NIT                                        | Art. 555-2 Estatuto Tributario
+21     | O-21         | Vigente  | Declarar ingreso/salida del pais de divisas/moneda      | Decreto 4048 de 2008 / DIAN
+22     | O-22         | Vigente  | Obligado a cumplir deberes formales a nombre de terceros| Art. 572 Estatuto Tributario
+23     | O-23         | Vigente  | Agente de retencion en ventas (ReteIVA)                 | Art. 437-2 Estatuto Tributario
+24     | O-24         | Vigente  | Declaracion consolidada precios de transferencia        | Art. 260-9 Estatuto Tributario
+26     | O-26         | Vigente  | Declaracion individual precios de transferencia         | Art. 260-9 Estatuto Tributario
+32     | O-32         | Vigente  | Impuesto nacional a la gasolina y al ACPM               | Ley 1607 de 2012 Art. 167
+33     | O-33         | Vigente  | Impuesto nacional al consumo (INC)                      | Art. 512-1 Estatuto Tributario
+35     | O-35         | Derogada | Impuesto al patrimonio personas juridicas (historico)   | Ley 1739 de 2014 (Derogada)
+36     | O-36         | Derogada | Establecimiento permanente (historico)                  | Art. 20-1 ET / Suprimida del RUT casilla 53
+37     | O-37         | Derogada | Obligado a facturar electronicamente (sustituida)       | Res. 000042 de 2020 (Sustituida por 52)
+38     | O-38         | Derogada | Facturacion electronica voluntaria (sustituida)         | Res. 000042 de 2020 (Sustituida por 52)
+39     | O-39         | Derogada | Proveedor de servicios tecnologicos PST (historica)     | Res. 000042 de 2020 / Clasificacion tecnica
+41     | O-41         | Vigente  | Declaracion anual de activos en el exterior             | Art. 607 Estatuto Tributario
+42     | O-42         | Vigente  | Obligado a llevar contabilidad                           | Art. 19 Codigo de Comercio / DUR 2420/2015
+45     | O-45         | Vigente  | Autorretenedor de rendimientos financieros              | Art. 365 ET / Dec. Reg. 2418 de 2013
+46     | O-46         | Derogada | IVA prestadores de servicios desde el exterior          | Res. 000051 de 2018 (Derogada/Reemplazada)
+47     | O-47         | Vigente  | Regimen Simple de Tributacion - SIMPLE                  | Art. 903 a 916 Estatuto Tributario
+48     | O-48         | Vigente  | Impuesto sobre las ventas - IVA                          | Art. 437 Estatuto Tributario
+49     | O-49         | Vigente  | No responsable de IVA                                   | Art. 437 ET, paragrafo 3
+50     | O-50         | Vigente  | No responsable de consumo restaurantes y bares          | Art. 512-13 Estatuto Tributario
+51     | O-51         | Vigente  | Agente de retencion impoconsumo bienes inmuebles         | Art. 512-22 Estatuto Tributario
+52     | O-52         | Vigente  | Facturador electronico                                  | Art. 616-1 ET / Res. DIAN 000165 de 2023
+53     | O-53         | Vigente  | Persona juridica no responsable de IVA                  | Art. 437 Estatuto Tributario
+54     | O-54         | Vigente  | Intercambio automatico de informacion CRS               | Res. DIAN 000119 de 2015 / Estandar OCDE
+55     | O-55         | Vigente  | Informante de beneficiarios finales (RUB)               | Art. 631-5 ET / Res. DIAN 000164 de 2021
+56     | O-56         | Vigente  | Impuesto nacional al carbono                            | Ley 1819 de 2016 Art. 221
+57     | O-57         | Vigente  | Declaracion de activos en el exterior simplificada      | Art. 607 ET / Res. Reglamentaria
+58     | O-58         | Vigente  | Intercambio automatico de informacion FATCA             | Ley 1666 de 2013 / Convenio IGA
+59     | O-59         | Vigente  | Autorretencion especial de renta                        | Decreto 2201 de 2016 / Art. 365 ET
+60     | O-60         | Vigente  | Autorretencion por intereses y rendimientos financieros | Art. 365 ET / Decreto 2418 de 2013
+61     | O-61         | Vigente  | Regimen Tributario Especial sector cooperativo          | Art. 19-4 Estatuto Tributario
+99     | R-99-PN      | Vigente  | No aplica / Persona natural consumidor final            | Anexo Tecnico UBL 2.1 Regla FAK26

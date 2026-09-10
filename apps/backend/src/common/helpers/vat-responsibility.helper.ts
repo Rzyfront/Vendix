@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { VendixHttpException } from '../errors/vendix-http.exception';
 import { ErrorCodes } from '../errors/error-codes';
 import { purchaseEffectFor } from '../../domains/fiscal-operations/constants/fiscal-responsibilities.catalog';
+import { normalizeFiscalResponsibilityCode } from '../constants/fiscal-responsibilities';
 
 /**
  * F4 — Ciclo de vida legal del IVA colombiano.
@@ -140,9 +141,9 @@ export function resolveVatResponsibility(
   fiscalData: VatFiscalDataInput | null | undefined,
 ): VatResponsibilityResult {
   const responsibilities = Array.isArray(fiscalData?.tax_responsibilities)
-    ? (fiscalData!.tax_responsibilities as unknown[]).filter(
-        (code): code is string => typeof code === 'string',
-      )
+    ? (fiscalData!.tax_responsibilities as unknown[])
+        .filter((code): code is string => typeof code === 'string')
+        .map((code) => normalizeFiscalResponsibilityCode(code))
     : [];
 
   // 1) Señal explícita por responsabilidades DIAN (RUT casilla 53).

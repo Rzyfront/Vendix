@@ -1,5 +1,6 @@
 import { normalizeNit } from '../utils/nit.util';
 import { isVatResponsible } from './vat-responsibility.helper';
+import { normalizeFiscalResponsibilityCode } from '../constants/fiscal-responsibilities';
 import type { dian_nit_type_enum } from '@prisma/client';
 
 /**
@@ -214,9 +215,9 @@ export function buildOrganizationFiscalColumns(
 
   if ('tax_responsibilities' in patch) {
     const responsibilities = Array.isArray(patch.tax_responsibilities)
-      ? (patch.tax_responsibilities as unknown[]).filter(
-          (code): code is string => typeof code === 'string',
-        )
+      ? (patch.tax_responsibilities as unknown[])
+          .filter((code): code is string => typeof code === 'string')
+          .map((code) => normalizeFiscalResponsibilityCode(code))
       : [];
     columns.fiscal_responsibilities = responsibilities;
   }

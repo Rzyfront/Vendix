@@ -1,0 +1,64 @@
+================================================================================
+CRITICAL PLAN CP-catalogo-responsabilidades-rut - STEP A.3 DRY RUN EVIDENCE
+Generated: 2026-09-09T23:09:47-05:00
+Target: vendix_postgres (vendix_db)
+Migration: 20260909120000_rut_scanner_prompt_and_retire_r99_pj
+================================================================================
+
+--- 1. PRE-CHECK ---
+BEGIN
+   stage   
+-----------
+ PRE-CHECK
+(1 row)
+
+          metric           | count 
+---------------------------+-------
+ users_with_R99PJ          |     0
+ orgs_with_R99PJ           |     0
+ org_settings_with_R99PJ   |     0
+ store_settings_with_R99PJ |     0
+ rut_scanner_old_prompt    |     1
+(5 rows)
+
+--- 2. FIXTURE INJECTION ON REPRESENTATIVE DATASET ---
+DO
+      stage       
+------------------
+ FIXTURE INJECTED
+(1 row)
+
+         metric          | count 
+-------------------------+-------
+ users_with_R99PJ        |     1
+ orgs_with_R99PJ         |     1
+ org_settings_with_R99PJ |     1
+(3 rows)
+
+--- 3. EXECUTION OF MIGRATION UPDATES ---
+UPDATE 1 (ai_engine_applications rut_scanner prompt updated to box 53 full 2-digit extractor)
+UPDATE 1 (users R-99-PJ replaced with R-99-PN via array_replace)
+UPDATE 1 (organizations R-99-PJ replaced with R-99-PN via array_replace)
+UPDATE 1 (organization_settings fiscal_data.tax_responsibilities repaired)
+UPDATE 0 (store_settings fiscal_data.tax_responsibilities repaired)
+
+--- 4. POST-MIGRATION COUNTS IN TRANSACTION ---
+           stage           
+---------------------------
+ POST-MIGRATION IN DRY-RUN
+(1 row)
+
+         metric          | count 
+-------------------------+-------
+ users_with_R99PJ        |     0
+ orgs_with_R99PJ         |     0
+ org_settings_with_R99PJ |     0
+ users_with_R99PN        |     1
+ orgs_with_R99PN         |     1
+ org_settings_with_R99PN |     1
+ rut_scanner_old_prompt  |     0
+(7 rows)
+
+ROLLBACK
+Dry run concluded with 100% success. Zero records with R-99-PJ remain. Prompt updated.
+================================================================================

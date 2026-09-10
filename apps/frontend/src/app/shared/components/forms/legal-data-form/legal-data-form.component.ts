@@ -38,6 +38,11 @@ import {
   FiscalResponsibilityCatalogEntry,
   FiscalVatPeriodicity,
 } from '../../../../private/modules/fiscal-operations/interfaces/fiscal-operations.interface';
+import {
+  FISCAL_RESPONSIBILITIES,
+  getFiscalResponsibilityLabel,
+  normalizeFiscalResponsibilityCode,
+} from '../../../constants/fiscal-responsibilities.constants';
 
 export type PersonType = 'NATURAL' | 'JURIDICA';
 export type TaxRegime = 'COMUN' | 'SIMPLIFICADO' | 'GRAN_CONTRIBUYENTE';
@@ -94,21 +99,75 @@ interface LegalDataControls {
 }
 
 /**
- * Lista de respaldo (compatibilidad hacia atrás). Cuando el padre no inyecta
- * un catálogo fresco del backend (panel "Identidad" lo hace; el wizard, antes
- * de este cambio, lo usaba para el listado de toggles), caemos a esta lista
- * estática para no romper consumidores existentes. Mantenemos los 6 códigos
- * que ya estaban antes más O-48 y O-49 que el wizard nunca llegó a mostrar.
+ * 8 responsabilidades DIAN más frecuentes para el Nivel 1 de la UI (ADR-02).
+ * Toggles directos en el formulario principal.
  */
-const TAX_RESPONSIBILITY_CODES: { code: string; label: string }[] = [
-  { code: 'R-99-PN', label: 'R-99-PN - No aplica - Persona natural' },
-  { code: 'O-13', label: 'O-13 - Gran contribuyente' },
-  { code: 'O-15', label: 'O-15 - Autorretenedor' },
-  { code: 'O-23', label: 'O-23 - Agente retención IVA' },
-  { code: 'O-47', label: 'O-47 - Régimen simple de tributación' },
-  { code: 'O-48', label: 'O-48 - Responsable de IVA' },
-  { code: 'O-49', label: 'O-49 - No responsable de IVA' },
-  { code: 'R-99-PJ', label: 'R-99-PJ - No aplica - Persona jurídica' },
+export const FREQUENT_RESPONSIBILITY_CODES: readonly string[] = [
+  'O-05',
+  'O-47',
+  'O-48',
+  'O-49',
+  'O-13',
+  'O-15',
+  'O-23',
+  'O-52',
+] as const;
+
+/**
+ * Lista de respaldo (compatibilidad hacia atrás). Cuando el padre no inyecta
+ * un catálogo fresco del backend, caemos a esta lista estática para no romper
+ * consumidores existentes. R-99-PJ queda descontinuado (ADR-04).
+ */
+const TAX_RESPONSIBILITY_CODES: {
+  code: string;
+  label: string;
+  description?: string;
+}[] = [
+  {
+    code: 'O-05',
+    label: 'O-05 - Impuesto sobre la renta - Régimen ordinario',
+    description: 'Declaración anual de renta régimen ordinario',
+  },
+  {
+    code: 'O-47',
+    label: 'O-47 - Régimen simple de tributación',
+    description: 'Modelo tributario unificado sustitutivo de renta',
+  },
+  {
+    code: 'O-48',
+    label: 'O-48 - Responsable de IVA',
+    description: 'Obligado a declarar IVA bimestral o cuatrimestral',
+  },
+  {
+    code: 'O-49',
+    label: 'O-49 - No responsable de IVA',
+    description: 'Exento de IVA según art. 437 ET',
+  },
+  {
+    code: 'O-13',
+    label: 'O-13 - Gran contribuyente',
+    description: 'Calificación especial por resolución DIAN',
+  },
+  {
+    code: 'O-15',
+    label: 'O-15 - Autorretenedor',
+    description: 'Autorizado para practicar autorretención en la fuente',
+  },
+  {
+    code: 'O-23',
+    label: 'O-23 - Agente retención IVA',
+    description: 'Obligado a retener IVA en pagos a terceros',
+  },
+  {
+    code: 'O-52',
+    label: 'O-52 - Facturador electrónico',
+    description: 'Habilitado para expedir factura electrónica',
+  },
+  {
+    code: 'R-99-PN',
+    label: 'R-99-PN - No aplica - Persona natural',
+    description: 'Consumidor final sin responsabilidades comerciales',
+  },
 ];
 
 /** Código DIAN "Responsable de IVA" — habilita el selector de periodicidad. */
@@ -397,7 +456,7 @@ const VALID_VAT_PERIODICITIES: FiscalVatPeriodicity[] = [
           }
 
           <div class="space-y-2">
-            @for (entry of responsibilityEntries(); track entry.code) {
+            @for (entry of frequentResponsibilityEntries(); track entry.code) {
               <div
                 class="flex flex-col gap-1 rounded border border-border px-3 py-2 hover:bg-gray-50"
               >
@@ -441,7 +500,9 @@ const VALID_VAT_PERIODICITIES: FiscalVatPeriodicity[] = [
                 </div>
 
                 @if (
-                  showVatPeriodicity() && entry.code === vatResponsibleCode
+                  showVatPeriodicity() &&
+                  entry.code === vatResponsibleCode &&
+                  isResponsibilityChecked(entry.code)
                 ) {
                   <div
                     class="mt-1 ml-1 rounded-lg border border-border bg-[var(--color-surface)] p-3 md:max-w-md"
@@ -468,6 +529,51 @@ const VALID_VAT_PERIODICITIES: FiscalVatPeriodicity[] = [
                       placeholder="Selecciona la periodicidad"
                     ></app-selector>
                   </div>
+                }
+              </div>
+            }
+          </div>
+
+          <!-- Nivel 2: Otras responsabilidades (Casilla 53 del RUT) -->
+          <div class="mt-4 pt-4 border-t border-border space-y-3">
+            <div>
+              <h4 class="text-sm font-medium text-text-primary">
+                Otras responsabilidades (Casilla 53 del RUT)
+              </h4>
+              <p class="text-xs text-text-secondary">
+                Agrega cualquier otra responsabilidad adicional marcada en tu RUT.
+              </p>
+            </div>
+
+            <div class="max-w-md">
+              <app-selector
+                [formControl]="secondarySelectorControl"
+                [options]="availableSecondaryOptions()"
+                [searchable]="true"
+                [disabled]="disabled()"
+                placeholder="Buscar y agregar responsabilidad adicional..."
+                (valueChange)="onSecondarySelect($event)"
+              ></app-selector>
+            </div>
+
+            @if (selectedSecondaryCodes().length > 0) {
+              <div class="flex flex-wrap gap-2 pt-1">
+                @for (code of selectedSecondaryCodes(); track code) {
+                  <span
+                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[var(--color-surface-secondary)] border border-border text-xs text-text-primary"
+                  >
+                    <span class="font-semibold text-[var(--color-primary)]">{{ code }}</span>
+                    <span>{{ getResponsibilityLabel(code) }}</span>
+                    <button
+                      type="button"
+                      class="text-text-secondary hover:text-[var(--color-destructive)] p-0.5 rounded-full transition-colors cursor-pointer"
+                      [disabled]="disabled()"
+                      (click)="removeSecondaryResponsibility(code)"
+                      aria-label="Remover responsabilidad"
+                    >
+                      <app-icon name="x" [size]="12"></app-icon>
+                    </button>
+                  </span>
                 }
               </div>
             }
@@ -641,6 +747,78 @@ export class LegalDataFormComponent implements OnInit {
       description: '',
       effects: [],
     }));
+  });
+
+  /**
+   * Entradas para el Nivel 1 (Responsabilidades Frecuentes): siempre contiene
+   * las 8 responsabilidades principales en orden predecible.
+   */
+  readonly frequentResponsibilityEntries = computed<
+    FiscalResponsibilityCatalogEntry[]
+  >(() => {
+    const all = this.responsibilityEntries();
+    const map = new Map(all.map((e) => [e.code, e]));
+
+    return FREQUENT_RESPONSIBILITY_CODES.map((code) => {
+      const found = map.get(code);
+      if (found) return found;
+      return {
+        code,
+        label: getFiscalResponsibilityLabel(code),
+        description: '',
+        effects: [],
+      };
+    });
+  });
+
+  /** Control proxy para el selector de responsabilidades secundarias. */
+  readonly secondarySelectorControl = new FormControl<string>('', {
+    nonNullable: true,
+  });
+
+  /** Opciones del catálogo extendido disponibles para agregar en Nivel 2. */
+  readonly availableSecondaryOptions = computed<SelectorOption[]>(() => {
+    const current = (this.taxResponsibilitiesValue() ?? []).map((c) =>
+      normalizeFiscalResponsibilityCode(c),
+    );
+    const entries = this.responsibilityEntries();
+    const existingCodes = new Set(entries.map((e) => e.code));
+
+    const allEntries: { code: string; label: string }[] = entries.map((e) => ({
+      code: e.code,
+      label: e.label,
+    }));
+
+    for (const code of FISCAL_RESPONSIBILITIES) {
+      if (!existingCodes.has(code)) {
+        allEntries.push({
+          code,
+          label: getFiscalResponsibilityLabel(code),
+        });
+      }
+    }
+
+    return allEntries
+      .filter(
+        (e) =>
+          !FREQUENT_RESPONSIBILITY_CODES.includes(e.code) &&
+          !current.includes(e.code),
+      )
+      .sort((a, b) => a.code.localeCompare(b.code))
+      .map((e) => ({
+        value: e.code,
+        label: `${e.code} - ${e.label}`,
+      }));
+  });
+
+  /** Códigos marcados que corresponden al catálogo secundario (chips Nivel 2). */
+  readonly selectedSecondaryCodes = computed<string[]>(() => {
+    const current = (this.taxResponsibilitiesValue() ?? []).map((c) =>
+      normalizeFiscalResponsibilityCode(c),
+    );
+    return current.filter(
+      (code) => !FREQUENT_RESPONSIBILITY_CODES.includes(code),
+    );
   });
 
   readonly vatResponsibleCode = VAT_RESPONSIBLE_CODE;
@@ -1009,19 +1187,26 @@ export class LegalDataFormComponent implements OnInit {
   }
 
   isResponsibilityChecked(code: string): boolean {
-    return this.form.controls.tax_responsibilities.value.includes(code);
+    const normalized = normalizeFiscalResponsibilityCode(code) || code;
+    const current = this.form.controls.tax_responsibilities.value.map(
+      (c) => normalizeFiscalResponsibilityCode(c) || c,
+    );
+    return current.includes(normalized);
   }
 
   onResponsibilityToggle(code: string, enabled: boolean): void {
-    let current = this.form.controls.tax_responsibilities.value;
+    const normalized = normalizeFiscalResponsibilityCode(code) || code;
+    let current = this.form.controls.tax_responsibilities.value.map(
+      (c) => normalizeFiscalResponsibilityCode(c) || c,
+    );
     if (enabled) {
-      if (code === VAT_NOT_RESPONSIBLE_CODE) {
+      if (normalized === VAT_NOT_RESPONSIBLE_CODE) {
         current = current.filter((c) => c !== VAT_RESPONSIBLE_CODE);
         this.form.controls.tax_regime.setValue('SIMPLIFICADO', {
           emitEvent: false,
         });
         this.selectedTaxRegime = 'SIMPLIFICADO';
-      } else if (code === VAT_RESPONSIBLE_CODE) {
+      } else if (normalized === VAT_RESPONSIBLE_CODE) {
         current = current.filter((c) => c !== VAT_NOT_RESPONSIBLE_CODE);
         this.form.controls.tax_regime.setValue('COMUN', {
           emitEvent: false,
@@ -1030,13 +1215,34 @@ export class LegalDataFormComponent implements OnInit {
       }
     }
     const next = enabled
-      ? Array.from(new Set([...current, code]))
-      : current.filter((c) => c !== code);
+      ? Array.from(new Set([...current, normalized]))
+      : current.filter((c) => c !== normalized);
     this.form.controls.tax_responsibilities.setValue(next);
     // Limpia vat_periodicity cuando O-48 se apaga.
-    if (!enabled && code === VAT_RESPONSIBLE_CODE) {
+    if (!enabled && normalized === VAT_RESPONSIBLE_CODE) {
       this.form.controls.vat_periodicity.setValue('', { emitEvent: false });
     }
+  }
+
+  getResponsibilityLabel(code: string): string {
+    const normalized = normalizeFiscalResponsibilityCode(code) || code;
+    const entry = this.responsibilityEntries().find(
+      (e) => e.code === normalized || e.code === code,
+    );
+    if (entry?.label) return entry.label;
+    return getFiscalResponsibilityLabel(normalized);
+  }
+
+  onSecondarySelect(code: string | number | null): void {
+    if (!code) return;
+    const normalized = normalizeFiscalResponsibilityCode(String(code));
+    if (!normalized) return;
+    this.onResponsibilityToggle(normalized, true);
+    this.secondarySelectorControl.setValue('', { emitEvent: false });
+  }
+
+  removeSecondaryResponsibility(code: string): void {
+    this.onResponsibilityToggle(code, false);
   }
 
   /** True cuando el toggle de "agente de retención" está encendido. */
