@@ -1,5 +1,16 @@
-import {Component, input, output, model, signal, effect, inject, DestroyRef} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import {
+  Component,
+  input,
+  output,
+  model,
+  signal,
+  computed,
+  effect,
+  inject,
+  DestroyRef,
+} from '@angular/core';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { startWith, map } from 'rxjs/operators';
 import { DecimalPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import {
@@ -19,6 +30,7 @@ import {
   SelectorOption,
   DialogService,
   TooltipComponent,
+  TaxInclusiveChipComponent,
 } from '../../../../../shared/components';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
@@ -53,6 +65,7 @@ import { AccountCodeSelectComponent } from './account-code-select.component';
     CategoryQuickCreateComponent,
     TaxQuickCreateComponent,
     AccountCodeSelectComponent,
+    TaxInclusiveChipComponent,
   ],
   templateUrl: './product-create-modal/product-create-modal.component.html',
   styleUrls: ['./product-create-modal/product-create-modal.component.scss'],
@@ -80,10 +93,60 @@ export class ProductCreateModalComponent {
     return !!this.product();
   }
 
-  productForm: FormGroup;
+  productForm: FormGroup = this.createForm();
   categoryOptions = signal<SelectorOption[]>([]);
   brandOptions = signal<SelectorOption[]>([]);
   taxCategoryOptions = signal<MultiSelectorOption[]>([]);
+
+  readonly taxInclusiveMap = signal<Record<number, boolean>>({});
+
+  readonly selectedTaxCategoryIds = toSignal(
+    this.productForm.get('tax_category_ids')!.valueChanges.pipe(
+      startWith(this.productForm.get('tax_category_ids')!.value || []),
+      map((ids: any) => (Array.isArray(ids) ? ids.map(Number) : [])),
+    ),
+    { initialValue: [] as number[] },
+  );
+
+  readonly selectedTaxCategories = computed<TaxCategory[]>(() => {
+    const ids = this.selectedTaxCategoryIds() || [];
+    return ids
+      .map((id) => this.allTaxCategories.find((c) => c.id === id))
+      .filter((c): c is TaxCategory => !!c);
+  });
+
+  isTaxInclusive(taxId: number): boolean {
+    const map = this.taxInclusiveMap();
+    if (map[taxId] !== undefined) return map[taxId];
+    const cat = this.allTaxCategories.find((c) => c.id === taxId);
+    return !!(cat?.is_inclusive ?? cat?.tax_rates?.[0]?.is_inclusive ?? false);
+  }
+
+  setTaxInclusive(taxId: number, isInclusive: boolean): void {
+    this.taxInclusiveMap.update((m) => ({ ...m, [taxId]: isInclusive }));
+  }
+
+  removeTaxCategory(taxId: number): void {
+    const current: number[] =
+      this.productForm.get('tax_category_ids')?.value || [];
+    this.productForm
+      .get('tax_category_ids')
+      ?.setValue(current.filter((id) => id !== taxId));
+  }
+
+  taxInclusiveHint(taxId: number): string {
+    return this.isTaxInclusive(taxId)
+      ? 'El impuesto ya está dentro del precio unitario. Click para cambiarlo a adicional.'
+      : 'El impuesto se suma sobre el precio unitario. Click para cambiarlo a incluido.';
+  }
+
+  getTaxRatePercent(tax: TaxCategory): number {
+    const raw = tax.rate ?? tax.tax_rates?.[0]?.rate ?? 0;
+    const val = Number(raw);
+    if (!Number.isFinite(val) || val < 0) return 0;
+    const percent = val > 1 ? val : val * 100;
+    return Math.round(percent * 100) / 100;
+  }
 
   // Quick create modals state
   isCategoryCreateOpen = signal(false);
@@ -100,7 +163,6 @@ export class ProductCreateModalComponent {
   private isInitialized = signal(false);
 
   constructor() {
-    this.productForm = this.createForm();
 
     // React to product input changes
     effect(() => {
@@ -188,6 +250,7 @@ export class ProductCreateModalComponent {
       state: val.state || 'active',
       // Viaja al formulario avanzado para que el salto no pierda la cuenta.
       account_code: val.account_code || null,
+      tax_inclusive_map: this.taxInclusiveMap(),
     };
 
     this.router.navigate(['/admin/products/create'], {
@@ -202,15 +265,25 @@ export class ProductCreateModalComponent {
       this.productForm.get('tax_category_ids')?.value || [];
     if (!basePrice || selectedIds.length === 0) return basePrice;
 
-    const totalRate = this.allTaxCategories
-      .filter((tc) => selectedIds.includes(tc.id))
-      .reduce((sum, tc) => {
+    let inclusiveRate = 0;
+    let additionalRate = 0;
+
+    for (const tc of this.allTaxCategories) {
+      if (selectedIds.includes(tc.id)) {
         const rawRate = tc.rate ?? tc.tax_rates?.[0]?.rate ?? 0;
         const rate = parseFloat(String(rawRate));
-        return sum + (isNaN(rate) ? 0 : rate);
-      }, 0);
+        const finalRate = isNaN(rate) ? 0 : rate > 1 ? rate / 100 : rate;
+        if (this.isTaxInclusive(tc.id)) {
+          inclusiveRate += finalRate;
+        } else {
+          additionalRate += finalRate;
+        }
+      }
+    }
 
-    return basePrice * (1 + totalRate);
+    const netBase =
+      inclusiveRate > 0 ? basePrice / (1 + inclusiveRate) : basePrice;
+    return basePrice + netBase * additionalRate;
   }
 
   private loadCategoriesAndBrands(): void {
@@ -244,6 +317,16 @@ export class ProductCreateModalComponent {
       account_code: prod.account_code ?? null,
     });
 
+    if (prod.product_tax_assignments) {
+      const map = { ...this.taxInclusiveMap() };
+      for (const ta of prod.product_tax_assignments as any[]) {
+        if (ta.tax_categories?.is_inclusive !== undefined) {
+          map[ta.tax_category_id] = !!ta.tax_categories.is_inclusive;
+        }
+      }
+      this.taxInclusiveMap.set(map);
+    }
+
     if (prod.account_code) {
       this.isAccountingOpen.set(true);
     }
@@ -270,6 +353,18 @@ export class ProductCreateModalComponent {
     this.taxesService.getTaxCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (taxCategories: TaxCategory[]) => {
         this.allTaxCategories = taxCategories;
+        const map = { ...this.taxInclusiveMap() };
+        for (const cat of taxCategories) {
+          if (map[cat.id] === undefined) {
+            map[cat.id] = !!(
+              cat.is_inclusive ??
+              cat.tax_rates?.[0]?.is_inclusive ??
+              false
+            );
+          }
+        }
+        this.taxInclusiveMap.set(map);
+
         if (taxCategories.length > 0) {
           this.taxCategoryOptions.set(taxCategories.map((cat: TaxCategory) => {
             const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;

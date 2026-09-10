@@ -337,6 +337,7 @@ export interface TaxCategory {
   /** Fiscal classification: iva | inc | ica | withholding | reteiva | reteica */
   tax_type?: string;
   tax_rates?: any[]; // Add this to match the API response
+  is_inclusive?: boolean;
   store_id: number;
   created_at: Date;
   updated_at: Date;

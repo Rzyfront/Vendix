@@ -81,6 +81,20 @@
             <app-icon name="plus" size="20"></app-icon>
           </button>
         </div>
+        @if (selectedTaxCategories().length > 0) {
+          <div class="flex flex-wrap items-center gap-1.5 mt-2">
+            @for (tax of selectedTaxCategories(); track tax.id) {
+              <vendix-tax-inclusive-chip
+                [name]="tax.name"
+                [rate]="getTaxRatePercent(tax)"
+                [inclusive]="isTaxInclusive(tax.id)"
+                [hint]="taxInclusiveHint(tax.id)"
+                (inclusiveChange)="setTaxInclusive(tax.id, $event)"
+                (remove)="removeTaxCategory(tax.id)"
+              />
+            }
+          </div>
+        }
         @if (
           (productForm.get("tax_category_ids")?.value || []).length > 0 &&
           productForm.get("base_price")?.value > 0
