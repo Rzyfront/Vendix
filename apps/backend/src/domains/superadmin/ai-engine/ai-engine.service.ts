@@ -154,6 +154,18 @@ export class AIEngineConfigService {
       throw new VendixHttpException(ErrorCodes.AI_CONFIG_001);
     }
 
+    // F-001 (blocker): the panel round-trips maskApiKey() output
+    // ('****' + last4, or '****') when the operator did not type a new
+    // secret. Persisting that placeholder as api_key_ref would orphan the
+    // real secret and break every provider call with AI_PROVIDER_002, so a
+    // masked value is dropped from the payload and the stored ref survives.
+    if (
+      typeof dto.api_key_ref === 'string' &&
+      dto.api_key_ref.startsWith('****')
+    ) {
+      delete dto.api_key_ref;
+    }
+
     // Check for duplicate provider+model_id
     if (
       (dto.provider || dto.model_id) &&
