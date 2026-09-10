@@ -1888,7 +1888,24 @@ export class InvoicingService {
     // zero DIAN numbers. `resolution_id` resolves together with the number there.
     // Manual `create()` keeps numbering at creation (explicit human act, ADR-01 scope).
 
-    const productItems = (order.order_items || []).map((item: any) => {
+    // A.4 CP-impuesto-incluido-agregado (F-020): herencia asignación→línea.
+    // `order_item_taxes` ya trae `is_inclusive` por fila (N filas por tasa,
+    // decisión F-002); acá se agrega por línea para marcar
+    // `invoice_items.is_inclusive`. Precedencia por fila: el flag persistido
+    // al vender (verdad de la asignación); sin filas, la línea es agregada
+    // (histórico). Espeja el patrón del calculador
+    // (`item.is_inclusive ?? taxes.some(inclusivo)`).
+    // La base YA llega despejada desde los canales (A.3: POS y checkout
+    // persisten la base en `total_price`/`unit_price`): acá no se resta
+    // nada — restar volvería a despejar y facturaría de menos.
+    const orderLineInclusive = (order.order_items || []).map((item: any) => {
+      const rows = (item as any).order_item_taxes || [];
+      return {
+        is_inclusive: rows.some((t: any) => t.is_inclusive === true),
+      };
+    });
+
+    const productItems = (order.order_items || []).map((item: any, index: number) => {
       const description =
         item.description ||
         item.product_name ||
@@ -1900,6 +1917,7 @@ export class InvoicingService {
       const tax = Number(item.tax_amount_item || 0) * quantity;
       const total_amount =
         Number(item.total_price || quantity * unit_price - discount) + tax;
+      const lineIncl = orderLineInclusive[index];
       return {
         product_id: item.product_id,
         product_variant_id: item.product_variant_id,
@@ -1909,6 +1927,7 @@ export class InvoicingService {
         discount_amount: new Prisma.Decimal(discount),
         tax_amount: new Prisma.Decimal(tax),
         total_amount: new Prisma.Decimal(total_amount),
+        is_inclusive: lineIncl.is_inclusive,
         // "Empaque por tarifa" snapshot propagated from the order line so the
         // invoice mirrors the order PDF (tier label + packaging units consumed).
         applied_price_tier_name:
@@ -1943,6 +1962,10 @@ export class InvoicingService {
           ]
         : productItems;
 
+    // A.4: el subtotal es Σ de BASES gravables y ya llega despejado desde
+    // los canales (POS y checkout persisten la base en `unit_price`): no se
+    // resta nada acá. Con líneas agregadas, idéntico a hoy; con inclusivas,
+    // el total == precio porque la base + la cuota suman el publicado.
     const subtotal = items.reduce(
       (acc: number, item: any) =>
         acc + Number(item.quantity) * Number(item.unit_price),
@@ -1959,10 +1982,11 @@ export class InvoicingService {
     const total = subtotal - discount + tax;
 
     // Aggregate the order's per-line typed taxes (order_item_taxes) into invoice
-    // header-level invoice_taxes, one row per (name, rate, fiscal type). Without
-    // this, invoices created from an order reached DIAN with NO taxes and fell
-    // back to a default 19% IVA. order_item_taxes.tax_rate is a fraction (0.19);
-    // invoice_taxes.tax_rate is a percentage (19.00) as DIAN UBL expects.
+    // header-level invoice_taxes, one row per (name, rate, fiscal type,
+    // inclusive flag). Without this, invoices created from an order reached
+    // DIAN with NO taxes and fell back to a default 19% IVA.
+    // order_item_taxes.tax_rate is a fraction (0.19); invoice_taxes.tax_rate
+    // is a percentage (19.00) as DIAN UBL expects.
     const round2 = (n: number) => Math.round(n * 100) / 100;
     const taxGroups = new Map<
       string,
@@ -1973,6 +1997,7 @@ export class InvoicingService {
         tax_type: string;
         taxable_amount: number;
         tax_amount: number;
+        is_inclusive: boolean;
       }
     >();
     /**
@@ -1988,11 +2013,22 @@ export class InvoicingService {
     const orderLineTaxes: DocumentLineTaxes = [];
     for (const item of order.order_items || []) {
       const lineNet = Number(item.total_price || 0);
+      // A.4/ADR-02: la base gravable de la línea es `total_price`, que los
+      // canales ya persisten despejada (A.3). No se re-deriva por 1+r acá
+      // para no introducir una segunda verdad que difiera un centavo de la
+      // persistida.
+      // ERR-03: sin tasas o con tasa 0 no se decide nada ni se lanza — la
+      // línea aporta su neto y su snapshot tal cual.
+      const lineBase = lineNet;
       const lineTaxes: InvoiceTaxRowInput[] = [];
       for (const t of (item as any).order_item_taxes || []) {
         const ratePct = round2(Number(t.tax_rate || 0) * 100);
         const type = (t.tax_type as string) || 'iva';
-        const key = `${t.tax_name}|${ratePct}|${type}|${t.tax_rate_id ?? ''}`;
+        // A.4 (F-020): el flag viaja por fila y particiona el bucket — la
+        // misma tasa inclusiva en una línea y agregada en otra NO se
+        // mezclan (igual que `aggregateHeaderTaxes` del calculador).
+        const inclusive = t.is_inclusive === true;
+        const key = `${t.tax_name}|${ratePct}|${type}|${t.tax_rate_id ?? ''}|${inclusive ? '1' : '0'}`;
         const group = taxGroups.get(key) || {
           tax_rate_id: t.tax_rate_id ?? null,
           tax_name: t.tax_name,
@@ -2000,8 +2036,9 @@ export class InvoicingService {
           tax_type: type,
           taxable_amount: 0,
           tax_amount: 0,
+          is_inclusive: inclusive,
         };
-        group.taxable_amount += lineNet;
+        group.taxable_amount += lineBase;
         group.tax_amount += Number(t.tax_amount || 0);
         taxGroups.set(key, group);
 
@@ -2012,9 +2049,10 @@ export class InvoicingService {
           tax_rate_id: t.tax_rate_id ?? null,
           tax_name: t.tax_name,
           tax_rate: ratePct,
-          taxable_amount: round2(lineNet),
+          taxable_amount: round2(lineBase),
           tax_amount: round2(Number(t.tax_amount || 0)),
           tax_type: type,
+          is_inclusive: inclusive,
         });
       }
       orderLineTaxes.push(lineTaxes);
@@ -2030,6 +2068,7 @@ export class InvoicingService {
       taxable_amount: round2(g.taxable_amount),
       tax_amount: round2(g.tax_amount),
       tax_type: g.tax_type,
+      is_inclusive: g.is_inclusive,
     }));
     // Se pasa por el mapeador compartido en vez de armar el input a mano: es lo
     // único que garantiza que `tax_type` —la clave con la que el CUFE arma
@@ -3579,7 +3618,7 @@ export class InvoicingService {
    */
   private async resolveTenantTaxRateCatalog(
     items: CreateInvoiceItemDto[],
-  ): Promise<Map<number, TenantTaxRateSnapshot>> {
+  ): Promise<TenantTaxCatalog> {
     const referenced = new Set<number>();
     for (const item of items ?? []) {
       for (const tax of item.taxes ?? []) {
@@ -3587,7 +3626,11 @@ export class InvoicingService {
       }
     }
     const catalog = new Map<number, TenantTaxRateSnapshot>();
-    if (referenced.size === 0) return catalog;
+    const empty: TenantTaxCatalog = {
+      rates: catalog,
+      assignment_inclusive: new Map(),
+    };
+    if (referenced.size === 0) return empty;
 
     const context = this.getContext();
     const organization_id = Number(context.organization_id);
@@ -3599,6 +3642,7 @@ export class InvoicingService {
       select: {
         id: true,
         store_id: true,
+        tax_category_id: true,
         rate: true,
         name: true,
         is_inclusive: true,
@@ -3654,10 +3698,46 @@ export class InvoicingService {
         tax_type: row.tax_categories?.tax_type ?? null,
         tax_name: row.name,
         is_inclusive: row.is_inclusive ?? row.tax_categories?.is_inclusive ?? null,
+        tax_category_id: row.tax_category_id,
       });
     }
 
-    return catalog;
+    // A.4 (F-020, nivel medio): la asignación producto↔categoría aporta su
+    // `is_inclusive` entre el override de línea y el default del catálogo.
+    // Un solo batch (no N+1) por los productos y categorías en juego; el
+    // scoping de tenant lo pone la extensión (`product_tax_assignments` se
+    // filtra vía `products.store_id`).
+    const assignment_inclusive = new Map<string, boolean>();
+    const productIds = new Set<number>();
+    for (const item of items ?? []) {
+      if (typeof item.product_id === 'number') productIds.add(item.product_id);
+    }
+    const categoryIds = new Set<number>();
+    for (const snapshot of catalog.values()) {
+      categoryIds.add(snapshot.tax_category_id);
+    }
+    if (productIds.size > 0 && categoryIds.size > 0) {
+      const assignmentRows =
+        await this.prisma.product_tax_assignments.findMany({
+          where: {
+            product_id: { in: [...productIds] },
+            tax_category_id: { in: [...categoryIds] },
+          },
+          select: {
+            product_id: true,
+            tax_category_id: true,
+            is_inclusive: true,
+          },
+        });
+      for (const assignment of assignmentRows) {
+        assignment_inclusive.set(
+          `${assignment.product_id}|${assignment.tax_category_id}`,
+          assignment.is_inclusive ?? false,
+        );
+      }
+    }
+
+    return { rates: catalog, assignment_inclusive };
   }
 
   /**
@@ -3670,16 +3750,17 @@ export class InvoicingService {
    */
   private applyTaxCatalogToLine(
     taxes: CreateInvoiceTaxDto[] | undefined,
-    catalog: Map<number, TenantTaxRateSnapshot>,
+    catalog: TenantTaxCatalog,
     label: string,
     line_index: number,
+    product_id?: number | null,
   ): InvoiceCalculatorTaxInput[] | undefined {
     if (!taxes) return undefined;
 
     return taxes.map((tax) => {
       const known =
         typeof tax.tax_rate_id === 'number'
-          ? catalog.get(tax.tax_rate_id)
+          ? catalog.rates.get(tax.tax_rate_id)
           : undefined;
 
       if (!known) {
@@ -3709,6 +3790,17 @@ export class InvoicingService {
         );
       }
 
+      // A.4 (F-020): precedencia override-línea > asignación >
+      // catálogo/tasa. La asignación sólo ata cuando la línea trae
+      // `product_id` y la tarifa está en el catálogo (su categoría es la
+      // llave); sin esos anclajes manda el default del catálogo.
+      const assignment_inclusive =
+        known != null && typeof product_id === 'number'
+          ? catalog.assignment_inclusive.get(
+              `${product_id}|${known.tax_category_id}`,
+            )
+          : undefined;
+
       return {
         tax_rate_id: tax.tax_rate_id,
         // El nombre del catálogo es el que el comerciante ve en su pantalla de
@@ -3721,8 +3813,10 @@ export class InvoicingService {
         // `is_inclusive` SÍ admite el override explícito de la línea: el mismo
         // impuesto se cobra por dentro o por fuera del precio según cómo se
         // capturó la venta, y `schema.prisma` ya lo documenta así sobre
-        // `tax_rates.is_inclusive`. El catálogo sólo pone el valor por defecto.
-        is_inclusive: tax.is_inclusive ?? known.is_inclusive,
+        // `tax_rates.is_inclusive`. La asignación pone el valor por producto
+        // y el catálogo sólo el default.
+        is_inclusive:
+          tax.is_inclusive ?? assignment_inclusive ?? known.is_inclusive,
       };
     });
   }
@@ -4917,11 +5011,15 @@ export class InvoicingService {
     aiu?: InvoiceCalculatorAiuInput,
     /**
      * Catálogo `tax_rates` de la tienda, ya validado por
-     * `resolveTenantTaxRateCatalog`. Cuando una línea señala una de sus filas,
-     * la tarifa y el tipo fiscal salen de ahí y no del cuerpo del request.
-     * Vacío ⇒ ninguna línea referenció el catálogo y manda lo declarado.
+     * `resolveTenantTaxRateCatalog`, más la verdad por asignación (A.4,
+     * F-020). Cuando una línea señala una de sus filas, la tarifa y el tipo
+     * fiscal salen de ahí y no del cuerpo del request. Vacío ⇒ ninguna
+     * línea referenció el catálogo y manda lo declarado.
      */
-    tax_catalog: Map<number, TenantTaxRateSnapshot> = new Map(),
+    tax_catalog: TenantTaxCatalog = {
+      rates: new Map(),
+      assignment_inclusive: new Map(),
+    },
   ): InvoiceCalculatorResult {
     const result = this.calculator.calculate({
       ...(aiu ? { aiu } : {}),
@@ -4943,6 +5041,7 @@ export class InvoicingService {
           tax_catalog,
           label,
           index,
+          item.product_id,
         ),
       })),
     });
@@ -5298,4 +5397,23 @@ interface TenantTaxRateSnapshot {
   tax_name: string;
   /** Default del catálogo; la línea puede sobrescribirlo. */
   is_inclusive: boolean | null;
+  /** Categoría dueña de la tarifa — llave para atar la asignación por producto. */
+  tax_category_id: number;
+}
+
+/**
+ * Catálogo de tarifas del tenant + verdad por asignación (A.4, F-020).
+ *
+ * `assignment_inclusive` (`${product_id}|${tax_category_id}` →
+ * `is_inclusive`) es el NIVEL MEDIO de la precedencia
+ * override-línea > asignación > catálogo/tasa: el comerciante pudo marcar
+ * el impuesto como incluido para ESE producto aunque el catálogo diga otra
+ * cosa. Sólo existe cuando la línea trae `product_id` Y señala una tarifa
+ * del catálogo — sin esos dos anclajes no hay a qué atar la asignación y
+ * no se inventa ningún vínculo.
+ */
+interface TenantTaxCatalog {
+  /** Tarifas validadas por `tax_rate_id`. */
+  rates: Map<number, TenantTaxRateSnapshot>;
+  assignment_inclusive: Map<string, boolean>;
 }
