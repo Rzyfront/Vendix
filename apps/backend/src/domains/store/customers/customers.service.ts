@@ -474,6 +474,7 @@ export class CustomersService {
     was_created: boolean;
     was_updated: boolean;
     matched_by: 'email' | 'document' | 'name' | null;
+    document_conflict: boolean;
   }> {
     const store = await this.prisma.stores.findUnique({
       where: { id: storeId },
@@ -579,6 +580,36 @@ export class CustomersService {
         dto,
       );
 
+      // PAVS3 (2026-09-10): el documento SÍ se rellena cuando NO fue el que
+      // dirigió el match. Match por email/nombre + documento vacío + cajero
+      // trae documento ⇒ backfill (un null no es identidad que proteger).
+      // Con documento ya guardado y distinto al traído NO se sobreescribe
+      // (podría ser otra persona con el mismo email): se reporta
+      // `document_conflict` para que el POS avise. Match por documento ⇒
+      // nunca se toca (dirigió el match, ver `buildUpdatePayload`).
+      let document_conflict = false;
+      if (matched_by === 'email' || matched_by === 'name') {
+        const existingDoc = this.normalizeDocument({
+          type: existing.document_type ?? null,
+          number: existing.document_number ?? null,
+        });
+        if (
+          !existingDoc.number &&
+          normalizedDoc.number &&
+          normalizedDoc.type
+        ) {
+          updateData.document_type = normalizedDoc.type;
+          updateData.document_number = normalizedDoc.number;
+        } else if (
+          existingDoc.number &&
+          normalizedDoc.number &&
+          (existingDoc.number !== normalizedDoc.number ||
+            (existingDoc.type ?? '') !== (normalizedDoc.type ?? ''))
+        ) {
+          document_conflict = true;
+        }
+      }
+
       let was_updated = false;
       if (Object.keys(updateData).length > 0) {
         // Race-condition note: two cashiers typing the same email
@@ -669,6 +700,7 @@ export class CustomersService {
         was_created: false,
         was_updated,
         matched_by,
+        document_conflict,
       };
     }
 
@@ -681,6 +713,7 @@ export class CustomersService {
       was_created: true,
       was_updated: false,
       matched_by: null,
+      document_conflict: false,
     };
   }
 
