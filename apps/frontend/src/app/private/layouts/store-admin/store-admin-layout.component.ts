@@ -605,6 +605,14 @@ export class StoreAdminLayoutComponent {
         },
       ],
     },
+    // Impuestos (tax_categories). 'Contabilidad' en este sidebar es una hoja
+    // dentro del grupo 'Fiscal' (sin children), así que no puede alojar hijas:
+    // aplica el fallback y va top-level después de Productos.
+    {
+      label: 'Impuestos',
+      icon: 'receipt',
+      route: '/admin/taxes',
+    },
     {
       label: 'Inventario',
       icon: 'warehouse',

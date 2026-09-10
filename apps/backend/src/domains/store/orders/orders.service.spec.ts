@@ -152,9 +152,13 @@ describe('OrdersService', () => {
   // updated, so Nest refused to build the TestingModule and every test
   // failed at module init. Mock mínimo sólo para que DI resuelva;
   // `findAll` no usa SSE.
+  // CP-orders-sales-sse-realtime — el hub real expone `pushOrderEvent`
+  // (no `pushEvent`); sin esta clave los tests que emiten
+  // order.created/status_changed mueren con TypeError is not a function.
   const mockOrderSseService = {
     emit: jest.fn(),
     pushEvent: jest.fn(),
+    pushOrderEvent: jest.fn(),
     subscribe: jest.fn(),
   };
 

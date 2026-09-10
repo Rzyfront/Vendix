@@ -267,6 +267,7 @@ export class MenuFilterService {
     Retenciones: 'accounting_withholding_tax',
     'Info Exógena': 'accounting_exogenous',
     'ICA Municipal': 'taxes_ica',
+    Impuestos: 'taxes',
     'Operación fiscal': 'fiscal_operations',
     'Dashboard fiscal': 'fiscal_dashboard',
     'Obligaciones fiscales': 'fiscal_obligations',

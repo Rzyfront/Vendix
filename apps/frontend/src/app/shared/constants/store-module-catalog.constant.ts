@@ -144,6 +144,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   accounting_withholding_tax: '/admin/accounting/taxes/withholding',
   accounting_exogenous: '/admin/accounting/taxes/exogenous',
   taxes_ica: '/admin/accounting/taxes/ica',
+  taxes: '/admin/taxes',
 
   // Nómina
   payroll: '/admin/payroll',

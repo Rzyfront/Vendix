@@ -225,6 +225,12 @@ export class DefaultPanelUIService {
         accounting_withholding_tax: true,
         accounting_exogenous: true,
         taxes_ica: true,
+        // Impuestos (tax_categories). Decisiones de plan:
+        // default_visible_for_privileged_users=true ("config fiscal esencial:
+        // sin él los comercios no pueden marcar impuestos incluidos");
+        // show_new_badge=yes ("descubribilidad: el módulo es nuevo y los
+        // usuarios lo pidieron").
+        taxes: true,
         fiscal_operations: true,
         fiscal_dashboard: true,
         fiscal_obligations: true,

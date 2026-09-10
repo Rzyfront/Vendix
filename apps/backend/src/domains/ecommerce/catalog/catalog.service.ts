@@ -1298,6 +1298,7 @@ export class CatalogService {
       variant: variant ?? null,
       saleUnit: product?.__default_sale_unit ?? null,
       taxRate: this.storefrontPrice.getTotalTaxRate(product),
+      taxRates: this.storefrontPrice.getTypedTaxRates(product),
     }).gross_unit_price;
   }
 

@@ -566,6 +566,12 @@ export const APP_MODULES: {
           label: 'ICA Municipal',
           description: 'Impuesto de industria y comercio municipal',
         },
+        {
+          key: 'taxes',
+          label: 'Impuestos',
+          description:
+            'Categorías de impuestos de la tienda (IVA, INC, impuestos incluidos)',
+        },
       ],
     },
 
