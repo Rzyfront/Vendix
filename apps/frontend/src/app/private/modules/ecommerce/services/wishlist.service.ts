@@ -25,6 +25,8 @@ export interface WishlistItem {
         name: string;
         sku: string;
         price_override: number | null;
+        /** Precio final con impuesto (contrato feat/global-final-prices). */
+        final_price?: number | null;
         attributes: any;
     } | null;
 }

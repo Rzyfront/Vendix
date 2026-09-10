@@ -836,11 +836,17 @@
                     <!-- Price -->
                     <div class="text-right flex-shrink-0">
                       <p class="font-bold text-gray-900 text-sm sm:text-lg">
-                        {{ item.total_price || 0 | currency }}
+                        {{
+                          (item.final_total_price ?? item.total_price) || 0
+                            | currency
+                        }}
                       </p>
                       <p class="text-xs text-gray-500">
                         {{ item.quantity }} x
-                        {{ item.unit_price || 0 | currency }}
+                        {{
+                          (item.final_unit_price ?? item.unit_price) || 0
+                            | currency
+                        }}
                       </p>
                     </div>
                   </div>

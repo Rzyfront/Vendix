@@ -99,6 +99,12 @@ export interface OrderDetail extends Order {
     quantity: number;
     unit_price: number;
     total_price: number;
+    /**
+     * Precio final con impuesto por línea (contrato feat/global-final-prices).
+     * Opcional hasta que el backend lo publique; la vista usa `??` fallback.
+     */
+    final_unit_price?: number | null;
+    final_total_price?: number | null;
     image_url: string | null;
     variant_image_url?: string | null;
     /** Mirrors `product_type_enum`; null when the product row was removed. */
