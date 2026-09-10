@@ -153,7 +153,7 @@ export class AddRateWizardModalComponent implements OnInit {
       text += `, siempre que el pedido esté entre <strong>${minText}</strong> y <strong>${maxText}</strong>`;
     }
 
-    if (free !== null && free !== undefined && free > 0) {
+    if (free !== null && free !== undefined && free !== '' && Number(free) > 0) {
       text += `. Además, será <strong>gratis</strong> si la compra supera los <strong>$${free}</strong>`;
     }
 
@@ -171,10 +171,13 @@ export class AddRateWizardModalComponent implements OnInit {
       this.rate_form.patchValue({
         type: rate.type,
         base_cost: rate.base_cost,
-        per_unit_cost: rate.per_unit_cost ?? null,
-        min_val: rate.min_val ?? null,
-        max_val: rate.max_val ?? null,
-        free_shipping_threshold: rate.free_shipping_threshold ?? null,
+        per_unit_cost: rate.per_unit_cost != null ? Number(rate.per_unit_cost) : null,
+        min_val: rate.min_val != null ? Number(rate.min_val) : null,
+        max_val: rate.max_val != null ? Number(rate.max_val) : null,
+        free_shipping_threshold:
+          rate.free_shipping_threshold != null && Number(rate.free_shipping_threshold) > 0
+            ? Number(rate.free_shipping_threshold)
+            : null,
         is_active: rate.is_active,
         name: rate.name || '',
       });
@@ -252,16 +255,37 @@ export class AddRateWizardModalComponent implements OnInit {
 
     const values = this.rate_form.value;
 
+    const parseNullableNumber = (val: any): number | null => {
+      if (val === null || val === undefined || val === '' || isNaN(Number(val))) {
+        return null;
+      }
+      return Number(val);
+    };
+
+    const parsePositiveThreshold = (val: any): number | null => {
+      const num = parseNullableNumber(val);
+      return num !== null && num > 0 ? num : null;
+    };
+
+    const freeThreshold = parsePositiveThreshold(values.free_shipping_threshold);
+    const perUnitCost = parseNullableNumber(values.per_unit_cost);
+    const minVal = parseNullableNumber(values.min_val);
+    const maxVal = parseNullableNumber(values.max_val);
+    const nameVal =
+      values.name && typeof values.name === 'string' && values.name.trim().length > 0
+        ? values.name.trim()
+        : null;
+
     const dto: CreateRateDto = {
       shipping_zone_id: this.selected_zone_id()!,
       shipping_method_id: this.method_id(),
-      name: values.name || undefined,
+      name: nameVal,
       type: (values.type as ShippingRateType) || 'flat',
-      base_cost: values.base_cost ?? 0,
-      per_unit_cost: values.per_unit_cost ?? undefined,
-      min_val: values.min_val ?? undefined,
-      max_val: values.max_val ?? undefined,
-      free_shipping_threshold: values.free_shipping_threshold ?? undefined,
+      base_cost: Number(values.base_cost) || 0,
+      per_unit_cost: perUnitCost,
+      min_val: minVal,
+      max_val: maxVal,
+      free_shipping_threshold: freeThreshold,
       is_active: values.is_active ?? true,
     };
 

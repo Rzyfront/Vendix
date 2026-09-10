@@ -98,12 +98,16 @@ export class MethodZonesInlineComponent {
   get tableData(): any[] {
     return this.zones().map((item) => ({
       id: item.rate.id,
-      zone_name: item.zone.name,
+      zone_name: item.rate.name
+        ? `${item.rate.name} (${item.zone.name})`
+        : item.zone.name,
       rate_type_label: this.getRateTypeLabel(item.rate.type),
       base_cost: this.formatCost(item.rate),
-      free_shipping: item.rate.free_shipping_threshold
-        ? `$${Number(item.rate.free_shipping_threshold).toLocaleString('es-CO')}`
-        : '—',
+      free_shipping:
+        item.rate.free_shipping_threshold &&
+        Number(item.rate.free_shipping_threshold) > 0
+          ? `$${Number(item.rate.free_shipping_threshold).toLocaleString('es-CO')}`
+          : '—',
       status: item.rate.is_active ? 'active' : 'inactive',
       _rate: item.rate,
     }));

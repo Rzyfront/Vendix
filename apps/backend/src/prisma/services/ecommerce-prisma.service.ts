@@ -275,6 +275,9 @@ export class EcommercePrismaService extends BasePrismaService {
   get users() {
     return this.baseClient.users;
   }
+  get checkout_idempotency_keys() {
+    return this.baseClient.checkout_idempotency_keys;
+  }
 
   override $transaction(arg: any, options?: any) {
     return this.scoped_client.$transaction(arg, options);

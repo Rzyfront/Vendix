@@ -23,6 +23,8 @@ const ADMINISTRATIVE_PREFIX_PATTERNS: RegExp[] = [
   /^provincia\s+de\s+/,
 ];
 
+const LEADING_ARTICLE_PATTERN = /^(el|la|los|las|del|de)\s+/;
+
 /** Forma canónica de un nombre geográfico para comparar. */
 export function normalizeGeoName(value?: string | null): string {
   if (value === null || value === undefined) return '';
@@ -36,6 +38,9 @@ export function normalizeGeoName(value?: string | null): string {
 
   for (const pattern of ADMINISTRATIVE_PREFIX_PATTERNS) {
     normalized = normalized.replace(pattern, '');
+  }
+  while (LEADING_ARTICLE_PATTERN.test(normalized)) {
+    normalized = normalized.replace(LEADING_ARTICLE_PATTERN, '');
   }
   for (const pattern of ADMINISTRATIVE_SUFFIX_PATTERNS) {
     normalized = normalized.replace(pattern, '');

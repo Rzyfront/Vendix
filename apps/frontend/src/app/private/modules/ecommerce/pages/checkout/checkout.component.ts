@@ -1426,7 +1426,7 @@ export class CheckoutComponent implements OnInit {
     if (this.selected_delivery() !== 'home') return null;
     if (this.use_new_address()) {
       if (!this.address_form.valid) return null;
-      const v = this.address_form.value;
+      const v = this.address_form.getRawValue();
       return `new:${v.country_code}|${v.state_province}|${v.city}|${v.address_line1}|${v.postal_code}`;
     }
     const id = this.selected_address_id();
@@ -1574,7 +1574,7 @@ export class CheckoutComponent implements OnInit {
   private refreshShippingQuote(key: string): Promise<void> {
     let address: any | null = null;
     if (this.use_new_address()) {
-      address = this.mapFormToCalcAddress(this.address_form.value);
+      address = this.mapFormToCalcAddress(this.address_form.getRawValue());
     } else if (this.selected_address_id() != null) {
       const saved = this.addresses().find(
         (a) => a.id === this.selected_address_id(),
@@ -1605,7 +1605,7 @@ export class CheckoutComponent implements OnInit {
    */
   loadShippingOptions(notify = true): Promise<void> {
     if (this.use_new_address() && this.address_form.valid) {
-      const address = this.mapFormToCalcAddress(this.address_form.value);
+      const address = this.mapFormToCalcAddress(this.address_form.getRawValue());
       if (!address) {
         this.shipping_options.set([]);
         this.shipping_coverage.set('none');
@@ -1678,9 +1678,13 @@ export class CheckoutComponent implements OnInit {
     return { value, unresolved };
   }
 
-  private mapFormToCalcAddress(formValue: any): any | null {
-    const { value, unresolved } = this.resolveGeoNames(formValue);
+  private mapFormToCalcAddress(formValue?: any): any | null {
+    const raw = formValue ?? this.address_form.getRawValue();
+    const { value, unresolved } = this.resolveGeoNames(raw);
     if (unresolved.length > 0) {
+      if (this.loading_cities() || this.departments().length === 0) {
+        return null;
+      }
       console.warn(
         '[checkout] No se pudo resolver el nombre de',
         unresolved.join(', '),
@@ -1727,9 +1731,10 @@ export class CheckoutComponent implements OnInit {
             // selección y el comprador elige explícitamente — preseleccionar
             // la barata subcobra el envío remoto. `nextStep` bloquea avanzar
             // sin selección, así que limpiar equivale a exigir la elección.
-            const stillValid = options.some(
+            const matchedOption = options.find(
               (o: any) => o.id === this.selected_shipping_option_id,
             );
+            const stillValid = Boolean(matchedOption);
             // Solo hay retiro (típico: la zona matcheó pero su única tarifa
             // aplicable es pickup): para el domicilio es sin cobertura — se
             // muestra el estado vacío accionable en vez de una lista vacía.
@@ -1751,15 +1756,15 @@ export class CheckoutComponent implements OnInit {
                   'Sin cobertura de envío',
                 );
               }
+            } else if (stillValid && matchedOption) {
+              this.shipping_cost.set(matchedOption.cost);
             } else if (!stillValid) {
-              if (shippable.length === 1) {
-                this.selectShippingMethod(shippable[0], shippable[0].cost);
-              } else {
-                this.selected_shipping_option_id = null;
-                this.selected_shipping_method_id = null;
-                this.selected_shipping_method_type = null;
-                this.shipping_cost.set(0);
-              }
+              // Preselección de tarifa en checkout:
+              // 1. Si alguna opción coincide exactamente con el código postal del comprador, se preselecciona esa.
+              // 2. Si ninguna coincide o el comprador no tiene código postal, se preselecciona la primera (shippable[0]).
+              const preferred =
+                shippable.find((o: any) => o.postal_code_match) ?? shippable[0];
+              this.selectShippingMethod(preferred, preferred.cost);
             }
 
             if (isFallbackOnly) {
@@ -1902,12 +1907,14 @@ export class CheckoutComponent implements OnInit {
   }
 
   mapAddressToCalc(addr: Address) {
-    return {
+    const raw = {
       country_code: addr.country_code,
       state_province: addr.state_province,
       city: addr.city,
       postal_code: addr.postal_code || undefined,
     };
+    const { value } = this.resolveGeoNames(raw);
+    return value;
   }
 
   /** The step number that corresponds to Payment in the current flow */
@@ -2189,7 +2196,7 @@ export class CheckoutComponent implements OnInit {
    * Prepares the address payload with converted department/city names for Colombia
    */
   private prepareAddressPayload(): any | null {
-    const { value, unresolved } = this.resolveGeoNames(this.address_form.value);
+    const { value, unresolved } = this.resolveGeoNames(this.address_form.getRawValue());
 
     // Guardar la dirección con el ID del catálogo en el campo `city` la deja
     // permanentemente inservible para calcular envíos. Preferimos no guardarla.
@@ -2366,7 +2373,7 @@ export class CheckoutComponent implements OnInit {
     if (!this.cartHasOnlyServices && this.use_new_address()) {
       // Convert IDs to names for backend compatibility
       const { value: addressValue, unresolved } = this.resolveGeoNames(
-        this.address_form.value,
+        this.address_form.getRawValue(),
       );
 
       // Mandar el ID del catálogo como nombre de ciudad deja la orden con una

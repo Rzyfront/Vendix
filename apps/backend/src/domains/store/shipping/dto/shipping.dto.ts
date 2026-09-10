@@ -9,8 +9,9 @@ import {
   Min,
   Max,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import {
   shipping_method_type_enum,
   shipping_rate_type_enum,
@@ -109,22 +110,49 @@ export class CreateShippingRateDto {
   @Min(0)
   base_cost: number;
 
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined) return undefined;
+    if (value === null || value === '') return null;
+    return Number(value);
+  })
+  @ValidateIf((_, value) => value !== null)
   @IsNumber()
   @Min(0)
-  @IsOptional()
-  per_unit_cost?: number;
+  per_unit_cost?: number | null;
 
-  @IsNumber()
   @IsOptional()
-  min_val?: number;
+  @Transform(({ value }) => {
+    if (value === undefined) return undefined;
+    if (value === null || value === '') return null;
+    return Number(value);
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsNumber()
+  @Min(0)
+  min_val?: number | null;
 
-  @IsNumber()
   @IsOptional()
-  max_val?: number;
+  @Transform(({ value }) => {
+    if (value === undefined) return undefined;
+    if (value === null || value === '') return null;
+    return Number(value);
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsNumber()
+  @Min(0)
+  max_val?: number | null;
 
-  @IsNumber()
   @IsOptional()
-  free_shipping_threshold?: number;
+  @Transform(({ value }) => {
+    if (value === undefined) return undefined;
+    if (value === null || value === '' || Number(value) <= 0) return null;
+    return Number(value);
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsNumber()
+  @Min(0)
+  free_shipping_threshold?: number | null;
 
   @IsBoolean()
   @IsOptional()

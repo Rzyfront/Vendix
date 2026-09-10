@@ -6,8 +6,9 @@ import {
   IsNumber,
   IsEnum,
   Min,
+  ValidateIf,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { PartialType, ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { shipping_rate_type_enum } from '@prisma/client';
 
@@ -84,8 +85,14 @@ export class CreateRateDto {
 
   @ApiPropertyOptional({ description: 'Display name for the rate' })
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined) return undefined;
+    if (value === null || (typeof value === 'string' && value.trim() === '')) return null;
+    return typeof value === 'string' ? value.trim() : value;
+  })
+  @ValidateIf((_, value) => value !== null)
   @IsString()
-  name?: string;
+  name?: string | null;
 
   @ApiProperty({
     description: 'Rate calculation type',
@@ -107,40 +114,60 @@ export class CreateRateDto {
     example: 10.0,
   })
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined) return undefined;
+    if (value === null || value === '') return null;
+    return Number(value);
+  })
+  @ValidateIf((_, value) => value !== null)
   @IsNumber()
   @Min(0)
-  @Type(() => Number)
-  per_unit_cost?: number;
+  per_unit_cost?: number | null;
 
   @ApiPropertyOptional({
     description: 'Minimum value (weight in kg or order price)',
     example: 0,
   })
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined) return undefined;
+    if (value === null || value === '') return null;
+    return Number(value);
+  })
+  @ValidateIf((_, value) => value !== null)
   @IsNumber()
   @Min(0)
-  @Type(() => Number)
-  min_val?: number;
+  min_val?: number | null;
 
   @ApiPropertyOptional({
     description: 'Maximum value (weight in kg or order price)',
     example: 100,
   })
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined) return undefined;
+    if (value === null || value === '') return null;
+    return Number(value);
+  })
+  @ValidateIf((_, value) => value !== null)
   @IsNumber()
   @Min(0)
-  @Type(() => Number)
-  max_val?: number;
+  max_val?: number | null;
 
   @ApiPropertyOptional({
     description: 'Order amount threshold for free shipping',
     example: 2000.0,
   })
   @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined) return undefined;
+    if (value === null || value === '' || Number(value) <= 0) return null;
+    return Number(value);
+  })
+  @ValidateIf((_, value) => value !== null)
   @IsNumber()
   @Min(0)
-  @Type(() => Number)
-  free_shipping_threshold?: number;
+  free_shipping_threshold?: number | null;
 
   @ApiPropertyOptional({
     description: 'Whether the rate is active',

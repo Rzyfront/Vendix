@@ -385,6 +385,8 @@ async function bootstrapApi(role: VendixProcessRole) {
       'Pragma',
       'X-Requested-With',
       'x-store-id',
+      'Idempotency-Key',
+      'idempotency-key',
     ],
     // `exposedHeaders` es lo único que permite al JS del navegador LEER una
     // cabecera de respuesta cross-origin: sin listarla aquí, fetch/XHR la

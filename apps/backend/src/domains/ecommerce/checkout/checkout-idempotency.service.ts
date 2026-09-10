@@ -44,7 +44,7 @@ export class CheckoutIdempotencyService {
     if (!ctx) return { replay: false };
     const now = new Date();
     try {
-      await (this.prisma as any).checkout_idempotency_keys.create({
+      await this.prisma.checkout_idempotency_keys.create({
         data: {
           store_id: ctx.storeId,
           idempotency_key: ctx.key,
@@ -59,7 +59,7 @@ export class CheckoutIdempotencyService {
       if ((error as any)?.code !== 'P2002') {
         throw error;
       }
-      const existing = await (this.prisma as any).checkout_idempotency_keys.findUnique({
+      const existing = await this.prisma.checkout_idempotency_keys.findUnique({
         where: {
           store_id_idempotency_key: {
             store_id: ctx.storeId,
@@ -76,7 +76,7 @@ export class CheckoutIdempotencyService {
         return { replay: true, response: existing.response };
       }
       if (existing && existing.expires_at <= now) {
-        await (this.prisma as any).checkout_idempotency_keys
+        await this.prisma.checkout_idempotency_keys
           .delete({ where: { id: existing.id } })
           .catch(() => null);
         return this.begin(key);
@@ -91,7 +91,7 @@ export class CheckoutIdempotencyService {
     if (!ctx) return;
     const normalized =
       response === undefined ? null : JSON.parse(JSON.stringify(response));
-    await (this.prisma as any).checkout_idempotency_keys
+    await this.prisma.checkout_idempotency_keys
       .updateMany({
         where: {
           store_id: ctx.storeId,
@@ -111,7 +111,7 @@ export class CheckoutIdempotencyService {
     const storeId = RequestContextService.getStoreId();
     const ctx = this.resolve(storeId ?? null, key);
     if (!ctx) return;
-    await (this.prisma as any).checkout_idempotency_keys
+    await this.prisma.checkout_idempotency_keys
       .deleteMany({
         where: { store_id: ctx.storeId, idempotency_key: ctx.key },
       })

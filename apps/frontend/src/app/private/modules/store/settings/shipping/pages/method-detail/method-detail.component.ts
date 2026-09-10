@@ -447,13 +447,17 @@ export class MethodDetailComponent implements OnInit {
   table_data = computed(() => {
     return this.filtered_zones().map((zr) => ({
       _original: zr,
-      zone_name: zr.zone.name,
+      zone_name: zr.rate.name
+        ? `${zr.rate.name} (${zr.zone.name})`
+        : zr.zone.name,
       countries_display: this.formatCountries(zr.zone.countries),
       rate_type_label: this.getRateTypeLabel(zr.rate.type),
       cost_display: this.formatCost(zr.rate),
-      free_threshold_display: zr.rate.free_shipping_threshold
-        ? `$${Number(zr.rate.free_shipping_threshold).toLocaleString('es-CO')}`
-        : '—',
+      free_threshold_display:
+        zr.rate.free_shipping_threshold &&
+        Number(zr.rate.free_shipping_threshold) > 0
+          ? `$${Number(zr.rate.free_shipping_threshold).toLocaleString('es-CO')}`
+          : '—',
       status_label: zr.rate.is_active ? 'Activa' : 'Inactiva'}));
   });
 
