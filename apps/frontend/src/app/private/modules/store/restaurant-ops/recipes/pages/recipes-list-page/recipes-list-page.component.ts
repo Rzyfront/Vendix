@@ -33,7 +33,7 @@ import {
 } from '../../../../../../../shared/components/index';
 
 import { Recipe, RecipeProductVariant } from '../../interfaces';
-import { RecipesService } from '../../services';
+import { RecipesService, RecipeMutationError } from '../../services';
 
 interface RecipesStats {
   total: number;
@@ -197,6 +197,15 @@ export class RecipesListPageComponent implements OnInit {
     },
   ];
 
+  /**
+   * Acciones por fila según `is_active` (ciclo completo del paso 3):
+   * - Activa → Editar + Desactivar (soft, `DELETE /:id` → `is_active=false`).
+   * - Inactiva → Editar + Reactivar (`POST /:id/restore`) + Eliminar
+   *   definitiva (`DELETE /:id/hard`, doble confirmación). El borrado duro
+   *   vive solo en inactivas a propósito: primero se desactiva, después se
+   *   decide si se destruye. `show` lo respetan la tabla desktop y las cards
+   *   móviles (`getVisibleActions` en ambos).
+   */
   readonly tableActions = computed<TableAction[]>(() => [
     {
       label: 'Editar',
@@ -206,9 +215,27 @@ export class RecipesListPageComponent implements OnInit {
     },
     {
       label: 'Desactivar',
+      icon: 'power',
+      variant: 'warning',
+      show: (item: Recipe) => item.is_active === true,
+      tooltip: 'Desactivar: la receta se conserva y se puede reactivar',
+      action: (item: Recipe) => this.confirmDelete(item),
+    },
+    {
+      label: 'Reactivar',
+      icon: 'refresh-cw',
+      variant: 'success',
+      show: (item: Recipe) => item.is_active !== true,
+      tooltip: 'Reactivar la receta para producción y costeo',
+      action: (item: Recipe) => this.confirmRestore(item),
+    },
+    {
+      label: 'Eliminar definitiva',
       icon: 'trash-2',
       variant: 'danger',
-      action: (item: Recipe) => this.confirmDelete(item),
+      show: (item: Recipe) => item.is_active !== true,
+      tooltip: 'Eliminar definitivamente: no se puede deshacer',
+      action: (item: Recipe) => this.confirmHardDelete(item),
     },
   ]);
 
@@ -415,6 +442,104 @@ export class RecipesListPageComponent implements OnInit {
             typeof error === 'string'
               ? error
               : 'Error al desactivar la receta',
+          );
+        },
+      });
+  }
+
+  confirmRestore(recipe: Recipe): void {
+    this.dialogService
+      .confirm({
+        title: 'Reactivar Receta',
+        message: `¿Reactivar la receta de "${recipe.product?.name ?? 'este producto'}"? Volverá a estar disponible para producción y costeo.`,
+        confirmText: 'Reactivar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
+      })
+      .then((confirmed: boolean) => {
+        if (confirmed) {
+          this.restoreRecipe(recipe);
+        }
+      });
+  }
+
+  private restoreRecipe(recipe: Recipe): void {
+    this.recipesService
+      .restore(recipe.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Receta reactivada correctamente');
+          this.loadRecipes();
+        },
+        error: (error: unknown) => {
+          // `restore` lanza RecipeMutationError: el mensaje ya es UX (el
+          // backend nombra el componente con cantidad inválida cuando aplica
+          // RECIPE_ACTIVATION_BLOCKED_INVALID_ITEMS).
+          const mutation = error as Partial<RecipeMutationError> | null;
+          this.toastService.error(
+            typeof mutation?.message === 'string' && mutation.message
+              ? mutation.message
+              : 'Error al reactivar la receta',
+            'No se pudo reactivar',
+            6000,
+          );
+        },
+      });
+  }
+
+  /**
+   * Borrado DEFINITIVO con doble confirmación: el primero explica que la
+   * acción destruye la receta y sus componentes; el segundo es la red de
+   * seguridad contra el tap accidental. Ante RECIPE_HAS_OPEN_TICKETS el toast
+   * muestra el bloqueador (ticket u orden abierta) en vez de un genérico.
+   */
+  confirmHardDelete(recipe: Recipe): void {
+    const productName = recipe.product?.name ?? 'este producto';
+    this.dialogService
+      .confirm({
+        title: 'Eliminar Receta Definitivamente',
+        message: `¿Eliminar DEFINITIVAMENTE la receta de "${productName}"? Se borrará con todos sus componentes y no se podrá recuperar. Solo procede si no tiene tickets de cocina ni órdenes de producción abiertas.`,
+        confirmText: 'Continuar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      })
+      .then((firstConfirmed: boolean) => {
+        if (!firstConfirmed) return;
+        this.dialogService
+          .confirm({
+            title: 'Confirmar Eliminación Definitiva',
+            message:
+              'Esta acción no se puede deshacer. ¿Confirmar la eliminación definitiva?',
+            confirmText: 'Eliminar definitivamente',
+            cancelText: 'Volver',
+            confirmVariant: 'danger',
+          })
+          .then((secondConfirmed: boolean) => {
+            if (secondConfirmed) {
+              this.hardDeleteRecipe(recipe);
+            }
+          });
+      });
+  }
+
+  private hardDeleteRecipe(recipe: Recipe): void {
+    this.recipesService
+      .hardDelete(recipe.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Receta eliminada definitivamente');
+          this.loadRecipes();
+        },
+        error: (error: unknown) => {
+          const mutation = error as Partial<RecipeMutationError> | null;
+          this.toastService.error(
+            typeof mutation?.message === 'string' && mutation.message
+              ? mutation.message
+              : 'Error al eliminar la receta',
+            'No se pudo eliminar',
+            6000,
           );
         },
       });

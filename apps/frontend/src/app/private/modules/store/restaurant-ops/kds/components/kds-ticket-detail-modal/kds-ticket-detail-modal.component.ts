@@ -18,6 +18,7 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import {
   itemHasActiveRecipe,
+  itemInactiveRecipeId,
   KitchenTicket,
   KitchenTicketItem,
 } from '../../interfaces';
@@ -79,6 +80,11 @@ export class KdsTicketDetailModalComponent {
    * deep-linkea a `recipes/new?product_id=…`. Mismo CTA que la card.
    */
   readonly createRecipeClicked = output<KitchenTicketItem>();
+  /**
+   * Paso 4 recetas-kds: "Ver receta / Reactivarla" para un plato cuya receta
+   * existe pero está inactiva. Mismo CTA que la card (`viewRecipeClicked`).
+   */
+  readonly viewRecipeClicked = output<KitchenTicketItem>();
   /** Cierre del modal (X / backdrop / Escape) propagado al board. */
   readonly closed = output<void>();
 
@@ -98,9 +104,20 @@ export class KdsTicketDetailModalComponent {
   // 1400+ `takeUntilDestroyed(this.destroyRef)` call sites in the repo).
   private readonly destroyRef = inject(DestroyRef);
 
-  /** Cache of recipe loads keyed by `product_id` to avoid hammering the API. */
-  private readonly recipeCache = new Map<number, RecipeLoadState>();
-  readonly recipeStates = signal<Record<number, RecipeLoadState>>({});
+  /**
+   * Paso 4 recetas-kds: cache de recetas por PAR `(product_id, variant_id)`
+   * (`"<product_id>"` o `"<product_id>:<variant_id>"`). La clave por solo
+   * `product_id` mentía en platos variantizados: la base y la variante
+   * comparten producto pero tienen recetas distintas.
+   */
+  private readonly recipeCache = new Map<string, RecipeLoadState>();
+  readonly recipeStates = signal<Record<string, RecipeLoadState>>({});
+
+  /** Clave de cache para un item: par exacto que bloquea (o no) el ticket. */
+  recipeKeyFor(item: Pick<KitchenTicketItem, 'product_id' | 'product_variant_id'>): string {
+    const variantId = item.product_variant_id ?? null;
+    return variantId != null ? `${item.product_id}:${variantId}` : `${item.product_id}`;
+  }
 
   readonly ticketDisplay = computed(() => this.ticket());
 
@@ -147,6 +164,11 @@ export class KdsTicketDetailModalComponent {
   /** Per-dish recipe presence — drives the "Crear receta" CTA in the modal. */
   itemHasRecipe(item: KitchenTicketItem): boolean {
     return itemHasActiveRecipe(item);
+  }
+
+  /** Id de la receta inactiva del par exacto — CTA "Ver receta". */
+  inactiveRecipeIdFor(item: KitchenTicketItem): number | null {
+    return itemInactiveRecipeId(item);
   }
 
   readonly elapsedLabel = computed(() => {
@@ -196,7 +218,7 @@ export class KdsTicketDetailModalComponent {
 
   constructor() {
     // Whenever the ticket changes, refetch the recipes for the new
-    // (or newly-added) products. Cache by product_id so re-firing
+    // (or newly-added) products. Cache by pair so re-firing
     // the same dish is instant.
     effect(() => {
       const t = this.ticket();
@@ -204,31 +226,92 @@ export class KdsTicketDetailModalComponent {
       for (const item of t.items ?? []) {
         const pid = item.product_id;
         if (typeof pid !== 'number') continue;
-        if (this.recipeCache.has(pid)) continue;
+        const key = this.recipeKeyFor(item);
+        const cached = this.recipeCache.get(key);
+        // Paso 4 recetas-kds: invalida el 'missing'/'error' rancio. Si el
+        // snapshot fresco del ticket ya trae receta activa del par (el
+        // operador la creó/reactivó y el SSE re-emitió el ticket), la entrada
+        // vieja mentiría "Sin receta" para siempre — se recarga.
+        if (cached != null) {
+          if (
+            (cached.status === 'missing' || cached.status === 'error') &&
+            itemHasActiveRecipe(item)
+          ) {
+            this.recipeCache.delete(key);
+          } else {
+            continue;
+          }
+        }
         // Short-circuit: si el payload ya indica que el plato no tiene receta
         // activa —resolución por par `(product_id, product_variant_id)` sobre
         // `product.recipes[]` con caída a la base, ver `itemHasActiveRecipe`—
         // lo marcamos 'missing' sin pegar a la API: evita un fetch que de
         // todas formas degradaría a "no disponible".
         if (!itemHasActiveRecipe(item)) {
-          this.recipeCache.set(pid, { status: 'missing' });
+          this.recipeCache.set(key, { status: 'missing' });
           continue;
         }
-        this.loadRecipe(pid);
+        this.loadRecipe(pid, item.product_variant_id ?? null);
       }
       // Sync the local signal with the cache.
       this.publishCache();
     });
   }
 
-  private loadRecipe(productId: number): void {
-    this.recipeCache.set(productId, { status: 'loading' });
+  /**
+   * Paso 4 recetas-kds: invalida la cache de recetas. Sin args limpia todo
+   * (el board la llama al volver del formulario de receta o tras una
+   * restauración); con par limpia solo esa entrada para forzar su recarga.
+   */
+  invalidateRecipeCache(productId?: number, variantId?: number | null): void {
+    if (productId == null) {
+      this.recipeCache.clear();
+    } else {
+      const key =
+        variantId != null ? `${productId}:${variantId}` : `${productId}`;
+      this.recipeCache.delete(key);
+    }
+    this.publishCache();
+  }
+
+  /**
+   * Reintenta las entradas 'missing'/'error' contra el ticket ACTUAL (el
+   * snapshot pudo refrescarse con la receta recién creada). Las 'ok' se
+   * conservan; las que el payload ya marca activas se recargan.
+   */
+  refreshRecipes(): void {
+    const t = this.ticket();
+    for (const key of Array.from(this.recipeCache.keys())) {
+      const state = this.recipeCache.get(key);
+      if (state?.status === 'missing' || state?.status === 'error') {
+        this.recipeCache.delete(key);
+      }
+    }
+    if (t) {
+      for (const item of t.items ?? []) {
+        if (typeof item.product_id !== 'number') continue;
+        const key = this.recipeKeyFor(item);
+        if (this.recipeCache.has(key)) continue;
+        if (!itemHasActiveRecipe(item)) {
+          this.recipeCache.set(key, { status: 'missing' });
+          continue;
+        }
+        this.loadRecipe(item.product_id, item.product_variant_id ?? null);
+      }
+    }
+    this.publishCache();
+  }
+
+  private loadRecipe(productId: number, variantId?: number | null): void {
+    const key =
+      variantId != null ? `${productId}:${variantId}` : `${productId}`;
+    this.recipeCache.set(key, { status: 'loading' });
     this.recipesService
-      .getByProduct(productId)
+      .getByProduct(productId, variantId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (recipe) => {
-          this.recipeCache.set(productId, { status: 'ok', recipe });
+          this.recipeCache.set(key, { status: 'ok', recipe });
           this.publishCache();
         },
         error: (err: any) => {
@@ -247,9 +330,9 @@ export class KdsTicketDetailModalComponent {
             err?.status === 403 ||
             err?.status === 404
           ) {
-            this.recipeCache.set(productId, { status: 'missing' });
+            this.recipeCache.set(key, { status: 'missing' });
           } else {
-            this.recipeCache.set(productId, {
+            this.recipeCache.set(key, {
               status: 'error',
               errorCode: code ?? 'UNKNOWN',
             });
@@ -263,22 +346,27 @@ export class KdsTicketDetailModalComponent {
   }
 
   private publishCache(): void {
-    const ids = Array.from(this.recipeCache.keys());
-    this.recipeStates.set(this.snapshotCache(ids));
+    const keys = Array.from(this.recipeCache.keys());
+    this.recipeStates.set(this.snapshotCache(keys));
   }
 
-  private snapshotCache(productIds: number[]): Record<number, RecipeLoadState> {
-    const out: Record<number, RecipeLoadState> = {};
-    for (const id of productIds) {
-      const state = this.recipeCache.get(id);
-      if (state) out[id] = state;
+  private snapshotCache(keys: string[]): Record<string, RecipeLoadState> {
+    const out: Record<string, RecipeLoadState> = {};
+    for (const key of keys) {
+      const state = this.recipeCache.get(key);
+      if (state) out[key] = state;
     }
     return out;
   }
 
-  recipeStateFor(productId: number | null | undefined): RecipeLoadState {
-    if (!productId) return { status: 'missing' };
-    return this.recipeStates()[productId] ?? { status: 'idle' };
+  /**
+   * Estado de receta del PAR exacto del item (no solo del producto): la card
+   * y el modal resuelven por `(product_id, product_variant_id)`, así que dos
+   * variantes del mismo plato pueden mostrar estados distintos.
+   */
+  recipeStateFor(item: KitchenTicketItem | null | undefined): RecipeLoadState {
+    if (!item || typeof item.product_id !== 'number') return { status: 'missing' };
+    return this.recipeStates()[this.recipeKeyFor(item)] ?? { status: 'idle' };
   }
 
   onStart(): void {
@@ -303,6 +391,9 @@ export class KdsTicketDetailModalComponent {
   }
   onCreateRecipe(item: KitchenTicketItem): void {
     this.createRecipeClicked.emit(item);
+  }
+  onViewRecipe(item: KitchenTicketItem): void {
+    this.viewRecipeClicked.emit(item);
   }
 
   /** Emite el cierre al board para que resetee `selectedTicketId`. */

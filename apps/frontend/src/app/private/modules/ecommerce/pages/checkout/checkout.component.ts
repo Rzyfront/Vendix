@@ -455,8 +455,8 @@ export class CheckoutComponent implements OnInit {
 
     // CP-tienda-checkout-whatsapp (C.2): recotización de fondo del domicilio.
     // Cuando el modo es domicilio y hay una dirección válida, cotiza con
-    // debounce para que la lista de opciones viva en el paso 1 (donde el
-    // comprador la elige) y no en el paso de pago. Lee como deps reactivas
+    // debounce para detectar cobertura en el paso 1; la elección explícita
+    // vive en el paso Pago junto al total. Lee como deps reactivas
     // solo signals; el valor del formulario se lee untracked vía la clave.
     effect(() => {
       const mode = this.selected_delivery();
@@ -1803,7 +1803,7 @@ export class CheckoutComponent implements OnInit {
     });
   }
 
-  /** Nombre de la tarifa elegida para el resumen del paso de pago (C.4). */
+  /** Nombre de la tarifa elegida para el resumen del paso de pago. */
   selectedShippingOptionName(): string {
     const found = this.shipping_options().find(
       (o: any) => o.id === this.selected_shipping_option_id,
@@ -1992,11 +1992,10 @@ export class CheckoutComponent implements OnInit {
           );
           return;
         }
-        if (this.selected_shipping_option_id == null) {
-          // Hay tarifas pero el comprador aún no elige (caso 2+ tarifas).
-          this.error_message.set('Por favor selecciona una opción de envío');
-          return;
-        }
+        // La elección explícita vive en el paso Pago junto al total: con
+        // cobertura se avanza aunque la tarifa aún no esté elegida (con
+        // tarifa única ya viene autoseleccionada). El paso Pago exige la
+        // elección antes de Confirmar.
       }
       this.advanceStep();
       return;
@@ -2201,11 +2200,16 @@ export class CheckoutComponent implements OnInit {
     }
 
     // Add required fields for the API
-    return {
+    const payload = {
       ...value,
       type: 'shipping',
       is_primary: this.addresses().length === 0, // Make it primary if it's the first address
     };
+    // `municipality_code` es un artefacto de la cotización (id interno del
+    // catálogo, no código DANE) y el endpoint de guardado lo rechaza con 400
+    // `property municipality_code should not exist`. No se persiste.
+    delete payload.municipality_code;
+    return payload;
   }
 
   /**

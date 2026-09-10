@@ -1,0 +1,23 @@
+# Critical Files
+
+- `apps/backend/src/domains/fiscal-operations/constants/fiscal-responsibilities.catalog.ts` — Enriched versioned catalog, v2 with 7 entries; add 01-61 + obligation_types.
+- `apps/backend/src/common/constants/fiscal-responsibilities.ts` — Canonical allowlist, 14 codes today; validators read this file.
+- `apps/backend/src/common/validators/fiscal-responsibility.validator.ts` — Strict DTO rule; fails closed on any code outside canonical.
+- `apps/backend/src/domains/store/invoicing/validators/customer-fiscal-identity.validator.ts` — KNOWN mirror + R-99-PJ; shape blocker, membership warning.
+- `apps/backend/src/domains/store/settings/rut-scanner.service.ts` — RutScanResult contract; interface comment restricts to 6 codes.
+- `apps/backend/prisma/seeds/ai-engine-apps.seed.ts` — rut_scanner prompt with 6-code set; never reconciled on existing rows.
+- `apps/backend/src/domains/fiscal-operations/organization-fiscal.controller.ts` — GET responsibilities/catalog for organizations.
+- `apps/backend/src/domains/fiscal-operations/store-fiscal.controller.ts` — GET responsibilities/catalog for stores.
+- `apps/backend/src/domains/superadmin/fiscal-operations/superadmin-fiscal-operations.controller.ts` — GET responsibilities/catalog for superadmin.
+- `apps/backend/src/domains/fiscal-operations/services/fiscal-obligation.service.ts` — defaultTypesForContext via isVatResponsible; per-code mapping decided in A.1.
+- `apps/backend/src/common/helpers/vat-responsibility.helper.ts` — isVatResponsible with normalization; must accept new codes.
+- `apps/backend/src/domains/store/invoicing/providers/dian-direct/constants/dian-tax-level-codes.ts` — toDianTaxLevelCode closed UBL firewall.
+- `apps/backend/src/domains/store/invoicing/providers/dian-direct/xml/ubl-common.builder.ts` — resolveTaxCodeFromTax is tax_type, explicitly untouched.
+- `apps/backend/src/domains/store/customers/dto/create-customer.dto.ts` — Strict rule on customer create.
+- `apps/backend/src/domains/store/customers/dto/resolve-customer.dto.ts` — Lenient on resolve by design, no catalog rule.
+- `apps/backend/src/domains/store/customers/customers.service.ts` — Persists fiscal_responsibilities into users.
+- `apps/frontend/src/app/shared/constants/fiscal-responsibilities.constants.ts` — Frontend mirror, 7 codes today; must match canonical.
+- `apps/frontend/src/app/shared/components/forms/legal-data-form/legal-data-form.component.ts` — Legal form with catalog input and two-layer UI.
+- `apps/frontend/src/app/private/modules/fiscal-operations/components/fiscal-identity-panel.component.ts` — Identity tab; missing [catalog] binding, B.2 target.
+- `apps/frontend/src/app/shared/components/fiscal-activation-wizard/steps/fiscal-legal-data-step.component.ts` — Wizard step; working [catalog] reference for B.2.
+- `apps/frontend/src/app/shared/components/fiscal-activation-wizard/components/rut-scanner-modal.component.ts` — Scan review + confirmed emit, C.2 target.

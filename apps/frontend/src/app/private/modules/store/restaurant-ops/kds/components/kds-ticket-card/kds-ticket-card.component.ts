@@ -12,6 +12,7 @@ import { AlertBannerComponent } from '../../../../../../../shared/components/ale
 import { KitchenTicketsService } from '../../services/kitchen-tickets.service';
 import {
   itemHasActiveRecipe,
+  itemInactiveRecipeId,
   KitchenTicket,
   KitchenTicketItem,
   KitchenTicketStatus,
@@ -56,6 +57,14 @@ export class KdsTicketCardComponent {
    * ticket. Stops propagation in the template so it never opens the modal.
    */
   readonly createRecipeClicked = output<KitchenTicketItem>();
+  /**
+   * Restaurant Suite — paso 4 recetas-kds: "Ver receta / Reactivarla" para
+   * un plato cuya receta existe pero está INACTIVA (ver
+   * `itemInactiveRecipeId`). El board deep-linkea a `recipes/:id/edit`
+   * donde el operador la reactiva; distinto CTA que `createRecipeClicked`,
+   * que va a `recipes/new` con el par de la línea.
+   */
+  readonly viewRecipeClicked = output<KitchenTicketItem>();
   /**
    * Restaurant Suite — Fase K Gap 4: emitted on click of the card
    * body (NOT the actions footer). The board opens the detail
@@ -189,6 +198,15 @@ export class KdsTicketCardComponent {
     return itemHasActiveRecipe(item);
   }
 
+  /**
+   * Id de la receta inactiva que bloquea el plato (misma regla
+   * exacta→base→null que `itemHasRecipe`, sobre inactivas). `null` = no hay
+   * nada que reactivar, solo queda "Crear receta".
+   */
+  inactiveRecipeIdFor(item: KitchenTicketItem): number | null {
+    return itemInactiveRecipeId(item);
+  }
+
   // ─── Restaurant Suite — per-dish urgency ───────────────────────────
   /**
    * Per-dish preparation time in minutes (product-level; `variant_label` /
@@ -220,6 +238,10 @@ export class KdsTicketCardComponent {
 
   onCreateRecipe(item: KitchenTicketItem): void {
     this.createRecipeClicked.emit(item);
+  }
+
+  onViewRecipe(item: KitchenTicketItem): void {
+    this.viewRecipeClicked.emit(item);
   }
 
   onCardClick(): void {

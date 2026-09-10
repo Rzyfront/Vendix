@@ -23,6 +23,7 @@ import {
 } from '@angular/forms';
 
 import {
+  ButtonComponent,
   CardComponent,
   DialogService,
   IconComponent,
@@ -39,7 +40,7 @@ import {
 import { RecipeItemsEditorComponent } from '../../components/recipe-items-editor/recipe-items-editor.component';
 import { ProductsService } from '../../../../products/services/products.service';
 import { Product } from '../../../../products/interfaces/product.interface';
-import { RecipesService } from '../../services';
+import { RecipesService, RecipeMutationError } from '../../services';
 import {
   CreateRecipeDto,
   CreateRecipeItemDto,
@@ -84,6 +85,7 @@ function atLeastOneItemValidator(control: AbstractControl): ValidationErrors | n
   imports: [
     ReactiveFormsModule,
     StickyHeaderComponent,
+    ButtonComponent,
     CardComponent,
     InputComponent,
     SelectorComponent,
@@ -111,6 +113,13 @@ export class RecipeFormPageComponent implements OnInit {
   // fallback to the toast (which the user reported was not always visible).
   // Persists until the next submit attempt.
   readonly submitError = signal<string | null>(null);
+  /**
+   * Receta inactiva en conflicto (409 `RECIPE_DUP_PRODUCT` con
+   * `details.is_active=false`): el banner ofrece "Reactivar existente" en vez
+   * de un error muerto. `null` = sin conflicto pendiente.
+   */
+  readonly conflictingRecipeId = signal<number | null>(null);
+  readonly isReactivating = signal(false);
   readonly isLoadingRecipe = signal(false);
   readonly isSubmitting = signal(false);
   readonly isLoadingProducts = signal(false);
@@ -562,8 +571,42 @@ export class RecipeFormPageComponent implements OnInit {
     }
   }
 
+  /**
+   * Reactiva la receta inactiva en conflicto (banner del 409) y vuelve a la
+   * lista, donde ya aparece en Activas. Sin re-fire ni recreación manual.
+   */
+  reactivateExisting(): void {
+    const id = this.conflictingRecipeId();
+    if (id == null || this.isReactivating()) return;
+    this.isReactivating.set(true);
+    this.recipesService
+      .restore(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isReactivating.set(false);
+          this.conflictingRecipeId.set(null);
+          this.toastService.success(
+            'Receta existente reactivada correctamente',
+          );
+          this.router.navigate(['/admin/restaurant-ops/recipes']);
+        },
+        error: (err: unknown) => {
+          this.isReactivating.set(false);
+          const mutation = err as Partial<RecipeMutationError> | null;
+          const msg =
+            typeof mutation?.message === 'string' && mutation.message
+              ? mutation.message
+              : 'Error al reactivar la receta existente';
+          this.submitError.set(msg);
+          this.toastService.error(msg, 'No se pudo reactivar', 6000);
+        },
+      });
+  }
+
   submit(): void {
     this.submitError.set(null); // clear any previous inline error
+    this.conflictingRecipeId.set(null);
     this.form.markAllAsTouched();
     this.itemsArray.markAllAsTouched();
     const formInvalid = this.form.invalid;
@@ -677,14 +720,47 @@ export class RecipeFormPageComponent implements OnInit {
         error: (err: unknown) => {
           clearTimeout(safetyTimer);
           this.isSubmitting.set(false);
-          // The recipes service transforms HttpErrorResponse into a plain
-          // string message; for 409 it includes the backend's exact text
-          // (e.g. "Ya existe una receta para este producto en la tienda").
-          // Fall back to a clear generic only if no message arrived.
+          // Las mutaciones lanzan RecipeMutationError (código + mensaje UX +
+          // details). El 409 `RECIPE_DUP_PRODUCT` con inactiva NO es un error
+          // muerto: ofrece "Reactivar existente" (ver banner del template).
+          const mutation = err as Partial<RecipeMutationError> | null;
+          const code =
+            typeof mutation?.code === 'string' ? mutation.code : null;
+          const mutationMessage =
+            typeof mutation?.message === 'string' && mutation.message
+              ? mutation.message
+              : null;
+          if (code === 'RECIPE_DUP_PRODUCT') {
+            const details = (mutation?.details ?? null) as {
+              existing_recipe_id?: unknown;
+              is_active?: unknown;
+            } | null;
+            const existingId =
+              typeof details?.existing_recipe_id === 'number'
+                ? details.existing_recipe_id
+                : null;
+            if (details?.is_active === false && existingId != null) {
+              this.conflictingRecipeId.set(existingId);
+              const msg =
+                mutationMessage ??
+                'Ya existe una receta inactiva para este plato.';
+              this.submitError.set(
+                `${msg} Puedes reactivarla en vez de crear otra.`,
+              );
+              this.toastService.warning(
+                'Ya existe una receta inactiva para este plato',
+                'Receta duplicada',
+                6000,
+              );
+              return;
+            }
+          }
+          // Sin conflicto reactivable: banner en línea + toast con el mensaje
+          // UX (o genérico claro si no llegó ninguno).
           const apiMessage =
-            typeof err === 'string'
-              ? err
-              : (err as { error?: { message?: string } })?.error?.message;
+            mutationMessage ??
+            (typeof err === 'string' ? err : null) ??
+            (err as { error?: { message?: string } })?.error?.message;
           const finalMessage =
             apiMessage ??
             (this.isEditMode()

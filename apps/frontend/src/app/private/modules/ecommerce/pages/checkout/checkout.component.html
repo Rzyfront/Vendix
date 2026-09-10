@@ -311,9 +311,10 @@
               </div>
             }
 
-            <!-- Opciones de envío del domicilio: se eligen AQUÍ (paso 1), no
-                 en el paso de pago (C.4). La recotización de fondo las mantiene
-                 vigentes mientras la dirección no cambie. -->
+            <!-- La cotización vive en el paso 1 (cobertura + auto-selección
+                 con tarifa única); la elección explícita vive en el paso Pago
+                 junto al total. La recotización de fondo la mantiene vigente
+                 mientras la dirección no cambie. -->
             @if (loading_shipping()) {
               <div class="shipping-coverage-empty">
                 <app-icon name="loader-2" [size]="18" [spin]="true"></app-icon>
@@ -322,49 +323,10 @@
                 </p>
               </div>
             } @else if (shippableOptions().length > 0) {
-              <h2 class="delivery-subhead">Elige el envío</h2>
-              <div class="payment-list">
-                @for (option of shipping_options(); track option.id) {
-                  @if (option.method_type !== 'pickup') {
-                  <div
-                    class="payment-card"
-                    [class.selected]="selected_shipping_option_id === option.id"
-                    (click)="selectShippingMethod(option, option.cost)"
-                    (keydown.enter)="
-                      selectShippingMethod(option, option.cost)
-                    "
-                    (keydown.space)="
-                      $event.preventDefault();
-                      selectShippingMethod(option, option.cost)
-                    "
-                    tabindex="0"
-                    role="radio"
-                    [attr.aria-checked]="
-                      selected_shipping_option_id === option.id
-                    "
-                    [attr.aria-label]="option.method_name"
-                  >
-                    <div class="payment-radio">
-                      <span
-                        class="radio"
-                        [class.checked]="
-                          selected_shipping_option_id === option.id
-                        "
-                      ></span>
-                    </div>
-                    <div class="payment-info" style="flex: 1">
-                      <span class="payment-name">{{ option.method_name }}</span>
-                      <span class="payment-type">{{ option.description }}</span>
-                    </div>
-                    <div class="payment-price" style="font-weight: bold">
-                      {{
-                        option.cost === 0 ? "Gratis" : (option.cost | currency)
-                      }}
-                    </div>
-                  </div>
-                  }
-                }
-              </div>
+              <p class="delivery-subhead">
+                Opciones de envío disponibles — elige la tuya en el paso Pago
+                junto al total.
+              </p>
               @if (isPickupOnlyCoverage()) {
                 <div class="shipping-coverage-fallback">
                   <app-icon
@@ -634,9 +596,9 @@
         <!-- Payment Step -->
         @if (step() === paymentStep) {
           <div class="checkout-section">
-            <!-- C.4: esta sección es SOLO método de pago. La entrega se eligió
-                 en el paso 1 (modo + tarifa); aquí solo se resume con opción
-                 de volver a cambiarla. -->
+            <!-- La tarifa se elige AQUÍ junto al total; la cobertura se
+                 detectó en el paso 1. Con tarifa única ya viene elegida;
+                 con varias el comprador elige y el total se recalcula. -->
             @if (!cartHasOnlyServices) {
               <div class="delivery-summary">
                 @if (selected_delivery() === 'pickup') {
@@ -654,11 +616,15 @@
                   <div class="delivery-summary__body">
                     <p class="delivery-summary__title">Envío a domicilio</p>
                     <p class="delivery-summary__hint">
-                      {{ selectedShippingOptionName() }}
-                      @if (shippingCost() > 0) {
-                        — {{ shippingCost() | currency }}
+                      @if (selected_shipping_option_id == null) {
+                        Elige tu tarifa de envío abajo
                       } @else {
-                        — Gratis
+                        {{ selectedShippingOptionName() }}
+                        @if (shippingCost() > 0) {
+                          — {{ shippingCost() | currency }}
+                        } @else {
+                          — Gratis
+                        }
                       }
                     </p>
                   </div>
@@ -668,6 +634,57 @@
                   Cambiar entrega
                 </app-button>
               </div>
+              @if (
+                selected_delivery() === 'home' && shippableOptions().length > 1
+              ) {
+                <h2 class="delivery-subhead">Elige el envío</h2>
+                <div class="payment-list">
+                  @for (option of shippableOptions(); track option.id) {
+                    <div
+                      class="payment-card"
+                      [class.selected]="
+                        selected_shipping_option_id === option.id
+                      "
+                      (click)="selectShippingMethod(option, option.cost)"
+                      (keydown.enter)="
+                        selectShippingMethod(option, option.cost)
+                      "
+                      (keydown.space)="
+                        $event.preventDefault();
+                        selectShippingMethod(option, option.cost)
+                      "
+                      tabindex="0"
+                      role="radio"
+                      [attr.aria-checked]="
+                        selected_shipping_option_id === option.id
+                      "
+                      [attr.aria-label]="option.method_name"
+                    >
+                      <div class="payment-radio">
+                        <span
+                          class="radio"
+                          [class.checked]="
+                            selected_shipping_option_id === option.id
+                          "
+                        ></span>
+                      </div>
+                      <div class="payment-info" style="flex: 1">
+                        <span class="payment-name">{{
+                          option.method_name
+                        }}</span>
+                        <span class="payment-type">{{
+                          option.description
+                        }}</span>
+                      </div>
+                      <div class="payment-price" style="font-weight: bold">
+                        {{
+                          option.cost === 0 ? "Gratis" : (option.cost | currency)
+                        }}
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
             }
 
             @if (etaLabel()) {
@@ -1060,7 +1077,11 @@
                   !canProceedFromAddress()) ||
                 (step() === paymentStep &&
                   !cartHasOnlyServices &&
-                  shipping_options().length === 0)
+                  shipping_options().length === 0) ||
+                (step() === paymentStep &&
+                  !cartHasOnlyServices &&
+                  selected_delivery() === 'home' &&
+                  selected_shipping_option_id == null)
               "
             >
               Continuar

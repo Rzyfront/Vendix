@@ -75,14 +75,14 @@
                   <p class="text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)] mb-1">
                     Receta
                   </p>
-                  @switch (recipeStateFor(item.product_id).status) {
+                  @switch (recipeStateFor(item).status) {
                     @case ('loading') {
                       <p class="text-[11px] text-[var(--color-text-secondary)] flex items-center gap-1">
                         <app-icon name="loader" [size]="11" class="animate-spin" /> Cargando receta…
                       </p>
                     }
                     @case ('ok') {
-                      @let recipe = recipeStateFor(item.product_id).recipe;
+                      @let recipe = recipeStateFor(item).recipe;
                       @if (recipe?.items?.length) {
                         <ul class="text-[11px] space-y-0.5">
                           @for (ri of recipe?.items; track ri.id) {
@@ -106,14 +106,26 @@
                         <p class="text-[11px] italic text-[var(--color-text-secondary)]">
                           Sin receta activa.
                         </p>
-                        <app-button
-                          variant="outline"
-                          size="xsm"
-                          (clicked)="onCreateRecipe(item)"
-                        >
-                          <app-icon slot="icon" name="plus" [size]="12" />
-                          Crear receta
-                        </app-button>
+                        <div class="flex items-center gap-2">
+                          @if (inactiveRecipeIdFor(item) != null) {
+                            <app-button
+                              variant="outline"
+                              size="xsm"
+                              (clicked)="onViewRecipe(item)"
+                            >
+                              <app-icon slot="icon" name="eye" [size]="12" />
+                              Ver receta
+                            </app-button>
+                          }
+                          <app-button
+                            variant="outline"
+                            size="xsm"
+                            (clicked)="onCreateRecipe(item)"
+                          >
+                            <app-icon slot="icon" name="plus" [size]="12" />
+                            Crear receta
+                          </app-button>
+                        </div>
                       </div>
                     }
                     @case ('error') {
@@ -132,7 +144,7 @@
                   <p class="kds-detail-nota-label text-[10px] uppercase tracking-wide text-amber-700 mb-1">
                     Nota
                   </p>
-                  @let prepNotes = recipeStateFor(item.product_id).recipe?.preparation_notes;
+                  @let prepNotes = recipeStateFor(item).recipe?.preparation_notes;
                   @if (item.notes) {
                     <p class="kds-detail-nota-text text-[15px] sm:text-base font-semibold leading-snug text-amber-900 break-words">
                       “{{ item.notes }}”

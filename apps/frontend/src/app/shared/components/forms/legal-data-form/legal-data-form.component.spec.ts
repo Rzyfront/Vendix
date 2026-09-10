@@ -223,4 +223,50 @@ describe('LegalDataFormComponent — DIAN strict resolver contract', () => {
       expect(component.form.controls.tax_responsibilities.valid).toBe(true);
     });
   });
+
+  describe('C.1 — Dos niveles de responsabilidades (ADR-02)', () => {
+    it('frequentResponsibilityEntries contiene exactamente las 8 responsabilidades frecuentes', () => {
+      fixture.detectChanges();
+      const frequentCodes = component
+        .frequentResponsibilityEntries()
+        .map((e) => e.code);
+      expect(frequentCodes).toEqual([
+        'O-05',
+        'O-47',
+        'O-48',
+        'O-49',
+        'O-13',
+        'O-15',
+        'O-23',
+        'O-52',
+      ]);
+    });
+
+    it('permite agregar y remover responsabilidades secundarias vía selector y chips', () => {
+      fixture.detectChanges();
+      // Agregar responsabilidad secundaria '14' (informante de exógena)
+      component.onSecondarySelect('14');
+      expect(component.getValue().tax_responsibilities).toContain('O-14');
+      expect(component.selectedSecondaryCodes()).toContain('O-14');
+
+      // Agregar otra secundaria '55'
+      component.onSecondarySelect('O-55');
+      expect(component.getValue().tax_responsibilities).toContain('O-55');
+      expect(component.selectedSecondaryCodes()).toContain('O-55');
+
+      // Remover 'O-14'
+      component.removeSecondaryResponsibility('O-14');
+      expect(component.getValue().tax_responsibilities).not.toContain('O-14');
+      expect(component.selectedSecondaryCodes()).not.toContain('O-14');
+      expect(component.getValue().tax_responsibilities).toContain('O-55');
+    });
+
+    it('normaliza códigos al alternar toggles directos (ej: "48" -> "O-48")', () => {
+      fixture.detectChanges();
+      component.onResponsibilityToggle('48', true);
+      expect(component.getValue().tax_responsibilities).toContain('O-48');
+      expect(component.isResponsibilityChecked('48')).toBe(true);
+      expect(component.isResponsibilityChecked('O-48')).toBe(true);
+    });
+  });
 });

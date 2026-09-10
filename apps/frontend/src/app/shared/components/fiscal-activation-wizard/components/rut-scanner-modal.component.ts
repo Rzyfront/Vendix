@@ -24,6 +24,10 @@ import {
   RutScanResult,
   RutScannerScope,
 } from '../interfaces/rut-scan-result.interface';
+import {
+  getFiscalResponsibilityLabel,
+  normalizeFiscalResponsibilityCode,
+} from '../../../constants/fiscal-responsibilities.constants';
 
 type RutScannerStep = 1 | 2 | 3;
 
@@ -330,7 +334,9 @@ const TAX_REGIME_LABELS: Record<string, string> = {
                   resp of result()!.tax_responsibilities;
                   track resp
                 ) {
-                  <app-badge variant="info" size="xsm">{{ resp }}</app-badge>
+                  <app-badge variant="info" size="xsm">{{
+                    getResponsibilityBadgeText(resp)
+                  }}</app-badge>
                 }
               </div>
             } @else {
@@ -935,6 +941,15 @@ export class RutScannerModalComponent {
     return fallback;
   }
 
+  /**
+   * Traduce el código de la casilla 53 a una etiqueta legible para el badge de revisión.
+   */
+  getResponsibilityBadgeText(code: string): string {
+    const label = getFiscalResponsibilityLabel(code);
+    if (!label || label === code) return code;
+    return `${code} - ${label}`;
+  }
+
   // ============================================================
   // Confirm
   // ============================================================
@@ -952,7 +967,19 @@ export class RutScannerModalComponent {
       return;
     }
 
-    this.confirmed.emit(data);
+    // Normaliza códigos de responsabilidades (ej: '48' -> 'O-48', '05' -> 'O-05')
+    // y tax_scheme antes de emitir al formulario padre (ADR-03).
+    const normalizedData: RutScanResult = {
+      ...data,
+      tax_responsibilities: (data.tax_responsibilities ?? []).map((r) =>
+        normalizeFiscalResponsibilityCode(r),
+      ),
+      tax_scheme: data.tax_scheme
+        ? normalizeFiscalResponsibilityCode(data.tax_scheme)
+        : '',
+    };
+
+    this.confirmed.emit(normalizedData);
     this.closeAndReset();
   }
 
