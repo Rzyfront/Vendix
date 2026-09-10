@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
@@ -40,6 +40,9 @@ export class EmbeddingService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly configService: ConfigService,
+    // forwardRef: AIEngineModule (global) imports EmbeddingModule AND provides
+    // AIEngineService. Plain injection would not resolve at boot.
+    @Inject(forwardRef(() => AIEngineService))
     private readonly aiEngine: AIEngineService,
   ) {
     this.initializeOpenAI();
