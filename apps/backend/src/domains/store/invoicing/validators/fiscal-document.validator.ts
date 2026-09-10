@@ -1880,7 +1880,9 @@ export class FiscalDocumentValidator {
         category: 'resolution',
         field: 'invoice_number',
         problem: `El documento no tiene número asignado. La DIAN numera por (NIT emisor, resolución, consecutivo) y sin consecutivo no hay documento que autorizar.`,
-        fix: `Vuelve a guardar el documento para que se le asigne el siguiente consecutivo de su resolución.`,
+        // A.1 CP-facturacion-fixes: los borradores automáticos nacen sin número y
+        // lo reciben al validar — "guardar de nuevo" ya no es la acción correcta.
+        fix: `Valida el documento para que se le asigne el siguiente consecutivo de su resolución.`,
         details: scope,
       });
       return findings;

@@ -2,6 +2,7 @@ import { SessionsService } from './sessions.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { MovementsService } from '../movements/movements.service';
 import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
+import { SettingsService } from '../../settings/settings.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors';
 
@@ -89,11 +90,16 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       is_super_admin: false,
     } as any);
 
+    const settingsServiceMock = {
+      getStoreCurrency: jest.fn().mockResolvedValue('COP'),
+    };
+
     service = new SessionsService(
       prismaMock as unknown as StorePrismaService,
       {} as unknown as MovementsService,
       event_emitter as any,
       {} as unknown as AIEngineService,
+      settingsServiceMock as unknown as SettingsService,
     );
   });
 
@@ -303,6 +309,78 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       await expect(service.getCashSummary(SESSION_ID)).rejects.toThrow(
         'Sesión de caja no encontrada',
       );
+    });
+  });
+
+  /**
+   * QUI-784 — el "Resumen IA del Cierre" mostraba "USD" hardcodeado para todas
+   * las tiendas porque la plantilla del AI app y `formatGrouped` inyectaban `$`
+   * literal. Antes del fix, la única moneda que viajaba al prompt era el símbolo
+   * `$`, así que el AI interpretaba cualquier tienda como USD. Ahora la moneda
+   * real de la tienda viaja al reporte y al prompt; sin esos cambios el AI sigue
+   * etiquetando todo como USD por reflejo de entrenamiento.
+   */
+  describe('QUI-784 — moneda real viaja al resumen IA del cierre', () => {
+    /**
+     * `findOne` hace `findFirst` con `include.movements`, así que el mock tiene
+     * que devolver una sesión con `movements: []` para que `groupMovementsByType`
+     * no falle. El reporte no lee `cash_register_movements.findMany` (eso lo
+     * usa `getCashSummary`).
+     */
+    const stubSessionWithMovements = () => {
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue({
+        ...OPEN_SESSION,
+        movements: [],
+      });
+    };
+
+    it('getSessionReport expone currency.code de la tienda', async () => {
+      stubSessionWithMovements();
+
+      const report = await service.getSessionReport(SESSION_ID);
+
+      expect(report.currency).toEqual({ code: 'COP', symbol: '$' });
+    });
+
+    it('USD para tienda en USD: el código cambia, el símbolo también es $', async () => {
+      (service as any).settingsService.getStoreCurrency.mockResolvedValue('USD');
+      stubSessionWithMovements();
+
+      const report = await service.getSessionReport(SESSION_ID);
+
+      expect(report.currency).toEqual({ code: 'USD', symbol: '$' });
+    });
+
+    it('EUR para tienda europea: símbolo €, código EUR', async () => {
+      (service as any).settingsService.getStoreCurrency.mockResolvedValue('EUR');
+      stubSessionWithMovements();
+
+      const report = await service.getSessionReport(SESSION_ID);
+
+      expect(report.currency).toEqual({ code: 'EUR', symbol: '€' });
+    });
+
+    it('incluye currency_code y currency_symbol explícitos para el AI app', async () => {
+      stubSessionWithMovements();
+
+      const report = await service.getSessionReport(SESSION_ID);
+
+      expect(report.currency.code).toBe('COP');
+      expect(report.currency.symbol).toBe('$');
+      // El reporte ya NO depende de inferencia desde `session.register` ni de
+      // valores hardcoded; el AI app debe leer esto explícitamente.
+    });
+
+    it('getStoreCurrency devuelve "USD" cuando SettingsService no resuelve moneda', async () => {
+      // SettingsService.getStoreCurrency ya tiene try/catch interno que cae a
+      // 'USD'. Este test documenta que la integración con getSessionReport
+      // respeta ese fallback sin necesidad de catch adicional acá.
+      (service as any).settingsService.getStoreCurrency.mockResolvedValue('USD');
+      stubSessionWithMovements();
+
+      const report = await service.getSessionReport(SESSION_ID);
+
+      expect(report.currency).toEqual({ code: 'USD', symbol: '$' });
     });
   });
 });

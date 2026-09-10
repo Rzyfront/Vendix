@@ -712,18 +712,19 @@ RULES:
       system_prompt: `Eres un asistente financiero de punto de venta. Generas resumenes claros y utiles de cierre de caja.
 Responde SIEMPRE en espanol. Tono profesional pero natural y cercano.
 No inventes datos. Solo analiza lo proporcionado.
-Usa Markdown ligero: negritas, listas y parrafos cortos. Entre 120 y 200 palabras.`,
-      prompt_template: `Analiza el siguiente cierre de caja y genera un resumen:
+Usa Markdown ligero: negritas, listas y parrafos cortos. Entre 120 y 200 palabras.
+Moneda: para todo monto usa EXCLUSIVAMENTE el simbolo {{currency_symbol}} y la sigla ISO {{currency_code}} que vienen en el prompt. Si el codigo es COP, escribe COP; si es USD, escribe USD. NUNCA asumas "USD" por defecto ni inventes otra sigla.`,
+      prompt_template: `Analiza el siguiente cierre de caja y genera un resumen. Moneda de la tienda: {{currency_code}} (simbolo {{currency_symbol}}).
 
 Caja: {{register_name}} | Cajero: {{closed_by}}
 Turno: {{opened_at}} → {{closed_at}}
-Apertura: \${{opening_amount}} | Esperado: \${{expected_closing_amount}} | Conteo: \${{actual_closing_amount}} | Diferencia: \${{difference}}
+Apertura: {{currency_symbol}}{{opening_amount}} | Esperado: {{currency_symbol}}{{expected_closing_amount}} | Conteo: {{currency_symbol}}{{actual_closing_amount}} | Diferencia: {{currency_symbol}}{{difference}}
 Notas: {{closing_notes}}
 
-Metodos de pago:
+Metodos de pago (ya formateados con simbolo y codigo):
 {{summary_by_method}}
 
-Tipos de movimiento:
+Tipos de movimiento (ya formateados con simbolo y codigo):
 {{summary_by_type}}
 
 Total movimientos: {{total_movements}}
@@ -734,7 +735,8 @@ Genera el resumen en estos bloques:
 3. **Analisis** — 1-2 lineas con una observacion util: patron de ventas, concentracion de metodo de pago, o dato relevante
 4. **Alerta** (solo si aplica) — sobrante, faltante o anomalia detectada
 
-Se directo pero natural. No repitas datos en bruto, interpreta y analiza.`,
+Se directo pero natural. No repitas datos en bruto, interpreta y analiza.
+Todos los montos del resumen DEBEN usar {{currency_symbol}} y/o la sigla {{currency_code}}. Nunca "USD" salvo que la moneda sea USD.`,
     },
     {
       key: 'consultation_prediagnosis',

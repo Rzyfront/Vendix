@@ -54,6 +54,7 @@ import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module'
 import { InventorySerialNumbersModule } from '../inventory/serial-numbers/inventory-serial-numbers.module';
 import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.module';
 import { TablesModule } from '../tables/tables.module';
+import { InvoicingModule } from '../invoicing/invoicing.module';
 
 @Module({
   imports: [
@@ -82,6 +83,9 @@ import { TablesModule } from '../tables/tables.module';
     // Restaurant Suite — table close-out / Wompi reconciliation needs
     // TableSessionsService (session_closed emit + deferred-close reconcile).
     TablesModule,
+    // A.3 CP-facturacion-fixes: InvoicingService + InvoiceFlowService for the
+    // webhook auto-send. No cycle: the invoicing graph never imports payments.
+    InvoicingModule,
   ],
   controllers: [
     // CP-POLLO-ARABE-727 (verificación E2E) — `BankAccountsController` va ANTES

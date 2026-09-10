@@ -173,6 +173,19 @@ export class PlatformDianEventsService {
       );
     }
 
+    // 4b. A.1 CP-facturacion-fixes: los borradores pueden nacer sin número. Una factura
+    // aceptada siempre lo tiene (validate() lo asigna), pero el tipo ya no lo garantiza:
+    // fallo explícito en vez de propagar null al SOAP. Se captura en local porque el
+    // narrowing de propiedades no cruza el closure de `RequestContextService.run`.
+    if (!invoice.invoice_number) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_EVENT_001,
+        `La factura ${invoice_id} está aceptada pero no tiene consecutivo asignado; no se puede referenciar el evento ${event_code}.`,
+        { invoice_id, event_code },
+      );
+    }
+    const invoice_number = invoice.invoice_number;
+
     // 5. Validar unicidad: un evento ya aceptado para el mismo código
     //    no se vuelve a registrar (mismo invariante que el riel tienda).
     const already = await this.prisma
@@ -257,7 +270,7 @@ export class PlatformDianEventsService {
             generated_by: CUSTOMER_GENERATED_EVENTS.includes(event_code)
               ? 'customer'
               : 'issuer',
-            referenced_document_number: invoice.invoice_number,
+            referenced_document_number: invoice_number,
             referenced_document_key: invoice.cufe as string,
             referenced_document_date: referenced_date,
             customer: this.buildCustomerParty(invoice),

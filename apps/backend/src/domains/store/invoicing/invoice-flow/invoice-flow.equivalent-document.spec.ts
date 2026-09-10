@@ -217,6 +217,7 @@ describe('InvoiceFlowService POS equivalent document', () => {
         acquirerIdentity as any,
         fiscalDocument as any,
         technicalKeyVault as any,
+        {} as any,
       ),
       prisma,
       provider,

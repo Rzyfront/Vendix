@@ -46,6 +46,7 @@ import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper'
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
+import { CheckoutIdempotencyService } from './checkout-idempotency.service';
 
 @Injectable()
 export class CheckoutService {
@@ -149,6 +150,8 @@ export class CheckoutService {
     // Art. 616-1 ET / Res. 000165/2023 — frontera 5 UVT documento equivalente
     // vs factura electrónica nominativa (compartida con el POS).
     private readonly fiscalInvoiceThreshold: FiscalInvoiceThresholdService,
+    // A.4 CP-facturacion-fixes: Idempotency-Key store (same module, no cycle).
+    private readonly checkoutIdempotency: CheckoutIdempotencyService,
   ) {}
 
   /**
@@ -995,7 +998,32 @@ export class CheckoutService {
     );
   }
 
-  async checkout(dto: CheckoutDto, file?: Express.Multer.File) {
+  /**
+   * A.4 CP-facturacion-fixes — optional `Idempotency-Key` (24h window). A replay
+   * returns the first response; a concurrent second submit gets 409
+   * `ECOM_CHECKOUT_006`; a failure releases the key so the client can retry.
+   * The legacy `POST /whatsapp` endpoint is frozen by design (see its ADR) and
+   * stays out; the storefront whatsapp flow already goes through here.
+   */
+  async checkout(
+    dto: CheckoutDto,
+    file?: Express.Multer.File,
+    idempotencyKey?: string,
+  ) {
+    if (!idempotencyKey) return this.runCheckout(dto, file);
+    const claimed = await this.checkoutIdempotency.begin(idempotencyKey);
+    if (claimed.replay) return claimed.response;
+    try {
+      const result = await this.runCheckout(dto, file);
+      await this.checkoutIdempotency.complete(idempotencyKey, result);
+      return result;
+    } catch (error) {
+      await this.checkoutIdempotency.discard(idempotencyKey);
+      throw error;
+    }
+  }
+
+  private async runCheckout(dto: CheckoutDto, file?: Express.Multer.File) {
     await this.assertGuestCheckoutAllowed();
 
     const user_id = RequestContextService.getUserId();

@@ -4,6 +4,7 @@ import {
   NotFoundException,
   MessageEvent,
   Logger,
+  Inject,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -15,6 +16,17 @@ import { OpenSessionDto } from '../dto/open-session.dto';
 import { CloseSessionDto } from '../dto/close-session.dto';
 import { QuerySessionDto } from '../dto/query-session.dto';
 import { MovementsService } from '../movements/movements.service';
+import type { SettingsService } from '../../settings/settings.service';
+
+/**
+ * QUI-784 — token de inyección para el `SettingsService` dentro del dominio de
+ * cajas. `sessions.service` ↔ `settings.service` tienen dependencia mutua real
+ * (caja usa la moneda de la tienda; settings consulta sesiones abiertas para
+ * bloquear el apagado del módulo). Si ambas clases se importan por valor, SWC
+ * emite `design:paramtypes` con un require circular que revienta en TDZ al
+ * arrancar el backend. El token rompe el ciclo a nivel de archivo.
+ */
+export const SETTINGS_SERVICE = Symbol('SETTINGS_SERVICE');
 
 /**
  * Resumen de sesiones de caja abiertas en una tienda. `registers` está
@@ -60,6 +72,7 @@ export class SessionsService {
     private readonly movements_service: MovementsService,
     private readonly event_emitter: EventEmitter2,
     private readonly aiEngine: AIEngineService,
+    @Inject(SETTINGS_SERVICE) private readonly settingsService: SettingsService,
   ) {}
 
   async getActiveSession(user_id?: number) {
@@ -441,6 +454,13 @@ export class SessionsService {
       session.movements,
     );
 
+    // QUI-784 — el resumen IA del cierre mostraba "USD" hardcodeado porque la
+    // plantilla del AI app y formatGrouped inyectaban `$` literal. Cargamos la
+    // moneda real de la tienda para que el prompt refleje el símbolo correcto
+    // y el AI deje de etiquetar todo como USD por defecto.
+    const currency_code = await this.settingsService.getStoreCurrency();
+    const currency_symbol = this.currencySymbolFor(currency_code);
+
     return {
       session: {
         id: session.id,
@@ -461,7 +481,21 @@ export class SessionsService {
         by_payment_method: movements_by_method,
         total_movements: session.movements.length,
       },
+      currency: { code: currency_code, symbol: currency_symbol },
     };
+  }
+
+  /**
+   * Mapa mínimo de código ISO → símbolo. Mantenido chico a propósito: si la
+   * tienda usa una moneda que no está acá, caemos a `$` y el AI lo aclara en el
+   * código ISO. El AI app ya no debe inventar la etiqueta.
+   */
+  private currencySymbolFor(code: string): string {
+    const upper = code.toUpperCase();
+    if (upper === 'EUR' || upper === '€') return '€';
+    if (upper === 'GBP' || upper === '£') return '£';
+    if (upper === 'MXN' || upper === 'COP' || upper === 'ARS' || upper === 'CLP') return '$';
+    return '$';
   }
 
   /**
@@ -592,6 +626,8 @@ export class SessionsService {
   private buildAISummaryVariables(report: any): Record<string, string> {
     const s = report.session;
     const summary = report.summary;
+    const currency_code = report.currency?.code || 'USD';
+    const currency_symbol = report.currency?.symbol || '$';
 
     const formatUser = (user: any) =>
       user ? `${user.first_name} ${user.last_name}` : 'N/A';
@@ -602,13 +638,16 @@ export class SessionsService {
     const formatDecimal = (value: any) =>
       value != null ? String(Number(value)) : '0';
 
+    // QUI-784 — antes hardcodeaba `$${val.total}` y forzaba al AI a etiquetar
+    // todo como USD. Ahora usa el símbolo real y acompaña del código ISO para
+    // que el AI no se confunda entre COP/USD (ambos usan `$`).
     const formatGrouped = (
       grouped: Record<string, { count: number; total: number }>,
     ) =>
       Object.entries(grouped)
         .map(
           ([key, val]) =>
-            `- ${key}: ${val.count} movimiento(s), total $${val.total}`,
+            `- ${key}: ${val.count} movimiento(s), total ${currency_symbol}${val.total} ${currency_code}`,
         )
         .join('\n') || 'Sin datos';
 
@@ -626,6 +665,10 @@ export class SessionsService {
       summary_by_method: formatGrouped(summary.by_payment_method),
       summary_by_type: formatGrouped(summary.by_type),
       total_movements: String(summary.total_movements),
+      // QUI-784 — variables explícitas de moneda. El AI app las usa en la
+      // plantilla del prompt para no inventar la etiqueta.
+      currency_code,
+      currency_symbol,
     };
   }
 

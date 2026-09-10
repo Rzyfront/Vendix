@@ -17,6 +17,8 @@ import {
   BulkEditResultDto,
   BulkEditResultItemDto,
   BulkEditableChangesDto,
+  BulkRelationalTaxActionDto,
+  RelationalActionMode,
   UpdateProductDto,
 } from './dto';
 // Los enums SIEMPRE desde el módulo hoja: importarlos desde `./dto` (barrel con
@@ -212,6 +214,48 @@ export class ProductsBulkEditService {
       products,
     );
 
+    const taxAction = dto.changes.tax_category_action;
+    const taxCategoriesMap = new Map<
+      number,
+      { id: number; name: string; tax_type: string | null }
+    >();
+    const productTaxesMap = new Map<number, { id: number; name: string }[]>();
+
+    if (taxAction) {
+      const allActionTaxes = await this.prisma.tax_categories.findMany({
+        where: { id: { in: taxAction.ids } },
+        select: { id: true, name: true, tax_type: true },
+      });
+      for (const cat of allActionTaxes) {
+        taxCategoriesMap.set(cat.id, cat);
+      }
+
+      if (allActionTaxes.length !== taxAction.ids.length) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VALIDATE_001,
+          'Una o más categorías de impuestos seleccionadas no existen o no pertenecen a la tienda',
+        );
+      }
+
+      const existingAssignments =
+        await this.prisma.product_tax_assignments.findMany({
+          where: { product_id: { in: editableIds } },
+          select: {
+            product_id: true,
+            tax_category_id: true,
+            tax_categories: { select: { id: true, name: true } },
+          },
+        });
+
+      for (const a of existingAssignments) {
+        const list = productTaxesMap.get(a.product_id) || [];
+        if (a.tax_categories) {
+          list.push({ id: a.tax_category_id, name: a.tax_categories.name });
+        }
+        productTaxesMap.set(a.product_id, list);
+      }
+    }
+
     // --- Clasificación ----------------------------------------------------
     const items: BulkEditPreviewItemDto[] = ids.map((id) => {
       const product = productById.get(id);
@@ -240,6 +284,52 @@ export class ProductsBulkEditService {
         ingredientCapableStores,
       );
       const changes = this.buildDiff(product, effective.payload);
+
+      if (taxAction) {
+        const currentTaxes = productTaxesMap.get(product.id) || [];
+        const currentIds = currentTaxes.map((t) => t.id);
+        let nextTaxes: { id: number; name: string }[] = [];
+
+        if (taxAction.mode === RelationalActionMode.REPLACE) {
+          nextTaxes = taxAction.ids
+            .map((tid) => taxCategoriesMap.get(tid))
+            .filter(
+              (
+                t,
+              ): t is { id: number; name: string; tax_type: string | null } =>
+                !!t,
+            )
+            .map((t) => ({ id: t.id, name: t.name }));
+        } else if (taxAction.mode === RelationalActionMode.ADD) {
+          const toAdd = taxAction.ids
+            .filter((tid) => !currentIds.includes(tid))
+            .map((tid) => taxCategoriesMap.get(tid))
+            .filter(
+              (
+                t,
+              ): t is { id: number; name: string; tax_type: string | null } =>
+                !!t,
+            )
+            .map((t) => ({ id: t.id, name: t.name }));
+          nextTaxes = [...currentTaxes, ...toAdd];
+        } else if (taxAction.mode === RelationalActionMode.REMOVE) {
+          nextTaxes = currentTaxes.filter((t) => !taxAction.ids.includes(t.id));
+        }
+
+        const nextIds = nextTaxes.map((t) => t.id);
+        const hasTaxChanged =
+          currentIds.length !== nextIds.length ||
+          currentIds.some((cid) => !nextIds.includes(cid));
+
+        if (hasTaxChanged) {
+          changes.push({
+            field: 'tax_categories',
+            current: currentTaxes.map((t) => t.name),
+            next: nextTaxes.map((t) => t.name),
+          });
+        }
+      }
+
       const base = {
         id: product.id,
         name: product.name,
@@ -264,6 +354,22 @@ export class ProductsBulkEditService {
         ingredientCapableStores,
         activeRecipeProductIds,
       );
+
+      if (taxAction) {
+        const currentTaxes = productTaxesMap.get(product.id) || [];
+        const remainingCount =
+          taxAction.mode === RelationalActionMode.REMOVE
+            ? currentTaxes.filter((t) => !taxAction.ids.includes(t.id)).length
+            : taxAction.mode === RelationalActionMode.REPLACE
+              ? taxAction.ids.length
+              : currentTaxes.length + taxAction.ids.length;
+        if (remainingCount === 0 && currentTaxes.length > 0) {
+          warnings.push(
+            'El producto quedará sin categorías de impuestos configuradas.',
+          );
+        }
+      }
+
       if (warnings.length > 0) {
         return { ...base, status: 'warning', message: warnings.join(' ') };
       }
@@ -299,15 +405,48 @@ export class ProductsBulkEditService {
       knownNames.set(row.id, row.name);
     }
 
+    const taxAction = dto.changes.tax_category_action;
+    const productTaxesMap = new Map<number, number[]>();
+    if (taxAction) {
+      const existingAssignments =
+        await this.prisma.product_tax_assignments.findMany({
+          where: { product_id: { in: ids } },
+          select: { product_id: true, tax_category_id: true },
+        });
+      for (const a of existingAssignments) {
+        const list = productTaxesMap.get(a.product_id) || [];
+        list.push(a.tax_category_id);
+        productTaxesMap.set(a.product_id, list);
+      }
+    }
+
+    const { tax_category_action, ...scalarChanges } = dto.changes;
     const results: BulkEditResultItemDto[] = [];
 
     // En serie y con try/catch por producto: el fallo de una fila NO aborta las
     // siguientes. Delegación íntegra en `update()` (ver docblock de la clase).
     for (const id of ids) {
       try {
+        const productPayload: UpdateProductDto = {
+          ...(scalarChanges as UpdateProductDto),
+        };
+
+        if (taxAction) {
+          const currentIds = productTaxesMap.get(id) || [];
+          let targetIds: number[] = [];
+          if (taxAction.mode === RelationalActionMode.REPLACE) {
+            targetIds = [...taxAction.ids];
+          } else if (taxAction.mode === RelationalActionMode.ADD) {
+            targetIds = Array.from(new Set([...currentIds, ...taxAction.ids]));
+          } else if (taxAction.mode === RelationalActionMode.REMOVE) {
+            targetIds = currentIds.filter((cid) => !taxAction.ids.includes(cid));
+          }
+          productPayload.tax_category_ids = targetIds;
+        }
+
         const updated = await this.productsService.update(
           id,
-          dto.changes as UpdateProductDto,
+          productPayload,
           { lean: true },
         );
         results.push({

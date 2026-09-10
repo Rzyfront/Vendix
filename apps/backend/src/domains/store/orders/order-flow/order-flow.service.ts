@@ -619,6 +619,41 @@ export class OrderFlowService {
    * y el `cause_code` lo mapea a la causa real para soporte y la UI.
    */
   async payOrder(orderId: number, dto: PayOrderDto) {
+    // A.2 CP-facturacion-fixes — charge-time shipping gate (ADR-02). Creation stays
+    // open (whatsapp/assisted orders choose the method later), but a physical order
+    // that needs dispatch cannot be CHARGED without a shipping method: assign it
+    // first, then charge. Read-only and placed BEFORE the state claim, so rejection
+    // touches nothing; a concurrent assignment races toward a retryable error, never
+    // toward a shippyless charge. `direct_delivery` (POS in-person) and `pickup`
+    // are exempt; services-only carts have no physical items. NOTE: checkout's extra
+    // `requires_shipping === false` carve-out is skipped here — it is not a Prisma
+    // column (hydrated cart object only), and `product_type !== 'service'` covers it.
+    {
+      const probe = await this.prisma.orders.findFirst({
+        where: { id: orderId },
+        select: {
+          delivery_type: true,
+          shipping_method_id: true,
+          order_items: {
+            select: {
+              products: { select: { product_type: true } },
+            },
+          },
+        },
+      });
+      const needsDispatch =
+        probe?.delivery_type !== 'pickup' &&
+        probe?.delivery_type !== 'direct_delivery' &&
+        (probe?.order_items ?? []).some((item: any) => {
+          const product = item.products;
+          if (!product) return true;
+          return product.product_type !== 'service';
+        });
+      if (needsDispatch && probe?.shipping_method_id == null) {
+        throw new VendixHttpException(ErrorCodes.ORD_SHIP_CHARGE_001);
+      }
+    }
+
     // QUI-POS-E2E-R8-LIVE: FB-10 double-click race (v2 — atomic state claim).
     //
     // The state-claim inside `promoteDraftToCreated` correctly rejects

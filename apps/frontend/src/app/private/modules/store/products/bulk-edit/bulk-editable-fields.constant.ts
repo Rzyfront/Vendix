@@ -374,6 +374,16 @@ export const BULK_EDITABLE_FIELDS = [
     min: 0,
     dependsOn: 'is_on_sale',
   },
+  {
+    key: 'tax_category_action',
+    label: 'Impuestos',
+    description:
+      'Añade, quita o reemplaza impuestos en lote sobre los productos seleccionados.',
+    group: 'pricing',
+    control: 'tax-action',
+    productTypes: ALL_TYPES,
+    optionsRef: 'tax-categories',
+  },
 
   // ═══ price_tiers ══════════════════════════════════════════════════════════
   {

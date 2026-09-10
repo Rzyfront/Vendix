@@ -42,6 +42,7 @@ describe('D.9 — isAiuTaxable (calculador) vs isAiuComponentTaxable (flujo de e
     {} as any,
     {} as any,
     {} as any,
+    {} as any,
   );
 
   const callIsAiuTaxable = (component: string | null, basis: AiuTaxableBasis): boolean =>

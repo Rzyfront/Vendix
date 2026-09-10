@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { MulterModule } from '@nestjs/platform-express';
 import { CheckoutController } from './checkout.controller';
 import { CheckoutService } from './checkout.service';
+import { CheckoutIdempotencyService } from './checkout-idempotency.service';
 import { StoreAvailabilityGuard } from './guards/store-availability.guard';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { CartModule } from '../cart/cart.module';
@@ -61,7 +62,12 @@ import { StorefrontSharedModule } from '../shared/storefront-shared.module';
     MulterModule.register({ limits: { fileSize: 5 * 1024 * 1024 } }),
   ],
   controllers: [CheckoutController],
-  providers: [CheckoutService, PaymentEncryptionService, StoreAvailabilityGuard],
+  providers: [
+    CheckoutService,
+    CheckoutIdempotencyService,
+    PaymentEncryptionService,
+    StoreAvailabilityGuard,
+  ],
   exports: [CheckoutService],
 })
 export class CheckoutModule {}

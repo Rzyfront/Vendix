@@ -237,6 +237,9 @@ export class BulkConfirmModalComponent {
 
   /** Etiqueta humana de un campo del contrato, tomada del registro. */
   describeField(key: string): string {
+    if (key === 'tax_categories' || key === 'tax_category_action') {
+      return 'Impuestos';
+    }
     return (
       findBulkEditableField(key as BulkEditableFieldKey)?.label ?? key
     );
@@ -312,6 +315,9 @@ export class BulkConfirmModalComponent {
     }
     if (typeof value === 'boolean') {
       return value ? 'Sí' : 'No';
+    }
+    if (Array.isArray(value)) {
+      return value.length > 0 ? value.join(', ') : 'Ninguno';
     }
 
     const meta = findBulkEditableField(field as BulkEditableFieldKey);

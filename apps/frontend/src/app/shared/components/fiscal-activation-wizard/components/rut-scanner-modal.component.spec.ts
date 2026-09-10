@@ -41,16 +41,16 @@ describe('RutScannerModalComponent (Step C.2)', () => {
         '05 - Impuesto sobre la renta - Régimen ordinario',
       );
       expect(component.getResponsibilityBadgeText('14')).toBe(
-        '14 - Informante de exógena',
+        '14 - Informante de información exógena',
       );
       expect(component.getResponsibilityBadgeText('48')).toBe(
-        '48 - Responsable de IVA',
+        '48 - Responsable del impuesto sobre las ventas (IVA)',
       );
       expect(component.getResponsibilityBadgeText('52')).toBe(
         '52 - Facturador electrónico',
       );
       expect(component.getResponsibilityBadgeText('O-48')).toBe(
-        'O-48 - Responsable de IVA',
+        'O-48 - Responsable del impuesto sobre las ventas (IVA)',
       );
     });
   });
@@ -82,8 +82,8 @@ describe('RutScannerModalComponent (Step C.2)', () => {
       const element: HTMLElement = fixture.nativeElement;
       const text = element.textContent ?? '';
       expect(text).toContain('05 - Impuesto sobre la renta - Régimen ordinario');
-      expect(text).toContain('14 - Informante de exógena');
-      expect(text).toContain('48 - Responsable de IVA');
+      expect(text).toContain('14 - Informante de información exógena');
+      expect(text).toContain('48 - Responsable del impuesto sobre las ventas (IVA)');
       expect(text).toContain('52 - Facturador electrónico');
     });
   });
