@@ -13,7 +13,7 @@ import {
   DragDropModule,
   moveItemInArray,
 } from '@angular/cdk/drag-drop';
-import { map, startWith } from 'rxjs';
+import { map, startWith, firstValueFrom } from 'rxjs';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
@@ -1520,16 +1520,28 @@ export class EcommerceComponent {
 
   /**
    * Submit the form
+   *
+   * QUI-792 — antes este método abortaba TODO el guardado si el
+   * `settingsForm` principal estaba inválido (cualquier required field
+   * sin tocar), incluyendo el footer — que es un form independiente
+   * con su propio `valueChanges` y su propia validez. Resultado: el
+   * usuario llenaba FAQs en admin, daba "Guardar Cambios", y la FAQ
+   * NUNCA llegaba al backend porque la sección principal tenía un
+   * error que el admin ni siquiera había tocado.
+   *
+   * Ahora: el footer se guarda SIEMPRE como una operación
+   * independiente (PATCH parcial). Si la sección principal está
+   * inválida, se notifica pero no se aborta el footer. Si la sección
+   * principal está válida, se guardan ambas (footer primero para
+   * preservar el orden de toasts).
    */
   async onSubmit(): Promise<void> {
-    if (this.settingsForm.invalid) {
-      this.toastService.warning('Por favor verifica los datos del formulario');
-      return;
-    }
-
-    // Validate WhatsApp checkout before proceeding
+    // Validate WhatsApp checkout before proceeding (afecta a la sección
+    // principal; el footer es independiente).
     const whatsappValid = await this.validateWhatsappCheckout();
     if (!whatsappValid) return;
+
+    this.isSaving.set(true);
 
     // Resolver tokens del pitch ({tienda}/{web}) con los valores reales
     // antes de guardar: el texto guardado nunca lleva tokens resolvibles.
@@ -1543,7 +1555,21 @@ export class EcommerceComponent {
 
     this.syncInicioFromWelcomeSection();
 
-    this.isSaving.set(true);
+    // Footer primero: si el principal falla por validación backend,
+    // el footer ya quedó guardado y el admin no pierde su trabajo.
+    const footerSaved = await this.saveFooterOnly();
+
+    // Si la sección principal está inválida, NO seguimos con el guardado
+    // general (el toast del footer ya le avisa al admin qué se guardó).
+    if (this.settingsForm.invalid) {
+      this.isSaving.set(false);
+      if (!footerSaved) {
+        this.toastService.warning(
+          'Por favor verifica los datos del formulario',
+        );
+      }
+      return;
+    }
 
     // Preparar el objeto de configuración (strip confirm_whatsapp_number — frontend-only)
     const { confirm_whatsapp_number, ...checkoutPayload } =
@@ -1745,6 +1771,32 @@ export class EcommerceComponent {
   onFooterChange(footer: FooterSettings): void {
     this.footerSettings.set(footer);
     this.settingsForm.markAsDirty();
+  }
+
+  /**
+   * PATCH independiente del footer. El backend hace merge profundo
+   * (`{...existingEcommerce, ...processedDto}`) — enviar solo
+   * `{footer: ...}` deja el resto intacto y reemplaza/mergea el footer.
+   *
+   * Devuelve `true` si se envió OK, `false` si no había nada que
+   * guardar (footer vacío o sin signal) o si falló el backend.
+   */
+  private async saveFooterOnly(): Promise<boolean> {
+    const footer = this.footerSettings();
+    if (!footer) return false;
+
+    try {
+      await firstValueFrom(
+        this.ecommerceService.updateSettings({ footer } as EcommerceSettings),
+      );
+      this.toastService.success('Footer guardado');
+      return true;
+    } catch (err) {
+      this.toastService.error(
+        'No pudimos guardar los cambios del footer',
+      );
+      return false;
+    }
   }
 
   private hydrateWelcomeSection(config?: EcommerceSettings): void {
