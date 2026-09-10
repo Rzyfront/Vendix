@@ -139,8 +139,16 @@ export class EcommerceReviewsService {
       return { can_review: false, reason: 'reviews_disabled' };
     }
 
-    const context = RequestContextService.getContext()!;
-    const user_id = context.user_id!;
+    const context = RequestContextService.getContext();
+    const user_id = context?.user_id;
+
+    // QUI-794 — el endpoint se expone con @OptionalAuth() para que un visitante
+    // anónimo pueda ver "por qué no puede escribir" sin tener que iniciar
+    // sesión para averiguarlo. Antes, sin sesión, JwtAuthGuard respondía 401
+    // y la UI ocultaba el CTA sin explicación.
+    if (!user_id) {
+      return { can_review: false, reason: 'unauthenticated' };
+    }
 
     // Check if THIS CUSTOMER has a delivered/finished order with this
     // product. EcommercePrismaService scopes orders by store_id
