@@ -26,6 +26,6 @@ skills: [how-to-test, vendix-error-handling, vendix-permissions, buildcheck-dev]
 - **Acceptance checklist:**
   - [x] Unit frontend 13/13 SUCCESS (SSE created+status) → evidence/c1-karma-sse.log
   - [ ] E2E dos sesiones + cross-tienda + kill/reconnect: dev apagado, pendiente
-  - [ ] cp-lint exit 0 (corre al cerrar) y pr-code-review >=80% en el PR
+  - [x] cp-lint exit 0 + review PR #780 scope SSE 95/100 APPROVE (fiscal: del sibling)
   - [ ] Dos rondas de convergencia limpias con entry points variados
-- **Status:** in-progress · Rafael Eduardo Martinez Frontado · 2026-09-10 · unit verde; falta E2E con dev arriba
+- **Status:** in-progress · Rafael Eduardo Martinez Frontado · 2026-09-10 · review OK; falta E2E con dev arriba

@@ -8,3 +8,4 @@
 | 2026-09-10 | Rafael | B.2 | Prepend+dedup+filtros+toast+statsChanged en lista y padre; E2E pendiente | codigo en rama feature/orders-sales-sse-realtime |
 | 2026-09-10 | Rafael | TREE | Pop ajeno revertido (51 archivos print-formats/fiscal); stash@{0} intacto | git status limpio, solo 4 archivos propios |
 | 2026-09-10 | Rafael | C.1 | E2E bloqueado: backend reiniciando (sin /api/health 12:31), sin ng serve | docker logs vendix_backend + curl 000; spec backend en curso |
+| 2026-09-10 | Rafael | C.1 | PR #780 abierto y pusheado; review scope SSE 95/100 APPROVE posteado | gh pr create + pr review --comment; backend spec 32/40 |
