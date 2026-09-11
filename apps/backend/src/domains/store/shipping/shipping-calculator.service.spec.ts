@@ -380,4 +380,90 @@ describe('ShippingCalculatorService', () => {
       expect(optionsWithoutMatch[1].postal_code_match).toBe(false);
     });
   });
+
+  describe('free_shipping_threshold (ADR-04, F-008: threshold 0 = gratis explícito)', () => {
+    const riohachaZone = {
+      id: 10,
+      store_id: 1,
+      name: 'Riohacha Local',
+      countries: ['CO'],
+      regions: ['La Guajira'],
+      cities: ['Riohacha'],
+      zip_codes: [],
+      is_active: true,
+    };
+
+    const address = {
+      country_code: 'CO',
+      state_province: 'La Guajira',
+      city: 'Riohacha',
+    };
+
+    const rateWithThreshold = (threshold: any) => ({
+      id: 101,
+      shipping_zone_id: 10,
+      shipping_method_id: 5,
+      name: 'Envío a domicilio',
+      type: shipping_rate_type_enum.flat,
+      base_cost: 8000,
+      free_shipping_threshold: threshold,
+      is_active: true,
+      shipping_method: {
+        id: 5,
+        name: 'Envío a domicilio',
+        type: 'own_fleet',
+        is_active: true,
+        display_order: 1,
+      },
+    });
+
+    const quote = (threshold: any, cartPrice = 50000) => {
+      mockPrisma.shipping_zones.findMany.mockResolvedValue([riohachaZone]);
+      mockPrisma.shipping_rates.findMany.mockResolvedValue([
+        rateWithThreshold(threshold),
+      ]);
+      return service.calculateRates(
+        1,
+        [{ product_id: 1, quantity: 1, price: cartPrice }],
+        address,
+      );
+    };
+
+    it('threshold 0 = envío gratis deliberado aunque el carrito sea mínimo', async () => {
+      const options = await quote(0, 1000);
+      expect(options).toHaveLength(1);
+      expect(options[0].cost).toBe(0);
+    });
+
+    it('threshold 0 como objeto Decimal (truthy en runtime Prisma) = gratis', async () => {
+      // Regresión del accidente original: `Decimal(0)` es un objeto truthy;
+      // la comparación explícita `>= 0` lo trata como gratis intencional.
+      const decimalZero = { valueOf: () => 0, toString: () => '0' };
+      const options = await quote(decimalZero, 1000);
+      expect(options).toHaveLength(1);
+      expect(options[0].cost).toBe(0);
+    });
+
+    it('threshold null = sin umbral, se cobra el costo base', async () => {
+      const options = await quote(null);
+      expect(options).toHaveLength(1);
+      expect(options[0].cost).toBe(8000);
+    });
+
+    it('threshold negativo legacy = sin gratis, se cobra el costo base', async () => {
+      const options = await quote(-5);
+      expect(options).toHaveLength(1);
+      expect(options[0].cost).toBe(8000);
+    });
+
+    it('threshold positivo se respeta: gratis solo desde el umbral', async () => {
+      const below = await quote(100000, 50000);
+      expect(below).toHaveLength(1);
+      expect(below[0].cost).toBe(8000);
+
+      const above = await quote(100000, 150000);
+      expect(above).toHaveLength(1);
+      expect(above[0].cost).toBe(0);
+    });
+  });
 });
