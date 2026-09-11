@@ -12,6 +12,7 @@ import {
 } from './dto/create-credit-note.dto';
 import { InvoiceNumberGenerator } from '../utils/invoice-number-generator';
 import { RESOLUTION_PUBLIC_SELECT } from '../utils/technical-key.util';
+import { absorbInclusiveLine } from '../utils/dian-money.util';
 import {
   localDateString,
   resolveStoreTimezone,
@@ -58,7 +59,8 @@ export class CreditNotesService {
   private getContext() {
     const context = RequestContextService.getContext();
     if (!context) {
-      throw new Error('No request context found');
+      // B.1 (F-029) — 400 tipado en vez de 500 crudo.
+      throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
     }
     return context;
   }
@@ -243,10 +245,27 @@ export class CreditNotesService {
     // Los impuestos siguen a las líneas: si la nota es total y no trae los
     // suyos, copia también los de la factura, o el documento quedaría con base
     // gravable pero sin cuota.
+    //
+    // B.1 (F-020) — la rama PARCIAL ya no suma floats ni persiste el
+    // `tax_amount` del cliente: cada línea se deriva por el kernel único
+    // `absorbInclusiveLine`, el mismo loop del motor, y la cabecera suma lo
+    // derivado. La rama TOTAL sigue copia exacta (ver `derivePartialNote...`).
+    const is_partial = !!dto.items?.length;
+    const derived_partial = !dto.taxes?.length &&
+      is_partial
+        ? derivePartialNoteLinesViaKernel(
+            items,
+            related_invoice.invoice_items,
+            related_invoice.invoice_taxes,
+            related_invoice.id,
+            type,
+            this.logger,
+          )
+        : null;
     const taxes = dto.taxes?.length
       ? dto.taxes
-      : dto.items?.length
-        ? deriveNoteTaxesFromLines(items, related_invoice.invoice_taxes, type)
+      : derived_partial
+        ? derived_partial.taxes
         : related_invoice.invoice_taxes.map((t) => ({
             tax_rate_id: t.tax_rate_id ?? undefined,
             tax_name: t.tax_name,
@@ -260,12 +279,22 @@ export class CreditNotesService {
     let subtotal = 0;
     let discount = 0;
     let tax = 0;
-    for (const item of items) {
-      subtotal += item.quantity * item.unit_price;
-      discount += item.discount_amount || 0;
-      tax += item.tax_amount || 0;
+    let total = 0;
+    if (derived_partial) {
+      // Parcial por kernel: la cabecera suma base/cuota DERIVADAS, no el
+      // reclamo del cliente. Todo en `Decimal`: ni un float en el camino.
+      subtotal = derived_partial.totals.subtotal.toNumber();
+      discount = derived_partial.totals.discount.toNumber();
+      tax = derived_partial.totals.tax.toNumber();
+      total = derived_partial.totals.total.toNumber();
+    } else {
+      for (const item of items) {
+        subtotal += item.quantity * item.unit_price;
+        discount += item.discount_amount || 0;
+        tax += item.tax_amount || 0;
+      }
+      total = subtotal - discount + tax;
     }
-    const total = subtotal - discount + tax;
 
     // Fecha fiscal de la nota: HOY en el huso de la tienda. Derivarla en el
     // navegador es de donde salen los desfases de un día.
@@ -312,11 +341,20 @@ export class CreditNotesService {
         // separar para saber qué se declaró de verdad.
         note_concept_code: dto.note_concept_code ?? null,
         invoice_items: {
-          create: items.map((item) => {
-            const item_total =
-              item.quantity * item.unit_price -
-              (item.discount_amount || 0) +
-              (item.tax_amount || 0);
+          create: items.map((item, index) => {
+            // B.1 (F-020) — parcial por kernel: la línea persiste base/cuota
+            // derivadas (nunca el reclamo del cliente). Total/explícito:
+            // idéntico a siempre.
+            const derived_line = derived_partial?.lines[index];
+            const line_tax =
+              derived_line?.tax_amount ??
+              new Prisma.Decimal(item.tax_amount || 0);
+            const item_total = derived_line
+              ? derived_line.total_amount
+              : new Prisma.Decimal(item.quantity)
+                  .times(item.unit_price)
+                  .minus(item.discount_amount || 0)
+                  .plus(item.tax_amount || 0);
             return {
               product_id: item.product_id,
               product_variant_id: item.product_variant_id,
@@ -324,8 +362,8 @@ export class CreditNotesService {
               quantity: new Prisma.Decimal(item.quantity),
               unit_price: new Prisma.Decimal(item.unit_price),
               discount_amount: new Prisma.Decimal(item.discount_amount || 0),
-              tax_amount: new Prisma.Decimal(item.tax_amount || 0),
-              total_amount: new Prisma.Decimal(item_total),
+              tax_amount: line_tax,
+              total_amount: item_total,
             };
           }),
         },
@@ -464,68 +502,227 @@ export class CreditNotesService {
 }
 
 /**
- * Nota PARCIAL sin desglose de impuestos propio.
- *
- * Antes esta rama devolvía `[]`, y ahí estaba el defecto: la cabecera SÍ suma
- * `item.tax_amount` (el bucle de totales de arriba), así que la nota quedaba
- * con cuota declarada y CERO filas en `invoice_taxes`. Reproducido en dev con
- * NCDEV2: `tax_amount = 28500`, `total = 178500`, ninguna fila.
- *
- * Al emitir, `LegalMonetaryTotal` incluye esos 28.500 mientras el documento no
- * lleva ningún `cac:TaxTotal` que los respalde. La DIAN valida esa identidad
- * aritméticamente y rechaza — quemando el consecutivo de la nota.
- *
- * Se deriva del perfil tributario del documento que se corrige, que es el único
- * origen legítimo: una nota no inventa tributos, corrige los de su factura.
- * Cuando la factura mezcla varios esquemas (IVA + INC, p. ej.) las líneas del
- * DTO sólo traen un `tax_amount` agregado y NO hay forma de repartirlo sin
- * adivinar, así que se exige el desglose explícito en vez de fabricarlo.
+ * Línea parcial derivada por el kernel (B.1, F-020): base, cuota y total en
+ * `Decimal`, listos para persistir.
  */
-function deriveNoteTaxesFromLines(
+export interface DerivedPartialNoteLine {
+  base_amount: Prisma.Decimal;
+  tax_amount: Prisma.Decimal;
+  total_amount: Prisma.Decimal;
+  is_inclusive: boolean;
+}
+
+/**
+ * Nota PARCIAL sin desglose de impuestos propio, derivada por el kernel.
+ *
+ * B.1 (F-020) — antes esta rama sumaba floats y persistía el `tax_amount`
+ * del cliente, que puede violar `cuota = trunc(base × rate)` y quemar el
+ * consecutivo en DIAN (una parcial sobre línea absorbida de $3.000 → base
+ * 2777.78 + 222.22 salía con cualquier otro reparto que el cliente mandara).
+ * Ahora cada línea pasa por `absorbInclusiveLine` —el mismo loop del motor—:
+ * la cuota que se persiste ES `trunc(base_final × rate)` por construcción, y
+ * la cabecera suma lo derivado, nunca el reclamo.
+ *
+ * Lo que NO cambia (copia exacta): la nota TOTAL (sin `dto.items`) copia
+ * líneas e impuestos de la factura que corrige tal cual; el desglose
+ * explícito (`dto.taxes`) manda sobre lo derivado.
+ *
+ * Falla cerrada ANTES de numerar (el llamador numera después): entrada
+ * inválida ⇒ `INVOICING_CALC_006`; bruto inalcanzable ⇒ `INVOICING_CALC_005`.
+ * Sin cuota derivada no hay nada que respaldar: líneas exentas o excluidas
+ * salen sin `cac:TaxTotal`, que es exactamente lo que el Anexo 1.9 pide.
+ *
+ * La inclusividad de cada línea sale del DTO (`is_inclusive` de la línea o
+ * de su primer impuesto, herencia del motor) y, en su defecto, de la línea
+ * de la factura que corrige (misma pareja producto+variante, o la única
+ * línea cuando la factura trae una sola). Sin dato ⇒ adicional (default
+ * histórico). Las líneas de nota no traen `price_unit_quantity` (el DTO no
+ * lo acepta: lo resuelve el servidor desde el producto al facturar), así que
+ * el divisor es 1 y el precio del DTO ya es por unidad.
+ */
+export function derivePartialNoteLinesViaKernel(
   items: Array<{
+    product_id?: number | null;
+    product_variant_id?: number | null;
+    description?: string;
     quantity: number;
     unit_price: number;
-    discount_amount?: number;
-    tax_amount?: number;
+    discount_amount?: number | null;
+    tax_amount?: number | null;
+    is_inclusive?: boolean | null;
+    taxes?: Array<{ is_inclusive?: boolean | null }> | null;
+  }>,
+  related_items: Array<{
+    product_id: number | null;
+    product_variant_id: number | null;
+    is_inclusive: boolean | null;
   }>,
   invoice_taxes: Array<{
     tax_rate_id: number | null;
     tax_name: string;
-    tax_rate: Prisma.Decimal;
+    tax_rate: Prisma.Decimal | number;
     tax_type: string | null;
   }>,
+  related_invoice_id: number,
   type: 'credit_note' | 'debit_note',
-) {
-  const note_tax = items.reduce((acc, i) => acc + (i.tax_amount || 0), 0);
-  const note_base = items.reduce(
-    (acc, i) => acc + i.quantity * i.unit_price - (i.discount_amount || 0),
-    0,
-  );
-
-  // Sin cuota no hay nada que respaldar: líneas exentas o excluidas salen sin
-  // `cac:TaxTotal`, que es exactamente lo que el Anexo 1.9 pide para ellas.
-  if (note_tax === 0) return [];
-
+  logger?: { warn(message: string): void },
+): {
+  taxes: Array<{
+    tax_rate_id: number | undefined;
+    tax_name: string;
+    tax_rate: number;
+    taxable_amount: number;
+    tax_amount: number;
+    tax_type: string | null;
+  }>;
+  lines: DerivedPartialNoteLine[];
+  totals: {
+    subtotal: Prisma.Decimal;
+    discount: Prisma.Decimal;
+    tax: Prisma.Decimal;
+    total: Prisma.Decimal;
+  };
+} {
   if (invoice_taxes.length !== 1) {
     const label = type === 'credit_note' ? 'nota crédito' : 'nota débito';
+    const claimed = items.reduce(
+      (acc, i) => acc.plus(new Prisma.Decimal(i.tax_amount || 0)),
+      new Prisma.Decimal(0),
+    );
     throw new VendixHttpException(
       ErrorCodes.INVOICING_CALC_001,
       invoice_taxes.length === 0
-        ? `Las líneas de la ${label} declaran ${note_tax} de impuesto, pero la factura que corrigen no tiene ningún impuesto registrado del que derivarlo. Envía el desglose en «taxes».`
+        ? `Las líneas de la ${label} declaran ${claimed.toString()} de impuesto, pero la factura que corrigen no tiene ningún impuesto registrado del que derivarlo. Envía el desglose en «taxes».`
         : `La factura que corrige esta ${label} mezcla ${invoice_taxes.length} impuestos (${invoice_taxes.map((t) => t.tax_name).join(', ')}), y las líneas sólo traen el importe total. Envía el desglose en «taxes» indicando cuánto corresponde a cada uno.`,
-      { note_tax_amount: note_tax, invoice_tax_schemes: invoice_taxes.length },
+      {
+        note_tax_amount: claimed.toNumber(),
+        invoice_tax_schemes: invoice_taxes.length,
+      },
     );
   }
 
   const scheme = invoice_taxes[0];
-  return [
+  const scheme_type = (scheme.tax_type ?? '').trim().toLowerCase() || 'iva';
+  // Espejo de `resolveRateBasis` del motor y de `rateFractionPpm` del
+  // preview: sin `rate_basis` explícito el ICA (y su retención) van POR MIL.
+  const rate_basis =
+    scheme_type === 'ica' || scheme_type === 'reteica'
+      ? ('per_mil' as const)
+      : ('percent' as const);
+  const scheme_rate = Number(scheme.tax_rate);
+
+  const single_related =
+    related_items.length === 1 ? related_items[0] : undefined;
+  const lines: DerivedPartialNoteLine[] = items.map((item, index) => {
+    const quantity = new Prisma.Decimal(item.quantity);
+    const unit_price = new Prisma.Decimal(item.unit_price);
+    const discount = new Prisma.Decimal(item.discount_amount || 0);
+    const gross = quantity.times(unit_price).minus(discount);
+
+    // Herencia de inclusividad del motor: flag de línea ⇒ primer impuesto
+    // del DTO ⇒ línea de la factura (misma pareja, o la única) ⇒ adicional.
+    let is_inclusive: boolean | undefined;
+    if (item.is_inclusive === true) is_inclusive = true;
+    else if (item.is_inclusive === false) is_inclusive = false;
+    else if (item.taxes?.[0]?.is_inclusive === true) is_inclusive = true;
+    else if (item.taxes?.[0]?.is_inclusive === false) is_inclusive = false;
+    if (is_inclusive === undefined) {
+      const match =
+        related_items.find(
+          (rel) =>
+            (rel.product_id ?? null) === (item.product_id ?? null) &&
+            (rel.product_variant_id ?? null) ===
+              (item.product_variant_id ?? null),
+        ) ?? single_related;
+      is_inclusive = match?.is_inclusive === true;
+    }
+
+    const kernel = absorbInclusiveLine({
+      gross,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      discount_amount: item.discount_amount ?? 0,
+      rates: [
+        {
+          rate: scheme_rate,
+          rate_basis,
+          tax_type: scheme_type,
+          is_inclusive,
+        },
+      ],
+    });
+
+    if (kernel.invalid_inputs.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_006,
+        `La línea ${index + 1}${item.description ? ` («${item.description}»)` : ''} de la nota trae una entrada inválida (${kernel.invalid_inputs.join(', ')}): corrige la línea en vez de emitirla en cero.`,
+        {
+          line_index: index,
+          detail: kernel.invalid_inputs.join(', '),
+          related_invoice_id,
+        },
+      );
+    }
+    if (!kernel.closed_exactly) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_005,
+        `La línea ${index + 1}${item.description ? ` («${item.description}»)` : ''} con precio impuesto-incluido no puede cerrar al total de ${kernel.gross.toString()}: base más cuotas truncadas llega a ${kernel.closed_total.toString()}. Ajusta el precio o el descuento en 1 centavo y vuelve a intentarlo; re-guardar el mismo importe repite el mismo rechazo.`,
+        {
+          line_index: index,
+          expected: kernel.gross.toString(),
+          received: kernel.closed_total.toString(),
+          difference: kernel.unclosed_residual_cents,
+          related_invoice_id,
+        },
+      );
+    }
+
+    const quota = kernel.quotas[0]?.quota ?? new Prisma.Decimal(0);
+    const claimed_tax = new Prisma.Decimal(item.tax_amount || 0);
+    if (!claimed_tax.equals(quota)) {
+      logger?.warn(
+        `credit-note partial line ${index + 1} of invoice #${related_invoice_id}: ` +
+          `client tax_amount=${claimed_tax.toString()} replaced by kernel quota=${quota.toString()} (server wins)`,
+      );
+    }
+    return {
+      base_amount: kernel.base,
+      tax_amount: quota,
+      total_amount: kernel.closed_total,
+      is_inclusive,
+    };
+  });
+
+  const totals = lines.reduce(
+    (acc, line, index) => ({
+      subtotal: acc.subtotal.plus(line.base_amount),
+      discount: acc.discount.plus(
+        new Prisma.Decimal(items[index].discount_amount || 0),
+      ),
+      tax: acc.tax.plus(line.tax_amount),
+      total: acc.total.plus(line.total_amount),
+    }),
     {
-      tax_rate_id: scheme.tax_rate_id ?? undefined,
-      tax_name: scheme.tax_name,
-      tax_rate: Number(scheme.tax_rate),
-      taxable_amount: note_base,
-      tax_amount: note_tax,
-      tax_type: scheme.tax_type,
+      subtotal: new Prisma.Decimal(0),
+      discount: new Prisma.Decimal(0),
+      tax: new Prisma.Decimal(0),
+      total: new Prisma.Decimal(0),
     },
-  ];
+  );
+
+  if (totals.tax.isZero()) return { taxes: [], lines, totals };
+  return {
+    taxes: [
+      {
+        tax_rate_id: scheme.tax_rate_id ?? undefined,
+        tax_name: scheme.tax_name,
+        tax_rate: scheme_rate,
+        taxable_amount: totals.subtotal.toNumber(),
+        tax_amount: totals.tax.toNumber(),
+        tax_type: scheme.tax_type,
+      },
+    ],
+    lines,
+    totals,
+  };
 }

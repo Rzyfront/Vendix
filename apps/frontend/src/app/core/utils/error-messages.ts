@@ -886,9 +886,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
    * qué familia es el problema, porque un documento puede incumplir varias reglas
    * a la vez y ninguna frase única las describe.
    *
-   * Por qué vale la pena mostrarlos bien: un rechazo de la DIAN gasta un
-   * consecutivo autorizado que no se recupera. Todo lo que se corrija en esta
-   * pantalla es numeración que no se pierde.
+   * OJO CON LA NUMERACIÓN (B.1, F-027): este bloqueo es previo a la FIRMA,
+   * no al número. `invoice-flow.validate()` toma el consecutivo ANTES de
+   * prevalidar (la resolución se mide contra el número), así que un bloqueo
+   * saliendo de «Validar» ya gastó el número: queda como hueco. Lo que salva
+   * numeración es corregir en la puerta de requisitos (emit-readiness) ANTES
+   * de validar, no después del rechazo. Un rechazo de la DIAN gasta otro
+   * consecutivo que tampoco se recupera.
    */
   INVOICING_PREVALIDATION_001:
     'Las cuentas del documento no cuadran y la DIAN lo rechazaría. Revisa los descuadres señalados: normalmente basta con volver a guardar el documento para que se recalculen los totales.',

@@ -21,6 +21,7 @@ import {
   ProviderResponse,
 } from '../providers/invoice-provider.interface';
 import {
+  absorbInclusiveLine,
   clearInclusiveLine,
   dianAmount,
   dianLineExtension,
@@ -478,6 +479,136 @@ const INVOICE_INCLUDE = {
   },
 };
 
+/**
+ * Borrador huérfano (B.1, F-023): líneas con impuesto en cabecera y cero
+ * filas en `invoice_taxes`. Puro para el spec de B.1.
+ */
+export function isOrphanedDraftTaxes(
+  items: unknown[],
+  taxes: unknown[],
+  header_tax: Prisma.Decimal,
+): boolean {
+  return (
+    (items?.length ?? 0) > 0 &&
+    (taxes?.length ?? 0) === 0 &&
+    !header_tax.isZero()
+  );
+}
+
+/**
+ * Veredicto de una línea del borrador contra el kernel vigente (B.1, F-027).
+ *
+ * - `skip`: no juzgable (AIU, sin filas, sin tasa inclusiva) — el camino
+ *   exclusivo/agregado/AIU es byte-idéntico antes y después del fix.
+ * - `ok`: el snapshot coincide con el recómputo que cierra.
+ * - `invalid_line_input` / `unclosed_residual`: falla cerrada del kernel.
+ * - `pre_fix_residual`: el total cierra pero el REPARTO es de la regla
+ *   anterior (base a >½¢ del kernel).
+ */
+export type DraftLineJudgment =
+  | { kind: 'skip' }
+  | { kind: 'ok' }
+  | { kind: 'invalid_line_input'; invalid_inputs: string[] }
+  | {
+      kind: 'unclosed_residual';
+      kernel_gross: Prisma.Decimal;
+      kernel_closed_total: Prisma.Decimal;
+    }
+  | {
+      kind: 'pre_fix_residual';
+      snapshot_base: Prisma.Decimal;
+      snapshot_quota: Prisma.Decimal;
+      kernel_base: Prisma.Decimal;
+      kernel_quota: Prisma.Decimal;
+    };
+
+export function judgeDraftLineSnapshot(
+  item: any,
+  taxes: any[],
+): DraftLineJudgment {
+  if (item?.aiu_component != null) return { kind: 'skip' };
+  const header_rows = (taxes ?? []).filter(
+    (tax) => tax?.invoice_item_id == null,
+  );
+  const linked = (taxes ?? []).filter(
+    (tax) =>
+      tax?.invoice_item_id != null &&
+      Number(tax.invoice_item_id) === Number(item?.id),
+  );
+  // Filas de cabecera (histórico de un solo tributo) valen para todas las
+  // líneas; desglose por línea, sólo para su línea.
+  const line_taxes = linked.length > 0 ? linked : header_rows;
+  if (line_taxes.length === 0) return { kind: 'skip' };
+
+  const rates = line_taxes.map((tax) => ({
+    rate: Number(tax?.tax_rate ?? 0),
+    // Espejo de `resolveRateBasis` del motor: sin `rate_basis` el ICA (y su
+    // retención) van POR MIL.
+    rate_basis: (() => {
+      const type = String(tax?.tax_type ?? '').trim().toLowerCase();
+      return type === 'ica' || type === 'reteica' ? 'per_mil' : 'percent';
+    })(),
+    tax_type: String(tax?.tax_type ?? 'iva'),
+    is_inclusive:
+      tax?.is_inclusive === true
+        ? true
+        : tax?.is_inclusive === false
+          ? false
+          : item?.is_inclusive === true,
+  }));
+  if (!rates.some((rate) => rate.is_inclusive === true))
+    return { kind: 'skip' };
+
+  const divisor_raw = Number(item?.price_unit_quantity ?? 1);
+  const divisor =
+    Number.isFinite(divisor_raw) && divisor_raw > 0 ? divisor_raw : 1;
+  const gross = toDecimal(item?.quantity ?? 0)
+    .times(toDecimal(item?.unit_price ?? 0))
+    .dividedBy(divisor)
+    .minus(toDecimal(item?.discount_amount ?? 0));
+
+  const kernel = absorbInclusiveLine({
+    gross,
+    quantity: item?.quantity ?? 0,
+    unit_price: item?.unit_price ?? 0,
+    discount_amount: item?.discount_amount ?? 0,
+    rates,
+  });
+
+  if (kernel.invalid_inputs.length > 0) {
+    return { kind: 'invalid_line_input', invalid_inputs: kernel.invalid_inputs };
+  }
+  if (!kernel.closed_exactly) {
+    return {
+      kind: 'unclosed_residual',
+      kernel_gross: kernel.gross,
+      kernel_closed_total: kernel.closed_total,
+    };
+  }
+
+  // El total cierra: lo que puede ser viejo es el REPARTO (`total − impuesto`
+  // es la base que se declaró en una línea inclusiva).
+  const snapshot_base = toDecimal(item?.total_amount ?? 0).minus(
+    toDecimal(item?.tax_amount ?? 0),
+  );
+  const base_drift = kernel.base.minus(snapshot_base).abs();
+  if (base_drift.greaterThan(new Prisma.Decimal('0.005'))) {
+    const snapshot_quota = toDecimal(item?.tax_amount ?? 0);
+    const kernel_quota = kernel.quotas.reduce(
+      (acc: Prisma.Decimal, quota) => acc.plus(quota.quota),
+      new Prisma.Decimal(0),
+    );
+    return {
+      kind: 'pre_fix_residual',
+      snapshot_base,
+      snapshot_quota,
+      kernel_base: kernel.base,
+      kernel_quota,
+    };
+  }
+  return { kind: 'ok' };
+}
+
 @Injectable()
 export class InvoiceFlowService {
   private readonly logger = new Logger(InvoiceFlowService.name);
@@ -756,7 +887,8 @@ export class InvoiceFlowService {
   private getContext() {
     const context = RequestContextService.getContext();
     if (!context) {
-      throw new Error('No request context found');
+      // B.1 (F-029) — 400 tipado en vez de 500 crudo.
+      throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
     }
     return context;
   }
@@ -1222,6 +1354,95 @@ export class InvoiceFlowService {
     return this.prisma.accounts_payable.create({ data });
   }
 
+  /**
+   * Puerta aritmética pre-numeración del borrador (B.1, F-027 + F-023).
+   *
+   * Dos borradores que el prevalidador no alcanza —porque corre post-número—:
+   *
+   * 1. HUÉRFANO: líneas con impuesto en cabecera y cero filas en
+   *    `invoice_taxes` (crash entre los dos pasos de `persistLineTaxes`).
+   *    Reparación: re-guardar INCLUYENDO las líneas (el `update()` con líneas
+   *    recalcula y reescribe los tributos); guardar sin líneas no lo repara.
+   * 2. PRE-FIX CON RESIDUO: línea inclusiva cuyo snapshot trae la base de la
+   *    regla anterior (p. ej. 2777.77 + 222.22) mientras el kernel vigente
+   *    cierra el mismo total en otra base (2777.78 + 222.22). Re-validar así
+   *    emitiría dos aritméticas distintas para el mismo precio cobrado.
+   *    Reparación: editar o re-guardar las líneas (el motor recalcula con la
+   *    regla vigente); re-validar lo mismo repite el rechazo.
+   *
+   * Pura en lo que juzga (`judgeDraftLineSnapshot` + `isOrphanedDraftTaxes`,
+   * exportadas para el spec): lee el snapshot, no recalcula el documento ni
+   * escribe nada. Bloquea con la familia `INVOICING_CALC_00X` y el mismo
+   * `details` (`line_index` + `expected`/`received`) que el gate de creación,
+   * para que el frontend nombre LA línea igual en los dos caminos.
+   */
+  private assertDraftArithmeticClosable(invoice: any): void {
+    const items: any[] = invoice.invoice_items ?? [];
+    const taxes: any[] = invoice.invoice_taxes ?? [];
+
+    // Caso 1 — huérfano (F-023).
+    const header_tax = toDecimal(invoice.tax_amount ?? 0);
+    if (isOrphanedDraftTaxes(items, taxes, header_tax)) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PREVALIDATION_001,
+        `El borrador #${invoice.id} tiene ${items.length} línea(s) con ${dianAmount(header_tax)} de impuesto en cabecera pero ninguna fila de impuesto registrada (escritura interrumpida entre líneas y tributos). Vuelve a guardar el documento INCLUYENDO las líneas para que el servidor regenere los impuestos; validar así quemaría el consecutivo en un rechazo.`,
+        {
+          invoice_id: invoice.id,
+          item_count: items.length,
+          tax_row_count: 0,
+        },
+      );
+    }
+
+    // Caso 2 — residuo pre-fix, línea por línea (F-027).
+    items.forEach((item, line_index) => {
+      const judgment = judgeDraftLineSnapshot(item, taxes);
+      if (judgment.kind === 'skip' || judgment.kind === 'ok') return;
+      const label = `La línea ${line_index + 1}${item?.description ? ` («${item.description}»)` : ''} del borrador`;
+      if (judgment.kind === 'invalid_line_input') {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_CALC_006,
+          `${label} trae una entrada inválida (${judgment.invalid_inputs.join(', ')}): corrige la línea en vez de validarla en cero.`,
+          {
+            line_index,
+            detail: judgment.invalid_inputs.join(', '),
+            invoice_id: invoice.id,
+          },
+        );
+      }
+      if (judgment.kind === 'unclosed_residual') {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_CALC_005,
+          `${label} con precio impuesto-incluido no puede cerrar al total cobrado de ${dianAmount(judgment.kernel_gross)}: base más cuotas truncadas llega a ${dianAmount(judgment.kernel_closed_total)}. Ajusta el precio o el descuento en 1 centavo y vuelve a intentarlo; validar el mismo importe quema el consecutivo en el mismo rechazo.`,
+          {
+            line_index,
+            expected: dianAmount(judgment.kernel_gross),
+            received: dianAmount(judgment.kernel_closed_total),
+            difference: dianAmount(
+              judgment.kernel_closed_total.minus(judgment.kernel_gross),
+            ),
+            invoice_id: invoice.id,
+          },
+        );
+      }
+      // `pre_fix_residual`: el total cierra, lo viejo es el REPARTO.
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_005,
+        `${label} es un borrador de la regla anterior: declara base ${dianAmount(judgment.snapshot_base)} + cuota ${dianAmount(judgment.snapshot_quota)}, pero la regla vigente cierra el mismo total en base ${dianAmount(judgment.kernel_base)} + cuota ${dianAmount(judgment.kernel_quota)}. Edita la línea o vuelve a guardar incluyendo las líneas para recalcular con la regla vigente; validar así emitiría dos aritméticas distintas para el mismo precio cobrado.`,
+        {
+          line_index,
+          expected: dianAmount(judgment.kernel_base),
+          received: dianAmount(judgment.snapshot_base),
+          difference: dianAmount(
+            judgment.snapshot_base.minus(judgment.kernel_base),
+          ),
+          detail: 'pre_fix_residual',
+          invoice_id: invoice.id,
+        },
+      );
+    });
+  }
+
   async validate(id: number) {
     let invoice = await this.getInvoice(id);
     this.validateTransition(invoice.status, 'validated');
@@ -1237,6 +1458,14 @@ export class InvoiceFlowService {
         'La factura no tiene ninguna línea. Agrega al menos un producto o servicio antes de validarla.',
       );
     }
+
+    // B.1 (F-027/F-023) — PUERTA ARITMÉTICA PRE-NUMERACIÓN. El prevalidador
+    // (ERR-02) corre DESPUÉS de tomar el número —la resolución se mide contra
+    // el número—, así que lo que él bloquee ya gastó consecutivo. Esta puerta
+    // juzga ANTES de numerar los dos borradores que el prevalidador no puede
+    // ver: el huérfano sin filas de impuesto (crash entre los dos pasos de
+    // escritura) y el pre-fix con residuo (aritmética de la regla anterior).
+    this.assertDraftArithmeticClosable(invoice);
 
     // PUERTA DE IDENTIDAD FISCAL DEL ADQUIRIENTE.
     //

@@ -40,7 +40,10 @@ import {
   formatReason,
   readPersistedDianRejection,
 } from '../../utils/invoicing-errors.util';
-import { normalizeRatePercent } from '../../utils/invoice-line-math';
+import {
+  computeLineMath,
+  normalizeRatePercent,
+} from '../../utils/invoice-line-math';
 import {
   ContingencyWindow,
   FiscalStatusCell,
@@ -822,6 +825,20 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               </span>
             </div>
 
+            <!-- B.1 (F-051): marca de régimen anterior. Estática y sólo
+              cuando el snapshot difiere del recómputo que cierra: el total
+              refleja la regla anterior y se corrige vía nota crédito. -->
+            @if (priorRegimeHint()) {
+              <div class="mt-3 space-y-1.5 rounded-lg bg-surface px-3 py-2.5">
+                <div class="flex items-start gap-2">
+                  <app-icon name="info" [size]="14" class="mt-0.5 text-text-secondary" />
+                  <p class="text-xs text-text-secondary">
+                    {{ priorRegimeHint() }}
+                  </p>
+                </div>
+              </div>
+            }
+
             @if (withholdingAmount() > 0) {
               <div class="mt-3 space-y-1.5 rounded-lg bg-surface px-3 py-2.5">
                 <div class="flex items-start gap-2">
@@ -1419,6 +1436,88 @@ export class InvoiceDetailComponent {
       tax_amount: this.toNumber(tax?.tax_amount),
       taxable_amount: this.toNumber(tax?.taxable_amount),
     }));
+  });
+
+  /**
+   * Hint de régimen anterior (B.1, F-051): sólo para documentos pre-fix con
+   * líneas inclusivas, sin marcador de schema.
+   *
+   * Reutiliza el kernel del preview (`computeLineMath`, el mismo que pinta
+   * el formulario de creación): si el snapshot de alguna línea inclusiva
+   * difiere del recómputo que cierra (base o total a ≥1¢), el documento se
+   * calculó con la regla anterior y el total refleja esa regla. Estático y
+   * en el bloque de totales: el total NO se reescribe (documento aceptado no
+   * se toca, ADR-02) y la corrección es vía nota crédito.
+   *
+   * Sólo se miran líneas inclusivas sin componente AIU: el camino
+   * exclusivo/agregado/AIU es byte-idéntico antes y después del fix, así que
+   * ahí no hay residuo que buscar y cualquier diferencia sería un falso
+   * positivo. Líneas cuyo recómputo no cierra se saltan por la misma razón.
+   */
+  readonly priorRegimeHint = computed<string | null>(() => {
+    const lines = this.lines();
+    if (lines.length === 0) return null;
+    const taxes = this.taxLines() as Array<
+      InvoiceTax & {
+        invoice_item_id?: number | null;
+        is_inclusive?: boolean | null;
+      }
+    >;
+    const headerRows = taxes.filter((tax) => tax?.invoice_item_id == null);
+
+    for (const line of lines) {
+      const item = line as InvoiceItem & {
+        is_inclusive?: boolean | null;
+        price_unit_quantity?: number | string | null;
+        aiu_component?: string | null;
+      };
+      if (item?.aiu_component != null) continue;
+      const linked = taxes.filter(
+        (tax) =>
+          tax?.invoice_item_id != null &&
+          Number(tax.invoice_item_id) === Number(item?.id),
+      );
+      const lineTaxes = linked.length > 0 ? linked : headerRows;
+      if (lineTaxes.length === 0) continue;
+      const selections = lineTaxes.map((tax) => ({
+        tax_rate_id:
+          Number.isFinite(Number((tax as { tax_rate_id?: unknown })?.tax_rate_id)) &&
+          Number((tax as { tax_rate_id?: unknown })?.tax_rate_id) > 0
+            ? Number((tax as { tax_rate_id?: unknown })?.tax_rate_id)
+            : 0,
+        rate: normalizeRatePercent(tax?.tax_rate),
+        name: tax?.tax_name ?? '',
+        tax_type: tax?.tax_type ?? undefined,
+        is_inclusive:
+          tax?.is_inclusive === true
+            ? true
+            : tax?.is_inclusive === false
+              ? false
+              : item?.is_inclusive === true,
+      }));
+      if (!selections.some((selection) => selection.is_inclusive === true)) {
+        continue;
+      }
+      const math = computeLineMath({
+        quantity: item?.quantity,
+        unit_price: item?.unit_price,
+        discount_amount: item?.discount_amount,
+        price_unit_quantity: item?.price_unit_quantity,
+        taxes: selections,
+      });
+      if (math.unclosedResidualCents !== 0) continue;
+      const snapshotBaseCents =
+        Math.round(Number(item?.total_amount) * 100) -
+        Math.round(Number(item?.tax_amount) * 100);
+      const snapshotTotalCents = Math.round(Number(item?.total_amount) * 100);
+      if (
+        Math.abs(math.baseCents - snapshotBaseCents) >= 1 ||
+        Math.abs(math.totalCents - snapshotTotalCents) >= 1
+      ) {
+        return 'Este documento se calculó con la regla anterior de impuesto incluido: el total refleja esa regla (base y cuota anteriores). Los documentos nuevos ya cierran con la regla vigente; este se corrige con nota crédito.';
+      }
+    }
+    return null;
   });
 
   // ───────────────────────────────────────────────────────────────────────────
