@@ -153,7 +153,7 @@ export class AddRateWizardModalComponent implements OnInit {
       text += `, siempre que el pedido esté entre <strong>${minText}</strong> y <strong>${maxText}</strong>`;
     }
 
-    if (free !== null && free !== undefined && free !== '' && Number(free) > 0) {
+    if (free !== null && free !== undefined && Number(free) > 0) {
       text += `. Además, será <strong>gratis</strong> si la compra supera los <strong>$${free}</strong>`;
     }
 
