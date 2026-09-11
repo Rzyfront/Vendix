@@ -1547,8 +1547,8 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
              poder leerlo MIENTRAS corrige. -->
         @if (submitError()) {
           <!-- F-053: el banner recibe foco programático cuando el error es
-               aritmético nuevo (`focusSubmitErrorBanner`), para que el lector
-               de pantalla anuncie el encabezado. `tabindex="-1"`: enfocable
+               aritmético nuevo (focusSubmitErrorBanner), para que el lector
+               de pantalla anuncie el encabezado. tabindex="-1": enfocable
                por código, fuera del orden de tabulación. -->
           <app-alert-banner
             #submitErrorBanner
@@ -3013,8 +3013,8 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
           </vendix-invoice-form-section>
 
           <!-- Totales: siempre visibles, nunca dentro de una sección plegada -->
-          <!-- F-052: el total corregido SE ANUNCIA. `aria-live="polite"` con
-               `atomic` hace que el lector de pantalla reciba el valor central
+          <!-- F-052: el total corregido SE ANUNCIA. aria-live="polite" con
+               atomic hace que el lector de pantalla reciba el valor central
                del fix sin mover el foco del campo que se está editando. -->
           <div
             class="rounded-lg border border-border p-3 bg-[var(--color-surface-muted)]"
