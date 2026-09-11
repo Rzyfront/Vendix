@@ -114,6 +114,7 @@ export class ReportsDataService {
     }
     lastRangePerReport.set(report.id, rangeSignature);
 
+    const cacheKey = `${report.id}-${dataEndpoint}-${JSON.stringify(options)}`;
     return this.withCache(cacheKey, () =>
       this.http.get<any>(url, { params }).pipe(
         map((response) => this.adapter.adapt(response, report)),
