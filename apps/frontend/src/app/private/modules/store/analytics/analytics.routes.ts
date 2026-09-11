@@ -100,6 +100,13 @@ export const analyticsRoutes: Routes = [
                 (c) => c.SalesByPaymentComponent,
               ),
           },
+          {
+            path: 'by-user',
+            loadComponent: () =>
+              import('./pages/sales/sales-by-user.component').then(
+                (c) => c.SalesByUserComponent,
+              ),
+          },
         ],
       },
       // Inventory Analytics (shell)

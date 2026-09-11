@@ -189,6 +189,15 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     category: 'sales',
     icon: 'credit-card',
   },
+  {
+    key: 'sales_by_user',
+    title: 'Por Vendedor',
+    description: 'Rendimiento y ventas por usuario o vendedor',
+    detailedDescription: 'Analiza el volumen de ventas, órdenes y ticket promedio generado por cada vendedor del equipo.',
+    route: '/admin/analytics/sales/by-user',
+    category: 'sales',
+    icon: 'user-check',
+  },
 
   // Inventory (5)
   {

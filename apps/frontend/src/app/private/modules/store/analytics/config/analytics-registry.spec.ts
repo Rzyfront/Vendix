@@ -34,8 +34,8 @@ describe('AnalyticsRegistry', () => {
   });
 
   describe('ANALYTICS_VIEWS', () => {
-    it('should have 24 views', () => {
-      expect(ANALYTICS_VIEWS).toHaveSize(24);
+    it('should have 25 views', () => {
+      expect(ANALYTICS_VIEWS).toHaveSize(25);
     });
 
     it('should have unique keys', () => {
@@ -56,9 +56,9 @@ describe('AnalyticsRegistry', () => {
       expect(overviewViews).toHaveSize(1);
     });
 
-    it('should have sales with 6 views', () => {
+    it('should have sales with 7 views', () => {
       const salesViews = getViewsByCategory('sales');
-      expect(salesViews).toHaveSize(6);
+      expect(salesViews).toHaveSize(7);
     });
 
     it('should have inventory with 5 views', () => {
