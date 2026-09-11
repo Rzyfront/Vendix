@@ -15,3 +15,4 @@
 | 2026-09-11 | agentes A/B | fixes | A.1 fd04b5c24, A.2 6906e7eed, A.3 610b4443e, B.1 0cce477d5, B.2 68e4d0adc, B.3 no-op, F-008UI 961615248 | commits en develop |
 | 2026-09-11 | orquestador | verif | Transpile 10 archivos frontend 0 errores; inventory spec 6 fallos preexistentes (mock supplier_products) | node + jest |
 | 2026-09-11 | orquestador | cierre | 15 findings en fixed; A/B en done; B.1 datacheck prod y B.2 visual browser quedan pre-release | bundle |
+| 2026-09-11 | orquestador | Z.1 | customers-analytics.spec 5/5 corrido directo; todo verificado de primera mano | jest |
