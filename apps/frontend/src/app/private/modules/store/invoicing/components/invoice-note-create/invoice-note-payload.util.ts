@@ -5,36 +5,22 @@
  * fiscal se lee y se prueba mejor sin un template alrededor.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * LAS DOS FORMAS DE NOTA, Y POR QUÉ LA PARCIAL TIENE QUE MANDAR SUS IMPUESTOS
+ * LAS DOS FORMAS DE NOTA, Y POR QUÉ LA PARCIAL YA NO MANDA SUS IMPUESTOS
  * ─────────────────────────────────────────────────────────────────────────────
  *
- * **Nota TOTAL** — no se manda `items` ni `taxes`. `credit-notes.service.ts:142`
- * copia las líneas de la factura y `:170` copia también sus impuestos. Es el
- * camino que hoy funciona entero y el que hay que preferir siempre que la
- * corrección sea por el documento completo.
+ * **Nota TOTAL** — no se manda `items` ni `taxes`. El backend copia las
+ * líneas de la factura y también sus impuestos. Es el camino que funciona
+ * entero y el que hay que preferir siempre que la corrección sea por el
+ * documento completo.
  *
- * **Nota PARCIAL** — se manda `items`. Y entonces HAY QUE MANDAR `taxes`
- * TAMBIÉN. La razón está en `credit-notes.service.ts:166-177`:
- *
- * ```ts
- * const taxes = dto.taxes?.length ? dto.taxes
- *   : dto.items?.length ? []                 // ← acá
- *   : <copia los de la factura>;
- * ```
- *
- * Con `items` y sin `taxes`, el servicio se queda con `[]` y el spread de
- * `:242` (`...(taxes.length > 0 && {...})`) NO crea ninguna fila en
- * `invoice_taxes`. Pero la cabecera SÍ suma el impuesto: `:186` acumula
- * `item.tax_amount` y `:188` lo mete en `total_amount`. Resultado: una nota con
- * `LegalMonetaryTotal` que incluye IVA y sin un solo `cac:TaxTotal` en el XML
- * (`UblCreditNoteBuilder` recibe `taxes: []`). Esa es la familia de rechazos de
- * consistencia aritmética de la DIAN.
- *
- * Así que el desglose se manda, y se manda DERIVADO DE LAS MISMAS CIFRAS que
- * viajan en las líneas —no de un recálculo paralelo—. Por construcción,
- * `Σ taxes[].tax_amount === Σ items[].tax_amount`, que es exactamente lo que el
- * backend va a poner en la cabecera. Dos fuentes distintas para el mismo número
- * es de donde salen los descuadres de un peso.
+ * **Nota PARCIAL** — se manda SOLO `items`, nunca `taxes` (F-073). Mandar el
+ * desglose desde el navegador activaba el camino explícito del DTO con
+ * floats, y la nota podía diferir de la factura en centavos. Los impuestos
+ * los deriva el servidor por el kernel (`derivePartialNoteLinesViaKernel`
+ * en `credit-notes.service.ts`): la cuota persistida ES `trunc(base × tasa)`
+ * por construcción y la cabecera suma lo derivado, nunca el reclamo del
+ * cliente. Quien necesite un desglose distinto al derivado usa el camino
+ * explícito del DTO a propósito, no este formulario.
  */
 
 import {
