@@ -3,6 +3,10 @@ import {
   InvoiceCalculatorInput,
   InvoiceCalculatorService,
 } from './invoice-calculator.service';
+// Paridad espejo-motor (A.1): el spec del motor es el que fija el contrato
+// compartido porque el espejo (`tax-inclusive-math`) no puede importar de
+// invoicing sin crear un ciclo taxes ↔ invoicing. Solo lectura en specs.
+import { resolveLineTotals } from '../../taxes/utils/tax-inclusive-math.util';
 
 /**
  * El servicio es PURO (sin Prisma, sin ALS, sin HTTP), así que se instancia con
@@ -2242,6 +2246,400 @@ describe('InvoiceCalculatorService', () => {
         expect(result.totals.tax_amount).toBe('18974.16');
         expect(result.totals.total_before_tax).toBe('3328800.00');
       });
+    });
+  });
+
+  /**
+   * A.1 (CP-facturacion-impuesto-incluido-redondeo) — el total cobrado cierra.
+   *
+   * Decisión comercial del plan: el total cobrado (precio publicado) es la
+   * verdad comercial; base + impuestos truncados no pueden redefinir el total
+   * ni las letras. El fix (A.2, ADR-01) absorbe el residuo en la base con
+   * búsqueda acotada en centavos (mejor base con f ≤ bruto, jamás overshoot) y
+   * emite divergencia tipada cuando el bruto es inalcanzable (ADR-04).
+   *
+   * TODAS las cifras esperadas están calculadas A MANO (ver comentarios; la
+   * aritmética se verificó con una calculadora Decimal independiente, nunca
+   * llamando al servicio bajo prueba). Estos casos FALLAN hoy y pasan tras
+   * A.2. Ningún caso vigente de arriba se tocó.
+   *
+   * Nota sobre el caso '$100 con IVA dentro ⇒ 99.99' de más arriba: ese caso
+   * documenta el comportamiento PRE-fix (pérdida declarada deliberada). El caso
+   * A.1 de $100 fija el contrato POST-fix (84.04/15.96/100.00); A.2 actualiza
+   * el viejo porque es uno de "los casos del bug" (PLAN objetivo 5).
+   */
+  describe('A.1 — cierre exacto del total cobrado (falla hasta A.2)', () => {
+    it('$3.000 con INC 8% incluido ⇒ base 2777.78, cuota 222.22, total 3000.00', () => {
+      // B0 = trunc(3000/1.08) = 2777.77 → 2777.77+222.22 = 2999.99 (hoy).
+      // +1¢: trunc(2777.78×0.08) = trunc(222.2224) = 222.22 → 3000.00 ✓.
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 3000,
+          is_inclusive: true,
+          taxes: [{ tax_name: 'INC', tax_rate: 8, tax_type: 'inc' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.line_extension_amount).toBe('2777.78');
+      expect(line.taxes[0].tax_amount).toBe('222.22');
+      expect(line.total_amount).toBe('3000.00');
+      expect(result.totals.total_amount).toBe('3000.00');
+    });
+
+    it('$5.000 con INC 8% incluido ⇒ base 4629.63, cuota 370.37, total 5000.00', () => {
+      // B0 = trunc(5000/1.08) = 4629.62 → 4629.62+370.36 = 4999.98 (hoy, -2¢).
+      // +1¢: trunc(4629.63×0.08) = trunc(370.3704) = 370.37 → 5000.00 ✓.
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 5000,
+          is_inclusive: true,
+          taxes: [{ tax_name: 'INC', tax_rate: 8, tax_type: 'inc' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.line_extension_amount).toBe('4629.63');
+      expect(line.taxes[0].tax_amount).toBe('370.37');
+      expect(line.total_amount).toBe('5000.00');
+      expect(result.totals.total_amount).toBe('5000.00');
+    });
+
+    it('$100 con IVA 19% incluido ⇒ base 84.04, cuota 15.96, total 100.00', () => {
+      // B0 = trunc(100/1.19) = 84.03 → 84.03+15.96 = 99.99 (hoy, el caso
+      // 'acepta el centavo' de arriba). +1¢: trunc(84.04×0.19) =
+      // trunc(15.9676) = 15.96 → 100.00 ✓ (la cuota sigue siendo
+      // trunc(base_final × r): la regla DIAN se cumple por construcción).
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 100,
+          is_inclusive: true,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.line_extension_amount).toBe('84.04');
+      expect(line.tax_amount).toBe('15.96');
+      expect(line.total_amount).toBe('100.00');
+    });
+
+    it('$17 con INC 8% termina en closest-below + divergencia, sin sobrecobrar (F-039/ADR-04)', () => {
+      // f(15.74) = 15.74+1.25 = 16.99; f(15.75) = 15.75+1.26 = 17.01 > 17:
+      // bruto INALCANZABLE (1699→1701 en centavos). Se persiste closest-below
+      // y se DIVERGE (bloquea pre-numeración en A.2, F-060); hoy el corto
+      // persiste en silencio. El timeout es la prueba de terminación.
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 17,
+          is_inclusive: true,
+          taxes: [{ tax_name: 'INC', tax_rate: 8, tax_type: 'inc' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.line_extension_amount).toBe('15.74');
+      expect(line.tax_amount).toBe('1.25');
+      expect(line.total_amount).toBe('16.99');
+      expect(Number(line.total_amount)).toBeLessThanOrEqual(17);
+      // El silencio es el bug: sin cierre exacto hay divergencia tipada
+      // (A.2 fija el scope exacto; acá se exige el hecho, no el nombre).
+      expect(result.divergences.length).toBeGreaterThan(0);
+    }, 10000);
+
+    it('$3.000 con IVA 19% + INC 8% dentro ⇒ closest-below 2999.99 + divergencia (F-007)', () => {
+      // B0 = trunc(3000/1.27) = 2362.20 → 2999.98 (hoy).
+      // +1¢: 2362.21 + trunc(448.8199)=448.81 + trunc(188.9768)=188.97
+      // = 2999.99 ✓. +2¢: la parte IVA salta a 448.82 → 3000.01 overshoot.
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 3000,
+          is_inclusive: true,
+          taxes: [
+            { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' },
+            { tax_name: 'INC', tax_rate: 8, tax_type: 'inc' },
+          ],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.line_extension_amount).toBe('2362.21');
+      expect(line.taxes[0].tax_amount).toBe('448.81');
+      expect(line.taxes[1].tax_amount).toBe('188.97');
+      expect(line.total_amount).toBe('2999.99');
+      expect(result.divergences.length).toBeGreaterThan(0);
+    });
+
+    it('$1.000 con IVA 19% + IVA 5% dentro ⇒ base 806.46, total 1000.00', () => {
+      // B0 = trunc(1000/1.24) = 806.45 → 999.99 (hoy).
+      // +1¢: trunc(806.46×0.19) = trunc(153.2274) = 153.22,
+      // trunc(806.46×0.05) = trunc(40.323) = 40.32 → 1000.00 ✓.
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 1000,
+          is_inclusive: true,
+          taxes: [
+            { tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' },
+            { tax_name: 'IVA 5%', tax_rate: 5, tax_type: 'iva' },
+          ],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.line_extension_amount).toBe('806.46');
+      expect(line.taxes[0].tax_amount).toBe('153.22');
+      expect(line.taxes[1].tax_amount).toBe('40.32');
+      expect(line.total_amount).toBe('1000.00');
+      // Dos tarifas, un solo esquema: un único ValImp1 con la suma.
+      expect(result.totals.tax_iva).toBe('193.54');
+      expect(result.totals.total_amount).toBe('1000.00');
+    });
+
+    it('$1.000.000 con ICA 9.66‰ dentro ⇒ base 990432.43, total 1000000.00 (F-032)', () => {
+      // 9.66‰ con rate_basis per_mil (default del ICA).
+      // B0 = trunc(1000000/1.00966) = 990432.42 → 999999.99 (hoy, -1¢).
+      // +1¢: trunc(990432.43×0.00966) = trunc(9567.5772…) = 9567.57
+      // → 1000000.00 ✓.
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 1000000,
+          is_inclusive: true,
+          taxes: [{ tax_name: 'ICA', tax_rate: 9.66, tax_type: 'ica' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.taxes[0].rate_basis).toBe('per_mil');
+      expect(line.line_extension_amount).toBe('990432.43');
+      expect(line.taxes[0].tax_amount).toBe('9567.57');
+      expect(line.total_amount).toBe('1000000.00');
+      expect(result.totals.tax_ica).toBe('9567.57');
+    });
+  });
+
+  describe('A.1 — descuentos en el cierre (F-034/F-006; la frontera == pasa hoy por diseño)', () => {
+    it('descuento == bruto: línea en cero SIN divergencia bloqueante (frontera permitida, candado)', () => {
+      // 100% de descuento es una línea gratis legítima, no un error de
+      // captura: el cero se queda y no bloquea, hoy y tras A.2.
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 50000,
+          discount_amount: 50000,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.gross_amount).toBe('50000.00');
+      expect(line.discount_amount).toBe('50000.00');
+      expect(line.line_extension_amount).toBe('0.00');
+      expect(line.tax_amount).toBe('0.00');
+      expect(line.total_amount).toBe('0.00');
+    });
+
+    it('descuento > bruto: el cero silencioso se vuelve divergencia (F-034, falla hasta A.2)', () => {
+      // Hoy: base/impuesto/total en 0 sin señal (ver el caso 'no produce base
+      // ni impuesto negativos' arriba). F-034: bruto=max(0,neto) idéntico en
+      // los tres sitios + divergencia que rechaza con 422; nunca línea cero
+      // silenciosa.
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 50000,
+          discount_amount: 80000,
+          taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+        }),
+      );
+
+      expect(result.lines[0].total_amount).toBe('0.00');
+      expect(result.divergences.length).toBeGreaterThan(0);
+    });
+
+    it('descuento 9.89 sobre $3.000 INC 8%: G=2990.11 inalcanzable ⇒ 2990.10 + divergencia (F-006)', () => {
+      // Neto capturado (con impuesto dentro): 3000 − 9.89 = 2990.11.
+      // B0 = trunc(2990.11/1.08) = 2768.62;
+      // f = 2768.62 + trunc(221.4896)=221.48 = 2990.10;
+      // +1¢ → 2990.12 overshoot: closest-below + divergencia.
+      const result = service.calculate(
+        oneLine({
+          quantity: 1,
+          unit_price: 3000,
+          discount_amount: 9.89,
+          is_inclusive: true,
+          taxes: [{ tax_name: 'INC', tax_rate: 8, tax_type: 'inc' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.net_entered_amount).toBe('2990.11');
+      expect(line.line_extension_amount).toBe('2768.62');
+      expect(line.tax_amount).toBe('221.48');
+      expect(line.total_amount).toBe('2990.10');
+      expect(result.divergences.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('A.1 — numéricos inválidos fail-closed con divergencia (F-036, falla hasta A.2)', () => {
+    const iva19 = [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' as const }];
+    const cases: Array<[string, InvoiceCalculatorInput['items'][number]]> = [
+      ["unit_price 'abc'", { quantity: 1, unit_price: 'abc' }],
+      ["quantity locale '1,000'", { quantity: '1,000', unit_price: 100000 }],
+      ['quantity Infinity', { quantity: Infinity, unit_price: 100000 }],
+      ['unit_price NaN', { quantity: 1, unit_price: NaN }],
+      ["unit_price ''", { quantity: 1, unit_price: '' }],
+      ['discount NaN', { quantity: 1, unit_price: 100000, discount_amount: NaN }],
+    ];
+
+    it.each(cases)(
+      '%s ⇒ la línea no nace en cero silencioso: hay divergencia',
+      (_label, item) => {
+        // Hoy toDecimal colapsa a 0 y la línea sale en 0.00 sin señal: una
+        // línea cero que la DIAN acepta y nadie cobra (F-036). A.2: precondición
+        // de finitud en qty/precio/descuento/tasas + divergencia/422; el
+        // frontend muestra inválido, no 0.
+        const result = service.calculate(oneLine({ ...item, taxes: iva19 }));
+        expect(result.divergences.length).toBeGreaterThan(0);
+      },
+    );
+  });
+
+  describe('A.1 — paridad espejo-motor (F-035/F-014/F-009, falla hasta A.2)', () => {
+    it.each([["'false'"], ["'true'"]])(
+      'flag stringy %s: motor y espejo acuerdan exclusivo (solo true booleano despeja, F-035)',
+      (flag) => {
+        // Hoy el espejo lee el string como exclusivo (=== true) pero el motor
+        // lo lee inclusivo (truthy): con 'false' el motor despeja a 84033.61 /
+        // 99999.99 contra 100000 / 119000 del espejo. F-035: coerce estricto
+        // (v === true) una sola vez por entrada en los tres sitios.
+        const stringy = flag as unknown as boolean;
+        const mirror = resolveLineTotals(100000, [
+          { rate: 0.19, is_inclusive: stringy },
+        ]);
+        const result = service.calculate(
+          oneLine({
+            quantity: 1,
+            unit_price: 100000,
+            taxes: [
+              {
+                tax_name: 'IVA',
+                tax_rate: 19,
+                tax_type: 'iva',
+                is_inclusive: stringy,
+              },
+            ],
+          }),
+        );
+
+        const [line] = result.lines;
+        // Contrato post-fix (estricto): el string NO despeja en ningún lado.
+        expect(mirror.base).toBe(100000);
+        expect(mirror.total).toBe(119000);
+        expect(line.line_extension_amount).toBe('100000.00');
+        expect(line.tax_amount).toBe('19000.00');
+        expect(line.total_amount).toBe('119000.00');
+        expect(Number(line.total_amount)).toBe(mirror.total);
+      },
+    );
+
+    it('qty>1: el espejo por bruto de línea iguala al motor (F-009)', () => {
+      // Granularidad canónica = bruto de LÍNEA: el espejo se llama UNA vez por
+      // línea con qty×precio (nunca por unidad escalando en floats) y en
+      // centavos/Decimal. 3 × 1000 con INC 8% dentro ⇒ 2777.78 / 222.22 /
+      // 3000.00 en ambos lados.
+      const mirror = resolveLineTotals(3000, [
+        { rate: 0.08, is_inclusive: true },
+      ]);
+      const result = service.calculate(
+        oneLine({
+          quantity: 3,
+          unit_price: 1000,
+          is_inclusive: true,
+          taxes: [{ tax_name: 'INC', tax_rate: 8, tax_type: 'inc' }],
+        }),
+      );
+
+      const [line] = result.lines;
+      expect(line.gross_amount).toBe('3000.00');
+      expect(line.line_extension_amount).toBe('2777.78');
+      expect(line.tax_amount).toBe('222.22');
+      expect(line.total_amount).toBe('3000.00');
+      expect(mirror.base).toBe(Number(line.line_extension_amount));
+      expect(mirror.total).toBe(Number(line.total_amount));
+    });
+
+    it('mixta con flags explícitos: inclusiva + exclusiva reconcilian por línea y en cabecera (F-014)', () => {
+      // F-014: is_inclusive explícito por línea (nunca derivado del orden de
+      // las tasas). L1: 3000 INC 8% dentro ⇒ 2777.78/222.22/3000.00.
+      // L2: 100000 IVA 19% fuera ⇒ 100000/19000/119000.
+      const result = service.calculate({
+        items: [
+          {
+            description: 'Inclusiva',
+            quantity: 1,
+            unit_price: 3000,
+            is_inclusive: true,
+            taxes: [{ tax_name: 'INC', tax_rate: 8, tax_type: 'inc' }],
+          },
+          {
+            description: 'Exclusiva',
+            quantity: 1,
+            unit_price: 100000,
+            is_inclusive: false,
+            taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }],
+          },
+        ],
+      });
+
+      const [l1, l2] = result.lines;
+      expect(l1.total_amount).toBe('3000.00');
+      expect(l2.total_amount).toBe('119000.00');
+      // Espejo por línea, con el mismo bruto y los mismos flags:
+      const m1 = resolveLineTotals(3000, [{ rate: 0.08, is_inclusive: true }]);
+      const m2 = resolveLineTotals(100000, [{ rate: 0.19, is_inclusive: false }]);
+      expect(m1.total).toBe(Number(l1.total_amount));
+      expect(m2.total).toBe(Number(l2.total_amount));
+      // Cabecera: 2777.78+100000 = 102777.78; 222.22+19000 = 19222.22;
+      // total 122000.00 (FAU14: la cabecera es Σ de líneas).
+      expect(result.totals.total_before_tax).toBe('102777.78');
+      expect(result.totals.tax_inc).toBe('222.22');
+      expect(result.totals.tax_iva).toBe('19000.00');
+      expect(result.totals.total_amount).toBe('122000.00');
+    });
+
+    it('multi-línea: 3 × $3.000 INC 8% agregan exacto en cabecera', () => {
+      // Cada línea 2777.78/222.22/3000.00; cabecera suma truncados:
+      // base 8333.34, INC 666.66, total 9000.00.
+      const result = service.calculate({
+        items: [0, 1, 2].map((i) => ({
+          description: `Línea ${i}`,
+          quantity: 1,
+          unit_price: 3000,
+          is_inclusive: true,
+          taxes: [{ tax_name: 'INC', tax_rate: 8, tax_type: 'inc' }],
+        })),
+      });
+
+      for (const line of result.lines) {
+        expect(line.line_extension_amount).toBe('2777.78');
+        expect(line.tax_amount).toBe('222.22');
+        expect(line.total_amount).toBe('3000.00');
+      }
+      expect(result.header_taxes).toHaveLength(1);
+      expect(result.header_taxes[0]).toMatchObject({
+        taxable_amount: '8333.34',
+        tax_amount: '666.66',
+      });
+      expect(result.totals.total_before_tax).toBe('8333.34');
+      expect(result.totals.tax_inc).toBe('666.66');
+      expect(result.totals.total_amount).toBe('9000.00');
     });
   });
 });
