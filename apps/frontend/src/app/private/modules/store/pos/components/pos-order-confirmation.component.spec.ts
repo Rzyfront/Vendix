@@ -1,4 +1,4 @@
-import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Component, input, output, signal } from '@angular/core';
 import { of } from 'rxjs';
 import { Store } from '@ngrx/store';
@@ -241,42 +241,91 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
 
     expect(component.awaitingFiscalPrint()).toBe(false);
     expect(mockTicketService.printTicket).toHaveBeenCalled();
-    expect(component.fiscalFallbackNotice()).toContain('No se pudo emitir la factura electronica');
+    expect(component.fiscalFallbackNotice()).toContain('No se pudo emitir la factura electrónica');
     expect(mockToastService.warning).toHaveBeenCalled();
   });
 
-  it('5. Venta con FE cuyo timer de 10s expira emite ticket de contingencia por timeout', fakeAsync(() => {
+  // Zoneless: sin zone.js/testing, `fakeAsync` no existe en este arnés.
+  // Se usa `jasmine.clock()` para controlar el timer de 10s.
+  it('5. Venta con FE cuyo timer de 10s expira emite ticket de contingencia por timeout', async () => {
+    jasmine.clock().install();
+    try {
+      activeFiscalAreasSignal.set(['invoicing']);
+      fixture.componentRef.setInput('isOpen', true);
+      fixture.componentRef.setInput('orderData', sampleOrder);
+      fixture.detectChanges();
+
+      expect(component.awaitingFiscalPrint()).toBe(true);
+      expect(mockTicketService.printTicket).not.toHaveBeenCalled();
+
+      jasmine.clock().tick(10000);
+      await fixture.whenStable();
+
+      expect(component.awaitingFiscalPrint()).toBe(false);
+      expect(mockTicketService.printTicket).toHaveBeenCalled();
+      expect(component.fiscalFallbackNotice()).toContain('La DIAN tardó más de lo esperado en responder');
+      expect(mockToastService.warning).toHaveBeenCalled();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+  });
+
+  it('7. Venta con FE en contingencia imprime documento y avisa sin afirmar aceptación DIAN', () => {
     activeFiscalAreasSignal.set(['invoicing']);
     fixture.componentRef.setInput('isOpen', true);
     fixture.componentRef.setInput('orderData', sampleOrder);
     fixture.detectChanges();
 
     expect(component.awaitingFiscalPrint()).toBe(true);
-    expect(mockTicketService.printTicket).not.toHaveBeenCalled();
 
-    tick(10000);
+    const fiscalContingency: PosFiscalStatus = {
+      order_id: 1001,
+      state: 'contingency',
+      message: 'La DIAN no estaba disponible: el documento se expidió bajo contingencia y se transmitirá automáticamente.',
+      invoice_id: 502,
+      invoice_number: 'FE-102',
+      invoice_status: 'contingency',
+      cufe: null,
+      pdf_url: null,
+      blockers: [],
+      retry: null,
+      contingency_deadline: null,
+      invoice_data_token: null,
+    };
+
+    component.onFiscalStatus(fiscalContingency);
 
     expect(component.awaitingFiscalPrint()).toBe(false);
     expect(mockTicketService.printTicket).toHaveBeenCalled();
-    expect(component.fiscalFallbackNotice()).toContain('La DIAN tardo mas de lo esperado en responder');
-    expect(mockToastService.warning).toHaveBeenCalled();
-  }));
+    expect(mockToastService.warning).toHaveBeenCalledWith(fiscalContingency.message);
+    // `printReceipt` avisa 'Ticket enviado a impresión' en toda ruta: lo que
+    // no debe aparecer es un éxito de aceptación DIAN.
+    const successMsgs: string[] = mockToastService.success.calls
+      .allArgs()
+      .map((args: unknown[]) => String(args[0]));
+    expect(successMsgs.some((m) => m.includes('aceptada por la DIAN'))).toBe(false);
+  });
 
-  it('6. startNewSale() limpia timers y resetea awaitingFiscalPrint', fakeAsync(() => {
-    activeFiscalAreasSignal.set(['invoicing']);
-    fixture.componentRef.setInput('isOpen', true);
-    fixture.componentRef.setInput('orderData', sampleOrder);
-    fixture.detectChanges();
+  it('6. startNewSale() limpia timers y resetea awaitingFiscalPrint', () => {
+    jasmine.clock().install();
+    try {
+      activeFiscalAreasSignal.set(['invoicing']);
+      fixture.componentRef.setInput('isOpen', true);
+      fixture.componentRef.setInput('orderData', sampleOrder);
+      fixture.detectChanges();
 
-    expect(component.awaitingFiscalPrint()).toBe(true);
+      expect(component.awaitingFiscalPrint()).toBe(true);
 
-    component.startNewSale();
+      component.startNewSale();
 
-    expect(component.awaitingFiscalPrint()).toBe(false);
-    expect(component.fiscalFallbackNotice()).toBeNull();
+      expect(component.awaitingFiscalPrint()).toBe(false);
+      expect(component.fiscalFallbackNotice()).toBeNull();
 
-    tick(10000);
-    // El timeout cancelado no debe disparar printTicket
-    expect(mockTicketService.printTicket).not.toHaveBeenCalled();
-  }));
+      jasmine.clock().tick(10000);
+      // El timeout cancelado no debe disparar printTicket
+      expect(mockTicketService.printTicket).not.toHaveBeenCalled();
+    } finally {
+      jasmine.clock().uninstall();
+    }
+  });
 });

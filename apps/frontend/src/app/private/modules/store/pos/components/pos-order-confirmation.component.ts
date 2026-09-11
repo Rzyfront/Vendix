@@ -710,18 +710,11 @@ private authFacade = inject(AuthFacade);
       const isOpen = this.isOpen();
       const data = this.orderData();
       if (isOpen && data) {
-        // CP-POS-MODAL-SCOPE-001 / Phase F.8 — defer the order-data load out
-        // of the current change-detection cycle. `loadOrderData()` writes
-        // `orderNumber`, `currentDate`, `customerName`, `electronicInvoice`,
-        // `fiscalStatus`, `creatingInvoice`, etc. while Angular is still
-        // checking THIS template, and we get NG0100
-        // ExpressionChangedAfterItHasBeenCheckedError on every order
-        // confirmation. `setTimeout(0)` schedules the load on the next
-        // macrotask — AFTER Angular's CD has fully settled and a fresh CD
-        // cycle will pick up all the new field/signal values cleanly. Using
-        // `queueMicrotask` was not enough: the next CD cycle still saw the
-        // half-updated state and tripped the guard. Zoneless-safe: signal
-        // writes inside the timeout are still tracked by the change graph.
+        // CP-POS-MODAL-SCOPE-001 / Phase F.8 — resetea el estado fiscal de la
+        // orden anterior y evalúa el auto-print dentro de `untracked()` para
+        // que esas escrituras no creen dependencias del effect ni re-disparen
+        // el ciclo de CD con valores a medio actualizar (NG0100
+        // ExpressionChangedAfterItHasBeenCheckedError en el modal).
         untracked(() => {
           this.resetStaleInvoiceState(data);
           this.maybeAutoPrint();
@@ -830,13 +823,24 @@ private authFacade = inject(AuthFacade);
     // un tiquete de venta prematuro ("COPIA INFORMATIVA").
     if (this.shouldWaitForFiscalEmission()) {
       const currentFiscalState = this.fiscalStatus()?.state;
-      if (currentFiscalState === 'issued' || currentFiscalState === 'contingency') {
+      if (currentFiscalState === 'issued') {
         this.autoPrintedOrderId = this.orderId;
         const invoiceNumber = this.fiscalStatus()?.invoice_number;
         this.toastService.success(
           invoiceNumber
             ? `Factura ${invoiceNumber} aceptada por la DIAN`
             : 'Factura aceptada por la DIAN',
+        );
+        this.printReceipt();
+        void this.printDispatchTicketIfNeeded('automatic');
+        return;
+      }
+      if (currentFiscalState === 'contingency') {
+        this.autoPrintedOrderId = this.orderId;
+        // Contingencia ≠ aceptación: la DIAN no estaba disponible, el
+        // documento se expidió bajo contingencia y se transmitirá solo.
+        this.toastService.warning(
+          this.fiscalStatus()?.message || 'Documento expedido bajo contingencia.',
         );
         this.printReceipt();
         void this.printDispatchTicketIfNeeded('automatic');
@@ -1134,7 +1138,7 @@ private authFacade = inject(AuthFacade);
       this.orderId &&
       this.autoPrintedOrderId !== this.orderId
     ) {
-      if (status.state === 'issued' || status.state === 'contingency') {
+      if (status.state === 'issued') {
         this.cleanupFiscalPrintTimeout();
         this.awaitingFiscalPrint.set(false);
         this.autoPrintedOrderId = this.orderId;
@@ -1144,6 +1148,16 @@ private authFacade = inject(AuthFacade);
             ? `Factura ${status.invoice_number} aceptada por la DIAN`
             : 'Factura aceptada por la DIAN',
         );
+        this.printReceipt();
+        void this.printDispatchTicketIfNeeded('automatic');
+      } else if (status.state === 'contingency') {
+        this.cleanupFiscalPrintTimeout();
+        this.awaitingFiscalPrint.set(false);
+        this.autoPrintedOrderId = this.orderId;
+        this.autoPrintedFeOrderId = this.orderId;
+        // Contingencia ≠ aceptación: se imprime el documento de contingencia
+        // y se avisa con el mensaje real del backend, no con éxito DIAN.
+        this.toastService.warning(status.message);
         this.printReceipt();
         void this.printDispatchTicketIfNeeded('automatic');
       } else if (status.state === 'failed') {
@@ -1177,7 +1191,10 @@ private authFacade = inject(AuthFacade);
             : 'Factura aceptada por la DIAN',
         );
         // Con auto-print activo y factura emitida a mano sobre orden previa,
-        // permite imprimir la FE si aún no se había impreso:
+        // permite imprimir la FE si aún no se había impreso. Nota intencional
+        // (revisión PR789): no se exige que el ticket ya haya salido solo para
+        // no dejar sin papel una FE manual cuando el auto-print no disparó.
+        // El guard `autoPrintedFeOrderId` evita la doble impresión en todo caso:
         if (
           this.orderId &&
           this.autoPrintedFeOrderId !== this.orderId &&
