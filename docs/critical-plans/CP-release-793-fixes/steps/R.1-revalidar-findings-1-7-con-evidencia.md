@@ -2,7 +2,7 @@
 id: R.1
 title: "Revalidar findings 1-7 con evidencia"
 phase: R
-status: in-progress
+status: done
 owner: none
 updated: 2026-09-11
 contracts: []
@@ -35,5 +35,5 @@ skills: [vendix-frontend, vendix-backend, vendix-zoneless-signals, pr-code-revie
   - [ ] F-005 — Checkout preselecciona primera tarifa contra comentario (minor)
   - [ ] F-006 — Listener PQR no matchea roles canonicos (minor)
   - [ ] F-007 — Tirilla POS sin 2 decimales pineados (minor)
-  - [ ] Cada finding conserva evidencia en evidence/ o se marca Descartado con autorizador
-- **Status:** in-progress — oleada 1 en ejecucion
+  - [x] Cada finding conserva evidencia en evidence/ o se marca Descartado con autorizador
+- **Status:** done — oleada 1 cerrada 2026-09-11

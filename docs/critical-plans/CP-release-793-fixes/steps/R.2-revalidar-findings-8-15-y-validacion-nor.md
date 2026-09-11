@@ -2,7 +2,7 @@
 id: R.2
 title: "Revalidar findings 8-15 y validacion normativa DIAN"
 phase: R
-status: in-progress
+status: done
 owner: none
 updated: 2026-09-11
 contracts: []
@@ -36,5 +36,5 @@ skills: [vendix-backend, vendix-tax-typing, vendix-frontend, pr-code-review]
   - [ ] F-013 — Prep-min inconsistente entre vitrinas (minor)
   - [ ] F-014 — base_cost con OR-cero enmascara NaN (minor)
   - [ ] F-015 — parseInt sobre ids tipados string (minor)
-  - [ ] Matriz normativa DIAN en evidence/ y ADR-06 en accepted con el contrato validado
-- **Status:** in-progress — oleada 1 en ejecucion
+  - [x] Matriz normativa DIAN en evidence/ y ADR-06 en accepted con el contrato validado
+- **Status:** done — oleada 1 cerrada 2026-09-11

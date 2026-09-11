@@ -2,7 +2,7 @@
 id: T.1
 title: "Tickets Linear: dedup, crear y actualizar"
 phase: T
-status: in-progress
+status: done
 owner: none
 updated: 2026-09-11
 contracts: []
@@ -24,8 +24,8 @@ skills: [linear-issues, linear-connect]
   - `searchIssues` por cada candidato antes de crear; si hay match >=70%% se actualiza/comenta en vez de crear
   - Releer cada issue tras escribir y confirmar estado + labels (un UUID muerto falla en silencio)
 - **Acceptance checklist:**
-  - [ ] Dedup ejecutado para los 7 findings sin ticket y el CHORE de pulido (11, 13, 14, 15)
-  - [ ] Creados en Todo: 3 tickets nuevos maximo agrupados por modulo (PQR, checkout/shipping, UI/pulido)
-  - [ ] Comentados los 4 QUI existentes: 628 (abandonados), 801 (toggle), 792 (footer), 702 (notas)
-  - [ ] Ejecucion registrada en log con identifier + URL por ticket
-- **Status:** in-progress — oleada 1 en ejecucion
+  - [x] Dedup ejecutado para los 7 findings sin ticket y el CHORE de pulido (11, 13, 14, 15)
+  - [x] Creados en Todo: 3 tickets nuevos maximo agrupados por modulo (PQR, checkout/shipping, UI/pulido)
+  - [x] Comentados los 4 QUI existentes: 628 (abandonados), 801 (toggle), 792 (footer), 702 (notas)
+  - [x] Ejecucion registrada en log con identifier + URL por ticket
+- **Status:** done — oleada 1 cerrada 2026-09-11
