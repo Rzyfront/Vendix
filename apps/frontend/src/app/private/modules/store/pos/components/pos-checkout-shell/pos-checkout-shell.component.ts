@@ -122,6 +122,8 @@ export class PosCheckoutShellComponent {
   readonly shippingCompleted = output<any>();
   readonly requestCustomer = output<void>();
   readonly customerSelected = output<PosCustomer>();
+  /** CP-pos-customer-stale (F-006) — el cajero quitó el cliente: el padre debe desvincular el carro. */
+  readonly customerCleared = output<void>();
   readonly tableSessionOpened = output<OpenTableSessionResult>();
   /** Emitted when a draft order has been persisted (and KDS fired if applicable). */
   readonly draftSaved = output<PosOrderCreateResult>();
@@ -1693,6 +1695,11 @@ export class PosCheckoutShellComponent {
       this.addressValid.set(
         !!(seeded.address_line1 && seeded.city && seeded.phone_number),
       );
+    } else if (this.requiresAddress()) {
+      // CP-pos-customer-stale (F-005) — reemplazo A→B sin dirección guardada:
+      // no heredar la dirección/gate de A; el sub-paso Dirección exige captura.
+      this.capturedAddress.set(null);
+      this.addressValid.set(false);
     }
   }
 
@@ -1704,6 +1711,9 @@ export class PosCheckoutShellComponent {
   /** "Quitar cliente / venta anónima" desde el selector inline. */
   onCustomerCleared(): void {
     this.toggleAnonymousSale(true);
+    // CP-pos-customer-stale (F-006) — la etiqueta no basta: el padre es dueño
+    // del carro y debe desvincular al cliente para no facturarle a A.
+    this.customerCleared.emit();
   }
 
   /**

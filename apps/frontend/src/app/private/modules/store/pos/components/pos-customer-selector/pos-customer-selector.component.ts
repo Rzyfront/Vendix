@@ -536,7 +536,14 @@ export class PosCustomerSelectorComponent {
     this.resolving.set(false);
     this.query.set('');
     this.lastQuery.set('');
-    this.activeTab.set('search');
-    this.view.set('overview');
+    // CP-pos-customer-stale (F-008) — en modo factura mínima no existe tab de
+    // búsqueda: volver a la vista mínima en vez del buscador general.
+    if (this.minimalInvoiceMode()) {
+      this.activeTab.set('create');
+      this.view.set('search');
+    } else {
+      this.activeTab.set('search');
+      this.view.set('overview');
+    }
   }
 }

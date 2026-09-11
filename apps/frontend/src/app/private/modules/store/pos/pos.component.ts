@@ -570,6 +570,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (shippingCompleted)="onShippingCompleted($event)"
         (requestCustomer)="onOpenCustomerModal()"
         (customerSelected)="onPaymentCustomerSelected($event)"
+        (customerCleared)="onClearCustomer()"
         (tableSessionOpened)="onPaymentTableSessionOpened($event)"
         (draftSaved)="onCreateOrderConfirmed($event)"
         (editorUpdated)="onEditorUpdated($event)"
