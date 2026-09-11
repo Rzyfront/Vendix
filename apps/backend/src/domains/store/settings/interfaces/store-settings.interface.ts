@@ -173,6 +173,9 @@ export interface EcommerceSettings {
     // `price_tiers.kind='sale_unit'`) en la ficha de producto del storefront.
     // Ausente ⇒ apagado (default `false`); se lee con `=== true`.
     enable_sale_unit_selector: boolean;
+    // Opt-in: muestra el tiempo de preparación del producto en el catálogo
+    // público (lista y detalle). Ausente ⇒ apagado (default `false`).
+    show_preparation_time?: boolean;
   };
   cart?: {
     allow_guest_checkout: boolean;
