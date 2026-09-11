@@ -85,27 +85,28 @@ describe('tax-inclusive-math — matriz A.6 (F-005 truncado DIAN)', () => {
   });
 
   describe('caso 3 — mixto (primero se despeja, lo agregado suma encima)', () => {
-    it('100000 con INC 8% dentro + IVA 19% fuera ⇒ base 92592.59, total 117592.59', () => {
-      // Divisor = 1.08 (SOLO lo inclusivo). B = trunc(100000/1.08)
-      // = trunc(92592.5925…) = 92592.59.
-      // INC = trunc(92592.59 × 0.08) = trunc(7407.4072) = 7407.40.
-      // IVA = trunc(92592.59 × 0.19) = trunc(17592.5921) = 17592.59.
-      // Total = 100000 + 17592.59 = 117592.59.
+    it('100000 con INC 8% dentro + IVA 19% fuera ⇒ base 92592.60, total 117592.59', () => {
+      // Divisor = 1.08 (SOLO lo inclusivo). B0 = trunc(100000/1.08)
+      // = trunc(92592.5925…) = 92592.59; f(B0) = 99999.99 < bruto ⇒ +1¢
+      // (A.2/ADR-01): base final 92592.60.
+      // INC = trunc(92592.60 × 0.08) = trunc(7407.408) = 7407.40.
+      // IVA = trunc(92592.60 × 0.19) = trunc(17592.594) = 17592.59.
+      // Total = 100000 + 17592.59 = 117592.59 (idéntico; solo la base +1¢).
       const r = resolveLineTotals(100000, [
         { rate: 0.08, is_inclusive: true },
         { rate: 0.19, is_inclusive: false },
       ]);
-      expect(r.base).toBe(92592.59);
+      expect(r.base).toBe(92592.6);
       expect(r.taxes[0]).toMatchObject({
         rate: 0.08,
         is_inclusive: true,
-        base: 92592.59,
+        base: 92592.6,
         amount: 7407.4,
       });
       expect(r.taxes[1]).toMatchObject({
         rate: 0.19,
         is_inclusive: false,
-        base: 92592.59,
+        base: 92592.6,
         amount: 17592.59,
       });
       expect(r.total).toBe(117592.59);
@@ -169,12 +170,14 @@ describe('tax-inclusive-math — matriz A.6 (F-005 truncado DIAN)', () => {
 
   describe('F-005 — truncado DIAN, nunca redondeo ni residuo-a-la-mayor', () => {
     it('100 con IVA dentro: cuota 15.96 (redondear daría 15.97)', () => {
-      // B = trunc(100/1.19) = trunc(84.0336…) = 84.03.
-      // Cuota = trunc(84.03 × 0.19) = trunc(15.9657) = 15.96.
-      // Math.round daría 15.97: ese centavo es el defecto F-005.
+      // A.2/ADR-01: B0 = trunc(100/1.19) = 84.03, +1¢ ⇒ base final 84.04.
+      // Cuota = trunc(84.04 × 0.19) = trunc(15.9676) = 15.96: el TRUNCADO
+      // SIGUE INTACTO (Math.round daría 15.97: ese centavo sigue siendo el
+      // defecto F-005). Solo la base absorbe el residuo: 84.04+15.96=100.00.
       const r = resolveLineTotals(100, [{ rate: 0.19, is_inclusive: true }]);
-      expect(r.base).toBe(84.03);
+      expect(r.base).toBe(84.04);
       expect(r.taxes[0].amount).toBe(15.96);
+      expect(r.total).toBe(100);
     });
 
     it('truncMoney trunca hacia cero a 2 decimales', () => {

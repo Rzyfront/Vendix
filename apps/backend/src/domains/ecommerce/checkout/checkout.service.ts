@@ -11,7 +11,7 @@ import { resolveLineTotals } from '../../store/taxes/utils/tax-inclusive-math.ut
 import { CheckoutDto } from './dto/checkout.dto';
 import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { payment_processing_mode_enum } from '@prisma/client';
+import { Prisma, payment_processing_mode_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../../store/settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -1440,36 +1440,71 @@ export class CheckoutService {
               ? Number(productWithTaxes.cost_price)
               : null;
 
-        // A.4 (F-003): el total de la línea sale del dueño único.
-        // `netPrice` es el precio FINAL publicado (F-011: para inclusivo ya
-        // trae el impuesto dentro): inclusivo NO crece el total, agregado
-        // suma sobre la base neta. La línea persiste la BASE despejada
-        // (convención convergente con el cobro POS, A.3); `net_price`
-        // conserva el publicado para descuentos y visualización.
-        const lineTotals = resolveLineTotals(
-          netPrice,
+        // A.2 (F-009/ADR-01 + revisión orquestador): la UNIDAD cierra.
+        // UNA llamada al dueño único por línea sobre el bruto UNITARIO
+        // (`netPrice`, precio FINAL publicado, F-011); la unidad absorbida
+        // cierra exacta (3×1000 INC 8% ⇒ 925.93+74.07 = 1000.00) y la línea
+        // es qty×unidad en `Decimal` (2777.79+222.21 = 3000.00): caja,
+        // confirmación POS y tirilla ven cifras que cierran por unidad, y el
+        // total coincide con el motor (que re-deriva por línea al facturar;
+        // el split puede diferir ≤1¢, tolerancia del fixture).
+        // `netPrice` no unitario no existe: es el publicado por unidad.
+        // Los totales se REUSAN de ese único resolve (F-042: sin doble
+        // resolve). `net_price` conserva el publicado para descuentos y
+        // visualización.
+        const rawQuantity = Number(item.quantity);
+        const safeQuantity =
+          Number.isFinite(rawQuantity) && rawQuantity > 0 ? rawQuantity : 1;
+        const quantityDec = new Prisma.Decimal(safeQuantity);
+        const unitTotals = resolveLineTotals(
+          Number.isFinite(netPrice) ? netPrice : 0,
           taxInfo.taxes.map((t: any) => ({
             rate: t.rate,
             is_inclusive: t.is_inclusive,
           })),
         );
+        // F-061: el corto inalcanzable (ADR-04) no se persiste en silencio:
+        // warn estructurado ANTES del create con orden + línea + inputs. La
+        // venta NO se bloquea acá (el bloqueo vive en la numeración,
+        // A.2-motor); `order_number` ya existe pero el id aún no (el create
+        // viene después).
+        if ((unitTotals.unclosed_residual_cents ?? 0) !== 0) {
+          this.logger.warn({
+            event: 'checkout.unclosed_residual_cents',
+            order_number,
+            line_index: index,
+            store_id: RequestContextService.getStoreId() ?? null,
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id ?? null,
+            quantity: item.quantity,
+            unit_gross: netPrice,
+            residual_cents: unitTotals.unclosed_residual_cents,
+            invalid_inputs: unitTotals.invalid_inputs,
+          });
+        }
+        const lineBaseDec = new Prisma.Decimal(unitTotals.base).times(
+          quantityDec,
+        );
+        const lineTaxDec = new Prisma.Decimal(
+          unitTotals.total_tax_amount,
+        ).times(quantityDec);
 
         return {
           ...item,
           net_price: netPrice,
-          base_unit_price: lineTotals.base,
+          base_unit_price: unitTotals.base,
           cost_price,
-          tax_rate: lineTotals.total_rate,
-          tax_amount_item: lineTotals.total_tax_amount,
-          total_tax: lineTotals.total_tax_amount * item.quantity,
-          total_net: lineTotals.base * item.quantity,
-          item_taxes: lineTotals.taxes.map((t, index) => ({
-            tax_rate_id: (taxInfo.taxes[index] as any)?.tax_rate_id ?? null,
-            name: (taxInfo.taxes[index] as any)?.name ?? '',
+          tax_rate: unitTotals.total_rate,
+          tax_amount_item: unitTotals.total_tax_amount,
+          total_tax: Number(lineTaxDec.toFixed(2, Prisma.Decimal.ROUND_DOWN)),
+          total_net: Number(lineBaseDec.toFixed(2, Prisma.Decimal.ROUND_DOWN)),
+          item_taxes: unitTotals.taxes.map((t, taxIndex) => ({
+            tax_rate_id: (taxInfo.taxes[taxIndex] as any)?.tax_rate_id ?? null,
+            name: (taxInfo.taxes[taxIndex] as any)?.name ?? '',
             rate: t.rate,
             amount: t.amount,
             base: t.base,
-            tax_type: (taxInfo.taxes[index] as any)?.tax_type ?? 'iva',
+            tax_type: (taxInfo.taxes[taxIndex] as any)?.tax_type ?? 'iva',
             is_inclusive: t.is_inclusive,
           })),
           applied_price_tier_id: line.applied_price_tier_id,
@@ -2168,33 +2203,68 @@ export class CheckoutService {
               ? Number(productWithTaxes.cost_price)
               : null;
 
-        // A.4 (F-003): el total de la línea sale del dueño único (misma
-        // semántica que el checkout principal: base despejada persistida,
-        // `net_price` publicado para descuentos).
+        // A.2 (F-009/ADR-01): granularidad canónica = bruto de LÍNEA
+        // (misma semántica que el checkout principal: UNA llamada por línea
+        // sobre `netPrice × quantity`, escala en `Decimal`, totales reusados
+        // del único resolve — F-042 — y warn de residuo antes de persistir).
+        const waRawQuantity = Number(item.quantity);
+        const waSafeQuantity =
+          Number.isFinite(waRawQuantity) && waRawQuantity > 0
+            ? waRawQuantity
+            : 1;
+        const waQuantityDec = new Prisma.Decimal(waSafeQuantity);
+        const waLineGrossDec = new Prisma.Decimal(
+          Number.isFinite(netPrice) ? netPrice : 0,
+        ).times(waQuantityDec);
         const lineTotals = resolveLineTotals(
-          netPrice,
+          waLineGrossDec.toNumber(),
           taxInfo.taxes.map((t: any) => ({
             rate: t.rate,
             is_inclusive: t.is_inclusive,
           })),
         );
+        if ((lineTotals.unclosed_residual_cents ?? 0) !== 0) {
+          this.logger.warn({
+            event: 'checkout.unclosed_residual_cents',
+            order_number,
+            line_index: index,
+            store_id: RequestContextService.getStoreId() ?? null,
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id ?? null,
+            quantity: item.quantity,
+            unit_gross: netPrice,
+            line_gross: waLineGrossDec.toNumber(),
+            residual_cents: lineTotals.unclosed_residual_cents,
+            invalid_inputs: lineTotals.invalid_inputs,
+          });
+        }
+        const waTruncUnit = (d: Prisma.Decimal): number =>
+          Number(d.toFixed(2, Prisma.Decimal.ROUND_DOWN));
+        const waBaseUnitDec = new Prisma.Decimal(lineTotals.base).dividedBy(
+          waQuantityDec,
+        );
+        const waTaxUnitDec = new Prisma.Decimal(
+          lineTotals.total_tax_amount,
+        ).dividedBy(waQuantityDec);
 
         return {
           ...item,
           net_price: netPrice,
-          base_unit_price: lineTotals.base,
+          base_unit_price: waTruncUnit(waBaseUnitDec),
           cost_price,
           tax_rate: lineTotals.total_rate,
-          tax_amount_item: lineTotals.total_tax_amount,
-          total_tax: lineTotals.total_tax_amount * item.quantity,
-          total_net: lineTotals.base * item.quantity,
-          item_taxes: lineTotals.taxes.map((t, index) => ({
-            tax_rate_id: (taxInfo.taxes[index] as any)?.tax_rate_id ?? null,
-            name: (taxInfo.taxes[index] as any)?.name ?? '',
+          tax_amount_item: waTruncUnit(waTaxUnitDec),
+          total_tax: lineTotals.total_tax_amount,
+          total_net: lineTotals.base,
+          item_taxes: lineTotals.taxes.map((t, taxIndex) => ({
+            tax_rate_id: (taxInfo.taxes[taxIndex] as any)?.tax_rate_id ?? null,
+            name: (taxInfo.taxes[taxIndex] as any)?.name ?? '',
             rate: t.rate,
-            amount: t.amount,
-            base: t.base,
-            tax_type: (taxInfo.taxes[index] as any)?.tax_type ?? 'iva',
+            amount: waTruncUnit(
+              new Prisma.Decimal(t.amount).dividedBy(waQuantityDec),
+            ),
+            base: waTruncUnit(waBaseUnitDec),
+            tax_type: (taxInfo.taxes[taxIndex] as any)?.tax_type ?? 'iva',
             is_inclusive: t.is_inclusive,
           })),
           applied_price_tier_id: line.applied_price_tier_id,
