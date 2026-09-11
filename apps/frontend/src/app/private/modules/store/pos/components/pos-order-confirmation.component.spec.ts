@@ -366,7 +366,9 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
     fixture.detectChanges();
 
     const items = component.derivedOrderItems();
-    expect(items).toHaveLength(1);
+    // FIX: `toHaveLength` no resuelve en `FunctionMatchers<any>` para este
+    // matcher chain; usamos `length.toBe(...)` que es universal en Jasmine.
+    expect(items.length).toBe(1);
     expect(items[0].tax).toBe(222.22);
     expect(items[0].totalPrice).toBe(3000);
     // El impuesto aceptado es la Σ del snapshot, idéntica al ítem.
