@@ -312,7 +312,8 @@ function finishLine(
  * nombre del impuesto no entra porque no mueve ni un centavo.
  */
 function lineSignature(line: InvoiceLineMathInput): string {
-  const taxes = Array.isArray(line?.taxes) ? line.taxes : [];
+  const rawTaxes = line?.taxes;
+  const taxes: TaxSelection[] = Array.isArray(rawTaxes) ? rawTaxes : [];
   const taxSig = taxes
     .map(
       (t) =>
@@ -354,7 +355,8 @@ export function computeLineMath(line: InvoiceLineMathInput): InvoiceLineMath {
   if (cached) return cached;
 
   const grossCents = truncNetToCents(lineGrossNet(line));
-  const taxes = Array.isArray(line?.taxes) ? line.taxes : [];
+  const rawTaxes = line?.taxes;
+  const taxes: TaxSelection[] = Array.isArray(rawTaxes) ? rawTaxes : [];
   const cents = computeLineCents(grossCents, taxes);
   const result: InvoiceLineMath = {
     gross: cents.grossCents / 100,
@@ -502,7 +504,8 @@ export function aggregatePreviewTaxBreakdown(
 ): PreviewTaxRow[] {
   const rows = new Map<string, PreviewTaxRow & { baseCents: number; amountCents: number }>();
   for (let i = 0; i < items.length; i++) {
-    const taxes = Array.isArray(items[i]?.taxes) ? items[i].taxes : [];
+    const rawTaxes = items[i]?.taxes;
+    const taxes: TaxSelection[] = Array.isArray(rawTaxes) ? rawTaxes : [];
     const details = math[i]?.taxes ?? [];
     const baseCents = math[i]?.baseCents ?? 0;
     for (let j = 0; j < taxes.length; j++) {

@@ -23,6 +23,7 @@
   },
   "files": ["src/main.ts", "src/main.server.ts"],
   "include": ["src/**/*.ts", "src/**/*.d.ts"],
+  "exclude": ["src/**/*.spec.ts"],
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,
     "strictInjectionParameters": true,

@@ -10,8 +10,6 @@ import { PriceTierCacheService } from '../../price-tiers/services/price-tier-cac
 import { WithholdingTaxService } from '../../withholding-tax/services/withholding-tax.service';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { InvoicingService } from '../../invoicing/services/invoicing.service';
-import { StoreAvailabilityService } from '../../../../../core/services/store-availability.service';
-import { CartPromotionsService } from '../services/cart-promotions.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 
 /**
@@ -367,14 +365,6 @@ describe('PosCartService — removeFromCart (modo libre, QUI-806)', () => {
         {
           provide: InvoicingService,
           useValue: { getPosUvtThreshold: () => of({ data: null }) },
-        },
-        {
-          provide: StoreAvailabilityService,
-          useValue: { getCurrentStoreId: () => of(null) },
-        },
-        {
-          provide: CartPromotionsService,
-          useValue: { clearPromotions: () => of(null) },
         },
         { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
       ],

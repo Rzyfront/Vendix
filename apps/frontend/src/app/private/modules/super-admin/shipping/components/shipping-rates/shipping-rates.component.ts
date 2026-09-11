@@ -485,6 +485,7 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
   private toastService = inject(ToastService);
 
   ShippingRateType = ShippingRateType;
+  protected readonly Number = Number;
   rates = signal<ShippingRate[]>([]);
   selectedRate = signal<ShippingRate | undefined>(undefined);
   methodOptions = signal<SelectorOption[]>([]);
