@@ -6,10 +6,28 @@ export interface PanelUISettings {
   STORE_ECOMMERCE?: Record<string, boolean>;
 }
 
+/**
+ * Ecommerce catalog opt-in flags. Mirror of the backend
+ * `EcommerceSettings['catalog']` flags in
+ * `apps/backend/src/domains/store/settings/interfaces/store-settings.interface.ts`.
+ * Absent means off — always read with `=== true`.
+ */
+export interface EcommerceCatalogSettings {
+  enable_sale_unit_selector?: boolean;
+  show_preparation_time?: boolean;
+}
+
 export interface StoreSettings {
   general: GeneralSettings;
   inventory: InventorySettings;
   checkout: CheckoutSettings;
+  /**
+   * Ecommerce catalog flags mirror (subset: only the opt-in flags the
+   * storefront gates on). Optional; absent means every flag off.
+   */
+  ecommerce?: {
+    catalog?: EcommerceCatalogSettings;
+  };
 
   notifications: NotificationsSettings;
   pos: PosSettings;

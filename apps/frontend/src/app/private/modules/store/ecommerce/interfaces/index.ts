@@ -69,6 +69,7 @@ export interface EcommerceSettings {
     show_related_products?: boolean;
     enable_filters?: boolean;
     enable_sale_unit_selector?: boolean;
+    show_preparation_time?: boolean;
   };
 
   // Carrito

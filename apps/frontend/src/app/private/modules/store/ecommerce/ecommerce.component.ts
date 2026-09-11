@@ -627,6 +627,8 @@ export class EcommerceComponent {
         enable_filters: [false],
         // Opt-in: apagado por defecto (capacidad nueva de multi-tarifa).
         enable_sale_unit_selector: [false],
+        // Opt-in: apagado por defecto (indicador ~X min en vitrina).
+        show_preparation_time: [false],
       }),
 
       // Carrito
@@ -720,6 +722,9 @@ export class EcommerceComponent {
   }
   get enableSaleUnitSelectorControl() {
     return this.catalogGroup.get('enable_sale_unit_selector') as any;
+  }
+  get showPreparationTimeControl() {
+    return this.catalogGroup.get('show_preparation_time') as any;
   }
 
   // Cart

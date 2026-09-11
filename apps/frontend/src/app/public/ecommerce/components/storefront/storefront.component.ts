@@ -1,13 +1,16 @@
-import { Component, OnInit, inject, signal, computed, effect } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject, signal, computed, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ConfigFacade } from '../../../../core/store/config';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
+import { CatalogService } from '../../../../private/modules/ecommerce/services/catalog.service';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
 import { InputsearchComponent } from '../../../../shared/components/inputsearch/inputsearch.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
+import { BadgeComponent } from '../../../../shared/components/badge/badge.component';
 import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
@@ -21,6 +24,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
     CardComponent,
     InputsearchComponent,
     IconComponent,
+    BadgeComponent,
     CurrencyPipe,
   ],
   template: `
@@ -190,6 +194,20 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
                         </span>
                       }
                     </div>
+                    @if (prepMinutesFor(product); as prepMinutes) {
+                      <app-badge
+                        variant="info"
+                        size="xs"
+                        style="align-self: flex-start; margin-bottom: 1rem;"
+                      >
+                        <app-icon
+                          name="clock"
+                          [size]="12"
+                          style="margin-right: 0.25rem;"
+                        />
+                        <span>~{{ prepMinutes }} min</span>
+                      </app-badge>
+                    }
                     <div class="product-actions">
                       <app-button
                         (click)="addToCart(product)"
@@ -293,6 +311,8 @@ export class StorefrontComponent {
   private configFacade = inject(ConfigFacade);
   private authFacade = inject(AuthFacade);
   private router = inject(Router);
+  private catalogService = inject(CatalogService);
+  private destroyRef = inject(DestroyRef);
 
   private readonly appConfigEffect = effect(() => {
     const appConfig = this.configFacade.getCurrentConfig();
@@ -327,6 +347,15 @@ export class StorefrontComponent {
   readonly cartItems = signal<any[]>([]);
   readonly wishlist = signal<any[]>([]);
 
+  /**
+   * Opt-in storefront: muestra el tiempo de preparación (~X min) en la
+   * tarjeta de producto. Se enciende solo con
+   * `ecommerce.catalog.show_preparation_time === true` leído de
+   * GET /ecommerce/catalog/config/public; cualquier fallo deja el
+   * indicador apagado (fail-closed).
+   */
+  readonly showPreparationTime = signal(false);
+
   readonly cartTotal = computed(() =>
     this.cartItems().reduce(
       (total, item) => total + item.price * item.quantity,
@@ -334,7 +363,34 @@ export class StorefrontComponent {
     )
   );
 
-  ngOnInit() {}
+  ngOnInit() {
+    this.catalogService
+      .getPublicConfig()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.showPreparationTime.set(
+            response.data?.ecommerce?.catalog?.show_preparation_time === true,
+          );
+        },
+        error: () => {
+          this.showPreparationTime.set(false);
+        },
+      });
+  }
+
+  /**
+   * Minutos a pintar para un producto, o `null` cuando no se renderiza nada:
+   * flag apagado, o valor ausente, nulo, no numérico o menor o igual a cero.
+   */
+  prepMinutesFor(
+    product: { preparation_time_minutes?: number | null } | null | undefined,
+  ): number | null {
+    if (this.showPreparationTime() !== true) return null;
+    const minutes = Number(product?.preparation_time_minutes);
+    if (!Number.isFinite(minutes) || minutes <= 0) return null;
+    return Math.floor(minutes);
+  }
 
   private loadDefaultData() {
     this.categories.set(this.generateSampleCategories());
