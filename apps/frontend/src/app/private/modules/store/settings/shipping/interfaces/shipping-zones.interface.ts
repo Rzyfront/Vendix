@@ -125,13 +125,13 @@ export interface UpdateZoneDto extends Partial<CreateZoneDto> {}
 export interface CreateRateDto {
   shipping_zone_id: number;
   shipping_method_id: number;
-  name?: string;
+  name?: string | null;
   type: ShippingRateType;
   base_cost: number;
-  per_unit_cost?: number;
-  min_val?: number;
-  max_val?: number;
-  free_shipping_threshold?: number;
+  per_unit_cost?: number | null;
+  min_val?: number | null;
+  max_val?: number | null;
+  free_shipping_threshold?: number | null;
   is_active?: boolean;
 }
 

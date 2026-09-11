@@ -2056,6 +2056,30 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "5127803d",
+      "created_by": "rzy",
+      "created_at": "2026-09-11T09:40:33Z",
+      "sessions": 1,
+      "memories": 6,
+      "prompts": 0
+    },
+    {
+      "id": "346580e9",
+      "created_by": "rzy",
+      "created_at": "2026-09-11T19:20:10Z",
+      "sessions": 0,
+      "memories": 2,
+      "prompts": 0
+    },
+    {
+      "id": "b6246388",
+      "created_by": "rzy",
+      "created_at": "2026-09-11T21:53:14Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }

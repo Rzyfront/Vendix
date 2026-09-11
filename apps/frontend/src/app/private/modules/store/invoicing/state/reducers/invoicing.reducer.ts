@@ -149,6 +149,7 @@ export const invoicingReducer = createReducer(
   on(
     InvoicingActions.validateInvoiceSuccess,
     InvoicingActions.sendInvoiceSuccess,
+    InvoicingActions.issueNoteSuccess,
     (state, { invoice }) => ({
       ...state,
       currentInvoice: invoice,

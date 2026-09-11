@@ -55,13 +55,15 @@ describe('TaxesService.calculateProductTaxes — contrato por-tasa (A.3)', () =>
     });
 
     expect(out.taxes).toHaveLength(2);
+    // A.2/ADR-01 («caso del bug»): la base absorbe +1¢ (92592.60); cuotas y
+    // total idénticos (7407.40/17592.59/117592.59).
     expect(out.taxes[0]).toMatchObject({
       tax_rate_id: 1,
       name: 'INC',
       rate: 0.08,
       tax_type: 'inc',
       is_inclusive: true,
-      base: 92592.59,
+      base: 92592.6,
       amount: 7407.4,
     });
     expect(out.taxes[1]).toMatchObject({
@@ -70,10 +72,10 @@ describe('TaxesService.calculateProductTaxes — contrato por-tasa (A.3)', () =>
       rate: 0.19,
       tax_type: 'iva',
       is_inclusive: false,
-      base: 92592.59,
+      base: 92592.6,
       amount: 17592.59,
     });
-    expect(out.base).toBe(92592.59);
+    expect(out.base).toBe(92592.6);
     // El total solo crece con lo agregado (F-001).
     expect(out.total).toBe(117592.59);
   });
@@ -134,9 +136,11 @@ describe('TaxesService.calculateProductTaxes — contrato por-tasa (A.3)', () =>
   });
 
   it('despeja sobre el precio FINAL resuelto, nunca sobre base cruda (F-011)', async () => {
-    // Precio de oferta 95000 con IVA dentro: B = trunc(95000/1.19)
-    // = trunc(79831.9327…) = 79831.93; cuota = trunc(79831.93 × 0.19)
-    // = trunc(15168.0667) = 15168.06.
+    // Precio de oferta 95000 con IVA dentro: B0 = trunc(95000/1.19)
+    // = trunc(79831.9327…) = 79831.93; f(B0) = 94999.99 < bruto ⇒ +1¢
+    // (A.2/ADR-01, «caso del bug»): base final 79831.94.
+    // Cuota = trunc(79831.94 × 0.19) = trunc(15168.0686) = 15168.06
+    // (idéntica); total 95000 (idéntico).
     const service = buildService();
     const out = await service.calculateProductTaxes(7, 95000, {
       client: clientWith([
@@ -146,7 +150,7 @@ describe('TaxesService.calculateProductTaxes — contrato por-tasa (A.3)', () =>
         }),
       ]) as any,
     });
-    expect(out.base).toBe(79831.93);
+    expect(out.base).toBe(79831.94);
     expect(out.taxes[0].amount).toBe(15168.06);
     expect(out.total).toBe(95000);
   });

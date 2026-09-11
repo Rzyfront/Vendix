@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
+import { TenantFacade } from '../../../../core/store';
 
 /**
  * Confirmation page shown after a successful PQR submission. Displays
@@ -18,6 +19,11 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
 })
 export class PqrThankYouComponent {
   private readonly route = inject(ActivatedRoute);
+  private readonly tenantFacade = inject(TenantFacade);
+
+  readonly storeName = computed(
+    () => this.tenantFacade.storeName() || this.tenantFacade.getCurrentStore()?.name || '',
+  );
 
   readonly ticketNumber = toSignal(
     this.route.paramMap,

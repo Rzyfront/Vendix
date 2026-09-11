@@ -650,6 +650,52 @@ export class CartService {
     return Date.now() > expiresAt;
   }
 
+  /**
+   * QUI-795 — vacía el carrito invitado si está vencido sin necesidad de
+   * recargar la página.
+   *
+   * El `getLocalCart()` privado ya purga localStorage al leer si encuentra la
+   * marca de expirado, pero ese camino solo corre cuando alguien lee el
+   * carrito (addItem, saveLocalCart, loadLocalCart). Si el cliente deja la
+   * pestaña abierta y vuelve al cabo de N horas, nadie lee el carrito hasta
+   * el siguiente mutación: la UI muestra los ítems viejos aunque
+   * localStorage ya esté vencido.
+   *
+   * Este método es el disparador explícito: lo invoca el layout del storefront
+   * (a) en el constructor y (b) en cada `visibilitychange` cuando la pestaña
+   * vuelve a primer plano. Solo emite `emitEmptyCart()` si efectivamente
+   * había algo vencido (para no refrescar la UI en cada cambio de foco).
+   *
+   * Devuelve `true` si purgó algo, `false` si no había nada vencido.
+   */
+  purgeExpiredLocalCart(): boolean {
+    const stored = localStorage.getItem(this.local_storage_key);
+    if (!stored) return false;
+
+    let parsed: LocalCartItem[] | StoredLocalCart | null = null;
+    try {
+      parsed = JSON.parse(stored) as LocalCartItem[] | StoredLocalCart;
+    } catch {
+      // Storage corrupto: lo tiramos y emitimos vacío para no mostrar
+      // basura. Mantiene el contrato del bug original (purga silenciosa).
+      localStorage.removeItem(this.local_storage_key);
+      this.emitEmptyCart();
+      return true;
+    }
+
+    if (!parsed) return false;
+
+    // Carrito legacy (array plano sin `updated_at`): no se puede evaluar
+    // expiración, pero tampoco molesta — sigue funcionando como antes.
+    if (Array.isArray(parsed)) return false;
+
+    if (!this.isStoredCartExpired(parsed)) return false;
+
+    localStorage.removeItem(this.local_storage_key);
+    this.emitEmptyCart();
+    return true;
+  }
+
   getCartExpirationHours(): number | null {
     const value =
       this.domain_service.getCurrentDomainConfig()?.customConfig?.ecommerce

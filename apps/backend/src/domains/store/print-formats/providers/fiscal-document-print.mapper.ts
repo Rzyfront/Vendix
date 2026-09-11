@@ -1,8 +1,18 @@
+import { Logger } from '@nestjs/common';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { mapUserAddress } from '../lib/customer-address';
 import { RESOLUTION_PUBLIC_SELECT } from '../../invoicing/utils/technical-key.util';
 import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
 import { resolveFiscalIssuerForPrint } from '../services/fiscal-issuer-identity';
+
+/**
+ * A.3 (CP-facturacion-impuesto-incluido-redondeo, F-066) — el mapeador es una
+ * función pura sin DI, así que el log estructurado del fallback sale por un
+ * `Logger` de módulo. Dispara SOLO cuando el snapshot falta y se recompone:
+ * carta/tirilla mostrando un recompute mientras el snapshot y el CUFE dicen
+ * otro es exactamente lo que B.2 verifica que no pase en silencio.
+ */
+const fallbackLogger = new Logger('FiscalDocumentPrintMapper');
 
 /**
  * UNA sola proyección `invoices` → modelo de impresión, compartida por los dos
@@ -189,7 +199,22 @@ export function resolveRawLogoKey(invoice: any): string | undefined {
   return store.logo_url || org.logo_url || undefined;
 }
 
-const money = (n: number) => `$${n.toLocaleString('es-CO')}`;
+/**
+ * A.3 — contrato decimal del papel, pineado como `CurrencyFormatService`:
+ * `minimum/maximumFractionDigits: 2` siempre. Sin el pineado, `toLocaleString`
+ * usa 0–3 decimales según la magnitud y `$3000` se imprime `$3.000` mientras
+ * el XML declara `3000.00`: el adquiriente suma distinto que la factura.
+ *
+ * F-007 — helper compartido: el override fiscal de
+ * `pos-sale-ticket.provider.ts` lo reusa para que la tirilla con snapshot
+ * pinte la misma precisión que el documento fiscal (mismo modelo, una sola
+ * precisión: `'$5.000,00'`).
+ */
+export const formatFiscalMoney = (n: number) =>
+  `$${Number(n || 0).toLocaleString('es-CO', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
 export function mapFiscalDocumentToPrintData(
   invoice: any,
@@ -236,14 +261,14 @@ export function mapFiscalDocumentToPrintData(
       variant_sku: variantSku,
       quantity: Number(it.quantity || 1),
       unit_price: unitPrice,
-      unit_price_formatted: money(unitPrice),
+      unit_price_formatted: formatFiscalMoney(unitPrice),
       discount_amount: discountAmt,
       discount_formatted:
-        discountAmt > 0 ? `-${money(discountAmt)}` : undefined,
+        discountAmt > 0 ? `-${formatFiscalMoney(discountAmt)}` : undefined,
       tax_rate: taxRate,
       tax_amount: Number(it.tax_amount || 0),
       total_price: totalPrice,
-      total_price_formatted: money(totalPrice),
+      total_price_formatted: formatFiscalMoney(totalPrice),
     };
   });
 
@@ -264,18 +289,42 @@ export function mapFiscalDocumentToPrintData(
   }
   const taxes = Array.from(taxesMap.values()).map((t) => ({
     ...t,
-    base_formatted: money(t.base_amount),
-    tax_formatted: money(t.tax_amount),
+    base_formatted: formatFiscalMoney(t.base_amount),
+    tax_formatted: formatFiscalMoney(t.tax_amount),
   }));
 
-  const subtotal = Number(invoice.subtotal_amount || 0);
-  const discount = Number(invoice.discount_amount || 0);
-  const tax = Number(invoice.tax_amount || 0);
+  const subtotal = Number(invoice.subtotal_amount ?? 0);
+  const discount = Number(invoice.discount_amount ?? 0);
+  const tax = Number(invoice.tax_amount ?? 0);
   // E.11 casilla 1 — la retención viaja al papel. INFORMATIVA: no resta del
   // total (`invoice-calculator.service.ts`: «Retenciones ... NUNCA restan del
   // total»), igual que la fila «Retencion:» del builder PDF.
-  const withholding = Number(invoice.withholding_amount || 0);
-  const total = Number(invoice.total_amount || subtotal - discount + tax);
+  const withholding = Number(invoice.withholding_amount ?? 0);
+  // F-050: `??`, no `||`. Una factura de valor CERO (`total_amount = 0`) es
+  // legal y es falsy: con `||` el mapeador la RECALCULABA en floats por la
+  // ruta que se supone que «nunca recalcula». Solo lo ausente recompone.
+  const snapshotTotal = invoice.total_amount;
+  const total =
+    snapshotTotal === null || snapshotTotal === undefined
+      ? subtotal - discount + tax
+      : Number(snapshotTotal);
+  if (snapshotTotal === null || snapshotTotal === undefined) {
+    // F-066: cada disparo del fallback deja traza estructurada (factura +
+    // snapshot vs recompute) para que B.2 distinga «imprimió el snapshot» de
+    // «imprimió un recompute».
+    fallbackLogger.warn({
+      event: 'fiscal_print_total_fallback',
+      invoice_id: invoice?.id ?? null,
+      invoice_number: invoice?.invoice_number ?? null,
+      snapshot: {
+        subtotal_amount: invoice?.subtotal_amount ?? null,
+        discount_amount: invoice?.discount_amount ?? null,
+        tax_amount: invoice?.tax_amount ?? null,
+        total_amount: null,
+      },
+      recomputed_total: total,
+    });
+  }
 
   const accepted = invoice.dian_status === 'accepted';
 
@@ -406,17 +455,17 @@ export function mapFiscalDocumentToPrintData(
     taxes,
     totals: {
       subtotal,
-      subtotal_formatted: money(subtotal),
+      subtotal_formatted: formatFiscalMoney(subtotal),
       discount_total: discount,
-      discount_total_formatted: money(discount),
+      discount_total_formatted: formatFiscalMoney(discount),
       shipping_total: 0,
       shipping_total_formatted: '$0',
       tax_total: tax,
-      tax_total_formatted: money(tax),
+      tax_total_formatted: formatFiscalMoney(tax),
       withholding_total: withholding,
-      withholding_total_formatted: money(withholding),
+      withholding_total_formatted: formatFiscalMoney(withholding),
       grand_total: total,
-      grand_total_formatted: money(total),
+      grand_total_formatted: formatFiscalMoney(total),
       // Mismo `total` que la fila en cifras: una segunda fuente aquí sería una
       // contradicción interna del documento legal.
       grand_total_in_words: Number.isFinite(total)

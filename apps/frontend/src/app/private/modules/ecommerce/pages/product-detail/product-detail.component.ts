@@ -46,6 +46,7 @@ import {
   PriceResolverService,
   resolvePackSize,
 } from '../../../../../shared/services/pricing';
+import { prepMinutesOrNull } from '../../../../../public/ecommerce/components/storefront/storefront.component';
 import { EmptyStateComponent } from '../../../../../shared/components/empty-state/empty-state.component';
 import {
   CurrencyPipe,
@@ -159,6 +160,16 @@ import {
                     }
                   </div>
                   <span class="count">({{ p.review_count }})</span>
+                </div>
+              }
+
+              @if (prepMinutes(p.preparation_time_minutes); as prepMins) {
+                <div
+                  class="prep-line flex items-center gap-1 text-sm text-text-muted my-1"
+                  title="Tiempo de preparación"
+                >
+                  <app-icon name="clock" [size]="14" />
+                  <span>~{{ prepMins }} min de preparación</span>
                 </div>
               }
 
@@ -1638,6 +1649,11 @@ export class ProductDetailComponent implements OnInit {
   hasError = signal(false);
   /** True when the product was not found / not available for ecommerce (HTTP 404). */
   notFound = signal(false);
+  /**
+   * Muestra el tiempo de preparación. Fail-closed: solo true cuando la
+   * config pública trae el flag encendido; en error se queda apagado.
+   */
+  readonly show_preparation_time = signal(false);
   /** Last slug requested, used to retry after a generic load error. */
   private currentSlug: string | null = null;
   activeImageUrl = signal<string | null>(null);
@@ -2122,6 +2138,15 @@ export class ProductDetailComponent implements OnInit {
     return formatMenuNextAvailable(this.product()?.next_available ?? null);
   }
 
+  /**
+   * F-013 — minutos de preparación a pintar (`null` = no renderizar).
+   * Comparte `prepMinutesOrNull` con la vitrina y la card: el mismo dato,
+   * una sola decisión de render (sub-minuto oculto, flag apagado oculto).
+   */
+  prepMinutes(value: number | string | null | undefined): number | null {
+    return prepMinutesOrNull(value, this.show_preparation_time());
+  }
+
   /** Structured payload for `<app-next-available-notice>`. Mirrors the
    *  same TZ-aware logic used by `menus-showcase` and `menus-page`. */
   readonly nextAvailableDetailed = computed(() => {
@@ -2208,6 +2233,19 @@ export class ProductDetailComponent implements OnInit {
       .subscribe((params) => {
         const slug = params['slug'];
         if (slug) this.loadProduct(slug);
+      });
+    this.catalogService
+      .getPublicConfig()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.show_preparation_time.set(
+            response.data?.ecommerce?.catalog?.show_preparation_time === true,
+          );
+        },
+        error: () => {
+          this.show_preparation_time.set(false);
+        },
       });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }

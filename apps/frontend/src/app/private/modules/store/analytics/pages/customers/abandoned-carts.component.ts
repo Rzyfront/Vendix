@@ -8,6 +8,7 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import { comparisonLabelFor } from '../../utils/comparison-label.util';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
   FilterConfig,
@@ -77,7 +78,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
   exporting$: Observable<boolean> = this.store.select(
     AbandonedCartsSelectors.selectExporting,
   );
-  dateRange$: Observable<DateRangeFilter> = this.store.select(
+  dateRange$: Observable<DateRangeFilter | null> = this.store.select(
     AbandonedCartsSelectors.selectDateRange,
   );
   granularity$: Observable<string> = this.store.select(
@@ -88,6 +89,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
   readonly loading = toSignal(this.loading$, { initialValue: false });
   readonly loadingTrends = toSignal(this.loadingTrends$, { initialValue: false });
   readonly exporting = toSignal(this.exporting$, { initialValue: false });
+  readonly dateRange = toSignal(this.dateRange$, { initialValue: null as DateRangeFilter | null });
 
   trendsChartOptions: EChartsOption = {};
   byReasonChartOptions: EChartsOption = {};
@@ -130,9 +132,9 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([dateRange, granularity]) => {
         this.filterValues = {
-          date_range_start: dateRange.start_date || null,
-          date_range_end: dateRange.end_date || null,
-          date_range_preset: dateRange.preset || null,
+          date_range_start: dateRange?.start_date || null,
+          date_range_end: dateRange?.end_date || null,
+          date_range_preset: dateRange?.preset || null,
           granularity: granularity || 'day',
         };
       });
@@ -219,10 +221,21 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
     }
   }
 
-  getGrowthText(growth?: number): string {
-    if (growth === undefined || growth === null) return '';
+  /**
+   * QUI-628 v3 — el crecimiento puede ser `null` cuando no hay base
+   * comparable (regla 9 del contrato de métricas). Antes el componente
+   * devolvía string vacío, lo cual ocultaba el "sin base" detrás de un
+   * hueco en pantalla. Ahora dice "Sin base de comparación" y usa
+   * `comparisonLabelFor` para que el rótulo refleje el preset elegido
+   * ("ayer" para Hoy, "semana ant." para Esta Semana, etc.) en vez del
+   * "vs período anterior" fijo de antes.
+   */
+  getGrowthText(growth: number | null | undefined): string {
+    if (growth === undefined || growth === null) {
+      return `Sin base de comparación vs ${comparisonLabelFor(this.dateRange()?.preset)}`;
+    }
     const sign = growth >= 0 ? '+' : '';
-    return `${sign}${growth.toFixed(1)}% vs período anterior`;
+    return `${sign}${growth.toFixed(1)}% vs ${comparisonLabelFor(this.dateRange()?.preset)}`;
   }
 
   getAbandonmentRate(): string {

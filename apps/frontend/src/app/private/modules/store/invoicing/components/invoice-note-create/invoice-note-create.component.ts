@@ -24,6 +24,9 @@ import {
   createDebitNote,
   createDebitNoteFailure,
   createDebitNoteSuccess,
+  issueNote,
+  issueNoteFailure,
+  issueNoteSuccess,
   MutationFailure,
 } from '../../state/actions/invoicing.actions';
 import { extractValidationMessages } from '../../utils/invoicing-errors.util';
@@ -506,18 +509,59 @@ import { remainingChars, showCharCounter } from '../../utils/char-limit.util';
             hay que validarla y enviarla desde su propio detalle.
           </p>
         </div>
+
+        <!-- B.1 — la nota ya nació: preguntar si se emite de una. El
+             formulario queda arriba intacto pero el pie ya no ofrece Crear,
+             así que no hay doble nota por doble clic. -->
+        @if (createdNote(); as note) {
+          <div class="rounded-xl border border-[var(--color-success)]/40 bg-[var(--color-success)]/10 p-3">
+            <p class="text-sm font-semibold text-text-primary">
+              {{ note.invoice_number }} creada en borrador por {{ money(note.total_amount) }}
+            </p>
+            <p class="mt-1 text-xs text-text-secondary">
+              ¿Desea emitirla ahora? Se valida y se envía a la DIAN de una vez.
+              Si elige Después, queda en borrador y se emite desde su detalle.
+            </p>
+            @if (issueError()) {
+              <p class="mt-2 text-xs font-semibold text-error">{{ issueError() }}</p>
+            }
+            <div class="mt-3 flex flex-wrap justify-end gap-2">
+              <app-button
+                variant="ghost"
+                [disabled]="issuing()"
+                (clicked)="onIssueLater()"
+              >
+                Después
+              </app-button>
+              <app-button
+                variant="primary"
+                [loading]="issuing()"
+                [disabled]="issuing()"
+                (clicked)="onIssueNow()"
+              >
+                Emitir ahora
+              </app-button>
+            </div>
+          </div>
+        }
       </div>
 
       <div slot="footer" class="flex justify-end gap-2">
-        <app-button variant="ghost" (clicked)="onClose()">Cancelar</app-button>
-        <app-button
-          variant="primary"
-          [loading]="submitting()"
-          [disabled]="!canSubmit()"
-          (clicked)="onSubmit()"
-        >
-          Crear {{ noteNoun() }}
-        </app-button>
+        @if (createdNote()) {
+          <span class="text-xs text-text-secondary self-center">
+            Responda arriba: emitir ahora o dejarla en borrador.
+          </span>
+        } @else {
+          <app-button variant="ghost" (clicked)="onClose()">Cancelar</app-button>
+          <app-button
+            variant="primary"
+            [loading]="submitting()"
+            [disabled]="!canSubmit()"
+            (clicked)="onSubmit()"
+          >
+            Crear {{ noteNoun() }}
+          </app-button>
+        }
       </div>
     </app-modal>
   `,
@@ -542,6 +586,14 @@ export class InvoiceNoteCreateComponent {
   readonly submitting = signal(false);
   readonly submitError = signal<string | null>(null);
   readonly submitErrorDetails = signal<string[]>([]);
+  /**
+   * Nota recién creada, a la espera de la pregunta "¿Emitirla ahora?"
+   * (CP-nc-nd-auto-orden-reembolso, B.1). Mientras no sea null el formulario
+   * queda detrás del panel de emisión: evita crear dos notas con doble clic.
+   */
+  readonly createdNote = signal<Invoice | null>(null);
+  readonly issuing = signal(false);
+  readonly issueError = signal<string | null>(null);
   readonly scope = signal<'total' | 'partial'>('total');
 
   /**
@@ -749,7 +801,7 @@ export class InvoiceNoteCreateComponent {
         ofType(createCreditNoteSuccess, createDebitNoteSuccess),
         takeUntilDestroyed(this.destroyRef),
       )
-      .subscribe(() => this.onSucceeded());
+      .subscribe(({ invoice }) => this.onSucceeded(invoice));
 
     this.actions$
       .pipe(
@@ -757,6 +809,14 @@ export class InvoiceNoteCreateComponent {
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((failure) => this.onFailed(failure));
+
+    this.actions$
+      .pipe(ofType(issueNoteSuccess), takeUntilDestroyed(this.destroyRef))
+      .subscribe(({ invoice }) => this.onIssued(invoice.id));
+
+    this.actions$
+      .pipe(ofType(issueNoteFailure), takeUntilDestroyed(this.destroyRef))
+      .subscribe((failure) => this.onIssueFailed(failure));
   }
 
   money(value: number | string | null | undefined): string {
@@ -834,14 +894,58 @@ export class InvoiceNoteCreateComponent {
     );
   }
 
-  private onSucceeded(): void {
+  /**
+   * La nota nació en borrador: NO se cierra ni se limpia — se muestra la
+   * pregunta "¿Emitirla ahora?" (B.1). El cierre llega con `onIssued()` o con
+   * "Después".
+   */
+  private onSucceeded(invoice: Invoice): void {
     if (!this.submitting()) {
       return;
     }
     this.submitting.set(false);
     this.clearSubmitError();
+    this.issueError.set(null);
+    this.createdNote.set(invoice);
+  }
+
+  /** Un clic: validar + enviar la nota recién creada vía `POST :id/issue`. */
+  onIssueNow(): void {
+    const note = this.createdNote();
+    if (!note || this.issuing()) {
+      return;
+    }
+    this.issueError.set(null);
+    this.issuing.set(true);
+    this.store.dispatch(issueNote({ id: note.id }));
+  }
+
+  /** Dejar la nota en borrador y cerrar, como hacía el flujo manual. */
+  onIssueLater(): void {
+    if (this.issuing()) {
+      return;
+    }
     this.reset();
     this.isOpen.set(false);
+  }
+
+  private onIssued(issuedId: number): void {
+    // La página de orden emite sus propias notas (B.3) sobre el mismo store:
+    // solo la que este modal pidió lo cierra.
+    if (this.createdNote()?.id !== issuedId) {
+      return;
+    }
+    this.issuing.set(false);
+    this.reset();
+    this.isOpen.set(false);
+  }
+
+  private onIssueFailed(failure: MutationFailure): void {
+    if (!this.createdNote() || !this.issuing()) {
+      return;
+    }
+    this.issuing.set(false);
+    this.issueError.set(failure.error);
   }
 
   /**
@@ -862,9 +966,11 @@ export class InvoiceNoteCreateComponent {
   }
 
   onClose(): void {
-    if (this.submitting()) {
+    if (this.submitting() || this.issuing()) {
       return;
     }
+    // Cerrar con la pregunta pendiente equivale a "Después": la nota queda en
+    // borrador y se emite desde su detalle, como antes de este cambio.
     this.reset();
     this.isOpen.set(false);
   }
@@ -873,6 +979,9 @@ export class InvoiceNoteCreateComponent {
     this.noteForm.reset({ conceptCode: '', reason: '' });
     this.scope.set('total');
     this.clearSubmitError();
+    this.createdNote.set(null);
+    this.issuing.set(false);
+    this.issueError.set(null);
   }
 
   private clearSubmitError(): void {

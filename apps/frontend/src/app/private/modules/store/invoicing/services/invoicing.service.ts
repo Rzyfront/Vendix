@@ -22,6 +22,8 @@ import {
   InvoicePdfUrl,
   PosUvtThreshold,
   RegisterDianEventRequest,
+  RelatedNote,
+  IssueNoteResult,
 } from '../interfaces/invoice.interface';
 
 @Injectable({
@@ -229,6 +231,24 @@ export class InvoicingService {
     return this.http.post<ApiResponse<Invoice>>(
       this.getApiUrl('debit-notes'),
       dto,
+    );
+  }
+
+  /**
+   * Emite de una una NC/ND en borrador (CP-nc-nd-auto-orden-reembolso, A.1):
+   * el backend corre validate+send en una sola llamada.
+   */
+  issueNote(id: number): Observable<ApiResponse<IssueNoteResult>> {
+    return this.http.post<ApiResponse<IssueNoteResult>>(
+      this.getApiUrl(`${id}/issue`),
+      {},
+    );
+  }
+
+  /** NC/ND de una factura, para las cards de la orden (A.2). */
+  listNotes(relatedInvoiceId: number): Observable<ApiResponse<RelatedNote[]>> {
+    return this.http.get<ApiResponse<RelatedNote[]>>(
+      this.getApiUrl(`${relatedInvoiceId}/notes`),
     );
   }
 

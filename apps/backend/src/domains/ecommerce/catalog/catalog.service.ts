@@ -685,6 +685,7 @@ export class CatalogService {
   private async getCatalogSettings(storeId?: number | null): Promise<{
     show_out_of_stock?: boolean;
     enable_sale_unit_selector?: boolean;
+    show_preparation_time?: boolean;
   }> {
     if (!storeId) return {};
 
@@ -696,6 +697,7 @@ export class CatalogService {
     return ((settings?.settings as any)?.ecommerce?.catalog ?? {}) as {
       show_out_of_stock?: boolean;
       enable_sale_unit_selector?: boolean;
+      show_preparation_time?: boolean;
     };
   }
 
@@ -1065,6 +1067,7 @@ export class CatalogService {
       service_duration_minutes: product.service_duration_minutes,
       service_modality: product.service_modality,
       booking_mode: product.booking_mode,
+      preparation_time_minutes: product.preparation_time_minutes ?? null,
     };
   }
 
@@ -1213,6 +1216,7 @@ export class CatalogService {
       service_duration_minutes: product.service_duration_minutes,
       service_modality: product.service_modality,
       booking_mode: product.booking_mode,
+      preparation_time_minutes: product.preparation_time_minutes ?? null,
     };
   }
 

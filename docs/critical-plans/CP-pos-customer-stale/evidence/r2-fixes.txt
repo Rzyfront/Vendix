@@ -1,0 +1,9 @@
+R2 fixes (commit siguiente a b3c1935), verificados por traza de codigo + tipos:
+- F-005: shell selectCustomer else-branch limpia capturedAddress=null y addressValid=false
+  cuando requiresAddress y B no trae dirección (tipos: AddressPayload|null, boolean OK).
+- F-006: shell emite customerCleared; pos.component lo cablea a onClearCustomer()
+  existente (setCustomer(null) + toast). Sin ese cable, "Quitar" solo cambiaba etiqueta.
+- F-008: selector reset() respeta minimalInvoiceMode (create+search) como el effect init.
+- Spec shell: stub CustomerSelectorStub gana hasFormIdentifiers()->false (flujo legacy intacto).
+- F-007 (alias): NO tocado — cambiar precedencia alias-vs-cliente es regla de negocio;
+  se deja abierto a decisión humana. Dirección segura actual: factura a A conocido.

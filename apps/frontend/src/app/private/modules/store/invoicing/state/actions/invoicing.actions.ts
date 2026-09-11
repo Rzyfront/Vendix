@@ -248,6 +248,21 @@ export const createDebitNoteFailure = createAction(
   props<MutationFailure>(),
 );
 
+// ── Issue Note (emitir NC/ND de una: validar+enviar) ──────────
+
+export const issueNote = createAction(
+  '[Invoicing] Issue Note',
+  props<{ id: number }>(),
+);
+export const issueNoteSuccess = createAction(
+  '[Invoicing] Issue Note Success',
+  props<{ invoice: Invoice }>(),
+);
+export const issueNoteFailure = createAction(
+  '[Invoicing] Issue Note Failure',
+  props<MutationFailure>(),
+);
+
 // ── Rechazo de la DIAN (INVOICING_PROVIDER_004) ─────────────
 //
 // El motivo real del rechazo llega en `details.dian_errors[]` y NO cabe en un

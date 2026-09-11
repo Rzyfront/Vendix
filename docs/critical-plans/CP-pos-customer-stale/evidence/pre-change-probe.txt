@@ -1,0 +1,2 @@
+seleccionado=A + form=B => {"resolved":true,"via":"short-circuit","emitted":null}
+BUG: venta queda a nombre de A (stale)

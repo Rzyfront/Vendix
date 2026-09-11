@@ -481,6 +481,89 @@ export function clearBackendError(control: AbstractControl): void {
 }
 
 // ─────────────────────────────────────────────────────────────
+// 4. Bloqueantes aritméticos del servidor nuevo (A.3, F-030)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Hallazgo del prevalidador tal como viaja en `details.blockers[]`: `problem`
+ * (qué está mal y por qué la DIAN lo rechaza) + `fix` (qué tocar y dónde).
+ * Espejo estructural del `FiscalDocumentFinding` del backend; se declara acá
+ * para no acoplar el frontend a un tipo del backend.
+ */
+export interface ArithmeticBlocker {
+  problem?: unknown;
+  fix?: unknown;
+}
+
+/**
+ * Enumera los bloqueantes aritméticos que el servidor trae en `details`, en
+ * el orden en que llegaron.
+ *
+ * RAMA DEL CÓDIGO NUEVO (F-030). El backend rechaza ANTES de numerar lo que la
+ * DIAN rechazaría y el motivo REAL viaja en `details`, no en el copy del
+ * código. Dos formas, las dos del gate pre-numeración de A.2:
+ *
+ *  1. `details.blockers[]` (familia `INVOICING_PREVALIDATION_*`): hallazgos
+ *     con `problem` + `fix` redactados. Se enumeran por FORMA, sin una rama
+ *     por código que se desactualice sola.
+ *  2. `details` plano con `line_index` + `expected`/`received`/`difference`
+ *     (`INVOICING_CALC_005` residuo inabsorbible, `INVOICING_CALC_006`
+ *     entrada inválida): nombra LA línea que hay que mover.
+ *
+ * Sin esta lectura el banner mostraría solo el encabezado y el comerciante no
+ * tendría nada que corregir — con el consecutivo en juego. Vacío cuando no
+ * hay nada enumerable: el llamador conserva su comportamiento histórico.
+ */
+export function extractArithmeticBlockers(details: unknown): string[] {
+  const record = asRecord(details);
+  const rows: string[] = [];
+  const raw = record?.['blockers'];
+  if (Array.isArray(raw)) {
+    for (const entry of raw) {
+      const row = asRecord(entry);
+      if (!row) continue;
+      const problem = readString(row['problem']);
+      const fix = readString(row['fix']);
+      const text = [problem, fix].filter(Boolean).join(' ').trim();
+      if (text) rows.push(text);
+    }
+  }
+  const lineRow = formatCalcLineDetail(record);
+  if (lineRow) rows.push(lineRow);
+  return rows;
+}
+
+/**
+ * Una fila nombrable para el rechazo por línea (`CALC_005`/`CALC_006`):
+ * «Línea 3 («Flete»): esperaba 3000.00, cierra en 2999.99 (residuo −0.01)».
+ *
+ * Exige `line_index` numérico MÁS `expected` y `received`: esa terna solo la
+ * emite el gate de divergencias, así que un `details` ajeno que traiga un
+ * `line_index` suelto no pinta filas fantasmas.
+ */
+function formatCalcLineDetail(
+  record: Record<string, unknown> | null,
+): string | null {
+  if (!record) return null;
+  const index = record['line_index'];
+  // El gate manda `dianAmount` (strings); se tolera número por si el contrato
+  // cambia de serialización: lo que importa es nombrar la línea y las cifras.
+  const expected = readAmount(record['expected']);
+  const received = readAmount(record['received']);
+  if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) {
+    return null;
+  }
+  if (!expected || !received) return null;
+  const description = readString(record['line_description']);
+  const difference = readAmount(record['difference']);
+  return (
+    `Línea ${index + 1}${description ? ` («${description}»)` : ''}: ` +
+    `esperaba ${expected}, cierra en ${received}` +
+    (difference ? ` (residuo ${difference})` : '')
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────
 
@@ -488,6 +571,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+/** Importe legible venga como string (`dianAmount`) o como número. */
+function readAmount(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return null;
 }
 
 function readString(value: unknown): string | null {

@@ -333,6 +333,18 @@ export class InvoicingController {
     return this.response_service.success(result);
   }
 
+  /**
+   * NC/ND de una factura, para las cards de la orden
+   * (CP-nc-nd-auto-orden-reembolso, A.2). Lectura: quien revisa no siempre emite.
+   */
+  @Get(':id/notes')
+  @Permissions('invoicing:read')
+  async listNotes(@Param('id', ParseIntPipe) id: number) {
+    const result =
+      await this.credit_notes_service.findNotesByRelatedInvoice(id);
+    return this.response_service.success(result);
+  }
+
   @Get(':id')
   @Permissions('invoicing:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
@@ -361,6 +373,19 @@ export class InvoicingController {
       result,
       'Invoice validated successfully',
     );
+  }
+
+  /**
+   * Emite de una una NC/ND en borrador: valida y envía en una sola llamada
+   * (CP-nc-nd-auto-orden-reembolso, A.1). No numera ni acepta otros tipos —
+   * ver `CreditNotesService.issueNote`. El flujo manual queda intacto.
+   */
+  @Post(':id/issue')
+  @Permissions('invoicing:write')
+  @HttpCode(HttpStatus.OK)
+  async issueNote(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.credit_notes_service.issueNote(id);
+    return this.response_service.success(result, 'Note issued successfully');
   }
 
   @Patch(':id/send')

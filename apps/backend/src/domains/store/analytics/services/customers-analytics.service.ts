@@ -18,6 +18,10 @@ import {
   localPeriodSql,
   localBucketSql,
 } from '@common/utils/store-timezone.util';
+import {
+  computeGrowth,
+  round2,
+} from '../analytics-metrics.contract';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -25,6 +29,20 @@ export class CustomersAnalyticsService {
   constructor(private readonly prisma: StorePrismaService) {}
 
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
+
+  /**
+   * ADR-01 (F-002) — ventana de inactividad X de la definición derivada de
+   * abandono. Un carrito cuenta como abandonado cuando lleva al menos X
+   * minutos sin actividad (`last_activity_at < NOW() - X`), sigue `active`
+   * y conserva items. X vive aquí como constante nombrada (sin migración,
+   * sin job, solo lectura).
+   *
+   * 30 minutos: muy por debajo del `cart_expiration_hours` por defecto
+   * (24 h), así el carrito es medible mucho antes de que el expiry borre
+   * sus items; solo afecta al borde reciente de la ventana actual, las
+   * ventanas históricas quedan estables.
+   */
+  private readonly ABANDONED_CART_INACTIVITY_MINUTES = 30;
 
   /**
    * Resolves the current request's store timezone (single source of truth).
@@ -541,10 +559,50 @@ export class CustomersAnalyticsService {
 
   // ==================== ABANDONED CARTS ANALYTICS ====================
 
+  /**
+   * QUI-628 v3 + ADR-01 (F-002) — definición DERIVADA del abandono de
+   * carrito. Nada escribe `state = 'abandoned'` (los escritores solo ponen
+   * `active`/`converted` y el expiry borra items sin tocar `state`), así
+   * que filtrar por el estado almacenado medía ~0 estructural.
+   *
+   *   abandoned = `carts.state = 'active'`
+   *               + `last_activity_at` en la ventana
+   *               + `last_activity_at < NOW() - ABANDONED_CART_INACTIVITY_MINUTES`
+   *               + con items (`EXISTS cart_items`).
+   *               (La migración 20260805120000 ya añade `state`,
+   *               `converted_order_id`, `converted_at`, `last_activity_at`
+   *               con FK ON DELETE SET NULL + 2 índices).
+   *   recovered = `carts.state = 'converted'` contados por `converted_at` en
+   *               la ventana — UN MISMO UNIVERSO (carts), no `orders.placed_at`.
+   *   rates     = abandonados y recuperados comparten denominador (abandoned
+   *               + recovered), así la tarjeta y su % cuadran contra la misma
+   *               base.
+   *   growth    = `computeGrowth(actual, previo)` del contrato: `null` cuando
+   *               el período previo no tiene base (regla 9). Para
+   *               `recovery_rate_growth` queda `null` por defecto: el período
+   *               previo no usa el nuevo schema, así que un delta sería
+   *               fabricación. Cuando ambos períodos vivan bajo la nueva
+   *               columna, lo activamos en una iteración siguiente.
+   *
+   * Lo que ya NO está:
+   *   - `recoveredCarts` de `prisma.orders.count` (universo distinto).
+   *   - `calculatedRate = orderCount / abandonedCount` y su tope a 100 %.
+   *   - `recovered_carts = floor(abandoned * rate / 100)` (derivado falso).
+   *   - `recovered_value = abandoned * rate / 100` (idem).
+   *   - `recovery_rate_growth: 0` hardcodeado (la UI mostraba "0 %" como
+   *     medición real).
+   *   - `potential_recovery_value === recovered_value` con dos nombres.
+   *
+   * Ver contrato: `apps/backend/src/domains/store/analytics/analytics-metrics.contract.ts`
+   * Spec que lo blinda: `customers-analytics.service.spec.ts` (QUI-628)
+   */
   async getAbandonedCartsSummary(query: AnalyticsQueryDto) {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
-    const { previousStartDate, previousEndDate } = getPreviousPeriod(startDate, endDate);
+    const { previousStartDate, previousEndDate } = getPreviousPeriod(
+      startDate,
+      endDate,
+    );
 
     const context = RequestContextService.getContext();
     if (!context?.store_id) {
@@ -552,81 +610,100 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    // Abandoned carts: carts created in period
-    // Using a proxy: count carts created and calculate based on cart interactions
-    const abandonedCarts = await (this.prisma.withoutScope() as any).$queryRaw<Array<{ count: bigint; total_value: number }>>`
+    // Abandoned (ADR-01, definición derivada): state='active' + cart con
+    // items + last_activity_at en ventana + inactivo más de X minutos.
+    // EXISTS sobre cart_items blinda "carrito sin items" — un carrito
+    // vacío técnicamente existe pero NO cuenta como abandono real. El
+    // corte de inactividad excluye los carritos que siguen en uso en el
+    // borde reciente de la ventana actual.
+    const abandonedRows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{ count: bigint; total_value: number }>
+    >`
       SELECT
-        COUNT(c.id) as count,
-        COALESCE(SUM(c.subtotal), 0) as total_value
+        COUNT(c.id) AS count,
+        COALESCE(SUM(c.subtotal), 0) AS total_value
       FROM carts c
       WHERE c.store_id = ${storeId}
-        AND c.created_at >= ${startDate}
-        AND c.created_at <= ${endDate}
+        AND c.state = 'active'
+        AND c.last_activity_at >= ${startDate}
+        AND c.last_activity_at <= ${endDate}
+        AND c.last_activity_at < NOW() - make_interval(mins => ${this.ABANDONED_CART_INACTIVITY_MINUTES})
+        AND EXISTS (
+          SELECT 1 FROM cart_items ci WHERE ci.cart_id = c.id
+        )
     `;
 
-    const abandonedCount = Number(abandonedCarts[0]?.count || 0);
-    const totalAbandonedValue = Number(abandonedCarts[0]?.total_value || 0);
+    const abandonedCount = Number(abandonedRows[0]?.count || 0);
+    const totalAbandonedValue = Number(abandonedRows[0]?.total_value || 0);
 
-    // For recovery, we count orders created from carts in period
-    // Using EXTRACT to match carts by user and approximate time window
-    const recoveredCarts = await this.prisma.orders.count({
-      where: {
-        store_id: storeId,
-        created_at: { gte: startDate, lte: endDate },
-        // Orders that appear to be from carts (using a heuristic: created within 24h of a cart)
-      },
-    });
-
-    // Previous period for growth calculation
-    const previousAbandoned = await (this.prisma.withoutScope() as any).$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(c.id) as count
+    // Recovered: state='converted' + converted_at en ventana. UNA sola
+    // columna de fecha (converted_at, NO placed_at) — el ticket es del
+    // carrito, no de la orden; el vínculo `converted_order_id` es solo
+    // para auditoría.
+    const recoveredRows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{ count: bigint; total_value: number }>
+    >`
+      SELECT
+        COUNT(c.id) AS count,
+        COALESCE(SUM(c.subtotal), 0) AS total_value
       FROM carts c
       WHERE c.store_id = ${storeId}
-        AND c.created_at >= ${previousStartDate}
-        AND c.created_at <= ${previousEndDate}
+        AND c.state = 'converted'
+        AND c.converted_at >= ${startDate}
+        AND c.converted_at <= ${endDate}
     `;
 
-    const previousAbandonedCount = Number(previousAbandoned[0]?.count || 0);
+    const recoveredCount = Number(recoveredRows[0]?.count || 0);
+    const totalRecoveredValue = Number(recoveredRows[0]?.total_value || 0);
 
-    const completedOrders = await (this.prisma.withoutScope() as any).$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(o.id) as count
-      FROM orders o
-      WHERE o.store_id = ${storeId}
-        AND o.placed_at >= ${startDate}
-        AND o.placed_at <= ${endDate}
-        AND o.state IN ('delivered', 'finished')
+    // Período previo: solo el lado de abandonados tiene historia honesta
+    // porque `converted_at` es columna nueva. El de recuperados lo
+    // dejamos en `null` por ahora y lo activamos cuando el backfill cubra
+    // al menos una ventana comparable.
+    const previousAbandonedRows = await (this.prisma.withoutScope() as any)
+      .$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(c.id) AS count
+      FROM carts c
+      WHERE c.store_id = ${storeId}
+        AND c.state = 'active'
+        AND c.last_activity_at >= ${previousStartDate}
+        AND c.last_activity_at <= ${previousEndDate}
+        AND c.last_activity_at < NOW() - make_interval(mins => ${this.ABANDONED_CART_INACTIVITY_MINUTES})
+        AND EXISTS (
+          SELECT 1 FROM cart_items ci WHERE ci.cart_id = c.id
+        )
     `;
-    const orderCount = Number(completedOrders[0]?.count || 0);
+    const previousAbandonedCount = Number(
+      previousAbandonedRows[0]?.count || 0,
+    );
 
-    let recoveryRate: number;
-    if (abandonedCount > 0 && orderCount > 0) {
-      const calculatedRate = (orderCount / abandonedCount) * 100;
-      recoveryRate = Math.min(Math.round(calculatedRate * 10) / 10, 100);
-    } else if (abandonedCount === 0) {
-      recoveryRate = 0;
-    } else {
-      recoveryRate = 0;
-    }
+    const total = abandonedCount + recoveredCount;
+    const abandonmentRate =
+      total > 0 ? round2((abandonedCount / total) * 100) : 0;
+    const recoveryRate =
+      total > 0 ? round2((recoveredCount / total) * 100) : 0;
 
-    const abandonmentRate = abandonedCount > 0 ? 100 - recoveryRate : 0;
-
-    const abandonmentRateGrowth =
-      previousAbandonedCount > 0
-        ? ((abandonedCount - previousAbandonedCount) / previousAbandonedCount) * 100
-        : 0;
+    const abandonmentRateGrowth = computeGrowth(
+      abandonedCount,
+      previousAbandonedCount,
+    );
 
     return {
       total_abandoned_carts: abandonedCount,
       total_abandoned_value: totalAbandonedValue,
       abandonment_rate: abandonmentRate,
       abandonment_rate_growth: abandonmentRateGrowth,
-      recovered_carts: Math.floor(abandonedCount * (recoveryRate / 100)),
-      recovered_value: totalAbandonedValue * (recoveryRate / 100),
+      recovered_carts: recoveredCount,
+      recovered_value: totalRecoveredValue,
       recovery_rate: recoveryRate,
-      recovery_rate_growth: 0,
+      // Honesto: el período previo no tiene la columna `converted_at`
+      // poblada para carts pre-fix. Hasta que el backfill cubra la
+      // ventana comparable, mostrar 0 % mentiría.
+      recovery_rate_growth: null,
       average_cart_value:
-        abandonedCount > 0 ? totalAbandonedValue / abandonedCount : 0,
-      potential_recovery_value: totalAbandonedValue * (recoveryRate / 100),
+        abandonedCount > 0
+          ? round2(totalAbandonedValue / abandonedCount)
+          : 0,
     };
   }
 
@@ -639,81 +716,80 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    // Resolve the store timezone ONCE and drive both the date range and the
-    // bucketing with it (single source of truth).
     const tz = await resolveStoreTimezone(this.prisma, storeId);
     const { startDate, endDate } = parseDateRange(query, tz);
 
-    // Bucket by the store's LOCAL calendar via the authoritative TEXT label.
-    const cartsPeriodSql = localPeriodSql('c.created_at', tz, granularity);
-    const ordersPeriodSql = localPeriodSql('o.placed_at', tz, granularity);
+    // QUI-628 v3 — bucketing por la columna de tiempo REAL de cada lado:
+    //   - abandoned: last_activity_at (la última interacción con el carrito)
+    //   - recovered: converted_at (el momento en que se convirtió en orden)
+    // Cada bucket devuelve un único universo (carts) con su propia ventana
+    // local. La agregación final une los dos buckets en memoria por período.
+    const abandonedPeriodSql = localPeriodSql(
+      'c.last_activity_at',
+      tz,
+      granularity,
+    );
+    const recoveredPeriodSql = localPeriodSql(
+      'c.converted_at',
+      tz,
+      granularity,
+    );
 
-    const results = await (this.prisma.withoutScope() as any).$queryRaw<
-      Array<{
-        period: string;
-        abandoned_carts: bigint;
-        cart_value: number;
-      }>
+    const abandonedRows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{ period: string; count: bigint; cart_value: number }>
     >`
       SELECT
-        ${cartsPeriodSql} AS period,
-        COUNT(c.id) AS abandoned_carts,
-        COALESCE(SUM(c.subtotal), 0) as cart_value
+        ${abandonedPeriodSql} AS period,
+        COUNT(c.id) AS count,
+        COALESCE(SUM(c.subtotal), 0) AS cart_value
       FROM carts c
       WHERE c.store_id = ${storeId}
-        AND c.created_at >= ${startDate}
-        AND c.created_at <= ${endDate}
+        AND c.state = 'active'
+        AND c.last_activity_at >= ${startDate}
+        AND c.last_activity_at <= ${endDate}
+        AND c.last_activity_at < NOW() - make_interval(mins => ${this.ABANDONED_CART_INACTIVITY_MINUTES})
+        AND EXISTS (
+          SELECT 1 FROM cart_items ci WHERE ci.cart_id = c.id
+        )
       GROUP BY 1
-      ORDER BY 1 ASC
     `;
 
-    const completedOrders = await (this.prisma.withoutScope() as any).$queryRaw<
-      Array<{
-        period: string;
-        order_count: bigint;
-      }>
+    const recoveredRows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{ period: string; count: bigint; cart_value: number }>
     >`
       SELECT
-        ${ordersPeriodSql} AS period,
-        COUNT(o.id) AS order_count
-      FROM orders o
-      WHERE o.store_id = ${storeId}
-        AND o.placed_at >= ${startDate}
-        AND o.placed_at <= ${endDate}
-        AND o.state IN ('delivered', 'finished')
+        ${recoveredPeriodSql} AS period,
+        COUNT(c.id) AS count,
+        COALESCE(SUM(c.subtotal), 0) AS cart_value
+      FROM carts c
+      WHERE c.store_id = ${storeId}
+        AND c.state = 'converted'
+        AND c.converted_at >= ${startDate}
+        AND c.converted_at <= ${endDate}
       GROUP BY 1
-      ORDER BY 1 ASC
     `;
 
-    const ordersMap = new Map<string, number>();
-    completedOrders.forEach(o => {
-      // period is already the authoritative local label from SQL.
-      ordersMap.set(o.period, Number(o.order_count));
-    });
-
-    let defaultRecoveryRate = 0;
-    let defaultAbandonmentRate = 0;
+    const recoveredMap = new Map<string, number>();
+    recoveredRows.forEach((r) =>
+      recoveredMap.set(r.period, Number(r.count)),
+    );
 
     return fillTimeSeries(
-      results.map((r) => {
+      abandonedRows.map((r) => {
         const periodKey = r.period;
-        const orderCount = ordersMap.get(periodKey) || 0;
-        const cartCount = Number(r.abandoned_carts);
-        
-        let recoveryRate: number;
-        if (cartCount > 0 && orderCount > 0) {
-          const calculatedRate = (orderCount / cartCount) * 100;
-          recoveryRate = Math.min(Math.round(calculatedRate * 10) / 10, 100);
-        } else {
-          recoveryRate = 0;
-        }
+        const abandonedCount = Number(r.count);
+        const recoveredCount = recoveredMap.get(periodKey) || 0;
+        const total = abandonedCount + recoveredCount;
 
         return {
           period: periodKey,
-          abandoned_carts: cartCount,
-          recovered_carts: Math.floor(cartCount * (recoveryRate / 100)),
-          abandonment_rate: cartCount > 0 ? 100 - recoveryRate : 0,
-          recovery_rate: recoveryRate,
+          abandoned_carts: abandonedCount,
+          recovered_carts: recoveredCount,
+          abandonment_rate:
+            total > 0 ? round2((abandonedCount / total) * 100) : 0,
+          recovery_rate:
+            total > 0 ? round2((recoveredCount / total) * 100) : 0,
+          cart_value: Number(r.cart_value),
         };
       }),
       startDate,
@@ -722,14 +798,25 @@ export class CustomersAnalyticsService {
       {
         abandoned_carts: 0,
         recovered_carts: 0,
-        abandonment_rate: defaultAbandonmentRate,
-        recovery_rate: defaultRecoveryRate,
+        abandonment_rate: 0,
+        recovery_rate: 0,
+        cart_value: 0,
       },
       formatPeriodFromDate,
       tz,
     );
   }
 
+  /**
+   * HONEST rename: lo que se mide aquí es la HORA LOCAL DEL DÍA en que se
+   * creó el carrito abandonado, NO la causa del abandono. La vista de UI
+   * debe titularse "Abandono por hora del día" (o equivalente) para no
+   * inducir al operador a leer estos datos como motivo.
+   *
+   * Si en el futuro capturamos la causa real (evento de checkout
+   * abandonado, sesión cerrada, etc.), esta función se queda como proxy
+   * honesto y se agrega un endpoint paralelo con la causa.
+   */
   async getAbandonedCartsByReason(query: AnalyticsQueryDto) {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
@@ -740,64 +827,67 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    // Group carts by hour of day as a proxy for abandonment patterns
-    const abandonedCartsData = await (this.prisma.withoutScope() as any).$queryRaw<
-      Array<{
-        hour: number;
-        count: bigint;
-        total_value: number;
-      }>
+    // Filtrar por carritos realmente abandonados (definición derivada
+    // ADR-01: state='active' + inactivo más de X + con items), no por
+    // TODOS los carritos del período. Antes este query contaba cualquier
+    // carrito creado — incluyendo los convertidos, los vacíos y los activos
+    // — y los etiquetaba como "motivos", lo cual es fabricación pura.
+    const hourBuckets = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{ hour: number; count: bigint; total_value: number }>
     >`
       SELECT
-        EXTRACT(HOUR FROM ${localBucketSql('c.created_at', tz)}) as hour,
-        COUNT(c.id) as count,
-        COALESCE(SUM(c.subtotal), 0) as total_value
+        EXTRACT(HOUR FROM ${localBucketSql('c.last_activity_at', tz)}) AS hour,
+        COUNT(c.id) AS count,
+        COALESCE(SUM(c.subtotal), 0) AS total_value
       FROM carts c
       WHERE c.store_id = ${storeId}
-        AND c.created_at >= ${startDate}
-        AND c.created_at <= ${endDate}
-      GROUP BY EXTRACT(HOUR FROM ${localBucketSql('c.created_at', tz)})
-      ORDER BY count DESC
+        AND c.state = 'active'
+        AND c.last_activity_at >= ${startDate}
+        AND c.last_activity_at <= ${endDate}
+        AND c.last_activity_at < NOW() - make_interval(mins => ${this.ABANDONED_CART_INACTIVITY_MINUTES})
+        AND EXISTS (
+          SELECT 1 FROM cart_items ci WHERE ci.cart_id = c.id
+        )
+      GROUP BY EXTRACT(HOUR FROM ${localBucketSql('c.last_activity_at', tz)})
     `;
 
-    const totalCarts = abandonedCartsData.reduce(
+    const totalAbandoned = hourBuckets.reduce(
       (sum, r) => sum + Number(r.count),
       0,
     );
 
-    // Map hours to time-of-day periods
-    const hourReasons = [
+    const hourBuckets_labels = [
       { minHour: 0, maxHour: 6, label: 'Madrugada (00-06h)' },
       { minHour: 6, maxHour: 12, label: 'Mañana (06-12h)' },
       { minHour: 12, maxHour: 18, label: 'Tarde (12-18h)' },
       { minHour: 18, maxHour: 24, label: 'Noche (18-24h)' },
     ];
 
-    // Group by time period
     const periodMap = new Map<string, { count: number; total_value: number }>();
-
-    for (const r of abandonedCartsData) {
+    for (const r of hourBuckets) {
       const hour = Number(r.hour);
-      const period = hourReasons.find(
+      const period = hourBuckets_labels.find(
         (p) => hour >= p.minHour && hour < p.maxHour,
       );
       const label = period?.label || 'Otro';
-      const existing = periodMap.get(label) || { count: 0, total_value: 0 };
+      const existing = periodMap.get(label) || {
+        count: 0,
+        total_value: 0,
+      };
       existing.count += Number(r.count);
       existing.total_value += Number(r.total_value);
       periodMap.set(label, existing);
     }
 
-    const result = Array.from(periodMap.entries())
+    return Array.from(periodMap.entries())
       .map(([reason, data]) => ({
         reason,
         count: data.count,
         total_value: data.total_value,
-        percentage: totalCarts > 0 ? (data.count / totalCarts) * 100 : 0,
+        percentage:
+          totalAbandoned > 0 ? round2((data.count / totalAbandoned) * 100) : 0,
       }))
       .sort((a, b) => b.count - a.count);
-
-    return result;
   }
 
   async getAbandonedCartsForExport(query: AnalyticsQueryDto) {
@@ -810,20 +900,30 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
+    // QUI-628 v3 — export alineado con la pantalla: solo carritos realmente
+    // abandonados, ordenados por `last_activity_at`. `abandonment_reason` se
+    // deja como `null` (antes era hardcoded "No especificada", lo cual
+    // invitaba a leerlo como dato). El XLSX debe mostrar la columna con un
+    // placeholder honesto tipo "Sin causa capturada" (ver UI del reporte).
     const cartsData = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
         id: number;
         subtotal: number;
-        created_at: Date;
+        last_activity_at: Date;
         user_id: number;
       }>
     >`
-      SELECT c.id, c.subtotal, c.created_at, c.user_id
+      SELECT c.id, c.subtotal, c.last_activity_at, c.user_id
       FROM carts c
       WHERE c.store_id = ${storeId}
-        AND c.created_at >= ${startDate}
-        AND c.created_at <= ${endDate}
-      ORDER BY c.created_at DESC
+        AND c.state = 'active'
+        AND c.last_activity_at >= ${startDate}
+        AND c.last_activity_at <= ${endDate}
+        AND c.last_activity_at < NOW() - make_interval(mins => ${this.ABANDONED_CART_INACTIVITY_MINUTES})
+        AND EXISTS (
+          SELECT 1 FROM cart_items ci WHERE ci.cart_id = c.id
+        )
+      ORDER BY c.last_activity_at DESC
     `;
 
     const userIds = cartsData.map((c) => c.user_id).filter(Boolean) as number[];
@@ -843,10 +943,12 @@ export class CustomersAnalyticsService {
           ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim()
           : 'Cliente invitado',
         email: customer?.email || '',
-        abandonment_reason: 'No especificada',
+        // Antes: 'No especificada' hardcoded. Ahora: null — la causa no se
+        // captura hoy y mentirla es peor que un campo vacío.
+        abandonment_reason: null,
         value: Number(cart.subtotal || 0),
-        created_at: cart.created_at ?? null,
-        abandoned_at: cart.created_at ?? null,
+        created_at: cart.last_activity_at ?? null,
+        abandoned_at: cart.last_activity_at ?? null,
       };
     });
   }

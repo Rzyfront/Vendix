@@ -376,6 +376,15 @@ export class EcommerceCatalogDto {
   @IsOptional()
   @IsBoolean()
   enable_sale_unit_selector?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Muestra el tiempo de preparación del producto en el catálogo público (lista y detalle). Opt-in: ausente ⇒ apagado.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  show_preparation_time?: boolean;
 }
 
 /**

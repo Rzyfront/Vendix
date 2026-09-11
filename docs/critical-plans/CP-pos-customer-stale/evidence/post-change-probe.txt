@@ -1,0 +1,5 @@
+PASS | A + form B lleno => {"resolved":true,"via":"resolve-backend","emitted":"B"}
+PASS | A + form vacio => {"resolved":true,"via":"short-circuit","emitted":null}
+PASS | sin cliente + form B => {"resolved":true,"via":"resolve-backend","emitted":"B"}
+PASS | sin cliente + form vacio => {"resolved":false,"via":"blocked","emitted":null}
+PASS | A + solo nombre => {"resolved":true,"via":"resolve-backend","emitted":"B"}

@@ -265,6 +265,21 @@ export function postalCodeInList(
     const pattern = normalizePostalCode(candidate);
     if (!pattern) return false;
     if (pattern === target) return true;
+
+    // Caso Colombia 5 dígitos vs 6 dígitos (ej. "44001" vs "440001", "11001" vs "110001"):
+    // Muy frecuentemente se escribe omitiendo el cero distrital antes del dígito final.
+    if (
+      (/^\d{5}$/.test(pattern) && /^\d{6}$/.test(target)) ||
+      (/^\d{6}$/.test(pattern) && /^\d{5}$/.test(target))
+    ) {
+      const five = pattern.length === 5 ? pattern : target;
+      const six = pattern.length === 6 ? pattern : target;
+      // Variante 1: Cero omitido antes del dígito final ("4400" + "0" + "1" === "440001")
+      if (five.slice(0, 4) + '0' + five.slice(4) === six) return true;
+      // Variante 2: Cero omitido después del departamento ("44" + "0" + "001" === "440001")
+      if (five.slice(0, 2) + '0' + five.slice(2) === six) return true;
+    }
+
     const shorter = pattern.length <= target.length ? pattern : target;
     const longer = pattern.length <= target.length ? target : pattern;
     return (

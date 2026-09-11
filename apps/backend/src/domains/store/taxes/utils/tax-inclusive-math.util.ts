@@ -1,43 +1,70 @@
 import { Prisma } from '@prisma/client';
+import {
+  INCLUSIVE_SOLVER_MAX_STEPS,
+  resolveInclusiveClearing,
+} from '../../invoicing/utils/dian-money.util';
+import type { InclusiveRateBasis } from '../../invoicing/utils/dian-money.util';
 
 /**
- * Matemática pura del despeje impuesto-incluido (CP-impuesto-incluido-agregado, A.3).
+ * Espejo DELGADO del despeje impuesto-incluido (A.2, F-001/ADR-01).
  *
- * Replica la MISMA fórmula que `invoice-calculator.resolveTaxableBase` + el
- * truncado DIAN de `dian-money.util` (Anexo 1.9 §11.2: truncar, nunca redondear),
- * SIN importarlos: este helper vive en taxes y esos módulos viven en invoicing;
- * importarlos crearía un ciclo taxes ↔ invoicing. F-014 se cumple por paridad de
- * fórmula, no por compartir el símbolo — si la fórmula de factura cambia, esta
- * también debe cambiar (y viceversa).
+ * `resolveLineTotals` NO implementa el loop: delega en el kernel único
+ * `resolveInclusiveClearing` (`invoicing/utils/dian-money.util.ts`, hoja sin
+ * imports de dominio — por eso no hay ciclo taxes ↔ invoicing) y solo adapta
+ * `Decimal → number`. Misma cota, mismas precondiciones, mismo cierre en
+ * centavos y misma semántica de carve-outs donde aplica:
+ * - Base propia / AIU-contrato / `omit_tax_total`: carve-outs DEL MOTOR. El
+ *   espejo no los recibe en su forma de entrada (tasas sin base propia), así
+ *   que no hay nada que espejar; documentado, no ignorado en silencio.
+ * - `rate_basis`: SÍ aplica — se normaliza con el `toFraction` compartido
+ *   del kernel (F-032). Ausente ⇒ `fraction` (cero regresión: todos los
+ *   llamadores actuales ya mandan fracción).
+ * - `is_inclusive`: estricto `=== true` (F-035), igual que el kernel.
  *
- * Semántica (ADR-02 con la corrección de F-005):
- * - Inclusivo NO crece el total: `B = G / (1 + Σ r_incl)` y cada cuota
- *   inclusiva sale de la base despejada. El redondeo es TRUNCADO DIAN, no
- *   residuo-a-la-mayor-tasa (F-005 corrige al ADR-02 en este punto).
- * - Agregado suma SOBRE LA BASE NETA despejada (idéntico a hoy cuando no hay
+ * La aserción de cota vive DENTRO del kernel (camino puro): la fachada
+ * `TaxesService.resolveLineTotals` y los importadores directos la heredan
+ * por delegación (F-004). La cota se re-exporta para visibilidad sin tocar
+ * la fachada.
+ *
+ * Semántica (ADR-02 con la corrección de F-005 + cierre A.2/ADR-01):
+ * - Inclusivo NO crece el total: `B = G / (1 + Σ r_incl)` con bump acotado
+ *   de a 1¢ hasta la mayor base con `f(base) ≤ bruto`; cada cuota sale de la
+ *   base final con TRUNCADO DIAN (Anexo 1.9 §11.2), nunca residuo-a-la-mayor.
+ * - Agregado suma SOBRE LA BASE NETA despejada (idéntico a hoy sin
  *   inclusivo: `B = G` y `cuota = trunc(B × r)`).
- * - Mixto: primero se despeja lo inclusivo, lo agregado se suma encima.
- * - Con varias tasas inclusivas el divisor es la SUMA (no cascada): los
- *   tributos gravan la misma base, no impuesto-sobre-impuesto.
+ * - Con varias tasas inclusivas el divisor es la SUMA (no cascada).
+ * - Inalcanzable (el escalón salta el bruto) ⇒ closest-below + residuo
+ *   declarado en `unclosed_residual_cents` (ADR-04, jamás overshoot).
+ * - Inválidos ⇒ coerción por compat + reporte en `invalid_inputs` (F-062).
  *
  * F-011: el input `finalPrice` es el precio FINAL ya resuelto
  * (sale/tier/override). Nunca se despeja sobre `base_price` crudo: quien llama
  * resuelve primero y despeja después.
  */
 
-const DIAN_SCALE = 2;
-const TRUNCATE = Prisma.Decimal.ROUND_DOWN;
-const ZERO = new Prisma.Decimal(0);
-const ONE = new Prisma.Decimal(1);
+export { INCLUSIVE_SOLVER_MAX_STEPS };
+export type { InclusiveRateBasis };
 
-/** Tasa tal como la lee cada canal: fracción decimal (0.19 = 19%). */
+const ZERO = new Prisma.Decimal(0);
+
+/** Tasa tal como la lee cada canal + unidad declarada (F-032). */
 export interface TaxRateForResolution {
   rate: number;
   is_inclusive?: boolean | null;
+  /**
+   * Unidad de `rate`. Ausente ⇒ `fraction` (0.19 = 19%, igual que
+   * `tax_rates.rate` y `calculateProductTaxes`). `percent` (19 ⇒ 0.19) y
+   * `per_mil`/`per-mil` (9.66 ⇒ 0.00966) se normalizan con
+   * `absorbRateToFraction` (F-067, UNA sola normalización en la hoja);
+   * basis desconocida ⇒ inválido + cuota 0; sin base y valor > 1 ⇒
+   * `rate:ambiguous_unit` reportado (bifurcación 100x imposible en silencio).
+   */
+  rate_basis?: InclusiveRateBasis;
 }
 
 /** Desglose por tasa: cuota truncada DIAN sobre la base neta despejada. */
 export interface ResolvedTaxAmount {
+  /** Fracción normalizada (0.19 = 19%), no el crudo de entrada. */
   rate: number;
   is_inclusive: boolean;
   /** Base neta de la línea (la misma para todas las tasas). */
@@ -47,20 +74,27 @@ export interface ResolvedTaxAmount {
 }
 
 export interface ResolvedLineTotals {
-  /** Base neta despejada (truncada DIAN). */
+  /** Base neta despejada (truncada DIAN, con el bump absorbido). */
   base: number;
   /**
-   * Total a cobrar: precio publicado + SOLO lo agregado.
-   * Con todo inclusivo, `total === finalPrice` (el total no crece).
+   * Total a cobrar: `f(base_final) + Σ agregadas`. Con cierre exacto y todo
+   * inclusivo, `total === finalPrice`; inalcanzable ⇒ closest-below (≤ bruto).
    */
   total: number;
-  /** Σ de todas las tasas (significado legacy, se conserva por compatibilidad). */
+  /** Σ de las fracciones normalizadas (significado legacy, se conserva). */
   total_rate: number;
   /** Σ de todas las cuotas (inclusivas despejadas + agregadas). */
   total_tax_amount: number;
   inclusive_tax_amount: number;
   exclusive_tax_amount: number;
   taxes: ResolvedTaxAmount[];
+  /**
+   * Residuo inalcanzable en centavos (F-061/ADR-04): 0 si cierra. Quien
+   * persiste (checkout/storefront/payments) lo chequea ANTES de persistir.
+   */
+  unclosed_residual_cents: number;
+  /** Entradas coercionadas por compat (F-062): bruto/tasas/basis en crudo. */
+  invalid_inputs: unknown[];
 }
 
 /**
@@ -74,65 +108,50 @@ export function truncMoney(value: number): number {
 /**
  * Dueño único del despeje (F-003): checkout/POS/orders/vitrina consumen esta
  * semántica en vez de reimplementarla. Puro y síncrono a propósito: sin DB,
- * testeable sin mocks.
+ * testeable sin mocks. Llamada delgada al kernel (F-001): todo el loop vive
+ * en `dian-money.util.ts`.
  */
 export function resolveLineTotals(
   finalPrice: number,
   ratesInput?: TaxRateForResolution[] | null,
 ): ResolvedLineTotals {
-  const gross = toDecimal(finalPrice);
-  const rates = (ratesInput ?? []).map((r) => ({
-    rate: sanitizeRate(r?.rate),
-    is_inclusive: r?.is_inclusive === true,
-  }));
+  const solved = resolveInclusiveClearing(
+    finalPrice,
+    (ratesInput ?? []).map((r) => ({
+      rate: r?.rate,
+      is_inclusive: r?.is_inclusive,
+      rate_basis: r?.rate_basis,
+    })),
+  );
 
-  let inclusiveRateSum = ZERO;
-  for (const r of rates) {
-    if (r.is_inclusive) inclusiveRateSum = inclusiveRateSum.plus(r.rate);
-  }
-
-  const divisor = ONE.plus(inclusiveRateSum);
-  // Divisor ≤ 0 solo llegaría con tarifas negativas (el DTO las prohíbe):
-  // se degrada a "sin despeje" en vez de emitir base negativa o infinita.
-  const baseExact =
-    rates.some((r) => r.is_inclusive) && divisor.greaterThan(ZERO)
-      ? gross.dividedBy(divisor)
-      : gross;
-  // La base gravable nunca es negativa (espejo de invoice-calculator).
-  const base = truncate(baseExact.isNegative() ? ZERO : baseExact);
-  const baseNum = toNum(base);
-
-  const taxes: ResolvedTaxAmount[] = rates.map((r) => ({
-    rate: r.rate,
-    is_inclusive: r.is_inclusive,
+  const baseNum = toNum(solved.base);
+  const taxes: ResolvedTaxAmount[] = solved.rates.map((t) => ({
+    rate: toNum(t.fraction),
+    is_inclusive: t.is_inclusive,
     base: baseNum,
-    amount: toNum(truncate(base.times(r.rate))),
+    amount: toNum(t.amount),
   }));
 
   let inclusiveTax = ZERO;
   let exclusiveTax = ZERO;
-  for (const t of taxes) {
-    const amount = toDecimal(t.amount);
-    if (t.is_inclusive) inclusiveTax = inclusiveTax.plus(amount);
-    else exclusiveTax = exclusiveTax.plus(amount);
+  let totalRate = ZERO;
+  for (const t of solved.rates) {
+    totalRate = totalRate.plus(t.fraction);
+    if (t.is_inclusive) inclusiveTax = inclusiveTax.plus(t.amount);
+    else exclusiveTax = exclusiveTax.plus(t.amount);
   }
-
-  const totalRate = rates.reduce((sum, r) => sum + r.rate, 0);
 
   return {
     base: baseNum,
-    total: toNum(gross.plus(exclusiveTax)),
-    total_rate: totalRate,
+    total: toNum(solved.total),
+    total_rate: toNum(totalRate),
     total_tax_amount: toNum(inclusiveTax.plus(exclusiveTax)),
     inclusive_tax_amount: toNum(inclusiveTax),
     exclusive_tax_amount: toNum(exclusiveTax),
     taxes,
+    unclosed_residual_cents: solved.unclosed_residual_cents,
+    invalid_inputs: solved.invalid_inputs,
   };
-}
-
-function sanitizeRate(value: unknown): number {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 function toDecimal(value: unknown): Prisma.Decimal {
@@ -146,7 +165,7 @@ function toDecimal(value: unknown): Prisma.Decimal {
 }
 
 function truncate(d: Prisma.Decimal): Prisma.Decimal {
-  return new Prisma.Decimal(d.toFixed(DIAN_SCALE, TRUNCATE));
+  return new Prisma.Decimal(d.toFixed(2, Prisma.Decimal.ROUND_DOWN));
 }
 
 function toNum(d: Prisma.Decimal): number {

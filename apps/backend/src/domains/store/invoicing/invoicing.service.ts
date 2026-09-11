@@ -415,6 +415,57 @@ export function aggregateOrderTaxes(
   };
 }
 
+/**
+ * Correlación espejo↔motor (B.1, F-063): lo mínimo para unir un warn del
+ * motor o un 422 del gate con el documento que lo produjo, sin re-ejecutar
+ * a mano. Todo opcional: el gate también corre en caminos sin factura
+ * todavía (create) o sin pedido (manual).
+ *
+ * `request` no existe como id propio (no hay middleware de request-id): la
+ * etiqueta del carril (`label`: `invoice:create`, `invoice:update:123`…)
+ * es el marcador de petición y ya viaja en cada warn.
+ */
+export interface GateCorrelation {
+  store_id?: number | null;
+  organization_id?: number | null;
+  invoice_id?: number | null;
+  order_id?: number | null;
+}
+
+/**
+ * Sufijo de correlación para los warns (`store=2 org=1 invoice=300`): sólo
+ * las partes definidas, para no ensuciar el log con `undefined`.
+ */
+export function formatGateCorrelation(correlation: GateCorrelation): string {
+  const parts: string[] = [];
+  if (correlation.store_id != null)
+    parts.push(`store=${correlation.store_id}`);
+  if (correlation.organization_id != null)
+    parts.push(`org=${correlation.organization_id}`);
+  if (correlation.invoice_id != null)
+    parts.push(`invoice=${correlation.invoice_id}`);
+  if (correlation.order_id != null)
+    parts.push(`order=${correlation.order_id}`);
+  return parts.length > 0 ? ` [${parts.join(' ')}]` : '';
+}
+
+/**
+ * `details.correlation` para los 422 del gate: el mismo objeto, sin claves
+ * vacías. `undefined` cuando no hay nada que correlacionar, para no cambiar
+ * la forma del `details` en caminos sin contexto.
+ */
+export function gateCorrelationDetails(
+  correlation: GateCorrelation,
+): GateCorrelation | undefined {
+  const details: GateCorrelation = {};
+  if (correlation.store_id != null) details.store_id = correlation.store_id;
+  if (correlation.organization_id != null)
+    details.organization_id = correlation.organization_id;
+  if (correlation.invoice_id != null) details.invoice_id = correlation.invoice_id;
+  if (correlation.order_id != null) details.order_id = correlation.order_id;
+  return Object.keys(details).length > 0 ? details : undefined;
+}
+
 @Injectable()
 export class InvoicingService {
   private readonly logger = new Logger(InvoicingService.name);
@@ -611,7 +662,9 @@ export class InvoicingService {
   private getContext() {
     const context = RequestContextService.getContext();
     if (!context) {
-      throw new Error('No request context found');
+      // B.1 (F-029) — sin contexto no hay tenant que atribuir: 400
+      // tipado en vez de 500 crudo. Ningún spec lo aserta (grep 2026-09-11).
+      throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
     }
     return context;
   }
@@ -1096,6 +1149,12 @@ export class InvoicingService {
       'invoice:create',
       aiu_context.aiu,
       tax_catalog,
+      // B.1 (F-063) — correlación del gate: la factura aún no existe, pero
+      // la tienda y la organización sí se saben.
+      {
+        store_id: context.store_id ?? null,
+        organization_id: context.organization_id ?? null,
+      },
     );
 
     // Tasa de cambio: sólo cuando el documento declara divisa y no trae tasa.
@@ -1490,6 +1549,11 @@ export class InvoicingService {
       'invoice:validate-draft',
       aiu_context.aiu,
       tax_catalog,
+      // B.1 (F-063).
+      {
+        store_id: context.store_id ?? null,
+        organization_id: context.organization_id ?? null,
+      },
     );
     const exchange_rate = await this.resolveExchangeRateForDocument({
       foreign_currency: dto.foreign_currency,
@@ -2556,6 +2620,12 @@ export class InvoicingService {
       line_snapshots,
       'invoice:create-from-contract',
       aiu_context.aiu,
+      undefined,
+      // B.1 (F-063).
+      {
+        store_id: context.store_id ?? null,
+        organization_id: context.organization_id ?? null,
+      },
     );
 
     // El adquiriente es el cliente del contrato (C.1 lo exige al crear).
@@ -2836,6 +2906,32 @@ export class InvoicingService {
       throw new VendixHttpException(ErrorCodes.INVOICING_STATUS_002);
     }
 
+    // B.1 (F-023) — LECTURA DE REPARO del invariante header vs filas.
+    //
+    // `persistLineTaxes` escribe `invoice_taxes` en un segundo paso fuera de
+    // transacción: un crash intermedio deja un borrador con líneas, cabecera
+    // con impuesto y CERO filas hijas. El PATCH que trae líneas ya repara
+    // solo (recalcula y reescribe los tributos por completo); el PATCH sin
+    // líneas NO recalcula y lo dejaría huérfano hasta la validación — donde
+    // ya hay número tomado. Se corta acá, ANTES de numerar, con la única
+    // instrucción que repara: re-guardar INCLUYENDO las líneas.
+    if (
+      (!dto.items || dto.items.length === 0) &&
+      (invoice.invoice_items?.length ?? 0) > 0 &&
+      (invoice.invoice_taxes?.length ?? 0) === 0 &&
+      Number(invoice.tax_amount ?? 0) !== 0
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PREVALIDATION_001,
+        `El borrador #${id} tiene ${invoice.invoice_items.length} línea(s) con ${invoice.tax_amount} de impuesto en cabecera pero ninguna fila de impuesto registrada (escritura interrumpida entre líneas y tributos). Vuelve a guardar el documento INCLUYENDO las líneas para que el servidor regenere los impuestos; guardar sólo este cambio no lo repara.`,
+        {
+          invoice_id: id,
+          item_count: invoice.invoice_items.length,
+          tax_row_count: 0,
+        },
+      );
+    }
+
     await this.assertFiscalPeriodOpen(
       invoice.accounting_entity_id,
       invoice.issue_date,
@@ -3057,6 +3153,12 @@ export class InvoicingService {
         `invoice:update:${id}`,
         aiu_context.aiu,
         tax_catalog,
+        // B.1 (F-063) — acá la factura YA existe: correlación completa.
+        {
+          store_id: invoice.store_id ?? null,
+          organization_id: invoice.organization_id ?? null,
+          invoice_id: id,
+        },
       );
       // EL SNAPSHOT SE REFRESCA EN CADA EDICIÓN QUE TOCA LÍNEAS.
       //
@@ -3608,7 +3710,22 @@ export class InvoicingService {
     // `createMany` y no `create` anidado: `invoice_taxes` es un modelo
     // RELACIONAL en el scoping de tienda (se filtra por `invoice.store_id` en
     // lectura), así que el create pasa sin que la extensión le inyecte nada.
-    await this.prisma.invoice_taxes.createMany({ data: rows });
+    const written = await this.prisma.invoice_taxes.createMany({ data: rows });
+
+    // B.1 (F-023) — verificación de lectura del segundo paso: si el
+    // `createMany` no persistió nada habiendo filas que escribir, el
+    // borrador queda con cabecera con impuesto y cero filas hijas. Se
+    // registra en voz alta (la lectura de reparo en `update()` y la puerta
+    // aritmética de `invoice-flow.validate()` lo atajan después); NO se
+    // lanza acá porque el consecutivo YA se tomó y un reintento del cliente
+    // quemaría otro número por un documento que existe y se repara
+    // re-guardando con líneas.
+    if (written.count === 0) {
+      this.logger.error(
+        `Invoice #${invoice_id}: invoice_taxes.createMany wrote 0 rows for ${rows.length} calculated rows; ` +
+          `draft left with header tax and no child rows (F-023 orphan — repair by re-saving with lines)`,
+      );
+    }
   }
 
   /**
@@ -3773,17 +3890,16 @@ export class InvoicingService {
       (id) => !owned.some((row) => row.id === id),
     );
     if (rejected.length > 0) {
-      const found = new Set(rows.map((row) => row.id));
-      const missing = rejected.filter((id) => !found.has(id));
-
+      // B.1 (F-031) — MENSAJE ÚNICO: la rama anterior distinguía «no existe»
+      // de «es de otra organización», y la lectura es `withoutScope` — un
+      // oráculo cross-tenant (probar ids ajenos dice cuáles existen). El
+      // detalle tampoco separa: sólo la lista rechazada, sin el split
+      // `missing_*` que delataba existencia.
       throw new VendixHttpException(
         ErrorCodes.INVOICING_CALC_002,
-        missing.length === rejected.length
-          ? `El documento referencia ${rejected.length === 1 ? 'una tarifa de impuesto que no existe' : 'tarifas de impuesto que no existen'}: ` +
-              `${rejected.join(', ')}. Si tomaste el identificador del catálogo de impuestos, revisa que sea el de la TARIFA y no el de la categoría que la contiene.`
-          : `El documento referencia ${rejected.length === 1 ? 'una tarifa de impuesto que no pertenece a esta organización' : 'tarifas de impuesto que no pertenecen a esta organización'}: ` +
-              `${rejected.join(', ')}. Selecciona el impuesto desde el catálogo de la tienda.`,
-        { rejected_tax_rate_ids: rejected, missing_tax_rate_ids: missing },
+        `El documento referencia ${rejected.length === 1 ? 'una tarifa de impuesto que no está en el catálogo de esta tienda' : 'tarifas de impuesto que no están en el catálogo de esta tienda'}: ` +
+          `${rejected.join(', ')}. Selecciona el impuesto desde el catálogo de la tienda, revisando que sea el de la TARIFA y no el de la categoría que la contiene.`,
+        { rejected_tax_rate_ids: rejected },
       );
     }
 
@@ -5125,7 +5241,20 @@ export class InvoicingService {
       rates: new Map(),
       assignment_inclusive: new Map(),
     },
+    /**
+     * B.1 (F-063) — correlación espejo↔motor: quién y qué produjo el
+     * bloqueo/aviso (tienda, organización, factura). Viaja en los warns y en
+     * el `details` de los 422 para unir el espejo contra el motor sin
+     * re-ejecutar a mano. Opcional con default vacío: cero regresión para
+     * los llamadores que no la pasan (los 4 carriles la pasan).
+     */
+    correlation: GateCorrelation = {},
   ): InvoiceCalculatorResult {
+    const gate_correlation = formatGateCorrelation(correlation);
+    const correlation_details = gateCorrelationDetails(correlation);
+    const with_correlation = correlation_details
+      ? { correlation: correlation_details }
+      : {};
     const result = this.calculator.calculate({
       ...(aiu ? { aiu } : {}),
       items: items.map((item, index) => ({
@@ -5151,6 +5280,25 @@ export class InvoicingService {
       })),
     });
 
+    // Huella corta de correlación (F-065): identifica la entrada que produjo
+    // el bloqueo sin volcar el payload. FNV-1a de 32 bits — correlación, no
+    // criptografía — definida acá para no sacar nada de esta región.
+    // (`store/order/invoice/request` no existen en esta firma privada; viajan
+    // en el `label` del llamador. Hilo pendiente para B.1.)
+    const hashLineInput = (line: unknown): string => {
+      try {
+        const text = JSON.stringify(line ?? null);
+        let hash = 0x811c9dc5;
+        for (let index = 0; index < text.length; index++) {
+          hash ^= text.charCodeAt(index);
+          hash = Math.imul(hash, 0x01000193);
+        }
+        return (hash >>> 0).toString(16).padStart(8, '0');
+      } catch {
+        return 'unhashable';
+      }
+    };
+
     const orphan = result.divergences.find(
       (divergence) => divergence.scope === 'untaxed_line_with_amount',
     );
@@ -5160,7 +5308,70 @@ export class InvoicingService {
         `La línea ${orphan.line_index + 1}${
           orphan.line_description ? ` («${orphan.line_description}»)` : ''
         } declara un impuesto de ${orphan.received} pero no declara ninguna tarifa. Agrega el impuesto con su tarifa (por ejemplo IVA 19%) o deja el importe en cero: sin tarifa la DIAN no puede validar el documento.`,
-        { line_index: orphan.line_index, received: orphan.received },
+        {
+          line_index: orphan.line_index,
+          received: orphan.received,
+          ...with_correlation,
+        },
+      );
+    }
+
+    // A.2 (ADR-04, F-060) — bruto inclusivo inalcanzable ⇒ **bloquea**.
+    //
+    // Espejo del bloque `untaxed_line_with_amount` de arriba: el calculador
+    // es puro e informa, y este es el único gate pre-numeración — todos los
+    // carriles (`create`, `update`, `create-from-contract`, `validate-draft`)
+    // recalculan ANTES de `generateNextNumber`. Sin este find, el scope nuevo
+    // caía en el warn agregado de abajo y el corto se numeraba: el bug con
+    // un log que nadie alerta (F-026).
+    const unclosed = result.divergences.find(
+      (divergence) => divergence.scope === 'unclosed_residual',
+    );
+    if (unclosed) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_005,
+        `La línea ${unclosed.line_index + 1}${
+          unclosed.line_description ? ` («${unclosed.line_description}»)` : ''
+        } con precio impuesto-incluido no puede cerrar al total cobrado de ${unclosed.expected}: ` +
+          `base más cuotas truncadas llega a ${unclosed.received} (residuo ${unclosed.difference}, ${unclosed.detail ?? 'sin traza'}). ` +
+          `Ajusta el precio o el descuento para que base más cuotas truncadas igualen el total — emitir el corto descuadra TOTAL, letras, XML y CUFE, y sobrecobrar no es una opción.`,
+        {
+          line_index: unclosed.line_index,
+          expected: unclosed.expected,
+          received: unclosed.received,
+          difference: unclosed.difference,
+          detail: unclosed.detail,
+          input_hash: hashLineInput(items[unclosed.line_index]),
+          ...with_correlation,
+        },
+      );
+    }
+
+    // A.2 (F-034, F-036, F-037) — entrada numérica inválida ⇒ **bloquea**.
+    //
+    // Misma región y misma forma que el anterior: los totales de la línea
+    // conservan la coerción legacy por compatibilidad, así que sin este
+    // throw nacerían en cero silencioso — una línea que la DIAN acepta y
+    // nadie cobra. El `detail` trae el código fail-closed del kernel.
+    const invalid = result.divergences.find(
+      (divergence) => divergence.scope === 'invalid_line_input',
+    );
+    if (invalid) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_006,
+        `La línea ${invalid.line_index + 1}${
+          invalid.line_description ? ` («${invalid.line_description}»)` : ''
+        } trae una entrada inválida (${invalid.detail ?? 'ver detail'}): ` +
+          `corrige la línea en vez de facturar un cero silencioso.`,
+        {
+          line_index: invalid.line_index,
+          expected: invalid.expected,
+          received: invalid.received,
+          difference: invalid.difference,
+          detail: invalid.detail,
+          input_hash: hashLineInput(items[invalid.line_index]),
+          ...with_correlation,
+        },
       );
     }
 
@@ -5209,6 +5420,7 @@ export class InvoicingService {
         {
           line_index: componente_line_index,
           contrato_line_index,
+          ...with_correlation,
         },
       );
     }
@@ -5237,6 +5449,7 @@ export class InvoicingService {
           aiu_value: aiu_floor.received,
           minimum_base: aiu_floor.expected,
           difference: aiu_floor.difference,
+          ...with_correlation,
         },
       );
     }
@@ -5303,11 +5516,48 @@ export class InvoicingService {
       );
     }
 
-    for (const divergence of result.divergences) {
-      this.logger.warn(
-        `[${label}] Divergencia ${divergence.scope} en línea ${divergence.line_index + 1}: ` +
-          `cliente=${divergence.received} servidor=${divergence.expected} (gana el servidor)`,
+    // A.2 (F-065, F-064) — warns agregados por documento con evidencia del
+    // absorb. Los scopes bloqueantes ya lanzaron arriba; lo que llega acá es
+    // informativo (gana el servidor). Un warn con conteos por scope, centavos
+    // absorbidos y las 3 peores líneas; el detalle por línea va a debug con
+    // su huella de correlación. (`store/order/invoice/request` no existen en
+    // esta firma; el `label` del llamador es la correlación disponible.)
+    if (result.divergences.length > 0) {
+      const counts = new Map<string, number>();
+      for (const divergence of result.divergences) {
+        counts.set(
+          divergence.scope,
+          (counts.get(divergence.scope) ?? 0) + 1,
+        );
+      }
+      const absorbed_cents = result.lines.reduce(
+        (acc, line) => acc + (line.absorb?.residual_absorbed_cents ?? 0),
+        0,
       );
+      const rank = (value: string): number => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
+      };
+      const worst = [...result.divergences]
+        .sort((a, b) => rank(b.difference) - rank(a.difference))
+        .slice(0, 3);
+      // B.1 (F-063) — el sufijo de correlación une el warn con el
+      // documento sin re-ejecutar: la etiqueta ya decía el carril, ahora
+      // dice también la tienda, la organización y la factura.
+      this.logger.warn(
+        `[${label}]${gate_correlation} ${result.divergences.length} divergencia(s) cliente↔servidor ` +
+          `(${[...counts.entries()].map(([scope, count]) => `${scope}×${count}`).join(', ')}) ` +
+          `en ${result.lines.length} línea(s); absorbido=${absorbed_cents}¢ (gana el servidor). ` +
+          `Peores: ${worst.map((divergence) => `L${divergence.line_index + 1}/${divergence.scope}/${divergence.difference}`).join(' | ')}`,
+      );
+      for (const divergence of result.divergences) {
+        this.logger.debug?.(
+          `[${label}]${gate_correlation} Divergencia ${divergence.scope} en línea ${divergence.line_index + 1}: ` +
+            `cliente=${divergence.received} servidor=${divergence.expected} ` +
+            `(gana el servidor) detail=${divergence.detail ?? '-'} ` +
+            `input_hash=${hashLineInput(items[divergence.line_index])}`,
+        );
+      }
     }
 
     return result;

@@ -209,6 +209,18 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
            porque el ticket ya declara por su cuenta si es copia informativa.
            Nunca abre nada: informa mientras el cajero sigue trabajando. -->
       <div class="max-w-md mx-auto mt-4 print:hidden">
+        @if (fiscalFallbackNotice()) {
+          <div class="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-snug text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+            <div class="flex items-start gap-2">
+              <app-icon name="alert-triangle" [size]="16" class="mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400"></app-icon>
+              <div>
+                <span class="font-semibold block mb-0.5">Comprobante de contingencia</span>
+                <span>{{ fiscalFallbackNotice() }}</span>
+              </div>
+            </div>
+          </div>
+        }
+
         <!-- SIN ACENTOS GRAVES ACÁ: este comentario vive DENTRO del literal
              del template, y un acento grave lo CIERRA. La paridad del resto
              del archivo se descuadra y el compilador reporta una cascada
@@ -240,9 +252,16 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
         <!-- Acciones secundarias: ghost, compactos, en fila -->
         <div class="flex items-center justify-center gap-1 sm:gap-2">
           @if (derivedIsPaid()) {
-            <app-button variant="ghost" size="sm" (clicked)="printReceipt()" [loading]="printing" title="Imprimir Ticket">
+            <app-button
+              variant="ghost"
+              size="sm"
+              (clicked)="printReceipt()"
+              [loading]="printing || awaitingFiscalPrint()"
+              [disabled]="awaitingFiscalPrint()"
+              [title]="awaitingFiscalPrint() ? 'Esperando respuesta de la DIAN...' : 'Imprimir Ticket'"
+            >
               <app-icon name="printer" [size]="16" slot="icon" ></app-icon>
-              <span class="hidden sm:inline">Imprimir</span>
+              <span class="hidden sm:inline">{{ awaitingFiscalPrint() ? 'Esperando FE...' : 'Imprimir' }}</span>
             </app-button>
           }
     
@@ -341,6 +360,22 @@ export class PosOrderConfirmationComponent {
   readonly creatingInvoice = signal(false);
   /** Loading del botón "Despachar" (envío al pool de reparto). */
   readonly dispatching = signal(false);
+
+  /**
+   * Señal que indica si la auto-impresión está en espera de que la DIAN
+   * emita la Factura Electrónica para no imprimir un tiquete borrador prematuro.
+   */
+  readonly awaitingFiscalPrint = signal<boolean>(false);
+
+  /**
+   * Mensaje explicativo cuando la emisión falló o excedió el tiempo límite y
+   * se degradó a imprimir un tiquete de venta de contingencia.
+   */
+  readonly fiscalFallbackNotice = signal<string | null>(null);
+
+  /** Temporizador de salvaguarda de 10s para no bloquear la caja ante caídas de la DIAN. */
+  private fiscalPrintTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly FISCAL_PRINT_TIMEOUT_MS = 10_000;
 
   // CP-POS-MODAL-SCOPE-001 / Phase F.8 v3 — derived `computed()` signals from
   // `orderData()` instead of an `effect()` side-effect that writes to plain
@@ -443,12 +478,19 @@ export class PosOrderConfirmationComponent {
   });
   readonly derivedOrderItems = computed(() => {
     const d = this.orderData();
-    const items = d?.items || d?.order_items || [];
+    // F-017: la factura trae `invoice_items`; leer solo `items`/`order_items`
+    // dejaba la confirmación sin líneas (o con las de la orden) cuando el
+    // snapshot fiscal ya existe. El snapshot manda primero.
+    const items = d?.invoice_items || d?.items || d?.order_items || [];
     return items.map((item: any) => {
-      const unitPrice = Number(item.unit_price || item.unitPrice || 0);
+      const unitPrice = Number(item.unit_price ?? item.unitPrice ?? 0);
       const quantity = Number(item.quantity || 0);
-      const totalPrice = Number(item.total_price || item.totalPrice || 0);
-      const tax = Number(item.tax_amount || item.tax || 0) || (totalPrice - (unitPrice * quantity));
+      const totalPrice = Number(item.total_price ?? item.totalPrice ?? 0);
+      // F-016/F-048: SIN fallback aritmético en floats. Derivar el impuesto
+      // como `total − unit × qty` inventa un desglose (222.2199) que la
+      // factura no va a persistir (222.22 sobre base 2777.78). Lo ausente es
+      // 0, nunca una resta: el cajero acepta lo que la factura declara.
+      const tax = Number(item.tax_amount ?? item.tax ?? 0);
       const weight = Number(item.weight || 0);
       const weight_unit = item.weight_unit || 'kg';
       const is_weight_product = weight > 0;
@@ -489,21 +531,41 @@ export class PosOrderConfirmationComponent {
         })() };
     });
   });
+  /**
+   * Suma del snapshot fiscal `invoice_taxes`, o `null` si no hay snapshot.
+   * Es la paridad que exige F-048: el impuesto que el cajero acepta es la Σ
+   * de las cuotas que la factura persiste, no un campo de la orden.
+   */
+  private invoiceTaxSnapshotTotal(d: any): number | null {
+    const rows = d?.invoice_taxes;
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    // En centavos: las cuotas son exactas a 2dp y el `+=` en float acumula
+    // residuo binario entre filas.
+    let cents = 0;
+    for (const row of rows) {
+      cents += Math.round(Number(row?.tax_amount ?? 0) * 100);
+    }
+    return cents / 100;
+  }
   readonly derivedOrderTotal = computed(() => {
     const d = this.orderData();
-    return Number(d?.grand_total ?? d?.total_amount ?? d?.total ?? 0);
+    // El snapshot fiscal manda sobre los campos de la orden: cuando la venta
+    // ya tiene factura, la confirmación enseña lo facturado, no lo cobrado.
+    return Number(d?.invoice?.total_amount ?? d?.grand_total ?? d?.total_amount ?? d?.total ?? 0);
   });
   readonly derivedOrderSubtotal = computed(() => {
     const d = this.orderData();
-    return Number(d?.subtotal ?? d?.subtotal_amount ?? 0);
+    return Number(d?.invoice?.subtotal_amount ?? d?.subtotal ?? d?.subtotal_amount ?? 0);
   });
   readonly derivedOrderTax = computed(() => {
     const d = this.orderData();
-    return Number(d?.tax_amount ?? d?.tax ?? 0);
+    const snapshot = this.invoiceTaxSnapshotTotal(d);
+    if (snapshot !== null) return snapshot;
+    return Number(d?.invoice?.tax_amount ?? d?.tax_amount ?? d?.tax ?? 0);
   });
   readonly derivedOrderDiscount = computed(() => {
     const d = this.orderData();
-    return Number(d?.discount_amount ?? d?.discount ?? 0);
+    return Number(d?.invoice?.discount_amount ?? d?.discount_amount ?? d?.discount ?? 0);
   });
   readonly derivedInvoiceDataToken = computed(() => this.orderData()?.invoiceDataToken ?? this.orderData()?.invoice_data_token);
   readonly derivedInvoiceDataQrUrl = computed(() => {
@@ -675,24 +737,18 @@ private authFacade = inject(AuthFacade);
       const isOpen = this.isOpen();
       const data = this.orderData();
       if (isOpen && data) {
-        // CP-POS-MODAL-SCOPE-001 / Phase F.8 — defer the order-data load out
-        // of the current change-detection cycle. `loadOrderData()` writes
-        // `orderNumber`, `currentDate`, `customerName`, `electronicInvoice`,
-        // `fiscalStatus`, `creatingInvoice`, etc. while Angular is still
-        // checking THIS template, and we get NG0100
-        // ExpressionChangedAfterItHasBeenCheckedError on every order
-        // confirmation. `setTimeout(0)` schedules the load on the next
-        // macrotask — AFTER Angular's CD has fully settled and a fresh CD
-        // cycle will pick up all the new field/signal values cleanly. Using
-        // `queueMicrotask` was not enough: the next CD cycle still saw the
-        // half-updated state and tripped the guard. Zoneless-safe: signal
-        // writes inside the timeout are still tracked by the change graph.
+        // CP-POS-MODAL-SCOPE-001 / Phase F.8 — resetea el estado fiscal de la
+        // orden anterior y evalúa el auto-print dentro de `untracked()` para
+        // que esas escrituras no creen dependencias del effect ni re-disparen
+        // el ciclo de CD con valores a medio actualizar (NG0100
+        // ExpressionChangedAfterItHasBeenCheckedError en el modal).
         untracked(() => {
           this.resetStaleInvoiceState(data);
           this.maybeAutoPrint();
         });
       }
     });
+    this.destroyRef.onDestroy(() => this.cleanupFiscalPrintTimeout());
   }
 
   /**
@@ -727,17 +783,21 @@ private authFacade = inject(AuthFacade);
     const previousOrderId = this.orderId;
     this.orderId = data?.id?.toString?.() || null;
     if (this.orderId !== previousOrderId) {
+      this.cleanupFiscalPrintTimeout();
+      this.awaitingFiscalPrint.set(false);
+      this.fiscalFallbackNotice.set(null);
       this.electronicInvoice.set(null);
       this.fiscalStatus.set(null);
       this.awaitingManualEmit = false;
       this.creatingInvoice.set(false);
       this.autoPrintedFeOrderId = null;
     }
-    // Mirrors still useful for the print path (see `printReceipt`).
-    this.orderTotal = Number(data?.grand_total ?? data?.total_amount ?? data?.total ?? 0);
-    this.orderSubtotal = Number(data?.subtotal ?? data?.subtotal_amount ?? 0);
-    this.orderDiscount = Number(data?.discount_amount ?? data?.discount ?? 0);
-    this.orderTax = Number(data?.tax_amount ?? data?.tax ?? 0);
+    // Mirrors still useful for the print path (see `printReceipt`). Misma
+    // precedencia que los `derived*`: snapshot fiscal primero (F-048/F-017).
+    this.orderTotal = Number(data?.invoice?.total_amount ?? data?.grand_total ?? data?.total_amount ?? data?.total ?? 0);
+    this.orderSubtotal = Number(data?.invoice?.subtotal_amount ?? data?.subtotal ?? data?.subtotal_amount ?? 0);
+    this.orderDiscount = Number(data?.invoice?.discount_amount ?? data?.discount_amount ?? data?.discount ?? 0);
+    this.orderTax = this.invoiceTaxSnapshotTotal(data) ?? Number(data?.invoice?.tax_amount ?? data?.tax_amount ?? data?.tax ?? 0);
     this.appliedPromotions = data?.applied_promotions || data?.appliedPromotions || [];
     this.appliedCoupons = data?.applied_coupons || data?.appliedCoupons || [];
     if (data.payment) {
@@ -757,6 +817,22 @@ private authFacade = inject(AuthFacade);
     }
   }
 
+  /**
+   * Determina si la tienda activa tiene la capacidad y configuración para
+   * emitir Factura Electrónica de forma automática en ventas POS.
+   */
+  private shouldWaitForFiscalEmission(): boolean {
+    if (this.fiscalStatus()?.state === 'not_applicable') return false;
+
+    const activeAreas = (this.authFacade.activeFiscalAreas() || []) as string[];
+    const hasInvoicing = activeAreas.includes('invoicing');
+    if (!hasInvoicing) return false;
+
+    const settings = this.settingsFacade.settings() as any;
+    const autoEmit = settings?.invoicing?.pos?.auto_emit ?? true;
+    return Boolean(autoEmit);
+  }
+
   private maybeAutoPrint(): void {
     if (!this.isOpen()) return;
     // CP-POS-MODAL-SCOPE-001 / Phase F.15 — only PAID orders emit a
@@ -770,6 +846,50 @@ private authFacade = inject(AuthFacade);
     if (!this.ticketService.shouldAutoPrint()) return;
     if (!this.orderId || this.autoPrintedOrderId === this.orderId) return;
 
+    // CP-POS-FE-AUTOPRINT — Si la tienda emite FE de forma automática, encolar
+    // la impresión para que salga la factura electrónica oficial en lugar de
+    // un tiquete de venta prematuro ("COPIA INFORMATIVA").
+    if (this.shouldWaitForFiscalEmission()) {
+      const currentFiscalState = this.fiscalStatus()?.state;
+      if (currentFiscalState === 'issued') {
+        this.autoPrintedOrderId = this.orderId;
+        const invoiceNumber = this.fiscalStatus()?.invoice_number;
+        this.toastService.success(
+          invoiceNumber
+            ? `Factura ${invoiceNumber} aceptada por la DIAN`
+            : 'Factura aceptada por la DIAN',
+        );
+        this.printReceipt();
+        void this.printDispatchTicketIfNeeded('automatic');
+        return;
+      }
+      if (currentFiscalState === 'contingency') {
+        this.autoPrintedOrderId = this.orderId;
+        // Contingencia ≠ aceptación: la DIAN no estaba disponible, el
+        // documento se expidió bajo contingencia y se transmitirá solo.
+        this.toastService.warning(
+          this.fiscalStatus()?.message || 'Documento expedido bajo contingencia.',
+        );
+        this.printReceipt();
+        void this.printDispatchTicketIfNeeded('automatic');
+        return;
+      }
+      if (currentFiscalState === 'failed') {
+        this.autoPrintedOrderId = this.orderId;
+        const reason = this.fiscalStatus()?.message || 'Error en validación DIAN';
+        const msg = `No se pudo emitir la factura electrónica (${reason}). Se imprimió ticket de venta como comprobante de contingencia.`;
+        this.fiscalFallbackNotice.set(msg);
+        this.toastService.warning(msg);
+        this.printReceipt();
+        void this.printDispatchTicketIfNeeded('automatic');
+        return;
+      }
+
+      this.awaitingFiscalPrint.set(true);
+      this.startFiscalPrintTimeout();
+      return;
+    }
+
     this.autoPrintedOrderId = this.orderId;
     this.printReceipt();
     // CP-DTLP Phase E.1 — encadenar tiquete de despacho con trigger
@@ -781,13 +901,42 @@ private authFacade = inject(AuthFacade);
     void this.printDispatchTicketIfNeeded('automatic');
   }
 
+  private startFiscalPrintTimeout(): void {
+    this.cleanupFiscalPrintTimeout();
+    this.fiscalPrintTimer = setTimeout(() => {
+      this.fiscalPrintTimer = null;
+      if (
+        this.awaitingFiscalPrint() &&
+        this.orderId &&
+        this.autoPrintedOrderId !== this.orderId
+      ) {
+        this.awaitingFiscalPrint.set(false);
+        this.autoPrintedOrderId = this.orderId;
+        const msg =
+          'La DIAN tardó más de lo esperado en responder. Se imprimió ticket de venta como comprobante de contingencia.';
+        this.fiscalFallbackNotice.set(msg);
+        this.toastService.warning(msg);
+        this.printReceipt();
+        void this.printDispatchTicketIfNeeded('automatic');
+      }
+    }, PosOrderConfirmationComponent.FISCAL_PRINT_TIMEOUT_MS);
+  }
+
+  private cleanupFiscalPrintTimeout(): void {
+    if (this.fiscalPrintTimer !== null) {
+      clearTimeout(this.fiscalPrintTimer);
+      this.fiscalPrintTimer = null;
+    }
+  }
 
   onModalClosed(): void {
+    this.cleanupFiscalPrintTimeout();
+    this.awaitingFiscalPrint.set(false);
     this.closed.emit();
   }
 
   printReceipt(): void {
-    if (!this.orderData()) return;
+    if (!this.orderData() || this.printing) return;
 
     this.printing = true;
 
@@ -820,10 +969,12 @@ private authFacade = inject(AuthFacade);
 	        // venta imprimiéndose distinto según el momento.
 	        isTakeaway: item.isTakeaway,
 	        serials: item.serials })),
-      subtotal: this.derivedOrderSubtotal() || this.orderSubtotal,
-      tax: this.derivedOrderTax() || this.orderTax,
-      discount: this.derivedOrderDiscount() || this.orderDiscount,
-      total: this.derivedOrderTotal() || this.orderTotal,
+      // `??`, no `||`: un 0 legítimo (venta sin impuesto) no es ausencia
+      // y no debe caer al espejo. Lo ausente rinde 0 (F-048).
+      subtotal: this.derivedOrderSubtotal() ?? this.orderSubtotal,
+      tax: this.derivedOrderTax() ?? this.orderTax,
+      discount: this.derivedOrderDiscount() ?? this.orderDiscount,
+      total: this.derivedOrderTotal() ?? this.orderTotal,
       paymentMethod: this.paymentInfo?.method || 'Pago',
       cashReceived: this.paymentInfo?.amount || (this.derivedOrderTotal() || this.orderTotal),
       change: Number(this.orderData()?.change || 0),
@@ -891,6 +1042,9 @@ private authFacade = inject(AuthFacade);
   }
 
   startNewSale(): void {
+    this.cleanupFiscalPrintTimeout();
+    this.awaitingFiscalPrint.set(false);
+    this.fiscalFallbackNotice.set(null);
     this.newSale.emit();
   }
 
@@ -1008,6 +1162,53 @@ private authFacade = inject(AuthFacade);
       });
     }
 
+    // CP-POS-FE-AUTOPRINT — Resolución de auto-impresión encolada esperando a la DIAN
+    if (
+      this.awaitingFiscalPrint() &&
+      this.orderId &&
+      this.autoPrintedOrderId !== this.orderId
+    ) {
+      if (status.state === 'issued') {
+        this.cleanupFiscalPrintTimeout();
+        this.awaitingFiscalPrint.set(false);
+        this.autoPrintedOrderId = this.orderId;
+        this.autoPrintedFeOrderId = this.orderId;
+        this.toastService.success(
+          status.invoice_number
+            ? `Factura ${status.invoice_number} aceptada por la DIAN`
+            : 'Factura aceptada por la DIAN',
+        );
+        this.printReceipt();
+        void this.printDispatchTicketIfNeeded('automatic');
+      } else if (status.state === 'contingency') {
+        this.cleanupFiscalPrintTimeout();
+        this.awaitingFiscalPrint.set(false);
+        this.autoPrintedOrderId = this.orderId;
+        this.autoPrintedFeOrderId = this.orderId;
+        // Contingencia ≠ aceptación: se imprime el documento de contingencia
+        // y se avisa con el mensaje real del backend, no con éxito DIAN.
+        this.toastService.warning(status.message);
+        this.printReceipt();
+        void this.printDispatchTicketIfNeeded('automatic');
+      } else if (status.state === 'failed') {
+        this.cleanupFiscalPrintTimeout();
+        this.awaitingFiscalPrint.set(false);
+        this.autoPrintedOrderId = this.orderId;
+        const reason = status.message || 'Error en validación DIAN';
+        const msg = `No se pudo emitir la factura electrónica (${reason}). Se imprimió ticket de venta como comprobante de contingencia.`;
+        this.fiscalFallbackNotice.set(msg);
+        this.toastService.warning(msg);
+        this.printReceipt();
+        void this.printDispatchTicketIfNeeded('automatic');
+      } else if (status.state === 'not_applicable') {
+        this.cleanupFiscalPrintTimeout();
+        this.awaitingFiscalPrint.set(false);
+        this.autoPrintedOrderId = this.orderId;
+        this.printReceipt();
+        void this.printDispatchTicketIfNeeded('automatic');
+      }
+    }
+
     if (!this.awaitingManualEmit) return;
     this.awaitingManualEmit = false;
     this.creatingInvoice.set(false);
@@ -1019,13 +1220,13 @@ private authFacade = inject(AuthFacade);
             ? `Factura ${status.invoice_number} aceptada por la DIAN`
             : 'Factura aceptada por la DIAN',
         );
-        // Con auto-print activo y ticket ya auto-impreso, la FE sale sola:
-        // el gate ahora resuelve a la factura emitida. Guard por orden para
-        // no reimprimir en cada re-sondeo. Imprimir nunca emite (la emisión
-        // ya ocurrió arriba, a mano), así que no se consume consecutivo extra.
+        // Con auto-print activo y factura emitida a mano sobre orden previa,
+        // permite imprimir la FE si aún no se había impreso. Nota intencional
+        // (revisión PR789): no se exige que el ticket ya haya salido solo para
+        // no dejar sin papel una FE manual cuando el auto-print no disparó.
+        // El guard `autoPrintedFeOrderId` evita la doble impresión en todo caso:
         if (
           this.orderId &&
-          this.autoPrintedOrderId === this.orderId &&
           this.autoPrintedFeOrderId !== this.orderId &&
           this.ticketService.shouldAutoPrint()
         ) {

@@ -152,6 +152,8 @@ export class HomeComponent implements OnInit {
   });
   readonly home_sections = signal<HomeSectionsConfig>(DEFAULT_HOME_SECTIONS);
   readonly shipping_badge_enabled = signal(false);
+  /** Fail-closed: solo true cuando la config pública trae el flag encendido. */
+  readonly show_preparation_time = signal(false);
   readonly featured_section = computed(
     () => this.home_sections().featured_products,
   );
@@ -261,6 +263,9 @@ export class HomeComponent implements OnInit {
           if (this.hasConfiguredShipping(ecommerceConfig)) {
             this.shipping_badge_enabled.set(true);
           }
+          this.show_preparation_time.set(
+            ecommerceConfig?.catalog?.show_preparation_time === true,
+          );
 
           this.slider_config.set(ecommerceConfig.slider || null);
           const inicio = ecommerceConfig.inicio || {};
@@ -331,6 +336,9 @@ export class HomeComponent implements OnInit {
         next: (response) => {
           this.shipping_badge_enabled.set(
             this.hasConfiguredShipping(response.data?.ecommerce),
+          );
+          this.show_preparation_time.set(
+            response.data?.ecommerce?.catalog?.show_preparation_time === true,
           );
         },
       });

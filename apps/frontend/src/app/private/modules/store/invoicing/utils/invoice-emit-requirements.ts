@@ -206,6 +206,17 @@ export const INVOICE_EMIT_REQUIREMENTS_MAP: Record<
     actionLabel: 'Ir a la línea',
     actionTarget: 'discount_amount',
   },
+  // A.3 — el residuo no absorbible (`INVOICING_CALC_005`) nombra la línea cuyo
+  // importe no cierra al centavo. El impuesto de la línea se declara en su
+  // propio selector (`formControlName="taxes"` de la fila): el destino viaja
+  // como `items.<i>.taxes`, la MISMA convención que `itemError()`, para que el
+  // botón lleve a ESA línea y no a la primera ni al agregado de cabecera.
+  'items[].tax_amount': {
+    label: 'Impuesto de la línea',
+    actionKind: 'focus',
+    actionLabel: 'Ir a la línea',
+    actionTarget: 'taxes',
+  },
   // Los impuestos se declaran POR LÍNEA en esta pantalla; la sección
   // «Impuestos» enseña el agregado que el servidor va a recomputar. Ahí es
   // donde se ve el desglose que el hallazgo está discutiendo.

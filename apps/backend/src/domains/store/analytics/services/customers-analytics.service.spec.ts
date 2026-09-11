@@ -133,4 +133,48 @@ describe('CustomersAnalyticsService.getAbandonedCartsSummary (QUI-628)', () => {
     // conversion flow but the metric anchors on the cart's own converted_at).
     expect(calls.some((s) => s.includes('c.converted_at'))).toBe(true);
   });
+
+  it('ADR-01 (F-002): abandoned side uses the derived definition, never the stored state', async () => {
+    // Nothing ever writes state='abandoned' (writers only put active /
+    // converted, expiry deletes items without touching state), so filtering
+    // by the stored state measured a structural ~0. The derived definition
+    // is: state='active' + last_activity_at older than X + EXISTS items.
+    prisma.$queryRaw
+      .mockResolvedValueOnce([{ count: 0n, total_value: '0.00' }])
+      .mockResolvedValueOnce([{ count: 0n, total_value: '0.00' }])
+      .mockResolvedValueOnce([{ count: 0n }]);
+
+    await service.getAbandonedCartsSummary(QUERY as any);
+
+    const sqls = prisma.$queryRaw.mock.calls.map((c) => {
+      const arg = c[0] as any;
+      if (Array.isArray(arg?.strings)) return arg.strings.join(' ');
+      return String(arg);
+    });
+    // The unreachable stored-state filter must be gone from every query.
+    expect(sqls.some((s) => s.includes("c.state = 'abandoned'"))).toBe(false);
+    // Abandoned-side queries carry the full derived definition.
+    const abandonedSqls = sqls.filter((s) => s.includes('cart_items'));
+    expect(abandonedSqls.length).toBeGreaterThan(0);
+    for (const s of abandonedSqls) {
+      expect(s).toContain("c.state = 'active'");
+      expect(s).toContain('c.last_activity_at');
+      expect(s).toContain('make_interval');
+    }
+    // The inactivity window X travels as a bound parameter from the named
+    // constant — single source of truth, no hardcoded duplicate here.
+    const windowX = (service as any).ABANDONED_CART_INACTIVITY_MINUTES;
+    expect(windowX).toBeGreaterThan(0);
+    const allValues = prisma.$queryRaw.mock.calls.flatMap((c) => {
+      const first = (c[0] as any) ?? {};
+      // The mock is invoked as a template tag (`mock\`...${v}...\``), so
+      // bound parameters arrive as the trailing call arguments. A real
+      // Prisma Sql object would carry them in `.values` instead.
+      if (Array.isArray(first.values)) return first.values as unknown[];
+      return c.slice(1) as unknown[];
+    });
+    expect(allValues).toContain(windowX);
+    // Recovered side is untouched: still the stored converted state.
+    expect(sqls.some((s) => s.includes("c.state = 'converted'"))).toBe(true);
+  });
 });

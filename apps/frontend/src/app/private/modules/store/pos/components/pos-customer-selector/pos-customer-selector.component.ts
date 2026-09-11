@@ -31,6 +31,11 @@ import {
 } from '../../../../../../shared/components';
 import { computeDocumentFormatHint } from '../../utils/document-format-hint.util';
 import { computePhoneFormatHint } from '../../utils/phone-format-hint.util';
+import {
+  extractFormIdentifiers,
+  RawCustomerResolveForm,
+  shouldShortCircuitResolve,
+} from '../../utils/customer-resolve-guard.util';
 import { PosCustomerService } from '../../services/pos-customer.service';
 import {
   CreatePosCustomerRequest,
@@ -362,13 +367,46 @@ export class PosCustomerSelectorComponent {
   }
 
   selectCustomer(customer: PosCustomer): void {
+    // CP-pos-customer-stale (F-002) — an explicit click wins over any draft:
+    // drop the form so a typed-but-discarded B can never override the
+    // chosen A on the next "Siguiente".
+    this.form.reset();
     this.customerSelected.emit(customer);
     this.view.set('overview');
   }
 
   clearCustomer(): void {
+    this.form.reset();
     this.customerCleared.emit();
     this.view.set('overview');
+  }
+
+  /**
+   * CP-pos-customer-stale — true when the cashier typed any identifier
+   * (email, document type/number, or name). Hosts use it to decide whether
+   * "Siguiente" must resolve first even when a customer is already attached
+   * (F-003: the shell used to skip `resolveIfNeeded()` with a cart customer).
+   * Imperative form read at click time — safe outside signals.
+   */
+  hasFormIdentifiers(): boolean {
+    const ids = extractFormIdentifiers(this.readRawForm());
+    return ids.hasEmail || ids.hasDocument || ids.hasName;
+  }
+
+  /** Single source for the identifier snapshot (guard + resolve share it). */
+  private readRawForm(): RawCustomerResolveForm {
+    const formSnapshot = this.form.value as {
+      email?: string | null;
+      documentIdentity?: DocumentIdentityValue | null;
+      firstName?: string | null;
+    };
+    return {
+      email: formSnapshot.email,
+      documentType:
+        formSnapshot.documentIdentity?.documentType as string | null,
+      documentNumber: formSnapshot.documentIdentity?.documentNumber,
+      firstName: formSnapshot.firstName,
+    };
   }
 
   // ── Resolución unificada (QUI-723) ──────────────────────────────────
@@ -378,17 +416,28 @@ export class PosCustomerSelectorComponent {
    * and emitted through `customerSelected`; `false` when the cashier has
    * not provided enough data to resolve (no email AND no document).
    *
-   * - If a customer was already selected on the cart, this returns `true`
-   *   without re-running the lookup — the cashier's edits to the form are
-   *   ignored, matching the previous "no-op when already chosen" semantics.
-   * - Otherwise, it calls `resolveCustomer` (find-or-create on the backend)
-   *   and emits the resulting customer via `customerSelected`.
+   * - If a customer was already selected AND the form carries no
+   *   identifier (no email, no document, no name), this returns `true`
+   *   without re-running the lookup — the untouched wizard keeps its
+   *   selection ("short-circuit on empty form", see ADR-01).
+   * - If the cashier filled any identifier, it calls `resolveCustomer`
+   *   (find-or-create on the backend) and emits the resulting customer
+   *   via `customerSelected` — "lo diligenciado manda", so a typed B
+   *   always replaces a previously selected A (CP-pos-customer-stale).
    *
    * The Observable completes synchronously in both paths so the host can
    * `await` (or subscribe-and-flag) without juggling timers.
    */
   resolveIfNeeded(): Observable<boolean> {
-    if (this.selectedCustomer()) {
+    // CP-pos-customer-stale — "lo diligenciado manda": short-circuit only
+    // on an empty form (see hasFormIdentifiers/readRawForm for the touched
+    // definition: a picked document type alone already counts as touched).
+    if (
+      shouldShortCircuitResolve(
+        !!this.selectedCustomer(),
+        extractFormIdentifiers(this.readRawForm()),
+      )
+    ) {
       return of(true);
     }
     if (!this.canResolve()) {
@@ -487,7 +536,14 @@ export class PosCustomerSelectorComponent {
     this.resolving.set(false);
     this.query.set('');
     this.lastQuery.set('');
-    this.activeTab.set('search');
-    this.view.set('overview');
+    // CP-pos-customer-stale (F-008) — en modo factura mínima no existe tab de
+    // búsqueda: volver a la vista mínima en vez del buscador general.
+    if (this.minimalInvoiceMode()) {
+      this.activeTab.set('create');
+      this.view.set('search');
+    } else {
+      this.activeTab.set('search');
+      this.view.set('overview');
+    }
   }
 }

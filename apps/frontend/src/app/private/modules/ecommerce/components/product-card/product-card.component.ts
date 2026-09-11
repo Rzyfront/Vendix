@@ -25,6 +25,7 @@ import {
   PromotionStackComponent,
   PromotionStackItem,
 } from '../../../../../shared/components/promotion-stack/promotion-stack.component';
+import { prepMinutesOrNull } from '../../../../../public/ecommerce/components/storefront/storefront.component';
 
 @Component({
   selector: 'app-product-card',
@@ -160,6 +161,14 @@ import {
                 <span>{{ product().service_modality === 'virtual' ? 'Virtual' : product().service_modality === 'hybrid' ? 'Híbrido' : 'Presencial' }}</span>
               </div>
             }
+          </div>
+        }
+        @if (prepMinutes(); as prepMins) {
+          <div class="service-indicators">
+            <div class="service-indicator" title="Tiempo de preparación">
+              <app-icon name="clock" [size]="12"></app-icon>
+              <span>~{{ prepMins }} min</span>
+            </div>
           </div>
         }
         <div class="product-bottom">
@@ -639,6 +648,11 @@ export class ProductCardComponent {
   readonly product = input.required<EcommerceProduct>();
   readonly show_variants = input<boolean>(true);
   readonly show_shipping_badge = input<boolean>(false);
+  /**
+   * Muestra el indicador de tiempo de preparación. Fail-closed: `false` por
+   * defecto para que las superficies que no propagan el flag no cambien.
+   */
+  readonly show_preparation_time = input<boolean>(false);
   readonly in_wishlist = input<boolean>(false);
   readonly add_to_cart = output<EcommerceProduct>();
   readonly toggle_wishlist = output<EcommerceProduct>();
@@ -762,6 +776,18 @@ export class ProductCardComponent {
 
   hasVariants(): boolean {
     return !!this.product().variant_count && this.product().variant_count! > 0;
+  }
+
+  /**
+   * F-013 — minutos de preparación a pintar (`null` = no renderizar).
+   * Comparte `prepMinutesOrNull` con la vitrina y el detalle: el mismo dato,
+   * una sola decisión de render (sub-minuto oculto, flag apagado oculto).
+   */
+  prepMinutes(): number | null {
+    return prepMinutesOrNull(
+      this.product().preparation_time_minutes,
+      this.show_preparation_time(),
+    );
   }
 
   /**

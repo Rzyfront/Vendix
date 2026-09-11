@@ -191,6 +191,7 @@ export class InvoicingEffects {
         InvoicingActions.sendInvoiceSuccess,
         InvoicingActions.createCreditNoteSuccess,
         InvoicingActions.createDebitNoteSuccess,
+        InvoicingActions.issueNoteSuccess,
         InvoicingActions.acceptInvoiceSuccess,
         InvoicingActions.rejectInvoiceSuccess,
         InvoicingActions.cancelInvoiceSuccess,
@@ -494,6 +495,31 @@ export class InvoicingEffects {
           catchError((error) =>
             this.fail(error, (f) =>
               InvoicingActions.createDebitNoteFailure({
+                error: f.message,
+                errorCode: f.errorCode,
+                details: f.details,
+              }),
+            ),
+          )
+        )
+      )
+    )
+  );
+
+  // Issue note — emitir NC/ND de una (CP-nc-nd-auto-orden-reembolso, A.1/B.1).
+  // El toast vive acá y no en el modal (una sola fuente de feedback).
+  issueNote$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(InvoicingActions.issueNote),
+      switchMap(({ id }) =>
+        this.invoicingService.issueNote(id).pipe(
+          map((response) => {
+            this.toastService.success('Nota emitida a la DIAN');
+            return InvoicingActions.issueNoteSuccess({ invoice: response.data.invoice });
+          }),
+          catchError((error) =>
+            this.fail(error, (f) =>
+              InvoicingActions.issueNoteFailure({
                 error: f.message,
                 errorCode: f.errorCode,
                 details: f.details,

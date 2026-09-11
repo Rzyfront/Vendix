@@ -56,6 +56,7 @@ interface CatalogSettings {
   show_variants: boolean;
   show_related_products: boolean;
   enable_filters: boolean;
+  show_preparation_time: boolean;
 }
 
 type CatalogSortBy = 'name' | 'price_asc' | 'price_desc' | 'newest' | 'oldest';
@@ -66,6 +67,7 @@ const DEFAULT_CATALOG_SETTINGS: CatalogSettings = {
   show_variants: true,
   show_related_products: false,
   enable_filters: false,
+  show_preparation_time: false,
 };
 
 @Component({
@@ -114,6 +116,9 @@ export class CatalogComponent implements OnInit {
   );
   readonly show_variants = computed(
     () => this.catalog_settings().show_variants !== false,
+  );
+  readonly show_preparation_time = computed(
+    () => this.catalog_settings().show_preparation_time === true,
   );
   readonly sortOptions: SelectorOption[] = [
     { value: 'newest', label: 'Más recientes' },
@@ -429,6 +434,7 @@ export class CatalogComponent implements OnInit {
       show_variants: catalog.show_variants !== false,
       show_related_products: catalog.show_related_products === true,
       enable_filters: catalog.enable_filters === true,
+      show_preparation_time: catalog.show_preparation_time === true,
     });
     this.shipping_badge_enabled.set(this.hasConfiguredShipping(ecommerce));
     this.limit.set(productsPerPage);

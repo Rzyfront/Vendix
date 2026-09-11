@@ -77,7 +77,9 @@ Las cantidades y los precios se dejan en blanco a propósito si cambian cada mes
 
 Lo que aquí se marque gravable es lo que emite «cac:TaxTotal»; lo que no, no emite totalización alguna. La diferencia importa: declarar una tarifa del 0 % no es lo mismo que no declarar el tributo, y la DIAN rechaza lo primero cuando la operación es excluida.
 
-El impuesto de cabecera es la SUMA de los impuestos de línea, cada uno con dos decimales. No es la tarifa aplicada al total — calcularlo así produce diferencias de céntimos que la validación de totales rechaza.`,
+El impuesto de cabecera es la SUMA de los impuestos de línea, cada uno con dos decimales. No es la tarifa aplicada al total — calcularlo así produce diferencias de céntimos que la validación de totales rechaza.
+
+Con impuesto INCLUIDO en el precio, la base se despeja y el residuo del truncado lo absorbe la base, nunca el impuesto ni el total: $3.000 con INC 8 % incluido declara base $2.777,78 + impuesto $222,22 = $3.000,00. Si divides 3000 ÷ 1,08 con calculadora verás $2.777,77 — ese centavo no es sobre-declaración, es la absorción que cuadra el total cobrado con lo declarado.`,
     `La matriz que decide qué impuesto grava qué porción, y con qué tarifa, en todas las facturas de este perfil.
 
 Existe para repartir el importe entre porciones gravables y no gravables. En una venta ordinaria no hace falta: el impuesto lo declara cada línea desde el catálogo de tarifas del producto.

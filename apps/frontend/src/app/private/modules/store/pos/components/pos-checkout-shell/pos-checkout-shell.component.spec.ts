@@ -142,6 +142,10 @@ class CustomerSelectorStub {
   resolveIfNeeded() {
     return of(false);
   }
+  /** CP-pos-customer-stale (F-003) — el shell lo lee en attemptNextStep; false = flujo legacy. */
+  hasFormIdentifiers(): boolean {
+    return false;
+  }
 }
 
 @Component({ selector: 'app-address-form-fields', standalone: true, template: `` })

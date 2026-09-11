@@ -125,6 +125,15 @@ export class PqrService {
     let owningOrgId: number;
     if (dto.organization_id) {
       owningOrgId = dto.organization_id;
+    } else if (dto.store_id) {
+      const store = await this.globalPrisma.stores.findUnique({
+        where: { id: dto.store_id },
+        select: { organization_id: true },
+      });
+      if (!store) {
+        throw new VendixHttpException(ErrorCodes.SUP_PQR_001);
+      }
+      owningOrgId = store.organization_id;
     } else {
       const orgVendix = await this.globalPrisma.organizations.findFirst({
         where: { is_platform: true },
@@ -168,6 +177,11 @@ export class PqrService {
     // parsing the description. Legacy `name` / `email` / `phone` on
     // the DTO still work — they're the fallback when the structured
     // fields aren't sent.
+    const nameParts = (dto.name ?? '').trim().split(/\s+/).filter(Boolean);
+    const inferredFirstName = nameParts[0] || null;
+    const inferredLastName =
+      nameParts.length > 1 ? nameParts.slice(1).join(' ') : null;
+
     const ticket = await this.globalPrisma.support_tickets.create({
       data: {
         ticket_number: ticketNumber,
@@ -184,8 +198,8 @@ export class PqrService {
         source_channel: 'public_form',
         tags: ['pqr', dto.pqr_type.toLowerCase(), `ip:${ip}`],
         // Structured requester fields (preferred path)
-        requester_first_name: dto.requester_first_name ?? null,
-        requester_last_name: dto.requester_last_name ?? null,
+        requester_first_name: dto.requester_first_name ?? inferredFirstName,
+        requester_last_name: dto.requester_last_name ?? inferredLastName,
         requester_email: dto.requester_email ?? dto.email,
         requester_phone: dto.requester_phone ?? dto.phone ?? null,
         requester_document_type: dto.requester_document_type ?? null,
@@ -224,15 +238,14 @@ export class PqrService {
    * Returns a sanitized view of a PQR for anonymous tracking. Only public
    * (non-internal) comments are exposed. Throws SUP_PQR_003 if the ticket
    * is missing or belongs to a different organization.
+   *
+   * ADR-05: public tracking serves platform-public PQRs only. Store
+   * PQRs stay in their authenticated admin — sequential
+   * PQRS-{orgId}-{counter} numbers would otherwise be enumerable
+   * cross-store (F-009).
    */
   async findByTicketNumberPublic(ticketNumber: string): Promise<PublicPqrView> {
-    const orgVendix = await this.globalPrisma.organizations.findFirst({
-      where: { is_platform: true },
-      select: { id: true },
-    });
-    if (!orgVendix) {
-      throw new VendixHttpException(ErrorCodes.SUP_PQR_001);
-    }
+    const orgVendix = await this.getPlatformOrgOrThrow();
 
     const ticket = await this.globalPrisma.support_tickets.findFirst({
       where: {
@@ -569,6 +582,7 @@ export class PqrService {
           // discriminator alone. Migration can add the enum-side
           // check back once it's deployed everywhere.
           tags: { has: 'pqr' },
+          store_id: null,
         },
         // Intentionally NOT including organization / store here — the
         // mapping layer below only needs assigned_to + comments +
@@ -827,10 +841,11 @@ export class PqrService {
     dto: UpdatePqrStatusDto,
     userId: number,
   ) {
-    const orgVendix = await this.getPlatformOrgOrThrow();
-
     const ticket = await this.globalPrisma.support_tickets.findFirst({
-      where: { id, organization_id: orgVendix.id, tags: { has: 'pqr' } },
+      where: {
+        ...this.buildPqrScope(),
+        id,
+      },
     });
     if (!ticket) {
       throw new VendixHttpException(ErrorCodes.SUP_PQR_003);
@@ -910,10 +925,11 @@ export class PqrService {
   }
 
   async adminAssign(id: number, dto: AssignPqrDto, userId: number) {
-    const orgVendix = await this.getPlatformOrgOrThrow();
-
     const ticket = await this.globalPrisma.support_tickets.findFirst({
-      where: { id, organization_id: orgVendix.id, tags: { has: 'pqr' } },
+      where: {
+        ...this.buildPqrScope(),
+        id,
+      },
     });
     if (!ticket) {
       throw new VendixHttpException(ErrorCodes.SUP_PQR_003);
@@ -1088,8 +1104,11 @@ export class PqrService {
       : `Admin #${userId}`;
 
     const isInternal = dto.is_internal !== false; // default true
-    const shouldNotify =
-      dto.notify_requester ?? !isInternal; // non-internal → notify
+    // Internal notes never notify, even if the client sends notify_requester
+    // (defense in depth: the email path cannot tell internal from public).
+    const shouldNotify = isInternal
+      ? false
+      : (dto.notify_requester ?? true); // non-internal → notify
 
     const comment = await this.globalPrisma.support_comments.create({
       data: {

@@ -184,16 +184,16 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
                         <span>+\${{ rate.per_unit_cost }}/u</span>
                       </div>
                     }
-                    @if (rate.free_shipping_threshold) {
+                    @if (rate.free_shipping_threshold != null && Number(rate.free_shipping_threshold) >= 0) {
                       <div
                         class="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 rounded-md text-emerald-600 font-bold"
                       >
                         <app-icon name="sparkles" size="10"></app-icon>
-                        <span
-                          >Gratis desde \${{
-                            rate.free_shipping_threshold
-                          }}</span
-                        >
+                        <span>{{
+                          rate.free_shipping_threshold == 0
+                            ? 'Envío gratis'
+                            : 'Gratis desde $' + rate.free_shipping_threshold
+                        }}</span>
                       </div>
                     }
                   </div>
@@ -485,6 +485,7 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
   private toastService = inject(ToastService);
 
   ShippingRateType = ShippingRateType;
+  protected readonly Number = Number;
   rates = signal<ShippingRate[]>([]);
   selectedRate = signal<ShippingRate | undefined>(undefined);
   methodOptions = signal<SelectorOption[]>([]);
@@ -592,8 +593,12 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
       text += `, siempre que el pedido esté entre **${minText}** y **${maxText}**`;
     }
 
-    if (free !== null && free > 0) {
-      text += `. Además, será **gratis** si la compra supera los **$${free}**`;
+    // F-008/ADR-04 — 0 = envío gratis explícito; null = sin umbral.
+    if (free !== null && free !== undefined && free !== '' && !isNaN(Number(free)) && Number(free) >= 0) {
+      text +=
+        Number(free) === 0
+          ? `. Además, el envío será **gratis**`
+          : `. Además, será **gratis** si la compra supera los **$${free}**`;
     }
 
     return text + '.';

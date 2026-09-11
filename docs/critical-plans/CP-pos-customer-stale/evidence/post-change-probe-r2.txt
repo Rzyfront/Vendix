@@ -1,0 +1,4 @@
+PASS | F-002 click-A resetea draft, Siguiente conserva A
+PASS | F-003 carro=A + form B => shell resuelve
+PASS | F-003 carro=A + form vacio => avance directo con A
+PASS | F-004 tipo-solo no hace short-circuit a A

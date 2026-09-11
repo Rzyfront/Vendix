@@ -37,8 +37,7 @@ import { FormStyleVariant } from '../../types/form.types';
       [disabled]="isDisabled()"
       (click)="onToggle()"
       [class]="buttonClasses"
-      [class.bg-[var(--color-primary)]]="isOn()"
-      [class.bg-[var(--color-muted)]]="!isOn()"
+      [style.background-color]="isDisabled() ? 'var(--color-muted)' : isOn() ? 'var(--color-primary)' : 'var(--color-danger)'"
     >
       <span
         class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow ring-0 transition-transform duration-75 ease-out"
@@ -137,7 +136,12 @@ export class ToggleComponent implements ControlValueAccessor {
     ];
 
     if (this.isDisabled()) {
-      baseClasses.push('opacity-50');
+      // QUI-801 — contrato de color (lo pinta el template, línea 40):
+      // deshabilitado = `muted`, encendido habilitado = `primary`, APAGADO
+      // HABILITADO = `danger` (rojo opaco a propósito, para que el OFF no se
+      // confunda con el deshabilitado). Acá solo se mantiene el cursor y se
+      // deja el color al template — sin `opacity` que apague la señal visual.
+      baseClasses.push('cursor-not-allowed');
     }
 
     if (this.styleVariant() === 'modern') {

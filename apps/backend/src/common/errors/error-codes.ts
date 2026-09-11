@@ -2286,6 +2286,36 @@ export const ErrorCodes = {
       'Invoice references a customer that does not exist or belongs to another organization',
   },
   /**
+   * El bruto con impuesto incluido es INALCANZABLE (A.2, ADR-04): `f(base)`
+   * salta el precio cobrado por escalón —multi-tasa, $17 con INC 8 %, brutos
+   * no representables tras el descuento— y el kernel persistió el
+   * closest-below sin sobrecobrar. Emitir el corto en silencio descuadra
+   * TOTAL, letras, XML y CUFE contra lo cobrado; sobrecobrar 1¢ no es una
+   * opción. Se corta al crear/actualizar/validar, ANTES de tomar numeración:
+   * `details` trae línea, bruto (`expected`), cierre (`received`) y residuo
+   * (`difference`, ≤ 0).
+   */
+  INVOICING_CALC_005: {
+    code: 'INVOICING_CALC_005',
+    httpStatus: 422,
+    devMessage:
+      'Invoice line with tax-included price cannot close to the charged total (unreachable gross); adjust the price or discount so base plus truncated quotas equal it',
+  },
+  /**
+   * La línea trae entradas numéricas INVÁLIDAS (A.2, fail-closed): no finitas,
+   * neto negativo por sobre-descuento, `price_unit_quantity` no entero ≥ 1,
+   * tarifa negativa o no finita, `rate_basis`/`tax_type` desconocidos. Los
+   * totales conservan la coerción legacy por compatibilidad —este código es
+   * lo que impide que nazcan en cero silencioso—. Se corta ANTES de tomar
+   * numeración; `details` trae línea y el código fail-closed (`detail`).
+   */
+  INVOICING_CALC_006: {
+    code: 'INVOICING_CALC_006',
+    httpStatus: 422,
+    devMessage:
+      'Invoice line carries invalid numeric input (non-finite, over-discount, bad price-unit or unknown rate basis/tax type); correct the line instead of billing a silent zero',
+  },
+  /**
    * PREVALIDACIÓN FISCAL — los cuatro códigos siguientes traducen el veredicto de
    * `FiscalDocumentValidator` (`validators/fiscal-document.validator.ts`), la
    * puerta que rechaza en LOCAL lo que la DIAN rechazaría.

@@ -253,7 +253,7 @@
             >
             </app-selector>
 
-            <div class="flex gap-2 items-end h-full md:col-span-2">
+            <div class="flex gap-2 items-end md:col-span-2">
               <app-multi-selector
                 class="flex-1"
                 label="Impuestos Aplicables"
@@ -263,10 +263,20 @@
                 tooltipText="Impuestos que se suman al precio base en facturación y checkout (IVA, INC, retenciones)."
               ></app-multi-selector>
 
+              <!--
+                FIX QUI-800: antes el botón "+" usaba `mb-[26px]` hardcoded
+                intentando alinearse con el input del multi-selector. Ese
+                offset se descalibró cuando cambió la altura del helper/label.
+                Se reemplaza por `self-end` (CSS align-self: end): delega la
+                alineación al flex container (que ya tiene `items-end`) y
+                sigue automáticamente si el multi-selector cambia de altura.
+                También se quita `h-full` del wrapper para que el botón no se
+                estire; el multi-selector marca la altura de la fila.
+              -->
               <app-button
                 variant="outline"
                 (clicked)="isTaxCategoryCreateOpen = true"
-                customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-[26px]"
+                customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center self-end"
               >
                 <app-icon slot="icon" name="plus" size="20"></app-icon>
               </app-button>

@@ -122,6 +122,8 @@ export class PosCheckoutShellComponent {
   readonly shippingCompleted = output<any>();
   readonly requestCustomer = output<void>();
   readonly customerSelected = output<PosCustomer>();
+  /** CP-pos-customer-stale (F-006) — el cajero quitó el cliente: el padre debe desvincular el carro. */
+  readonly customerCleared = output<void>();
   readonly tableSessionOpened = output<OpenTableSessionResult>();
   /** Emitted when a draft order has been persisted (and KDS fired if applicable). */
   readonly draftSaved = output<PosOrderCreateResult>();
@@ -983,6 +985,12 @@ export class PosCheckoutShellComponent {
             this.showCustomerError.set(true);
             return;
           }
+          // CP-pos-customer-stale (F-007, decisión humana: el alias gana) —
+          // alias confirmado con cliente en carro: desvincular al cliente para
+          // no facturarle a A mostrando B (igual que el editor, que nulifica).
+          if (this.cartState()?.customer) {
+            this.customerCleared.emit();
+          }
           // Alias es terminal en pickup (delivery bloquea alias) → avanzamos.
           this.nextStep();
           return;
@@ -992,7 +1000,13 @@ export class PosCheckoutShellComponent {
         // sub-step. Solo avanzamos cuando `resolveIfNeeded()` confirma éxito;
         // si el form está vacío o el backend rechaza, el selector muestra un
         // toast y el sub-step queda visible para que el cajero corrija.
-        if (!this.cartState()?.customer) {
+        // CP-pos-customer-stale (F-003) — con cliente en carro Y formulario
+        // diligenciado, el cajero está reemplazando A por B: hay que resolver
+        // primero en vez de avanzar con el A stale.
+        if (
+          !this.cartState()?.customer ||
+          this.customerSelector()?.hasFormIdentifiers()
+        ) {
           const selector = this.customerSelector();
           if (!selector) {
             // Sin referencia al selector (¿modal cerrado a mitad del flujo?):
@@ -1687,6 +1701,13 @@ export class PosCheckoutShellComponent {
       this.addressValid.set(
         !!(seeded.address_line1 && seeded.city && seeded.phone_number),
       );
+    } else {
+      // CP-pos-customer-stale (F-005/F-009) — cualquier cambio de identidad
+      // descarta el estado de dirección previo: en delivery sin primaria el
+      // sub-paso exige captura fresca, y en pickup evita que un flip posterior
+      // a delivery reutilice la dirección de A para B.
+      this.capturedAddress.set(null);
+      this.addressValid.set(false);
     }
   }
 
@@ -1698,6 +1719,13 @@ export class PosCheckoutShellComponent {
   /** "Quitar cliente / venta anónima" desde el selector inline. */
   onCustomerCleared(): void {
     this.toggleAnonymousSale(true);
+    // CP-pos-customer-stale (F-006/F-009) — la etiqueta no basta: el padre es
+    // dueño del carro y debe desvincular al cliente; la dirección capturada de
+    // A tampoco sobrevive a la venta anónima.
+    this.capturedAddressId.set(null);
+    this.capturedAddress.set(null);
+    this.addressValid.set(false);
+    this.customerCleared.emit();
   }
 
   /**

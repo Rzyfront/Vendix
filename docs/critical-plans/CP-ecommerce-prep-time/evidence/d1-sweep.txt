@@ -1,0 +1,25 @@
+# D.1 sweep evidence — 2026-09-11
+
+## 1. Catalog spec (exact path)
+`cd apps/backend && npx jest src/domains/ecommerce/catalog/catalog.service.spec.ts`
+Result: 16 passed / 2 failed of 18. Both failures are
+"attaches active_promotion ..." (product-scope and category-scope).
+
+## 2. Pre-existence proof (pristine base worktree)
+`git worktree add --detach /tmp/cp-base origin/develop` (HEAD 7e2dd0ef5),
+symlinked workspace node_modules, ran the same 2 tests:
+Result on BASE: same 2 failed / 16 skipped. The failures pre-date this plan
+(promotion-attachment path; untouched by the +4/+16 additive diff).
+Worktree removed afterwards (`worktree remove --force`, `prune`).
+
+## 3. Static additive proof
+`git diff` of the 3 backend files: 16 insertions, 0 deletions, 0 renames.
+No migration, no deleted/renamed key, no touched checkout/cart/order code.
+`grep -n "throw " catalog.service.ts` → only line 524 pre-existing
+NotFoundException (registered pattern). No new raw throws (ERR-03).
+
+## 4. Live curl — UNVERIFIED (environment)
+`vendix_backend` container up but frozen mid-boot since 05:36, no HTTP
+response (`curl :3000/api/health` → 000, empty reply). No frontend watch
+container exists in this machine. FB live-response checks and visual E2E
+transfer to a healthy backend / CI. No server was started or restarted here.

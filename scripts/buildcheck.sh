@@ -140,6 +140,9 @@ watch_status() {
   local pid puerto_ok=0
 
   pid="$(lsof -nP -iTCP:4200 -sTCP:LISTEN -t 2>/dev/null | head -1)"
+  if [ -z "$pid" ]; then
+    pid="$(ss -tlnp 'sport = :4200' 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)"
+  fi
   [ -n "$pid" ] && puerto_ok=1
 
   if [ "$puerto_ok" -eq 1 ]; then
@@ -159,7 +162,7 @@ watch_status() {
   # trampa que hace leer como sano un dev server que se cayó hace media hora.
   local edad ahora mtime
   ahora=$(date +%s)
-  mtime=$(stat -f %m "$log" 2>/dev/null || stat -c %Y "$log" 2>/dev/null || echo "$ahora")
+  mtime=$(stat -c %Y "$log" 2>/dev/null || stat -f %m "$log" 2>/dev/null || echo "$ahora")
   edad=$(( ahora - mtime ))
 
   # El log lleva secuencias ANSI, y esbuild las mete ENTRE el corchete y la

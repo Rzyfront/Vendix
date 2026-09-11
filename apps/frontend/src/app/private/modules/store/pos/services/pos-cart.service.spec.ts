@@ -10,6 +10,7 @@ import { PriceTierCacheService } from '../../price-tiers/services/price-tier-cac
 import { WithholdingTaxService } from '../../withholding-tax/services/withholding-tax.service';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { InvoicingService } from '../../invoicing/services/invoicing.service';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 
 /**
  * CP-POS-CREAR-EDITAR-COBRAR-001 — G.1 / D.1
@@ -290,6 +291,95 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
       expect(posApi.updateOrderItems).not.toHaveBeenCalled();
       expect(state.items.length).toBe(1);
       expect(state.items[0].id).toBe('b');
+      done();
+    });
+  });
+});
+
+/**
+ * QUI-806 — el último producto del carrito no se vacía al eliminarlo.
+ *
+ * Síntoma reportado: en /admin/pos, al agregar 1 producto y pulsar
+ * "Eliminar", el toast decía "Producto eliminado" pero la línea seguía
+ * visible con su cantidad.
+ *
+ * Causa raíz (race condition): el effect de hidratación de carrito
+ * (`initPersistence`) leía `cartState().items.length` DENTRO de su cuerpo
+ * para hacer el guard "no pisar un carrito activo". Angular registraba
+ * esa lectura como dependencia del effect, así que se re-evaluaba con
+ * cada add/remove. La secuencia problemática era:
+ *   1. Usuario elimina el último producto.
+ *   2. `cartState.set({items: []})` re-evalúa el effect SINCRONAMENTE.
+ *   3. `items.length === 0` → entra a la rama de hidratación.
+ *   4. `loadFromStorage()` lee el valor PREVIO de localStorage
+ *      (el debounce de 250ms del save aún no disparó).
+ *   5. `cartState.set(saved)` restaura el item eliminado.
+ *   6. 250ms después, `saveToStorage` persiste el item restaurado.
+ *
+ * Fix: el guard interno se mantiene (sigue siendo importante no pisar un
+ * carrito activo al cambiar de tienda), pero la lectura se envuelve en
+ * `untracked()` para que NO sea dependencia del effect. El effect
+ * ahora solo re-dispara cuando cambia la tienda activa.
+ */
+describe('PosCartService — removeFromCart (modo libre, QUI-806)', () => {
+  let service: PosCartService;
+
+  const cartLine = (id: string) =>
+    ({
+      id,
+      product: { id: id, name: `Item ${id}` },
+      quantity: 1,
+      unitPrice: 1000,
+      finalPrice: 1000,
+      totalPrice: 1000,
+      taxAmount: 0,
+      itemType: 'product',
+      addedAt: new Date(),
+    }) as any;
+
+  const seedCartWithOneItem = () => {
+    service.cartState.set({
+      ...service.cartState(),
+      linkedOrderId: null,
+      linkedOrderNumber: null,
+      items: [cartLine('only-item')],
+    });
+  };
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        PosCartService,
+        { provide: PosProductService, useValue: { getProductById: () => of(null) } },
+        { provide: PosApiService, useValue: {} },
+        { provide: PosSaleUnitService, useValue: {} },
+        { provide: PriceResolverService, useValue: {} },
+        { provide: PriceTierCacheService, useValue: {} },
+        {
+          provide: WithholdingTaxService,
+          useValue: {
+            previewWithholding: () => of({ lines: [], total_withholding: 0 }),
+          },
+        },
+        { provide: CurrencyFormatService, useValue: {} },
+        {
+          provide: InvoicingService,
+          useValue: { getPosUvtThreshold: () => of({ data: null }) },
+        },
+        { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+      ],
+    });
+    service = TestBed.inject(PosCartService);
+  });
+
+  it('vacía el carrito al eliminar el único producto (modo libre)', (done) => {
+    seedCartWithOneItem();
+    expect(service.cartState().items.length).toBe(1);
+
+    service.removeFromCart('only-item').subscribe((state) => {
+      // El cart DEBE quedar vacío tras eliminar el único item.
+      expect(state.items.length).toBe(0);
+      expect(service.cartIsEmpty()).toBe(true);
       done();
     });
   });

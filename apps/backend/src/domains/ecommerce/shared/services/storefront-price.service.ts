@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   PriceResolverService,
   PriceResolutionResult,
@@ -10,7 +10,9 @@ import {
 import type { DefaultSaleUnit } from '../../../store/products/services/default-sale-unit.util';
 import {
   resolveLineTotals,
+  type InclusiveRateBasis,
   type ResolvedTaxAmount,
+  type TaxRateForResolution,
 } from '../../../store/taxes/utils/tax-inclusive-math.util';
 
 /**
@@ -85,6 +87,9 @@ export interface StorefrontLineInput {
 export interface StorefrontTaxRateInput {
   rate: number;
   is_inclusive?: boolean | null;
+  // F-067: se preserva de punta a punta (el kernel valida); ausente ⇒ el
+  // default explícito del camino ('fraction', contrato de catálogo).
+  rate_basis?: string | null;
 }
 
 /**
@@ -152,6 +157,8 @@ export interface StorefrontLinePrice {
  */
 @Injectable()
 export class StorefrontPriceService {
+  private readonly logger = new Logger(StorefrontPriceService.name);
+
   constructor(private readonly priceResolver: PriceResolverService) {}
 
   resolveLine(input: StorefrontLineInput): StorefrontLinePrice {
@@ -208,6 +215,18 @@ export class StorefrontPriceService {
     const resolved = typedRates
       ? resolveLineTotals(result.unitPrice, typedRates)
       : null;
+    // A.2 (F-061/ADR-04): el corto inalcanzable no se publica en silencio —
+    // warn estructurado con inputs (la vitrina muestra, no persiste ni
+    // bloquea; el bloqueo vive en la numeración, A.2-motor).
+    if (resolved && (resolved.unclosed_residual_cents ?? 0) !== 0) {
+      this.logger.warn({
+        event: 'storefront.unclosed_residual_cents',
+        unit_price: result.unitPrice,
+        rates: typedRates,
+        residual_cents: resolved.unclosed_residual_cents,
+        invalid_inputs: resolved.invalid_inputs,
+      });
+    }
 
     // El packSize se toma del RESULTADO del resolver, no de una segunda lectura
     // de la cascada `override ?? tier ?? 1`: el resolver ya eligió la fila de
@@ -315,12 +334,20 @@ export class StorefrontPriceService {
    */
   private normalizeTypedRates(
     rates?: StorefrontTaxRateInput[] | null,
-  ): { rate: number; is_inclusive: boolean }[] | null {
+  ): TaxRateForResolution[] | null {
     if (rates == null) return null;
     if (!Array.isArray(rates)) return null;
+    // F-067: rate_basis se preserva (no se borra en el borde); el kernel lo
+    // valida y reporta. Ausente ⇒ default explícito del camino. El cast es el
+    // mismo que usa checkout (líneas 1469/2227): no cambia el valor en
+    // runtime —un string inválido sigue llegando al kernel, que lo reporta—,
+    // solo estrecha el tipo para `resolveLineTotals`. `null` ⇒ `undefined`
+    // porque para el kernel ambos son «ausente» (dian-money.util `absorbRateToFraction`).
     return rates.map((r) => ({
       rate: this.normalizeRate(r?.rate),
       is_inclusive: r?.is_inclusive === true,
+      rate_basis:
+        (r as { rate_basis?: InclusiveRateBasis } | null)?.rate_basis ?? undefined,
     }));
   }
 

@@ -2738,7 +2738,10 @@ export class PaymentsService {
     // cobrado (`finalUnitPrice`, F-011), y el desglose se RE-DESPEJA por tasa —
     // nunca reescalado lineal (eso volvería a sumar lo inclusivo en mixto).
     // Sin override, el re-despeje reproduce `catalogTaxInfo` por construcción.
-    const taxInfo = this.rescaleTaxInfo(catalogTaxInfo, finalUnitPrice);
+    const taxInfo = this.rescaleTaxInfo(catalogTaxInfo, finalUnitPrice, {
+      product_id: product.id,
+      quantity: priceUnits,
+    });
     const unitBasePrice = taxInfo.base;
     // Snapshot de costo de venta. La prioridad variante > producto > null vive en
     // `pickCostPrice` (único dueño de la regla); aquí se aplica sobre las filas
@@ -2795,6 +2798,7 @@ export class PaymentsService {
   private rescaleTaxInfo(
     source: Awaited<ReturnType<TaxesService['calculateProductTaxes']>>,
     finalPrice: number,
+    context?: { product_id?: unknown; quantity?: unknown },
   ): Awaited<ReturnType<TaxesService['calculateProductTaxes']>> {
     const resolved = this.taxes_service.resolveLineTotals(
       finalPrice,
@@ -2803,6 +2807,23 @@ export class PaymentsService {
         is_inclusive: tax.is_inclusive,
       })),
     );
+    // A.2 (F-061/ADR-04): el corto inalcanzable no se cobra en silencio —
+    // warn estructurado ANTES de persistir el snapshot (el bloqueo vive en
+    // la numeración, A.2-motor; acá todavía no hay order id).
+    if ((resolved.unclosed_residual_cents ?? 0) !== 0) {
+      this.logger.warn({
+        event: 'payments.unclosed_residual_cents',
+        product_id: context?.product_id ?? null,
+        quantity: context?.quantity ?? null,
+        final_price: finalPrice,
+        rates: source.taxes.map((tax) => ({
+          rate: tax.rate,
+          is_inclusive: tax.is_inclusive,
+        })),
+        residual_cents: resolved.unclosed_residual_cents,
+        invalid_inputs: resolved.invalid_inputs,
+      });
+    }
     return {
       total_rate: resolved.total_rate,
       total_tax_amount: resolved.total_tax_amount,

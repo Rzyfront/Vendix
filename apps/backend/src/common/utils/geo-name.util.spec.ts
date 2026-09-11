@@ -44,14 +44,17 @@ describe('geo-name.util', () => {
       expect(postalCodeInList('44000', ['440001'])).toBe(true);
     });
 
-    it('no matchea cuando solo coincide parcialmente sin ser prefijo', () => {
-      // "44001" no es prefijo de "440001" (difieren en el 5.º dígito).
-      expect(postalCodeInList('440001', ['44001'])).toBe(false);
+    it('matchea equivalencia colombiana de 5 dígitos vs 6 dígitos (cero distrital omitido)', () => {
+      expect(postalCodeInList('440001', ['44001'])).toBe(true);
+      expect(postalCodeInList('44001', ['440001'])).toBe(true);
+      expect(postalCodeInList('110001', ['11001'])).toBe(true);
+      expect(postalCodeInList('11001', ['110001'])).toBe(true);
     });
 
-    it('no matchea por una sola cifra ni códigos distintos', () => {
-      expect(postalCodeInList('440001', ['4'])).toBe(false);
+    it('no matchea cuando los códigos corresponden a distritos o departamentos distintos', () => {
+      expect(postalCodeInList('440001', ['440002'])).toBe(false);
       expect(postalCodeInList('440001', ['110111'])).toBe(false);
+      expect(postalCodeInList('440001', ['4'])).toBe(false);
       expect(postalCodeInList('', ['440001'])).toBe(false);
     });
   });

@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
+  AbsorbKernelQuota,
   DianNumericInput,
+  INCLUSIVE_ABSORB_KERNEL_VERSION,
+  absorbInclusiveLine,
   dianAmount,
   dianLineExtension,
   dianRate,
@@ -11,8 +14,8 @@ import {
 import {
   DIAN_TAX_CODES,
   DIAN_TAX_NAMES,
+  resolveDianTaxSchemeCode,
 } from '../providers/dian-direct/constants/dian-tax-codes';
-import { UblCommonBuilder } from '../providers/dian-direct/xml/ubl-common.builder';
 import type { ProviderInvoiceTax } from '../providers/invoice-provider.interface';
 import {
   AIU_COMPONENTS,
@@ -141,8 +144,11 @@ const CUFE_SCHEME_ORDER: readonly string[] = [
  * `ica.service.ts` (`amount * (rate_per_mil / 1000)`) y la conversión ‰→% que
  * `UblCommonBuilder.buildTaxTotals` hace al escribir `cbc:Percent`. Aplicar
  * `/100` a una tarifa por mil cobra diez veces el ICA que corresponde.
+ * `fraction` — 0.19 ya es la fracción (A.2: vocabulario compartido con el
+ * espejo, que recibe fracciones como 0.08; el motor sigue declarando
+ * `percent`/`per_mil`).
  */
-export type InvoiceTaxRateBasis = 'percent' | 'per_mil';
+export type InvoiceTaxRateBasis = 'percent' | 'per_mil' | 'fraction';
 
 /** Un impuesto declarado sobre una línea. */
 export interface InvoiceCalculatorTaxInput {
@@ -346,7 +352,7 @@ export interface CalculatedTax {
   tax_name: string;
   /** Normalizado en minúsculas; `iva` cuando el cliente no declara nada. */
   tax_type: string;
-  /** Esquema DIAN resuelto por `UblCommonBuilder.resolveTaxCodeFromTax`. */
+  /** Esquema DIAN resuelto por `resolveDianTaxSchemeCode` (hoja, A.2). */
   dian_tax_code: string;
   /** Tarifa formateada, en su unidad original (ver `rate_basis`). */
   tax_rate: string;
@@ -413,6 +419,23 @@ export interface CalculatedLine {
    * `omit_tax_total` y no tienen por qué cambiar (ADR-7, D.3).
    */
   omit_tax_total: boolean;
+  /**
+   * Evidencia del kernel de absorción (A.2, ADR-01, F-064): qué aritmética
+   * produjo `line_extension_amount` para que la auditoría distinga un centavo
+   * absorbido de uno capturado. Presente sólo en el camino del kernel;
+   * ausente en las líneas esculpidas (AIU-contrato, base fija,
+   * `omit_tax_total`), que conservan la fórmula legacy byte-idéntica.
+   */
+  absorb?: {
+    /** Versión del kernel (`INCLUSIVE_ABSORB_KERNEL_VERSION`). */
+    kernel: string;
+    /** `base_final − B0` en centavos: lo que el absorb movió. */
+    residual_absorbed_cents: number;
+    /** `bruto − total_cerrado` en centavos: 0 ⇔ cierre exacto. */
+    unclosed_residual_cents: number;
+    /** Iteraciones de la búsqueda acotada consumidas. */
+    steps: number;
+  };
   /**
    * **Base gravable declarada de ESTA línea** — de donde sale
    * `cbc:TaxableAmount` en el armado UBL (ADR-7). Ausente hasta D.3; con este
@@ -525,6 +548,28 @@ export type InvoiceCalculatorDivergenceScope =
    */
   | 'aiu_base_below_minimum'
   /**
+   * A.2 (ADR-04) — el bruto inclusivo es INALCANZABLE: `f(base)` salta el
+   * objetivo por escalón (multi-tasa, $17 @ 8 %, descuentos que dejan brutos
+   * no representables) y la búsqueda acotada persistió el closest-below, jamás
+   * overshoot. `expected` = bruto cobrado, `received` = total cerrado,
+   * `difference` = `received − expected` (≤ 0, en centavos de residuo).
+   * Recomendación de cableado: **rechazar** pre-numeración
+   * (`INVOICING_CALC_005`) — emitir el corto en silencio es el bug, y
+   * sobrecobrar 1¢ no es una opción.
+   */
+  | 'unclosed_residual'
+  /**
+   * A.2 (F-034, F-036, F-037) — la línea trae entradas numéricas inválidas
+   * (no finitas, neto negativo por sobre-descuento, `price_unit_quantity` no
+   * entero ≥ 1, tarifa negativa o no finita, `rate_basis`/`tax_type`
+   * desconocidos). Los totales de la línea conservan la coerción legacy por
+   * compatibilidad; esta divergencia es la que impide que nazcan en cero
+   * silencioso. Una por entrada inválida (`tax_name`/`tax_type` sólo en las
+   * de nivel tasa). Recomendación de cableado: **rechazar** pre-numeración
+   * (`INVOICING_CALC_006`).
+   */
+  | 'invalid_line_input'
+  /**
    * D.4 — un documento mezcló el Modelo 1 (`aiu_component: 'contrato'`) con el
    * Modelo 2 (líneas `administracion`/`imprevistos`/`utilidad`).
    *
@@ -557,6 +602,13 @@ export interface InvoiceCalculatorDivergence {
   line_description?: string;
   tax_name?: string;
   tax_type?: string;
+  /**
+   * Diagnóstico libre (A.2): el código fail-closed del kernel
+   * (`quantity:non_finite`, …) o la traza de la búsqueda
+   * (`kernel=… steps=… capped=… residual_cents=…`). Sólo lo emiten los scopes
+   * `invalid_line_input` y `unclosed_residual`; el resto lo deja ausente.
+   */
+  detail?: string;
   /** Lo que el servidor calculó. Es lo que se persiste. */
   expected: string;
   /** Lo que el cliente mandó. */
@@ -899,15 +951,49 @@ export class InvoiceCalculatorService {
       });
     }
 
+    // F-035 — estricto: sólo `=== true` declara inclusivo, en la línea y en
+    // cada tasa. El `??` + truthy anterior leía un `'false'` string como
+    // inclusivo en el motor mientras el espejo lo leía exclusivo: la misma
+    // carga despejaba distinto según el lado. Un flag explícito `false` sigue
+    // ganando sobre las tasas (F-014: lo declarado manda, nunca el orden).
     const line_is_inclusive =
-      item.is_inclusive ??
-      document_taxes.some((tax) => tax.is_inclusive === true);
+      item.is_inclusive === true
+        ? true
+        : item.is_inclusive === false
+          ? false
+          : document_taxes.some((tax) => tax.is_inclusive === true);
+
+    // A.2 carve-outs (F-005, F-010, F-021): la búsqueda del kernel sólo corre
+    // donde cada cuota grava `line_extension_amount`. La línea AIU-contrato
+    // grava una FRACCIÓN de su importe (el loop la sobre-tasaría ~10x), la de
+    // base fija no despeja (su base viene dada) y la excluida no emite
+    // impuesto. Las tres conservan la fórmula legacy byte-idéntica abajo.
+    const is_contrato_line = aiu != null && aiu_component === 'contrato';
+    const has_fixed_base = document_taxes.some((tax) =>
+      this.hasTaxableBase(tax.taxable_amount),
+    );
+    if (!omit_tax_total && !is_contrato_line && !has_fixed_base) {
+      return this.calculateLineWithKernel(
+        item,
+        index,
+        divergences,
+        document_taxes,
+        line_is_inclusive,
+        gross_amount,
+        discount_amount,
+        net_entered_amount,
+      );
+    }
 
     // La base se TRUNCA antes de gravar, no después: la DIAN valida
     // `TaxAmount = TaxableAmount × Percent` contra los valores que van en el
     // XML, y en el XML la base ya viaja con 2 decimales. Calcular la cuota
     // sobre la base en precisión plena produce una cuota que no se puede
     // reproducir desde el documento emitido.
+    //
+    // CAMINO LEGACY (A.2): sólo lo alcanzan las líneas esculpidas de arriba.
+    // No tocar: su regresión byte-idéntica vive en
+    // `invoice-calculator-aiu-contrato-pinning.spec.ts`.
     const line_extension_amount = dianAmount(
       this.resolveTaxableBase(
         toDecimal(net_entered_amount),
@@ -1053,6 +1139,205 @@ export class InvoiceCalculatorService {
       omit_tax_total,
       taxable_amount,
     };
+  }
+
+  /**
+   * Camino del kernel (A.2, ADR-01): la base sale de `absorbInclusiveLine` y
+   * cada cuota es `trunc(base_final × r)` — la regla DIAN por construcción.
+   * Sólo lo alcanzan líneas donde cada cuota grava `line_extension_amount`
+   * (sin split AIU, sin base fija, sin `omit_tax_total`: ver el carve-out en
+   * `calculateLine`), así que `taxable_amount` es la base entera.
+   *
+   * Formatea cada valor terminal UNA vez con `dianAmount` (F-041): el kernel
+   * ya entrega truncados en espacio `Decimal`, y `dianAmount` es idempotente
+   * sobre ellos — las cadenas son byte-idénticas al camino legacy cuando el
+   * legacy ya cerraba exacto.
+   */
+  private calculateLineWithKernel(
+    item: InvoiceCalculatorLineInput,
+    index: number,
+    divergences: InvoiceCalculatorDivergence[],
+    document_taxes: InvoiceCalculatorTaxInput[],
+    line_is_inclusive: boolean,
+    gross_amount: string,
+    discount_amount: string,
+    net_entered_amount: string,
+  ): CalculatedLine {
+    const kernel = absorbInclusiveLine({
+      gross: net_entered_amount,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+      discount_amount: item.discount_amount,
+      price_unit_quantity: item.price_unit_quantity,
+      rates: document_taxes.map((tax) => ({
+        rate: tax.tax_rate,
+        // Unidad explícita con el default legacy (ICA ⇒ por mil): el kernel
+        // nunca re-deriva el default del esquema, así que la fracción que ve
+        // es exactamente la que veía la fórmula anterior.
+        rate_basis: this.resolveRateBasis(tax),
+        tax_type: tax.tax_type,
+        // Herencia línea→tasa (legacy `tax.is_inclusive ?? line_is_inclusive`,
+        // ahora estricta): una tasa sin flag hereda el efectivo de la línea.
+        // Sin esto, una línea inclusiva con tasas sin flag no despejaría.
+        is_inclusive:
+          tax.is_inclusive === true
+            ? true
+            : tax.is_inclusive === false
+              ? false
+              : line_is_inclusive,
+      })),
+    });
+
+    const line_extension_amount = dianAmount(kernel.base);
+    const taxes: CalculatedTax[] = document_taxes.map((tax, tax_index) => {
+      const quota: AbsorbKernelQuota = kernel.quotas[tax_index];
+      const computed = dianAmount(quota.quota);
+
+      this.reportTaxDivergence(
+        divergences,
+        index,
+        item.description,
+        tax,
+        computed,
+      );
+
+      return {
+        tax_rate_id: tax.tax_rate_id ?? null,
+        tax_name: tax.tax_name,
+        tax_type: this.normalizeTaxType(tax.tax_type),
+        dian_tax_code: this.resolveDianTaxCode(tax),
+        tax_rate: dianRate(tax.tax_rate),
+        rate_basis: quota.rate_basis,
+        is_inclusive:
+          tax.is_inclusive === true
+            ? true
+            : tax.is_inclusive === false
+              ? false
+              : line_is_inclusive,
+        taxable_amount: line_extension_amount,
+        tax_amount: computed,
+      };
+    });
+
+    this.reportKernelDivergences(
+      divergences,
+      index,
+      item,
+      document_taxes,
+      kernel,
+      net_entered_amount,
+    );
+
+    // Línea legacy: importe de impuesto sin ninguna tarifa — espejo del bloque
+    // del camino legacy (mismo scope, misma forma). En el camino del kernel
+    // `omit_tax_total` es siempre falso, así que no se repite esa guarda.
+    if (
+      document_taxes.length === 0 &&
+      this.hasValue(item.tax_amount)
+    ) {
+      const received = dianAmount(item.tax_amount);
+      if (toDecimal(received).abs().greaterThan(ONE_CENT)) {
+        divergences.push({
+          scope: 'untaxed_line_with_amount',
+          line_index: index,
+          line_description: item.description,
+          expected: dianAmount(0),
+          received,
+          difference: received,
+        });
+      }
+    }
+
+    const tax_amount = dianSum(taxes.map((tax) => tax.tax_amount));
+
+    return {
+      index,
+      description: item.description,
+      gross_amount,
+      discount_amount,
+      net_entered_amount,
+      line_extension_amount,
+      taxes,
+      tax_amount,
+      total_amount: dianSum([line_extension_amount, tax_amount]),
+      is_inclusive: line_is_inclusive,
+      aiu_component: item.aiu_component ?? null,
+      omit_tax_total: false,
+      taxable_amount: line_extension_amount,
+      absorb: {
+        kernel: INCLUSIVE_ABSORB_KERNEL_VERSION,
+        residual_absorbed_cents: kernel.residual_absorbed_cents,
+        unclosed_residual_cents: kernel.unclosed_residual_cents,
+        steps: kernel.steps,
+      },
+    };
+  }
+
+  /**
+   * Traduce el reporte fail-closed del kernel a divergencias tipadas del
+   * documento: una `invalid_line_input` por entrada inválida y, cuando el
+   * bruto es inalcanzable, una `unclosed_residual` con bruto/cierre/residuo.
+   * El kernel ya dejó los totales en coerción legacy; acá sólo se informa.
+   */
+  private reportKernelDivergences(
+    divergences: InvoiceCalculatorDivergence[],
+    line_index: number,
+    item: InvoiceCalculatorLineInput,
+    document_taxes: InvoiceCalculatorTaxInput[],
+    kernel: ReturnType<typeof absorbInclusiveLine>,
+    net_entered_amount: string,
+  ): void {
+    for (const code of kernel.invalid_inputs) {
+      const rate_match = /^rates\[(\d+)\]\.(.+)$/.exec(code);
+      const tax =
+        rate_match !== null
+          ? document_taxes[Number(rate_match[1])]
+          : undefined;
+      divergences.push({
+        scope: 'invalid_line_input',
+        line_index,
+        line_description: item.description,
+        ...(tax !== undefined
+          ? {
+              tax_name: tax.tax_name,
+              tax_type: this.normalizeTaxType(tax.tax_type),
+            }
+          : {}),
+        expected: dianAmount(0),
+        received: code.startsWith('net:negative')
+          ? dianAmount(net_entered_amount)
+          : code,
+        difference: code.startsWith('net:negative')
+          ? dianAmount(net_entered_amount)
+          : dianAmount(0),
+        detail: code,
+      });
+    }
+
+    if (kernel.unclosed_residual_cents > 0 || kernel.capped) {
+      const inclusive_closed = dianAmount(
+        kernel.quotas
+          .filter((quota) => quota.is_inclusive)
+          .reduce<Prisma.Decimal>(
+            (acc, quota) => acc.plus(quota.quota),
+            kernel.base,
+          ),
+      );
+      divergences.push({
+        scope: 'unclosed_residual',
+        line_index,
+        line_description: item.description,
+        expected: dianAmount(kernel.gross),
+        received: inclusive_closed,
+        difference: dianAmount(
+          toDecimal(inclusive_closed).minus(kernel.gross),
+        ),
+        detail:
+          `kernel=${kernel.kernel} steps=${kernel.steps} ` +
+          `capped=${kernel.capped} ` +
+          `residual_cents=${kernel.unclosed_residual_cents}`,
+      });
+    }
   }
 
   // --- AIU ---
@@ -1396,6 +1681,12 @@ export class InvoiceCalculatorService {
   /**
    * Despeja la base gravable de una línea cuyo precio YA CONTIENE impuesto.
    *
+   * CAMINO LEGACY (A.2): sólo lo usan las líneas esculpidas del carve-out en
+   * `calculateLine` (AIU-contrato, base fija, `omit_tax_total`), cuya
+   * regresión byte-idéntica lo congela. El camino estándar no pasa por acá:
+   * `calculateLine` delega en `calculateLineWithKernel`, llamador delgado del
+   * kernel único `absorbInclusiveLine` (`dian-money.util.ts`, ADR-01).
+   *
    * ## La fórmula
    *
    *     B = (G − Σ impuestos_inclusivos_con_base_propia) / (1 + Σ tarifas_inclusivas)
@@ -1657,10 +1948,9 @@ export class InvoiceCalculatorService {
   }
 
   /**
-   * Esquema DIAN del impuesto. Delega en `UblCommonBuilder.resolveTaxCodeFromTax`
-   * —la ÚNICA clasificación del dominio— construyendo el `ProviderInvoiceTax`
-   * mínimo que esa función lee (`tax_type` y, como caída, `tax_name`). Los
-   * importes van en cero porque no participan de la clasificación.
+   * Esquema DIAN del impuesto. Delega en `resolveDianTaxSchemeCode` —la ÚNICA
+   * clasificación del dominio, en la hoja `dian-tax-codes` (A.2)— con el
+   * `tax_type` normalizado y, como caída, `tax_name`.
    */
   private resolveDianTaxCode(tax: InvoiceCalculatorTaxInput): string {
     const probe: ProviderInvoiceTax = {
@@ -1670,7 +1960,7 @@ export class InvoiceCalculatorService {
       taxable_amount: dianAmount(0),
       tax_amount: dianAmount(0),
     };
-    return UblCommonBuilder.resolveTaxCodeFromTax(probe);
+    return resolveDianTaxSchemeCode(probe);
   }
 
   /**
@@ -1694,13 +1984,20 @@ export class InvoiceCalculatorService {
       : 'percent';
   }
 
-  /** Tarifa → fracción. 19 % ⇒ 0,19 · 7 ‰ ⇒ 0,007. Siempre en `Decimal`. */
+  /**
+   * Tarifa → fracción. 19 % ⇒ 0,19 · 7 ‰ ⇒ 0,007 · fracción ⇒ tal cual.
+   * Siempre en `Decimal`.
+   */
   private rateFraction(
     rate: DianNumericInput,
     basis: InvoiceTaxRateBasis,
   ): Prisma.Decimal {
     return toDecimal(rate).dividedBy(
-      basis === 'per_mil' ? PER_MIL_DIVISOR : PERCENT_DIVISOR,
+      basis === 'per_mil'
+        ? PER_MIL_DIVISOR
+        : basis === 'fraction'
+          ? ONE
+          : PERCENT_DIVISOR,
     );
   }
 
