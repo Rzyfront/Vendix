@@ -40,7 +40,6 @@
 import {
   CreateCreditNoteDto,
   CreateInvoiceItemDto,
-  CreateInvoiceTaxDto,
   Invoice,
   InvoiceItem,
 } from '../../interfaces/invoice.interface';
@@ -179,53 +178,6 @@ export function buildNoteItems(
 }
 
 /**
- * El desglose de impuestos de una nota parcial, agrupado por tarifa.
- *
- * Se agrupan los MISMOS importes ya redondeados que van en las líneas, así que
- * la suma de este arreglo es idéntica al `tax_amount` que el backend va a
- * calcular sumando las líneas. No hay un segundo cálculo que pueda diferir.
- *
- * `tax_name` y `tax_type` se toman del desglose de la factura corregida cuando
- * hay una tarifa que coincide: la nota debe declarar el MISMO tributo que
- * corrige, y bautizarlo «IVA» por defecto convertiría un INC en IVA delante de
- * la DIAN. Solo si la factura no trae esa tarifa se cae al rótulo genérico.
- *
- * Los grupos sin cuota no se emiten: una nota sobre líneas sin impuesto no
- * lleva `cac:TaxTotal`, y `taxes: []` es justo lo que el backend interpreta
- * como «esta nota no tiene impuestos».
- */
-export function buildNoteTaxes(
-  invoice: Invoice,
-  selections: NoteLineSelection[],
-): CreateInvoiceTaxDto[] {
-  const headerTaxes = invoice.invoice_taxes ?? invoice.taxes ?? [];
-  const groups = new Map<number, { taxable_amount: number; tax_amount: number }>();
-
-  for (const { item, quantity } of selections) {
-    const scaled = scaleLine(item, quantity);
-    if (scaled.tax_amount <= 0) {
-      continue;
-    }
-    const rate = lineTaxRate(item);
-    const current = groups.get(rate) ?? { taxable_amount: 0, tax_amount: 0 };
-    current.taxable_amount = round2(current.taxable_amount + scaled.base);
-    current.tax_amount = round2(current.tax_amount + scaled.tax_amount);
-    groups.set(rate, current);
-  }
-
-  return [...groups.entries()].map(([rate, amounts]) => {
-    const source = headerTaxes.find((tax) => round2(num(tax.tax_rate)) === rate);
-    return {
-      tax_name: source?.tax_name ?? `IVA ${rate}%`,
-      tax_rate: rate,
-      taxable_amount: amounts.taxable_amount,
-      tax_amount: amounts.tax_amount,
-      ...(source?.tax_type ? { tax_type: source.tax_type } : {}),
-    };
-  });
-}
-
-/**
  * El concepto DIAN va DELANTE y entre corchetes porque el texto que produce
  * termina en `cbc:Description`/`cbc:Note` —el lado LEGIBLE de la corrección—,
  * y el prefijo sigue puesto AUNQUE el código ya viaje aparte en
@@ -356,9 +308,14 @@ export function buildNotePayload(params: {
     return base;
   }
 
+  // Parcial: SOLO `items`, nunca `taxes` (F-073 round 2). Los impuestos los
+  // deriva el servidor por el kernel (`derivePartialNoteLinesViaKernel`):
+  // mandar el desglose del navegador activaría el camino explícito con
+  // floats (`scaleLine` sin divisor) y la nota podría diferir de la factura
+  // en centavos. Quien necesite un desglose distinto al derivado usa el
+  // camino explícito del DTO a propósito, no este formulario.
   return {
     ...base,
     items: buildNoteItems(selections),
-    taxes: buildNoteTaxes(invoice, selections),
   };
 }
