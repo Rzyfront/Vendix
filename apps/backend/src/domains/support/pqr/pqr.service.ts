@@ -1104,8 +1104,11 @@ export class PqrService {
       : `Admin #${userId}`;
 
     const isInternal = dto.is_internal !== false; // default true
-    const shouldNotify =
-      dto.notify_requester ?? !isInternal; // non-internal → notify
+    // Internal notes never notify, even if the client sends notify_requester
+    // (defense in depth: the email path cannot tell internal from public).
+    const shouldNotify = isInternal
+      ? false
+      : (dto.notify_requester ?? true); // non-internal → notify
 
     const comment = await this.globalPrisma.support_comments.create({
       data: {

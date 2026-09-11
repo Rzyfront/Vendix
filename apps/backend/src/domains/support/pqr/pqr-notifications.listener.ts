@@ -46,6 +46,8 @@ export const PQR_STORE_RESPONSE_ROLE_NAMES = [
   'owner',
   'admin',
   'manager',
+  'ORG_ADMIN',
+  'org_admin',
   'STORE_ADMIN',
   'store_admin',
 ];

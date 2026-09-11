@@ -274,9 +274,9 @@ export class AddRateWizardModalComponent implements OnInit {
     // F-008/ADR-04 — 0 = envío gratis explícito (backend `>= 0`); null = sin
     // umbral; negativo = inválido con error visible (antes 0 y negativos se
     // coaccionaban a null en silencio).
-    const parsePositiveThreshold = (val: any): number | null => parseNullableNumber(val);
+    const parseThresholdOrNull = (val: any): number | null => parseNullableNumber(val);
 
-    const freeThreshold = parsePositiveThreshold(values.free_shipping_threshold);
+    const freeThreshold = parseThresholdOrNull(values.free_shipping_threshold);
     if (freeThreshold !== null && freeThreshold < 0) {
       this.toastService.show({
         variant: 'error',

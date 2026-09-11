@@ -184,7 +184,7 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
                         <span>+\${{ rate.per_unit_cost }}/u</span>
                       </div>
                     }
-                    @if (rate.free_shipping_threshold != null) {
+                    @if (rate.free_shipping_threshold != null && Number(rate.free_shipping_threshold) >= 0) {
                       <div
                         class="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 rounded-md text-emerald-600 font-bold"
                       >
