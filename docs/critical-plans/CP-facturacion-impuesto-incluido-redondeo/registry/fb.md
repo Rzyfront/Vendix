@@ -1,0 +1,10 @@
+# Frontend↔Backend Contract Registry
+
+| Id | Method + route | Request DTO | Response shape | Frontend consumer | Change | Risk | Verification | Status |
+|----|----------------|-------------|----------------|-------------------|--------|------|--------------|--------|
+| FB-01 | `POST store/invoicing` | `CreateInvoiceDto` (`tax_amount` informativo) | invoice con `subtotal/tax/total_amount` snapshot | `invoice-create-page.component.ts:4903` (totals/lineMath) | none (regression check only) | Preview diverge del snapshot | `npx jest src/domains/store/invoicing/services/invoice-calculator.service.spec.ts --runInBand` + preview manual $3.000 | [ ] |
+| FB-02 | `POST store/invoicing/from-order/:orderId` | `orderId` param | invoice desde snapshot de orden | confirmación POS (`pos-order-confirmation.component.ts:944`) | none (regression check only) | Total reconstruido si falta impuesto | spec regresión + `rg -n "totalPrice-unitPrice" pos-order-confirmation.component.ts` | [ ] |
+| FB-03 | `GET store/invoicing/:id` | `id` param | invoice + items + `invoice_taxes` + totales | `invoice-detail.component.ts:789` | none (regression check only) | Pintar campos que el backend deje de enviar | `curl -H 'Authorization: [redacted]' http://localhost:3000/store/invoicing/:id` y comparar keys vs interfaz del detail | [ ] |
+| FB-04 | `GET store/invoicing/:id/pdf` | `id` param | PDF (TOTAL + letras del mismo total) | descarga de factura del detalle | none (regression check only) | Letras de otro total que las cifras | emitir prueba $3.000 INC 8% y verificar TOTAL $3.000 + TRES MIL PESOS | [ ] |
+| FB-05 | `POST store/invoicing/validate-draft` | draft de factura | divergencias del calculator | formulario (previene emitir descuadrado) | none (regression check only) | Divergencia no reportada | spec con línea inclusiva y `divergences` vacías tras el fix | [ ] |
+| FB-06 | `POST store/invoicing/credit-notes` | nota sobre factura | nota con snapshot propio | módulo de notas crédito | none (regression check only) | Nota hereda aritmética vieja | suite `ubl-credit-note.builder.spec.ts` en verde | [ ] |
