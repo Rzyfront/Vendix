@@ -21,6 +21,30 @@ export interface CustomerResolveFormIdentifiers {
   hasName: boolean;
 }
 
+/**
+ * Raw snapshot of the selector form. `documentType` counts as touched even
+ * without a number: picking a type signals intent to identify someone, so a
+ * type-only draft must never silent-short-circuit to the previous customer —
+ * it resolves (and `canResolve` guides the cashier with a toast when the
+ * number is still missing).
+ */
+export interface RawCustomerResolveForm {
+  email?: string | null;
+  documentType?: string | null;
+  documentNumber?: string | null;
+  firstName?: string | null;
+}
+
+export function extractFormIdentifiers(
+  raw: RawCustomerResolveForm,
+): CustomerResolveFormIdentifiers {
+  return {
+    hasEmail: !!raw.email?.trim(),
+    hasDocument: !!(raw.documentType || raw.documentNumber?.trim()),
+    hasName: !!raw.firstName?.trim(),
+  };
+}
+
 export function shouldShortCircuitResolve(
   hasSelectedCustomer: boolean,
   form: CustomerResolveFormIdentifiers,

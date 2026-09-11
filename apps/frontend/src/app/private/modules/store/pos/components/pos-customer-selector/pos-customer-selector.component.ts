@@ -31,7 +31,11 @@ import {
 } from '../../../../../../shared/components';
 import { computeDocumentFormatHint } from '../../utils/document-format-hint.util';
 import { computePhoneFormatHint } from '../../utils/phone-format-hint.util';
-import { shouldShortCircuitResolve } from '../../utils/customer-resolve-guard.util';
+import {
+  extractFormIdentifiers,
+  RawCustomerResolveForm,
+  shouldShortCircuitResolve,
+} from '../../utils/customer-resolve-guard.util';
 import { PosCustomerService } from '../../services/pos-customer.service';
 import {
   CreatePosCustomerRequest,
@@ -363,13 +367,46 @@ export class PosCustomerSelectorComponent {
   }
 
   selectCustomer(customer: PosCustomer): void {
+    // CP-pos-customer-stale (F-002) — an explicit click wins over any draft:
+    // drop the form so a typed-but-discarded B can never override the
+    // chosen A on the next "Siguiente".
+    this.form.reset();
     this.customerSelected.emit(customer);
     this.view.set('overview');
   }
 
   clearCustomer(): void {
+    this.form.reset();
     this.customerCleared.emit();
     this.view.set('overview');
+  }
+
+  /**
+   * CP-pos-customer-stale — true when the cashier typed any identifier
+   * (email, document type/number, or name). Hosts use it to decide whether
+   * "Siguiente" must resolve first even when a customer is already attached
+   * (F-003: the shell used to skip `resolveIfNeeded()` with a cart customer).
+   * Imperative form read at click time — safe outside signals.
+   */
+  hasFormIdentifiers(): boolean {
+    const ids = extractFormIdentifiers(this.readRawForm());
+    return ids.hasEmail || ids.hasDocument || ids.hasName;
+  }
+
+  /** Single source for the identifier snapshot (guard + resolve share it). */
+  private readRawForm(): RawCustomerResolveForm {
+    const formSnapshot = this.form.value as {
+      email?: string | null;
+      documentIdentity?: DocumentIdentityValue | null;
+      firstName?: string | null;
+    };
+    return {
+      email: formSnapshot.email,
+      documentType:
+        formSnapshot.documentIdentity?.documentType as string | null,
+      documentNumber: formSnapshot.documentIdentity?.documentNumber,
+      firstName: formSnapshot.firstName,
+    };
   }
 
   // ── Resolución unificada (QUI-723) ──────────────────────────────────
@@ -392,24 +429,14 @@ export class PosCustomerSelectorComponent {
    * `await` (or subscribe-and-flag) without juggling timers.
    */
   resolveIfNeeded(): Observable<boolean> {
-    // CP-pos-customer-stale — read the raw identifiers the same way the
-    // request builder below does (value.email/documentIdentity/firstName).
-    // Imperative read at click time, not inside a computed(), so no
-    // signal-bridging is needed here.
-    const formSnapshot = this.form.value as {
-      email?: string | null;
-      documentIdentity?: DocumentIdentityValue | null;
-      firstName?: string | null;
-    };
+    // CP-pos-customer-stale — "lo diligenciado manda": short-circuit only
+    // on an empty form (see hasFormIdentifiers/readRawForm for the touched
+    // definition: a picked document type alone already counts as touched).
     if (
-      shouldShortCircuitResolve(!!this.selectedCustomer(), {
-        hasEmail: !!formSnapshot.email?.trim(),
-        hasDocument: !!(
-          formSnapshot.documentIdentity?.documentType &&
-          formSnapshot.documentIdentity?.documentNumber?.trim()
-        ),
-        hasName: !!formSnapshot.firstName?.trim(),
-      })
+      shouldShortCircuitResolve(
+        !!this.selectedCustomer(),
+        extractFormIdentifiers(this.readRawForm()),
+      )
     ) {
       return of(true);
     }

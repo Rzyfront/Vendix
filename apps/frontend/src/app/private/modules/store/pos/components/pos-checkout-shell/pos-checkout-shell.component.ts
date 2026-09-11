@@ -992,7 +992,13 @@ export class PosCheckoutShellComponent {
         // sub-step. Solo avanzamos cuando `resolveIfNeeded()` confirma éxito;
         // si el form está vacío o el backend rechaza, el selector muestra un
         // toast y el sub-step queda visible para que el cajero corrija.
-        if (!this.cartState()?.customer) {
+        // CP-pos-customer-stale (F-003) — con cliente en carro Y formulario
+        // diligenciado, el cajero está reemplazando A por B: hay que resolver
+        // primero en vez de avanzar con el A stale.
+        if (
+          !this.cartState()?.customer ||
+          this.customerSelector()?.hasFormIdentifiers()
+        ) {
           const selector = this.customerSelector();
           if (!selector) {
             // Sin referencia al selector (¿modal cerrado a mitad del flujo?):

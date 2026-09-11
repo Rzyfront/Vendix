@@ -1,4 +1,5 @@
 import {
+  extractFormIdentifiers,
   shouldShortCircuitResolve,
   CustomerResolveFormIdentifiers,
 } from './customer-resolve-guard.util';
@@ -60,5 +61,61 @@ describe('shouldShortCircuitResolve', () => {
         hasName: true,
       }),
     ).toBeFalse();
+  });
+});
+
+describe('extractFormIdentifiers', () => {
+  it('returns all false for a pristine form (EMPTY_DOCUMENT_IDENTITY)', () => {
+    expect(
+      extractFormIdentifiers({
+        email: '',
+        documentType: '',
+        documentNumber: '',
+        firstName: '',
+      }),
+    ).toEqual({ hasEmail: false, hasDocument: false, hasName: false });
+  });
+
+  it('trims whitespace-only inputs to false', () => {
+    expect(
+      extractFormIdentifiers({
+        email: '   ',
+        documentType: '',
+        documentNumber: '  ',
+        firstName: ' ',
+      }),
+    ).toEqual({ hasEmail: false, hasDocument: false, hasName: false });
+  });
+
+  it('counts a picked document type as touched even without a number', () => {
+    expect(
+      extractFormIdentifiers({
+        email: '',
+        documentType: 'CC',
+        documentNumber: '',
+        firstName: '',
+      }).hasDocument,
+    ).toBeTrue();
+  });
+
+  it('counts a typed document number as touched', () => {
+    expect(
+      extractFormIdentifiers({
+        email: '',
+        documentType: '',
+        documentNumber: '12345678',
+        firstName: '',
+      }).hasDocument,
+    ).toBeTrue();
+  });
+
+  it('end-to-end: A selected + type-only draft must not short-circuit', () => {
+    const ids = extractFormIdentifiers({
+      email: '',
+      documentType: 'CC',
+      documentNumber: '',
+      firstName: '',
+    });
+    expect(shouldShortCircuitResolve(true, ids)).toBeFalse();
   });
 });
