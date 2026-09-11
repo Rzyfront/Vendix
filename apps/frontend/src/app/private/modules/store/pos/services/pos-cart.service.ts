@@ -1,4 +1,4 @@
-import { Injectable, signal, computed, inject, DestroyRef, effect } from '@angular/core';
+import { Injectable, signal, computed, inject, DestroyRef, effect, untracked } from '@angular/core';
 import { Observable, of, throwError, forkJoin } from 'rxjs';
 import {
   catchError,
@@ -119,15 +119,34 @@ export class PosCartService {
   }
 
   private initPersistence(): void {
-    // Hidratar cuando la tienda activa esté lista
+    // QUI-806 — la hidratación se dispara SOLO cuando cambia la tienda
+    // activa. Antes este effect leía `cartState().items.length` en el cuerpo
+    // de la condición, lo que hacía que Angular lo re-registrara como
+    // dependencia y se re-evaluara con cada add/remove. La secuencia
+    // problemática era:
+    //   1. Usuario elimina el último producto.
+    //   2. `cartState.set({items: []})` re-evalúa el effect SINCRONAMENTE.
+    //   3. `items.length === 0` → entra a la rama de hidratación.
+    //   4. `loadFromStorage()` lee el valor PREVIO de localStorage
+    //      (el debounce de 250ms del save aún no disparó).
+    //   5. `cartState.set(saved)` restaura el item eliminado.
+    //   6. 250ms después, `saveToStorage` persiste el item restaurado.
+    // Resultado: toast "producto eliminado" pero el carrito no se vacía.
+    //
+    // Fix: la verificación `items.length === 0` queda como GUARD dentro del
+    // effect (envuelta en `untracked` para no registrar la dependencia),
+    // pero el ÚNICO disparador es el cambio de tienda. El cart vacío
+    // del usuario ya no re-hidrata.
     effect(() => {
       const store = this.authFacade.userStore();
-      if (store?.id && this.cartState().items.length === 0) {
+      untracked(() => {
+        if (!store?.id) return;
+        if (this.cartState().items.length > 0) return; // No pisar carrito activo
         const saved = this.loadFromStorage();
-        if (saved && saved.items && saved.items.length > 0) {
+        if (saved?.items && saved.items.length > 0) {
           this.cartState.set(saved);
         }
-      }
+      });
     });
 
     // Guardar automáticamente cambios en el carrito
