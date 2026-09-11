@@ -138,7 +138,7 @@ describe('AnalyticsRegistry', () => {
     it('should have correct view counts', () => {
       const entries = getSidebarEntries();
       const salesEntry = entries.find(e => e.label === 'Ventas');
-      expect(salesEntry?.viewCount).toBe(6);
+      expect(salesEntry?.viewCount).toBe(7);
     });
   });
 });

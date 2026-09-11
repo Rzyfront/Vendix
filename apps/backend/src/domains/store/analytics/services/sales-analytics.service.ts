@@ -1431,6 +1431,7 @@ export class SalesAnalyticsService {
         },
       },
       orderBy: { created_at: 'desc' },
+      take: 10_000,
     });
 
     const sellerMap = new Map<
