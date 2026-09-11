@@ -78,11 +78,22 @@ export class DianMunicipalityLookupService {
    * — el form debe setearlo vía `setBaseUrl` antes de la primera consulta,
    * idealmente en su constructor o `ngOnInit`.
    */
-  private baseUrl = `${environment.apiUrl}/store/addresses/dian/municipalities`;
+  private customBaseUrl: string | null = null;
+
+  private get effectiveBaseUrl(): string {
+    if (this.customBaseUrl) return this.customBaseUrl;
+    if (
+      typeof window !== 'undefined' &&
+      window.location.pathname.startsWith('/super-admin')
+    ) {
+      return `${environment.apiUrl}/superadmin/addresses/dian/municipalities`;
+    }
+    return `${environment.apiUrl}/store/addresses/dian/municipalities`;
+  }
 
   /** Cambia la base del endpoint DANE (e.g. super-admin reusa este servicio). */
   setBaseUrl(url: string): void {
-    this.baseUrl = url;
+    this.customBaseUrl = url;
   }
 
   /** Búsquedas ya resueltas, por `término|límite`. */
@@ -109,7 +120,7 @@ export class DianMunicipalityLookupService {
     if (trimmed) params = params.set('search', trimmed);
 
     const request$ = this.http
-      .get<PaginatedEnvelope<DianMunicipalityOption>>(this.baseUrl, { params })
+      .get<PaginatedEnvelope<DianMunicipalityOption>>(this.effectiveBaseUrl, { params })
       .pipe(
         map((res) => {
           const items = Array.isArray(res?.data) ? res.data : [];
@@ -171,7 +182,7 @@ export class DianMunicipalityLookupService {
 
     return this.http
       .get<SuccessEnvelope<DianMunicipalityOption | null>>(
-        `${this.baseUrl}/resolve`,
+        `${this.effectiveBaseUrl}/resolve`,
         { params },
       )
       .pipe(
