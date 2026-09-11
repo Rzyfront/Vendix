@@ -812,7 +812,7 @@ export class InvoiceNoteCreateComponent {
 
     this.actions$
       .pipe(ofType(issueNoteSuccess), takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => this.onIssued());
+      .subscribe(({ invoice }) => this.onIssued(invoice.id));
 
     this.actions$
       .pipe(ofType(issueNoteFailure), takeUntilDestroyed(this.destroyRef))
@@ -929,8 +929,10 @@ export class InvoiceNoteCreateComponent {
     this.isOpen.set(false);
   }
 
-  private onIssued(): void {
-    if (!this.createdNote()) {
+  private onIssued(issuedId: number): void {
+    // La página de orden emite sus propias notas (B.3) sobre el mismo store:
+    // solo la que este modal pidió lo cierra.
+    if (this.createdNote()?.id !== issuedId) {
       return;
     }
     this.issuing.set(false);
@@ -939,7 +941,7 @@ export class InvoiceNoteCreateComponent {
   }
 
   private onIssueFailed(failure: MutationFailure): void {
-    if (!this.createdNote()) {
+    if (!this.createdNote() || !this.issuing()) {
       return;
     }
     this.issuing.set(false);
