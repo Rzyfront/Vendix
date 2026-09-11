@@ -388,6 +388,7 @@ describe('SalesAnalyticsService', () => {
 
       expect(result.data).toHaveLength(2);
       expect(result.meta.pagination.total).toBe(2);
+      expect(result.meta.truncated).toBe(false);
 
       const carlos = result.data.find((r) => r.user_id === 10);
       expect(carlos).toBeDefined();

@@ -15,8 +15,8 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { AnalyticsService } from '../../services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { DateRangeFilter, PaginatedResponse } from '../../interfaces/analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate, toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import {
@@ -316,8 +316,8 @@ export class SalesByUserComponent implements OnInit {
       .getSalesByUser(this.buildQuery())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (response) => {
-          const sellers = this.extractRows(response);
+        next: (response: PaginatedResponse<SalesByUser>) => {
+          const sellers = response.data ?? [];
           this.data.set(sellers);
           this.updateChart(sellers);
           this.chartQueryKey.set(queryKey);
@@ -332,12 +332,6 @@ export class SalesByUserComponent implements OnInit {
       });
   }
 
-  private extractRows(response: any): SalesByUser[] {
-    if (Array.isArray(response?.data)) return response.data;
-    if (Array.isArray(response?.data?.data)) return response.data.data;
-    return [];
-  }
-
   exportReport(): void {
     this.exporting.set(true);
     this.analyticsService
@@ -348,7 +342,7 @@ export class SalesByUserComponent implements OnInit {
           const url = window.URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = `ventas_por_vendedor_${new Date().toISOString().split('T')[0]}.xlsx`;
+          a.download = `ventas_por_vendedor_${toLocalDateString()}.xlsx`;
           a.click();
           window.URL.revokeObjectURL(url);
           this.exporting.set(false);
@@ -394,7 +388,7 @@ export class SalesByUserComponent implements OnInit {
         formatter: (params: any) => {
           if (!params?.[0]) return '';
           const p = params[0];
-          const seller = (p.data as any)?.seller ?? top10[p.dataIndex];
+          const seller = (p.data as { seller?: SalesByUser })?.seller;
           if (!seller) return '';
           const name = seller.user_name || 'Sin asignar';
           const emailLine = seller.user_email
