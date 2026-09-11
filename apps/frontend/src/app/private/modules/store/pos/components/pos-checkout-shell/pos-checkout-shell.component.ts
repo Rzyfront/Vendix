@@ -985,6 +985,12 @@ export class PosCheckoutShellComponent {
             this.showCustomerError.set(true);
             return;
           }
+          // CP-pos-customer-stale (F-007, decisión humana: el alias gana) —
+          // alias confirmado con cliente en carro: desvincular al cliente para
+          // no facturarle a A mostrando B (igual que el editor, que nulifica).
+          if (this.cartState()?.customer) {
+            this.customerCleared.emit();
+          }
           // Alias es terminal en pickup (delivery bloquea alias) → avanzamos.
           this.nextStep();
           return;
