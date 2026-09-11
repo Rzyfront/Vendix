@@ -2,8 +2,8 @@
 id: A.1
 title: "Reproducir stale y fijar inventario"
 phase: A
-status: pending
-owner: none
+status: done
+owner: rzy
 updated: 2026-09-11
 contracts: []
 adrs: []
@@ -23,9 +23,9 @@ skills: [vendix-frontend, vendix-zoneless-signals, parallel, agent-teams]
 - **Verification:**
   - `grep -n "if (this.selectedCustomer" apps/frontend/src/app/private/modules/store/pos/components/pos-customer-selector/pos-customer-selector.component.ts`
 - **Acceptance checklist:**
-  - [ ] Early-return 390-393 citado con file:line en la evidencia
-  - [ ] Traza seleccionar-A-crear-B-Siguiente-Pagar registrada
-  - [ ] `inventory/files.md` sin wildcards y verificado
-  - [ ] `inventory/assets.md` con reutilizables o razón
-  - [ ] Rama sigue en develop sin checkout durante el paso
-- **Status:** pending
+  - [x] Early-return 390-393 citado con file:line en la evidencia
+  - [x] Traza seleccionar-A-crear-B-Siguiente-Pagar registrada → evidence/repro-a-luego-b.md
+  - [x] `inventory/files.md` sin wildcards y verificado
+  - [x] `inventory/assets.md` con reutilizables o razón
+  - [x] Rama sigue en develop sin checkout durante el paso (7e2dd0e→b3c1935)
+- **Status:** done · rzy · 2026-09-11 · evidence/pre-change-probe.txt

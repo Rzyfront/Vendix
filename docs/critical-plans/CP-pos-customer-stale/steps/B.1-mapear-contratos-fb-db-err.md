@@ -2,8 +2,8 @@
 id: B.1
 title: "Mapear contratos FB DB ERR"
 phase: B
-status: pending
-owner: none
+status: done
+owner: rzy
 updated: 2026-09-11
 contracts: [FB-01, FB-02, FB-03, FB-04, FB-05, FB-06, FB-07, FB-08, DB-01, DB-02, DB-03, ERR-01, ERR-02, ERR-03, ERR-04]
 adrs: []
@@ -23,9 +23,9 @@ skills: [vendix-backend-api, vendix-validation, vendix-multi-tenant-context, ven
 - **Verification:**
   - `bash skills/how-to-critical-plan/assets/cp-lint.sh docs/critical-plans/CP-pos-customer-stale`
 - **Acceptance checklist:**
-  - [ ] 8 filas FB con Change y Verification runnable
-  - [ ] 3 filas DB con scoping e invariante
-  - [ ] 4 filas ERR con comportamiento frontend
-  - [ ] Ninguna fila supera 400 chars
-  - [ ] `cp-lint.sh` exit 0 en este paso
-- **Status:** pending
+  - [x] 8 filas FB con Change y Verification runnable
+  - [x] 3 filas DB con scoping e invariante
+  - [x] 4 filas ERR con comportamiento frontend
+  - [x] Ninguna fila supera 400 chars (lint lo valida)
+  - [x] `cp-lint.sh` exit 0 (0 fallas, ver E.1)
+- **Status:** done · rzy · 2026-09-11 · registry/fb.md,db.md,err.md

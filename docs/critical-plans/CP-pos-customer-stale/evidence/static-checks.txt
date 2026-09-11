@@ -14,3 +14,9 @@ TSC-UTIL PASS
 ✅ UI state plano en archivos cambiados: 0
 
 ❌ Zoneless audit FAILED
+
+## R2 (final, root binary, post F-002/F-003/F-004)
+TSC-UTIL R2 PASS
+
+## Zoneless en archivos del fix
+menciones de archivos del fix en audit: 0

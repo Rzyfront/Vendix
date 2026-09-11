@@ -2,8 +2,8 @@
 id: D.1
 title: "Regresion de venta y facturacion estandar"
 phase: D
-status: pending
-owner: none
+status: in-progress
+owner: rzy
 updated: 2026-09-11
 contracts: [FB-02, FB-03, FB-04, FB-07, FB-08, DB-01, DB-02, ERR-01, ERR-02]
 adrs: []
@@ -29,4 +29,5 @@ skills: [vendix-frontend, vendix-backend-api, vendix-error-handling, vendix-fisc
   - [ ] Edición conserva cliente salvo cambio explícito
   - [ ] Cotización y separé conservan customer_id
   - [ ] Factura from-order hereda B y reimprime B
-- **Status:** pending
+  - [ ] F-007 — alias con carro A se descarta en silencio y factura A (minor)
+- **Status:** in-progress · rzy · 2026-09-11

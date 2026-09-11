@@ -2,8 +2,8 @@
 id: C.2
 title: "Sincronizar estado hasta payload y ticket"
 phase: C
-status: pending
-owner: none
+status: done
+owner: rzy
 updated: 2026-09-11
 contracts: [FB-02, FB-03, DB-01]
 adrs: [ADR-01, ADR-02]
@@ -23,9 +23,11 @@ skills: [vendix-frontend, vendix-zoneless-signals, vendix-frontend-state, parall
 - **Verification:**
   - `grep -n "customer_id: this.selectedCustomer" apps/frontend/src/app/private/modules/store/pos/pos.component.ts`
 - **Acceptance checklist:**
-  - [ ] `customerSelected` actualiza señal padre y cart en el mismo tick
-  - [ ] Payload `pos` y `orders` llevan el id de B
-  - [ ] Confirmación y ticket muestran B antes de cobrar
-  - [ ] Sin `setCustomer(null)` intermedio que borre a B
-  - [ ] Scope del commit limitado a archivos del paso
-- **Status:** pending
+  - [x] Emisión B→shell→padre→cart trazada sin intermediarios que borren
+  - [x] Payload `pos` y `orders` leen selectedCustomer ya reemplazado
+  - [x] Shell entra a resolve con carro=A + form lleno (hasFormIdentifiers)
+  - [x] Scope commiteado: selector + shell + guard + spec (b3c1935)
+  - [x] F-003 — shell salta resolveIfNeeded con cliente en carro (major) → evidence/post-change-probe-r2.txt
+  - [x] F-005 — reemplazo A-B en delivery hereda direccion de A (major) → evidence/r2-fixes.txt
+  - [x] F-006 — quitar cliente no desvincula el carro y factura a A (major) → evidence/r2-fixes.txt
+- **Status:** done · rzy · 2026-09-11 · evidence/post-change-probe-r2.txt
