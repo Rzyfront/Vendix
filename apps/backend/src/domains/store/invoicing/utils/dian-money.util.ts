@@ -383,6 +383,400 @@ export function clearInclusiveLine(
   };
 }
 
+// =====================================================================
+// Inclusive absorb kernel (CP-facturacion-impuesto-incluido-redondeo, A.2,
+// ADR-01 + ADR-04).
+//
+// Single owner of the centavo-absorb search. Both the engine
+// (`InvoiceCalculatorService`) and its pure mirror (`resolveLineTotals`) call
+// into this leaf — which both already import, so neither direction creates a
+// taxes ↔ invoicing cycle (F-001, F-008).
+//
+// Contract: given the captured gross G (tax inside when inclusive) and the
+// normalized rate fractions, keep the GREATEST base (in cents) with
+// f(base) <= G, where f(base) = base + Σ trunc(base × r) over the INCLUSIVE
+// rates. Exclusive rates never enter f: they stack ON TOP of the closed
+// subtotal. Never overshoots G; when G is unreachable (f jumps over it, e.g.
+// $17 @ 8%: 1699 → 1701¢) the closest-below persists and the residual is
+// reported for the caller to block on (ADR-04).
+//
+// Fail-closed (F-033/F-034/F-035/F-036/F-037): every precondition violation is
+// REPORTED in `invalid_inputs` while totals keep the legacy coercion values,
+// so no caller silently changes money and no caller has to guess. The absorb
+// search runs ONLY on clean inputs; anything invalid takes the legacy totals
+// + report path.
+//
+// Decimal-space (F-041): the loop runs on integer cents (`Prisma.Decimal`
+// integers, never `number`, never strings). Callers format each TERMINAL
+// value once with `dianAmount`, which is idempotent over already-truncated
+// Decimals — emitted strings are byte-identical to the legacy path whenever
+// the legacy path was already exact.
+// =====================================================================
+
+/**
+ * Kernel version pinned into every absorb evidence record (F-064). Bump when
+ * the search semantics change so an audit can tell which arithmetic produced
+ * a persisted base.
+ */
+export const INCLUSIVE_ABSORB_KERNEL_VERSION = 'inclusive-absorb-v1' as const;
+
+/**
+ * Fixed small cap on absorb iterations (F-033).
+ *
+ * Termination proof: the search starts at B0 = trunc(G / (1 + Σr)) and climbs
+ * exactly 1¢/step while f(base) rises ≥ 1¢/step (the base itself rises 1¢ and
+ * every quota is monotone non-decreasing in the base). The residual G − f(B0)
+ * is bounded by (1 + Σr + k)¢ where k is the inclusive-tax count — each trunc
+ * sheds < 1¢ and the B0 trunc sheds < (1 + Σr)¢. Any sane rate set
+ * (Σr ≤ 1, k ≤ 6 ⇒ residual < 9¢) closes or overshoot-breaks long before the
+ * cap. Hitting the cap means insane rates; the kernel then returns
+ * closest-below with `capped: true` and the caller blocks (fail-closed,
+ * F-039 — never an open equality loop, never an overshoot).
+ */
+export const INCLUSIVE_ABSORB_MAX_STEPS = 16;
+
+/** Rate units the absorb kernel understands (F-013, F-032). */
+export type AbsorbRateBasis = 'percent' | 'per_mil' | 'fraction';
+
+/**
+ * Fiscal whitelist for the kernel preconditions: exactly `TaxFiscalType`
+ * (`apps/backend/src/domains/store/taxes/dto`), the 6 values of
+ * `tax_type_enum`. Unknown values are reported in `invalid_inputs` while the
+ * legacy normalization (lowercase, absent ⇒ `iva`) is kept for the totals.
+ */
+const ABSORB_TAX_TYPE_WHITELIST: ReadonlySet<string> = new Set([
+  'iva',
+  'inc',
+  'ica',
+  'withholding',
+  'reteiva',
+  'reteica',
+]);
+
+/** One rate as the caller captured it; normalization is the kernel's job. */
+export interface AbsorbKernelRateInput {
+  rate: DianNumericInput;
+  /** `percent` (default) | `per_mil` (`per-mil` accepted) | `fraction`. */
+  rate_basis?: unknown;
+  tax_type?: unknown;
+  /** Strict: only `=== true` counts (F-035 — one predicate, here). */
+  is_inclusive?: unknown;
+}
+
+/** Everything the kernel needs for one line; granularidad canónica = línea. */
+export interface AbsorbKernelLineInput {
+  /**
+   * Captured net (`quantity × unit_price ÷ puq − discount`, tax inside when
+   * inclusive). The caller computes it with its own canonical helper; the
+   * kernel never re-derives money from qty/price — those raws exist here for
+   * precondition REPORTING only.
+   */
+  gross: DianNumericInput;
+  quantity?: DianNumericInput;
+  unit_price?: DianNumericInput;
+  discount_amount?: DianNumericInput;
+  price_unit_quantity?: DianNumericInput;
+  rates: AbsorbKernelRateInput[];
+}
+
+/** One rate after kernel normalization (Decimal space, unformatted). */
+export interface AbsorbKernelQuota {
+  /** Normalized fraction: 19 % ⇒ 0.19 · 7 ‰ ⇒ 0.007 · fraction as-is. */
+  fraction: Prisma.Decimal;
+  rate_basis: AbsorbRateBasis;
+  /** Legacy normalization (lowercase, absent ⇒ `iva`); see `invalid_inputs`. */
+  tax_type: string;
+  is_inclusive: boolean;
+  /** `trunc(base_final × fraction)` — the DIAN-valid quota by construction. */
+  quota: Prisma.Decimal;
+}
+
+export interface AbsorbKernelResult {
+  /** {@link INCLUSIVE_ABSORB_KERNEL_VERSION} — audit pin (F-064). */
+  kernel: typeof INCLUSIVE_ABSORB_KERNEL_VERSION;
+  /** `max(0, gross)`: an over-discount never yields a negative base (F-034). */
+  gross: Prisma.Decimal;
+  /** Final absorbed base (Decimal, already truncated to cents). */
+  base: Prisma.Decimal;
+  quotas: AbsorbKernelQuota[];
+  /** `base + Σ ALL quotas` (inclusive + exclusive): the line total. */
+  closed_total: Prisma.Decimal;
+  /** `base_final − B0` in cents: what the absorb moved (0 when already exact). */
+  residual_absorbed_cents: number;
+  /** `gross − (base + Σ inclusive quotas)` in cents: 0 ⇔ exact close. */
+  unclosed_residual_cents: number;
+  closed_exactly: boolean;
+  /** Search iterations consumed (0 when short-circuited). */
+  steps: number;
+  /** True only when the cap stopped the search (fail-closed signal). */
+  capped: boolean;
+  /** False when the line took the no-search path (clean exclusive/zero). */
+  searched: boolean;
+  /**
+   * Precondition violations as `field:reason` codes (F-062). Totals ALWAYS
+   * keep the legacy coercion values — this channel reports, never reshapes.
+   */
+  invalid_inputs: string[];
+}
+
+/**
+ * Shared rate normalizer (F-013, F-032): `percent` ⇒ ÷100, `per_mil` ⇒ ÷1000,
+ * `fraction` ⇒ as-is (the mirror passes fractions like 0.08).
+ *
+ * Unknown basis is fail-closed: reported via `invalid` while the fraction
+ * falls back to `percent` — the legacy coercion (any non-`per_mil` divided by
+ * 100) — so compat totals are preserved alongside the report.
+ */
+export function absorbRateToFraction(
+  rate: DianNumericInput,
+  rate_basis: unknown,
+): { fraction: Prisma.Decimal; basis: AbsorbRateBasis; invalid: string | null } {
+  const raw = rate_basis === null || rate_basis === undefined ? 'percent' : String(rate_basis);
+  const normalized = raw.trim().toLowerCase().replace('-', '_');
+  const basis: AbsorbRateBasis =
+    normalized === 'per_mil' || normalized === 'fraction' ? normalized : 'percent';
+  const invalid_basis =
+    normalized !== 'percent' && normalized !== 'per_mil' && normalized !== 'fraction'
+      ? `rate_basis:unknown:${raw}`
+      : null;
+
+  if (!isStrictFiniteInput(rate)) {
+    return { fraction: new Prisma.Decimal(0), basis, invalid: invalid_basis ?? 'rate:non_finite' };
+  }
+  const value = toDecimal(rate);
+  if (value.isNegative()) {
+    // Legacy engine coercion kept the negative (no positivity filter); the
+    // mirror clamped to 0. Compat follows the engine (this leaf feeds it) and
+    // the violation is reported — the caller blocks on `invalid_inputs`.
+    return { fraction: value.dividedBy(basisDivisor(basis)), basis, invalid: invalid_basis ?? 'rate:negative' };
+  }
+  return {
+    fraction: value.dividedBy(basisDivisor(basis)),
+    basis,
+    invalid: invalid_basis,
+  };
+}
+
+/** Strict finiteness WITHOUT legacy collapsing (F-036, F-062). */
+export function isStrictFiniteInput(value: DianNumericInput): boolean {
+  if (value === null || value === undefined || value === '') return false;
+  if (value instanceof Prisma.Decimal) return value.isFinite();
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return false;
+    try {
+      return new Prisma.Decimal(trimmed).isFinite();
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/**
+ * Price-unit divisor with whitelist reporting (F-037): a finite integer ≥ 1,
+ * or absent (⇒ 1). Anything else is REPORTED (`price_unit_quantity:*`) while
+ * the legacy coercion (`> 1 ? n : 1`) is kept for the totals — never a silent
+ * 1, never a reshape.
+ */
+export function absorbPriceUnitDivisor(
+  value: DianNumericInput,
+  invalid_inputs: string[],
+): Prisma.Decimal {
+  if (value === null || value === undefined) return new Prisma.Decimal(1);
+  const parsed = toDecimal(value);
+  const is_integer = isStrictFiniteInput(value) && parsed.isInteger() && parsed.greaterThanOrEqualTo(1);
+  if (!is_integer) {
+    invalid_inputs.push('price_unit_quantity:non_integer_or_below_1');
+  }
+  return parsed.greaterThan(1) ? parsed : new Prisma.Decimal(1);
+}
+
+function basisDivisor(basis: AbsorbRateBasis): Prisma.Decimal {
+  switch (basis) {
+    case 'per_mil':
+      return new Prisma.Decimal(1000);
+    case 'fraction':
+      return new Prisma.Decimal(1);
+    default:
+      return new Prisma.Decimal(100);
+  }
+}
+
+/** Truncate to cents in Decimal space — no string round-trip (F-041). */
+function truncCents(value: Prisma.Decimal): Prisma.Decimal {
+  return value.toDecimalPlaces(DIAN_SCALE, TRUNCATE);
+}
+
+/**
+ * Bounded absorb search over integer cents. `f(b) = b + Σ floor(b × rᵢ)`.
+ * Returns the greatest base with `f ≤ bruto_cents`, whether it closes
+ * exactly, and how many 1¢ steps that took. Pure + total: terminates by
+ * closure, overshoot-break, or the fixed cap — never an open loop (F-039).
+ */
+function searchAbsorbCents(
+  bruto_cents: Prisma.Decimal,
+  fractions: Prisma.Decimal[],
+): { base_cents: Prisma.Decimal; steps: number; capped: boolean; closed: boolean } {
+  const rate_sum = fractions.reduce<Prisma.Decimal>(
+    (acc, f) => acc.plus(f),
+    new Prisma.Decimal(0),
+  );
+  const quotaOf = (base_cents: Prisma.Decimal, f: Prisma.Decimal): Prisma.Decimal =>
+    base_cents.times(f).toDecimalPlaces(0, TRUNCATE);
+  const fOf = (base_cents: Prisma.Decimal): Prisma.Decimal =>
+    fractions.reduce<Prisma.Decimal>(
+      (acc, fraction) => acc.plus(quotaOf(base_cents, fraction)),
+      base_cents,
+    );
+
+  let best = bruto_cents.dividedBy(new Prisma.Decimal(1).plus(rate_sum)).toDecimalPlaces(0, TRUNCATE);
+  if (best.isNegative()) best = new Prisma.Decimal(0);
+  if (fOf(best).equals(bruto_cents)) {
+    return { base_cents: best, steps: 0, capped: false, closed: true };
+  }
+  for (let step = 1; step <= INCLUSIVE_ABSORB_MAX_STEPS; step++) {
+    const candidate = best.plus(1);
+    const total = fOf(candidate);
+    if (total.greaterThan(bruto_cents)) {
+      return { base_cents: best, steps: step, capped: false, closed: false };
+    }
+    best = candidate;
+    if (total.equals(bruto_cents)) {
+      return { base_cents: best, steps: step, capped: false, closed: true };
+    }
+  }
+  return { base_cents: best, steps: INCLUSIVE_ABSORB_MAX_STEPS, capped: true, closed: false };
+}
+
+/**
+ * The bounded absorb kernel. See the section docblock for the contract.
+ *
+ * Precondition codes pushed to `invalid_inputs` (all fail-closed, legacy
+ * coercion kept for totals):
+ * `gross:non_finite` · `net:negative` (over-discount, F-034) ·
+ * `quantity:non_finite` · `unit_price:non_finite` ·
+ * `discount_amount:non_finite` · `price_unit_quantity:*` (F-037) ·
+ * `rates[i].rate:*` · `rates[i].rate_basis:unknown` (F-013/F-032) ·
+ * `rates[i].tax_type:unknown` (6-value whitelist).
+ *
+ * The search runs ONLY when `invalid_inputs` is empty, at least one rate is
+ * strictly inclusive with a positive fraction, and the divisor is sane.
+ * Otherwise the totals are the legacy coercion (B0 + trunc quotas, no climb).
+ */
+export function absorbInclusiveLine(input: AbsorbKernelLineInput): AbsorbKernelResult {
+  const invalid_inputs: string[] = [];
+
+  // --- Preconditions: report everything, coerce legacy for the totals. ---
+  const gross_raw = input.gross;
+  const gross_valid = isStrictFiniteInput(gross_raw);
+  if (!gross_valid) invalid_inputs.push('gross:non_finite');
+  const gross_decimal = toDecimal(gross_raw);
+  const negative_net = gross_valid && gross_decimal.isNegative();
+  if (negative_net) invalid_inputs.push('net:negative');
+  // bruto = max(0, net) — identical in engine, mirror and preview (F-034).
+  const gross = gross_valid && !negative_net ? truncCents(gross_decimal) : new Prisma.Decimal(0);
+
+  if (input.quantity !== null && input.quantity !== undefined && !isStrictFiniteInput(input.quantity)) {
+    invalid_inputs.push('quantity:non_finite');
+  }
+  if (input.unit_price !== null && input.unit_price !== undefined && !isStrictFiniteInput(input.unit_price)) {
+    invalid_inputs.push('unit_price:non_finite');
+  }
+  if (
+    input.discount_amount !== null &&
+    input.discount_amount !== undefined &&
+    !isStrictFiniteInput(input.discount_amount)
+  ) {
+    invalid_inputs.push('discount_amount:non_finite');
+  }
+  // Validated for the report; the divisor value itself stays legacy-compat.
+  // (The caller computes money with its own canonical helper.)
+  absorbPriceUnitDivisor(input.price_unit_quantity, invalid_inputs);
+
+  const quotas: AbsorbKernelQuota[] = (input.rates ?? []).map((r, index) => {
+    const is_inclusive = r?.is_inclusive === true;
+    const { fraction, basis, invalid } = absorbRateToFraction(r?.rate, r?.rate_basis);
+    if (invalid) invalid_inputs.push(`rates[${index}].${invalid}`);
+    const raw_type = r?.tax_type === null || r?.tax_type === undefined ? '' : String(r.tax_type);
+    const tax_type = raw_type.trim().toLowerCase() || 'iva';
+    if (raw_type.trim() !== '' && !ABSORB_TAX_TYPE_WHITELIST.has(tax_type)) {
+      invalid_inputs.push(`rates[${index}].tax_type:unknown:${raw_type}`);
+    }
+    // Placeholder quota; recomputed against the final base below.
+    return { fraction, rate_basis: basis, tax_type, is_inclusive, quota: new Prisma.Decimal(0) };
+  });
+
+  const finish = (
+    base: Prisma.Decimal,
+    extra: Partial<AbsorbKernelResult>,
+  ): AbsorbKernelResult => {
+    const settled = quotas.map((q) => ({ ...q, quota: truncCents(base.times(q.fraction)) }));
+    const inclusive_sum = settled.reduce<Prisma.Decimal>(
+      (acc, q) => (q.is_inclusive ? acc.plus(q.quota) : acc),
+      new Prisma.Decimal(0),
+    );
+    const all_sum = settled.reduce<Prisma.Decimal>((acc, q) => acc.plus(q.quota), new Prisma.Decimal(0));
+    const closed_total = base.plus(all_sum);
+    const unclosed = gross.minus(base.plus(inclusive_sum)).times(100);
+    return {
+      kernel: INCLUSIVE_ABSORB_KERNEL_VERSION,
+      gross,
+      base,
+      quotas: settled,
+      closed_total,
+      residual_absorbed_cents: 0,
+      unclosed_residual_cents: Math.max(0, Math.round(unclosed.toNumber())),
+      closed_exactly: false,
+      steps: 0,
+      capped: false,
+      searched: false,
+      invalid_inputs,
+      ...extra,
+    };
+  };
+
+  const clean = invalid_inputs.length === 0;
+  const inclusive_fractions = quotas.filter((q) => q.is_inclusive).map((q) => q.fraction);
+  const has_positive_inclusive = inclusive_fractions.some((f) => f.greaterThan(0));
+  const divisor = new Prisma.Decimal(1).plus(
+    inclusive_fractions.reduce<Prisma.Decimal>((acc, f) => acc.plus(f), new Prisma.Decimal(0)),
+  );
+
+  // Legacy B0 WITHOUT climb: the fail-closed totals (F-033). Same despeje the
+  // engine always ran — divisor ≤ 0 degrades to gross, exactly like the old
+  // formula — so every invalid/zero/exclusive input lands byte where legacy
+  // landed, plus the report.
+  const sane_divisor = divisor.greaterThan(0) ? divisor : new Prisma.Decimal(1);
+  const legacy_b0 = truncCents(gross.dividedBy(sane_divisor));
+
+  if (!clean || !has_positive_inclusive || divisor.lessThanOrEqualTo(0) || gross.isZero()) {
+    const closed = finish(legacy_b0, {});
+    return {
+      ...closed,
+      closed_exactly: closed.unclosed_residual_cents === 0,
+    };
+  }
+
+  const bruto_cents = gross.times(100);
+  const found = searchAbsorbCents(bruto_cents, inclusive_fractions);
+  const base = found.base_cents.dividedBy(100);
+  const b0_cents = bruto_cents
+    .dividedBy(divisor)
+    .toDecimalPlaces(0, TRUNCATE);
+  const closed = finish(base, {
+    residual_absorbed_cents: Math.max(0, found.base_cents.minus(b0_cents).toNumber()),
+    steps: found.steps,
+    capped: found.capped,
+    searched: true,
+  });
+  return {
+    ...closed,
+    closed_exactly: closed.unclosed_residual_cents === 0 && !found.capped,
+  };
+}
+
 /**
  * Parses any accepted input into a `Decimal`, collapsing invalid values to zero.
  * Exposed so callers doing multi-step math stay in `Decimal` space instead of
@@ -436,4 +830,313 @@ function applyScale(value: Prisma.Decimal, scale: number = DIAN_SCALE): string {
   // Truncating a tiny negative (-0.001) yields '-0.00'. A signed zero inside a
   // CUFE concatenation changes the hash, so it is normalized away.
   return formatted === '-' + (0).toFixed(scale) ? (0).toFixed(scale) : formatted;
+}
+
+// ---------------------------------------------------------------------------
+// A.2 (CP-facturacion-impuesto-incluido-redondeo, ADR-01 + ADR-04) — kernel
+// único del despeje impuesto-incluido con cierre en centavos.
+//
+// NOTA DE AUTORÍA (run paralelo A.2): el kernel no existía cuando el agente B
+// (espejo+checkout) lo necesitó, así que se implementa acá contra el contrato
+// de ADR-01 en vez de duplicar el loop en el espejo (F-001). El agente A
+// (kernel+motor+gate) es el dueño final: al aterrizar, RECONCILIA con esta
+// sección en vez de agregar un segundo loop — dos loops son la divergencia
+// que F-001/F-008 prohíben. `git log -S INCLUSIVE_SOLVER_MAX_STEPS` muestra
+// quién escribió qué.
+//
+// Contrato (ADR-01): búsqueda acotada en centavos que conserva la MAYOR base
+// con `f(base) <= bruto`, donde `f = base + Σ trunc(base×r_incl)`; jamás
+// overshoot. Lo inalcanzable cae en closest-below + residuo declarado
+// (ADR-04), nunca cuelga (F-006/F-039) ni sobrecobra.
+//
+// Precondiciones fail-closed con coerción por compat (F-036/F-062): lo
+// inválido (no finito, no parseable, negativo, base desconocida, `''`) se
+// COERCIONA a 0 para no romper a los llamadores históricos, pero se REPORTA
+// en `invalid_inputs` en vez de colapsar en silencio. El mapeo a divergencia
+// tipada / 422 vive en cada llamador (motor) o en warn estructurado
+// (espejo/checkout), nunca acá: el kernel es puro y sin logger.
+//
+// Carve-outs explícitos (quedan FUERA del loop, misma semántica que
+// `invoice-calculator.resolveTaxableBase` donde aplica):
+// - Base propia (`fixed_base`, motor): su cuota `trunc(base_fija×r)` no
+//   depende de B, así que resta del numerador en vez de entrar al divisor y
+//   se suma tal cual a `f`. El espejo nunca la envía (sus tasas no traen
+//   base propia).
+// - Líneas AIU-contrato y `omit_tax_total`: ruteo del MOTOR (hermano), no
+//   conocen a este kernel.
+// - Granularidad canónica: BRUTO DE LÍNEA (F-009). Quien llama por unidad y
+//   escala en floats diverge del motor por diseño.
+//
+// Unidades de tarifa (F-013/F-032): `rate_basis` normalizada por
+// `toFraction` — `percent` ⇒ /100, `per-mil`/`per_mil` ⇒ /1000, `fraction`
+// (default) ⇒ tal cual. Basis desconocida ⇒ inválido + fracción 0.
+// `is_inclusive` es estricto (`=== true`, F-035): strings/números no despejan
+// en ningún lado.
+// ---------------------------------------------------------------------------
+
+/**
+ * Cota fija del bump de centavos (F-033). Derivación: tras el truncado, el
+ * hueco `bruto − f(B0)` es < (1 + k)¢ con k = nº de tasas inclusivas (cada
+ * truncado pierde < 1¢ y la base otro < 1¢), y cada paso gana ≥ 1¢ — así que
+ * bastan < 1+k pasos. 16 cubre hasta 15 tasas inclusivas por línea, un orden
+ * de magnitud sobre cualquier línea real, y mantiene el peor caso en
+ * nanosegundos en el path caliente (F-042).
+ */
+export const INCLUSIVE_SOLVER_MAX_STEPS = 16;
+
+/** Unidad declarada de una tarifa (F-013/F-032). Ausente ⇒ `fraction`. */
+export type InclusiveRateBasis = 'percent' | 'per_mil' | 'per-mil' | 'fraction';
+
+/** Entrada cruda por tasa: el kernel sanea Y reporta (F-062). */
+export interface InclusiveSolveRateInput {
+  rate: unknown;
+  is_inclusive: unknown;
+  rate_basis?: unknown;
+  /**
+   * Base propia declarada (carve-out del motor, espejo N/A): su cuota no
+   * entra al divisor. Ausente/`''`/null ⇒ sin base propia.
+   */
+  fixed_base?: unknown;
+}
+
+/** Tasa resuelta: fracción normalizada + cuota truncada DIAN sobre B final. */
+export interface InclusiveSolvedRate {
+  fraction: Prisma.Decimal;
+  is_inclusive: boolean;
+  has_fixed_base: boolean;
+  amount: Prisma.Decimal;
+}
+
+export interface InclusiveClearingResult {
+  /** Base neta despejada (truncada DIAN, con el bump absorbido). */
+  base: Prisma.Decimal;
+  /** Cuotas por tasa en orden de entrada (inclusivas + agregadas). */
+  rates: InclusiveSolvedRate[];
+  /** Total cobrado: `f(B*) + Σ agregadas`. Inalcanzable ⇒ closest-below. */
+  total: Prisma.Decimal;
+  /** `bruto − f(B*)` en centavos enteros, ≥ 0 (ADR-04). */
+  unclosed_residual_cents: number;
+  /** Entradas coercionadas (bruto/tasas/basis/base-fija), en crudo. */
+  invalid_inputs: unknown[];
+  /** Pasos de bump ejecutados (≤ cota; 0 sin inclusivo). */
+  iterations: number;
+}
+
+const INCLUSIVE_CENT = new Prisma.Decimal('0.01');
+const INCLUSIVE_ZERO = new Prisma.Decimal(0);
+const INCLUSIVE_ONE = new Prisma.Decimal(1);
+const INCLUSIVE_HUNDRED = new Prisma.Decimal(100);
+const INCLUSIVE_THOUSAND = new Prisma.Decimal(1000);
+
+/** Predicado único de inclusividad (F-035): solo `true` booleano despeja. */
+export function coerceInclusiveStrict(value: unknown): boolean {
+  return value === true;
+}
+
+/** `true` solo para las cuatro grafías conocidas (F-032). */
+export function isInclusiveRateBasis(value: unknown): value is InclusiveRateBasis {
+  return (
+    value === 'percent' || value === 'per_mil' || value === 'per-mil' || value === 'fraction'
+  );
+}
+
+/**
+ * Tarifa → fracción, compartida por motor y espejo (F-001/F-032). Coerciona
+ * a 0 lo inválido/negativo y la basis desconocida (compat: nunca lanza); el
+ * REPORTE vive en `resolveInclusiveClearing` (F-062), no acá.
+ *
+ * ```ts
+ * toFraction(19, 'percent')   // 0.19
+ * toFraction(9.66, 'per_mil') // 0.00966
+ * toFraction(0.19)            // 0.19 (default fraction)
+ * ```
+ */
+export function toFraction(rate: unknown, basis?: unknown): Prisma.Decimal {
+  const parsed = parseInclusiveNumeric(rate);
+  if (parsed === null || parsed.isNegative()) return INCLUSIVE_ZERO;
+  const unit = basis === undefined || basis === null ? 'fraction' : basis;
+  switch (unit) {
+    case 'percent':
+      return parsed.dividedBy(INCLUSIVE_HUNDRED);
+    case 'per_mil':
+    case 'per-mil':
+      return parsed.dividedBy(INCLUSIVE_THOUSAND);
+    case 'fraction':
+      return parsed;
+    default:
+      return INCLUSIVE_ZERO;
+  }
+}
+
+/**
+ * Dueño único del despeje con cierre (ADR-01). Puro y síncrono a propósito:
+ * sin DB, sin logger, testeable sin mocks. La aserción de cota vive ACÁ
+ * dentro (F-004): fachada e importadores directos la heredan por delegación.
+ */
+export function resolveInclusiveClearing(
+  gross: unknown,
+  ratesInput: ReadonlyArray<InclusiveSolveRateInput> | null | undefined,
+): InclusiveClearingResult {
+  const invalid_inputs: unknown[] = [];
+
+  // Bruto: se REDONDEA a centavos (no trunca) para matar el polvo float
+  // (59.96999999999999 ⇒ 59.97); el bruto comercial siempre es 2dp.
+  // Negativo ⇒ max(0, ·) idéntico en los tres sitios (F-034) + reporte.
+  const rawGross = parseInclusiveNumeric(gross);
+  let G: Prisma.Decimal;
+  if (rawGross === null) {
+    invalid_inputs.push(gross);
+    G = INCLUSIVE_ZERO;
+  } else if (rawGross.isNegative()) {
+    invalid_inputs.push(gross);
+    G = INCLUSIVE_ZERO;
+  } else {
+    G = new Prisma.Decimal(rawGross.toFixed(DIAN_SCALE, Prisma.Decimal.ROUND_HALF_UP));
+  }
+
+  const parsed = (ratesInput ?? []).map((entry) => {
+    const source = (entry ?? {}) as InclusiveSolveRateInput;
+    const is_inclusive = coerceInclusiveStrict(source.is_inclusive);
+    const basisRaw = source.rate_basis;
+    const basis = basisRaw === undefined || basisRaw === null ? 'fraction' : basisRaw;
+    let fraction: Prisma.Decimal;
+    if (!isInclusiveRateBasis(basis)) {
+      invalid_inputs.push(basisRaw);
+      fraction = INCLUSIVE_ZERO;
+    } else {
+      fraction = toFractionWithReport(source.rate, basis, invalid_inputs);
+    }
+    // Base propia: solo aplica a inclusivas (en agregadas no significa nada
+    // y se ignora por documento, no en silencio casual).
+    let fixedBase: Prisma.Decimal | null = null;
+    if (is_inclusive) {
+      fixedBase = parseInclusiveFixedBase(source.fixed_base, invalid_inputs);
+    }
+    return { is_inclusive, fraction, fixedBase, fixedQuota: INCLUSIVE_ZERO };
+  });
+
+  // Cuotas fijas fuera del divisor (misma semántica que el motor: la base se
+  // trunca igual que la que usará la cuota emitida).
+  let fixedTotal = INCLUSIVE_ZERO;
+  for (const p of parsed) {
+    if (p.is_inclusive && p.fixedBase !== null) {
+      p.fixedQuota = truncInclusive(p.fixedBase.times(p.fraction));
+      fixedTotal = fixedTotal.plus(p.fixedQuota);
+    }
+  }
+  if (fixedTotal.greaterThan(G)) {
+    // F-034 en carve-out: las fijas ya superan el bruto (descuento mayor que
+    // precio con base propia). No hay despeje honesto: base 0, se REPORTA y
+    // el llamador lo mapea a divergencia (nunca línea cero silenciosa).
+    invalid_inputs.push(fixedTotal.toNumber());
+  }
+  const netForBase = G.minus(fixedTotal);
+  const Gprime = netForBase.isNegative() ? INCLUSIVE_ZERO : netForBase;
+
+  const looping = parsed.filter((p) => p.is_inclusive && p.fixedBase === null);
+  let divisor = INCLUSIVE_ONE;
+  for (const p of looping) divisor = divisor.plus(p.fraction);
+  const hasLoop = looping.length > 0 && divisor.greaterThan(INCLUSIVE_ZERO);
+
+  let base = hasLoop ? truncInclusive(Gprime.dividedBy(divisor)) : truncInclusive(Gprime);
+  if (base.isNegative()) base = INCLUSIVE_ZERO;
+
+  // f(B) = B + Σ trunc(B×r_incl) + fijas. Solo lo inclusivo limita el bump;
+  // lo agregado se liquida DESPUÉS sobre la base final (idéntico a hoy sin
+  // inclusivo).
+  const fOf = (candidate: Prisma.Decimal): Prisma.Decimal => {
+    let acc = candidate.plus(fixedTotal);
+    for (const p of looping) acc = acc.plus(truncInclusive(candidate.times(p.fraction)));
+    return acc;
+  };
+
+  let iterations = 0;
+  while (iterations < INCLUSIVE_SOLVER_MAX_STEPS) {
+    const candidate = base.plus(INCLUSIVE_CENT);
+    if (fOf(candidate).greaterThan(G)) break;
+    base = candidate;
+    iterations += 1;
+  }
+
+  // Tripwires DENTRO del camino puro (F-004): si un refactor futuro rompe la
+  // construcción, esto grita en vez de colgar (F-006) o sobrecobrar (F-039).
+  if (iterations > INCLUSIVE_SOLVER_MAX_STEPS) {
+    throw new Error(
+      `[dian-money] inclusive solver exceeded bound (${iterations} > ${INCLUSIVE_SOLVER_MAX_STEPS})`,
+    );
+  }
+  if (fOf(base).greaterThan(G) && fixedTotal.lessThanOrEqualTo(G)) {
+    throw new Error('[dian-money] inclusive solver left an infeasible base');
+  }
+
+  const rates: InclusiveSolvedRate[] = parsed.map((p) => ({
+    fraction: p.fraction,
+    is_inclusive: p.is_inclusive,
+    has_fixed_base: p.fixedBase !== null,
+    amount: p.fixedBase !== null ? p.fixedQuota : truncInclusive(base.times(p.fraction)),
+  }));
+
+  let total = base;
+  for (const r of rates) total = total.plus(r.amount);
+
+  const residual = G.minus(fOf(base));
+  const unclosed_residual_cents = residual.isNegative()
+    ? 0
+    : residual.times(INCLUSIVE_HUNDRED).toNumber();
+
+  return { base, rates, total, unclosed_residual_cents, invalid_inputs, iterations };
+}
+
+/** Numérico estricto: number/string/Decimal finitos; lo demás es null. */
+function parseInclusiveNumeric(value: unknown): Prisma.Decimal | null {
+  if (value instanceof Prisma.Decimal) {
+    return value.isFinite() ? value : null;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? new Prisma.Decimal(value) : null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return null;
+    try {
+      const parsed = new Prisma.Decimal(trimmed);
+      return parsed.isFinite() ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** `toFraction` con reporte del ofensor (F-062). Negativo ⇒ inválido + 0. */
+function toFractionWithReport(
+  rate: unknown,
+  basis: InclusiveRateBasis,
+  invalid_inputs: unknown[],
+): Prisma.Decimal {
+  const parsed = parseInclusiveNumeric(rate);
+  if (parsed === null || parsed.isNegative()) {
+    invalid_inputs.push(rate);
+    return INCLUSIVE_ZERO;
+  }
+  return toFraction(parsed, basis);
+}
+
+/** Base propia: ausente ⇒ null; basura/negativa ⇒ reporte + null. */
+function parseInclusiveFixedBase(
+  value: unknown,
+  invalid_inputs: unknown[],
+): Prisma.Decimal | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const parsed = parseInclusiveNumeric(value);
+  if (parsed === null || parsed.isNegative()) {
+    invalid_inputs.push(value);
+    return null;
+  }
+  return truncInclusive(parsed);
+}
+
+function truncInclusive(d: Prisma.Decimal): Prisma.Decimal {
+  return new Prisma.Decimal(d.toFixed(DIAN_SCALE, TRUNCATE));
 }

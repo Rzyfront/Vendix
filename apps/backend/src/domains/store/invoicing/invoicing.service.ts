@@ -5151,6 +5151,25 @@ export class InvoicingService {
       })),
     });
 
+    // Huella corta de correlación (F-065): identifica la entrada que produjo
+    // el bloqueo sin volcar el payload. FNV-1a de 32 bits — correlación, no
+    // criptografía — definida acá para no sacar nada de esta región.
+    // (`store/order/invoice/request` no existen en esta firma privada; viajan
+    // en el `label` del llamador. Hilo pendiente para B.1.)
+    const hashLineInput = (line: unknown): string => {
+      try {
+        const text = JSON.stringify(line ?? null);
+        let hash = 0x811c9dc5;
+        for (let index = 0; index < text.length; index++) {
+          hash ^= text.charCodeAt(index);
+          hash = Math.imul(hash, 0x01000193);
+        }
+        return (hash >>> 0).toString(16).padStart(8, '0');
+      } catch {
+        return 'unhashable';
+      }
+    };
+
     const orphan = result.divergences.find(
       (divergence) => divergence.scope === 'untaxed_line_with_amount',
     );
@@ -5161,6 +5180,63 @@ export class InvoicingService {
           orphan.line_description ? ` («${orphan.line_description}»)` : ''
         } declara un impuesto de ${orphan.received} pero no declara ninguna tarifa. Agrega el impuesto con su tarifa (por ejemplo IVA 19%) o deja el importe en cero: sin tarifa la DIAN no puede validar el documento.`,
         { line_index: orphan.line_index, received: orphan.received },
+      );
+    }
+
+    // A.2 (ADR-04, F-060) — bruto inclusivo inalcanzable ⇒ **bloquea**.
+    //
+    // Espejo del bloque `untaxed_line_with_amount` de arriba: el calculador
+    // es puro e informa, y este es el único gate pre-numeración — todos los
+    // carriles (`create`, `update`, `create-from-contract`, `validate-draft`)
+    // recalculan ANTES de `generateNextNumber`. Sin este find, el scope nuevo
+    // caía en el warn agregado de abajo y el corto se numeraba: el bug con
+    // un log que nadie alerta (F-026).
+    const unclosed = result.divergences.find(
+      (divergence) => divergence.scope === 'unclosed_residual',
+    );
+    if (unclosed) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_005,
+        `La línea ${unclosed.line_index + 1}${
+          unclosed.line_description ? ` («${unclosed.line_description}»)` : ''
+        } con precio impuesto-incluido no puede cerrar al total cobrado de ${unclosed.expected}: ` +
+          `base más cuotas truncadas llega a ${unclosed.received} (residuo ${unclosed.difference}, ${unclosed.detail ?? 'sin traza'}). ` +
+          `Ajusta el precio o el descuento para que base más cuotas truncadas igualen el total — emitir el corto descuadra TOTAL, letras, XML y CUFE, y sobrecobrar no es una opción.`,
+        {
+          line_index: unclosed.line_index,
+          expected: unclosed.expected,
+          received: unclosed.received,
+          difference: unclosed.difference,
+          detail: unclosed.detail,
+          input_hash: hashLineInput(items[unclosed.line_index]),
+        },
+      );
+    }
+
+    // A.2 (F-034, F-036, F-037) — entrada numérica inválida ⇒ **bloquea**.
+    //
+    // Misma región y misma forma que el anterior: los totales de la línea
+    // conservan la coerción legacy por compatibilidad, así que sin este
+    // throw nacerían en cero silencioso — una línea que la DIAN acepta y
+    // nadie cobra. El `detail` trae el código fail-closed del kernel.
+    const invalid = result.divergences.find(
+      (divergence) => divergence.scope === 'invalid_line_input',
+    );
+    if (invalid) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_006,
+        `La línea ${invalid.line_index + 1}${
+          invalid.line_description ? ` («${invalid.line_description}»)` : ''
+        } trae una entrada inválida (${invalid.detail ?? 'ver detail'}): ` +
+          `corrige la línea en vez de facturar un cero silencioso.`,
+        {
+          line_index: invalid.line_index,
+          expected: invalid.expected,
+          received: invalid.received,
+          difference: invalid.difference,
+          detail: invalid.detail,
+          input_hash: hashLineInput(items[invalid.line_index]),
+        },
       );
     }
 
@@ -5303,11 +5379,45 @@ export class InvoicingService {
       );
     }
 
-    for (const divergence of result.divergences) {
-      this.logger.warn(
-        `[${label}] Divergencia ${divergence.scope} en línea ${divergence.line_index + 1}: ` +
-          `cliente=${divergence.received} servidor=${divergence.expected} (gana el servidor)`,
+    // A.2 (F-065, F-064) — warns agregados por documento con evidencia del
+    // absorb. Los scopes bloqueantes ya lanzaron arriba; lo que llega acá es
+    // informativo (gana el servidor). Un warn con conteos por scope, centavos
+    // absorbidos y las 3 peores líneas; el detalle por línea va a debug con
+    // su huella de correlación. (`store/order/invoice/request` no existen en
+    // esta firma; el `label` del llamador es la correlación disponible.)
+    if (result.divergences.length > 0) {
+      const counts = new Map<string, number>();
+      for (const divergence of result.divergences) {
+        counts.set(
+          divergence.scope,
+          (counts.get(divergence.scope) ?? 0) + 1,
+        );
+      }
+      const absorbed_cents = result.lines.reduce(
+        (acc, line) => acc + (line.absorb?.residual_absorbed_cents ?? 0),
+        0,
       );
+      const rank = (value: string): number => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.abs(parsed) : 0;
+      };
+      const worst = [...result.divergences]
+        .sort((a, b) => rank(b.difference) - rank(a.difference))
+        .slice(0, 3);
+      this.logger.warn(
+        `[${label}] ${result.divergences.length} divergencia(s) cliente↔servidor ` +
+          `(${[...counts.entries()].map(([scope, count]) => `${scope}×${count}`).join(', ')}) ` +
+          `en ${result.lines.length} línea(s); absorbido=${absorbed_cents}¢ (gana el servidor). ` +
+          `Peores: ${worst.map((divergence) => `L${divergence.line_index + 1}/${divergence.scope}/${divergence.difference}`).join(' | ')}`,
+      );
+      for (const divergence of result.divergences) {
+        this.logger.debug?.(
+          `[${label}] Divergencia ${divergence.scope} en línea ${divergence.line_index + 1}: ` +
+            `cliente=${divergence.received} servidor=${divergence.expected} ` +
+            `(gana el servidor) detail=${divergence.detail ?? '-'} ` +
+            `input_hash=${hashLineInput(items[divergence.line_index])}`,
+        );
+      }
     }
 
     return result;

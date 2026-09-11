@@ -184,8 +184,8 @@ const SHAPES: TaxMatrixShape[] = [
       ],
     },
     order_lines: [
-      { description: 'Postre', quantity: 3, unit_price: 925.92, discount_amount: 0, total_price: 2777.76, tax_amount_item: 74.07, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 222.21, is_inclusive: true, tax_rate_id: INC_ID }], channel_gross: { unit_price: 1000, rates: [{ rate: 0.08, is_inclusive: true }] } },
-      { description: 'Jugo', quantity: 2, unit_price: 462.95, discount_amount: 0, total_price: 925.9, tax_amount_item: 37.03, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 74.06, is_inclusive: true, tax_rate_id: INC_ID }], channel_gross: { unit_price: 499.99, rates: [{ rate: 0.08, is_inclusive: true }] } },
+      { description: 'Postre', quantity: 3, unit_price: 925.93, discount_amount: 0, total_price: 2777.79, tax_amount_item: 74.07, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 222.21, is_inclusive: true, tax_rate_id: INC_ID }], channel_gross: { unit_price: 1000, rates: [{ rate: 0.08, is_inclusive: true }] } },
+      { description: 'Jugo', quantity: 2, unit_price: 462.96, discount_amount: 0, total_price: 925.92, tax_amount_item: 37.03, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 74.06, is_inclusive: true, tax_rate_id: INC_ID }], channel_gross: { unit_price: 499.99, rates: [{ rate: 0.08, is_inclusive: true }] } },
     ],
     expect_split: true,
   },
@@ -582,21 +582,23 @@ describe('InvoicingService · matriz fiscal createFromOrder+split+prevalidador',
     },
   );
 
-  describe('regresión factura #81 (INC inclusivo 4629.62, un solo tributo)', () => {
+  describe('regresión factura #81 (INC inclusivo 4629.63, un solo tributo)', () => {
     const incl = (base: number) => [
       {
         tax_rate_id: INC_ID,
         tax_name: 'INC',
         tax_rate: 8,
         taxable_amount: base,
-        tax_amount: 370.36,
+        tax_amount: 370.37,
         tax_type: 'inc',
         is_inclusive: true,
       },
     ];
 
     it('parte por línea aunque haya un solo grupo', () => {
-      expect(needsOrderLineTaxSplit(1, [incl(4629.62)] as any)).toBe(true);
+      // Base post-fix A.2 (antes 4629.62/370.36: el corto de 2¢ del bug —
+      // «caso del bug», PLAN objetivo 5).
+      expect(needsOrderLineTaxSplit(1, [incl(4629.63)] as any)).toBe(true);
     });
 
     it('el fallback bruto−impuesto sobre netos daría 4259.26 (doble despeje documentado)', () => {
@@ -628,18 +630,20 @@ describe('InvoicingService · matriz fiscal createFromOrder+split+prevalidador',
           {
             description: 'Plato #81',
             quantity: 1,
-            unit_price: 4629.62,
+            unit_price: 4629.63,
             discount_amount: 0,
-            total_price: 4629.62,
-            tax_amount_item: 370.36,
-            taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 370.36, is_inclusive: true, tax_rate_id: INC_ID }],
+            total_price: 4629.63,
+            tax_amount_item: 370.37,
+            taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 370.37, is_inclusive: true, tax_rate_id: INC_ID }],
           },
         ],
         expect_split: true,
       };
       const { engine, mapped, persisted_items, overrides, input } =
         buildDocument(shape);
-      expect(engine.totals.total_before_tax).toBe('4629.62');
+      // Base post-fix A.2 («caso del bug», PLAN objetivo 5): $5.000 INC 8%
+      // cierra en 4629.63 + 370.37 = 5000.00.
+      expect(engine.totals.total_before_tax).toBe('4629.63');
       expect(mapped.split).toBe(true);
       expect(overrides.has(Number(persisted_items[0].id))).toBe(true);
       const report = validator.validate(input);

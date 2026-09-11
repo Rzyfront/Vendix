@@ -295,7 +295,7 @@ describe('InvoiceCalculatorService', () => {
       expect(line.total_amount).toBe('119700.00');
     });
 
-    it('acepta el centavo que el truncado se lleva, en vez de romper base × tarifa', () => {
+    it('absorbe el centavo en la base sin romper base × tarifa (A.2, ADR-01)', () => {
       const result = service.calculate(
         oneLine({
           quantity: 1,
@@ -306,14 +306,20 @@ describe('InvoiceCalculatorService', () => {
       );
 
       const [line] = result.lines;
-      // 100 / 1,19 = 84,033613... → 84,03 (truncado, §11.2)
-      expect(line.line_extension_amount).toBe('84.03');
-      // 84,03 × 0,19 = 15,9657 → 15,96
+      // 100 / 1,19 = 84,033613... → B0 84,03 +1¢ ⇒ 84,04 (búsqueda acotada).
+      expect(line.line_extension_amount).toBe('84.04');
+      // 84,04 × 0,19 = 15,9676 → 15,96 (truncado, §11.2, sobre la base FINAL).
       expect(line.tax_amount).toBe('15.96');
-      // 84,03 + 15,96 = 99,99, un centavo bajo el precio de mostrador.
-      // Es deliberado: la DIAN valida TaxAmount = TaxableAmount × Percent, así
-      // que inflar la cuota para cuadrar con los $100 rompería esa regla.
-      expect(line.total_amount).toBe('99.99');
+      // 84,04 + 15,96 = 100,00: el residuo se absorbió en la base, NO inflando
+      // la cuota — la DIAN valida TaxAmount = TaxableAmount × Percent y esa
+      // regla se cumple por construcción. Actualizado en A.2 por ser uno de
+      // «los casos del bug» (PLAN objetivo 5; ver nota en el bloque A.1).
+      expect(line.total_amount).toBe('100.00');
+      expect(line.absorb).toMatchObject({
+        kernel: 'inclusive-absorb-v1',
+        residual_absorbed_cents: 1,
+        unclosed_residual_cents: 0,
+      });
     });
   });
 

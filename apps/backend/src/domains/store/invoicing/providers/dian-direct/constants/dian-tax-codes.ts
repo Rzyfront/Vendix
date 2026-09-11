@@ -125,6 +125,80 @@ export function isDianTaxSchemeCode(
   );
 }
 
+/** Lo mínimo que la clasificación fiscal necesita leer de una fila. */
+export interface TaxSchemeProbe {
+  tax_type?: string | null;
+  tax_name?: string | null;
+}
+
+/**
+ * Clasificación fiscal pura `tax_type` → esquema DIAN (A.2, dueño único).
+ *
+ * Vive en esta hoja —sin imports— para que el motor (`InvoiceCalculatorService`)
+ * la use sin importar el builder UBL. El `switch` es verbatim el que vivía en
+ * `UblCommonBuilder.resolveTaxCodeFromTax`, que ahora delega acá (deprecated).
+ * Las retenciones resuelven su propio código (05/06/07/08) y nunca el del
+ * tributo que retienen: «ReteIVA» contiene «IVA» y «ReteICA» contiene «ICA»,
+ * así que el heurístico por nombre es el peor camino para ellas.
+ */
+export function resolveDianTaxSchemeCode(tax: TaxSchemeProbe): string {
+  const tax_type = (tax.tax_type || '').toLowerCase();
+  switch (tax_type) {
+    case 'iva':
+      return DIAN_TAX_CODES.IVA;
+    case 'inc':
+      return DIAN_TAX_CODES.INC;
+    case 'ica':
+      return DIAN_TAX_CODES.ICA;
+    case 'reteiva':
+      return DIAN_TAX_CODES.RETE_IVA;
+    case 'retefuente':
+      return DIAN_TAX_CODES.RETE_FUENTE;
+    case 'reteica':
+      return DIAN_TAX_CODES.RETE_ICA;
+    case 'retecree':
+      return DIAN_TAX_CODES.RETE_CREE;
+    default:
+      // `withholding` es el genérico de `tax_type_enum`: dice que la fila es
+      // una retención pero no cuál, así que el nombre es lo único que queda
+      // para distinguirlas — y ahí sí se busca «rete» primero.
+      return resolveDianTaxCodeByName(tax.tax_name ?? '');
+  }
+}
+
+/**
+ * Heurístico por nombre (verbatim de `UblCommonBuilder.resolveTaxCode`):
+ * respaldo para el histórico anterior a que `tax_type` existiera.
+ */
+export function resolveDianTaxCodeByName(tax_name: string): string {
+  const name = tax_name.toUpperCase().trim();
+
+  // Las retenciones van PRIMERO: sus nombres contienen el del tributo que
+  // retienen («ReteIVA» contiene «IVA», «ReteICA» contiene «ICA»), así que
+  // cualquier orden que las deje de últimas las clasifica como el tributo y
+  // las suma al `cac:TaxTotal` que la DIAN contrasta. Sólo se mira por
+  // PREFIJO —«RETE»/«AUTORRETE»— porque buscarlo en cualquier posición haría
+  // que una palabra que lo contenga por dentro clasificara como retención.
+  const compact = name.replace(/[^A-Z0-9]/g, '');
+  if (compact.startsWith('RETE') || compact.startsWith('AUTORRETE')) {
+    if (compact.includes('IVA')) return DIAN_TAX_CODES.RETE_IVA;
+    if (compact.includes('ICA')) return DIAN_TAX_CODES.RETE_ICA;
+    if (compact.includes('CREE')) return DIAN_TAX_CODES.RETE_CREE;
+    return DIAN_TAX_CODES.RETE_FUENTE;
+  }
+
+  if (name.includes('IVA') || name.includes('VAT')) {
+    return DIAN_TAX_CODES.IVA;
+  }
+  if (name.includes('INC') || name.includes('CONSUMO')) {
+    return DIAN_TAX_CODES.INC;
+  }
+  if (name.includes('ICA')) {
+    return DIAN_TAX_CODES.ICA;
+  }
+  return DIAN_TAX_CODES.IVA; // Default
+}
+
 /**
  * Tarifas de IVA admitidas en `cac:TaxCategory[TaxScheme/ID='01']/cbc:Percent`.
  *

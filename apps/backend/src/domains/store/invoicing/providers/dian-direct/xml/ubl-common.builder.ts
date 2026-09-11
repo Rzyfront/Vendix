@@ -1,6 +1,11 @@
 import { create } from 'xmlbuilder2';
 import { UBL_NAMESPACES, UBL_CONSTANTS } from './xml-namespaces';
-import { DIAN_TAX_CODES, DIAN_TAX_NAMES } from '../constants/dian-tax-codes';
+import {
+  DIAN_TAX_CODES,
+  DIAN_TAX_NAMES,
+  resolveDianTaxCodeByName,
+  resolveDianTaxSchemeCode,
+} from '../constants/dian-tax-codes';
 import {
   DIAN_ID_TYPES,
   DIAN_ORGANIZATION_TYPES,
@@ -2478,72 +2483,25 @@ export class UblCommonBuilder {
 
   /**
    * Resolves a tax name (IVA, INC, ICA) to its DIAN code.
+   *
+   * @deprecated Dueño único: `resolveDianTaxCodeByName` en
+   * `../constants/dian-tax-codes` (A.2). Este wrapper delega y queda para no
+   * romper a los llamadores existentes; el código nuevo importa la hoja.
    */
   static resolveTaxCode(tax_name: string): string {
-    const name = tax_name.toUpperCase().trim();
-
-    // Las retenciones van PRIMERO: sus nombres contienen el del tributo que
-    // retienen («ReteIVA» contiene «IVA», «ReteICA» contiene «ICA»), así que
-    // cualquier orden que las deje de últimas las clasifica como el tributo y
-    // las suma al `cac:TaxTotal` que la DIAN contrasta. Sólo se mira por
-    // PREFIJO —«RETE»/«AUTORRETE»— porque buscarlo en cualquier posición haría
-    // que una palabra que lo contenga por dentro clasifique como retención.
-    const compact = name.replace(/[^A-Z0-9]/g, '');
-    if (compact.startsWith('RETE') || compact.startsWith('AUTORRETE')) {
-      if (compact.includes('IVA')) return DIAN_TAX_CODES.RETE_IVA;
-      if (compact.includes('ICA')) return DIAN_TAX_CODES.RETE_ICA;
-      if (compact.includes('CREE')) return DIAN_TAX_CODES.RETE_CREE;
-      return DIAN_TAX_CODES.RETE_FUENTE;
-    }
-
-    if (name.includes('IVA') || name.includes('VAT')) {
-      return DIAN_TAX_CODES.IVA;
-    }
-    if (name.includes('INC') || name.includes('CONSUMO')) {
-      return DIAN_TAX_CODES.INC;
-    }
-    if (name.includes('ICA')) {
-      return DIAN_TAX_CODES.ICA;
-    }
-    return DIAN_TAX_CODES.IVA; // Default
+    return resolveDianTaxCodeByName(tax_name);
   }
 
   /**
    * Resolves the DIAN tax scheme code for a tax row, prioritizing the persisted
-   * fiscal type over the tax_name heuristic. This makes IVA (01), INC (04) and
-   * ICA (03) deterministic regardless of how the tax was named by the user.
+   * fiscal type over the tax_name heuristic.
    *
-   * Las RETENCIONES resuelven su propio código —05 ReteIVA, 06 Retefuente,
-   * 07 ReteICA— y no el del tributo que retienen. Sin esa rama caían al
-   * heurístico por nombre, que es el peor camino posible para ellas: «ReteIVA»
-   * contiene «IVA» y «ReteICA» contiene «ICA», así que una retención infiltrada
-   * entre los tributos se clasificaba como el impuesto mismo. `isWithholdingTax`
-   * ya describía esa trampa y la evitaba para decidir SI la fila es retención;
-   * faltaba usarla también para decidir QUÉ código lleva.
+   * @deprecated Dueño único: `resolveDianTaxSchemeCode` en
+   * `../constants/dian-tax-codes` (A.2). Este wrapper delega y queda para no
+   * romper a los llamadores existentes; el código nuevo importa la hoja.
    */
   static resolveTaxCodeFromTax(tax: ProviderInvoiceTax): string {
-    const tax_type = (tax.tax_type || '').toLowerCase();
-    switch (tax_type) {
-      case 'iva':
-        return DIAN_TAX_CODES.IVA;
-      case 'inc':
-        return DIAN_TAX_CODES.INC;
-      case 'ica':
-        return DIAN_TAX_CODES.ICA;
-      case 'reteiva':
-        return DIAN_TAX_CODES.RETE_IVA;
-      case 'retefuente':
-        return DIAN_TAX_CODES.RETE_FUENTE;
-      case 'reteica':
-        return DIAN_TAX_CODES.RETE_ICA;
-      case 'retecree':
-        return DIAN_TAX_CODES.RETE_CREE;
-      default:
-        // `withholding` es el genérico de `tax_type_enum`: dice que la fila es
-        // una retención pero no cuál, así que el nombre es lo único que queda
-        // para distinguirlas — y ahí sí se busca «rete» primero.
-        return UblCommonBuilder.resolveTaxCode(tax.tax_name);
-    }
+    return resolveDianTaxSchemeCode(tax);
   }
 
   /**

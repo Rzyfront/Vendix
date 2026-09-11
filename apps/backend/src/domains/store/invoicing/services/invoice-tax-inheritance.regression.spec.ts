@@ -59,16 +59,19 @@ describe('factura — herencia is_inclusive y precedencia (F-020)', () => {
     });
 
     it('mixto: misma tasa en inclusiva y agregada NO se mezclan (bucket por flag)', () => {
-      // B = trunc(100000/1.08) = 92592.59; INC = 7407.40; IVA = 17592.59.
+      // B0 = trunc(100000/1.08) = 92592.59; +1¢ ⇒ 92592.60 con
+      // INC = trunc(92592.60×0.08) = 7407.40 (cierra 100000.00) e
+      // IVA = trunc(92592.60×0.19) = 17592.59 (agregado, sobre la base final).
       // El IVA declara `is_inclusive: false` EXPLÍCITO: el contrato del motor
       // es "ausente ⇒ hereda el flag de la línea", y el default de la línea
       // se engancha a true cuando ALGÚN impuesto es inclusivo — un mixto a
-      // medias se volvería todo-inclusivo (base 78740.15). Los canales
+      // medias se volvería todo-inclusivo (base 78740.16 post-A.2). Los canales
       // (createFromOrder/manual) siempre persisten el flag por fila (A.4).
-      // NOTA de truncado (F-005): base+cuotas = 117592.58, un centavo bajo el
-      // cobrado (100000 + 17592.59 = 117592.59). Polvo inherente al truncado
-      // DIAN: la cabecera cuadra con sus líneas (FAU14), que es lo que la
-      // DIAN valida. Se fija aquí para que ningún cambio lo mueva en silencio.
+      // NOTA de truncado (F-005, actualizada en A.2 por ser «caso del bug»,
+      // PLAN objetivo 5): base+cuotas = 117592.59 = lo cobrado
+      // (100000 + 17592.59). El centavo que faltaba se absorbió en la base;
+      // la cabecera sigue cuadrando con sus líneas (FAU14), que es lo que la
+      // DIAN valida. El cambio no es silencioso: lo fija este caso.
       const out = calc().calculate({
         items: [
           {
@@ -91,13 +94,13 @@ describe('factura — herencia is_inclusive y precedencia (F-020)', () => {
           },
         ],
       });
-      expect(out.lines[0].line_extension_amount).toBe('92592.59');
+      expect(out.lines[0].line_extension_amount).toBe('92592.60');
       expect(out.lines[0].taxes).toHaveLength(2);
       expect(out.header_taxes).toHaveLength(2);
       expect(out.totals).toMatchObject({
-        total_before_tax: '92592.59',
+        total_before_tax: '92592.60',
         tax_amount: '24999.99',
-        total_amount: '117592.58',
+        total_amount: '117592.59',
       });
     });
 
@@ -133,9 +136,10 @@ describe('factura — herencia is_inclusive y precedencia (F-020)', () => {
     it('mixto a medias: el flag ausente hereda la línea (enganchada a inclusivo)', () => {
       // Contrato documentado del motor, fijado aquí a propósito: si UNA tasa
       // es inclusiva y la otra omite el flag, la línea defaultea a inclusivo
-      // y AMBAS despejan (100000/1.27 = 78740.15). Por eso A.4 persiste el
-      // flag por fila en todos los canales: al motor solo llega mixto
-      // explícito. Quien cambie este default mueve facturación DIAN.
+      // y AMBAS despejan (100000/1.27 = B0 78740.15, +1¢ ⇒ 78740.16 post-A.2,
+      // «caso del bug», PLAN objetivo 5). Por eso A.4 persiste el flag por
+      // fila en todos los canales: al motor solo llega mixto explícito.
+      // Quien cambie este default mueve facturación DIAN.
       const out = calc().calculate({
         items: [
           {
@@ -148,7 +152,7 @@ describe('factura — herencia is_inclusive y precedencia (F-020)', () => {
           },
         ],
       });
-      expect(out.lines[0].line_extension_amount).toBe('78740.15');
+      expect(out.lines[0].line_extension_amount).toBe('78740.16');
     });
   });
 
