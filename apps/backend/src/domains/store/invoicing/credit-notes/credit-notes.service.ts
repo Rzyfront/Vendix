@@ -6,6 +6,7 @@ import { RequestContextService } from '../../../../common/context/request-contex
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { InvoiceEmissionGateService } from '../services/invoice-emission-gate.service';
+import { InvoiceFlowService } from '../invoice-flow/invoice-flow.service';
 import {
   CreateCreditNoteDto,
   CreateDebitNoteDto,
@@ -54,6 +55,7 @@ export class CreditNotesService {
     private readonly event_emitter: EventEmitter2,
     private readonly fiscalScope: FiscalScopeService,
     private readonly emissionGate: InvoiceEmissionGateService,
+    private readonly invoice_flow: InvoiceFlowService,
   ) {}
 
   private getContext() {
@@ -90,6 +92,89 @@ export class CreditNotesService {
 
   async createDebitNote(dto: CreateDebitNoteDto) {
     return this.createNote(dto, 'debit_note');
+  }
+
+  /**
+   * Emite de una una NC/ND que nació en `draft`: corre `validate()` + `send()`
+   * con los mismos seams del flujo manual, en una sola llamada.
+   *
+   * No numera (el consecutivo lo gastó `createNote`) y no acepta otros tipos:
+   * validar acá una factura de venta como efecto colateral sería emitir algo
+   * que el operador solo quería revisar. El `findFirst` va por `this.prisma,
+   * que scopea por tienda, así que una nota ajena responde 404, no 403.
+   *
+   * Doble clic concurrente: el segundo `validate()` choca con
+   * `validateTransition` (INVOICING_STATUS_001) — ver F-001.
+   */
+  async issueNote(id: number) {
+    const note = await this.prisma.invoices.findFirst({
+      where: { id },
+      select: { id: true, invoice_type: true, status: true },
+    });
+
+    if (!note) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
+    }
+
+    if (note.invoice_type !== 'credit_note' && note.invoice_type !== 'debit_note') {
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED,
+        `Solo una nota crédito o débito puede emitirse de una: el documento #${id} es «${note.invoice_type}» y sigue el flujo manual (validar, enviar).`,
+        { invoice_id: id, invoice_type: note.invoice_type },
+      );
+    }
+
+    await this.invoice_flow.validate(id);
+    const sent = await this.invoice_flow.send(id);
+
+    this.logger.log(`Note #${id} (${note.invoice_type}) issued in one shot`);
+
+    return {
+      invoice: sent,
+      phases: { validated: true, sent: true },
+    };
+  }
+
+  /**
+   * NC/ND de una factura, para las cards de la orden (A.2).
+   *
+   * La factura padre se resuelve primero por el scope de la tienda: si no es
+   * visible, 404 aunque existan notas. Las notas se filtran además por la
+   * entidad fiscal del padre, igual que `createNote` exige al crear.
+   */
+  async findNotesByRelatedInvoice(related_invoice_id: number) {
+    const parent = await this.prisma.invoices.findFirst({
+      where: { id: related_invoice_id },
+      select: { id: true, accounting_entity_id: true },
+    });
+
+    if (!parent) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
+    }
+
+    return this.prisma.invoices.findMany({
+      where: {
+        related_invoice_id: parent.id,
+        accounting_entity_id: parent.accounting_entity_id,
+        invoice_type: { in: ['credit_note', 'debit_note'] },
+      },
+      select: {
+        id: true,
+        invoice_number: true,
+        invoice_type: true,
+        fiscal_document_type: true,
+        status: true,
+        subtotal_amount: true,
+        discount_amount: true,
+        tax_amount: true,
+        total_amount: true,
+        currency: true,
+        issue_date: true,
+        note_concept_code: true,
+        created_at: true,
+      },
+      orderBy: { id: 'asc' },
+    });
   }
 
   private async createNote(
