@@ -498,7 +498,12 @@ export function aggregatePreviewTaxBreakdown(
 ): PreviewTaxRow[] {
   const rows = new Map<string, PreviewTaxRow & { baseCents: number; amountCents: number }>();
   for (let i = 0; i < items.length; i++) {
-    const taxes = Array.isArray(items[i]?.taxes) ? items[i].taxes : [];
+    // TS no puede estrechar `items[i]?.taxes` a `TaxSelection[]` cuando se
+    // accede dos veces (línea 501): el primer acceso puede ser null/undefined
+    // y el segundo no se garantiza igual. Guardamos en una variable local
+    // para que el narrowing se mantenga en las líneas siguientes.
+    const taxesRaw = items[i]?.taxes;
+    const taxes: ReadonlyArray<TaxSelection> = Array.isArray(taxesRaw) ? taxesRaw : [];
     const details = math[i]?.taxes ?? [];
     const baseCents = math[i]?.baseCents ?? 0;
     for (let j = 0; j < taxes.length; j++) {

@@ -723,9 +723,9 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                               {{ aiu.label }}
                             </span>
                           }
-                          <!-- F-054: el `title` solo no lo lee el teclado ni la
-                               mayoría de lectores; el `aria-label` espeja el
-                               texto para quien no pasa el cursor. -->
+                          <!-- F-054: el atributo title solo no lo lee el teclado
+                               ni la mayoría de lectores; el aria-label espeja
+                               el texto para quien no pasa el cursor. -->
                           @if (item.is_inclusive) {
                             <span
                               class="rounded-full bg-surface-secondary px-2 py-0.5 text-[11px] text-text-secondary"
