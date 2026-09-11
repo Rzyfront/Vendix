@@ -1,0 +1,31 @@
+
+> buildcheck:test
+> bash scripts/buildcheck.sh --test apps/backend/src/domains/store/taxes/utils/tax-inclusive-math.regression.spec.ts
+
+buildcheck — solo compilación, sin servidores (timeout 900s)
+logs: /Users/rzy/Documents/Organizations/Quickss/Vendix/.buildcheck
+
+RAM libre estimada: 5637 MB
+
+▶ backend-tests          FAIL  (exit 1, 16s)  → /Users/rzy/Documents/Organizations/Quickss/Vendix/.buildcheck/backend-tests.log
+
+RESULTADO: FAIL — backend-tests
+
+──── primeras líneas de error: backend-tests ────
+1:[0m[7m[1m[31m FAIL [39m[22m[27m[0m [2msrc/domains/store/taxes/utils/[22m[1mtax-inclusive-math.regression.spec.ts[22m ([0m[1m[41m14.704 s[49m[22m[0m)
+23:      [31m✕[39m [2m$3.000 con INC 8% dentro ⇒ base 2777.78, cuota 222.22, total 3000.00 (2 ms)[22m
+24:      [31m✕[39m [2m$5.000 con INC 8% dentro ⇒ base 4629.63, cuota 370.37, total 5000.00 (1 ms)[22m
+25:      [31m✕[39m [2m$100 con IVA 19% dentro ⇒ base 84.04, cuota 15.96, total 100.00[22m
+26:      [31m✕[39m [2m$17 con INC 8% dentro termina en closest-below sin sobrecobrar (F-039)[22m
+27:      [31m✕[39m [2m$3.000 con IVA 19% + INC 8% dentro ⇒ closest-below 2999.99 (F-007)[22m
+28:      [31m✕[39m [2m$1.000 con IVA 19% + IVA 5% dentro ⇒ base 806.46, total 1000.00[22m
+29:      [31m✕[39m [2m$1.000.000 con ICA 9.66‰ dentro ⇒ base 990432.43, total 1000000.00 (F-032)[22m
+30:      [31m✕[39m [2mdescuento que deja G=2990.11 con INC 8% ⇒ closest-below 2990.10 (F-006) (1 ms)[22m
+32:      [31m✕[39m [2mbruto NaN ⇒ coerción compatible + entrada reportada (1 ms)[22m
+33:      [31m✕[39m [2mbruto Infinity ⇒ coerción compatible + entrada reportada (1 ms)[22m
+34:      [31m✕[39m [2mbruto 'abc' ⇒ coerción compatible + entrada reportada[22m
+35:      [31m✕[39m [2mbruto locale '1.000,50' ⇒ coerción compatible + entrada reportada (1 ms)[22m
+36:      [31m✕[39m [2mbruto negativo ⇒ coerción compatible + entrada reportada[22m
+37:      [31m✕[39m [2mbruto vacío '' ⇒ coerción compatible + entrada reportada[22m
+38:      [31m✕[39m [2mtasa NaN ⇒ reportada (el kernel no la confunde con 0% válido)[22m
+39:      [31m✕[39m [2mtasa 'abc' ⇒ reportada (el kernel no la confunde con 0% válido)[22m

@@ -1,0 +1,35 @@
+
+> buildcheck:test
+> bash scripts/buildcheck.sh --test apps/backend/src/domains/store/invoicing/services/invoice-calculator.service.spec.ts
+
+buildcheck — solo compilación, sin servidores (timeout 900s)
+logs: /Users/rzy/Documents/Organizations/Quickss/Vendix/.buildcheck
+
+RAM libre estimada: 6652 MB
+
+▶ backend-tests          FAIL  (exit 1, 17s)  → /Users/rzy/Documents/Organizations/Quickss/Vendix/.buildcheck/backend-tests.log
+
+RESULTADO: FAIL — backend-tests
+
+──── primeras líneas de error: backend-tests ────
+1:[0m[7m[1m[31m FAIL [39m[22m[27m[0m [2msrc/domains/store/invoicing/services/[22m[1minvoice-calculator.service.spec.ts[22m ([0m[1m[41m16.381 s[49m[22m[0m)
+115:      [31m✕[39m [2m$3.000 con INC 8% incluido ⇒ base 2777.78, cuota 222.22, total 3000.00 (2 ms)[22m
+116:      [31m✕[39m [2m$5.000 con INC 8% incluido ⇒ base 4629.63, cuota 370.37, total 5000.00[22m
+117:      [31m✕[39m [2m$100 con IVA 19% incluido ⇒ base 84.04, cuota 15.96, total 100.00 (1 ms)[22m
+118:      [31m✕[39m [2m$17 con INC 8% termina en closest-below + divergencia, sin sobrecobrar (F-039/ADR-04) (1 ms)[22m
+119:      [31m✕[39m [2m$3.000 con IVA 19% + INC 8% dentro ⇒ closest-below 2999.99 + divergencia (F-007)[22m
+120:      [31m✕[39m [2m$1.000 con IVA 19% + IVA 5% dentro ⇒ base 806.46, total 1000.00[22m
+121:      [31m✕[39m [2m$1.000.000 con ICA 9.66‰ dentro ⇒ base 990432.43, total 1000000.00 (F-032) (1 ms)[22m
+124:      [31m✕[39m [2mdescuento > bruto: el cero silencioso se vuelve divergencia (F-034, falla hasta A.2)[22m
+125:      [31m✕[39m [2mdescuento 9.89 sobre $3.000 INC 8%: G=2990.11 inalcanzable ⇒ 2990.10 + divergencia (F-006) (1 ms)[22m
+127:      [31m✕[39m [2munit_price 'abc' ⇒ la línea no nace en cero silencioso: hay divergencia (2 ms)[22m
+128:      [31m✕[39m [2mquantity locale '1,000' ⇒ la línea no nace en cero silencioso: hay divergencia (1 ms)[22m
+129:      [31m✕[39m [2mquantity Infinity ⇒ la línea no nace en cero silencioso: hay divergencia (1 ms)[22m
+130:      [31m✕[39m [2munit_price NaN ⇒ la línea no nace en cero silencioso: hay divergencia (1 ms)[22m
+131:      [31m✕[39m [2munit_price '' ⇒ la línea no nace en cero silencioso: hay divergencia[22m
+132:      [31m✕[39m [2mdiscount NaN ⇒ la línea no nace en cero silencioso: hay divergencia (7 ms)[22m
+134:      [31m✕[39m [2mflag stringy 'false': motor y espejo acuerdan exclusivo (solo true booleano despeja, F-035) (4 ms)[22m
+135:      [31m✕[39m [2mflag stringy 'true': motor y espejo acuerdan exclusivo (solo true booleano despeja, F-035) (1 ms)[22m
+136:      [31m✕[39m [2mqty>1: el espejo por bruto de línea iguala al motor (F-009) (1 ms)[22m
+137:      [31m✕[39m [2mmixta con flags explícitos: inclusiva + exclusiva reconcilian por línea y en cabecera (F-014) (1 ms)[22m
+138:      [31m✕[39m [2mmulti-línea: 3 × $3.000 INC 8% agregan exacto en cabecera (1 ms)[22m
