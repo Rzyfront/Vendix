@@ -37,7 +37,7 @@ import { FormStyleVariant } from '../../types/form.types';
       [disabled]="isDisabled()"
       (click)="onToggle()"
       [class]="buttonClasses"
-      [style.background-color]="isDisabled() ? 'var(--color-muted)' : isOn() ? 'var(--color-primary)' : 'var(--color-danger)'"
+      [style.background-color]="isDisabled() ? 'var(--color-muted)' : isOn() ? 'var(--color-primary)' : 'rgba(var(--color-error-rgb), 0.25)'"
     >
       <span
         class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow ring-0 transition-transform duration-75 ease-out"
