@@ -34,6 +34,22 @@ import {
  * SSE channel — the bell badge query already filters by user
  * role + store_id when present.
  */
+/**
+ * F-006 — roles destino canónicos, compartidos por los 3 sitios de este
+ * listener. Postgres compara `=` case-sensitive y el canónico en seed +
+ * `roles.service.ts` es minúsculas (`super_admin`): matchear solo el literal
+ * en mayúsculas dejaba los avisos sin destinatarios. Misma forma que el fix
+ * ya aplicado en `handlePqrCreated` (`name: { in: [...] }`).
+ */
+export const PQR_SUPER_ADMIN_ROLE_NAMES = ['super_admin', 'SUPER_ADMIN'];
+export const PQR_STORE_RESPONSE_ROLE_NAMES = [
+  'owner',
+  'admin',
+  'manager',
+  'STORE_ADMIN',
+  'store_admin',
+];
+
 @Injectable()
 export class PqrNotificationsListener {
   private readonly logger = new Logger(PqrNotificationsListener.name);
@@ -167,7 +183,7 @@ export class PqrNotificationsListener {
           user_roles: {
             some: {
               roles: {
-                name: { in: ['super_admin', 'SUPER_ADMIN'] },
+                name: { in: PQR_SUPER_ADMIN_ROLE_NAMES },
               },
             },
           },
@@ -238,8 +254,9 @@ export class PqrNotificationsListener {
         return;
       }
 
-      // Look up admins of the owning store. A user with role
-      // STORE_ADMIN is the audience here.
+      // Look up admins of the owning store. Owner/admin/manager (más
+      // ambas cajas de STORE_ADMIN) son la audiencia, igual que en
+      // `handlePqrCreated`: solo `STORE_ADMIN` dejaba fuera al resto.
       const storeAdmins = await this.globalPrisma.users.findMany({
         where: {
           state: 'active',
@@ -247,7 +264,7 @@ export class PqrNotificationsListener {
             some: { store_id: ticket.store_id },
           },
           user_roles: {
-            some: { roles: { name: 'STORE_ADMIN' } },
+            some: { roles: { name: { in: PQR_STORE_RESPONSE_ROLE_NAMES } } },
           },
         },
         select: { id: true },
@@ -296,7 +313,9 @@ export class PqrNotificationsListener {
     const superAdmins = await this.globalPrisma.users.findMany({
       where: {
         state: 'active',
-        user_roles: { some: { roles: { name: 'SUPER_ADMIN' } } },
+        user_roles: {
+          some: { roles: { name: { in: PQR_SUPER_ADMIN_ROLE_NAMES } } },
+        },
       },
       select: { id: true },
     });

@@ -46,6 +46,7 @@ import {
   PriceResolverService,
   resolvePackSize,
 } from '../../../../../shared/services/pricing';
+import { prepMinutesOrNull } from '../../../../../public/ecommerce/components/storefront/storefront.component';
 import { EmptyStateComponent } from '../../../../../shared/components/empty-state/empty-state.component';
 import {
   CurrencyPipe,
@@ -162,13 +163,13 @@ import {
                 </div>
               }
 
-              @if (show_preparation_time() && (p.preparation_time_minutes ?? 0) > 0) {
+              @if (prepMinutes(p.preparation_time_minutes); as prepMins) {
                 <div
                   class="prep-line flex items-center gap-1 text-sm text-text-muted my-1"
                   title="Tiempo de preparación"
                 >
                   <app-icon name="clock" [size]="14" />
-                  <span>~{{ p.preparation_time_minutes }} min de preparación</span>
+                  <span>~{{ prepMins }} min de preparación</span>
                 </div>
               }
 
@@ -2135,6 +2136,15 @@ export class ProductDetailComponent implements OnInit {
   /** Short "Disponible Vie 08:00" label for the off-schedule badge. */
   formatNextAvailable(): string {
     return formatMenuNextAvailable(this.product()?.next_available ?? null);
+  }
+
+  /**
+   * F-013 — minutos de preparación a pintar (`null` = no renderizar).
+   * Comparte `prepMinutesOrNull` con la vitrina y la card: el mismo dato,
+   * una sola decisión de render (sub-minuto oculto, flag apagado oculto).
+   */
+  prepMinutes(value: number | string | null | undefined): number | null {
+    return prepMinutesOrNull(value, this.show_preparation_time());
   }
 
   /** Structured payload for `<app-next-available-notice>`. Mirrors the

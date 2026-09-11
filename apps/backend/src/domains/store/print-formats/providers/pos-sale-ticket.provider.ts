@@ -9,6 +9,7 @@ import { StandardPrintDataModel } from '../interfaces/standard-print-data.model'
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
 import { mapUserAddress } from '../lib/customer-address';
+import { formatFiscalMoney } from './fiscal-document-print.mapper';
 
 @Injectable()
 export class PosSaleTicketDataProvider implements IDocumentDataProvider {
@@ -153,19 +154,19 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       const total = Number((invoice as any).total_amount);
       if (Number.isFinite(subtotal)) {
         model.totals.subtotal = subtotal;
-        model.totals.subtotal_formatted = `$${subtotal.toLocaleString('es-CO')}`;
+        model.totals.subtotal_formatted = formatFiscalMoney(subtotal);
       }
       if (Number.isFinite(discount)) {
         model.totals.discount_total = discount;
-        model.totals.discount_total_formatted = `$${discount.toLocaleString('es-CO')}`;
+        model.totals.discount_total_formatted = formatFiscalMoney(discount);
       }
       if (Number.isFinite(tax)) {
         model.totals.tax_total = tax;
-        model.totals.tax_total_formatted = `$${tax.toLocaleString('es-CO')}`;
+        model.totals.tax_total_formatted = formatFiscalMoney(tax);
       }
       if (Number.isFinite(total)) {
         model.totals.grand_total = total;
-        model.totals.grand_total_formatted = `$${total.toLocaleString('es-CO')}`;
+        model.totals.grand_total_formatted = formatFiscalMoney(total);
       }
     } catch {
       // Ver docblock: la tirilla pre-fiscal con filas de orden es el fallback.
@@ -221,8 +222,8 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       rate: g.rate,
       base_amount: g.base_amount,
       tax_amount: g.tax_amount,
-      base_formatted: `$${g.base_amount.toLocaleString('es-CO')}`,
-      tax_formatted: `$${g.tax_amount.toLocaleString('es-CO')}`,
+      base_formatted: formatFiscalMoney(g.base_amount),
+      tax_formatted: formatFiscalMoney(g.tax_amount),
     }));
   }
 

@@ -276,12 +276,25 @@ export class AddRateWizardModalComponent implements OnInit {
         ? values.name.trim()
         : null;
 
+    // F-014 — misma línea que el resto del método: parse explícito y error
+    // visible si no es número. `Number(...) || 0` convertía `NaN`/`''` en 0
+    // silencioso y un tipeo inválido se volvía "gratis".
+    const baseCost = parseNullableNumber(values.base_cost);
+    if (baseCost === null || baseCost < 0) {
+      this.toastService.show({
+        variant: 'error',
+        description: 'El costo base debe ser un número válido mayor o igual a 0',
+      });
+      this.is_saving.set(false);
+      return;
+    }
+
     const dto: CreateRateDto = {
       shipping_zone_id: this.selected_zone_id()!,
       shipping_method_id: this.method_id(),
       name: nameVal,
       type: (values.type as ShippingRateType) || 'flat',
-      base_cost: Number(values.base_cost) || 0,
+      base_cost: baseCost,
       per_unit_cost: perUnitCost,
       min_val: minVal,
       max_val: maxVal,

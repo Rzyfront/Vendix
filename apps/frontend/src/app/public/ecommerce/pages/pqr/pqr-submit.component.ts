@@ -180,11 +180,22 @@ export class PqrSubmitComponent {
     const storeId = this.tenantFacade.getCurrentStoreId();
     const currentOrg = this.tenantFacade.currentOrganization();
     const currentStore = this.tenantFacade.getCurrentStore();
-    const orgId = currentOrg?.id
-      ? parseInt(currentOrg.id.toString(), 10)
-      : currentStore?.organizationId
-      ? parseInt(currentStore.organizationId.toString(), 10)
-      : undefined;
+    // F-015 — ids tipados `string`: `parseInt` hacía parse parcial
+    // ("12ab"→12) y el `NaN` viajaba como `null` en el JSON. `Number()` +
+    // guard `Number.isInteger`: lo no-entero se omite y el backend resuelve
+    // la org desde `store_id`.
+    const toIntOrUndefined = (
+      value: string | null | undefined,
+    ): number | undefined => {
+      if (value === null || value === undefined || value === '') {
+        return undefined;
+      }
+      const n = Number(value);
+      return Number.isInteger(n) ? n : undefined;
+    };
+    const orgId =
+      toIntOrUndefined(currentOrg?.id) ??
+      toIntOrUndefined(currentStore?.organizationId);
 
     const dto: CreatePqrPublicDto = {
       pqr_type: this.form.controls['pqr_type'].value as PqrType,

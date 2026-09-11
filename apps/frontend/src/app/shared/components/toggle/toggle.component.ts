@@ -136,12 +136,11 @@ export class ToggleComponent implements ControlValueAccessor {
     ];
 
     if (this.isDisabled()) {
-      // FIX QUI-801: antes se aplicaba `opacity-50` encima del gris muted, lo
-      // que daba un color apagado difícil de distinguir del estado "apagado
-      // pero habilitado". Ahora el template aplica `bg-[var(--color-danger)]`
-      // (rojo opaco) directamente al botón deshabilitado, así que acá solo
-      // mantenemos el cursor y dejamos el color al template — sin opacidad
-      // que apague la señal visual.
+      // QUI-801 — contrato de color (lo pinta el template, línea 40):
+      // deshabilitado = `muted`, encendido habilitado = `primary`, APAGADO
+      // HABILITADO = `danger` (rojo opaco a propósito, para que el OFF no se
+      // confunda con el deshabilitado). Acá solo se mantiene el cursor y se
+      // deja el color al template — sin `opacity` que apague la señal visual.
       baseClasses.push('cursor-not-allowed');
     }
 

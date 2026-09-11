@@ -204,8 +204,13 @@ export function resolveRawLogoKey(invoice: any): string | undefined {
  * `minimum/maximumFractionDigits: 2` siempre. Sin el pineado, `toLocaleString`
  * usa 0–3 decimales según la magnitud y `$3000` se imprime `$3.000` mientras
  * el XML declara `3000.00`: el adquiriente suma distinto que la factura.
+ *
+ * F-007 — helper compartido: el override fiscal de
+ * `pos-sale-ticket.provider.ts` lo reusa para que la tirilla con snapshot
+ * pinte la misma precisión que el documento fiscal (mismo modelo, una sola
+ * precisión: `'$5.000,00'`).
  */
-const money = (n: number) =>
+export const formatFiscalMoney = (n: number) =>
   `$${Number(n || 0).toLocaleString('es-CO', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -256,14 +261,14 @@ export function mapFiscalDocumentToPrintData(
       variant_sku: variantSku,
       quantity: Number(it.quantity || 1),
       unit_price: unitPrice,
-      unit_price_formatted: money(unitPrice),
+      unit_price_formatted: formatFiscalMoney(unitPrice),
       discount_amount: discountAmt,
       discount_formatted:
-        discountAmt > 0 ? `-${money(discountAmt)}` : undefined,
+        discountAmt > 0 ? `-${formatFiscalMoney(discountAmt)}` : undefined,
       tax_rate: taxRate,
       tax_amount: Number(it.tax_amount || 0),
       total_price: totalPrice,
-      total_price_formatted: money(totalPrice),
+      total_price_formatted: formatFiscalMoney(totalPrice),
     };
   });
 
@@ -284,8 +289,8 @@ export function mapFiscalDocumentToPrintData(
   }
   const taxes = Array.from(taxesMap.values()).map((t) => ({
     ...t,
-    base_formatted: money(t.base_amount),
-    tax_formatted: money(t.tax_amount),
+    base_formatted: formatFiscalMoney(t.base_amount),
+    tax_formatted: formatFiscalMoney(t.tax_amount),
   }));
 
   const subtotal = Number(invoice.subtotal_amount ?? 0);
@@ -450,17 +455,17 @@ export function mapFiscalDocumentToPrintData(
     taxes,
     totals: {
       subtotal,
-      subtotal_formatted: money(subtotal),
+      subtotal_formatted: formatFiscalMoney(subtotal),
       discount_total: discount,
-      discount_total_formatted: money(discount),
+      discount_total_formatted: formatFiscalMoney(discount),
       shipping_total: 0,
       shipping_total_formatted: '$0',
       tax_total: tax,
-      tax_total_formatted: money(tax),
+      tax_total_formatted: formatFiscalMoney(tax),
       withholding_total: withholding,
-      withholding_total_formatted: money(withholding),
+      withholding_total_formatted: formatFiscalMoney(withholding),
       grand_total: total,
-      grand_total_formatted: money(total),
+      grand_total_formatted: formatFiscalMoney(total),
       // Mismo `total` que la fila en cifras: una segunda fuente aquí sería una
       // contradicción interna del documento legal.
       grand_total_in_words: Number.isFinite(total)

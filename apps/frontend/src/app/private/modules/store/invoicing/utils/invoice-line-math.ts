@@ -140,11 +140,15 @@ const RATE_PPM_DIVISOR = 1_000_000;
 /**
  * Tarifa a PORCENTAJE, con guarda de unidad.
  *
- * Espejo de `toPercent` (`invoice-tax-catalog.service.ts`): el contrato del
- * formulario es porcentaje (8 = 8 %), pero del catálogo pueden colarse
- * fracciones legadas (0.08). `> 1 ⇒ porcentaje`, `<= 1 ⇒ fracción × 100`
- * (F-013). La ambigüedad de una tarifa sub-1 % guardada como `1` no existe en
- * el catálogo (se guardaría como `0.01`), así que la regla es total.
+ * Contrato real: el `tax-selector` ya entrega `TaxSelection.rate` en
+ * porcentaje (8 = 8 %), pero del catálogo pueden colarse fracciones legadas
+ * (0.08). Misma regla que `toPercent`
+ * (`invoice-create/invoice-tax-catalog.service.ts`) y coherente con el
+ * default de `resolveRateBasis` (`invoice-calculator.service.ts`: sin
+ * `rate_basis` explícito todo lo no-ICA va en porcentaje). `> 1 ⇒
+ * porcentaje`, `<= 1 ⇒ fracción × 100`. La ambigüedad de una tarifa sub-1 %
+ * guardada como `1` no existe en el catálogo (se guardaría como `0.01`), así
+ * que la regla es total.
  */
 export function normalizeRatePercent(raw: unknown): number {
   const value = Number(raw);
