@@ -653,3 +653,85 @@ describe('CustomersService — QUI-728 customer fiscal data', () => {
     }
   });
 });
+
+/**
+ * QUI-808 — el card de resumen del cliente (Última compra / Pedidos /
+ * Gasto total / Ticket promedio) en /admin/customers/:id leía siempre
+ * undefined. Causa: findOne() no agregaba stats de orders. El fix
+ * agrega un `groupBy` por `customer_id` y une los stats al usuario.
+ */
+describe('CustomersService — findOne (QUI-808 customer summary stats)', () => {
+  const STORE_ID = 7;
+  const CUSTOMER_ID = 302;
+
+  const makeUser = (overrides: any = {}) => ({
+    id: CUSTOMER_ID,
+    first_name: 'Adelin',
+    last_name: 'Toro',
+    email: 'adelin@vendix.com',
+    state: 'active',
+    addresses: [],
+    ...overrides,
+  });
+
+  it('agrega total_orders, total_spend y last_order_date del cliente', async () => {
+    mockPrismaService.users.findFirst.mockResolvedValue(makeUser());
+    mockPrismaService.orders.groupBy.mockResolvedValue([
+      {
+        customer_id: CUSTOMER_ID,
+        _count: { id: 3 },
+        _sum: { grand_total: 750000 },
+        _max: { created_at: new Date('2026-08-15T10:00:00Z') },
+      },
+    ]);
+
+    const result = await service.findOne(STORE_ID, CUSTOMER_ID);
+
+    expect(result.total_orders).toBe(3);
+    expect(result.total_spend).toBe(750000);
+    expect(result.last_order_date).toEqual(new Date('2026-08-15T10:00:00Z'));
+    expect(result.id).toBe(CUSTOMER_ID);
+    // La query debe estar escopada por store + customer.
+    expect(mockPrismaService.orders.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          store_id: STORE_ID,
+          customer_id: CUSTOMER_ID,
+        }),
+      }),
+    );
+  });
+
+  it('cliente sin órdenes devuelve 0 / null sin NaN', async () => {
+    mockPrismaService.users.findFirst.mockResolvedValue(makeUser());
+    mockPrismaService.orders.groupBy.mockResolvedValue([]);
+
+    const result = await service.findOne(STORE_ID, CUSTOMER_ID);
+
+    expect(result.total_orders).toBe(0);
+    expect(result.total_spend).toBe(0);
+    expect(result.last_order_date).toBeNull();
+  });
+
+  it('SQL devuelve null en _sum → total_spend queda en 0, no null', async () => {
+    // Edge case: cliente con órdenes pero todas con grand_total NULL
+    // (descuentos al 100%, cortesías, etc.). SUM en Postgres ignora
+    // NULL, así que el resultado es null, no 0. El fallback `?? 0` lo
+    // convierte a 0 para que el frontend no reciba null.
+    mockPrismaService.users.findFirst.mockResolvedValue(makeUser());
+    mockPrismaService.orders.groupBy.mockResolvedValue([
+      {
+        customer_id: CUSTOMER_ID,
+        _count: { id: 2 },
+        _sum: { grand_total: null },
+        _max: { created_at: null },
+      },
+    ]);
+
+    const result = await service.findOne(STORE_ID, CUSTOMER_ID);
+
+    expect(result.total_orders).toBe(2);
+    expect(result.total_spend).toBe(0); // null → 0, no null
+    expect(result.last_order_date).toBeNull();
+  });
+});
