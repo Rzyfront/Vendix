@@ -238,8 +238,15 @@ export class PqrService {
    * Returns a sanitized view of a PQR for anonymous tracking. Only public
    * (non-internal) comments are exposed. Throws SUP_PQR_003 if the ticket
    * is missing or belongs to a different organization.
+   *
+   * ADR-05: public tracking serves platform-public PQRs only. Store
+   * PQRs stay in their authenticated admin — sequential
+   * PQRS-{orgId}-{counter} numbers would otherwise be enumerable
+   * cross-store (F-009).
    */
   async findByTicketNumberPublic(ticketNumber: string): Promise<PublicPqrView> {
+    const orgVendix = await this.getPlatformOrgOrThrow();
+
     const ticket = await this.globalPrisma.support_tickets.findFirst({
       where: {
         ticket_number: ticketNumber,
@@ -274,7 +281,7 @@ export class PqrService {
       },
     });
 
-    if (!ticket) {
+    if (!ticket || ticket.organization_id !== orgVendix.id) {
       throw new VendixHttpException(ErrorCodes.SUP_PQR_003);
     }
 

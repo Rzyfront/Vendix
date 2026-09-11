@@ -197,15 +197,16 @@ describe('PqrService — QUI-791 multi-tenant PQR flow', () => {
   });
 
   describe('findByTicketNumberPublic()', () => {
-    it('returns sanitized public PQR view for a valid ticket', async () => {
+    it('returns sanitized public PQR view for a platform ticket', async () => {
+      mockGlobalPrisma.organizations.findFirst.mockResolvedValue(mockPlatformOrg);
       mockGlobalPrisma.support_tickets.findFirst.mockResolvedValue({
         id: 50,
-        ticket_number: 'PQRS-6-00001',
+        ticket_number: 'PQRS-1-00001',
         title: 'Garantía de producto',
         status: ticket_status_enum.IN_PROGRESS,
         category: 'CLAIM',
         priority: ticket_priority_enum.P2,
-        organization_id: 6,
+        organization_id: 1,
         created_at: new Date('2026-09-01'),
         updated_at: new Date('2026-09-02'),
         resolved_at: null,
@@ -214,25 +215,29 @@ describe('PqrService — QUI-791 multi-tenant PQR flow', () => {
           {
             id: 1,
             content: 'Estamos revisando su caso con el almacén.',
-            author_name: 'Soporte Nike',
+            author_name: 'Soporte Vendix',
             author_type: 'admin',
             created_at: new Date('2026-09-02'),
           },
         ],
       });
 
-      const result = await service.findByTicketNumberPublic('PQRS-6-00001');
+      const result = await service.findByTicketNumberPublic('PQRS-1-00001');
 
+      expect(mockGlobalPrisma.organizations.findFirst).toHaveBeenCalledWith({
+        where: { is_platform: true },
+        select: { id: true },
+      });
       expect(mockGlobalPrisma.support_tickets.findFirst).toHaveBeenCalledWith({
         where: {
-          ticket_number: 'PQRS-6-00001',
+          ticket_number: 'PQRS-1-00001',
           tags: { has: 'pqr' },
         },
         select: expect.any(Object),
       });
 
       expect(result).toEqual({
-        ticket_number: 'PQRS-6-00001',
+        ticket_number: 'PQRS-1-00001',
         title: 'Garantía de producto',
         status: ticket_status_enum.IN_PROGRESS,
         pqr_type: 'CLAIM',
@@ -245,7 +250,7 @@ describe('PqrService — QUI-791 multi-tenant PQR flow', () => {
           {
             id: 1,
             content: 'Estamos revisando su caso con el almacén.',
-            author_name: 'Soporte Nike',
+            author_name: 'Soporte Vendix',
             author_type: 'admin',
             created_at: new Date('2026-09-02'),
           },
@@ -254,9 +259,32 @@ describe('PqrService — QUI-791 multi-tenant PQR flow', () => {
     });
 
     it('throws SUP_PQR_003 when ticket does not exist or lacks pqr tag', async () => {
+      mockGlobalPrisma.organizations.findFirst.mockResolvedValue(mockPlatformOrg);
       mockGlobalPrisma.support_tickets.findFirst.mockResolvedValue(null);
 
       await expect(service.findByTicketNumberPublic('NON-EXISTENT')).rejects.toMatchObject({
+        errorCode: ErrorCodes.SUP_PQR_003.code,
+      });
+    });
+
+    it('throws SUP_PQR_003 for a store ticket even when it exists (ADR-05)', async () => {
+      mockGlobalPrisma.organizations.findFirst.mockResolvedValue(mockPlatformOrg);
+      mockGlobalPrisma.support_tickets.findFirst.mockResolvedValue({
+        id: 51,
+        ticket_number: 'PQRS-6-00001',
+        title: 'Pedido incompleto',
+        status: ticket_status_enum.NEW,
+        category: 'CLAIM',
+        priority: ticket_priority_enum.P3,
+        organization_id: 6,
+        created_at: new Date('2026-09-03'),
+        updated_at: new Date('2026-09-03'),
+        resolved_at: null,
+        closed_at: null,
+        comments: [],
+      });
+
+      await expect(service.findByTicketNumberPublic('PQRS-6-00001')).rejects.toMatchObject({
         errorCode: ErrorCodes.SUP_PQR_003.code,
       });
     });
