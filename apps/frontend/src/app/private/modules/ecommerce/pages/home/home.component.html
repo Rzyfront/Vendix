@@ -25,6 +25,7 @@
           @for (product of featured_products(); track product.id) {
             <app-product-card
               [product]="product"
+              [show_preparation_time]="show_preparation_time()"
               [show_shipping_badge]="shipping_badge_enabled()"
               [in_wishlist]="isInWishlist(product.id)"
               (add_to_cart)="onAddToCart($event)"
@@ -134,6 +135,7 @@
                 @for (product of featured_products(); track product.id) {
                   <app-product-card
                     [product]="product"
+                    [show_preparation_time]="show_preparation_time()"
                     [show_shipping_badge]="shipping_badge_enabled()"
                     [in_wishlist]="isInWishlist(product.id)"
                     (add_to_cart)="onAddToCart($event)"

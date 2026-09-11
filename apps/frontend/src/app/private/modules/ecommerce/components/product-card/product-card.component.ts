@@ -162,6 +162,14 @@ import {
             }
           </div>
         }
+        @if (show_preparation_time() && (product().preparation_time_minutes ?? 0) > 0) {
+          <div class="service-indicators">
+            <div class="service-indicator" title="Tiempo de preparación">
+              <app-icon name="clock" [size]="12"></app-icon>
+              <span>~{{ product().preparation_time_minutes }} min</span>
+            </div>
+          </div>
+        }
         <div class="product-bottom">
           @if (show_shipping_badge()) {
             <div class="shipping-badge">
@@ -639,6 +647,11 @@ export class ProductCardComponent {
   readonly product = input.required<EcommerceProduct>();
   readonly show_variants = input<boolean>(true);
   readonly show_shipping_badge = input<boolean>(false);
+  /**
+   * Muestra el indicador de tiempo de preparación. Fail-closed: `false` por
+   * defecto para que las superficies que no propagan el flag no cambien.
+   */
+  readonly show_preparation_time = input<boolean>(false);
   readonly in_wishlist = input<boolean>(false);
   readonly add_to_cart = output<EcommerceProduct>();
   readonly toggle_wishlist = output<EcommerceProduct>();

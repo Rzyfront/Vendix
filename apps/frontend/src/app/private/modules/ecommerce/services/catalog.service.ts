@@ -145,6 +145,12 @@ export interface EcommerceProduct {
   pricing_type?: 'unit' | 'weight';
   product_type?: 'physical' | 'service';
   service_duration_minutes?: number | null;
+  /**
+   * Minutos de preparación del producto. `null`/ausente cuando no aplica.
+   * Los consumidores solo lo pintan con el flag `show_preparation_time`
+   * encendido y valor mayor a cero.
+   */
+  preparation_time_minutes?: number | null;
   service_modality?: 'in_person' | 'virtual' | 'hybrid' | null;
   requires_booking?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';

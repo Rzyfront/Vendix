@@ -162,6 +162,16 @@ import {
                 </div>
               }
 
+              @if (show_preparation_time() && (p.preparation_time_minutes ?? 0) > 0) {
+                <div
+                  class="prep-line flex items-center gap-1 text-sm text-text-muted my-1"
+                  title="Tiempo de preparación"
+                >
+                  <app-icon name="clock" [size]="14" />
+                  <span>~{{ p.preparation_time_minutes }} min de preparación</span>
+                </div>
+              }
+
               <!-- Service Info Section -->
               @if (p.product_type === 'service') {
                 <div class="service-info-section">
@@ -1638,6 +1648,11 @@ export class ProductDetailComponent implements OnInit {
   hasError = signal(false);
   /** True when the product was not found / not available for ecommerce (HTTP 404). */
   notFound = signal(false);
+  /**
+   * Muestra el tiempo de preparación. Fail-closed: solo true cuando la
+   * config pública trae el flag encendido; en error se queda apagado.
+   */
+  readonly show_preparation_time = signal(false);
   /** Last slug requested, used to retry after a generic load error. */
   private currentSlug: string | null = null;
   activeImageUrl = signal<string | null>(null);
@@ -2208,6 +2223,19 @@ export class ProductDetailComponent implements OnInit {
       .subscribe((params) => {
         const slug = params['slug'];
         if (slug) this.loadProduct(slug);
+      });
+    this.catalogService
+      .getPublicConfig()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.show_preparation_time.set(
+            response.data?.ecommerce?.catalog?.show_preparation_time === true,
+          );
+        },
+        error: () => {
+          this.show_preparation_time.set(false);
+        },
       });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
