@@ -1059,7 +1059,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     fullViewRoute: '/admin/accounting/reports/general-ledger',
   },
 
-  // ─── FINANCIERO (3) ───────────────────────────────────────────────────────────
+  // ─── FINANCIERO (5) ───────────────────────────────────────────────────────────
 
   {
     id: 'tax-summary',
@@ -1168,6 +1168,40 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/financial/cash-sessions',
     exportEndpoint: 'store/analytics/financial/cash-sessions/export',
+  },
+
+  {
+    // QUI-544: Resumen de gastos. Gastos agrupados por categoría en el
+    // rango seleccionado, con conteo, monto total, promedio y última fecha.
+    // Preview tabular paginado (type: 'list') con totales en el footer.
+    id: 'expenses-summary',
+    category: 'financial',
+    title: 'Resumen de Gastos',
+    description: 'Gastos agrupados por categoría con totales y promedios',
+    detailedDescription:
+      'Muestra los gastos del período agrupados por categoría, con número de gastos, monto total, promedio por gasto y la fecha del último registro. Filtra por estados reconocidos (aprobados y pagados).',
+    icon: 'trending-down',
+    route: '/admin/reports/financial/expenses-summary',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'category_name',
+    columns: [
+      { key: 'category_name', header: 'Categoría', type: 'text' },
+      { key: 'expense_count', header: 'Nº Gastos', type: 'number', footer: 'sum' },
+      { key: 'total_amount', header: 'Total', type: 'currency', footer: 'sum' },
+      { key: 'avg_expense', header: 'Promedio', type: 'currency', footer: 'average' },
+      { key: 'last_expense_date', header: 'Último Gasto', type: 'date' },
+    ],
+    exportFilename: 'resumen_gastos',
+    stats: [
+      { key: 'total_amount', label: 'Total Gastos', type: 'currency', icon: 'dollar-sign' },
+      { key: 'expense_count', label: 'Total Gastos (Nº)', type: 'number', icon: 'receipt' },
+      { key: 'avg_expense', label: 'Gasto Promedio', type: 'currency', icon: 'calculator' },
+      { key: '_count', label: 'Categorías', type: 'number', icon: 'tags' },
+    ],
+    dataEndpoint: 'store/analytics/financial/expenses',
+    exportEndpoint: 'store/analytics/financial/expenses/export',
   },
 
   {

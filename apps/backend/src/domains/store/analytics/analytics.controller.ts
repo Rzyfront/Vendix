@@ -1190,6 +1190,42 @@ export class AnalyticsController {
     ]);
   }
 
+  @Get('financial/expenses')
+  @Permissions('store:analytics:read')
+  async getExpensesSummary(@Query() query: AnalyticsQueryDto) {
+    const result =
+      await this.financial_analytics_service.getExpensesSummary(query);
+    return this.response_service.paginated(
+      result.data,
+      result.total,
+      result.page,
+      result.limit,
+    );
+  }
+
+  @Get('financial/expenses/export')
+  @Permissions('store:analytics:read')
+  async exportExpensesSummary(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.financial_analytics_service.getExpensesSummaryForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'category_name', header: 'Categoría', type: 'text' },
+      { key: 'expense_count', header: 'Nº Gastos', type: 'number' },
+      { key: 'total_amount', header: 'Total', type: 'currency' },
+      { key: 'avg_expense', header: 'Promedio', type: 'currency' },
+      { key: 'last_expense_date', header: 'Último Gasto', type: 'date' },
+    ];
+
+    await this.emitReport(res, 'resumen_gastos', tz, [
+      this.toSheet('Resumen de Gastos', columns, rows, tz),
+    ]);
+  }
+
   // ==================== DISPATCH (CP-despachos-reportes B.1 + B.2) ====================
   // Reportes de lectura del módulo Despachos. Servicios devuelven crudo (Date
   // + números); el formato vive en estas columnas. Pantalla y export comparten
