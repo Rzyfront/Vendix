@@ -151,7 +151,7 @@ export class PosFiscalStatusComponent {
    * sigue vendiendo.
    */
   private static readonly MAX_POLLS = 12;
-  private static readonly POLL_MS = 5000;
+  private static readonly POLL_DELAYS_MS = [1500, 2500, 4000];
 
   private poll_timer: ReturnType<typeof setTimeout> | null = null;
   private poll_attempts = 0;
@@ -367,12 +367,16 @@ export class PosFiscalStatusComponent {
   private schedulePoll(order_id: number, status: PosFiscalStatus): void {
     if (status.state !== 'pending') return;
     if (this.poll_attempts >= PosFiscalStatusComponent.MAX_POLLS) return;
+    const delay =
+      this.poll_attempts < PosFiscalStatusComponent.POLL_DELAYS_MS.length
+        ? PosFiscalStatusComponent.POLL_DELAYS_MS[this.poll_attempts]
+        : 4000;
     this.poll_attempts += 1;
     this.poll_timer = setTimeout(() => {
       this.poll_timer = null;
       // Reconsulta, nunca reemite: un segundo POST podría transmitir dos veces.
       this.load(order_id, false);
-    }, PosFiscalStatusComponent.POLL_MS);
+    }, delay);
   }
 
   private stopPolling(): void {
