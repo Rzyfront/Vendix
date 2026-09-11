@@ -104,10 +104,13 @@ export class MethodZonesInlineComponent {
       rate_type_label: this.getRateTypeLabel(item.rate.type),
       base_cost: this.formatCost(item.rate),
       free_shipping:
-        item.rate.free_shipping_threshold &&
-        Number(item.rate.free_shipping_threshold) > 0
-          ? `$${Number(item.rate.free_shipping_threshold).toLocaleString('es-CO')}`
-          : '—',
+        item.rate.free_shipping_threshold == null ||
+        isNaN(Number(item.rate.free_shipping_threshold)) ||
+        Number(item.rate.free_shipping_threshold) < 0
+          ? '—'
+          : Number(item.rate.free_shipping_threshold) === 0
+            ? 'Envío gratis'
+            : `$${Number(item.rate.free_shipping_threshold).toLocaleString('es-CO')}`,
       status: item.rate.is_active ? 'active' : 'inactive',
       _rate: item.rate,
     }));

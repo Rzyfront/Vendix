@@ -153,8 +153,17 @@ export class AddRateWizardModalComponent implements OnInit {
       text += `, siempre que el pedido esté entre <strong>${minText}</strong> y <strong>${maxText}</strong>`;
     }
 
-    if (free !== null && free !== undefined && Number(free) > 0) {
-      text += `. Además, será <strong>gratis</strong> si la compra supera los <strong>$${free}</strong>`;
+    if (
+      free !== null &&
+      free !== undefined &&
+      (free as unknown) !== '' &&
+      !isNaN(Number(free)) &&
+      Number(free) >= 0
+    ) {
+      text +=
+        Number(free) === 0
+          ? `. Además, el envío será <strong>gratis</strong>`
+          : `. Además, será <strong>gratis</strong> si la compra supera los <strong>$${free}</strong>`;
     }
 
     return text + '.';
@@ -175,7 +184,7 @@ export class AddRateWizardModalComponent implements OnInit {
         min_val: rate.min_val != null ? Number(rate.min_val) : null,
         max_val: rate.max_val != null ? Number(rate.max_val) : null,
         free_shipping_threshold:
-          rate.free_shipping_threshold != null && Number(rate.free_shipping_threshold) > 0
+          rate.free_shipping_threshold != null
             ? Number(rate.free_shipping_threshold)
             : null,
         is_active: rate.is_active,
@@ -262,12 +271,20 @@ export class AddRateWizardModalComponent implements OnInit {
       return Number(val);
     };
 
-    const parsePositiveThreshold = (val: any): number | null => {
-      const num = parseNullableNumber(val);
-      return num !== null && num > 0 ? num : null;
-    };
+    // F-008/ADR-04 — 0 = envío gratis explícito (backend `>= 0`); null = sin
+    // umbral; negativo = inválido con error visible (antes 0 y negativos se
+    // coaccionaban a null en silencio).
+    const parsePositiveThreshold = (val: any): number | null => parseNullableNumber(val);
 
     const freeThreshold = parsePositiveThreshold(values.free_shipping_threshold);
+    if (freeThreshold !== null && freeThreshold < 0) {
+      this.toastService.show({
+        variant: 'error',
+        description: 'El umbral de envío gratis debe ser un número mayor o igual a 0',
+      });
+      this.is_saving.set(false);
+      return;
+    }
     const perUnitCost = parseNullableNumber(values.per_unit_cost);
     const minVal = parseNullableNumber(values.min_val);
     const maxVal = parseNullableNumber(values.max_val);
