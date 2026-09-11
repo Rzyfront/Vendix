@@ -2096,6 +2096,14 @@
       "sessions": 1,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "0175d14e",
+      "created_by": "dmin",
+      "created_at": "2026-09-11T17:55:14Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }

@@ -28,11 +28,6 @@ import {
   FilterValues,
 } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
-  ResponsiveDataViewComponent,
-  TableColumn,
-  ItemListCardConfig,
-} from '../../../../../../shared/components';
-import {
   SalesByUser,
   SalesAnalyticsQueryDto,
 } from '../../interfaces/sales-analytics.interface';
@@ -51,7 +46,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
     IconComponent,
     AnalyticsCardComponent,
     OptionsDropdownComponent,
-    ResponsiveDataViewComponent,
   ],
   styles: [
     `
@@ -170,36 +164,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
                 }
               </div>
             </app-card>
-
-            <!-- Table Card -->
-            <app-card
-              shadow="none"
-              [padding]="false"
-              overflow="hidden"
-              [showHeader]="true"
-            >
-              <div slot="header" class="results-header flex flex-col">
-                <span class="text-sm font-bold text-[var(--color-text-primary)]">
-                  Detalle por Vendedor
-                  <span class="text-xs text-[var(--color-text-secondary)] font-normal ml-2">
-                    ({{ data().length }} vendedores registrados)
-                  </span>
-                </span>
-              </div>
-
-              <div class="p-4">
-                <app-responsive-data-view
-                  [data]="data()"
-                  [columns]="columns"
-                  [cardConfig]="cardConfig"
-                  [loading]="loading()"
-                  [striped]="true"
-                  tableSize="sm"
-                  emptyMessage="Sin ventas por vendedor registradas en este período"
-                  emptyIcon="user-x"
-                ></app-responsive-data-view>
-              </div>
-            </app-card>
           </div>
 
           <!-- Quick Links -->
@@ -257,86 +221,6 @@ export class SalesByUserComponent implements OnInit {
       icon: 'download',
     },
   ]);
-
-  readonly columns: TableColumn[] = [
-    {
-      key: 'user_name',
-      label: 'Vendedor',
-      sortable: true,
-    },
-    {
-      key: 'user_email',
-      label: 'Correo',
-      sortable: true,
-      transform: (val: string) => val || '—',
-    },
-    {
-      key: 'orders_count',
-      label: 'Órdenes',
-      align: 'right',
-      sortable: true,
-    },
-    {
-      key: 'items_sold',
-      label: 'Unidades',
-      align: 'right',
-      sortable: true,
-    },
-    {
-      key: 'grand_total',
-      label: 'Total Vendido',
-      align: 'right',
-      sortable: true,
-      transform: (val: number) => this.currencyService.format(val, 0),
-    },
-    {
-      key: 'avg_order',
-      label: 'Ticket Promedio',
-      align: 'right',
-      sortable: true,
-      transform: (val: number) => this.currencyService.format(val, 0),
-    },
-    {
-      key: 'last_order_date',
-      label: 'Última Venta',
-      align: 'right',
-      sortable: true,
-      transform: (val: string | null) => {
-        if (!val) return '—';
-        const d = new Date(val);
-        return isNaN(d.getTime()) ? String(val) : d.toLocaleDateString('es-CO');
-      },
-    },
-  ];
-
-  readonly cardConfig: ItemListCardConfig = {
-    titleKey: 'user_name',
-    subtitleKey: 'user_email',
-    avatarFallbackIcon: 'user',
-    detailKeys: [
-      { key: 'orders_count', label: 'Órdenes' },
-      { key: 'items_sold', label: 'Unidades' },
-      {
-        key: 'grand_total',
-        label: 'Total Vendido',
-        transform: (val: number) => this.currencyService.format(val, 0),
-      },
-      {
-        key: 'avg_order',
-        label: 'Ticket Promedio',
-        transform: (val: number) => this.currencyService.format(val, 0),
-      },
-      {
-        key: 'last_order_date',
-        label: 'Última Venta',
-        transform: (val: string | null) => {
-          if (!val) return '—';
-          const d = new Date(val);
-          return isNaN(d.getTime()) ? String(val) : d.toLocaleDateString('es-CO');
-        },
-      },
-    ],
-  };
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -487,8 +371,21 @@ export class SalesByUserComponent implements OnInit {
     const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
     const hasData = top10.length > 0;
-    const sellerNames = hasData ? top10.map((s) => s.user_name) : ['Sin datos'];
-    const sellerValues = hasData ? top10.map((s) => s.grand_total) : [0];
+
+    const nameCounts = new Map<string, number>();
+    for (const s of top10) {
+      nameCounts.set(s.user_name, (nameCounts.get(s.user_name) || 0) + 1);
+    }
+
+    const sellerNames = hasData
+      ? top10.map((s) => {
+          if ((nameCounts.get(s.user_name) || 0) > 1) {
+            const hint = s.user_email ? s.user_email.split('@')[0] : `#${s.id}`;
+            return `${s.user_name} (${hint})`;
+          }
+          return s.user_name;
+        })
+      : ['Sin datos'];
 
     this.chartOptions.set({
       tooltip: {
@@ -497,8 +394,13 @@ export class SalesByUserComponent implements OnInit {
         formatter: (params: any) => {
           if (!params?.[0]) return '';
           const p = params[0];
-          const seller = top10.find((s) => s.user_name === p.name || s.grand_total === p.value);
-          return `${p.name}<br/>Total: ${this.currencyService.format(p.value)}<br/>Órdenes: ${seller?.orders_count || 0}<br/>Unidades: ${seller?.items_sold || 0}`;
+          const seller = (p.data as any)?.seller ?? top10[p.dataIndex];
+          if (!seller) return '';
+          const name = seller.user_name || 'Sin asignar';
+          const emailLine = seller.user_email
+            ? `<span style="font-size: 11px; opacity: 0.85">(${seller.user_email})</span><br/>`
+            : '';
+          return `<strong>${name}</strong><br/>${emailLine}Total: ${this.currencyService.format(seller.grand_total)}<br/>Órdenes: ${seller.orders_count || 0}<br/>Unidades: ${seller.items_sold || 0}`;
         },
       },
       legend: {
@@ -536,10 +438,13 @@ export class SalesByUserComponent implements OnInit {
         {
           name: 'Top Vendedores',
           type: 'bar' as const,
-          data: sellerValues.map((v, i) => ({
-            value: v,
-            itemStyle: { color: hasData ? colors[i % colors.length] : '#d1d5db' },
-          })),
+          data: hasData
+            ? top10.map((s, i) => ({
+                value: s.grand_total,
+                seller: s,
+                itemStyle: { color: colors[i % colors.length] },
+              }))
+            : [{ value: 0, itemStyle: { color: '#d1d5db' } }],
           barMaxWidth: 50,
         },
       ],
