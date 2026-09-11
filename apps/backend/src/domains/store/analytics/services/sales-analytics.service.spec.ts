@@ -407,6 +407,20 @@ describe('SalesAnalyticsService', () => {
       expect(unassigned!.grand_total).toBe(150);
       expect(unassigned!.avg_order).toBe(150);
     });
+
+    it('flags truncated when orders.length >= 10_000', async () => {
+      const orders = Array(10_000).fill({
+        id: 1,
+        created_at: new Date('2026-07-08T10:00:00.000Z'),
+        grand_total: 100,
+        created_by_user_id: 1,
+        users_orders_created_by: { id: 1, first_name: 'A', last_name: 'B', email: 'a@b.c' },
+        order_items: [{ quantity: 1 }],
+      });
+      prisma.orders.findMany.mockResolvedValue(orders as any);
+      const result = await service.getSalesByUser({ page: 1, limit: 10 } as any);
+      expect(result.meta.truncated).toBe(true);
+    });
   });
 
   describe('getSalesByUserForExport (QUI-551)', () => {
@@ -485,6 +499,34 @@ describe('SalesAnalyticsService', () => {
       expect(noSupplier).toBeDefined();
       expect(noSupplier!.items_sold).toBe(1);
       expect(noSupplier!.grand_total).toBe(200);
+      expect(exportData.truncated).toBe(false);
+    });
+
+    it('preserves correct last_order_date irrespective of batch order processing sequence in export', async () => {
+      // Order 200 has older created_at than order 100, but higher ID
+      prisma.orders.findMany.mockResolvedValue([
+        {
+          id: 200,
+          created_at: new Date('2026-07-01T10:00:00.000Z'),
+          grand_total: 100,
+          created_by_user_id: 15,
+          users_orders_created_by: { id: 15, first_name: 'Mateo', last_name: 'Ríos', email: 'mateo@vendix.com' },
+          order_items: [{ quantity: 1, total_price: 100, products: null }],
+        },
+        {
+          id: 100,
+          created_at: new Date('2026-07-15T18:30:00.000Z'),
+          grand_total: 250,
+          created_by_user_id: 15,
+          users_orders_created_by: { id: 15, first_name: 'Mateo', last_name: 'Ríos', email: 'mateo@vendix.com' },
+          order_items: [{ quantity: 2, total_price: 250, products: null }],
+        },
+      ] as any);
+
+      const exportData = await service.getSalesByUserForExport({} as any);
+      expect(exportData.summary[0].last_order_date).toEqual(new Date('2026-07-15T18:30:00.000Z'));
+      expect(exportData.summary[0].grand_total).toBe(350);
+      expect(exportData.truncated).toBe(false);
     });
   });
 });

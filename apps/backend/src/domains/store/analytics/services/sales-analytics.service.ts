@@ -1529,16 +1529,23 @@ export class SalesAnalyticsService {
 
   /**
    * QUI-551: Ventas por usuario / vendedor para exportación XLSX multi-hoja.
-   * Dataset completo en el rango (hasta take: 10000 de seguridad) con 3 hojas:
-   * 1. summary: Vendedor
-   * 2. byBrand: Vendedor × Marca
-   * 3. bySupplier: Vendedor × Proveedor
+   * Dataset completo en el rango procesado en lotes de `ORDER_EXPORT_BATCH_SIZE (1000)`
+   * mediante paginación por cursor sobre `id: 'desc'`.
+   *
+   * Nota de ordenamiento: `id: 'desc'` garantiza index scans deterministas en el cursor.
+   * La métrica `last_order_date` por vendedor se calcula comparando timestamps (`created_at`),
+   * por lo que siempre preserva la fecha más reciente con independencia del orden del cursor.
+   * Si se alcanza el techo de seguridad (ORDER_EXPORT_HARD_LIMIT = 100,000 órdenes),
+   * se activa el flag `truncated: true`.
    */
   async getSalesByUserForExport(
     query: SalesAnalyticsQueryDto,
   ): Promise<SalesByUserExportResult> {
     const tz = await this.getStoreTimezone();
     const { startDate, endDate } = parseDateRange(query, tz);
+
+    let totalProcessedOrders = 0;
+    let truncated = false;
 
     const summaryMap = new Map<
       string,
@@ -1715,6 +1722,12 @@ export class SalesAnalyticsService {
         }
       }
 
+      totalProcessedOrders += batch.length;
+      if (totalProcessedOrders >= ORDER_EXPORT_HARD_LIMIT) {
+        truncated = true;
+        break;
+      }
+
       if (batch.length < ORDER_EXPORT_BATCH_SIZE) break;
       cursorId = batch[batch.length - 1].id;
     }
@@ -1750,7 +1763,7 @@ export class SalesAnalyticsService {
       }))
       .sort((a, b) => b.grand_total - a.grand_total);
 
-    return { summary, byBrand, bySupplier };
+    return { summary, byBrand, bySupplier, truncated };
   }
 }
 
@@ -1786,5 +1799,6 @@ export interface SalesByUserExportResult {
   summary: SalesByUserSummaryRow[];
   byBrand: SalesByUserBrandRow[];
   bySupplier: SalesByUserSupplierRow[];
+  truncated?: boolean;
 }
 

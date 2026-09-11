@@ -266,6 +266,8 @@ export class AnalyticsController {
       result.meta.pagination.total,
       result.meta.pagination.page,
       result.meta.pagination.limit,
+      'Ventas por vendedor obtenidas correctamente',
+      { truncated: result.meta.truncated },
     );
   }
 

@@ -70,8 +70,9 @@ export class ResponseService {
     page: number,
     limit: number,
     message: string = 'Data retrieved successfully',
+    extraMeta?: Record<string, any>,
   ): PaginatedResponse<T> {
-    const meta = createPaginationMeta(total, page, limit);
+    const meta = { ...createPaginationMeta(total, page, limit), ...extraMeta };
 
     return {
       success: true,
