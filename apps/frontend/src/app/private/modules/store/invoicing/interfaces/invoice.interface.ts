@@ -686,6 +686,35 @@ export type InvoiceStatus =
   | 'cancelled'
   | 'voided';
 
+/**
+ * Fila de `GET /store/invoicing/:id/notes` (CP-nc-nd-auto-orden-reembolso, A.2).
+ * Subconjunto deliberado de `Invoice`: lo que pintan las cards de la orden
+ * (número, tipo, estado, totales, fecha, concepto). No reutilizar `Invoice`:
+ * exige `organization_id`, `store_id`, `send_status`… que este endpoint no
+ * devuelve y la card no necesita.
+ */
+export interface RelatedNote {
+  id: number;
+  invoice_number: string | null;
+  invoice_type: 'credit_note' | 'debit_note';
+  fiscal_document_type?: string | null;
+  status: InvoiceStatus;
+  subtotal_amount: number;
+  discount_amount: number;
+  tax_amount: number;
+  total_amount: number;
+  currency?: string | null;
+  issue_date: string;
+  note_concept_code?: string | null;
+  created_at: string;
+}
+
+/** Respuesta de `POST /store/invoicing/:id/issue` (A.1): la nota + fases corridas. */
+export interface IssueNoteResult {
+  invoice: Invoice;
+  phases: { validated: boolean; sent: boolean };
+}
+
 export interface InvoiceItem {
   id: number;
   invoice_id: number;

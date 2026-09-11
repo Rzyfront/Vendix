@@ -79,7 +79,13 @@ import { OrderTicketService } from '../../services/order-ticket.service';
 import { TicketData } from '../../../pos/models/ticket.model';
 import { InvoicingService } from '../../../invoicing/services/invoicing.service';
 import { Actions, ofType } from '@ngrx/effects';
-import { Invoice } from '../../../invoicing/interfaces/invoice.interface';
+import { Store } from '@ngrx/store';
+import {
+  Invoice,
+  RelatedNote,
+  CreateCreditNoteDto,
+  CreateInvoiceItemDto,
+} from '../../../invoicing/interfaces/invoice.interface';
 import * as InvoicingActions from '../../../invoicing/state/actions/invoicing.actions';
 import { InvoiceDetailComponent } from '../../../invoicing/components/invoice-detail/invoice-detail.component';
 import {
@@ -1300,6 +1306,7 @@ export class OrderDetailsPageComponent {
    * `invoiceMutatedInModal`.
    */
   private readonly invoicingActions$ = inject(Actions);
+  private readonly store = inject(Store);
   // Plan KDS fire-flows (F3): manual selective fire for online orders
   // with `prepared` items that were never auto-fired (the auto-fire
   // runs in the payment $transaction; for orders paid before this
@@ -1411,6 +1418,7 @@ export class OrderDetailsPageComponent {
           InvoicingActions.sendInvoiceSuccess,
           InvoicingActions.createCreditNoteSuccess,
           InvoicingActions.createDebitNoteSuccess,
+          InvoicingActions.issueNoteSuccess,
           InvoicingActions.acceptInvoiceSuccess,
           InvoicingActions.rejectInvoiceSuccess,
           InvoicingActions.cancelInvoiceSuccess,
@@ -1419,6 +1427,33 @@ export class OrderDetailsPageComponent {
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => this.invoiceMutatedInModal.set(true));
+
+    // B.3 — resultados del flujo sugerencia de NC (solo reaccionan cuando hay
+    // un flujo activo en `refundNoteState`; el modal de notas usa el suyo).
+    this.invoicingActions$
+      .pipe(
+        ofType(InvoicingActions.createCreditNoteSuccess),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(({ invoice }) => this.onRefundNoteCreated(invoice));
+    this.invoicingActions$
+      .pipe(
+        ofType(InvoicingActions.createCreditNoteFailure),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((failure) => this.onRefundNoteCreateFailed(failure.error));
+    this.invoicingActions$
+      .pipe(
+        ofType(InvoicingActions.issueNoteSuccess),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(() => this.onRefundNoteIssued());
+    this.invoicingActions$
+      .pipe(
+        ofType(InvoicingActions.issueNoteFailure),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((failure) => this.onRefundNoteIssueFailed(failure.error));
 
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       this.orderId = params.get('id');
@@ -1552,6 +1587,9 @@ export class OrderDetailsPageComponent {
 
           // Load refund history
           this.loadRefunds();
+
+          // B.2 — NC/ND de la factura para las cards (GET :id/notes).
+          this.loadInvoiceNotes();
 
           // Bug 4 — load dispatch notes (remisiones) for traceability.
           this.loadDispatchNotes();
@@ -4018,10 +4056,271 @@ export class OrderDetailsPageComponent {
    */
   onInvoiceDetailModalChange(open: boolean): void {
     this.showInvoiceDetailModal.set(open);
+    if (!open) {
+      this.noteDetailStub.set(null);
+    }
     if (!open && this.invoiceMutatedInModal()) {
       this.invoiceMutatedInModal.set(false);
       this.loadData();
     }
+  }
+
+  /**
+   * NC/ND de la factura de la orden (B.2, `GET :id/notes`). Vacío cuando no
+   * hay factura, sin permiso de lectura o con error: la sección no existe en
+   * vez de romperse — igual que `loadRefunds` ante el fallo.
+   */
+  readonly invoiceNotes = signal<RelatedNote[]>([]);
+
+  loadInvoiceNotes(): void {
+    const invoiceId = this.order()?.invoices?.[0]?.id;
+    if (!invoiceId) {
+      this.invoiceNotes.set([]);
+      return;
+    }
+    this.invoicingService
+      .listNotes(invoiceId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.invoiceNotes.set(
+            (Array.isArray(response?.data) ? response.data : []).map((n) => ({
+              ...n,
+              subtotal_amount: Number(n.subtotal_amount),
+              discount_amount: Number(n.discount_amount),
+              tax_amount: Number(n.tax_amount),
+              total_amount: Number(n.total_amount),
+            })),
+          );
+        },
+        error: () => this.invoiceNotes.set([]),
+      });
+  }
+
+  /** Stub mínimo para abrir el MISMO modal de detalle sobre una nota. */
+  private readonly noteDetailStub = signal<Invoice | null>(null);
+
+  readonly detailInvoice = computed<Invoice | null>(
+    () => this.noteDetailStub() ?? this.invoiceStub(),
+  );
+
+  openNoteDetail(note: RelatedNote): void {
+    this.noteDetailStub.set({
+      id: note.id,
+      organization_id: 0,
+      store_id: 0,
+      invoice_number: note.invoice_number ?? '',
+      invoice_type: note.invoice_type,
+      status: note.status,
+      subtotal_amount: note.subtotal_amount,
+      discount_amount: note.discount_amount,
+      tax_amount: note.tax_amount,
+      withholding_amount: 0,
+      total_amount: note.total_amount,
+      send_status: '',
+      issue_date: note.issue_date,
+      created_at: note.created_at,
+      updated_at: note.created_at,
+    } as unknown as Invoice);
+    this.invoiceMutatedInModal.set(false);
+    this.showInvoiceDetailModal.set(true);
+  }
+
+  noteKindLabel(note: RelatedNote): string {
+    return note.invoice_type === 'credit_note' ? 'Nota crédito' : 'Nota débito';
+  }
+
+  noteStatusCell(note: RelatedNote): FiscalStatusCell {
+    return {
+      label: 'Documento',
+      text: invoiceStatusLabel(note.status),
+      tone: invoiceStatusTone(note.status),
+      hint: null,
+    };
+  }
+
+  noteDate(note: RelatedNote): string {
+    const parsed = new Date(note.issue_date);
+    return Number.isNaN(parsed.getTime())
+      ? note.issue_date
+      : parsed.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  /**
+   * Sugerencia de NC post-reembolso (B.3, 1 clic, nunca automática).
+   *
+   * Candidatos: reembolsos `completed` con monto > 0, con factura ACEPTADA y
+   * sin NC viva que ya los cubra. Solo puede haber un flujo activo a la vez;
+   * el resto de cards sigue ofreciendo "Emitir nota crédito".
+   */
+  readonly refundNoteState = signal<{
+    refundId: number;
+    stage: 'creating' | 'ask' | 'issuing';
+    noteId?: number;
+    noteNumber?: string | null;
+    noteTotal?: number;
+    error?: string | null;
+  } | null>(null);
+
+  readonly refundNoteCandidateIds = computed<Set<number>>(() => {
+    const ids = new Set<number>();
+    if (!this.acceptedInvoice()) return ids;
+    for (const refund of this.orderRefunds()) {
+      if (refund.state !== 'completed') continue;
+      if (!(Number(refund.amount) > 0)) continue;
+      if (!this.refundHasMappableDetail(refund)) continue;
+      if (this.refundCoveredByNote(refund)) continue;
+      ids.add(refund.id);
+    }
+    return ids;
+  });
+
+  /** El reembolso trae líneas o solo-envío: sin detalle no se sugiere nada. */
+  private refundHasMappableDetail(refund: RefundRecord): boolean {
+    return (
+      (refund.refund_items?.length ?? 0) > 0 ||
+      Number(refund.shipping_refund ?? 0) > 0
+    );
+  }
+
+  /**
+   * ¿Ya existe una NC viva que cubra este reembolso? Misma regla que el
+   * operador aplicaría a ojo: NC de tipo crédito, no anulada/rechazada, por
+   * al menos el monto devuelto y creada después del reembolso.
+   */
+  private refundCoveredByNote(refund: RefundRecord): boolean {
+    const since = refund.processed_at ?? refund.created_at;
+    return this.invoiceNotes().some(
+      (n) =>
+        n.invoice_type === 'credit_note' &&
+        !['cancelled', 'voided', 'rejected'].includes(n.status) &&
+        Number(n.total_amount) >= Number(refund.amount) - 0.5 &&
+        n.created_at >= since,
+    );
+  }
+
+  /** 1 clic: crea la NC con el detalle del reembolso y pregunta si emitirla. */
+  startRefundNote(refund: RefundRecord): void {
+    if (this.refundNoteState() || !this.acceptedInvoice()) return;
+    const invoiceId = this.order()?.invoices?.[0]?.id;
+    if (!invoiceId) return;
+    this.refundNoteState.set({ refundId: refund.id, stage: 'creating', error: null });
+    this.store.dispatch(
+      InvoicingActions.createCreditNote({
+        dto: this.buildRefundNoteDto(refund, invoiceId),
+      }),
+    );
+  }
+
+  /** La NC nació: mostrar "¿Emitirla ahora?" en vez de cerrar en silencio. */
+  onRefundNoteCreated(invoice: Invoice): void {
+    const state = this.refundNoteState();
+    if (!state || state.stage !== 'creating') return;
+    // El modal de detalle pudo crear su propia nota a la vez: la suya la
+    // atiende su panel (B.1); esta card solo reclama el éxito que pidió.
+    if (this.showInvoiceDetailModal()) {
+      this.refundNoteState.set(null);
+      this.loadInvoiceNotes();
+      return;
+    }
+    this.refundNoteState.set({
+      ...state,
+      stage: 'ask',
+      noteId: invoice.id,
+      noteNumber: invoice.invoice_number,
+      noteTotal: Number(invoice.total_amount),
+    });
+  }
+
+  onRefundNoteCreateFailed(error: string): void {
+    const state = this.refundNoteState();
+    if (!state || state.stage !== 'creating') return;
+    this.refundNoteState.set({ ...state, stage: 'ask', error });
+  }
+
+  /** Emitirla de una vía `POST :id/issue`; "Después" la deja en borrador. */
+  issueRefundNote(): void {
+    const state = this.refundNoteState();
+    if (!state?.noteId || state.stage !== 'ask') return;
+    this.refundNoteState.set({ ...state, stage: 'issuing', error: null });
+    this.store.dispatch(InvoicingActions.issueNote({ id: state.noteId }));
+  }
+
+  dismissRefundNote(): void {
+    this.refundNoteState.set(null);
+  }
+
+  onRefundNoteIssued(): void {
+    if (!this.refundNoteState()) return;
+    // Mismo cruce que en onRefundNoteCreated: con el modal abierto, el éxito
+    // puede ser suyo; la card suelta el flujo y refresca en vez de afirmar.
+    this.refundNoteState.set(null);
+    this.loadInvoiceNotes();
+    this.loadRefunds();
+  }
+
+  onRefundNoteIssueFailed(error: string): void {
+    const state = this.refundNoteState();
+    if (!state) return;
+    this.refundNoteState.set({ ...state, stage: 'ask', error });
+  }
+
+  /**
+   * Mapea `refund_items` → líneas de NC con importes YA calculados (ADR-03):
+   * cantidad y montos del reembolso, precio y descripción de la línea de la
+   * orden. Nunca re-deriva impuestos. Sin líneas pero con envío → línea libre
+   * de envío. Sin detalle → se omite `items` (nota total).
+   */
+  private buildRefundNoteDto(
+    refund: RefundRecord,
+    invoiceId: number,
+  ): CreateCreditNoteDto {
+    const orderItems = this.order()?.order_items ?? [];
+    const items: CreateInvoiceItemDto[] = [];
+    for (const ri of refund.refund_items ?? []) {
+      if (!(Number(ri.quantity) > 0)) continue;
+      const oi = orderItems.find((o) => o.id === ri.order_item_id);
+      if (!oi) continue;
+      items.push({
+        ...(oi.product_id > 0 ? { product_id: oi.product_id } : {}),
+        ...(oi.product_variant_id ? { product_variant_id: oi.product_variant_id } : {}),
+        description: oi.product_name ?? `Ítem ${oi.id}`,
+        quantity: Number(ri.quantity),
+        unit_price: Number(oi.unit_price),
+        discount_amount: Number(ri.discount_amount ?? 0),
+        tax_amount: Number(ri.tax_amount ?? 0),
+      });
+    }
+    if (!items.length && Number(refund.shipping_refund ?? 0) > 0) {
+      items.push({
+        description: `Reembolso de envío — orden #${this.orderId}`,
+        quantity: 1,
+        unit_price: Number(refund.shipping_refund),
+        discount_amount: 0,
+        tax_amount: 0,
+      });
+    }
+    const reason =
+      `Reembolso #${refund.id} de la orden #${this.orderId}` +
+      (refund.reason ? ` — ${refund.reason}` : '');
+    return {
+      related_invoice_id: invoiceId,
+      reason: reason.slice(0, 500),
+      note_concept_code: this.refundCoversWholeOrder(refund) ? '2' : '1',
+      ...(items.length ? { items } : {}),
+    };
+  }
+
+  /** ¿Este reembolso devuelve todas las unidades de todas las líneas? */
+  private refundCoversWholeOrder(refund: RefundRecord): boolean {
+    const orderItems = this.order()?.order_items ?? [];
+    if (!orderItems.length) return false;
+    return orderItems.every((oi) => {
+      const qty = Number(
+        (refund.refund_items ?? []).find((ri) => ri.order_item_id === oi.id)?.quantity ?? 0,
+      );
+      return qty >= Number(oi.quantity);
+    });
   }
 
   readonly invoicePdfLoading = signal(false);
