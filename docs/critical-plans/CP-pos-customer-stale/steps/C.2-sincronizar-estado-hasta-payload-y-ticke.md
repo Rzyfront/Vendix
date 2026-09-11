@@ -30,4 +30,5 @@ skills: [vendix-frontend, vendix-zoneless-signals, vendix-frontend-state, parall
   - [x] F-003 — shell salta resolveIfNeeded con cliente en carro (major) → evidence/post-change-probe-r2.txt
   - [x] F-005 — reemplazo A-B en delivery hereda direccion de A (major) → evidence/r2-fixes.txt
   - [x] F-006 — quitar cliente no desvincula el carro y factura a A (major) → evidence/r2-fixes.txt
+  - [ ] F-009 — reemplazo en pickup conserva direccion y flip a delivery la reutiliza (minor)
 - **Status:** done · rzy · 2026-09-11 · evidence/post-change-probe-r2.txt

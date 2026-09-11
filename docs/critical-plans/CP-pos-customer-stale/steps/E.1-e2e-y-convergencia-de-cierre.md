@@ -2,8 +2,8 @@
 id: E.1
 title: "E2E y convergencia de cierre"
 phase: E
-status: pending
-owner: none
+status: in-progress
+owner: rzy
 updated: 2026-09-11
 contracts: [FB-01, FB-02, FB-04, DB-01, DB-02, ERR-01, ERR-02, ERR-03, ERR-04]
 adrs: []
@@ -23,9 +23,9 @@ skills: [vendix-frontend, vendix-backend-api, vendix-error-handling, pr-code-rev
 - **Verification:**
   - `bash skills/how-to-critical-plan/assets/cp-ledger.sh docs/critical-plans/CP-pos-customer-stale`
 - **Acceptance checklist:**
-  - [ ] Trece perspectivas corridas con hallazgos fileados
-  - [ ] Dos rondas consecutivas sin blocker ni major
-  - [ ] Todos los registry rows en [x] con evidencia
-  - [ ] `cp-lint.sh` exit 0 y ledger regenerado
-  - [ ] `pr-code-review` >= 80% antes del merge
-- **Status:** pending
+  - [x] Trece perspectivas corridas con hallazgos fileados (R1-R4)
+  - [x] Dos rondas consecutivas sin blocker ni major (R3 minor-only, R4 limpia)
+  - [ ] Todos los registry rows en [x] con evidencia (bloqueado: sin backend vivo)
+  - [x] `cp-lint.sh` exit 0 y ledger regenerado
+  - [ ] `pr-code-review` >= 80% antes del merge (gate pre-PR)
+- **Status:** in-progress · rzy · 2026-09-11
