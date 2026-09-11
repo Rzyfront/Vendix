@@ -832,12 +832,22 @@ private authFacade = inject(AuthFacade);
       const currentFiscalState = this.fiscalStatus()?.state;
       if (currentFiscalState === 'issued' || currentFiscalState === 'contingency') {
         this.autoPrintedOrderId = this.orderId;
+        const invoiceNumber = this.fiscalStatus()?.invoice_number;
+        this.toastService.success(
+          invoiceNumber
+            ? `Factura ${invoiceNumber} aceptada por la DIAN`
+            : 'Factura aceptada por la DIAN',
+        );
         this.printReceipt();
         void this.printDispatchTicketIfNeeded('automatic');
         return;
       }
       if (currentFiscalState === 'failed') {
         this.autoPrintedOrderId = this.orderId;
+        const reason = this.fiscalStatus()?.message || 'Error en validación DIAN';
+        const msg = `No se pudo emitir la factura electrónica (${reason}). Se imprimió ticket de venta como comprobante de contingencia.`;
+        this.fiscalFallbackNotice.set(msg);
+        this.toastService.warning(msg);
         this.printReceipt();
         void this.printDispatchTicketIfNeeded('automatic');
         return;

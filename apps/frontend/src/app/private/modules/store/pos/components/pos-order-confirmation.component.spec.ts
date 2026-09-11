@@ -43,6 +43,7 @@ class IconStub {
 @Component({ selector: 'app-invoicing-not-configured', standalone: true, template: `` })
 class InvoicingNotConfiguredStub {
   readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
   readonly reason = input('missing');
 }
 
