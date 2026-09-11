@@ -1,0 +1,23 @@
+# Recovery note — stale-stash pop incident (2026-09-11)
+
+## What happened
+To prove the 2 catalog-spec promotion failures pre-existing, a
+`git stash push -- <service-file>` was attempted. It reported "No local
+changes to save" (agent work was already committed), and the following
+`git stash pop` applied the PRE-EXISTING top stash entry
+("On dev: temp dev changes antes merge 703", чужой) onto the tree,
+staging changes and leaving merge conflicts in ~22 print-formats /
+platform-invoicing / ubl files.
+
+## Recovery (orchestrator-coordinated, per `parallel` skill)
+All `UU` + staged-only paths were print-formats/platform/ubl/package
+files — outside this plan's scope and outside the sibling POS session's
+visible scope. Restored with:
+`git status --porcelain | grep -E "^(UU|M ) " | cut -c4- | xargs git restore --source=HEAD --staged --worktree --`
+Result: 0 UU, 0 staged leftovers. All stash entries preserved untouched.
+Sibling work intact: 4 agent commits on branch, my 7 frontend files kept
+as unstaged edits, POS session's bundle files untouched.
+
+## Lesson for the team memory
+Never `git stash pop` to "continue" — always `git stash list` first and
+pop by explicit ref only when the entry is yours.
