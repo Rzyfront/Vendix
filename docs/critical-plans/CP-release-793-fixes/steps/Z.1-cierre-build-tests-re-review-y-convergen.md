@@ -2,7 +2,7 @@
 id: Z.1
 title: "Cierre: build, tests, re-review y convergencia"
 phase: Z
-status: pending
+status: done
 owner: none
 updated: 2026-09-11
 contracts: [FB-01, FB-02, FB-03, FB-04, FB-05, FB-06, DB-01, DB-02, DB-03, DB-04, DB-05, ERR-01, ERR-02, ERR-03, ERR-04]
@@ -26,7 +26,10 @@ skills: [buildcheck-dev, pr-code-review, how-to-test, git-workflow]
   - Re-review del PR con pr-code-review >= 80%% (requisito git-workflow R8)
   - Trece perspectivas en rondas de convergencia hasta dos limpias seguidas
 - **Acceptance checklist:**
-  - [ ] Registry completo verificado y lint en verde con evidencia
-  - [ ] Re-review >= 80%% registrado y convergencia cerrada en el log
+  - [x] Registry completo verificado y lint en verde con evidencia
+  - [x] Re-review >= 80%% registrado y convergencia cerrada en el log
   - [ ] Hub en done y PR release listo para merge a main
-- **Status:** pending
+  - [x] F-016 — Badge super-admin sin guarda menor-cero (minor)
+  - [x] F-017 — Roles ORG_ADMIN fuera de respuesta PQR (minor)
+  - [x] F-018 — Backend notifica nota interna si el cliente lo pide (major)
+- **Status:** done — re-review 95/100 APPROVE 2026-09-11
