@@ -622,8 +622,9 @@ export interface DerivedPartialNoteLine {
  * de la factura que corrige (misma pareja producto+variante, o la única
  * línea cuando la factura trae una sola). Sin dato ⇒ adicional (default
  * histórico). Las líneas de nota no traen `price_unit_quantity` (el DTO no
- * lo acepta: lo resuelve el servidor desde el producto al facturar), así que
- * el divisor es 1 y el precio del DTO ya es por unidad.
+ * lo trae), así que el divisor se lee de la línea gemela de la factura
+ * (`divisor_for`, N3 y —desde R3-01— también N2): el precio del DTO copia la
+ * escala de la factura (paquete de 12 a $36000, no $3000/unidad).
  */
 export function derivePartialNoteLinesViaKernel(
   items: Array<{
@@ -672,6 +673,34 @@ export function derivePartialNoteLinesViaKernel(
     total: Prisma.Decimal;
   };
 } {
+  // Gemela de la factura por pareja producto+variante (o la única línea).
+  // Vive arriba porque N2 y N3 la usan: ambas escalas leen la MISMA gemela.
+  const single_related =
+    related_items.length === 1 ? related_items[0] : undefined;
+  const match_related = (item: {
+    product_id?: number | null;
+    product_variant_id?: number | null;
+  }): (typeof related_items)[number] | undefined =>
+    related_items.find(
+      (rel) =>
+        (rel.product_id ?? null) === (item.product_id ?? null) &&
+        (rel.product_variant_id ?? null) ===
+          (item.product_variant_id ?? null),
+    ) ?? single_related;
+  // N3 (round 2, R3-01 también en N2): el divisor sale de la línea gemela
+  // de la factura (el DTO no lo trae); sin gemela ⇒ 1.
+  const divisor_for = (item: {
+    product_id?: number | null;
+    product_variant_id?: number | null;
+  }): number => {
+    const divisor_raw = Number(
+      (match_related(item) as { price_unit_quantity?: unknown } | undefined)
+        ?.price_unit_quantity ?? 1,
+    );
+    return Number.isFinite(divisor_raw) && divisor_raw >= 1
+      ? Math.floor(divisor_raw)
+      : 1;
+  };
   if (invoice_taxes.length !== 1) {
     const label = type === 'credit_note' ? 'nota crédito' : 'nota débito';
     const claimed = items.reduce(
@@ -680,10 +709,13 @@ export function derivePartialNoteLinesViaKernel(
     );
     // N2 (round 2): factura sin impuestos + nota que no reclama ninguno ⇒
     // camino cero preservado (la regresión funcional: antes no lanzaba).
+    // R3-01: la base también se escala por el divisor de la gemela — una
+    // presentación en factura sin impuestos no vale 12× por omitir N3.
     if (invoice_taxes.length === 0 && claimed.equals(0)) {
       const zero_lines = items.map((item) => {
         const base = new Prisma.Decimal(item.quantity)
           .times(new Prisma.Decimal(item.unit_price))
+          .dividedBy(divisor_for(item))
           .minus(new Prisma.Decimal(item.discount_amount || 0));
         return {
           base_amount: base,
@@ -734,34 +766,14 @@ export function derivePartialNoteLinesViaKernel(
       : ('percent' as const);
   const scheme_rate = Number(scheme.tax_rate);
 
-  const single_related =
-    related_items.length === 1 ? related_items[0] : undefined;
-  const match_related = (item: {
-    product_id?: number | null;
-    product_variant_id?: number | null;
-  }): (typeof related_items)[number] | undefined =>
-    related_items.find(
-      (rel) =>
-        (rel.product_id ?? null) === (item.product_id ?? null) &&
-        (rel.product_variant_id ?? null) ===
-          (item.product_variant_id ?? null),
-    ) ?? single_related;
   const lines: DerivedPartialNoteLine[] = items.map((item, index) => {
     const quantity = new Prisma.Decimal(item.quantity);
     const unit_price = new Prisma.Decimal(item.unit_price);
     const discount = new Prisma.Decimal(item.discount_amount || 0);
     const match = match_related(item);
-    // N3 (round 2): el divisor sale de la línea gemela de la factura (el DTO
-    // no lo trae); sin gemela ⇒ 1. La escala de catálogo va ANTES del despeje
-    // (F-037) también en el carril de notas.
-    const divisor_raw = Number(
-      (match as { price_unit_quantity?: unknown } | undefined)
-        ?.price_unit_quantity ?? 1,
-    );
-    const divisor =
-      Number.isFinite(divisor_raw) && divisor_raw >= 1
-        ? Math.floor(divisor_raw)
-        : 1;
+    // N3 (round 2): la escala de catálogo va ANTES del despeje (F-037)
+    // también en el carril de notas. Divisor compartido con N2 (`divisor_for`).
+    const divisor = divisor_for(item);
     const gross = quantity.times(unit_price).dividedBy(divisor).minus(discount);
 
     // Herencia de inclusividad del motor: flag de línea ⇒ primer impuesto

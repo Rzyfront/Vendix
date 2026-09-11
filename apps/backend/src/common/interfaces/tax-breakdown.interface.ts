@@ -105,7 +105,9 @@ export function scaleBreakdownToTotal(
   // N4 (round 2): desempate determinista por CONTENIDO (tipo, monto), no por
   // orden de entrada: el mismo multiconjunto reparte idéntico aunque los
   // llamadores ordenen distinto, y filas idénticas son intercambiables (misma
-  // cuenta PUC de todos modos).
+  // cuenta PUC de todos modos). R3-02: comparación por unidades de código,
+  // no `localeCompare` (el orden por locale depende del ICU del runtime y
+  // puede variar entre máquinas; acá el orden solo reparte centavos).
   const order = floors
     .map((f, index) => ({
       index,
@@ -114,10 +116,9 @@ export function scaleBreakdownToTotal(
     .sort((a, b) => {
       const cmp = b.fraction.comparedTo(a.fraction);
       if (cmp !== 0) return cmp;
-      const type_cmp = String(base[a.index]?.tax_type ?? '').localeCompare(
-        String(base[b.index]?.tax_type ?? ''),
-      );
-      if (type_cmp !== 0) return type_cmp;
+      const type_a = String(base[a.index]?.tax_type ?? '');
+      const type_b = String(base[b.index]?.tax_type ?? '');
+      if (type_a !== type_b) return type_a < type_b ? -1 : 1;
       return (
         Number(base[b.index]?.tax_amount ?? 0) -
         Number(base[a.index]?.tax_amount ?? 0)

@@ -207,6 +207,24 @@ describe('credit-notes · parcial por kernel (B.1/F-020)', () => {
     expect(result.totals.total.toString()).toBe('13000');
   });
 
+  it('R3-01: N2 con pack ×12 divide por la gemela (no vale 12×)', () => {
+    // Factura SIN impuestos + presentación de 12 a $36000 ($3000/unidad):
+    // base = 36000/12 = 3000, no 36000.
+    const result = derivePartialNoteLinesViaKernel(
+      [{ product_id: 11, quantity: 1, unit_price: 36000, tax_amount: 0 }],
+      [relatedLine({ price_unit_quantity: 12 })],
+      [],
+      910,
+      'credit_note',
+    );
+
+    expect(result.taxes).toEqual([]);
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0].base_amount.toString()).toBe('3000');
+    expect(result.lines[0].tax_amount.toString()).toBe('0');
+    expect(result.lines[0].total_amount.toString()).toBe('3000');
+  });
+
   it('pack ×12: el divisor sale de la gemela, no del DTO (N3)', () => {
     // Presentación de 12 a $36000 ($3000/unidad) con INC 8% incluido:
     // bruto = 36000/12 = 3000 ⇒ base 2777.78 + 222.22 (no 33333.33/2666.66).
