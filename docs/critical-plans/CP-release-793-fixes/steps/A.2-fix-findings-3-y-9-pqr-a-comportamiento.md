@@ -2,7 +2,7 @@
 id: A.2
 title: "Fix findings 3 y 9: PQR a comportamiento seguro"
 phase: A
-status: pending
+status: done
 owner: none
 updated: 2026-09-11
 contracts: [FB-03, FB-04, DB-03, DB-04, ERR-04]
@@ -25,7 +25,7 @@ skills: [vendix-frontend, vendix-backend, vendix-notifications-system, how-to-de
   - `curl` tracking publico con ticket de tienda → 404; con ticket de plataforma → 200
   - Suites `pqr.service.spec` + listener en verde
 - **Acceptance checklist:**
-  - [ ] Defaults internos restaurados y gate publico reaplicado
-  - [ ] Matriz curl publico/tienda/plataforma en evidence/ con 404/200 esperados
-  - [ ] Specs PQR en verde y findings de este step cerrados en sus records
-- **Status:** pending
+  - [x] Defaults internos restaurados y gate publico reaplicado
+  - [x] Matriz curl publico/tienda/plataforma en evidence/ con 404/200 esperados
+  - [x] Specs PQR en verde y findings de este step cerrados en sus records
+- **Status:** done — verificado y consolidado 2026-09-11

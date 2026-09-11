@@ -28,12 +28,12 @@ skills: [vendix-frontend, vendix-backend, vendix-zoneless-signals, pr-code-revie
   - `sed -n '296,302p;243,254p' pqr-notifications.listener.ts` vs seed de roles (F-006)
   - `rg -n "toLocaleString" pos-sale-ticket.provider.ts` vs `money()` del mapper (F-007)
 - **Acceptance checklist:**
-  - [ ] F-001 — Backticks sin escapar rompen ng build (blocker)
-  - [ ] F-002 — Metrica de abandonados lee cero estructural (major)
-  - [ ] F-003 — Default de comentario PQR paso a publico fail-open (major)
-  - [ ] F-004 — Toggle OFF habilitado pinta rojo en toda la app (major)
-  - [ ] F-005 — Checkout preselecciona primera tarifa contra comentario (minor)
-  - [ ] F-006 — Listener PQR no matchea roles canonicos (minor)
-  - [ ] F-007 — Tirilla POS sin 2 decimales pineados (minor)
+  - [x] F-001 — Backticks sin escapar rompen ng build (blocker)
+  - [x] F-002 — Metrica de abandonados lee cero estructural (major)
+  - [x] F-003 — Default de comentario PQR paso a publico fail-open (major)
+  - [x] F-004 — Toggle OFF habilitado pinta rojo en toda la app (major)
+  - [x] F-005 — Checkout preselecciona primera tarifa contra comentario (minor)
+  - [x] F-006 — Listener PQR no matchea roles canonicos (minor)
+  - [x] F-007 — Tirilla POS sin 2 decimales pineados (minor)
   - [x] Cada finding conserva evidencia en evidence/ o se marca Descartado con autorizador
 - **Status:** done — oleada 1 cerrada 2026-09-11

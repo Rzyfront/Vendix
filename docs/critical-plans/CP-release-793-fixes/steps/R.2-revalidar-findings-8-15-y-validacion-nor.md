@@ -28,13 +28,13 @@ skills: [vendix-backend, vendix-tax-typing, vendix-frontend, pr-code-review]
   - Head de ecommerce.component.ts L1565-1610 + 1790 (F-012), diff de los 3 archivos prep-min (F-013)
   - `sed -n '280,295p' add-rate-wizard-modal` y `sed -n '180,190p' pqr-submit.component.ts` (F-014/F-015)
 - **Acceptance checklist:**
-  - [ ] F-008 — Threshold cero cambia envio gratis en filas existentes (minor)
-  - [ ] F-009 — Tracking publico sirve PQRs de tiendas enumerables (major)
-  - [ ] F-010 — Header de notas contradice derivacion por kernel (major)
-  - [ ] F-011 — normalizeRatePercent cita espejo inexistente (minor)
-  - [ ] F-012 — Footer se guarda dos veces con doble toast (minor)
-  - [ ] F-013 — Prep-min inconsistente entre vitrinas (minor)
-  - [ ] F-014 — base_cost con OR-cero enmascara NaN (minor)
-  - [ ] F-015 — parseInt sobre ids tipados string (minor)
+  - [x] F-008 — Threshold cero cambia envio gratis en filas existentes (minor)
+  - [x] F-009 — Tracking publico sirve PQRs de tiendas enumerables (major)
+  - [x] F-010 — Header de notas contradice derivacion por kernel (major)
+  - [x] F-011 — normalizeRatePercent cita espejo inexistente (minor)
+  - [x] F-012 — Footer se guarda dos veces con doble toast (minor)
+  - [x] F-013 — Prep-min inconsistente entre vitrinas (minor)
+  - [x] F-014 — base_cost con OR-cero enmascara NaN (minor)
+  - [x] F-015 — parseInt sobre ids tipados string (minor)
   - [x] Matriz normativa DIAN en evidence/ y ADR-06 en accepted con el contrato validado
 - **Status:** done — oleada 1 cerrada 2026-09-11

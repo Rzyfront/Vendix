@@ -12,3 +12,6 @@
 | 2026-09-11 | agente T.1 | T.1 | Creados QUI-809/810/811 en Todo; dedup: F-008 residual en QUI-810 ref QUI-805 | linear.app/quickss (3 urls en reporte) |
 | 2026-09-11 | orquestador | T.1 | 4 comentarios de T.1 no aterrizaron (exito falso); republicados y releidos OK | QUI-628/801/792/702 |
 | 2026-09-11 | orquestador | B.3 | F-010 ya reescrito por humano en efecea5e5 (fuera del PR); B.3 verifica y cierra | git log + r2-dian-ncnd |
+| 2026-09-11 | agentes A/B | fixes | A.1 fd04b5c24, A.2 6906e7eed, A.3 610b4443e, B.1 0cce477d5, B.2 68e4d0adc, B.3 no-op, F-008UI 961615248 | commits en develop |
+| 2026-09-11 | orquestador | verif | Transpile 10 archivos frontend 0 errores; inventory spec 6 fallos preexistentes (mock supplier_products) | node + jest |
+| 2026-09-11 | orquestador | cierre | 15 findings en fixed; A/B en done; B.1 datacheck prod y B.2 visual browser quedan pre-release | bundle |

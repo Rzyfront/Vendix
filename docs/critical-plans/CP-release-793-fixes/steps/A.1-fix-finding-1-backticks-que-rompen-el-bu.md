@@ -2,7 +2,7 @@
 id: A.1
 title: "Fix finding 1: backticks que rompen el build"
 phase: A
-status: pending
+status: done
 owner: none
 updated: 2026-09-11
 contracts: []
@@ -25,7 +25,7 @@ skills: [vendix-frontend, vendix-zoneless-signals, how-to-dev, buildcheck-dev]
   - `rg -n '`' --glob '*.ts' apps/frontend/src | xargs` identifica inline-templates: barrido sin mas casos
   - `buildcheck` frontend en verde o CI Frontend Build (prod) en pass
 - **Acceptance checklist:**
-  - [ ] 3 comentarios sin backticks y barrido del PR limpio
-  - [ ] Transpile del repo en 0 errores con evidencia en evidence/
-  - [ ] Blocker de sintaxis cerrado con commit y evidencia (finding fileado en R.1)
-- **Status:** pending
+  - [x] 3 comentarios sin backticks y barrido del PR limpio
+  - [x] Transpile del repo en 0 errores con evidencia en evidence/
+  - [x] Blocker de sintaxis cerrado con commit y evidencia (finding fileado en R.1)
+- **Status:** done — verificado y consolidado 2026-09-11

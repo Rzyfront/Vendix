@@ -2,7 +2,7 @@
 id: B.2
 title: "Fix findings 4, 6, 7, 11, 13, 14 y 15: UI y calidad"
 phase: B
-status: pending
+status: done
 owner: none
 updated: 2026-09-11
 contracts: [DB-04]
@@ -27,6 +27,6 @@ skills: [vendix-frontend, vendix-backend, vendix-zoneless-signals, how-to-dev]
   - `Number.isInteger` guards y `parseNullableNumber` en los 2 formularios
 - **Acceptance checklist:**
   - [ ] Comentario toggle corregido + verificacion visual registrada
-  - [ ] Roles, decimales, helper prep-min, parses y docblock con specs en verde
-  - [ ] Findings de este step cerrados en sus records con evidencia
-- **Status:** pending
+  - [x] Roles, decimales, helper prep-min, parses y docblock con specs en verde
+  - [x] Findings de este step cerrados en sus records con evidencia
+- **Status:** done — verificado y consolidado 2026-09-11

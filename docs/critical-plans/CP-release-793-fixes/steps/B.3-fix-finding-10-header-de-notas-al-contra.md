@@ -2,7 +2,7 @@
 id: B.3
 title: "Fix finding 10: header de notas al contrato validado"
 phase: B
-status: pending
+status: done
 owner: none
 updated: 2026-09-11
 contracts: [DB-05, ERR-01]
@@ -25,7 +25,7 @@ skills: [vendix-frontend, vendix-tax-typing, how-to-dev]
   - `git diff --stat` del step muestra 1 archivo y 0 lineas de logica
   - ADR-06 en accepted enlazado desde el header
 - **Acceptance checklist:**
-  - [ ] ADR-06 en accepted antes de editar (gate duro de este step)
-  - [ ] Header reescrito con citas verificables y diff de 1 archivo sin logica
-  - [ ] QUI-702 comentado y finding cerrado en su record
-- **Status:** pending
+  - [x] ADR-06 en accepted antes de editar (gate duro de este step)
+  - [x] Header reescrito con citas verificables y diff de 1 archivo sin logica
+  - [x] QUI-702 comentado y finding cerrado en su record
+- **Status:** done — verificado y consolidado 2026-09-11

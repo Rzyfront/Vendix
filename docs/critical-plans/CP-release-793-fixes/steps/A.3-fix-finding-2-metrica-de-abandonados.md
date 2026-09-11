@@ -2,7 +2,7 @@
 id: A.3
 title: "Fix finding 2: metrica de abandonados"
 phase: A
-status: pending
+status: done
 owner: none
 updated: 2026-09-11
 contracts: [FB-05, DB-01]
@@ -25,7 +25,7 @@ skills: [vendix-backend, vendix-analytics-metrics, how-to-dev]
   - Frontend `abandoned-carts.component` renderiza growth `number|null` sin regresion
   - Specs de analytics en verde (mock $queryRaw actualizado a la nueva definicion)
 - **Acceptance checklist:**
-  - [ ] Queries derivadas con ventana X nombrada y documentada
-  - [ ] Evidencia SQL before/after en evidence/ y QUI-628 comentado
-  - [ ] Specs en verde y finding de este step cerrado en su record
-- **Status:** pending
+  - [x] Queries derivadas con ventana X nombrada y documentada
+  - [x] Evidencia SQL before/after en evidence/ y QUI-628 comentado
+  - [x] Specs en verde y finding de este step cerrado en su record
+- **Status:** done — verificado y consolidado 2026-09-11

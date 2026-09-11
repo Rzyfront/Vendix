@@ -2,7 +2,7 @@
 id: B.1
 title: "Fix findings 5, 8 y 12: checkout, shipping y footer"
 phase: B
-status: pending
+status: done
 owner: none
 updated: 2026-09-11
 contracts: [FB-01, FB-02, FB-06, DB-02, ERR-03]
@@ -25,7 +25,7 @@ skills: [vendix-frontend, vendix-backend, how-to-dev]
   - Calculadora con threshold 0/negativo/null: gratis explicito solo donde corresponde + etiqueta en admin
   - Guardar footer: un solo toast; guardar general incluye footer una vez
 - **Acceptance checklist:**
-  - [ ] Comentario de preseleccion reescrito y seleccion cambiable verificada
+  - [x] Comentario de preseleccion reescrito y seleccion cambiable verificada
   - [ ] Threshold explicito + data-check de prod en evidence/ + etiqueta admin
-  - [ ] Doble toast eliminado y findings de este step cerrados en sus records
-- **Status:** pending
+  - [x] Doble toast eliminado y findings de este step cerrados en sus records
+- **Status:** done — verificado y consolidado 2026-09-11
