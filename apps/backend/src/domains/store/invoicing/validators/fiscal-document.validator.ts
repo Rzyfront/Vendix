@@ -1208,13 +1208,27 @@ export class FiscalDocumentValidator {
       const difference = declared.minus(toDecimal(expected));
       if (!difference.abs().greaterThan(ONE_CENT)) return;
 
+      // A.3 (F-056) — el `fix` se ramifica por CAUSA. Una diferencia de 1–3¢
+      // no es una base mal capturada: es residuo de truncado (borrador
+      // pre-fix, o combinación que no cierra al centavo). Mandar a «corregir
+      // la base» haría retocar un dato correcto, y mandar SOLO a «volver a
+      // guardar» es un loop muerto cuando la combinación es inabsorbible (el
+      // recálculo determinista repite el mismo rechazo): la rama pequeña dice
+      // las dos cosas en orden — re-guardar primero, mover el importe si
+      // persiste. Solo cambia el copy; el `problem` y los umbrales, intactos.
+      const isResidualScale = difference
+        .abs()
+        .lessThanOrEqualTo(new Prisma.Decimal('0.03'));
+
       findings.push({
         code: 'TAX_SUBTOTAL_MISMATCH',
         severity: 'blocker',
         category: 'arithmetic',
         field: `taxes[${index}].tax_amount`,
         problem: `El impuesto «${name}» declara ${dianAmount(declared)} sobre una base de ${dianAmount(taxable)} al ${this.describeRate(rate, scheme)}, pero esa base y esa tarifa dan ${expected}. La DIAN recomputa \`TaxAmount = TaxableAmount × Percent/100\` sobre el XML que recibe y rechaza la diferencia.`,
-        fix: `Vuelve a guardar el documento para que el servidor recalcule sus impuestos, o corrige la base o la tarifa en ${SCREEN_DOCUMENT_LINES}. Si el importe es correcto y la base no, la base está mal capturada.`,
+        fix: isResidualScale
+          ? `Vuelve a guardar el documento para que el servidor recalcule sus impuestos. Si el aviso persiste tras guardar, la combinación precio × cantidad − descuento con esa tarifa no cierra al centavo: ajusta el precio o el descuento en 1 centavo en ${SCREEN_DOCUMENT_LINES} en vez de volver a guardar lo mismo.`
+          : `Vuelve a guardar el documento para que el servidor recalcule sus impuestos, o corrige la base o la tarifa en ${SCREEN_DOCUMENT_LINES}. Si el importe es correcto y la base no, la base está mal capturada.`,
         details: {
           tax_name: name,
           taxable_amount: dianAmount(taxable),

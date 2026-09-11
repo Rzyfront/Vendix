@@ -693,11 +693,17 @@ export interface InvoiceItem {
   product_name: string;
   description?: string;
   quantity: number;
-  unit_price: number;
-  discount_amount: number;
-  tax_amount: number;
-  total_amount: number;
-  tax_rate?: number;
+  /**
+   * Prisma serializa `Decimal` como STRING en el JSON (F-018): estos importes
+   * llegan como `"222.22"` y se declaran anchos a propósito. NADIE los lee
+   * crudos: `lines()` los normaliza una vez vía `toNumber` y el detalle pinta
+   * números. Un futuro `+`/`toFixed` sobre el crudo concatenaría o rompería.
+   */
+  unit_price: number | string;
+  discount_amount: number | string;
+  tax_amount: number | string;
+  total_amount: number | string;
+  tax_rate?: number | string;
   // "Empaque por tarifa" snapshot — applied price tier label and the real
   // stock units consumed when packaging expands the sold quantity.
   applied_price_tier_name?: string | null;
@@ -765,9 +771,13 @@ export interface InvoiceTax {
   id: number;
   invoice_id: number;
   tax_name: string;
-  tax_rate: number;
-  tax_amount: number;
-  taxable_amount: number;
+  /**
+   * `Decimal` serializado como string en el borde (F-018): igual que las
+   * líneas, `taxLines()` normaliza una vez y el detalle pinta números.
+   */
+  tax_rate: number | string;
+  tax_amount: number | string;
+  taxable_amount: number | string;
   /**
    * Clasificación fiscal del tributo (`iva`, `inc`, `ica`…). La columna existe
    * en `invoice_taxes` desde el contrato tipado y el backend la devuelve; el

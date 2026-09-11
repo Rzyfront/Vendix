@@ -2,11 +2,13 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ElementRef,
   OnInit,
   computed,
   effect,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { NgClass } from '@angular/common';
 import {
@@ -51,12 +53,17 @@ import {
   applyBackendValidationErrors,
   clearBackendError,
   describeApiFailure,
+  extractArithmeticBlockers,
   extractValidationMessages,
 } from '../../utils/invoicing-errors.util';
 import {
   InvoiceLineMath,
+  aggregatePreviewTaxBreakdown,
+  aggregatePreviewTotals,
   computeLineMath,
   lineDiscountExceedsSubtotal,
+  normalizeRatePercent,
+  previewTotalInWords,
 } from '../../utils/invoice-line-math';
 import {
   CreateCustomerRequest,
@@ -1265,6 +1272,13 @@ interface InvoiceCreateItemPayload {
    * cuarta porción — ver `AIU_COMPONENT_CONTRATO_OPTION`.
    */
   aiu_component?: 'administracion' | 'imprevistos' | 'utilidad' | 'contrato';
+  /**
+   * Marca de línea INCLUIDO vs ADICIONAL (A.3). Espejo de
+   * `CreateInvoiceItemDto.is_inclusive`: vale `taxes.some(is_inclusive)` —
+   * lo mismo que el backend deriva cuando se omite — y solo rellena lo que
+   * un impuesto no declare. Se manda explícito para no depender del orden.
+   */
+  is_inclusive?: boolean;
   taxes?: {
     /** Ausente cuando el impuesto elegido no tiene fila real en `tax_rates`. */
     tax_rate_id?: number;
@@ -1532,11 +1546,17 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
         <!-- Banner de error: persistente a propósito. El usuario tiene que
              poder leerlo MIENTRAS corrige. -->
         @if (submitError()) {
+          <!-- F-053: el banner recibe foco programático cuando el error es
+               aritmético nuevo (`focusSubmitErrorBanner`), para que el lector
+               de pantalla anuncie el encabezado. `tabindex="-1"`: enfocable
+               por código, fuera del orden de tabulación. -->
           <app-alert-banner
+            #submitErrorBanner
+            tabindex="-1"
             variant="danger"
             icon="alert-triangle"
             tone="token"
-            heading="No se pudo crear la factura"
+            [heading]="submitErrorHeading()"
           >
             {{ submitError() }}
             @if (submitErrorDetails().length) {
@@ -2993,8 +3013,13 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
           </vendix-invoice-form-section>
 
           <!-- Totales: siempre visibles, nunca dentro de una sección plegada -->
+          <!-- F-052: el total corregido SE ANUNCIA. `aria-live="polite"` con
+               `atomic` hace que el lector de pantalla reciba el valor central
+               del fix sin mover el foco del campo que se está editando. -->
           <div
             class="rounded-lg border border-border p-3 bg-[var(--color-surface-muted)]"
+            aria-live="polite"
+            aria-atomic="true"
           >
             <div
               class="grid grid-cols-2 gap-3 text-sm"
@@ -3073,6 +3098,16 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 </div>
               </div>
             </div>
+            <!-- El total EN LETRAS del documento que se va a emitir: la misma
+                 cifra de arriba, en palabras. Referencia de comprensión —el
+                 valor legal lo compone el servidor sobre el snapshot—, para
+                 que cifras y letras se lean juntas ANTES de gastar el
+                 consecutivo. -->
+            @if (totalInWords(); as words) {
+              <p class="mt-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+                Son: <span class="font-semibold text-text-primary">{{ words }}</span>
+              </p>
+            }
             <!--
               PASO 7 — EL DESGLOSE DEL AIU VIVE EN EL RESUMEN DE COBRO.
 
@@ -3131,9 +3166,17 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
                 </p>
               </div>
             }
+            <!-- F-057: compromiso de paridad, no descargo. El preview usa la
+                 MISMA regla que el servidor (truncado DIAN con absorción en
+                 base) y el total es el precio publicado: lo que se ve es lo
+                 que se emite. Solo las cifras que el servidor totaliza
+                 (retenciones manuales) pueden moverse al guardar. -->
             <p class="mt-2 text-[11px] text-[var(--color-text-secondary)]">
-              Cifras de referencia. El servidor recalcula el documento entero con
-              aritmética decimal y su resultado es el que se declara.
+              Este total es el que se emite: se calcula con la misma regla del
+              servidor y el total es el precio publicado. Con impuesto incluido,
+              la base absorbe 1–2¢ del truncado (p. ej. $3.000 al 8 % ⇒ base
+              $2.777,78 + impuesto $222,22); solo las retenciones manuales las
+              totaliza el servidor al guardar.
             </p>
           </div>
         }
@@ -3558,6 +3601,49 @@ export class InvoiceCreatePageComponent implements OnInit {
 
   readonly submitError = signal<string | null>(null);
   readonly submitErrorDetails = signal<string[]>([]);
+  /**
+   * `error_code` del rechazo que encendió el banner, o `null` en bloqueos
+   * locales. Decide el ENCABEZADO (fase y causa) y si el foco se mueve al
+   * banner: un error aritmético nuevo que nadie anunció se pierde sin foco
+   * (F-053).
+   */
+  readonly submitErrorCode = signal<string | null>(null);
+  /**
+   * Encabezado del banner según fase y causa. El bloqueo local y el fallo de
+   * red conservan el encabezado histórico; el rechazo aritmético del servidor
+   * (códigos CALC/PREVALIDATION) nombra que NADA se numeró — ese es el miedo
+   * real de quien ve fallar una emisión — y manda a la lista enumerada.
+   */
+  readonly submitErrorHeading = computed(() => {
+    const code = this.submitErrorCode();
+    if (code === 'INVOICING_CALC_005') {
+      return 'No se pudo emitir: el importe no cierra al centavo y no se gastó numeración';
+    }
+    if (
+      code !== null &&
+      (code.startsWith('INVOICING_CALC_') ||
+        code.startsWith('INVOICING_PREVALIDATION_'))
+    ) {
+      return 'El documento no cuadra y no se numeró nada: corrige los puntos señalados';
+    }
+    return 'No se pudo crear la factura';
+  });
+  /**
+   * El banner de error, para moverle el foco cuando el error es aritmético
+   * nuevo. `viewChild` sobre el componente: el foco cae en su host
+   * (`tabindex="-1"`), que es lo que el lector anuncia.
+   */
+  private readonly submitErrorBanner = viewChild('submitErrorBanner', {
+    read: ElementRef,
+  });
+  /**
+   * Lleva el foco al banner de error si ya está pintado. El `@if` lo monta en
+   * el mismo ciclo de CD que fija `submitError()`: se difiere a microtarea
+   * para que el elemento exista cuando se enfoca.
+   */
+  private focusSubmitErrorBanner(): void {
+    queueMicrotask(() => this.submitErrorBanner()?.nativeElement.focus());
+  }
   private readonly backendFieldErrors = signal<Record<string, string>>({});
 
   // ── Puerta de emisión (`GET /store/invoicing/:id/emit-readiness`) ──
@@ -4900,30 +4986,21 @@ export class InvoiceCreatePageComponent implements OnInit {
     );
   });
 
+  /**
+   * Totales del panel de preview, en centavos enteros (A.3).
+   *
+   * Delega en `aggregatePreviewTotals`: suma los `*Cents` ya truncados línea
+   * por línea en vez de acumular floats con `+=` (F-015). La única lectura con
+   * factor es el Modelo 1 AIU (`aiuTaxableShares`, vacío ⇒ `?? 1` deja la
+   * aritmética intacta para todo lo demás).
+   */
   readonly totals = computed(() => {
     const items = this.itemsValue();
-    const math = this.lineMath();
-    // Vacío mientras no haya una sola línea Modelo 1: `?? 1` deja la
-    // aritmética histórica intacta para todo lo demás.
-    const shares = this.aiuTaxableShares();
-    let base = 0;
-    let discount = 0;
-    let taxInclusive = 0;
-    let taxAdditional = 0;
-    let total = 0;
-    for (let i = 0; i < math.length; i++) {
-      const share = shares[i] ?? 1;
-      base += math[i].base;
-      taxInclusive += math[i].taxInclusive * share;
-      taxAdditional += math[i].taxAdditional * share;
-      // El importe de la línea NO se escala —es el `line_extension_amount` que
-      // el contrato pactó— y por eso el total del documento no se mueve al
-      // aplicar la base bajo el Modelo 1: sólo se mueve el impuesto.
-      total +=
-        math[i].base + (math[i].taxInclusive + math[i].taxAdditional) * share;
-      discount += Number(items[i]?.discount_amount) || 0;
-    }
-    return { base, discount, taxInclusive, taxAdditional, total };
+    return aggregatePreviewTotals(
+      this.lineMath(),
+      items.map((item) => item?.discount_amount),
+      this.aiuTaxableShares(),
+    );
   });
 
   /**
@@ -4953,47 +5030,18 @@ export class InvoiceCreatePageComponent implements OnInit {
     );
   });
 
-  /** Agregado por `(impuesto, tarifa, aplicación)`, igual que `invoice_taxes`. */
-  readonly taxBreakdown = computed(() => {
-    const items = this.itemsValue();
-    const math = this.lineMath();
-    const rows = new Map<
-      string,
-      {
-        key: string;
-        name: string;
-        rate: number;
-        isInclusive: boolean;
-        base: number;
-        amount: number;
-      }
-    >();
-
-    for (let i = 0; i < items.length; i++) {
-      const taxes = Array.isArray(items[i]?.taxes) ? items[i].taxes : [];
-      const lineBase = math[i]?.base ?? 0;
-      for (const tax of taxes) {
-        const rate = Number(tax.rate) || 0;
-        const key = tax.tax_rate_id + '|' + rate + '|' + tax.is_inclusive;
-        const existing = rows.get(key);
-        const amount = (lineBase * rate) / 100;
-        if (existing) {
-          existing.base += lineBase;
-          existing.amount += amount;
-        } else {
-          rows.set(key, {
-            key,
-            name: tax.name,
-            rate,
-            isInclusive: tax.is_inclusive,
-            base: lineBase,
-            amount,
-          });
-        }
-      }
-    }
-    return [...rows.values()];
-  });
+  /**
+   * Agregado por `(impuesto, tarifa, aplicación)`, igual que `invoice_taxes`
+   * (A.3).
+   *
+   * Delega en `aggregatePreviewTaxBreakdown`: agrega las cuotas YA truncadas
+   * por línea en centavos enteros (F-012: el `(base × tarifa) / 100` en float
+   * daba 222.222 contra 222.22 del servidor) con la tarifa normalizada a
+   * porcentaje (F-013: `8` y `0.08` caen en la misma cubeta).
+   */
+  readonly taxBreakdown = computed(() =>
+    aggregatePreviewTaxBreakdown(this.itemsValue(), this.lineMath()),
+  );
 
   /**
    * Desglose por porción de la SECCIÓN AIU.
@@ -6584,6 +6632,16 @@ export class InvoiceCreatePageComponent implements OnInit {
     const amount = this.totals().taxInclusive + this.totals().taxAdditional;
     return rows.length + ' concepto(s) · ' + this.formatCurrency(amount);
   });
+
+  /**
+   * El total EN LETRAS que se lee bajo el total en cifras. Referencia de
+   * comprensión calculada en el navegador (`previewTotalInWords`); el valor
+   * legal lo compone el servidor con `amountToSpanishWords` sobre el snapshot
+   * persistido. `null` (entrada imposible) ⇒ la línea no se pinta.
+   */
+  readonly totalInWords = computed(() =>
+    previewTotalInWords(this.totals().total),
+  );
 
   readonly aiuSummary = computed(() =>
     this.isAiu() ? 'Operación AIU (09)' : 'No aplica',
@@ -8660,7 +8718,11 @@ export class InvoiceCreatePageComponent implements OnInit {
           // columna es una clave foránea. Ver `InvoiceTaxCatalogService`.
           ...(tax.tax_rate_id > 0 ? { tax_rate_id: tax.tax_rate_id } : {}),
           tax_name: tax.name,
-          tax_rate: Number(tax.rate) || 0,
+          // La tarifa viaja en la unidad del contrato (PORCENTAJE, `@Max(100)`
+          // en el DTO) normalizada en el borde: una fracción colada (0.08) se
+          // declararía como 0.08 % y el impuesto nacería cien veces menor
+          // (F-013). `8` pasa intacto.
+          tax_rate: normalizeRatePercent(tax.rate),
           taxable_amount: taxableAmount,
           // CERO A PROPÓSITO. El backend recalcula toda la aritmética con
           // `Prisma.Decimal` y su resultado manda. El único caso que rechaza
@@ -8668,13 +8730,16 @@ export class InvoiceCreatePageComponent implements OnInit {
           // la que derivarlo, y acá siempre viaja la tarifa.
           tax_amount: 0,
           tax_type: safeTaxType(tax.tax_type),
-          is_inclusive: tax.is_inclusive,
+          is_inclusive: tax.is_inclusive === true,
         }));
+        // `is_inclusive` de LÍNEA explícito (A.3): vale lo MISMO que el backend
+        // deriva cuando se omite (`taxes.some(is_inclusive === true)`), así que
+        // no cambia ni un cálculo — pero deja de depender del orden de los
+        // impuestos y del predicado truthy/falsy del lector (F-014/F-035). En
+        // una línea mixta manda el desglose por impuesto; la marca de línea
+        // solo rellena lo que un impuesto no declare.
+        payload.is_inclusive = taxes.some((tax) => tax.is_inclusive === true);
       }
-      // `is_inclusive` de línea se OMITE a propósito: el backend lo deriva del
-      // primer impuesto de la línea, y declararlo aquí crearía una segunda
-      // fuente que puede contradecir a la primera cuando la línea lleva un
-      // impuesto incluido y otro adicional.
       return payload;
     });
 
@@ -9185,6 +9250,10 @@ export class InvoiceCreatePageComponent implements OnInit {
     if (!this.submitting()) return;
     this.submitting.set(false);
     this.submitError.set(failure.error);
+    // La causa viaja para el encabezado: un rechazo aritmético no es un
+    // «formulario incompleto» y su encabezado lo dice (ver
+    // `submitErrorHeading`).
+    this.submitErrorCode.set(failure.errorCode ?? null);
 
     // EL MOTIVO REAL NO SE PIERDE NUNCA.
     //
@@ -9196,9 +9265,16 @@ export class InvoiceCreatePageComponent implements OnInit {
     // y mapear después separa las dos preguntas: qué dijo el backend, y a qué
     // control corresponde.
     const messages = extractValidationMessages(failure.details);
+    // RAMA DEL CÓDIGO NUEVO (A.3, F-030): los bloqueantes aritméticos
+    // (`details.blockers[]` con `problem` + `fix` redactados) se enumeran
+    // primero — son la causa — en los DOS caminos, con y sin formulario.
+    const blockers = extractArithmeticBlockers(failure.details);
 
     if (!form) {
-      this.submitErrorDetails.set(messages);
+      this.submitErrorDetails.set([...blockers, ...messages]);
+      if (this.isArithmeticRejection(failure.errorCode, blockers)) {
+        this.focusSubmitErrorBanner();
+      }
       return;
     }
 
@@ -9206,9 +9282,10 @@ export class InvoiceCreatePageComponent implements OnInit {
     this.backendFieldErrors.set(applied.fieldErrors);
     // Lo que SÍ se pudo amarrar a un campo se pinta EN el campo; lo demás se
     // enumera, para que ningún motivo desaparezca por no saber dónde ponerlo.
-    this.submitErrorDetails.set(
-      applied.unmatched.length > 0 ? applied.unmatched : [],
-    );
+    this.submitErrorDetails.set([
+      ...blockers,
+      ...(applied.unmatched.length > 0 ? applied.unmatched : []),
+    ]);
     this.erroredControls = applied.touchedControls;
     this.watchForCorrection(applied.touchedControls);
     this.expandSectionsWithErrors();
@@ -9220,8 +9297,32 @@ export class InvoiceCreatePageComponent implements OnInit {
       Object.keys(applied.fieldErrors).length === 0 &&
       messages.length > 0
     ) {
-      this.submitErrorDetails.set(messages);
+      this.submitErrorDetails.set([...blockers, ...messages]);
     }
+
+    if (this.isArithmeticRejection(failure.errorCode, blockers)) {
+      this.focusSubmitErrorBanner();
+    }
+  }
+
+  /**
+   * ¿El rechazo es aritmético del servidor nuevo? El código lo dice cuando lo
+   * hay (`INVOICING_CALC_005` o familia CALC/PREVALIDATION con bloqueantes);
+   * la FORMA lo dice cuando el código todavía no existe en el catálogo del
+   * frontend (la enumeración solo aparece en rechazos aritméticos).
+   */
+  private isArithmeticRejection(
+    errorCode: string | null | undefined,
+    blockers: string[],
+  ): boolean {
+    if (errorCode === 'INVOICING_CALC_005') return true;
+    if (blockers.length === 0) return false;
+    return (
+      errorCode !== null &&
+      errorCode !== undefined &&
+      (errorCode.startsWith('INVOICING_CALC_') ||
+        errorCode.startsWith('INVOICING_PREVALIDATION_'))
+    );
   }
 
   /**
@@ -9249,6 +9350,7 @@ export class InvoiceCreatePageComponent implements OnInit {
   private clearSubmitError(): void {
     this.submitError.set(null);
     this.submitErrorDetails.set([]);
+    this.submitErrorCode.set(null);
     this.backendFieldErrors.set({});
     this.backendErrorSubs.unsubscribe();
     this.backendErrorSubs = new Subscription();

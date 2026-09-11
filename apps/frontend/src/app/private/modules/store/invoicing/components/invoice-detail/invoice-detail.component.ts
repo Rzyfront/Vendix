@@ -40,6 +40,7 @@ import {
   formatReason,
   readPersistedDianRejection,
 } from '../../utils/invoicing-errors.util';
+import { normalizeRatePercent } from '../../utils/invoice-line-math';
 import {
   ContingencyWindow,
   FiscalStatusCell,
@@ -714,14 +715,19 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                               class="rounded-full bg-primary/10 px-2 py-0.5 text-[11px]
                                      font-medium text-primary"
                               [title]="aiu.hint"
+                              [attr.aria-label]="aiu.label + '. ' + aiu.hint"
                             >
                               {{ aiu.label }}
                             </span>
                           }
+                          <!-- F-054: el `title` solo no lo lee el teclado ni la
+                               mayoría de lectores; el `aria-label` espeja el
+                               texto para quien no pasa el cursor. -->
                           @if (item.is_inclusive) {
                             <span
                               class="rounded-full bg-surface-secondary px-2 py-0.5 text-[11px] text-text-secondary"
                               title="El precio de la línea ya trae el impuesto dentro."
+                              aria-label="Impuesto incluido: el precio de la línea ya trae el impuesto dentro."
                             >
                               IVA incluido
                             </span>
@@ -761,7 +767,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               <div class="space-y-1">
                 @for (tax of taxLines(); track tax.id) {
                   <div class="flex justify-between text-sm">
-                    <span class="text-text-secondary">{{ tax.tax_name }} ({{ tax.tax_rate }}%)</span>
+                    <span class="text-text-secondary">{{ tax.tax_name }} ({{ formatPercent(tax.tax_rate) }})</span>
                     <span class="text-text-primary">{{ formatCurrency(tax.tax_amount) }}</span>
                   </div>
                 }
@@ -1388,15 +1394,31 @@ export class InvoiceDetailComponent {
    * (`invoice_items`, como nombra Prisma la relación) y sólo después el alias
    * `items` que el frontend declaraba: leyendo únicamente `items` la tabla
    * salía vacía SIEMPRE, porque ninguna respuesta del backend usa ese nombre.
+   *
+   * F-018: los importes se normalizan a `number` UNA vez, acá. Prisma
+   * serializa `Decimal` como string (`"222.22"`) y la interfaz lo declara
+   * ancho a propósito; pasado este punto todo es número y ningún `+`,
+   * `toFixed` o comparador del template vuelve a tocar el crudo.
    */
   readonly lines = computed<InvoiceItem[]>(() => {
     const inv = this.detail();
-    return inv?.invoice_items ?? inv?.items ?? [];
+    return (inv?.invoice_items ?? inv?.items ?? []).map((item) => ({
+      ...item,
+      unit_price: this.toNumber(item?.unit_price),
+      discount_amount: this.toNumber(item?.discount_amount),
+      tax_amount: this.toNumber(item?.tax_amount),
+      total_amount: this.toNumber(item?.total_amount),
+    }));
   });
 
   readonly taxLines = computed<InvoiceTax[]>(() => {
     const inv = this.detail();
-    return inv?.invoice_taxes ?? inv?.taxes ?? [];
+    return (inv?.invoice_taxes ?? inv?.taxes ?? []).map((tax) => ({
+      ...tax,
+      tax_rate: this.toNumber(tax?.tax_rate),
+      tax_amount: this.toNumber(tax?.tax_amount),
+      taxable_amount: this.toNumber(tax?.taxable_amount),
+    }));
   });
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -1673,12 +1695,20 @@ export class InvoiceDetailComponent {
    * Porcentaje legible. Se recorta el `.00` porque «19%» es lo que dice la
    * norma y «19.00%» es lo que dice el `Decimal(5,2)` de la base — el usuario
    * está leyendo la norma, no la columna.
+   *
+   * F-019: la unidad se normaliza a porcentaje ANTES de formatear (misma
+   * guarda que el preview, `normalizeRatePercent`): una fracción colada
+   * (`0.08`) se leía «0.08%» junto a la cuota correcta. `8` y `8.00` rinden
+   * «8%»; `8.5` rinde «8.50%».
+   *
+   * Pública porque la plantilla la invoca (AOT no admite `private` en el
+   * template).
    */
-  private formatPercent(value: number | string | null | undefined): string {
+  formatPercent(value: number | string | null | undefined): string {
     if (value === null || value === undefined || value === '') return '—';
-    const n = Number(value);
-    if (!Number.isFinite(n)) return String(value);
-    return `${Number.isInteger(n) ? n : n.toFixed(2)}%`;
+    const n = normalizeRatePercent(value);
+    if (n > 0) return `${Number.isInteger(n) ? n : n.toFixed(2)}%`;
+    return Number(value) === 0 ? '0%' : String(value);
   }
 
   readonly resolutionBanner = computed(() => {
@@ -1919,23 +1949,29 @@ export class InvoiceDetailComponent {
   eventStatus = dianEventStatusLabel;
   eventTone = dianEventStatusTone;
 
-  formatCurrency(value: number): string {
-    return this.currencyService.format(value || 0);
+  /**
+   * Acepta el `Decimal` serializado como string (F-018): el servicio ya
+   * lo numeriza, pero la firma ancha evita que un llamador futuro tenga que
+   * elegir entre mentirle al compilador o pre-convertir por su cuenta.
+   */
+  formatCurrency(value: number | string | null | undefined): string {
+    return this.currencyService.format(Number(value) || 0);
   }
 
   /** True when the line consumed packaging stock different from its quantity. */
   isPackageLine(item: InvoiceItem): boolean {
+    const consumed = Number(item.stock_units_consumed ?? 0);
     return (
-      typeof item.stock_units_consumed === 'number' &&
-      item.stock_units_consumed > 0 &&
-      item.stock_units_consumed !== item.quantity
+      Number.isFinite(consumed) &&
+      consumed > 0 &&
+      consumed !== Number(item.quantity)
     );
   }
 
   /** Units of stock consumed per sold unit (packaging factor), rounded to 2dp. */
   packagePerUnit(item: InvoiceItem): number {
-    const consumed = item.stock_units_consumed ?? 0;
-    const qty = item.quantity || 1;
+    const consumed = Number(item.stock_units_consumed ?? 0);
+    const qty = Number(item.quantity) || 1;
     return Math.round((consumed / qty) * 100) / 100;
   }
 

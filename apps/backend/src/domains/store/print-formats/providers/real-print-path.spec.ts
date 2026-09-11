@@ -758,6 +758,23 @@ describe('mapeador compartido invoices → modelo de impresión', () => {
     expect(d.totals?.grand_total).toBe(119000);
   });
 
+  it('A.3 (F-050): una factura de valor CERO no se recalcula — el 0 es snapshot, no ausencia', () => {
+    // Con `||` el 0 caía al recompute (`subtotal − discount + tax` en
+    // floats); con `??` solo lo ausente (`null`/`undefined`) recompone.
+    const d = mapFiscalDocumentToPrintData({
+      ...filaViva,
+      subtotal_amount: 0,
+      discount_amount: 0,
+      tax_amount: 0,
+      total_amount: 0,
+      invoice_items: [],
+      invoice_taxes: [],
+    });
+
+    expect(d.totals?.grand_total).toBe(0);
+    expect(d.totals?.grand_total_formatted).toBe('$0,00');
+  });
+
   /**
    * E.11 casilla 1 — las dos brechas fiscales medidas en la medición del
    * builder (§0): retención ausente del modelo y NIT crudo sin resolvedor.
@@ -767,7 +784,8 @@ describe('mapeador compartido invoices → modelo de impresión', () => {
     const d = mapFiscalDocumentToPrintData(filaViva);
 
     expect(d.totals?.withholding_total).toBe(5000);
-    expect(d.totals?.withholding_total_formatted).toBe('$5.000');
+    // A.3: el papel pinea 2 decimales como `CurrencyFormatService`.
+    expect(d.totals?.withholding_total_formatted).toBe('$5.000,00');
     // Informativa: NO descuenta del total — igual que el builder PDF.
     expect(d.totals?.grand_total).toBe(119000);
   });
@@ -812,9 +830,10 @@ describe('mapeador compartido invoices → modelo de impresión', () => {
     expect(d.items[0].variant_sku).toBe('PAN-SAM-A21S');
     expect(d.items[0].quantity).toBe(1);
     expect(d.items[0].unit_price).toBe(40000);
-    expect(d.items[0].unit_price_formatted).toBe('$40.000');
+    // A.3: el papel pinea 2 decimales como `CurrencyFormatService`.
+    expect(d.items[0].unit_price_formatted).toBe('$40.000,00');
     expect(d.items[0].total_price).toBe(40000);
-    expect(d.items[0].total_price_formatted).toBe('$40.000');
+    expect(d.items[0].total_price_formatted).toBe('$40.000,00');
     expect(d.document.payment_method).toBe('Contado (Efectivo)');
     expect(d.document.valid_until_formatted).toBeDefined();
   });

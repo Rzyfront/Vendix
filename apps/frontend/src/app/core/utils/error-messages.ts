@@ -852,6 +852,31 @@ export const ERROR_MESSAGES: Record<string, string> = {
   INVOICING_CALC_004:
     'El cliente del documento no está en esta organización. Vuelve a elegirlo desde el buscador de clientes.',
   /**
+   * Residuo no absorbible (A.3, F-055). La combinación precio × cantidad −
+   * descuento con esas tarifas no cierra al centavo ni moviendo la base de a
+   * 1¢: el servidor la detuvo ANTES de numerar, así que no se gastó
+   * consecutivo. Re-guardar no la arregla (el cálculo es determinista):
+   * hay que mover el importe.
+   *
+   * Encabezado: el `details.blockers[]` trae el hallazgo por línea con su
+   * `problem` y su `fix` redactados — la UI DEBE enumerarlos
+   * (`extractArithmeticBlockers`), igual que con la familia PREVALIDATION.
+   *
+   * Nombre pactado con A.2 (`INVOICING_CALC_00X` en F-060): si el motor numera
+   * distinto, renombrar acá, en `submitErrorHeading` y en el mapa de
+   * requisitos, nunca solo en un sitio.
+   */
+  INVOICING_CALC_005:
+    'Ese importe con esos impuestos no cierra al centavo: ni moviendo la base de a 1 centavo la base más los impuestos iguala el precio cobrado, así que el documento se detuvo antes de tomar consecutivo y no se gastó numeración. Ajusta el precio, la cantidad o el descuento en 1 centavo y vuelve a intentarlo; re-guardar el mismo importe repite el mismo rechazo.',
+  /**
+   * Entrada inválida en la línea (A.3, hermano de `CALC_005`). El servidor
+   * detuvo el documento ANTES de numerar porque un número no es utilizable
+   * (no finito, sobre-descuento, escala o tarifa inválida) y facturarlo en
+   * cero silencioso sería peor. El detalle nombra la línea y el motivo.
+   */
+  INVOICING_CALC_006:
+    'Una línea trae un dato que no se puede facturar (un número inválido, un descuento mayor que el precio o una escala de precio desconocida) y el documento se detuvo antes de tomar consecutivo: no se gastó numeración. Corrige la línea señalada en el detalle en vez de emitirla en cero.',
+  /**
    * PREVALIDACIÓN FISCAL — los cuatro mensajes siguientes son ENCABEZADOS.
    *
    * El backend rechaza el documento ANTES de firmarlo y transmitirlo, y manda en

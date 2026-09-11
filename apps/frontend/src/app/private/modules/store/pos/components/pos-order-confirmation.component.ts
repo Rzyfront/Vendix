@@ -478,12 +478,19 @@ export class PosOrderConfirmationComponent {
   });
   readonly derivedOrderItems = computed(() => {
     const d = this.orderData();
-    const items = d?.items || d?.order_items || [];
+    // F-017: la factura trae `invoice_items`; leer solo `items`/`order_items`
+    // dejaba la confirmación sin líneas (o con las de la orden) cuando el
+    // snapshot fiscal ya existe. El snapshot manda primero.
+    const items = d?.invoice_items || d?.items || d?.order_items || [];
     return items.map((item: any) => {
-      const unitPrice = Number(item.unit_price || item.unitPrice || 0);
+      const unitPrice = Number(item.unit_price ?? item.unitPrice ?? 0);
       const quantity = Number(item.quantity || 0);
-      const totalPrice = Number(item.total_price || item.totalPrice || 0);
-      const tax = Number(item.tax_amount || item.tax || 0) || (totalPrice - (unitPrice * quantity));
+      const totalPrice = Number(item.total_price ?? item.totalPrice ?? 0);
+      // F-016/F-048: SIN fallback aritmético en floats. Derivar el impuesto
+      // como `total − unit × qty` inventa un desglose (222.2199) que la
+      // factura no va a persistir (222.22 sobre base 2777.78). Lo ausente es
+      // 0, nunca una resta: el cajero acepta lo que la factura declara.
+      const tax = Number(item.tax_amount ?? item.tax ?? 0);
       const weight = Number(item.weight || 0);
       const weight_unit = item.weight_unit || 'kg';
       const is_weight_product = weight > 0;
@@ -524,21 +531,41 @@ export class PosOrderConfirmationComponent {
         })() };
     });
   });
+  /**
+   * Suma del snapshot fiscal `invoice_taxes`, o `null` si no hay snapshot.
+   * Es la paridad que exige F-048: el impuesto que el cajero acepta es la Σ
+   * de las cuotas que la factura persiste, no un campo de la orden.
+   */
+  private invoiceTaxSnapshotTotal(d: any): number | null {
+    const rows = d?.invoice_taxes;
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    // En centavos: las cuotas son exactas a 2dp y el `+=` en float acumula
+    // residuo binario entre filas.
+    let cents = 0;
+    for (const row of rows) {
+      cents += Math.round(Number(row?.tax_amount ?? 0) * 100);
+    }
+    return cents / 100;
+  }
   readonly derivedOrderTotal = computed(() => {
     const d = this.orderData();
-    return Number(d?.grand_total ?? d?.total_amount ?? d?.total ?? 0);
+    // El snapshot fiscal manda sobre los campos de la orden: cuando la venta
+    // ya tiene factura, la confirmación enseña lo facturado, no lo cobrado.
+    return Number(d?.invoice?.total_amount ?? d?.grand_total ?? d?.total_amount ?? d?.total ?? 0);
   });
   readonly derivedOrderSubtotal = computed(() => {
     const d = this.orderData();
-    return Number(d?.subtotal ?? d?.subtotal_amount ?? 0);
+    return Number(d?.invoice?.subtotal_amount ?? d?.subtotal ?? d?.subtotal_amount ?? 0);
   });
   readonly derivedOrderTax = computed(() => {
     const d = this.orderData();
-    return Number(d?.tax_amount ?? d?.tax ?? 0);
+    const snapshot = this.invoiceTaxSnapshotTotal(d);
+    if (snapshot !== null) return snapshot;
+    return Number(d?.invoice?.tax_amount ?? d?.tax_amount ?? d?.tax ?? 0);
   });
   readonly derivedOrderDiscount = computed(() => {
     const d = this.orderData();
-    return Number(d?.discount_amount ?? d?.discount ?? 0);
+    return Number(d?.invoice?.discount_amount ?? d?.discount_amount ?? d?.discount ?? 0);
   });
   readonly derivedInvoiceDataToken = computed(() => this.orderData()?.invoiceDataToken ?? this.orderData()?.invoice_data_token);
   readonly derivedInvoiceDataQrUrl = computed(() => {
@@ -765,11 +792,12 @@ private authFacade = inject(AuthFacade);
       this.creatingInvoice.set(false);
       this.autoPrintedFeOrderId = null;
     }
-    // Mirrors still useful for the print path (see `printReceipt`).
-    this.orderTotal = Number(data?.grand_total ?? data?.total_amount ?? data?.total ?? 0);
-    this.orderSubtotal = Number(data?.subtotal ?? data?.subtotal_amount ?? 0);
-    this.orderDiscount = Number(data?.discount_amount ?? data?.discount ?? 0);
-    this.orderTax = Number(data?.tax_amount ?? data?.tax ?? 0);
+    // Mirrors still useful for the print path (see `printReceipt`). Misma
+    // precedencia que los `derived*`: snapshot fiscal primero (F-048/F-017).
+    this.orderTotal = Number(data?.invoice?.total_amount ?? data?.grand_total ?? data?.total_amount ?? data?.total ?? 0);
+    this.orderSubtotal = Number(data?.invoice?.subtotal_amount ?? data?.subtotal ?? data?.subtotal_amount ?? 0);
+    this.orderDiscount = Number(data?.invoice?.discount_amount ?? data?.discount_amount ?? data?.discount ?? 0);
+    this.orderTax = this.invoiceTaxSnapshotTotal(data) ?? Number(data?.invoice?.tax_amount ?? data?.tax_amount ?? data?.tax ?? 0);
     this.appliedPromotions = data?.applied_promotions || data?.appliedPromotions || [];
     this.appliedCoupons = data?.applied_coupons || data?.appliedCoupons || [];
     if (data.payment) {
@@ -941,10 +969,12 @@ private authFacade = inject(AuthFacade);
 	        // venta imprimiéndose distinto según el momento.
 	        isTakeaway: item.isTakeaway,
 	        serials: item.serials })),
-      subtotal: this.derivedOrderSubtotal() || this.orderSubtotal,
-      tax: this.derivedOrderTax() || this.orderTax,
-      discount: this.derivedOrderDiscount() || this.orderDiscount,
-      total: this.derivedOrderTotal() || this.orderTotal,
+      // `??`, no `||`: un 0 legítimo (venta sin impuesto) no es ausencia
+      // y no debe caer al espejo. Lo ausente rinde 0 (F-048).
+      subtotal: this.derivedOrderSubtotal() ?? this.orderSubtotal,
+      tax: this.derivedOrderTax() ?? this.orderTax,
+      discount: this.derivedOrderDiscount() ?? this.orderDiscount,
+      total: this.derivedOrderTotal() ?? this.orderTotal,
       paymentMethod: this.paymentInfo?.method || 'Pago',
       cashReceived: this.paymentInfo?.amount || (this.derivedOrderTotal() || this.orderTotal),
       change: Number(this.orderData()?.change || 0),

@@ -328,4 +328,74 @@ describe('PosOrderConfirmationComponent — Auto-print & Fiscal Sync (CP-pos-fe-
       jasmine.clock().uninstall();
     }
   });
+
+  /**
+   * A.3 (CP-facturacion-impuesto-incluido-redondeo) — la confirmación enseña
+   * el desglose que la factura persiste, no uno derivado en floats.
+   *
+   * $3.000 con INC 8 %: base 2777.78 + cuota 222.22 = 3000.00 (mismos
+   * esperados que el motor A.1/A.2). El ítem DEL SNAPSHOT (`invoice_items`)
+   * y la Σ de `invoice_taxes` coinciden al centavo, y ningún camino deriva
+   * `total − unit × qty` (F-016/F-048: eso daba 222.2199).
+   */
+  it('A.3. paridad ítem vs invoice_taxes para $3.000/8 % sin fallback float', () => {
+    activeFiscalAreasSignal.set([]);
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', {
+      id: 2001,
+      order_number: 'ORD-2001',
+      state: 'completed',
+      payment_status: 'paid',
+      grand_total: 3000,
+      subtotal: 2777.78,
+      tax_amount: 222.22,
+      invoice_items: [
+        {
+          id: 1,
+          product_name: 'Producto INC 8 %',
+          quantity: 1,
+          unit_price: 3000,
+          total_price: 3000,
+          tax_amount: 222.22,
+        },
+      ],
+      invoice_taxes: [
+        { tax_name: 'INC', tax_rate: 8, taxable_amount: 2777.78, tax_amount: 222.22 },
+      ],
+    });
+    fixture.detectChanges();
+
+    const items = component.derivedOrderItems();
+    expect(items).toHaveLength(1);
+    expect(items[0].tax).toBe(222.22);
+    expect(items[0].totalPrice).toBe(3000);
+    // El impuesto aceptado es la Σ del snapshot, idéntica al ítem.
+    expect(component.derivedOrderTax()).toBe(222.22);
+    expect(component.derivedOrderTax()).toBe(items[0].tax);
+    expect(component.derivedOrderSubtotal()).toBe(2777.78);
+    expect(component.derivedOrderTotal()).toBe(3000);
+  });
+
+  it('A.3. sin impuesto declarado el desglose es 0, nunca una resta float', () => {
+    activeFiscalAreasSignal.set([]);
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.componentRef.setInput('orderData', {
+      id: 2002,
+      order_number: 'ORD-2002',
+      state: 'completed',
+      payment_status: 'paid',
+      grand_total: 3000,
+      subtotal: 3000,
+      items: [
+        // Sin `tax_amount`: el viejo fallback rendía
+        // `3000 − 2777.78 × 1 = 222.22000000000014` — un impuesto fantasma
+        // con polvo binario que la factura jamás persistiría. Ahora es 0.
+        { id: 2, name: 'Base sin impuesto declarado', quantity: 1, unit_price: 2777.78, total_price: 3000 },
+      ],
+    });
+    fixture.detectChanges();
+
+    expect(component.derivedOrderItems()[0].tax).toBe(0);
+    expect(component.derivedOrderTax()).toBe(0);
+  });
 });
