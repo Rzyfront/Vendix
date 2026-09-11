@@ -528,10 +528,15 @@ export interface AbsorbKernelResult {
  * 100) — so compat totals are preserved alongside the report.
  */
 export function absorbRateToFraction(
-  rate: DianNumericInput,
+  rate: DianNumericInput | unknown,
   rate_basis: unknown,
+  defaultBasis: AbsorbRateBasis = 'percent',
 ): { fraction: Prisma.Decimal; basis: AbsorbRateBasis; invalid: string | null } {
-  const raw = rate_basis === null || rate_basis === undefined ? 'percent' : String(rate_basis);
+  // F-067: UNA sola normalización en la hoja. El default depende del contrato
+  // del llamador y viaja explícito: 'percent' (facturación: DTOs/tienda) o
+  // 'fraction' (canales: catálogo). Ningún default es silencioso: una tasa
+  // > 1 sin base explícita se REPORTA (bifurcación 100x imposible en silencio).
+  const raw = rate_basis === null || rate_basis === undefined ? defaultBasis : String(rate_basis);
   const normalized = raw.trim().toLowerCase().replace('-', '_');
   const basis: AbsorbRateBasis =
     normalized === 'per_mil' || normalized === 'fraction' ? normalized : 'percent';
@@ -557,8 +562,8 @@ export function absorbRateToFraction(
   };
 }
 
-/** Strict finiteness WITHOUT legacy collapsing (F-036, F-062). */
-export function isStrictFiniteInput(value: DianNumericInput): boolean {
+/** Strict finiteness WITHOUT legacy collapsing (F-036, F-062). Frontera: acepta `unknown`. */
+export function isStrictFiniteInput(value: DianNumericInput | unknown): boolean {
   if (value === null || value === undefined || value === '') return false;
   if (value instanceof Prisma.Decimal) return value.isFinite();
   if (typeof value === 'number') return Number.isFinite(value);
@@ -676,7 +681,15 @@ export function absorbInclusiveLine(input: AbsorbKernelLineInput): AbsorbKernelR
   const negative_net = gross_valid && gross_decimal.isNegative();
   if (negative_net) invalid_inputs.push('net:negative');
   // bruto = max(0, net) — identical in engine, mirror and preview (F-034).
-  const gross = gross_valid && !negative_net ? truncCents(gross_decimal) : new Prisma.Decimal(0);
+  // F-067/F-075: UN SOLO normalizador de bruto en la hoja: HALF_UP a
+  // centavos (recupera la intención comercial ante polvo float, p. ej.
+  // 59.96999999 ⇒ 59.97). Con entradas exactas 2dp (DTOs/Decimal) half-up ==
+  // trunc: las cuotas siguen truncadas (Anexo §11.2, intacto) — sólo el
+  // BRUTO de entrada se sanea igual en ambos solvers.
+  const gross =
+    gross_valid && !negative_net
+      ? gross_decimal.toDecimalPlaces(DIAN_SCALE, Prisma.Decimal.ROUND_HALF_UP)
+      : new Prisma.Decimal(0);
 
   if (input.quantity !== null && input.quantity !== undefined && !isStrictFiniteInput(input.quantity)) {
     invalid_inputs.push('quantity:non_finite');
@@ -782,8 +795,17 @@ export function absorbInclusiveLine(input: AbsorbKernelLineInput): AbsorbKernelR
  * Exposed so callers doing multi-step math stay in `Decimal` space instead of
  * formatting and re-parsing between operations.
  */
-export function toDecimal(value: DianNumericInput): Prisma.Decimal {
+export function toDecimal(value: DianNumericInput | unknown): Prisma.Decimal {
   if (value === null || value === undefined || value === '') {
+    return new Prisma.Decimal(0);
+  }
+
+  // Frontera F-067: fuera de number/string/Decimal no hay dinero que leer.
+  if (
+    typeof value !== 'number' &&
+    typeof value !== 'string' &&
+    !(value instanceof Prisma.Decimal)
+  ) {
     return new Prisma.Decimal(0);
   }
 
@@ -941,9 +963,14 @@ export function isInclusiveRateBasis(value: unknown): value is InclusiveRateBasi
 }
 
 /**
- * Tarifa → fracción, compartida por motor y espejo (F-001/F-032). Coerciona
- * a 0 lo inválido/negativo y la basis desconocida (compat: nunca lanza); el
- * REPORTE vive en `resolveInclusiveClearing` (F-062), no acá.
+ * Tarifa → fracción.
+ *
+ * @deprecated F-067: la normalización única vive en `absorbRateToFraction`
+ * (con default explícito por camino + reporte). Esta función se conserva por
+ * compatibilidad; no la uses en código nuevo.
+ *
+ * Coerciona a 0 lo inválido/negativo y la basis desconocida (compat: nunca
+ * lanza).
  *
  * ```ts
  * toFraction(19, 'percent')   // 0.19
@@ -994,17 +1021,37 @@ export function resolveInclusiveClearing(
     G = new Prisma.Decimal(rawGross.toFixed(DIAN_SCALE, Prisma.Decimal.ROUND_HALF_UP));
   }
 
-  const parsed = (ratesInput ?? []).map((entry) => {
+  const parsed = (ratesInput ?? []).map((entry, index) => {
     const source = (entry ?? {}) as InclusiveSolveRateInput;
     const is_inclusive = coerceInclusiveStrict(source.is_inclusive);
-    const basisRaw = source.rate_basis;
-    const basis = basisRaw === undefined || basisRaw === null ? 'fraction' : basisRaw;
-    let fraction: Prisma.Decimal;
-    if (!isInclusiveRateBasis(basis)) {
-      invalid_inputs.push(basisRaw);
+    // F-067/F-078: UNA sola normalización (absorbRateToFraction) con default
+    // explícito 'fraction' (contrato de catálogo de este camino). Sin base
+    // explícita y valor > 1 ⇒ unidad ambigua: se REPORTA (bifurcación 100x
+    // imposible en silencio) y se fuerza como fracción para los totales.
+    const basisAbsent = source.rate_basis === undefined || source.rate_basis === null;
+    const solved = absorbRateToFraction(
+      source.rate,
+      source.rate_basis,
+      'fraction',
+    );
+    const basis = solved.basis;
+    let fraction = solved.fraction;
+    if (solved.invalid) invalid_inputs.push(`rates[${index}].${solved.invalid}`);
+    if (basisAbsent) {
+      const probe = parseInclusiveNumeric(source.rate);
+      if (probe !== null && probe.abs().greaterThan(1)) {
+        invalid_inputs.push(`rates[${index}].rate:ambiguous_unit:${String(source.rate)}`);
+      }
+    }
+    // Fail-closed de totales en este camino (los llamadores sólo advierten,
+    // no bloquean): base explícita desconocida o tasa negativa ⇒ cuota CERO
+    // (el reporte ya quedó arriba; el camino calculador conserva su legacy y
+    // sus llamadores SÍ bloquean).
+    if (
+      (!basisAbsent && (solved.invalid ?? '').startsWith('rate_basis:unknown')) ||
+      fraction.isNegative()
+    ) {
       fraction = INCLUSIVE_ZERO;
-    } else {
-      fraction = toFractionWithReport(source.rate, basis, invalid_inputs);
     }
     // Base propia: solo aplica a inclusivas (en agregadas no significa nada
     // y se ignora por documento, no en silencio casual).
@@ -1106,20 +1153,6 @@ function parseInclusiveNumeric(value: unknown): Prisma.Decimal | null {
     }
   }
   return null;
-}
-
-/** `toFraction` con reporte del ofensor (F-062). Negativo ⇒ inválido + 0. */
-function toFractionWithReport(
-  rate: unknown,
-  basis: InclusiveRateBasis,
-  invalid_inputs: unknown[],
-): Prisma.Decimal {
-  const parsed = parseInclusiveNumeric(rate);
-  if (parsed === null || parsed.isNegative()) {
-    invalid_inputs.push(rate);
-    return INCLUSIVE_ZERO;
-  }
-  return toFraction(parsed, basis);
 }
 
 /** Base propia: ausente ⇒ null; basura/negativa ⇒ reporte + null. */

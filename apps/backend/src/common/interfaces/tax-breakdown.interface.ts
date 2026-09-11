@@ -57,7 +57,8 @@ export function buildTaxBreakdown(
  * nunca `Math.round`) + resto mayor (`largest-remainder`): cada parte se
  * trunca al centavo y los centavos que el truncado suelta se reparten de a 1¢
  * a las partes con mayor fracción, así la suma de las partes ES `targetTotal`
- * al centavo, nunca ±1¢. Desempate por orden de entrada: determinista.
+ * al centavo, nunca ±1¢. Desempate por contenido (tipo, monto), N4 round 2:
+ * el mismo multiconjunto reparte idéntico sin importar el orden de entrada.
  *
  * NOTA CONTABLE — los reversos que escalan así son proporcionales al número
  * de la orden, NO espejan la absorción del snapshot de factura (la base
@@ -101,6 +102,10 @@ export function scaleBreakdownToTotal(
     Math.min(base.length, Math.floor(remainder_cents)),
   );
 
+  // N4 (round 2): desempate determinista por CONTENIDO (tipo, monto), no por
+  // orden de entrada: el mismo multiconjunto reparte idéntico aunque los
+  // llamadores ordenen distinto, y filas idénticas son intercambiables (misma
+  // cuenta PUC de todos modos).
   const order = floors
     .map((f, index) => ({
       index,
@@ -108,7 +113,15 @@ export function scaleBreakdownToTotal(
     }))
     .sort((a, b) => {
       const cmp = b.fraction.comparedTo(a.fraction);
-      return cmp !== 0 ? cmp : a.index - b.index;
+      if (cmp !== 0) return cmp;
+      const type_cmp = String(base[a.index]?.tax_type ?? '').localeCompare(
+        String(base[b.index]?.tax_type ?? ''),
+      );
+      if (type_cmp !== 0) return type_cmp;
+      return (
+        Number(base[b.index]?.tax_amount ?? 0) -
+        Number(base[a.index]?.tax_amount ?? 0)
+      );
     })
     .slice(0, remainder_cents)
     .map((entry) => entry.index);

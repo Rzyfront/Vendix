@@ -30,4 +30,4 @@ skills: [vendix-frontend, vendix-zoneless-signals, vendix-currency-formatting]
   - [ ] PR con pr-code-review ≥ 80% y rama al día
   - [ ] F-049 — Papel con decimales variables, pantallas fijos (minor)
   - [ ] F-059 — Letras inverificables antes de emitir (minor)
-- **Status:** pending
+- **Status:** in_progress · orquestador · 2026-09-11 · buildcheck:test sobre los 8 patrones tocados: 9 suites / 296 tests en verde; 2 suites (`checkout-inclusive-line.parity`, existente `checkout.service.spec`) no compilan por `TS2307 uuid` en `tables.service.ts` — preexistente y ambiental (`uuid` ausente de package.json y node_modules, archivo intacto en este plan, probado con el spec committed). Fix de tipos propio (`normalizeTypedRates` → `TaxRateForResolution`, cast `InclusiveRateBasis` estilo checkout) verificado con `storefront-price-residual.parity` en verde. Full `scripts/buildcheck.sh` y verificación visual carta/tirilla pendientes.

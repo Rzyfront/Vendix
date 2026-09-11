@@ -31,6 +31,8 @@ describe('credit-notes · parcial por kernel (B.1/F-020)', () => {
       product_id: number | null;
       product_variant_id: number | null;
       is_inclusive: boolean | null;
+      tax_amount?: number | null;
+      price_unit_quantity?: number | null;
     }> = {},
   ) => ({ product_id: 11, product_variant_id: null, is_inclusive: true as boolean | null, ...overrides });
 
@@ -169,5 +171,56 @@ describe('credit-notes · parcial por kernel (B.1/F-020)', () => {
 
     expect(result.taxes).toEqual([]);
     expect(result.totals.total.toString()).toBe('10000');
+  });
+
+  it('gemela exenta bajo esquema único no-cero: el kernel NO inventa cuota (N1)', () => {
+    // La factura tiene UNA fila INC 8% (de otra línea); esta línea es exenta
+    // (su gemela trae tax 0) y la nota no reclama nada: cero preservado.
+    const result = derivePartialNoteLinesViaKernel(
+      [{ product_id: 12, quantity: 1, unit_price: 5000, tax_amount: 0 }],
+      [relatedLine({ product_id: 12, is_inclusive: false, tax_amount: 0 })],
+      [scheme()],
+      907,
+      'credit_note',
+    );
+
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0].tax_amount.toString()).toBe('0');
+    expect(result.lines[0].base_amount.toString()).toBe('5000');
+    expect(result.lines[0].total_amount.toString()).toBe('5000');
+  });
+
+  it('factura sin impuestos + nota sin reclamo: camino cero, sin 422 (N2)', () => {
+    const result = derivePartialNoteLinesViaKernel(
+      [
+        { product_id: 11, quantity: 2, unit_price: 5000, tax_amount: 0 },
+        { product_id: 12, quantity: 1, unit_price: 3000, tax_amount: 0 },
+      ],
+      [relatedLine(), relatedLine({ product_id: 12 })],
+      [],
+      908,
+      'credit_note',
+    );
+
+    expect(result.taxes).toEqual([]);
+    expect(result.totals.tax.toString()).toBe('0');
+    expect(result.totals.total.toString()).toBe('13000');
+  });
+
+  it('pack ×12: el divisor sale de la gemela, no del DTO (N3)', () => {
+    // Presentación de 12 a $36000 ($3000/unidad) con INC 8% incluido:
+    // bruto = 36000/12 = 3000 ⇒ base 2777.78 + 222.22 (no 33333.33/2666.66).
+    const result = derivePartialNoteLinesViaKernel(
+      [{ product_id: 11, quantity: 1, unit_price: 36000, tax_amount: 0 }],
+      [relatedLine({ price_unit_quantity: 12 })],
+      [scheme()],
+      909,
+      'credit_note',
+    );
+
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0].base_amount.toString()).toBe('2777.78');
+    expect(result.lines[0].tax_amount.toString()).toBe('222.22');
+    expect(result.lines[0].total_amount.toString()).toBe('3000');
   });
 });

@@ -578,6 +578,47 @@ export function judgeDraftLineSnapshot(
   if (kernel.invalid_inputs.length > 0) {
     return { kind: 'invalid_line_input', invalid_inputs: kernel.invalid_inputs };
   }
+  // F-076: carve-outs que el motor exime del kernel (`!omit_tax_total &&
+  // !is_contrato_line && !has_fixed_base`, calculator §975). `aiu_component`
+  // (incluido 'contrato') ya salió arriba; `omit_tax_total` en no-AIU siempre
+  // es falso. Queda la base fija: su cuota NO deriva de la base de la línea
+  // sino de una base anclada, así que juzgarla por cierre del kernel es falso
+  // bloqueo. Detección sin reimplementar AIU: si alguna cuota inclusiva del
+  // snapshot es inconsistente con trunc(base_línea × r) pero consistente con
+  // OTRA base a >½¢ de distancia, la línea es esculpida ⇒ skip. Las líneas
+  // normales (pre y post-fix) siempre cumplen cuota == trunc(base_línea × r)
+  // y jamás se saltean; la basura ya salió como invalid arriba.
+  const snapshot_base_for_carve = toDecimal(item?.total_amount ?? 0).minus(
+    toDecimal(item?.tax_amount ?? 0),
+  );
+  // `rates` corre 1:1 con `line_taxes` (construido arriba): la fracción sale
+  // de la base declarada (F-067), nunca del crudo. Sin monto en la fila NO
+  // hay evidencia de esculpido (las filas reales de `invoice_taxes` sí traen
+  // `tax_amount`); con UNA sola tasa, el total del item es la cuota de esa
+  // fila y sirve de fallback.
+  const looks_carved = line_taxes.some((tax, index) => {
+    const mapping = rates[index] as unknown as { rate?: unknown; rate_basis?: unknown };
+    const raw_rate = Number(mapping?.rate ?? 0);
+    if (!Number.isFinite(raw_rate) || raw_rate <= 0) return false;
+    const basis = String(mapping?.rate_basis ?? 'percent');
+    const fraction =
+      basis === 'per_mil' ? raw_rate / 1000 : basis === 'fraction' ? raw_rate : raw_rate / 100;
+    if (!(fraction > 0)) return false;
+    const row_quota =
+      tax?.tax_amount ??
+      (line_taxes.length === 1 ? item?.tax_amount : undefined);
+    if (row_quota == null) return false;
+    const snapshot_quota = toDecimal(row_quota);
+    const trunc_of_line = snapshot_base_for_carve
+      .times(fraction)
+      .times(100)
+      .floor()
+      .dividedBy(100);
+    if (snapshot_quota.equals(trunc_of_line)) return false;
+    const implied_base = snapshot_quota.dividedBy(fraction);
+    return implied_base.minus(snapshot_base_for_carve).abs().greaterThan(0.005);
+  });
+  if (looks_carved) return { kind: 'skip' };
   if (!kernel.closed_exactly) {
     return {
       kind: 'unclosed_residual',

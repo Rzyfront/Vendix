@@ -125,5 +125,26 @@ describe('invoice-flow · puerta aritmética del borrador (B.1)', () => {
         ]).kind,
       ).toBe('skip');
     });
+
+    it('base fija esculpida (cuota de otra base) ⇒ skip, no falso bloqueo (F-076)', () => {
+      // Cuota 38 = trunc(200 × 0.19) anclada a base 200, no a la línea (962):
+      // el motor la exime del kernel y el gate debe esculpirla también.
+      const judgment = judgeDraftLineSnapshot(
+        line({ unit_price: 1000, tax_amount: 38, total_amount: 1000 }),
+        [taxRow({ tax_rate: 19, tax_type: 'iva', tax_amount: 38 })],
+      );
+      expect(judgment.kind).toBe('skip');
+    });
+
+    it('línea normal con cuota consistente jamás se saltea (F-076)', () => {
+      // Post-fix y pre-fix pasan el detector esculpido: su cuota SÍ deriva
+      // de la base de la línea (trunc 222.22 en ambos).
+      expect(judgeDraftLineSnapshot(line(), [taxRow()]).kind).toBe('ok');
+      const pre = judgeDraftLineSnapshot(
+        line({ tax_amount: 222.22, total_amount: 2999.99 }),
+        [taxRow()],
+      );
+      expect(pre.kind).toBe('pre_fix_residual');
+    });
   });
 });

@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import {
   INCLUSIVE_SOLVER_MAX_STEPS,
+  absorbInclusiveLine,
   coerceInclusiveStrict,
   resolveInclusiveClearing,
   toFraction,
@@ -369,6 +370,76 @@ describe('A.2 — paridad espejo-motor (espejo)', () => {
       expect(truncMoney(100.005)).toBe(100);
       expect(truncMoney(15.969)).toBe(15.96);
       expect(truncMoney(-15.969)).toBe(-15.96);
+    });
+  });
+
+  describe('paridad entre solvers + default explícito (F-067/F-075/F-077/F-078)', () => {
+    const absorb = (gross: number, rate: number, basis: 'percent' | 'per_mil' | 'fraction') =>
+      absorbInclusiveLine({
+        gross,
+        quantity: 1,
+        unit_price: gross,
+        discount_amount: 0,
+        rates: [{ rate, rate_basis: basis, tax_type: 'iva', is_inclusive: true }],
+      });
+
+    it('fracción explícita: ambos solvers cierran idéntico ($3.000/8%)', () => {
+      const a = absorb(3000, 0.08, 'fraction');
+      const m = resolveLineTotals(3000, [{ rate: 0.08, is_inclusive: true }]);
+      expect(a.base.toNumber()).toBe(2777.78);
+      expect(a.base.toNumber()).toBe(m.base);
+      expect(a.closed_total.toNumber()).toBe(m.total);
+      expect(a.unclosed_residual_cents).toBe(m.unclosed_residual_cents ?? 0);
+    });
+
+    it('percent explícito: ambos solvers cierran idéntico ($3.000/8%)', () => {
+      const a = absorb(3000, 8, 'percent');
+      const m = resolveLineTotals(3000, [{ rate: 8, is_inclusive: true, rate_basis: 'percent' }]);
+      expect(a.base.toNumber()).toBe(2777.78);
+      expect(a.base.toNumber()).toBe(m.base);
+      expect(a.closed_total.toNumber()).toBe(m.total);
+    });
+
+    it('por mil explícito: ambos solvers cierran idéntico ($1M/9.66‰)', () => {
+      const a = absorb(1000000, 9.66, 'per_mil');
+      const m = resolveLineTotals(1000000, [{ rate: 9.66, is_inclusive: true, rate_basis: 'per_mil' }]);
+      expect(a.base.toNumber()).toBe(990432.43);
+      expect(a.base.toNumber()).toBe(m.base);
+      expect(a.closed_total.toNumber()).toBe(m.total);
+    });
+
+    it('polvo float en el bruto: ambos recuperan 59.97 (half-up único)', () => {
+      const a = absorb(59.96999999999999, 0.08, 'fraction');
+      const m = resolveLineTotals(59.96999999999999, [{ rate: 0.08, is_inclusive: true }]);
+      expect(a.base.toNumber()).toBe(55.53);
+      expect(m.base).toBe(55.53);
+      expect(a.closed_total.toNumber()).toBe(59.97);
+      expect(m.total).toBe(59.97);
+    });
+
+    it('tasa 8 sin base: absorb entiende percent, el espejo REPORTA ambigüedad', () => {
+      const a = absorb(3000, 8, undefined as never);
+      expect(a.base.toNumber()).toBe(2777.78);
+      expect(a.invalid_inputs).toEqual([]);
+      const m = resolveLineTotals(3000, [{ rate: 8, is_inclusive: true }]);
+      // Camino de catálogo: 8 = 800% con reporte (bifurcación 100x imposible
+      // en silencio, F-067). Los totales fuerzan fracción (legacy).
+      expect(m.invalid_inputs).toContain('rates[0].rate:ambiguous_unit:8');
+      expect(m.base).toBe(333.33);
+    });
+
+    it('base explícita desconocida: espejo inválido + cuota 0 (fail-closed)', () => {
+      const m = resolveLineTotals(3000, [
+        { rate: 0.08, is_inclusive: true, rate_basis: 'fortnight' as never },
+      ]);
+      expect(m.invalid_inputs.length).toBeGreaterThan(0);
+      expect(m.taxes[0].amount).toBe(0);
+    });
+
+    it('tasa negativa: espejo inválido + cuota 0 (fail-closed)', () => {
+      const m = resolveLineTotals(3000, [{ rate: -0.08, is_inclusive: true }]);
+      expect(m.invalid_inputs.length).toBeGreaterThan(0);
+      expect(m.taxes[0].amount).toBe(0);
     });
   });
 });

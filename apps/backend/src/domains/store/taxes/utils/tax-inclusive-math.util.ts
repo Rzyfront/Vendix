@@ -54,8 +54,10 @@ export interface TaxRateForResolution {
   /**
    * Unidad de `rate`. Ausente ⇒ `fraction` (0.19 = 19%, igual que
    * `tax_rates.rate` y `calculateProductTaxes`). `percent` (19 ⇒ 0.19) y
-   * `per_mil`/`per-mil` (9.66 ⇒ 0.00966) se normalizan con el `toFraction`
-   * del kernel; basis desconocida ⇒ inválido + fracción 0.
+   * `per_mil`/`per-mil` (9.66 ⇒ 0.00966) se normalizan con
+   * `absorbRateToFraction` (F-067, UNA sola normalización en la hoja);
+   * basis desconocida ⇒ inválido + cuota 0; sin base y valor > 1 ⇒
+   * `rate:ambiguous_unit` reportado (bifurcación 100x imposible en silencio).
    */
   rate_basis?: InclusiveRateBasis;
 }

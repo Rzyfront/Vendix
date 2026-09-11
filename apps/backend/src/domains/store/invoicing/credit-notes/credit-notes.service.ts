@@ -556,6 +556,10 @@ export function derivePartialNoteLinesViaKernel(
     product_id: number | null;
     product_variant_id: number | null;
     is_inclusive: boolean | null;
+    // N1/N3 (round 2): la fila real trae más columnas; el kernel sólo lee
+    // estas dos para exención por gemela y divisor de presentación.
+    tax_amount?: Prisma.Decimal | number | null;
+    price_unit_quantity?: Prisma.Decimal | number | null;
   }>,
   invoice_taxes: Array<{
     tax_rate_id: number | null;
@@ -589,6 +593,40 @@ export function derivePartialNoteLinesViaKernel(
       (acc, i) => acc.plus(new Prisma.Decimal(i.tax_amount || 0)),
       new Prisma.Decimal(0),
     );
+    // N2 (round 2): factura sin impuestos + nota que no reclama ninguno ⇒
+    // camino cero preservado (la regresión funcional: antes no lanzaba).
+    if (invoice_taxes.length === 0 && claimed.equals(0)) {
+      const zero_lines = items.map((item) => {
+        const base = new Prisma.Decimal(item.quantity)
+          .times(new Prisma.Decimal(item.unit_price))
+          .minus(new Prisma.Decimal(item.discount_amount || 0));
+        return {
+          base_amount: base,
+          tax_amount: new Prisma.Decimal(0),
+          total_amount: base,
+          is_inclusive: false,
+        };
+      });
+      return {
+        taxes: [],
+        lines: zero_lines,
+        totals: {
+          subtotal: zero_lines.reduce(
+            (acc, line) => acc.plus(line.base_amount),
+            new Prisma.Decimal(0),
+          ),
+          discount: items.reduce(
+            (acc, i) => acc.plus(new Prisma.Decimal(i.discount_amount || 0)),
+            new Prisma.Decimal(0),
+          ),
+          tax: new Prisma.Decimal(0),
+          total: zero_lines.reduce(
+            (acc, line) => acc.plus(line.total_amount),
+            new Prisma.Decimal(0),
+          ),
+        },
+      };
+    }
     throw new VendixHttpException(
       ErrorCodes.INVOICING_CALC_001,
       invoice_taxes.length === 0
@@ -613,11 +651,33 @@ export function derivePartialNoteLinesViaKernel(
 
   const single_related =
     related_items.length === 1 ? related_items[0] : undefined;
+  const match_related = (item: {
+    product_id?: number | null;
+    product_variant_id?: number | null;
+  }): (typeof related_items)[number] | undefined =>
+    related_items.find(
+      (rel) =>
+        (rel.product_id ?? null) === (item.product_id ?? null) &&
+        (rel.product_variant_id ?? null) ===
+          (item.product_variant_id ?? null),
+    ) ?? single_related;
   const lines: DerivedPartialNoteLine[] = items.map((item, index) => {
     const quantity = new Prisma.Decimal(item.quantity);
     const unit_price = new Prisma.Decimal(item.unit_price);
     const discount = new Prisma.Decimal(item.discount_amount || 0);
-    const gross = quantity.times(unit_price).minus(discount);
+    const match = match_related(item);
+    // N3 (round 2): el divisor sale de la línea gemela de la factura (el DTO
+    // no lo trae); sin gemela ⇒ 1. La escala de catálogo va ANTES del despeje
+    // (F-037) también en el carril de notas.
+    const divisor_raw = Number(
+      (match as { price_unit_quantity?: unknown } | undefined)
+        ?.price_unit_quantity ?? 1,
+    );
+    const divisor =
+      Number.isFinite(divisor_raw) && divisor_raw >= 1
+        ? Math.floor(divisor_raw)
+        : 1;
+    const gross = quantity.times(unit_price).dividedBy(divisor).minus(discount);
 
     // Herencia de inclusividad del motor: flag de línea ⇒ primer impuesto
     // del DTO ⇒ línea de la factura (misma pareja, o la única) ⇒ adicional.
@@ -627,14 +687,30 @@ export function derivePartialNoteLinesViaKernel(
     else if (item.taxes?.[0]?.is_inclusive === true) is_inclusive = true;
     else if (item.taxes?.[0]?.is_inclusive === false) is_inclusive = false;
     if (is_inclusive === undefined) {
-      const match =
-        related_items.find(
-          (rel) =>
-            (rel.product_id ?? null) === (item.product_id ?? null) &&
-            (rel.product_variant_id ?? null) ===
-              (item.product_variant_id ?? null),
-        ) ?? single_related;
       is_inclusive = match?.is_inclusive === true;
+    }
+
+    // N1 (round 2): línea exenta (su gemela de factura no tiene impuesto y
+    // la nota no reclama ninguno, sin desglose explícito): el kernel NO
+    // inventa cuota; se preserva el cero como antes del fix.
+    const matched_tax_raw = (match as { tax_amount?: unknown } | undefined)
+      ?.tax_amount;
+    const matched_tax =
+      matched_tax_raw == null ? NaN : Number(matched_tax_raw);
+    const claimed_tax_early = Number(item.tax_amount || 0);
+    if (
+      match != null &&
+      Number.isFinite(matched_tax) &&
+      matched_tax === 0 &&
+      claimed_tax_early === 0 &&
+      !(item.taxes?.length)
+    ) {
+      return {
+        base_amount: gross,
+        tax_amount: new Prisma.Decimal(0),
+        total_amount: gross,
+        is_inclusive: false,
+      };
     }
 
     const kernel = absorbInclusiveLine({
@@ -642,6 +718,7 @@ export function derivePartialNoteLinesViaKernel(
       quantity: item.quantity,
       unit_price: item.unit_price,
       discount_amount: item.discount_amount ?? 0,
+      price_unit_quantity: divisor,
       rates: [
         {
           rate: scheme_rate,

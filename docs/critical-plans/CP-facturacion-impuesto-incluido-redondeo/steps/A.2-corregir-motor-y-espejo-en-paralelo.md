@@ -64,4 +64,8 @@ skills: [parallel, agent-teams, vendix-calculated-pricing, vendix-tax-typing, ve
   - [x] F-062 — Sanitizadores borran evidencia fail-closed (major)
   - [x] F-064 — Centavo absorbido inauditable por tolerancia (major)
   - [x] F-065 — Warn por linea sin agregacion documental (minor)
+  - [ ] F-067 — Doble normalizacion en la hoja: absorb vs mirror (major)
+  - [ ] F-075 — Bruto trunc vs half-up entre solvers (major)
+  - [ ] F-077 — WA y main difieren en split 1c (major)
+  - [ ] F-078 — Default de unidad y negativo divididos (minor)
 - **Status:** done · orquestador · 2026-09-11

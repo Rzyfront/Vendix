@@ -23,11 +23,12 @@ describe('tax-breakdown · scaleBreakdownToTotal exacto (B.1/F-022)', () => {
       10,
     );
     // 10/3 = 3.333…: truncado daría 3.33×3 = 9.99; el resto mayor pone 3.34
-    // en la primera parte (desempate por orden).
+    // en 'ica' (desempate por CONTENIDO, N4 round 2: mismo multiconjunto ⇒
+    // mismo reparto sin importar el orden de entrada).
     expect(scaled).toEqual([
-      { tax_type: 'iva', tax_amount: 3.34 },
+      { tax_type: 'iva', tax_amount: 3.33 },
       { tax_type: 'inc', tax_amount: 3.33 },
-      { tax_type: 'ica', tax_amount: 3.33 },
+      { tax_type: 'ica', tax_amount: 3.34 },
     ]);
     expect(sum(scaled)).toBe(10);
   });
@@ -76,5 +77,33 @@ describe('tax-breakdown · scaleBreakdownToTotal exacto (B.1/F-022)', () => {
     expect(
       scaleBreakdownToTotal([{ tax_type: 'iva', tax_amount: 0 }], 10),
     ).toEqual([]);
+  });
+
+  it('desempate por contenido: el mismo multiconjunto reparte idéntico (N4)', () => {
+    // Fracciones empatadas (10.005 cada una): el centavo va a 'inc' por tipo,
+    // sin importar el orden de entrada ⇒ misma cuenta PUC siempre.
+    const a = scaleBreakdownToTotal(
+      [
+        { tax_type: 'iva', tax_amount: 10 },
+        { tax_type: 'inc', tax_amount: 10 },
+      ],
+      20.01,
+    );
+    const b = scaleBreakdownToTotal(
+      [
+        { tax_type: 'inc', tax_amount: 10 },
+        { tax_type: 'iva', tax_amount: 10 },
+      ],
+      20.01,
+    );
+    expect(a).toEqual([
+      { tax_type: 'iva', tax_amount: 10 },
+      { tax_type: 'inc', tax_amount: 10.01 },
+    ]);
+    expect(b).toEqual([
+      { tax_type: 'inc', tax_amount: 10.01 },
+      { tax_type: 'iva', tax_amount: 10 },
+    ]);
+    expect(sum(a)).toBe(20.01);
   });
 });
