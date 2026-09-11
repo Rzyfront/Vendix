@@ -1695,9 +1695,11 @@ export class PosCheckoutShellComponent {
       this.addressValid.set(
         !!(seeded.address_line1 && seeded.city && seeded.phone_number),
       );
-    } else if (this.requiresAddress()) {
-      // CP-pos-customer-stale (F-005) — reemplazo A→B sin dirección guardada:
-      // no heredar la dirección/gate de A; el sub-paso Dirección exige captura.
+    } else {
+      // CP-pos-customer-stale (F-005/F-009) — cualquier cambio de identidad
+      // descarta el estado de dirección previo: en delivery sin primaria el
+      // sub-paso exige captura fresca, y en pickup evita que un flip posterior
+      // a delivery reutilice la dirección de A para B.
       this.capturedAddress.set(null);
       this.addressValid.set(false);
     }
@@ -1711,8 +1713,12 @@ export class PosCheckoutShellComponent {
   /** "Quitar cliente / venta anónima" desde el selector inline. */
   onCustomerCleared(): void {
     this.toggleAnonymousSale(true);
-    // CP-pos-customer-stale (F-006) — la etiqueta no basta: el padre es dueño
-    // del carro y debe desvincular al cliente para no facturarle a A.
+    // CP-pos-customer-stale (F-006/F-009) — la etiqueta no basta: el padre es
+    // dueño del carro y debe desvincular al cliente; la dirección capturada de
+    // A tampoco sobrevive a la venta anónima.
+    this.capturedAddressId.set(null);
+    this.capturedAddress.set(null);
+    this.addressValid.set(false);
     this.customerCleared.emit();
   }
 
