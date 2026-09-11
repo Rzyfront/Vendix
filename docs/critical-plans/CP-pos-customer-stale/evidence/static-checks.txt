@@ -1,0 +1,16 @@
+## TSC util (workspace binary, sin installs)
+TSC-UTIL PASS
+
+## Zoneless audit (fallas preexistentes, ninguna en archivos del fix)
+❌ EventEmitter: 2 archivos
+✅ NgZone residual: 0
+✅ markForCheck/detectChanges: 0
+❌ *ngIf/*ngFor/*ngSwitch: 1 templates
+✅ BehaviorSubject: 0
+✅ toSignal con initialValue: 0
+❌ subscribe sin gestión: 19 archivos
+✅ zone.js fuera de build/serve/server
+⚠️  take(1) en 9 archivos (informativo — revisar; exentos: auth.interceptor, account-mappings)
+✅ UI state plano en archivos cambiados: 0
+
+❌ Zoneless audit FAILED

@@ -31,6 +31,7 @@ import {
 } from '../../../../../../shared/components';
 import { computeDocumentFormatHint } from '../../utils/document-format-hint.util';
 import { computePhoneFormatHint } from '../../utils/phone-format-hint.util';
+import { shouldShortCircuitResolve } from '../../utils/customer-resolve-guard.util';
 import { PosCustomerService } from '../../services/pos-customer.service';
 import {
   CreatePosCustomerRequest,
@@ -378,17 +379,38 @@ export class PosCustomerSelectorComponent {
    * and emitted through `customerSelected`; `false` when the cashier has
    * not provided enough data to resolve (no email AND no document).
    *
-   * - If a customer was already selected on the cart, this returns `true`
-   *   without re-running the lookup — the cashier's edits to the form are
-   *   ignored, matching the previous "no-op when already chosen" semantics.
-   * - Otherwise, it calls `resolveCustomer` (find-or-create on the backend)
-   *   and emits the resulting customer via `customerSelected`.
+   * - If a customer was already selected AND the form carries no
+   *   identifier (no email, no document, no name), this returns `true`
+   *   without re-running the lookup — the untouched wizard keeps its
+   *   selection ("short-circuit on empty form", see ADR-01).
+   * - If the cashier filled any identifier, it calls `resolveCustomer`
+   *   (find-or-create on the backend) and emits the resulting customer
+   *   via `customerSelected` — "lo diligenciado manda", so a typed B
+   *   always replaces a previously selected A (CP-pos-customer-stale).
    *
    * The Observable completes synchronously in both paths so the host can
    * `await` (or subscribe-and-flag) without juggling timers.
    */
   resolveIfNeeded(): Observable<boolean> {
-    if (this.selectedCustomer()) {
+    // CP-pos-customer-stale — read the raw identifiers the same way the
+    // request builder below does (value.email/documentIdentity/firstName).
+    // Imperative read at click time, not inside a computed(), so no
+    // signal-bridging is needed here.
+    const formSnapshot = this.form.value as {
+      email?: string | null;
+      documentIdentity?: DocumentIdentityValue | null;
+      firstName?: string | null;
+    };
+    if (
+      shouldShortCircuitResolve(!!this.selectedCustomer(), {
+        hasEmail: !!formSnapshot.email?.trim(),
+        hasDocument: !!(
+          formSnapshot.documentIdentity?.documentType &&
+          formSnapshot.documentIdentity?.documentNumber?.trim()
+        ),
+        hasName: !!formSnapshot.firstName?.trim(),
+      })
+    ) {
       return of(true);
     }
     if (!this.canResolve()) {
