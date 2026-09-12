@@ -52,9 +52,11 @@ import * as OverviewSelectors from '../state/overview-summary.selectors';
 import { EChartsOption } from 'echarts';
 import { formatChartPeriod, getDefaultStartDate, getDefaultEndDate } from '../../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../../shared/utils/date-range-params.util';
+import { AnalyticsService } from '../../../services/analytics.service';
+import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 
 @Component({
-  selector: 'app-overview-summary',
+  selector: 'vendix-overview-summary',
   standalone: true,
   imports: [
     CommonModule,
@@ -78,6 +80,8 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   private currencyService = inject(CurrencyFormatService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly analyticsService = inject(AnalyticsService);
+  private readonly toastService = inject(ToastService);
 // Observables from store
   summary$: Observable<OverviewSummary | null> = this.store.select(
     OverviewSelectors.selectSummary,
@@ -113,6 +117,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   ];
 
   readonly overviewActions: StickyHeaderActionButton[] = [
+    { id: 'refresh', label: 'Actualizar', icon: 'refresh-cw', variant: 'outline' },
     { id: 'view-reports', label: 'Ver Reportes', icon: 'file-text', variant: 'outline' },
   ];
 
@@ -237,10 +242,13 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
 
   /**
    * Actions exposed via the `<app-options-dropdown>` in the card header.
-   * Single action today (Export XLSX); kept as a `DropdownAction[]` computed
-   * so future actions slot in without changing the template.
    */
   dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'refresh',
+      label: 'Actualizar datos',
+      icon: 'refresh-cw',
+    },
     {
       action: 'export-xlsx',
       label: 'Exportar XLSX',
@@ -249,7 +257,9 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
   ]);
 
   onActionsDropdownClick(action: string): void {
-    if (action === 'export-xlsx') {
+    if (action === 'refresh') {
+      this.onHeaderAction('refresh');
+    } else if (action === 'export-xlsx') {
       this.exportReport();
     }
   }
@@ -259,6 +269,13 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
   }
 
   onHeaderAction(actionId: string): void {
+    if (actionId === 'refresh') {
+      this.analyticsService.invalidateCache();
+      this.store.dispatch(OverviewActions.loadOverviewSummary());
+      this.store.dispatch(OverviewActions.loadOverviewTrends());
+      this.toastService.success('Datos de analítica actualizados');
+      return;
+    }
     if (actionId === 'view-reports') {
       this.goToReports();
     }

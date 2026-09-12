@@ -20,11 +20,18 @@ const lastRangePerReport = new Map<string, string>();
 export class ReportsDataService {
   private http = inject(HttpClient);
   private adapter = inject(ReportDataAdapterService);
-  /** High TTL for heavy analytics queries: 5 minutes (QUI-544). */
-  private readonly CACHE_TTL = 300_000;
+  /** Cache TTL de 30s para amortiguar navegación activa y paginación rápida sin estancar datos tras mutaciones. */
+  private readonly CACHE_TTL = 30_000;
 
   private withCache<T>(key: string, factory: () => Observable<T>): Observable<T> {
     const now = Date.now();
+
+    for (const [k, v] of reportsCache.entries()) {
+      if (now - v.lastFetch >= this.CACHE_TTL) {
+        reportsCache.delete(k);
+      }
+    }
+
     const cached = reportsCache.get(key);
     if (cached && now - cached.lastFetch < this.CACHE_TTL) {
       return cached.observable as Observable<T>;

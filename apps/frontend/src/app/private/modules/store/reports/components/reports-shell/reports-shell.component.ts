@@ -15,6 +15,7 @@ import { getDefaultDateRange } from '../../state/reports.state';
 import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { ReportsDataService } from '../../services/reports-data.service';
 import {
   StickyHeaderComponent,
   StickyHeaderTab,
@@ -35,6 +36,7 @@ export class ReportsShellComponent {
   private readonly authFacade = inject(AuthFacade);
   private readonly toast = inject(ToastService);
   private readonly dateRangeSync = inject(DateRangeSyncService);
+  private readonly reportsDataService = inject(ReportsDataService);
 
   private readonly dateRange = toSignal(this.store.select(selectDateRange), { initialValue: getDefaultDateRange() });
 
@@ -78,6 +80,9 @@ export class ReportsShellComponent {
     'payroll-runs': '/admin/payroll/runs',
     'payroll-settlements': '/admin/payroll/settlements',
     'payroll-advances': '/admin/payroll/advances',
+    // Financial / Expenses / Cash
+    'expenses-summary': '/admin/expenses',
+    'cash-sessions': '/admin/cash-registers',
   };
 
   /** Reports that have a corresponding module view route. */
@@ -107,19 +112,62 @@ export class ReportsShellComponent {
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
     const categoryId = this.categoryId();
     const config = categoryId ? this.categoryActionConfig[categoryId] : undefined;
+    const reportId = this.extractReportId(this.router.url);
 
-    if (config?.moduleKey && !this.authFacade.isModuleVisible(config.moduleKey)) {
-      return [];
-    }
-
-    return [
+    const actions: StickyHeaderActionButton[] = [
       {
-        id: config?.id || 'view-analytics',
-        label: config?.label || 'Ver Analitica',
-        icon: config?.icon || 'bar-chart-3',
+        id: 'refresh',
+        label: 'Actualizar',
+        icon: 'refresh-cw',
         variant: 'outline',
       },
     ];
+
+    if (config?.moduleKey && !this.authFacade.isModuleVisible(config.moduleKey)) {
+      return actions;
+    }
+
+    if (reportId === 'expenses-summary') {
+      if (this.authFacade.isModuleVisible('expenses')) {
+        actions.push({
+          id: 'view-module',
+          label: 'Ver Gastos',
+          icon: 'receipt',
+          variant: 'outline',
+        });
+      }
+      return actions;
+    }
+
+    if (reportId === 'cash-sessions') {
+      if (this.authFacade.isModuleVisible('cash-registers')) {
+        actions.push({
+          id: 'view-module',
+          label: 'Ver Cajas',
+          icon: 'calculator',
+          variant: 'outline',
+        });
+      }
+      return actions;
+    }
+
+    if (config) {
+      actions.push({
+        id: config.id,
+        label: config.label,
+        icon: config.icon,
+        variant: 'outline',
+      });
+    } else {
+      actions.push({
+        id: 'view-analytics',
+        label: 'Ver Analitica',
+        icon: 'bar-chart-3',
+        variant: 'outline',
+      });
+    }
+
+    return actions;
   });
 
   private readonly reportToAnalyticsRoute: Record<string, string> = {
@@ -160,6 +208,14 @@ export class ReportsShellComponent {
   };
 
   onActionClick(actionId: string): void {
+    if (actionId === 'refresh') {
+      const reportId = this.extractReportId(this.router.url);
+      this.reportsDataService.clearCache(reportId || undefined);
+      this.store.dispatch(ReportsActions.loadReportData());
+      this.toast.info('Datos del reporte actualizados');
+      return;
+    }
+
     if (actionId === 'view-module') {
       const reportId = this.extractReportId(this.router.url);
       const moduleRoute = reportId ? this.reportToModuleRoute[reportId] : undefined;
@@ -171,6 +227,7 @@ export class ReportsShellComponent {
         const fallbacks: Record<string, string> = {
           accounting: '/admin/accounting',
           payroll: '/admin/payroll',
+          financial: '/admin/expenses',
         };
         this.router.navigateByUrl(fallbacks[categoryId || ''] || '/admin');
       }
@@ -189,8 +246,9 @@ export class ReportsShellComponent {
   }
 
   private extractReportId(url: string): string | null {
-    // URL pattern: /admin/reports/{category}/{report-slug}
-    const match = url.match(/\/admin\/reports\/[^/]+\/(.+)/);
+    // URL pattern: /admin/reports/{category}/{report-slug} (stripping query parameters)
+    const cleanUrl = url.split('?')[0];
+    const match = cleanUrl.match(/\/admin\/reports\/[^/]+\/(.+)/);
     return match ? match[1] : null;
   }
 }
