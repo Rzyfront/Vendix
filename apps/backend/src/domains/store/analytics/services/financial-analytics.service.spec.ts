@@ -12,7 +12,7 @@ type MockStorePrismaService = {
   orders: { aggregate: jest.Mock; findFirst: jest.Mock };
   order_items: { findMany: jest.Mock };
   refunds: { aggregate: jest.Mock };
-  expenses: { aggregate: jest.Mock };
+  expenses: { aggregate: jest.Mock; findMany: jest.Mock };
   cash_register_sessions: { findMany: jest.Mock };
   store_settings: { findFirst: jest.Mock };
   // QUI-630: getTaxSummary moved to $queryRaw. Each call returns the rows the
@@ -45,7 +45,7 @@ describe('FinancialAnalyticsService', () => {
       orders: { aggregate: jest.fn(), findFirst: jest.fn() },
       order_items: { findMany: jest.fn() },
       refunds: { aggregate: jest.fn() },
-      expenses: { aggregate: jest.fn() },
+      expenses: { aggregate: jest.fn(), findMany: jest.fn() },
       cash_register_sessions: { findMany: jest.fn() },
       store_settings: { findFirst: jest.fn() },
       $queryRaw: jest.fn(),
@@ -1032,6 +1032,110 @@ describe('FinancialAnalyticsService', () => {
       // Nullable string columns are null (never ''), single-typed.
       expect(row.closed_by_name).toBeNull();
       expect(row.register_name).toBe('Caja 1');
+    });
+  });
+
+  describe('getExpensesSummary & getExpensesSummaryForExport (QUI-544)', () => {
+    const DATE_OLD = new Date('2026-07-01T10:00:00.000Z');
+    const DATE_NEW = new Date('2026-07-08T15:30:00.000Z');
+    const DATE_OTHER = new Date('2026-07-05T12:00:00.000Z');
+
+    const MOCK_EXPENSES = [
+      {
+        amount: 150.5,
+        expense_date: DATE_OLD,
+        category_id: 1,
+        expense_categories: { name: 'Servicios Públicos' },
+      },
+      {
+        amount: 350.25,
+        expense_date: DATE_NEW,
+        category_id: 1,
+        expense_categories: { name: 'Servicios Públicos' },
+      },
+      {
+        amount: 80.0,
+        expense_date: DATE_OTHER,
+        category_id: 2,
+        expense_categories: { name: 'Papelería' },
+      },
+      {
+        amount: 45.0,
+        expense_date: DATE_OTHER,
+        category_id: null,
+        expense_categories: null,
+      },
+    ];
+
+    it('groups recognized expenses by category, calculating sums, averages and latest dates', async () => {
+      prisma.expenses.findMany.mockResolvedValue(MOCK_EXPENSES);
+
+      const result = await service.getExpensesSummary(QUERY as any);
+
+      // Verify Prisma call parameters
+      expect(prisma.expenses.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            state: { in: ['approved', 'paid'] },
+            expense_date: expect.any(Object),
+          }),
+          take: 10000,
+        }),
+      );
+
+      expect(result.total).toBe(3); // 3 categories: Servicios Públicos, Papelería, Sin categoría
+      expect(result.page).toBe(1);
+      expect(result.limit).toBe(10);
+      expect(result.data).toHaveLength(3);
+
+      // Default sort by total_amount desc: Servicios (500.75) > Papelería (80) > Sin categoría (45)
+      const [servicios, papeleria, sinCategoria] = result.data;
+
+      expect(servicios.category_name).toBe('Servicios Públicos');
+      expect(servicios.expense_count).toBe(2);
+      expect(servicios.total_amount).toBe(round2(150.5 + 350.25)); // 500.75
+      expect(servicios.avg_expense).toBe(round2((150.5 + 350.25) / 2)); // 250.38
+      expect(servicios.last_expense_date).toEqual(DATE_NEW);
+
+      expect(papeleria.category_name).toBe('Papelería');
+      expect(papeleria.expense_count).toBe(1);
+      expect(papeleria.total_amount).toBe(80.0);
+      expect(papeleria.avg_expense).toBe(80.0);
+      expect(papeleria.last_expense_date).toEqual(DATE_OTHER);
+
+      expect(sinCategoria.category_name).toBe('Sin categoría');
+      expect(sinCategoria.expense_count).toBe(1);
+      expect(sinCategoria.total_amount).toBe(45.0);
+      expect(sinCategoria.avg_expense).toBe(45.0);
+      expect(sinCategoria.last_expense_date).toEqual(DATE_OTHER);
+    });
+
+    it('supports pagination in getExpensesSummary', async () => {
+      prisma.expenses.findMany.mockResolvedValue(MOCK_EXPENSES);
+
+      const paginatedResult = await service.getExpensesSummary({
+        ...QUERY,
+        page: 2,
+        limit: 1,
+      } as any);
+
+      expect(paginatedResult.total).toBe(3);
+      expect(paginatedResult.page).toBe(2);
+      expect(paginatedResult.limit).toBe(1);
+      expect(paginatedResult.data).toHaveLength(1);
+      expect(paginatedResult.data[0].category_name).toBe('Papelería');
+    });
+
+    it('returns raw unpaginated dataset for getExpensesSummaryForExport', async () => {
+      prisma.expenses.findMany.mockResolvedValue(MOCK_EXPENSES);
+
+      const exportRows = await service.getExpensesSummaryForExport(QUERY as any);
+
+      expect(exportRows).toHaveLength(3);
+      expect(exportRows[0].category_name).toBe('Servicios Públicos');
+      expect(exportRows[0].last_expense_date).toBeInstanceOf(Date);
+      expect(exportRows[0].total_amount).toBe(500.75);
+      expect(typeof exportRows[0].avg_expense).toBe('number');
     });
   });
 });

@@ -377,4 +377,33 @@ describe('SubscriptionFiscalService · createPlatformInvoice · puerta de pre-em
     }
     expect(blockers?.some((b) => b.code === 'CITY_CODE_REQUIRED')).toBe(true);
   });
+
+  it('con dirección y código DANE válido no bloquea por CITY_CODE_REQUIRED y viaja en customer_address', async () => {
+    const { providerData, error } = await runPrevalidation({
+      customer: {
+        ...buildCustomer(),
+        address_line: 'Calle 100 # 15-20',
+        city: 'Medellín',
+        city_code: '05001',
+        department_code: '05',
+      },
+      items: [
+        {
+          description: 'Implementación Vendix',
+          quantity: 1,
+          unit_price: 1000,
+        },
+      ],
+    } as CreatePlatformInvoiceDto);
+
+    // La pre-validación pasó y llegó al centinela de la transacción
+    expect(error).toBe(STOP_AFTER_PREVALIDATION);
+    expect(providerData.customer_address).toEqual({
+      line: 'Calle 100 # 15-20',
+      city: 'Medellín',
+      city_code: '05001',
+      department_code: '05',
+      country_code: 'CO',
+    });
+  });
 });

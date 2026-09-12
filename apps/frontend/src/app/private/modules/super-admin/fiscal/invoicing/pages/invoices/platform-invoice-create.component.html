@@ -237,11 +237,12 @@
                   ></app-input>
                 </div>
                 <div class="space-y-1">
-                  <app-input
-                    label="Ciudad / Municipio"
-                    formControlName="external_city"
-                    placeholder="Bogotá, Medellín, Cali..."
-                  ></app-input>
+                  <label class="text-xs font-medium text-text-secondary">Municipio (DANE)</label>
+                  <app-dian-municipality-select
+                    formControlName="external_city_code"
+                    placeholder="Busca por nombre o código DANE..."
+                    (municipalitySelected)="onCustomerMunicipality($event)"
+                  />
                 </div>
                 <div class="space-y-1">
                   <label class="text-xs font-medium text-text-secondary">Departamento</label>

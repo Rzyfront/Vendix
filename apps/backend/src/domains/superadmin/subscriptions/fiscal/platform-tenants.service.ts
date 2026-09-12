@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { resolveDianMunicipality } from '../../../store/invoicing/providers/dian-direct/constants/dian-geography';
 
 /**
  * CP-platform-fiscal-invoicing-mvp · Phase A.3
@@ -324,17 +325,25 @@ export class PlatformTenantsService {
   }
 
   private addressToTenant(addr: any): TenantAddress {
+    const resolved = resolveDianMunicipality({
+      city_code: addr.municipality_code ?? null,
+      city_name: addr.city ?? null,
+      department_code: addr.state_province ?? null,
+    });
     return {
-      // addresses columns son: address_line1, address_line2, city, state_province, country_code.
+      // addresses columns son: address_line1, address_line2, city, state_province, country_code, municipality_code.
       // Concatenamos line1+line2 para formar el campo `line` que consume el form.
       line:
         [addr.address_line1, addr.address_line2].filter(Boolean).join(' ').trim() ||
         null,
-      city: addr.city ?? null,
-      // state_province guarda el nombre del depto (no codigo DANE). El mapeo
-      // DANE->nombre vive en `country-divisions`. Para MVP enviamos el
-      // nombre tal cual — el frontend puede pedir lookup si lo necesita.
-      department_code: addr.state_province ?? null,
+      city: resolved?.name ?? addr.city ?? null,
+      city_code: resolved?.code ?? addr.municipality_code ?? null,
+      // Se prefiere el código DIVIPOLA resuelto de departamento; si no se resuelve,
+      // fallback a state_province o a los 2 primeros dígitos del código municipal.
+      department_code:
+        resolved?.department_code ??
+        addr.state_province ??
+        (addr.municipality_code ? String(addr.municipality_code).slice(0, 2) : null),
     };
   }
 
@@ -350,7 +359,7 @@ export class PlatformTenantsService {
       store.tax_id &&
       store.tax_id_dv &&
         billingAddress &&
-        billingAddress.line1 && // checkear contra la direccion real
+        (billingAddress.address_line1 || billingAddress.line1) &&
         billingAddress.city &&
         billingAddress.department_code,
     );
@@ -366,7 +375,7 @@ export class PlatformTenantsService {
         org.tax_regime &&
         (org.fiscal_responsibilities ?? []).length > 0 &&
         billingAddress &&
-        billingAddress.line1 &&
+        (billingAddress.address_line1 || billingAddress.line1) &&
         billingAddress.city &&
         billingAddress.department_code,
     );
@@ -379,6 +388,7 @@ export interface TenantAddress {
   line: string | null;
   city: string | null;
   department_code: string | null;
+  city_code?: string | null;
 }
 
 export interface TenantSearchResult {

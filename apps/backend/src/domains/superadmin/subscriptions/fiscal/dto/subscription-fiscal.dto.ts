@@ -451,6 +451,11 @@ export class PlatformInvoiceCustomerDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(10)
+  city_code?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(2)
   department_code?: string;
 
