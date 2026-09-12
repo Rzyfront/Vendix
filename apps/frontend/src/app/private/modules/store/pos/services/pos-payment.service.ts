@@ -15,7 +15,10 @@ import {
   PaymentResponse,
   Transaction,
 } from '../models/payment.model';
-import { PosShippingAddress } from '../models/shipping.model';
+import {
+  PosShippingAddress,
+  PosShippingSaleData,
+} from '../models/shipping.model';
 import { PosApiService } from './pos-api.service';
 
 // Re-export types for component usage
@@ -508,14 +511,7 @@ export class PosPaymentService {
    */
   processShippingSale(
     cartState: CartState,
-    shippingData: {
-      shippingMethodId: number;
-      shippingCost: number;
-      deliveryType: string;
-      shippingAddress: PosShippingAddress;
-      deliveryNotes?: string;
-      shippingAddressId?: number | null;
-    },
+    shippingData: PosShippingSaleData,
     paymentRequest: PaymentRequest | null,
     createdBy: string,
     creditConfig?: {
@@ -831,10 +827,20 @@ export class PosPaymentService {
   /**
    * Guardar borrador de orden
    */
+  /**
+   * Guarda el carrito como borrador (`is_draft: true`, sin pago).
+   *
+   * `shipping` es el contexto del wizard de Envío. Sin él, un borrador
+   * guardado DESDE ese wizard nacía como orden de mostrador: método, costo,
+   * dirección y notas de envío se perdían en silencio y la orden quedaba sin
+   * forma de despacharse. Cuando viene, el borrador persiste las mismas claves
+   * que `processShippingSale` y el total incluye el costo del envío.
+   */
   saveDraft(
     cartState: CartState,
     createdBy: string,
     customerAlias?: string,
+    shipping?: PosShippingSaleData | null,
   ): Observable<any> {
     // Drafts are NOT transactional — no cash register session required.
     const user_id = this.storeContextService.getUserId();
@@ -871,12 +877,26 @@ export class PosPaymentService {
       // se perdía al guardar el borrador y reaparecía como `coupon_code = null`.
       coupon_id: cartState.appliedCoupon?.id ?? null,
       coupon_code: cartState.appliedCoupon?.code ?? null,
-      total_amount: Number(cartState.summary.total.toFixed(2)),
+      total_amount: Number(
+        (cartState.summary.total + (shipping?.shippingCost ?? 0)).toFixed(2),
+      ),
       is_draft: true,
       requires_payment: false,
+      // Claves de envío (solo cuando el borrador nace del wizard de Envío).
+      ...(shipping
+        ? {
+            delivery_type: shipping.deliveryType,
+            shipping_method_id: shipping.shippingMethodId,
+            shipping_cost: Number(shipping.shippingCost.toFixed(2)),
+            shipping_address_snapshot: shipping.shippingAddress,
+            ...(shipping.shippingAddressId
+              ? { shipping_address_id: shipping.shippingAddressId }
+              : {}),
+          }
+        : {}),
       ...(register_id ? { register_id } : {}),
       seller_user_id: user_id,
-      internal_notes: cartState.notes || '',
+      internal_notes: shipping?.deliveryNotes || cartState.notes || '',
       update_inventory: false,
     };
 

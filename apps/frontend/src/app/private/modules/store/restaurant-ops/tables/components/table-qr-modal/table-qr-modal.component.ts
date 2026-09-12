@@ -28,8 +28,9 @@ import { TableQrPrintService } from '../../services/table-qr-print.service';
  * por el backend.
  *
  * Patrón zoneless: signals (`signal`/`computed`/`input`/`output`),
- * `@if` en template, sin NgZone/markForCheck. La impresión replica
- * el patrón iframe de `PosTicketService.printHTML`.
+ * `@if` en template, sin NgZone/markForCheck. La impresión NO se
+ * compone aquí: se delega en `TableQrPrintService`, el emisor único
+ * del cartel A4 de marca.
  */
 @Component({
   selector: 'app-table-qr-modal',

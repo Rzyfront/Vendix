@@ -418,7 +418,9 @@ describe('OrderFlowService.reconcileOrderFromDispatch — tabla de derivación',
 describe('OrderFlowService.markKitchenOrderDelivered — restaurant bridge', () => {
   const ORDER_ID = 77;
 
-  const buildService = (order: { state: string } | null) => {
+  const buildService = (
+    order: { state: string; delivery_type?: string } | null,
+  ) => {
     const prismaMock: any = {
       orders: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -470,6 +472,24 @@ describe('OrderFlowService.markKitchenOrderDelivered — restaurant bridge', () 
     expect(result.transitioned).toBe(true);
     expect(result.previousState).toBe('processing');
     expect(result.order?.state).toBe('delivered');
+  });
+
+  it('domicilio: cocina terminada NO entrega la orden — queda en processing para despacho', async () => {
+    const { service, updateSpy } = buildService({
+      state: 'processing',
+      delivery_type: 'home_delivery',
+    });
+
+    const result = await service.markKitchenOrderDelivered(ORDER_ID);
+
+    // Entregar los platos es entregarlos al domiciliario, no al cliente. Si
+    // el puente moviera la orden a `delivered`, el detalle perdería el botón
+    // "Despachar Orden" y `createFromOrder` rechazaría la remisión (exige
+    // `processing`/`pending_payment`).
+    expect(updateSpy).not.toHaveBeenCalled();
+    expect(result.transitioned).toBe(false);
+    expect(result.previousState).toBe('processing');
+    expect(result.order?.state).toBe('processing');
   });
 
   it('idempotencia: orden ya en delivered devuelve la fila sin transicionar', async () => {

@@ -46,6 +46,7 @@ import { CartState } from '../../../models/cart.model';
 import {
   PosShippingMethod,
   PosShippingAddress,
+  PosShippingSaleData,
 } from '../../../models/shipping.model';
 import { PaymentRequest } from '../../../models/payment.model';
 
@@ -403,17 +404,10 @@ export class PosShippingStepComponent {
 
     this.isProcessing.set(true);
 
-    const deliveryType = method.type === 'pickup' ? 'pickup' : 'home_delivery';
+    const deliveryType = this.resolveDeliveryType(method);
 
     const a = this.address();
-    const shippingAddress: PosShippingAddress = {
-      address_line1: a?.address_line1 || '',
-      city: a?.city || '',
-      state_province: a?.state_province || '',
-      country_code: a?.country_code || 'CO',
-      recipient_name: this.customerDisplayName,
-      recipient_phone: cart.customer?.phone || '',
-    };
+    const shippingAddress = this.buildShippingAddress();
 
     let paymentRequest: PaymentRequest | null = null;
     let creditConfig: ShippingCreditConfig | undefined = undefined;
@@ -454,6 +448,43 @@ export class PosShippingStepComponent {
       paymentRequest,
       creditConfig,
     );
+  }
+
+  /** `pickup` retira en tienda; cualquier otro método es envío a domicilio. */
+  private resolveDeliveryType(method: PosShippingMethod): string {
+    return method.type === 'pickup' ? 'pickup' : 'home_delivery';
+  }
+
+  /** Snapshot de dirección que viaja con la orden (venta o borrador). */
+  private buildShippingAddress(): PosShippingAddress {
+    const a = this.address();
+    return {
+      address_line1: a?.address_line1 || '',
+      city: a?.city || '',
+      state_province: a?.state_province || '',
+      country_code: a?.country_code || 'CO',
+      recipient_name: this.customerDisplayName,
+      recipient_phone: this.cartState()?.customer?.phone || '',
+    };
+  }
+
+  /**
+   * Contexto de envío ya capturado en el wizard, para las salidas que NO son
+   * el cobro — hoy "Guardar borrador". Devuelve null mientras no haya método
+   * elegido: sin método no hay envío que persistir, y el borrador debe
+   * guardarse como orden normal en vez de inventar uno.
+   */
+  buildShippingContext(): PosShippingSaleData | null {
+    const method = this.selectedShippingMethod();
+    if (!method) return null;
+    return {
+      shippingMethodId: method.id,
+      shippingCost: this.shippingCost(),
+      deliveryType: this.resolveDeliveryType(method),
+      shippingAddress: this.buildShippingAddress(),
+      deliveryNotes: this.notesControl.value || undefined,
+      shippingAddressId: this.addressId(),
+    };
   }
 
   /**

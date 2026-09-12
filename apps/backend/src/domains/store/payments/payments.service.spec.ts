@@ -1166,6 +1166,13 @@ describe('PaymentsService', () => {
           findMany: jest.fn().mockResolvedValue([]), // existing draft items
           findFirst: jest.fn().mockResolvedValue(null), // KDS candidate scan (line ~3033)
         },
+        // Guard de re-entrada del cierre de mesa: busca un pago ya
+        // `succeeded` sobre la misma orden antes de re-cobrar. Sin este mock
+        // el arrange muere con "Cannot read properties of undefined" antes de
+        // llegar al contrato que el test bloquea.
+        payments: {
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
         orders: {
           update: jest.fn().mockImplementation((args: any) =>
             Promise.resolve({
@@ -1223,6 +1230,13 @@ describe('PaymentsService', () => {
       // makes the fire branch a no-op so execution reaches the close-out block.
       (kitchenFire as any).prepareFireContext = jest.fn().mockResolvedValue(null);
       (kitchenFire as any).fireOrderItemsInTx = jest.fn().mockResolvedValue(null);
+
+      // Carril D/D1 marca la sesión como pagada antes del cierre; el mock del
+      // módulo solo declara `emitSessionClosed`. Vive en el arrange (y no en
+      // cada test) porque TODOS los cobros de mesa pasan por aquí.
+      (service as any).tableSessionsService.markSessionPaid = jest
+        .fn()
+        .mockResolvedValue({ id: session.id });
 
       return { tx, session, posUser };
     };

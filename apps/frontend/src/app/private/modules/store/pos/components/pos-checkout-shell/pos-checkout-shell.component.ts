@@ -39,6 +39,7 @@ import { PaymentMethod, PosPaymentService } from '../../services/pos-payment.ser
 import { PosCartService } from '../../services/pos-cart.service';
 import { CartState, CartItem } from '../../models/cart.model';
 import { PosCustomer } from '../../models/customer.model';
+import { PosShippingSaleData } from '../../models/shipping.model';
 import { FulfillmentType } from '../pos-fulfillment-selector.component';
 import { PosOrderCreateResult } from '../../models/order.model';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
@@ -301,6 +302,11 @@ export class PosCheckoutShellComponent {
    * dentro de la transacción del pago (`table_id`).
    */
   readonly checkoutTableId = computed<number | null>(() => {
+    // Un domicilio NUNCA ocupa mesa. Sin esta salida temprana, el envío caía a
+    // la mesa residual del padre (`tableId()` = mesa abierta en el POS) y el
+    // borrador terminaba empujando los platos a esa cuenta en vez de crear el
+    // pedido a domicilio.
+    if (this.checkoutIntent() === 'delivery') return null;
     if (this.showConsumoStep()) {
       return this.consumoStep()?.checkoutTableId() ?? null;
     }
@@ -1783,6 +1789,16 @@ export class PosCheckoutShellComponent {
 
     this.submittingDraft.set(true);
 
+    // Envío: el borrador es un pedido a domicilio, no una cuenta de mesa ni
+    // una orden de mostrador. Las ramas de restaurante de abajo lo mandarían a
+    // la mesa abierta (o abrirían una) y descartarían método, costo, dirección
+    // y notas del envío. Se guarda como borrador con su contexto de envío; la
+    // cocina se dispara al cobrarlo, igual que en la venta directa.
+    if (this.checkoutIntent() === 'delivery') {
+      this.createRetailDraft(state, this.shippingStep()?.buildShippingContext() ?? null);
+      return;
+    }
+
     const isRestaurant = this.integration.isRestaurantMode();
     const hasPrepared = this.hasUnfiredPreparedItems();
     const session = this.integration.currentTableSession();
@@ -1926,7 +1942,10 @@ export class PosCheckoutShellComponent {
       });
   }
 
-  private createRetailDraft(state: CartState): void {
+  private createRetailDraft(
+    state: CartState,
+    shipping: PosShippingSaleData | null = null,
+  ): void {
     // Phase D.2 — draft path. We DO NOT open payment, we DO NOT navigate to
     // detail, and we emit ONLY `draftSaved` to the parent (never
     // `checkoutCompleted`). The parent already routes on `(draftSaved)` via
@@ -1969,7 +1988,12 @@ export class PosCheckoutShellComponent {
         : state;
 
     this.paymentService
-      .saveDraft(draftState, 'current_user', this.customerAliasForPayload())
+      .saveDraft(
+        draftState,
+        'current_user',
+        this.customerAliasForPayload(),
+        shipping,
+      )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res: any) => {

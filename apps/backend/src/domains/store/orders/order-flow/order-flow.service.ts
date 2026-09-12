@@ -1623,6 +1623,15 @@ export class OrderFlowService {
    * Idempotent and tolerant: it is a no-op when the order is not in
    * `processing` (e.g. it was already finished by the operator or auto-finish),
    * so duplicate / late events never throw.
+   *
+   * EXCEPCION DOMICILIO (`home_delivery`): entregar los platos NO es entregar
+   * la orden. En un pedido a domicilio la cocina entrega al domiciliario, y la
+   * entrega real al cliente la estampa el flujo de despacho (remision / ruta /
+   * app de entrega). Si el puente moviera la orden a `delivered`, el detalle
+   * perderia el boton "Despachar Orden" (solo quedan Finalizar/Reembolso en
+   * `delivered`) y la remision ya no se podria generar (`createFromOrder`
+   * exige `processing` o `pending_payment`). Por eso la orden a domicilio se
+   * queda en `processing` con la cocina terminada, lista para despachar.
    */
   async markKitchenOrderDelivered(
     orderId: number,
@@ -1633,6 +1642,15 @@ export class OrderFlowService {
     if (previousState !== 'processing') {
       this.logger.debug(
         `Order #${orderId} not in 'processing' (is '${order.state}') — skipping KDS delivered bridge`,
+      );
+      return { order, transitioned: false, previousState };
+    }
+
+    // Ver la nota "EXCEPCION DOMICILIO" del docblock: la orden a domicilio se
+    // entrega por el flujo de despacho, no por la cocina.
+    if (order.delivery_type === 'home_delivery') {
+      this.logger.debug(
+        `Order #${orderId} is home_delivery — kitchen handoff done, order stays in 'processing' for dispatch`,
       );
       return { order, transitioned: false, previousState };
     }
@@ -2811,12 +2829,19 @@ export class OrderFlowService {
     // POS orders with kitchen tickets that have been paid+fired ('processing')
     // or already handed off ('delivered') for >4h. These auto-finish faster
     // because the seat is long gone; the operator rarely taps "Finalizar".
+    //
+    // EXCEPCION DOMICILIO: un pedido a domicilio en `processing` con cocina
+    // terminada esta ESPERANDO despacho (ver `markKitchenOrderDelivered`).
+    // Auto-finalizarlo a las 4h cerraria la orden sin remision ni entrega y
+    // dejaria el detalle sin flujo de despacho. Solo se auto-finaliza cuando
+    // ya paso por entrega (`delivered`).
     const restaurantOrders = await this.prisma.orders.findMany({
       where: {
         channel: 'pos',
         kitchen_tickets: { some: {} },
         state: { in: ['processing', 'delivered'] },
         updated_at: { lte: cutoff4h },
+        NOT: { delivery_type: 'home_delivery', state: 'processing' },
       },
       select: { id: true },
     });

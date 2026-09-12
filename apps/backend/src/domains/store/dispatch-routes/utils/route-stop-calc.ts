@@ -35,10 +35,11 @@ export interface RouteStopNoteInput {
   needs_collection?: boolean | null;
   invoice?: RouteStopInvoiceInput | null;
   /**
-   * Linked regular order. When present, its CURRENT `remaining_balance === 0`
-   * marks the note as prepaid (already paid). Used by `resolveIsPrepaid` so the
-   * prepaid status is DERIVED from the live payment state on read instead of
-   * being frozen at stop-creation time.
+   * Linked regular order. When present, its CURRENT `remaining_balance` (saldado
+   * dentro de la tolerancia de un centavo) marca la remisión como prepagada.
+   * Used by `resolveIsPrepaid` so the prepaid status is DERIVED from the live
+   * payment state on read instead of being frozen at stop-creation time — y por
+   * eso pesa MÁS que el `needs_collection` congelado de la remisión.
    */
   order?: RouteStopOrderInput | null;
 }
@@ -224,6 +225,17 @@ export function buildRouteReconciliation(
 }
 
 /**
+ * Saldo por debajo del cual una orden se considera SALDADA.
+ *
+ * No es un umbral nuevo: es exactamente el que `OrderFlowService` ya usa para
+ * decidir `balanceZero` / `is_fully_paid` (`remaining_balance <= 0.01`) al
+ * llevar una orden a `finished`. La ruta DEBE compartirlo: si contabilidad da
+ * la orden por saldada y la planilla exige el centavo restante, el repartidor
+ * recauda dinero que ya está en caja.
+ */
+const PAID_BALANCE_TOLERANCE = 0.01;
+
+/**
  * Resolve whether a dispatch note is prepaid (i.e. does NOT need collection).
  *
  * DERIVED on read from the CURRENT payment state — never from a frozen boolean
@@ -232,10 +244,9 @@ export function buildRouteReconciliation(
  * in route.
  *
  * Rule (safe default = COD):
- *   1. `needs_collection === true` → COD, NOT prepaid (explicit operator intent
- *      wins over everything else).
- *   2. Regular order with `remaining_balance === 0` → prepaid (already paid).
- *   3. Regular order with `remaining_balance > 0` → COD, NOT prepaid.
+ *   1. Regular order with `remaining_balance <= 0.01` → prepaid (already paid).
+ *   2. Regular order with a live balance above the tolerance → COD, NOT prepaid.
+ *   3. `needs_collection === true` (sin señal de saldo viva) → COD, NOT prepaid.
  *   4. Paid invoice (`invoice.payment_date` present) → prepaid (sales-order /
  *      legacy path; sales_orders have no remaining_balance, so the invoice is
  *      authoritative there).
@@ -249,16 +260,29 @@ export function resolveIsPrepaid(note: {
   invoice?: { payment_date?: Date | string | null } | null;
   order?: { remaining_balance?: number | string | null } | null;
 }): boolean {
-  // (1) Explicit COD wins: even if the note somehow looks paid, the operator
-  // asked for cash-on-route collection.
-  if (note.needs_collection === true) return false;
-
-  // (2)/(3) Regular order: the live remaining_balance is authoritative. A zero
-  // balance means the order is fully paid → prepaid; a positive balance means
-  // there is cash to collect on delivery → COD.
+  // (1)/(2) El saldo VIVO de la orden manda sobre cualquier bandera congelada.
+  //
+  // `dispatch_notes.needs_collection` se calcula UNA sola vez, al crear la
+  // remisión (`Number(order.remaining_balance) > 0` en dispatch-notes.service)
+  // y nadie la vuelve a escribir jamás. Si el cliente paga DESPUÉS de armar la
+  // remisión — transferencia, pago en caja, link de pago — la bandera se queda
+  // diciendo "hay que cobrar" y la parada exigía en ruta un recaudo que ya
+  // estaba cobrado: doble cobro sobre una orden prepagada. Consultar primero la
+  // evidencia viva es lo que hace que `is_prepaid` sea de verdad derivado-en-
+  // lectura; dejar ganar a `needs_collection` anulaba ese diseño entero.
+  //
+  // Sin regresión para el contra entrega: cuando queda saldo (> 0.01) esta rama
+  // devuelve exactamente lo mismo que antes (COD) y la parada sigue exigiendo
+  // su recaudo completo en `settleStop`.
   if (note.order != null && note.order.remaining_balance != null) {
-    return Number(note.order.remaining_balance) === 0;
+    return Number(note.order.remaining_balance) <= PAID_BALANCE_TOLERANCE;
   }
+
+  // (3) Sin saldo vivo que consultar, la intención explícita del operador es lo
+  // único que hay: COD declarado ⇒ se cobra en ruta, aunque exista una factura
+  // marcada como pagada (una factura puede quedar con `payment_date` por un
+  // anticipo o por el cierre fiscal sin que el dinero haya entrado).
+  if (note.needs_collection === true) return false;
 
   // (4) Sales-order / legacy path: only a paid invoice classifies as prepaid.
   return !!(note.invoice && note.invoice.payment_date);

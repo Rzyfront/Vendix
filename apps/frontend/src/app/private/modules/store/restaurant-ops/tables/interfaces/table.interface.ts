@@ -56,9 +56,25 @@ export interface Table {
  * data URL (base64) listo para `<img [src]>` y la URL pública de la
  * carta de la mesa.
  */
+/**
+ * Marca que el backend adjunta al QR de la mesa.
+ *
+ * `logo_url` llega **ya firmada** por `S3Service.signUrl`: en la base el logo
+ * vive como clave de S3 (lo que guarda la tarjeta "LOGO DE LA APP" de
+ * `settings/general/negocio`), y esa clave en un `<img src>` da 404. El
+ * frontend no debe volver a tocarla: se pinta tal cual.
+ */
+export interface TableQrBrand {
+  primary_color: string | null;
+  logo_url: string | null;
+  store_name: string | null;
+}
+
 export interface TableQrResponse {
   public_url: string;
   qr_data_url: string;
+  /** Opcional: un backend anterior al cartel de marca no la envía. */
+  brand?: TableQrBrand | null;
 }
 
 export interface PendingBookingSummary {

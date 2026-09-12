@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 
 import { DocumentPrintService } from '../../../../../../shared/services/print';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { Table, TableQrResponse } from '../interfaces';
 
 /**
@@ -63,6 +64,7 @@ interface TableQrBrand {
 export class TableQrPrintService {
   private readonly documentPrint = inject(DocumentPrintService);
   private readonly storeSettings = inject(StoreSettingsFacade);
+  private readonly authFacade = inject(AuthFacade);
 
   /** Imprime el cartel de UNA mesa (botón "Imprimir" del modal de QR). */
   async printOne(table: Table, qr: TableQrResponse): Promise<void> {
@@ -89,7 +91,7 @@ export class TableQrPrintService {
 
     if (pairs.length === 0) return;
 
-    const brand = this.resolveBrand();
+    const brand = this.resolveBrand(pairs.map((pair) => pair.qr));
     const pages = pairs
       .map((pair) => this.buildPage(pair.table, pair.qr, brand))
       .join('');
@@ -205,13 +207,34 @@ export class TableQrPrintService {
         text-align: center;
       }
 
-      /* El margen superior negativo mete el logo DENTRO del arco; el ancho
-         máximo lo mantiene lejos de los laterales curvos. */
+      /* Marco de tamaño FIJO para el logo. El margen superior negativo lo mete
+         dentro del arco y el ancho lo mantiene lejos de los laterales curvos.
+
+         El marco existe porque el logo lo sube cada comerciante: uno apaisado
+         y uno cuadrado tienen alturas muy distintas y, dimensionando el <img>
+         directamente, cada tienda imprimía el titular a una altura diferente y
+         el cartel se descuadraba. Con caja fija + object-fit:contain el logo
+         se encuadra dentro y la geometría de la hoja no depende de su
+         proporción. OJO: object-fit sobre un <img> sin alto explícito no hace
+         nada, por eso hace falta el marco y no basta con max-height.
+
+         Nada de comillas invertidas en estos comentarios: este bloque vive
+         dentro de un template literal y una sola lo parte en dos. */
+      .qr-logo-frame {
+        margin: -42mm auto 8mm;
+        width: 55%;
+        height: 26mm;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
       .qr-logo {
         display: block;
-        margin: -42mm auto 8mm;
-        max-height: 24mm;
-        max-width: 55%;
+        max-width: 100%;
+        max-height: 100%;
+        width: auto;
+        height: auto;
         object-fit: contain;
       }
 
@@ -294,7 +317,10 @@ export class TableQrPrintService {
     // tienda como wordmark, y si no hay ninguno el hueco simplemente no se abre.
     let identity = '';
     if (brand.logoUrl) {
-      identity = `<img class="qr-logo" src="${this.escapeHtml(brand.logoUrl)}" alt="" />`;
+      identity =
+        `<div class="qr-logo-frame">` +
+        `<img class="qr-logo" src="${this.escapeHtml(brand.logoUrl)}" alt="" />` +
+        `</div>`;
     } else if (brand.storeName) {
       identity = `<div class="qr-wordmark">${this.escapeHtml(brand.storeName)}</div>`;
     }
@@ -304,8 +330,14 @@ export class TableQrPrintService {
       : '';
 
     // Sin identidad el arco quedaría vacío; la clase sube el titular.
-    const bodyClass = identity ? 'qr-panel-body' : 'qr-panel-body qr-panel-body--bare';
+    const bodyClass = identity
+      ? 'qr-panel-body'
+      : 'qr-panel-body qr-panel-body--bare';
 
+    // El data URL del QR va sin escapar a propósito: es el PNG base64 que
+    // genera el backend y escaparlo lo rompería. El color tampoco se escapa,
+    // porque ya pasó por normalizeHex: esa es la guarda real contra inyección
+    // en el bloque <style>.
     return `
       <div class="qr-page">
         <div class="qr-card">
@@ -334,29 +366,71 @@ export class TableQrPrintService {
   /**
    * Resuelve color primario, logo y nombre de tienda por precedencia:
    *
-   * 1. `store_settings.branding` vía facade — la fuente viva.
-   * 2. El snapshot `vendix_app_config` de localStorage, que sobrevive a un
+   * 0. `qr.brand` que devuelve el backend — la ÚNICA fuente con el logo ya
+   *    firmado. Ver abajo por qué las demás no sirven para el logo.
+   * 1. `store_settings.branding` vía facade — la fuente viva del color.
+   * 2. El snapshot de auth (`user.store`), que es de donde el sidebar del panel
+   *    saca el logo que sí se ve en pantalla.
+   * 3. El snapshot `vendix_app_config` de localStorage, que sobrevive a un
    *    refresco antes de que NgRx rehidrate los settings.
-   * 3. La variable CSS `--color-primary` que ya pintó `ThemeService`.
-   * 4. `DEFAULT_PRIMARY`.
+   * 4. La variable CSS `--color-primary` que ya pintó `ThemeService`.
+   * 5. `DEFAULT_PRIMARY`.
+   *
+   * **Por qué el logo lo manda el backend.** En `store_settings.branding` el
+   * `logo_url` es la CLAVE de S3, no una URL: es lo que persiste la tarjeta
+   * "LOGO DE LA APP" de `settings/general/negocio`. Pintar esa clave en un
+   * `<img src>` produce una ruta relativa que da 404, y el cartel salía con el
+   * arco vacío — exactamente el defecto reportado en producción para Pollo
+   * Arabe, una tienda que SÍ tiene logo. `GET /store/tables/:id/qr` ahora la
+   * firma y la devuelve en `brand.logo_url`. Por eso todas las demás fuentes
+   * pasan por `readImageUrl`, que exige una URL absoluta y descarta claves.
    *
    * `storeName` NO cae a "Vendix": el cartel es de la tienda del cliente, y
-   * estampar la marca de la plataforma sería peor que no estampar nada.
+   * estampar la marca de la plataforma sería peor que no estampar nada. Por lo
+   * mismo, `branding['name']` va de últimas: arrastra el default literal
+   * `'Vendix'` de los settings por defecto del backend.
    */
-  private resolveBrand(): TableQrBrand {
+  private resolveBrand(
+    qrs: Array<TableQrResponse | undefined | null>,
+  ): TableQrBrand {
     let primary: string | null = null;
     let logoUrl: string | null = null;
     let storeName = '';
 
-    // 1. Settings del store (fuente de verdad de la marca).
+    // 0. Marca del backend. Todas las mesas son de la misma tienda, así que
+    //    basta la primera respuesta que la traiga.
+    const apiBrand = qrs.find((qr) => !!qr?.brand)?.brand ?? null;
+    if (apiBrand) {
+      primary = primary ?? this.normalizeHex(apiBrand.primary_color);
+      logoUrl = logoUrl ?? this.readImageUrl(apiBrand.logo_url);
+      storeName = storeName || (this.readString(apiBrand.store_name) ?? '');
+    }
+
+    // 1. Settings del store (fuente de verdad del color).
     const branding = this.storeSettings.branding();
     if (branding) {
       primary = primary ?? this.normalizeHex(branding['primary_color']);
-      logoUrl = logoUrl ?? this.readString(branding['logo_url']);
-      storeName = storeName || (this.readString(branding['name']) ?? '');
+      logoUrl = logoUrl ?? this.readImageUrl(branding['logo_url']);
     }
 
-    // 2. Snapshot de `vendix_app_config`. Conviven DOS formas en el mismo JSON:
+    // 2. Snapshot de auth: `user.store.logo_url` viene FIRMADO desde el login
+    //    (`AuthService.login` lo pasa por `s3Service.signUrl`) y es la misma
+    //    fuente que pinta el logo del sidebar del panel.
+    try {
+      const store = this.authFacade.userStore() as
+        | { name?: string | null; logo_url?: string | null }
+        | null
+        | undefined;
+      if (store) {
+        logoUrl = logoUrl ?? this.readImageUrl(store.logo_url);
+        storeName = storeName || (this.readString(store.name) ?? '');
+      }
+    } catch {
+      // El facade nunca debería lanzar, pero un fallo de lectura de estado no
+      // puede impedir imprimir el QR.
+    }
+
+    // 3. Snapshot de `vendix_app_config`. Conviven DOS formas en el mismo JSON:
     //    `branding` ya transformado por `ThemeService.transformBrandingFromApi`
     //    (`branding.logo.url`, `branding.colors.primary`) y la forma cruda de la
     //    API bajo `domainConfig.customConfig.branding` (`logo_url`,
@@ -379,10 +453,10 @@ export class TableQrPrintService {
 
         logoUrl =
           logoUrl ??
-          this.readString(transformed?.logo?.url) ??
-          this.readString(transformed?.logo_url) ??
-          this.readString(apiBranding?.logo_url) ??
-          this.readString(parsed?.domainConfig?.store_logo_url);
+          this.readImageUrl(transformed?.logo?.url) ??
+          this.readImageUrl(transformed?.logo_url) ??
+          this.readImageUrl(apiBranding?.logo_url) ??
+          this.readImageUrl(parsed?.domainConfig?.store_logo_url);
 
         storeName =
           storeName ||
@@ -396,7 +470,13 @@ export class TableQrPrintService {
       // nunca deben impedir imprimir.
     }
 
-    // 3. Variable CSS ya aplicada al documento. Puede venir vacía o no ser hex
+    // Último recurso para el nombre: el bloque de branding de settings. Va aquí
+    // y no arriba porque su default literal es 'Vendix'.
+    if (!storeName && branding) {
+      storeName = this.readString(branding['name']) ?? '';
+    }
+
+    // 4. Variable CSS ya aplicada al documento. Puede venir vacía o no ser hex
     //    (color-mix, rgb(...)), por eso pasa igual por normalizeHex.
     if (!primary) {
       try {
@@ -491,9 +571,7 @@ export class TableQrPrintService {
       const value = Math.round(
         parseInt(hex.slice(start, start + 2), 16) * factor,
       );
-      return Math.max(0, Math.min(255, value))
-        .toString(16)
-        .padStart(2, '0');
+      return Math.max(0, Math.min(255, value)).toString(16).padStart(2, '0');
     };
 
     return `#${channel(1)}${channel(3)}${channel(5)}`;
@@ -507,6 +585,24 @@ export class TableQrPrintService {
     if (typeof value !== 'string') return null;
     const trimmed = value.trim();
     return trimmed.length > 0 ? trimmed : null;
+  }
+
+  /**
+   * Igual que `readString`, pero SÓLO acepta algo que un `<img src>` pueda
+   * cargar desde el iframe de impresión: URL absoluta, `data:`, `blob:` o ruta
+   * absoluta del propio origen.
+   *
+   * Es la guarda que faltaba. `store_settings.branding.logo_url` guarda la
+   * CLAVE de S3 (`stores/12/logo-abc.webp`), no una URL. Al pintarla cruda el
+   * navegador la resolvía contra el `about:blank` del iframe, el `<img>` se
+   * quedaba en 0×0 y el cartel salía con el arco vacío — el defecto reportado
+   * en producción. Descartarla aquí deja que la cadena siga hasta la URL
+   * firmada que manda el backend en `qr.brand.logo_url`.
+   */
+  private readImageUrl(value: unknown): string | null {
+    const raw = this.readString(value);
+    if (!raw) return null;
+    return /^(https?:\/\/|data:|blob:|\/)/i.test(raw) ? raw : null;
   }
 
   private escapeHtml(s: string): string {
