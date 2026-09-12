@@ -1878,7 +1878,7 @@ export class FinancialAnalyticsService {
     const expenses = await this.prisma.expenses.findMany({
       where: {
         state: { in: [...RECOGNIZED_EXPENSE_STATES] },
-        expense_date: { gte: startDate, lte: endDate },
+        expense_date: { gte: startDate, lte: endDate }, // tz-audit:date-only — business-date; ventana de resolveLocalDateOnlyRange
       },
       select: {
         amount: true,
