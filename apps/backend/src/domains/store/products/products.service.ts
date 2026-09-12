@@ -1642,7 +1642,11 @@ export class ProductsService {
       }
     }
 
-    return new Map(rankedIds.map((id, index) => [id, index]));
+    // `rankedIds` queda asignado dentro del `try`, y el control flow de TS no
+    // propaga esa asignación fuera del try/catch (TS18047). El `?? []` es el
+    // estrechamiento explícito: en runtime el catch ya retornó antes de llegar
+    // aquí, así que la lista vacía nunca se usa.
+    return new Map((rankedIds ?? []).map((id, index) => [id, index]));
   }
 
   /**
