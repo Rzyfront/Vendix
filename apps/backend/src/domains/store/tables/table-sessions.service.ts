@@ -370,6 +370,7 @@ export class TableSessionsService {
     const order = await tx.orders.create({
       data: {
         store_id: args.storeId,
+        created_by_user_id: args.openedBy ?? null,
         customer_id: args.customerId,
         // ADR-9 — cliente y alias son excluyentes (CHECK
         // `orders_customer_xor_alias`). Si la mesa se abre con cliente, el

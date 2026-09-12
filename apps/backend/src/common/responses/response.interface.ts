@@ -35,6 +35,8 @@ export interface PaginationMeta {
   totalPages: number;
   hasNextPage: boolean;
   hasPreviousPage: boolean;
+  truncated?: boolean;
+  [key: string]: any;
 }
 
 /**

@@ -257,6 +257,63 @@ export class AnalyticsController {
     ]);
   }
 
+  @Get('sales/by-user')
+  @Permissions('store:analytics:read')
+  async getSalesByUser(@Query() query: SalesAnalyticsQueryDto) {
+    const result = await this.sales_analytics_service.getSalesByUser(query);
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+      'Ventas por vendedor obtenidas correctamente',
+      { truncated: result.meta.truncated },
+    );
+  }
+
+  @Get('sales/by-user/export')
+  @Permissions('store:analytics:read')
+  async exportSalesByUser(
+    @Query() query: SalesAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const result =
+      await this.sales_analytics_service.getSalesByUserForExport(query);
+
+    const summaryColumns: ReportColumn[] = [
+      { key: 'user_name', header: 'Vendedor', type: 'text' },
+      { key: 'user_email', header: 'Correo', type: 'text' },
+      { key: 'orders_count', header: 'Órdenes', type: 'number' },
+      { key: 'items_sold', header: 'Unidades Vendidas', type: 'number' },
+      { key: 'grand_total', header: 'Total Vendido', type: 'currency' },
+      { key: 'avg_order', header: 'Ticket Promedio', type: 'currency' },
+      { key: 'last_order_date', header: 'Última Venta', type: 'date', tz },
+    ];
+
+    const brandColumns: ReportColumn[] = [
+      { key: 'user_name', header: 'Vendedor', type: 'text' },
+      { key: 'brand_name', header: 'Marca', type: 'text' },
+      { key: 'orders_count', header: 'Órdenes', type: 'number' },
+      { key: 'items_sold', header: 'Unidades Vendidas', type: 'number' },
+      { key: 'grand_total', header: 'Total Vendido', type: 'currency' },
+    ];
+
+    const supplierColumns: ReportColumn[] = [
+      { key: 'user_name', header: 'Vendedor', type: 'text' },
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'orders_count', header: 'Órdenes', type: 'number' },
+      { key: 'items_sold', header: 'Unidades Vendidas', type: 'number' },
+      { key: 'grand_total', header: 'Total Vendido', type: 'currency' },
+    ];
+
+    await this.emitReport(res, 'ventas_por_vendedor', tz, [
+      this.toSheet('Resumen por vendedor', summaryColumns, result.summary, tz),
+      this.toSheet('Por vendedor × marca', brandColumns, result.byBrand, tz),
+      this.toSheet('Por vendedor × proveedor', supplierColumns, result.bySupplier, tz),
+    ]);
+  }
+
   // ==================== PRODUCTS ANALYTICS ====================
 
   @Get('products/summary')

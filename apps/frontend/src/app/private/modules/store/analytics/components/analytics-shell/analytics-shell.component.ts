@@ -69,6 +69,7 @@ export class AnalyticsShellComponent {
     '/admin/analytics/sales/by-category': '/admin/reports/sales/sales-by-category',
     '/admin/analytics/sales/by-customer': '/admin/reports/sales/sales-by-customer',
     '/admin/analytics/sales/by-payment': '/admin/reports/sales/sales-by-payment',
+    '/admin/analytics/sales/by-user': '/admin/reports/sales/sales-by-user',
     '/admin/analytics/sales/trends': '/admin/reports/sales/sales-trends',
     // Inventory
     '/admin/analytics/inventory/overview': '/admin/reports/inventory/inventory-overview',

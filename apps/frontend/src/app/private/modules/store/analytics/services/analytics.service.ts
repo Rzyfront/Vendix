@@ -16,6 +16,7 @@ import {
   SalesByPaymentMethod,
   SalesTrend,
   SalesByCustomer,
+  SalesByUser,
   SalesByChannel,
   SalesAnalyticsQueryDto,
 } from '../interfaces/sales-analytics.interface';
@@ -570,6 +571,25 @@ export class AnalyticsService {
         { params: this.buildParams(query) },
       ),
     );
+  }
+
+  getSalesByUser(
+    query: SalesAnalyticsQueryDto = {},
+  ): Observable<PaginatedResponse<SalesByUser>> {
+    const cacheKey = `sales-by-user-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<PaginatedResponse<SalesByUser>>(
+        this.getApiUrl('sales/by-user'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  exportSalesByUser(query: SalesAnalyticsQueryDto = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('sales/by-user/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
   }
 
   getSalesByChannel(

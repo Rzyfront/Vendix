@@ -1319,6 +1319,12 @@ export class BreadcrumbService {
       icon: 'credit-card',
     },
     {
+      path: '/admin/analytics/sales/by-user',
+      title: 'Por Vendedor',
+      parent: 'Ventas',
+      icon: 'user-check',
+    },
+    {
       path: '/admin/analytics/inventory',
       title: 'Inventario',
       parent: 'Analíticas',

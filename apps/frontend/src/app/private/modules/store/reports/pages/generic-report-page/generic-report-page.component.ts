@@ -4,6 +4,7 @@ import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ReportViewerComponent } from '../../components/report-viewer/report-viewer.component';
 import { ReportsActions } from '../../state/reports.actions';
+import { ReportsDataService } from '../../services/reports-data.service';
 import {
   selectSelectedReport,
   selectReportData,
@@ -34,12 +35,14 @@ import {
       (dateRangeChange)="onDateRangeChange($event)"
       (pageChange)="onPageChange($event)"
       (exportClick)="onExport()"
+      (refreshClick)="onRefresh()"
     />
   `,
 })
 export class GenericReportPageComponent {
   private store = inject(Store);
   private route = inject(ActivatedRoute);
+  private reportsDataService = inject(ReportsDataService);
 
   readonly report = toSignal(this.store.select(selectSelectedReport));
   readonly data = toSignal(this.store.select(selectReportData));
@@ -69,5 +72,10 @@ export class GenericReportPageComponent {
 
   onExport(): void {
     this.store.dispatch(ReportsActions.exportReport());
+  }
+
+  onRefresh(): void {
+    this.reportsDataService.clearCache();
+    this.store.dispatch(ReportsActions.loadReportData());
   }
 }

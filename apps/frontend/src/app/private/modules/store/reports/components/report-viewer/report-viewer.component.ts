@@ -195,8 +195,8 @@ function formatStatValue(value: any, type: string): string | number {
             <app-options-dropdown
               [filters]="filterConfigs()"
               [filterValues]="dropdownFilterValues()"
-              [actions]="report()?.exportEndpoint ? exportActions() : []"
-              [showActions]="!!report()?.exportEndpoint"
+              [actions]="exportActions()"
+              [showActions]="true"
               title="Filtros"
               triggerLabel="Acciones"
               triggerIcon="plus"
@@ -267,6 +267,7 @@ export class ReportViewerComponent {
   readonly dateRangeChange = output<any>();
   readonly pageChange = output<number>();
   readonly exportClick = output<void>();
+  readonly refreshClick = output<void>();
 
   readonly exportLoading = input<boolean>(false);
   readonly dateRange = input<any>(undefined);
@@ -368,20 +369,31 @@ export class ReportViewerComponent {
   });
 
   /**
-   * Acción expuesta en el `<app-options-dropdown>` "Acciones" del header.
-   * Hoy solo `Exportar XLSX`; la estructura queda abierta para añadir más
-   * (ej. imprimir, refrescar) sin tocar la plantilla.
+   * Acciones expuestas en el `<app-options-dropdown>` "Acciones" del header:
+   * refrescar datos y exportar a XLSX si el reporte lo soporta.
    */
-  readonly exportActions = computed<DropdownAction[]>(() => [
-    {
-      action: 'export-xlsx',
-      label: 'ExportAR XLSX',
-      icon: 'download',
-    },
-  ]);
+  readonly exportActions = computed<DropdownAction[]>(() => {
+    const actions: DropdownAction[] = [
+      {
+        action: 'refresh',
+        label: 'Actualizar',
+        icon: 'refresh-cw',
+      },
+    ];
+    if (this.report()?.exportEndpoint) {
+      actions.push({
+        action: 'export-xlsx',
+        label: 'Exportar XLSX',
+        icon: 'download',
+      });
+    }
+    return actions;
+  });
 
   onActionsDropdownClick(action: string): void {
-    if (action === 'export-xlsx') {
+    if (action === 'refresh') {
+      this.refreshClick.emit();
+    } else if (action === 'export-xlsx') {
       this.exportClick.emit();
     }
   }
