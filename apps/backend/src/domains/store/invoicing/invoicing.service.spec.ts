@@ -478,3 +478,126 @@ describe('InvoicingService · N líneas Modelo 1 en un documento (D.4)', () => {
     expect((thrown as VendixHttpException).message).toContain('La línea 3');
   });
 });
+
+/**
+ * `getEcommerceInvoicingSettings()` — gemela de `getPosInvoicingSettings()`
+ * (sin arnés propio hasta ahora). Se instancia por prototipo, igual que el
+ * harness de D.4: el método sólo toca `this.prisma.store_settings.findFirst`
+ * y el `RequestContextService` ambiental, así que levantar los otros ocho
+ * parámetros del constructor mediría el grafo, no la regla.
+ */
+describe('InvoicingService.getEcommerceInvoicingSettings', () => {
+  interface EcommerceSettingsHarness {
+    prisma: {
+      store_settings: { findFirst: jest.Mock };
+    };
+    logger: Pick<Logger, 'warn'>;
+    getEcommerceInvoicingSettings(): Promise<{ auto_emit: boolean }>;
+  }
+
+  const requestContext = {
+    user_id: 9,
+    organization_id: 1,
+    store_id: 2,
+    is_super_admin: false,
+    is_owner: true,
+  };
+
+  const buildHarness = (findFirstImpl: jest.Mock): EcommerceSettingsHarness => {
+    const service = Object.create(
+      InvoicingService.prototype,
+    ) as EcommerceSettingsHarness;
+    service.prisma = {
+      store_settings: { findFirst: findFirstImpl },
+    };
+    service.logger = { warn: jest.fn() };
+    return service;
+  };
+
+  const runWithSettings = (settings: Record<string, any> | null) => {
+    const findFirst = jest
+      .fn()
+      .mockResolvedValue(settings === null ? null : { settings });
+    const harness = buildHarness(findFirst);
+    return {
+      harness,
+      findFirst,
+      result: RequestContextService.run(requestContext, () =>
+        harness.getEcommerceInvoicingSettings(),
+      ),
+    };
+  };
+
+  it('invoicing.ecommerce.auto_emit === false → devuelve false', async () => {
+    const { result, findFirst } = runWithSettings({
+      invoicing: { ecommerce: { auto_emit: false } },
+    });
+
+    await expect(result).resolves.toEqual({ auto_emit: false });
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { store_id: 2 },
+      select: { settings: true },
+    });
+  });
+
+  it('invoicing.ecommerce.auto_emit === true gana aunque receipts.auto_issue_invoice sea false', async () => {
+    const { result } = runWithSettings({
+      invoicing: { ecommerce: { auto_emit: true } },
+      receipts: { auto_issue_invoice: false },
+    });
+
+    await expect(result).resolves.toEqual({ auto_emit: true });
+  });
+
+  it('sin bloque invoicing, con receipts.auto_issue_invoice === false → fallback legado en false', async () => {
+    const { result } = runWithSettings({
+      receipts: { auto_issue_invoice: false },
+    });
+
+    await expect(result).resolves.toEqual({ auto_emit: false });
+  });
+
+  it('sin bloque invoicing y sin receipts.auto_issue_invoice → default true', async () => {
+    const { result } = runWithSettings({});
+
+    await expect(result).resolves.toEqual({ auto_emit: true });
+  });
+
+  it('auto_emit escrito como la cadena "false" no se acepta → cae al legado/default', async () => {
+    const { result } = runWithSettings({
+      invoicing: { ecommerce: { auto_emit: 'false' as unknown as boolean } },
+      receipts: { auto_issue_invoice: false },
+    });
+
+    // El booleano explícito no es tal (es un string): el legado manda.
+    await expect(result).resolves.toEqual({ auto_emit: false });
+  });
+
+  it('sin store_id en el contexto ALS → devuelve el fallback sin consultar Prisma', async () => {
+    const findFirst = jest.fn();
+    const harness = buildHarness(findFirst);
+
+    const result = await RequestContextService.run(
+      { ...requestContext, store_id: undefined },
+      () => harness.getEcommerceInvoicingSettings(),
+    );
+
+    expect(result).toEqual({ auto_emit: true });
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it('si Prisma lanza, devuelve el fallback y NO propaga la excepción', async () => {
+    const findFirst = jest.fn().mockRejectedValue(new Error('P2010'));
+    const harness = buildHarness(findFirst);
+
+    const result = await RequestContextService.run(requestContext, () =>
+      harness.getEcommerceInvoicingSettings(),
+    );
+
+    expect(result).toEqual({ auto_emit: true });
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { store_id: 2 },
+      select: { settings: true },
+    });
+  });
+});

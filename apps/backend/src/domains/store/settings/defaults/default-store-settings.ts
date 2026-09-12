@@ -176,15 +176,13 @@ export function getDefaultStoreSettings(): StoreSettings {
       email_receipt: false,
       receipt_header: '',
       receipt_footer: '¡Gracias por su compra!',
-      // Electronic invoicing: safe defaults for a store that later gets DIAN
-      // habilitación — issue automatically, one printed copy, email the invoice.
-      auto_issue_invoice: true,
+      // `auto_issue_invoice` / `send_invoice_email` / `deliver_printed` fueron
+      // retirados (v3->v4): eran un interruptor MUDO — ningún lector los
+      // consultaba, sólo vivían en DTO/defaults/interfaz y en un formulario de
+      // UI ya retirado. El control real de emisión automática vive en
+      // `invoicing.{pos,ecommerce}.auto_emit`.
       invoice_copies: 1,
-      send_invoice_email: true,
       print_pos_ticket: false,
-      // Email is on by default, so the printed hand-off starts off: one delivery
-      // channel is enough to comply, and the UI keeps at least one active.
-      deliver_printed: false,
       // 80 mm roll, matching `PRINT_DEFAULTS.invoice`. This is a deliberate
       // change of behaviour, not a mirror of the old value: the previous seed
       // was `letter`, it IS read (`invoice-pdf.service.ts:resolveInvoiceFormat`),

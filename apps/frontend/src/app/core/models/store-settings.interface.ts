@@ -170,9 +170,19 @@ export interface PosInvoicingSettings {
   on_failure?: PosDianFailurePolicy;
 }
 
+/**
+ * Comportamiento fiscal del carril de e-commerce (tienda en línea). Espejo de
+ * `EcommerceInvoicingSettings` del backend. Igual que `pos`, se mezcla POR
+ * CLAVE: mandar sólo el campo que se edita es lo correcto.
+ */
+export interface EcommerceInvoicingSettings {
+  auto_emit?: boolean;
+}
+
 export interface InvoicingSettings {
   aiu?: AiuSettings;
   pos?: PosInvoicingSettings;
+  ecommerce?: EcommerceInvoicingSettings;
 }
 
 /**
@@ -183,6 +193,17 @@ export interface InvoicingSettings {
 export const POS_INVOICING_SETTINGS_DEFAULTS: Required<PosInvoicingSettings> = {
   auto_emit: true,
   on_failure: 'queue',
+};
+
+/**
+ * Default del carril e-commerce, en `true` A PROPÓSITO: hoy la tienda en línea
+ * emite SIEMPRE, sin ninguna bandera que lo controle. Si este default fuera
+ * `false`, el día que se despliegue la clave apagaría la emisión de TODAS las
+ * tiendas de golpe, sin que nadie lo haya pedido. Espejo de
+ * `DEFAULT_ECOMMERCE_AUTO_EMIT` del backend.
+ */
+export const ECOMMERCE_INVOICING_SETTINGS_DEFAULTS: Required<EcommerceInvoicingSettings> = {
+  auto_emit: true,
 };
 
 /**
@@ -732,22 +753,18 @@ export interface ReceiptsSettings {
    * is `environment='production'` with `enablement_status='enabled'`, NOT merely
    * when the fiscal wizard was completed. Optional across the board for
    * backward compatibility with settings rows that predate the block.
+   *
+   * `auto_issue_invoice`, `send_invoice_email` and `deliver_printed` used to
+   * live here and were retired (settings schema v3->v4): they were declared,
+   * rendered and saved, but NO reader ever consulted them — the merchant
+   * switched them off and the invoice was issued all the same. Automatic
+   * emission is now governed by `invoicing.pos.auto_emit` and
+   * `invoicing.ecommerce.auto_emit`, each with a real consumer behind it.
    */
-  /** Issue (and transmit) the electronic invoice right after the sale closes. */
-  auto_issue_invoice?: boolean;
   /** Printed copies of the electronic invoice per sale. 0 = do not print. */
   invoice_copies?: number;
-  /** Email the electronic invoice + its XML to the customer. */
-  send_invoice_email?: boolean;
   /** Also print the POS ticket alongside the invoice (kitchen/warehouse copy). */
   print_pos_ticket?: boolean;
-  /**
-   * Handing the printed graphic representation to the buyer. Colombian law
-   * requires the invoice to be DELIVERED to the acquirer, in physical or
-   * electronic form — not specifically by email. Second lawful channel, so the
-   * form keeps at least one of `send_invoice_email` / `deliver_printed` on.
-   */
-  deliver_printed?: boolean;
   /**
    * @deprecated Superseded by `printing.invoice`. Still LIVE: the backend reads
    * it in `invoice-pdf.service.ts` (`resolveInvoiceFormat`) and it defaults to
