@@ -2,31 +2,26 @@ import {
   Component,
   computed,
   DestroyRef,
+  ElementRef,
   effect,
   inject,
   input,
   output,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import {
-  FormBuilder,
-  FormControl,
-  FormGroup,
-  ReactiveFormsModule,
-} from '@angular/forms';
+import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
 import {
   ModalComponent,
   ButtonComponent,
-  InputComponent,
+  InputsearchComponent,
+  QuantityControlComponent,
   IconComponent,
   SpinnerComponent,
   EmptyStateComponent,
   ToastService,
-  PaginationComponent,
 } from '../../../../../../../shared/components/index';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/index';
 import { ProductsService } from '../../../../products/services/products.service';
@@ -72,33 +67,31 @@ interface AddItemsProductOption extends SellableProductOption {
 /**
  * Modal to append lines to an open table session (cuenta abierta).
  *
- * Single source of truth for selection survives page changes and modal
+ * Single source of truth for selection survives batch changes and modal
  * reopen: a `selectedQty` Map<product_id, qty> drives everything
  * (subtotal, decrement validation, submit payload). The server-side
- * product list is paginated to a fixed page size and is reset (along
- * with the search term and selection) whenever the modal transitions
- * from closed to open.
+ * product list loads in incremental batches via scroll (no numbered
+ * pagination) and is reset (along with the search term and selection)
+ * whenever the modal transitions from closed to open.
  */
 @Component({
   selector: 'app-add-items-modal',
   standalone: true,
   imports: [
-    CommonModule,
-    ReactiveFormsModule,
+    FormsModule,
     ModalComponent,
     ButtonComponent,
-    InputComponent,
+    InputsearchComponent,
+    QuantityControlComponent,
     IconComponent,
     SpinnerComponent,
     EmptyStateComponent,
-    PaginationComponent,
     CurrencyPipe,
   ],
   templateUrl: './add-items-modal.component.html',
   styleUrl: './add-items-modal.component.scss',
 })
 export class AddItemsModalComponent {
-  private readonly fb = inject(FormBuilder);
   private readonly productsService = inject(ProductsService);
   private readonly tablesService = inject(TablesService);
   private readonly toastService = inject(ToastService);
@@ -112,17 +105,21 @@ export class AddItemsModalComponent {
   readonly isOpenChange = output<boolean>();
   readonly addItems = output<TableSessionAddItem[]>();
 
-  private readonly searchDebounce$ = new Subject<string>();
-
-  // --- Paginated product list state ---------------------------------------
+  // --- Incremental product list state (scroll infinito, sin paginado) ----
   readonly currentProducts = signal<AddItemsProductOption[]>([]);
   readonly isLoading = signal(false);
-  readonly currentPage = signal(1);
-  readonly totalPages = signal(1);
-  readonly total = signal(0);
-  readonly limit = signal(20);
+  readonly limit = signal(30);
+  /**
+   * Derivado de la paginación que devuelve el backend en cada respuesta
+   * (`pagination.hasNext`, o `page < totalPages` si `hasNext` no viniera).
+   * `loadMore()` es el único lugar que lo consulta para decidir si pedir
+   * el siguiente lote.
+   */
+  readonly hasMore = signal(true);
+  /** Página del próximo lote a pedir. No es UI — no hay control de páginas. */
+  private page = 1;
 
-  // --- Selection state (survives page change and reopen) -----------------
+  // --- Selection state (survives batch change and reopen) -----------------
   readonly selectedQty = signal<Map<number, number>>(new Map());
   readonly productById = signal<Map<number, AddItemsProductOption>>(
     new Map(),
@@ -146,11 +143,10 @@ export class AddItemsModalComponent {
   /** Productos cuyo campo de nota esta desplegado (toggle del UI). */
   readonly showNotesByProduct = signal<Set<number>>(new Set());
 
-  readonly form: FormGroup<{ search: FormControl<string> }>;
-
-  get searchControl(): FormControl<string> {
-    return this.form.controls.search;
-  }
+  // --- Scroll infinito: sentinel al final de `.product-list` -------------
+  private readonly scrollSentinel =
+    viewChild<ElementRef<HTMLElement>>('scrollSentinel');
+  private sentinelObserver: IntersectionObserver | null = null;
 
   // --- Derived UI signals ------------------------------------------------
   readonly selectedCount = computed(
@@ -187,23 +183,6 @@ export class AddItemsModalComponent {
   });
 
   constructor() {
-    this.form = this.fb.group({
-      search: this.fb.nonNullable.control(''),
-    });
-
-    // Debounced search → reload
-    this.searchDebounce$
-      .pipe(
-        debounceTime(300),
-        distinctUntilChanged(),
-        takeUntilDestroyed(this.destroyRef),
-      )
-      .subscribe((term) => {
-        this.searchTerm.set(term);
-        this.currentPage.set(1);
-        this.loadProducts();
-      });
-
     // Reset state and reload every time the modal transitions false → true.
     // Wrapped in untracked() so the effect doesn't trigger on its own writes.
     effect(() => {
@@ -211,6 +190,16 @@ export class AddItemsModalComponent {
       if (!open) return;
       untracked(() => this.resetAndLoad());
     });
+
+    // El sentinel entra/sale del DOM según el `@if`/`@else` de la lista
+    // (vacío, cargando, con productos). Este effect (re)conecta el
+    // IntersectionObserver cada vez que `viewChild` resuelve un nodo nuevo.
+    effect(() => {
+      const ref = this.scrollSentinel();
+      untracked(() => this.attachSentinelObserver(ref?.nativeElement ?? null));
+    });
+
+    this.destroyRef.onDestroy(() => this.sentinelObserver?.disconnect());
   }
 
   onOpenChange(open: boolean): void {
@@ -221,8 +210,16 @@ export class AddItemsModalComponent {
     this.onOpenChange(false);
   }
 
-  onSearchInput(value: string): void {
-    this.searchDebounce$.next(value);
+  /**
+   * `(searchChange)` de `app-inputsearch` ya llega debounced (300ms por
+   * defecto) y sin duplicados (`distinctUntilChanged` interno). Un término
+   * nuevo empieza un lote nuevo: la búsqueda anterior no se mezcla con la
+   * nueva en el scroll infinito.
+   */
+  onSearchChange(term: string): void {
+    this.searchTerm.set(term);
+    this.resetBatch();
+    this.loadProducts();
   }
 
   trackById(_i: number, row: SellableProductOption): number {
@@ -239,7 +236,7 @@ export class AddItemsModalComponent {
    * Se lleva en un Set aparte y NO dentro de `selectedQty`, porque son dos
    * dimensiones independientes: la cantidad decide si la línea existe, el flag
    * decide cómo se entrega. Mezclarlos obligaría a un Map de objetos y a
-   * reconstruirlo en cada `bumpQty`.
+   * reconstruirlo en cada `applyQty`.
    *
    * El flag aplica a TODA la línea. Marcar solo algunas unidades de una línea
    * con cantidad > 1 exigiría partir la línea, que es el eje de QUI-655 y no de
@@ -464,9 +461,14 @@ export class AddItemsModalComponent {
     this.bumpQty(product, -1);
   }
 
-  onPageChange(page: number): void {
-    this.currentPage.set(page);
-    this.loadProducts();
+  /**
+   * Fija la cantidad EXACTA de un producto. Usado por `app-quantity-control`
+   * ((valueChange) emite el valor final, ya sea por +/- o por edición
+   * directa del input). Comparte la limpieza de takeaway/variante/nota/
+   * exclusiones con `bumpQty` a través de `applyQty`.
+   */
+  setQty(product: SellableProductOption, next: number): void {
+    this.applyQty(product, Math.max(0, next));
   }
 
   onSubmit(): void {
@@ -522,6 +524,16 @@ export class AddItemsModalComponent {
     if (target) target.style.display = 'none';
   }
 
+  /**
+   * Scroll infinito: pide el siguiente lote. Idempotente — no dispara si ya
+   * hay una carga en curso o si el backend ya dijo que no hay más páginas.
+   */
+  loadMore(): void {
+    if (this.isLoading() || !this.hasMore()) return;
+    this.page += 1;
+    this.loadProducts(true);
+  }
+
   // --- Private helpers ---------------------------------------------------
   private resetAndLoad(): void {
     this.selectedQty.set(new Map());
@@ -540,15 +552,29 @@ export class AddItemsModalComponent {
     this.showNotesByProduct.set(new Set());
     this.recipeProductId.set(null);
     this.searchTerm.set('');
-    this.form.controls.search.setValue('', { emitEvent: false });
-    this.currentPage.set(1);
-    this.currentProducts.set([]);
+    this.resetBatch();
     this.loadProducts();
+  }
+
+  /** Reinicia el lote de scroll infinito (no toca la selección). */
+  private resetBatch(): void {
+    this.page = 1;
+    this.currentProducts.set([]);
+    this.hasMore.set(true);
   }
 
   private bumpQty(product: SellableProductOption, delta: number): void {
     const current = this.selectedQty().get(product.id) ?? 0;
-    const next = Math.max(0, current + delta);
+    this.applyQty(product, Math.max(0, current + delta));
+  }
+
+  /**
+   * Único lugar que escribe `selectedQty`. Al caer a 0 limpia takeaway,
+   * variante, exclusiones y nota de la línea (una línea nueva no debe
+   * arrastrar el estado de la anterior). Usado por `bumpQty` (click +/-,
+   * click en el cuerpo de la fila) y por `setQty` (app-quantity-control).
+   */
+  private applyQty(product: SellableProductOption, next: number): void {
     const map = new Map(this.selectedQty());
     if (next === 0) {
       map.delete(product.id);
@@ -596,7 +622,7 @@ export class AddItemsModalComponent {
     this.selectedQty.set(map);
 
     // Cache metadata (name, price, image) for products in the selection
-    // so subtotal keeps working when the user pages away. El producto viene
+    // so subtotal keeps working when the user scrolls away. El producto viene
     // tipado como `SellableProductOption` pero en runtime arrastra
     // `product_variants` (el picker lo exige); por eso el cast.
     const byId = new Map(this.productById());
@@ -604,33 +630,40 @@ export class AddItemsModalComponent {
     this.productById.set(byId);
   }
 
-  private loadProducts(): void {
+  /**
+   * `append=true` agrega el lote al final de `currentProducts` (scroll
+   * infinito vía `loadMore()`); `append=false` (default) reemplaza la lista
+   * — primera carga del modal o cambio de término de búsqueda.
+   */
+  private loadProducts(append = false): void {
     this.isLoading.set(true);
     this.productsService
       .getProducts({
         limit: this.limit(),
-        page: this.currentPage(),
+        page: this.page,
         is_sellable: true,
         search: this.searchTerm().trim() || undefined,
         // CP-POLLO-ARABE-727 C.4 (QUI-736) — para el picker de variante de
         // platos `prepared`. Sin esto el backend no incluye `product_variants`
         // y el picker no tiene nada que mostrar.
         include_variants: true,
-      } as any)
+        // Dueño: mostrar primero los destacados. El backend desempata por
+        // `created_at desc` (agente hermano, en paralelo sobre el mismo
+        // endpoint).
+        featured_first: true,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           const list = (res.data ?? []) as unknown as AddItemsProductOption[];
-          this.currentProducts.set(list);
+          this.currentProducts.update((prev) => (append ? [...prev, ...list] : list));
 
           const p = res.pagination;
           if (p) {
-            this.total.set(p.total ?? 0);
-            this.totalPages.set(p.totalPages ?? 1);
             this.limit.set(p.limit ?? this.limit());
+            this.hasMore.set(p.hasNext ?? this.page < (p.totalPages ?? 1));
           } else {
-            this.total.set(list.length);
-            this.totalPages.set(1);
+            this.hasMore.set(false);
           }
 
           // Keep the byId cache warm for anything on screen so subtotal
@@ -646,5 +679,20 @@ export class AddItemsModalComponent {
           this.isLoading.set(false);
         },
       });
+  }
+
+  private attachSentinelObserver(el: HTMLElement | null): void {
+    this.sentinelObserver?.disconnect();
+    this.sentinelObserver = null;
+    if (!el) return;
+    this.sentinelObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) this.loadMore();
+        }
+      },
+      { root: null, rootMargin: '150px', threshold: 0.1 },
+    );
+    this.sentinelObserver.observe(el);
   }
 }

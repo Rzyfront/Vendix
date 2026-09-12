@@ -3,19 +3,19 @@
   (isOpenChange)="onOpenChange($event)"
   (cancel)="onCancel()"
   [size]="'lg'"
+  [fullScreenOnMobile]="true"
   [title]="'Agregar a la cuenta'"
   [dialog]="true"
   subtitle="Selecciona los productos y cantidades para esta mesa"
 >
   <!-- Search -->
   <div class="search-bar">
-    <app-input
-      [formControl]="searchControl"
-      label="Buscar producto"
-      placeholder="Escribe el nombre del producto..."
-      [required]="false"
-      (ngModelChange)="onSearchInput($event)"
-      customWrapperClass="mt-0"
+    <app-inputsearch
+      size="sm"
+      placeholder="Buscar plato…"
+      [ngModel]="searchTerm()"
+      (ngModelChange)="searchTerm.set($event)"
+      (searchChange)="onSearchChange($event)"
     />
   </div>
 
@@ -81,24 +81,13 @@
             </div>
           </div>
           <div class="qty-controls" (click)="$event.stopPropagation()">
-            <app-button
-              variant="outline-danger"
-              size="md"
-              [disabled]="quantityOf(row.id) <= 0"
-              [attr.aria-label]="'Disminuir'"
-              (clicked)="decrement(row)"
-            >
-              <app-icon slot="icon" name="minus" [size]="16"></app-icon>
-            </app-button>
-            <span class="qty">{{ quantityOf(row.id) }}</span>
-            <app-button
-              variant="outline-success"
-              size="md"
-              [attr.aria-label]="'Aumentar'"
-              (clicked)="increment(row)"
-            >
-              <app-icon slot="icon" name="plus" [size]="16"></app-icon>
-            </app-button>
+            <app-quantity-control
+              size="sm"
+              [min]="0"
+              [value]="quantityOf(row.id)"
+              [editable]="true"
+              (valueChange)="setQty(row, $event)"
+            ></app-quantity-control>
           </div>
 
           <!--
@@ -208,6 +197,10 @@
           }
         </div>
       }
+
+      <!-- Scroll infinito: sentinel observado por IntersectionObserver
+           (ver attachSentinelObserver en el TS). Sin paginado numerado. -->
+      <div #scrollSentinel class="scroll-sentinel" aria-hidden="true"></div>
     </div>
 
     @if (isLoading()) {
@@ -215,36 +208,26 @@
         <app-spinner size="sm"></app-spinner>
       </div>
     }
-
-    <app-pagination
-      [currentPage]="currentPage()"
-      [totalPages]="totalPages()"
-      [total]="total()"
-      [limit]="limit()"
-      (pageChange)="onPageChange($event)"
-    ></app-pagination>
   }
 
-  <!-- Subtotal is always visible (selection survives page changes) -->
-  <div class="total-preview">
-    <span>Subtotal estimado ({{ selectedCount() }} seleccionado{{ selectedCount() === 1 ? '' : 's' }}):</span>
-    <strong>{{ totalPreview() | currency }}</strong>
-  </div>
-
-  <div slot="footer" class="flex justify-between items-center gap-2">
-    <span class="text-sm text-text-secondary">
-      {{ total() }} productos disponibles
-    </span>
-    <div class="flex gap-2">
-      <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
+  <!-- Subtotal SIEMPRE visible: vive en el footer, no en el body scrolleable. -->
+  <div slot="footer" class="footer-row">
+    <div class="total-preview">
+      <span>Subtotal estimado ({{ selectedCount() }} seleccionado{{ selectedCount() === 1 ? '' : 's' }}):</span>
+      <strong>{{ totalPreview() | currency }}</strong>
+    </div>
+    <div class="footer-actions">
+      <app-button variant="outline-danger" size="sm" [fullWidth]="true" (clicked)="onCancel()">Cancelar</app-button>
       <app-button
         variant="primary"
-        size="lg"
+        size="sm"
+        [fullWidth]="true"
         [loading]="loading()"
         [disabled]="!hasItems() || hasMissingVariant()"
         (clicked)="onSubmit()"
       >
-        Agregar a la cuenta
+        <app-icon slot="icon" name="plus" [size]="16"></app-icon>
+        Agregar
       </app-button>
     </div>
   </div>

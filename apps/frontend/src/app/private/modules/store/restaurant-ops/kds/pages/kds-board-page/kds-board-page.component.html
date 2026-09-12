@@ -133,11 +133,14 @@
     [changeBlockedReason]="changeBlockedReason()"
     [heldByOther]="stationsService.sessionHeldByOther()"
     [canForceTake]="stationsService.canForceTakeCurrentStation()"
+    [canStartSession]="stationsService.selectedStationId() !== null"
+    [startingSession]="openingSession()"
     (closeClicked)="onHeaderAction('close-session')"
     (detailClicked)="openSessionSummary()"
     (exitFullscreenClicked)="exitFullscreen()"
     (changeStationClicked)="onChangeStation()"
     (forceTakeClicked)="onForceTake()"
+    (startSessionClicked)="startSession()"
   />
 
   @if (lastError()) {
@@ -346,13 +349,19 @@
     </app-button>
   </app-modal>
 
+  <!--
+    AVISO de turno cerrado. No abre la sesión: la apertura vive en el botón
+    "Iniciar turno" de la barra de estado y en ningún otro sitio. Este modal
+    existe para que tocar un ticket sin turno no falle en silencio, y para
+    decir dónde está el botón que falta pulsar.
+  -->
   <app-modal
     [isOpen]="sessionGateOpen()"
     size="sm"
     [dialog]="true"
-    title="Abrir turno de estación"
+    title="Sin turno abierto"
     [showCloseButton]="true"
-    (cancel)="cancelOpenSession()"
+    (cancel)="dismissSessionGate()"
   >
     <app-icon slot="header" name="chef-hat" [size]="20" class="text-primary" />
 
@@ -360,29 +369,21 @@
       <p>
         Para gestionar tickets de
         <strong>{{ stationsService.selectedStation()?.name ?? 'esta estación' }}</strong>
-        necesitas un turno abierto.
+        necesitas un turno abierto. Pulsa
+        <strong>Iniciar turno</strong> en la barra superior del tablero.
       </p>
       <p class="session-gate-why">
         El turno registra quién consumió los insumos de la estación, no solo quién
-        pidió que se cocine.
+        pidió que se cocine. Por eso se abre a conciencia y no al tocar un ticket.
       </p>
     </div>
 
     <app-button
       slot="footer"
-      variant="secondary"
-      (clicked)="cancelOpenSession()"
-      [disabled]="openingSession()"
-    >
-      Cancelar
-    </app-button>
-    <app-button
-      slot="footer"
       variant="primary"
-      [loading]="openingSession()"
-      (clicked)="confirmOpenSession()"
+      (clicked)="dismissSessionGate()"
     >
-      Abrir turno
+      Entendido
     </app-button>
   </app-modal>
   }

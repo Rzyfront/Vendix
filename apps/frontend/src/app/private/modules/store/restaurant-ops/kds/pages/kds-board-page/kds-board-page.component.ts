@@ -109,12 +109,18 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
    */
   readonly stationsService = inject(KdsStationsService);
   /**
-   * QUI-651 — gate de turno. `sessionGatePending` recuerda QUE ticket se quiso
-   * gestionar para reintentarlo tras abrir la sesion, en vez de obligar al
-   * operador a volver a buscarlo en el tablero.
+   * QUI-651 — aviso de turno. El tablero se LEE sin turno; gestionar un ticket
+   * exige turno abierto. Cuando no lo hay, este signal levanta un aviso que
+   * REMITE al botón "Iniciar turno" de la barra — no abre nada por su cuenta.
+   *
+   * Antes este mismo signal levantaba un modal con un botón "Abrir turno" que
+   * abría la sesión y reintentaba la acción: la apertura colgaba del gesto de
+   * tocar un ticket. De la sesión cuelga el consumo firmado del fire con su
+   * costo, así que la apertura pasó a ser un acto propio del operador y tiene
+   * un único origen, el botón de la barra. Por eso ya no hay ticket pendiente
+   * que recordar ni reintento que hacer.
    */
   readonly sessionGateOpen = signal(false);
-  readonly sessionGatePending = signal<number | null>(null);
   readonly openingSession = signal(false);
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
@@ -1272,16 +1278,22 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
    * En `error` limpiamos el id + toast (como antes).
    */
   /**
-   * Abre el turno de la estacion y REINTENTA la accion que disparo el gate.
+   * Abre el turno de la estacion seleccionada. UNICO camino de apertura: lo
+   * dispara el boton "Iniciar turno" de la barra de estado, nunca una accion
+   * sobre un ticket.
    *
-   * Reintentar importa: sin esto el operador abre el turno y su clic original se
-   * perdio, asi que tiene que volver a buscar el ticket en el tablero. El
-   * reintento se resuelve por id y no guardando el observable, porque el estado
-   * del ticket pudo cambiar por SSE mientras el modal estaba abierto.
+   * No reintenta ninguna accion: no hay ninguna pendiente, porque la apertura
+   * ya no cuelga del clic en un ticket. Si el aviso de turno estaba levantado
+   * se cierra aca, que es el unico caso en que abrir turno resuelve lo que el
+   * operador queria hacer.
    */
-  confirmOpenSession(): void {
+  startSession(): void {
     const kdsId = this.stationsService.selectedStationId();
     if (kdsId == null) return;
+    // Guarda de reentrada: dos clics seguidos mandarian dos POST y el segundo
+    // volveria como KDS_SESSION_ALREADY_OPEN por el indice unico parcial,
+    // culpando al operador de una carrera que provoco la UI.
+    if (this.openingSession()) return;
 
     this.openingSession.set(true);
     this.stationsService
@@ -1291,15 +1303,7 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
         next: () => {
           this.openingSession.set(false);
           this.sessionGateOpen.set(false);
-          const pending = this.sessionGatePending();
-          this.sessionGatePending.set(null);
           this.toastService.success('Turno abierto');
-          if (pending != null) {
-            const ticket = this.tickets().find((t) => t.id === pending);
-            // Se re-deriva la accion del estado ACTUAL del ticket: entre el gate y
-            // la apertura, el SSE pudo haberlo movido.
-            if (ticket) this.advanceTicket(ticket);
-          }
         },
         error: (err: unknown) => {
           this.openingSession.set(false);
@@ -1377,25 +1381,9 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     this.stationsService.clearStation();
   }
 
-  cancelOpenSession(): void {
+  /** Cierra el aviso de "sin turno". No abre ni cierra sesiones. */
+  dismissSessionGate(): void {
     this.sessionGateOpen.set(false);
-    this.sessionGatePending.set(null);
-  }
-
-  /**
-   * Avanza el ticket al siguiente estado segun donde este. Se usa para el
-   * reintento post-apertura de turno, donde solo se conserva el id.
-   */
-  private advanceTicket(ticket: KitchenTicket): void {
-    if (ticket.status === 'pending') {
-      this.runMutation(ticket.id, () => this.ticketsService.start(ticket.id));
-    } else if (ticket.status === 'in_preparation') {
-      this.runMutation(ticket.id, () =>
-        this.ticketsService.markReady(ticket.id),
-      );
-    }
-    // `ready` no se avanza automaticamente: entregar es una decision de servicio
-    // y la toma el operador desde su boton, no un reintento silencioso.
   }
 
   private runMutation(
@@ -1413,9 +1401,11 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     // dato que necesite dueno — pero gestionar un ticket consume inventario y
     // genera COGS, y eso necesita un responsable.
     //
-    // Y no muta NADA hasta que el turno se abra: se pide apertura y se corta.
+    // Y no muta NADA hasta que el turno se abra. El aviso NO abre el turno:
+    // remite al boton "Iniciar turno" de la barra. La apertura dejo de colgar
+    // del clic en un ticket porque de la sesion cuelga el consumo firmado del
+    // fire con su costo, y eso se abre a conciencia, no de rebote.
     if (!this.stationsService.canManageTickets()) {
-      this.sessionGatePending.set(ticketId);
       this.sessionGateOpen.set(true);
       return;
     }

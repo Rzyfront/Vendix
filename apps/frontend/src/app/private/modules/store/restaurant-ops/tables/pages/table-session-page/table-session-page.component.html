@@ -603,6 +603,7 @@
         class="session-cta__more"
         variant="ghost"
         size="md"
+        customClasses="!h-11 !w-11 !px-0"
         [attr.title]="'Más acciones'"
         [attr.aria-label]="'Más acciones'"
         (clicked)="isActionsSheetOpen.set(true)"
@@ -614,12 +615,13 @@
         class="session-cta__secondary"
         [variant]="checkoutEnabled() ? 'outline' : 'primary'"
         size="md"
+        customClasses="!h-11"
         [fullWidth]="!checkoutEnabled()"
         [disabled]="isClosed()"
         (clicked)="openAddItems()"
       >
         <app-icon slot="icon" name="plus" [size]="15"></app-icon>
-        Agregar items
+        Agregar
       </app-button>
 
       @if (checkoutEnabled()) {
@@ -627,6 +629,7 @@
           class="session-cta__primary"
           variant="primary"
           size="md"
+          customClasses="!h-11"
           [fullWidth]="true"
           [disabled]="items().length === 0"
           (clicked)="openPay()"

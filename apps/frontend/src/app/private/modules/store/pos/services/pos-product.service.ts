@@ -198,6 +198,18 @@ export interface SearchFilters {
    * scoped products query; the POS sends it explicitly for clarity.
    */
   is_sellable?: boolean;
+  /**
+   * Orden por defecto de la grilla del POS: antepone los productos marcados
+   * como destacados (`is_featured`). Sólo se envía en la carga sin búsqueda ni
+   * filtros — con un filtro activo manda el filtro, no este orden.
+   */
+  featured_first?: boolean;
+  /**
+   * Segundo criterio del orden por defecto: los más vendidos de los últimos 30
+   * días. Con `featured_first` produce destacados → más vendidos → resto; sin
+   * destacados en la tienda, la grilla queda ordenada por ventas.
+   */
+  best_selling_first?: boolean;
 }
 
 export interface SearchResult {
@@ -358,6 +370,17 @@ export class PosProductService {
 
     if (filters.is_sellable !== undefined) {
       query.is_sellable = filters.is_sellable ? 'true' : 'false';
+    }
+
+    // Orden por defecto de la grilla (destacados → más vendidos). Se serializa
+    // como string: el DTO del backend lo lee crudo con `@Transform`, así que
+    // `'false'` se respeta como falso en vez de coaccionarse a `true`.
+    if (filters.featured_first !== undefined) {
+      query.featured_first = filters.featured_first ? 'true' : 'false';
+    }
+
+    if (filters.best_selling_first !== undefined) {
+      query.best_selling_first = filters.best_selling_first ? 'true' : 'false';
     }
 
     const params = this.buildParams(query);

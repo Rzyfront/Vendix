@@ -50,10 +50,32 @@ const CARD_MAX_WIDTH = 480;
  */
 function buildDataUri(uri: string, base64?: string | null, mimeType?: string | null): string {
   if (base64 && base64.length > 0) {
-    const mime = mimeType || 'image/jpeg';
+    const mime = mimeType || mimeFromUriExtension(uri) || 'image/jpeg';
     return `data:${mime};base64,${base64}`;
   }
   return uri;
+}
+
+/**
+ * MIME a partir de la extensión del asset, para cuando el picker no informa
+ * `mimeType` (es opcional en `ImagePickerAsset`).
+ *
+ * Importa para la transparencia: al serializar a data URL descartamos la uri
+ * original, así que esta etiqueta es la ÚNICA señal que le queda aguas abajo
+ * a `image-edit-modal` para decidir si el recorte se guarda en PNG (con canal
+ * alfa) o en JPEG. Si un PNG transparente se etiquetara como jpeg por defecto,
+ * terminaría recortado sobre fondo NEGRO.
+ */
+function mimeFromUriExtension(uri: string): string | null {
+  const ext = /\.([a-z0-9]+)$/i.exec(uri.split(/[?#]/)[0])?.[1]?.toLowerCase();
+  if (!ext) return null;
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'gif') return 'image/gif';
+  if (ext === 'avif') return 'image/avif';
+  if (ext === 'heic' || ext === 'heif') return `image/${ext}`;
+  return null;
 }
 
 /**

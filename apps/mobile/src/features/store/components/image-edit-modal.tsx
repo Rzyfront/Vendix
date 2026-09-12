@@ -56,6 +56,56 @@ interface Frame {
 const MIN_SIZE = 0.1; // 10% del canvas mínimo
 
 /**
+ * Formatos de origen que PUEDEN traer canal alfa (transparencia).
+ *
+ * No incluimos `heic`/`heif` a propósito: en la práctica sólo salen de la
+ * cámara del iPhone, donde la foto es siempre opaca. Tratarlos como "con
+ * alfa" convertiría cada foto de producto en un PNG sin pérdida y dispararía
+ * el peso del data URL sin ganar nada.
+ */
+const ALPHA_CAPABLE_FORMATS = ['png', 'webp', 'gif', 'avif', 'svg', 'ico', 'bmp', 'tif', 'tiff'];
+
+/**
+ * Lado máximo (px) del recorte cuando lo guardamos en PNG.
+ *
+ * PNG es SIN PÉRDIDA: una foto de 4032x3024 de la cámara pesa decenas de MB
+ * y viaja como base64 (+33%) dentro del JSON del formulario. Acotamos el lado
+ * mayor a 1600px, que sigue estando por encima del preset más grande que
+ * consume este recorte en el backend (PRODUCT 1200x1200, CATEGORY 800x800,
+ * LOGO 400x200 — ver apps/backend/src/common/config/image-presets.ts), así
+ * que el backend reescala igual y NO perdemos calidad final: sólo evitamos
+ * mandar píxeles que se van a descartar. La rama JPEG conserva la resolución
+ * natural como hasta ahora.
+ */
+const ALPHA_MAX_DIMENSION = 1600;
+
+/**
+ * Decide si el recorte debe guardarse en un formato CON canal alfa.
+ *
+ * En React Native no hay `canvas`/`getImageData`, así que no podemos
+ * inspeccionar los píxeles como en la web: la única señal disponible es el
+ * tipo declarado del origen. `imageUri` llega como data URL con el MIME real
+ * del asset (lo construye `image-source-modal.tsx`) o, en su defecto, como
+ * ruta/URL con extensión.
+ */
+function sourceMayHaveAlpha(uri: string | null): boolean {
+  if (!uri) return false;
+
+  // 1) data URL -> el MIME es la señal más fiable.
+  const dataUrlMime = /^data:image\/([a-z0-9.+-]+)/i.exec(uri);
+  if (dataUrlMime) {
+    // `image/svg+xml` -> nos quedamos con `svg`.
+    const subtype = dataUrlMime[1].toLowerCase().split('+')[0];
+    return ALPHA_CAPABLE_FORMATS.includes(subtype);
+  }
+
+  // 2) file:// o http(s):// -> caemos a la extensión, ignorando query/hash.
+  const path = uri.split(/[?#]/)[0];
+  const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase();
+  return ext ? ALPHA_CAPABLE_FORMATS.includes(ext) : false;
+}
+
+/**
  * Modal de edición de imagen (espejo del web "Ajustar y recortar").
  *
  * Funcionalidades:
@@ -426,11 +476,29 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
       const swapAxes = rotation === 90 || rotation === 270;
       const renderedW = swapAxes ? imageDims.h : imageDims.w;
       const renderedH = swapAxes ? imageDims.w : imageDims.h;
+
+      // ¿El origen puede traer transparencia? JPEG NO tiene canal alfa: al
+      // exportar un PNG transparente a JPEG el alfa se aplasta y el fondo
+      // sale NEGRO. Por eso, si el origen puede tener alfa, guardamos en PNG
+      // aunque pese más. NO revertir esto "para optimizar": es el bug.
+      const keepAlpha = sourceMayHaveAlpha(imageUri);
+
+      // Sólo la rama PNG (sin pérdida) se acota; la rama JPEG mantiene la
+      // resolución natural de siempre. Ver ALPHA_MAX_DIMENSION.
+      const alphaScale = keepAlpha
+        ? Math.min(1, ALPHA_MAX_DIMENSION / Math.max(renderedW, renderedH))
+        : 1;
+      const baseW = Math.max(1, Math.round(renderedW * alphaScale));
+      const baseH = Math.max(1, Math.round(renderedH * alphaScale));
+
+      // `frame` está normalizado (0..1), así que el crop se deriva de las
+      // mismas dimensiones a las que reescalamos: al acotar la resolución el
+      // recorte sigue cayendo exactamente donde el usuario lo puso.
       const crop = {
-        originX: Math.round(frame.x * renderedW),
-        originY: Math.round(frame.y * renderedH),
-        width: Math.max(1, Math.round(frame.w * renderedW)),
-        height: Math.max(1, Math.round(frame.h * renderedH)),
+        originX: Math.round(frame.x * baseW),
+        originY: Math.round(frame.y * baseH),
+        width: Math.max(1, Math.round(frame.w * baseW)),
+        height: Math.max(1, Math.round(frame.h * baseH)),
       };
 
       const manipulator = ImageManipulator.ImageManipulator.manipulate(imageUri);
@@ -441,7 +509,7 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
       // queda "zoomed in" porque se aplica sobre la versión reducida.
       // `resize` a la dimensión natural hace que el crop opere sobre la
       // imagen a tamaño completo.
-      manipulator.resize({ width: renderedW, height: renderedH });
+      manipulator.resize({ width: baseW, height: baseH });
       // Encadenamos: rotar, voltear, recortar.
       // El orden importa: el crop opera sobre el sistema de coords de la
       // imagen rendered (post-rotación).
@@ -451,13 +519,27 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
       manipulator.crop(crop);
 
       const rendered = await manipulator.renderAsync();
+      // PNG preserva el canal alfa; JPEG no. Descartamos WEBP: aunque
+      // `SaveFormat.WEBP` existe en el enum de expo-image-manipulator 14, en
+      // iOS se encoda vía el pod SDWebImageWebPCoder (en Android es
+      // Bitmap.CompressFormat.WEBP), así que no es igual de fiable en ambas
+      // plataformas. PNG sí lo es, y el backend lo reconvierte a webp con
+      // sharp preservando el alfa.
+      const format = keepAlpha
+        ? ImageManipulator.SaveFormat.PNG
+        : ImageManipulator.SaveFormat.JPEG;
       const saved = await rendered.saveAsync({
-        format: ImageManipulator.SaveFormat.JPEG,
-        compress: 0.85,
+        format,
+        // `compress` sólo aplica a JPEG; en PNG (sin pérdida) se ignora.
+        compress: keepAlpha ? 1 : 0.85,
         base64: true,
       });
+      // El MIME del data URL DEBE coincidir con el formato realmente
+      // guardado: el backend deriva la extensión del archivo a partir de
+      // esta etiqueta, así que un PNG anunciado como jpeg viaja mal tipado.
+      const mime = keepAlpha ? 'image/png' : 'image/jpeg';
       const dataUri = saved.base64
-        ? `data:image/jpeg;base64,${saved.base64}`
+        ? `data:${mime};base64,${saved.base64}`
         : saved.uri;
       onApply({
         uri: dataUri,

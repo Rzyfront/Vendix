@@ -68,6 +68,32 @@ const ASPECT_RATIOS: {
 
 const DEFAULT_ASPECT: AspectRatio = 'free';
 
+/* ── Exportación del recorte ──────────────────────────────────────────────
+   Calidad de cada ruta de exportación. La ruta opaca (JPEG) conserva el 0.9
+   histórico; la ruta con alfa usa WebP, que a 0.95 pesa una fracción de un
+   PNG equivalente y sí conserva el canal alfa. */
+const JPEG_QUALITY = 0.9;
+const WEBP_QUALITY = 0.95;
+
+/* Presupuesto de píxeles para escanear el alfa de forma EXACTA (2048² ≈ 4.2M
+   píxeles). Por debajo de este tamaño leemos el canvas entero y miramos cada
+   byte alfa: una sola lectura y un bucle de ~4M enteros, imperceptible en un
+   click. Por encima cambiamos a perímetro + sonda reducida (ver
+   `hasAlphaPixels`) para no pedirle al navegador un buffer de ~67 MB. */
+const ALPHA_EXACT_SCAN_BUDGET = 2048 * 2048;
+
+/* Lado mayor de la sonda reducida que examina el interior de canvases enormes. */
+const ALPHA_PROBE_MAX_SIDE = 512;
+
+/* Lado mayor permitido cuando caemos al fallback PNG (navegador sin WebP en
+   `toDataURL`). PNG es SIN PÉRDIDA: un recorte de 4096px puede pasar de 2 MB y
+   los consumidores imponen topes en cliente — el formulario de ajustes de
+   tienda rechaza un logo de más de 2 MB y un favicon de más de 1 MB. Cambiar
+   "fondo negro" por "no puedo subir el logo" no sería un arreglo. Reduciendo a
+   2048px el PNG entra holgadamente en esos topes sin sacrificar nitidez real.
+   NO aplica a WebP ni a JPEG, que ya comprimen. */
+const PNG_FALLBACK_MAX_SIDE = 2048;
+
 @Component({
   selector: 'app-image-source-modal',
   standalone: true,
@@ -346,9 +372,12 @@ const DEFAULT_ASPECT: AspectRatio = 'free';
               class="relative w-full bg-gray-100 rounded-xl overflow-hidden flex items-center justify-center p-3"
               style="min-height: 280px;"
             >
+              <!-- El damero vive DETRÁS del canvas (CSS), nunca dentro del
+                   contexto 2D: pintarlo en el canvas lo exportaría dentro de
+                   la imagen. Así el usuario ve que el fondo es transparente. -->
               <div
                 #cropWrapper
-                class="relative inline-block max-w-full"
+                class="crop-checkerboard relative inline-block max-w-full"
                 style="touch-action: none;"
               >
                 <canvas
@@ -565,6 +594,31 @@ const DEFAULT_ASPECT: AspectRatio = 'free';
       </div>
     </app-modal>
   `,
+  styles: [
+    `
+      /* Damero de transparencia del recortador.
+         Se pinta como fondo CSS del contenedor del canvas, así que queda
+         DEBAJO de la imagen y jamás entra en el toDataURL(). Los dos tonos
+         salen de tokens de tema, de modo que funciona igual en claro y en
+         oscuro: el claro da blanco/gris suave, el oscuro da superficie/
+         superficie aclarada. */
+      .crop-checkerboard {
+        --crop-checker-base: var(--color-surface, #ffffff);
+        --crop-checker-alt: color-mix(
+          in srgb,
+          var(--color-text-primary, #0f172a) 12%,
+          var(--color-surface, #ffffff)
+        );
+        background-color: var(--crop-checker-base);
+        background-image: repeating-conic-gradient(
+          var(--crop-checker-alt) 0% 25%,
+          var(--crop-checker-base) 0% 50%
+        );
+        background-size: 16px 16px;
+        background-position: 0 0;
+      }
+    `,
+  ],
 })
 export class ImageSourceModalComponent {
   private readonly imageUploadService = inject(ImageUploadService);
@@ -1222,7 +1276,7 @@ export class ImageSourceModalComponent {
     if (!octx) return;
     octx.drawImage(tmp, sx, sy, sw, sh, 0, 0, sw, sh);
 
-    const dataUrl = out.toDataURL('image/jpeg', 0.9);
+    const dataUrl = this.exportCanvas(out, octx);
 
     if (this.mode() === 'edit') {
       this.imageEdited.emit(dataUrl);
@@ -1232,6 +1286,144 @@ export class ImageSourceModalComponent {
 
     this.appendResult(dataUrl);
     this.advanceQueue();
+  }
+
+  /**
+   * Exporta el canvas del recorte eligiendo formato según haya o no canal alfa.
+   *
+   * POR QUÉ EXISTE ESTE MÉTODO (no lo revierta nadie a un `toDataURL('image/jpeg')`
+   * pelado): JPEG **no tiene canal alfa**. Al exportar a JPEG un logo PNG/WebP
+   * con fondo transparente, el navegador aplana los píxeles transparentes a
+   * NEGRO — ese es exactamente el bug de "los logos quedan con fondo negro"
+   * reportado en producción. El backend no era el culpable: recomprime con
+   * `sharp().webp()`, que sí preserva alfa; la transparencia ya venía perdida
+   * desde el navegador.
+   *
+   * Rutas:
+   * 1. Sin alfa → JPEG 0.9, igual que siempre. No inflamos el peso de una foto
+   *    opaca convirtiéndola a PNG/WebP sin necesidad.
+   * 2. Con alfa → WebP, que conserva alfa y pesa una fracción de un PNG.
+   * 3. Con alfa y sin soporte WebP en `toDataURL` → PNG, pero reducido a
+   *    {@link PNG_FALLBACK_MAX_SIDE} porque es sin pérdida y reventaría los
+   *    topes de peso que los consumidores validan en cliente (2 MB el logo,
+   *    1 MB el favicon).
+   */
+  private exportCanvas(
+    canvas: HTMLCanvasElement,
+    ctx: CanvasRenderingContext2D,
+  ): string {
+    if (!this.hasAlphaPixels(canvas, ctx)) {
+      return canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+    }
+
+    // `toDataURL` NO avisa cuando el tipo pedido no está soportado: devuelve
+    // PNG en silencio. Por eso verificamos el prefijo real del data URL en vez
+    // de confiar en haberlo pedido.
+    const webp = canvas.toDataURL('image/webp', WEBP_QUALITY);
+    if (webp.startsWith('data:image/webp')) return webp;
+
+    return this.downscaleForPngFallback(canvas).toDataURL('image/png');
+  }
+
+  /**
+   * Devuelve el canvas tal cual si ya cabe en {@link PNG_FALLBACK_MAX_SIDE}, o
+   * una copia reducida si no. La copia se crea vacía (transparente) y se dibuja
+   * con `source-over`, así que la reducción conserva el canal alfa.
+   */
+  private downscaleForPngFallback(
+    canvas: HTMLCanvasElement,
+  ): HTMLCanvasElement {
+    const longest = Math.max(canvas.width, canvas.height);
+    if (longest <= PNG_FALLBACK_MAX_SIDE) return canvas;
+
+    const scale = PNG_FALLBACK_MAX_SIDE / longest;
+    const target = document.createElement('canvas');
+    target.width = Math.max(1, Math.round(canvas.width * scale));
+    target.height = Math.max(1, Math.round(canvas.height * scale));
+
+    const tctx = target.getContext('2d');
+    if (!tctx) return canvas;
+    tctx.drawImage(canvas, 0, 0, target.width, target.height);
+    return target;
+  }
+
+  /**
+   * ¿Hay algún píxel con alfa < 255 en el canvas?
+   *
+   * Estrategia por tamaño, para que el coste no dependa de que el usuario haya
+   * subido una imagen de 4096px:
+   *
+   * - Hasta {@link ALPHA_EXACT_SCAN_BUDGET} píxeles (2048²): escaneo EXACTO.
+   *   Una sola lectura y un bucle con salida temprana sobre los bytes alfa.
+   * - Por encima: primero el perímetro completo (4 tiras de 1px, coste O(lado)
+   *   en vez de O(lado²)) — ahí vive la transparencia de un logo, así que el
+   *   caso real sale por aquí sin tocar el interior. Si el perímetro es opaco,
+   *   una sonda reducida a {@link ALPHA_PROBE_MAX_SIDE} cubre el interior con
+   *   coste constante: al reducir, cualquier región translúcida grande (el
+   *   hueco de un logo tipo dona) sigue dando alfa < 255 en la sonda.
+   *
+   * La sonda podría, en teoría, perder píxeles translúcidos sueltos y aislados
+   * en el interior de una imagen gigante por lo demás opaca. Ese caso no
+   * produce el bug que arreglamos (no hay fondo que ennegrecer, solo un píxel
+   * que se aplana a su color de fondo), así que es un intercambio aceptable.
+   *
+   * Ante cualquier excepción asumimos que SÍ hay alfa: fallar preservando
+   * (WebP) solo cuesta unos KB; fallar aplanando (JPEG) devuelve el fondo negro
+   * que este arreglo elimina.
+   */
+  private hasAlphaPixels(
+    canvas: HTMLCanvasElement,
+    ctx: CanvasRenderingContext2D,
+  ): boolean {
+    const w = canvas.width;
+    const h = canvas.height;
+    if (w <= 0 || h <= 0) return false;
+
+    try {
+      if (w * h <= ALPHA_EXACT_SCAN_BUDGET) {
+        return this.containsTransparentPixel(ctx.getImageData(0, 0, w, h).data);
+      }
+
+      const perimeter = [
+        ctx.getImageData(0, 0, w, 1), // borde superior
+        ctx.getImageData(0, h - 1, w, 1), // borde inferior
+        ctx.getImageData(0, 0, 1, h), // borde izquierdo
+        ctx.getImageData(w - 1, 0, 1, h), // borde derecho
+      ];
+      if (perimeter.some((strip) => this.containsTransparentPixel(strip.data))) {
+        return true;
+      }
+
+      return this.probeHasAlpha(canvas);
+    } catch {
+      return true;
+    }
+  }
+
+  /** Sonda reducida del canvas completo, para cubrir el interior a coste fijo. */
+  private probeHasAlpha(canvas: HTMLCanvasElement): boolean {
+    const scale =
+      ALPHA_PROBE_MAX_SIDE / Math.max(canvas.width, canvas.height, 1);
+    const pw = Math.max(1, Math.round(canvas.width * scale));
+    const ph = Math.max(1, Math.round(canvas.height * scale));
+
+    const probe = document.createElement('canvas');
+    probe.width = pw;
+    probe.height = ph;
+
+    const pctx = probe.getContext('2d');
+    if (!pctx) return true;
+    pctx.drawImage(canvas, 0, 0, pw, ph);
+
+    return this.containsTransparentPixel(pctx.getImageData(0, 0, pw, ph).data);
+  }
+
+  /** Recorre solo el byte alfa (índices 3, 7, 11...) con salida temprana. */
+  private containsTransparentPixel(data: Uint8ClampedArray): boolean {
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] < 255) return true;
+    }
+    return false;
   }
 
   skipCurrent(): void {
