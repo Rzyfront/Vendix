@@ -1349,6 +1349,37 @@ export class ProductQueryDto {
   @IsBoolean()
   featured_first?: boolean;
 
+  /**
+   * Segundo criterio de orden del listado: dentro de cada bloque de
+   * `featured_first` (y en todo el listado cuando no hay ningún destacado),
+   * antepone los productos MÁS VENDIDOS de la tienda en los últimos 30 días.
+   *
+   * "Vendido" no se inventa aquí: el ranking sólo cuenta líneas de órdenes en
+   * `COMPLETED_SALE_STATES` (contrato `analytics-metrics.contract.ts`), así que
+   * un borrador o una orden cancelada nunca empuja un producto al frente.
+   *
+   * Ausente → el orden no cambia. Combinado con `featured_first=true` produce
+   * la prioridad que pide el POS: destacados → más vendidos → resto (newest).
+   *
+   * Mismo patrón `@Transform` que `featured_first`: el ValidationPipe global
+   * usa `enableImplicitConversion: true`, así que un `@Type(() => Boolean)`
+   * convertiría `'false'` en `true`. Este `@Transform` lee `obj[key]` crudo
+   * en vez de `value` para evitar esa coacción.
+   */
+  @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === undefined || raw === null || raw === '') {
+      return undefined;
+    }
+    if (raw === true || raw === 'true') return true;
+    if (raw === false || raw === 'false') return false;
+    // Cualquier otra cosa se entrega intacta para que `@IsBoolean` la rechace.
+    return raw;
+  })
+  @IsBoolean()
+  best_selling_first?: boolean;
+
   // Hidrata una selección concreta de productos (los que el usuario marcó en el
   // stack de edición masiva), aceptando `?ids=1&ids=2` o `?ids=1,2`.
   @IsOptional()
