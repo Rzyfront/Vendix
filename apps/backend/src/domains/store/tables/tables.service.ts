@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { QrService } from '@common/services/qr.service';
+import { S3Service } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import {
@@ -57,6 +58,25 @@ export interface FloorMapTable {
 }
 
 /**
+ * Marca de la tienda que acompaña al QR de mesa para que el cartel imprimible
+ * del panel pueda estamparla sin adivinar. Todos los campos son anulables: una
+ * tienda sin logo, sin color o recién creada imprime igual.
+ */
+export interface TableQrBrand {
+  primary_color: string | null;
+  /** URL FIRMADA y lista para un `<img src>`, nunca la clave cruda de S3. */
+  logo_url: string | null;
+  store_name: string | null;
+}
+
+/** Respuesta de `GET /store/tables/:id/qr`. */
+export interface TableQrResult {
+  public_url: string;
+  qr_data_url: string;
+  brand: TableQrBrand;
+}
+
+/**
  * TablesService
  *
  * Store-scoped CRUD for the `tables` and `table_sessions` domain of the
@@ -84,6 +104,7 @@ export class TablesService {
     private prisma: StorePrismaService,
     private readonly qrService: QrService,
     private readonly notificationsSseService?: NotificationsSseService,
+    private readonly s3Service?: S3Service,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -459,7 +480,7 @@ export class TablesService {
    * replica localmente porque `EcommerceService.findPrimaryEcommerceDomain`
    * es privado (ver arriba).
    */
-  async getQr(id: number): Promise<{ public_url: string; qr_data_url: string }> {
+  async getQr(id: number): Promise<TableQrResult> {
     const storeId = this.requireStoreId();
     const table = await this.getById(id);
 
@@ -484,12 +505,25 @@ export class TablesService {
     // Lectura defensiva: la fila puede no existir, `settings` puede ser
     // null, y `branding` puede faltar dentro del JSON. Cualquiera de esos
     // casos deja `primaryColor` en `undefined` → QR negro, sin lanzar error.
-    const settingsRow = await this.prisma.store_settings.findUnique({
-      where: { store_id: storeId },
-      select: { settings: true },
-    });
-    const branding = (settingsRow?.settings as { branding?: { primary_color?: string } } | null)
-      ?.branding;
+    const [settingsRow, store] = await Promise.all([
+      this.prisma.store_settings.findUnique({
+        where: { store_id: storeId },
+        select: { settings: true },
+      }),
+      this.prisma.stores.findUnique({
+        where: { id: storeId },
+        select: { name: true, logo_url: true },
+      }),
+    ]);
+    const branding = (
+      settingsRow?.settings as {
+        branding?: {
+          primary_color?: string;
+          logo_url?: string | null;
+          name?: string;
+        };
+      } | null
+    )?.branding;
     const darkColor = this.resolveQrDarkColor(branding?.primary_color);
 
     const baseUrl = this.buildEcommerceUrl(domain.hostname);
@@ -500,7 +534,66 @@ export class TablesService {
       darkColor,
     );
 
-    return { public_url: publicUrl, qr_data_url: qrDataUrl };
+    return {
+      public_url: publicUrl,
+      qr_data_url: qrDataUrl,
+      brand: await this.resolveQrBrand(branding, store),
+    };
+  }
+
+  /**
+   * Marca del cartel imprimible del QR, resuelta EN EL BACKEND a propósito.
+   *
+   * El frontend no puede resolverla solo: en `store_settings.settings.branding`
+   * y en `stores.logo_url` el logo se guarda como **clave de S3**, no como URL
+   * — es la misma clave que escribe la tarjeta "LOGO DE LA APP" de
+   * `settings/general/negocio` (`SettingsService.updateSettings`, sección
+   * `app`, que además sincroniza `stores.logo_url`). Pintar esa clave en un
+   * `<img src>` produce una ruta relativa que da 404 y el cartel sale sin logo.
+   *
+   * Por eso aquí se firma con `S3Service.signUrl` (24 h de validez, de sobra
+   * para el ciclo abrir-modal → imprimir) y se devuelve ya lista para el
+   * `<img>`. `signUrl` también devuelve tal cual una URL externa que no sea de
+   * S3, así que una tienda con el logo en otro host sigue funcionando.
+   *
+   * Precedencia del logo: `branding.logo_url` (lo que el panel de branding
+   * guardó) y, si está vacío, `stores.logo_url` (el espejo que escribe la
+   * misma tarjeta). Es la MISMA precedencia que usa `SettingsService.getSettings`
+   * para construir `app.logo_url`, la que ve el panel.
+   *
+   * El nombre prioriza `stores.name` porque `branding.name` arrastra el default
+   * literal `'Vendix'` de `getDefaultStoreSettings()` en toda tienda que nunca
+   * tocó el bloque: estampar la marca de la plataforma en el cartel de un
+   * restaurante sería peor que no estampar nada.
+   */
+  private async resolveQrBrand(
+    branding:
+      | { primary_color?: string; logo_url?: string | null; name?: string }
+      | undefined,
+    store: { name: string | null; logo_url: string | null } | null,
+  ): Promise<TableQrBrand> {
+    const logoKey = branding?.logo_url || store?.logo_url || null;
+
+    let logoUrl: string | null = null;
+    try {
+      logoUrl = (await this.s3Service?.signUrl(logoKey)) ?? null;
+    } catch (error) {
+      // Un fallo al firmar (credenciales, clave inexistente) NO puede tumbar la
+      // generación del QR: el cartel se imprime sin logo, que es degradación
+      // aceptable, y el QR —lo único imprescindible— sigue saliendo.
+      this.logger.warn(
+        `No se pudo firmar el logo de la tienda para el cartel QR: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      logoUrl = null;
+    }
+
+    return {
+      primary_color: branding?.primary_color ?? null,
+      logo_url: logoUrl,
+      store_name: store?.name ?? branding?.name ?? null,
+    };
   }
 
   async update(id: number, dto: UpdateTableDto) {
