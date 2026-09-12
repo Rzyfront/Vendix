@@ -11,8 +11,8 @@ import {
   tap,
 } from 'rxjs/operators';
 import { ExpensesService } from '../../services/expenses.service';
-import { ReportsDataService } from '../../reports/services/reports-data.service';
-import { AnalyticsService } from '../../analytics/services/analytics.service';
+import { ReportsDataService } from '../../../reports/services/reports-data.service';
+import { AnalyticsService } from '../../../analytics/services/analytics.service';
 import { AnalyticsRefreshService } from '../../../shared/services/analytics-refresh.service';
 import * as ExpensesActions from '../actions/expenses.actions';
 import { selectExpensesState } from '../selectors/expenses.selectors';
