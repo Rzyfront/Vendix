@@ -421,6 +421,24 @@ describe('SalesAnalyticsService', () => {
       const result = await service.getSalesByUser({ page: 1, limit: 10 } as any);
       expect(result.meta.truncated).toBe(true);
     });
+
+    it('excludes orders created by users with the customer role (ecommerce clients)', async () => {
+      // Mock vacío — lo importante es validar la cláusula where enviada a Prisma.
+      prisma.orders.findMany.mockResolvedValue([] as any);
+      await service.getSalesByUser({ page: 1, limit: 10 } as any);
+
+      expect(prisma.orders.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            users_orders_created_by: {
+              user_roles: {
+                none: { roles: { name: 'customer' } },
+              },
+            },
+          }),
+        }),
+      );
+    });
   });
 
   describe('getSalesByUserForExport (QUI-551)', () => {

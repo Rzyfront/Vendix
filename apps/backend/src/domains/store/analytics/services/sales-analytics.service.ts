@@ -20,6 +20,7 @@ import {
   localPeriodSql,
 } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
 import {
   formatQuantityInSaleUnit,
   resolveSaleUnitCodes,
@@ -1412,6 +1413,13 @@ export class SalesAnalyticsService {
           gte: startDate,
           lte: endDate,
         },
+        // Excluir clientes ecommerce del reporte: solo usuarios internos
+        // (admin/settings/users) deben contar como vendedores.
+        users_orders_created_by: {
+          user_roles: {
+            none: { roles: { name: StaffProvisioningService.CUSTOMER_ROLE } },
+          },
+        },
       },
       select: {
         id: true,
@@ -1592,6 +1600,13 @@ export class SalesAnalyticsService {
           created_at: {
             gte: startDate,
             lte: endDate,
+          },
+          // Excluir clientes ecommerce del export: solo usuarios internos
+          // (admin/settings/users) deben contar como vendedores.
+          users_orders_created_by: {
+            user_roles: {
+              none: { roles: { name: StaffProvisioningService.CUSTOMER_ROLE } },
+            },
           },
         },
         select: {

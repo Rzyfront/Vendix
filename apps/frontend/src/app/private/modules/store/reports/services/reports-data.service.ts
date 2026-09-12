@@ -45,22 +45,6 @@ export class ReportsDataService {
   }
 
   /**
-   * Clear cache for a specific report or all reports.
-   */
-  clearCache(reportId?: string): void {
-    if (reportId) {
-      const prefix = `${reportId}:`;
-      for (const key of reportsCache.keys()) {
-        if (key.startsWith(prefix)) {
-          reportsCache.delete(key);
-        }
-      }
-    } else {
-      reportsCache.clear();
-    }
-  }
-
-  /**
    * Fetch report data from any endpoint defined in the registry.
    * Uses ReportDataAdapterService to normalize and map response keys.
    */
