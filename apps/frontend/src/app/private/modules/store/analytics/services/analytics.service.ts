@@ -53,6 +53,7 @@ import {
   TopCustomer,
   CustomersAnalyticsQueryDto,
   CustomersByChannel,
+  CustomerReceivableRow,
 } from '../interfaces/customers-analytics.interface';
 import {
   AbandonedCartsSummary,
@@ -894,6 +895,27 @@ export class AnalyticsService {
 
   exportAbandonedCartsAnalytics(query: AbandonedCartsAnalyticsQueryDto = {}): Observable<Blob> {
     return this.http.get(this.getApiUrl('customers/abandoned-carts/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  // ==================== CUSTOMER RECEIVABLES (QUI-540) ====================
+
+  getCustomerReceivables(
+    query: Record<string, any> = {},
+  ): Observable<PaginatedResponse<CustomerReceivableRow>> {
+    const cacheKey = `customer-receivables-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<PaginatedResponse<CustomerReceivableRow>>(
+        this.getApiUrl('customers/receivable'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  exportCustomerReceivables(query: Record<string, any> = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('customers/receivable/export'), {
       params: this.buildParams(query),
       responseType: 'blob',
     });

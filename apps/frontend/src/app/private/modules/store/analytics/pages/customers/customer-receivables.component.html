@@ -1,0 +1,253 @@
+<div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+  <!-- Stats Cards -->
+  @if (loading() && rows().length === 0) {
+    <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
+          <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+          <div class="h-8 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      }
+    </div>
+  } @else {
+    <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <app-stats
+        title="Saldo Total"
+        [value]="totalBalance() | currency"
+        smallText="Cartera pendiente de cobro"
+        iconName="dollar-sign"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-600"
+      ></app-stats>
+
+      <app-stats
+        title="Total Cartera"
+        [value]="totalOriginal() | currency"
+        smallText="Monto original emitido"
+        iconName="receipt"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-600"
+      ></app-stats>
+
+      <app-stats
+        title="Total Recaudado"
+        [value]="totalPaid() | currency"
+        smallText="Abonos recibidos"
+        iconName="check-circle"
+        iconBgColor="bg-emerald-100"
+        iconColor="text-emerald-600"
+      ></app-stats>
+
+      <app-stats
+        title="Documentos"
+        [value]="total()"
+        smallText="Cuentas activas"
+        iconName="file-text"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      ></app-stats>
+    </div>
+  }
+
+  <!-- Main Card -->
+  <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+    <div slot="header" class="results-header flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex items-center gap-2 min-w-0">
+        <app-icon name="hand-coins" [size]="20" class="shrink-0 text-[var(--color-primary)]"></app-icon>
+        <span class="results-header__title text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight whitespace-nowrap">
+          Cuentas por Cobrar
+        </span>
+      </div>
+      <div class="flex items-end gap-2 flex-wrap shrink-0">
+        <app-options-dropdown
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [actions]="dropdownActions()"
+          [showActions]="true"
+          triggerLabel="Acciones"
+          triggerIcon="plus"
+          [isLoading]="exporting()"
+          (actionClick)="onActionClick($event)"
+        ></app-options-dropdown>
+      </div>
+    </div>
+
+    <div class="p-4 space-y-6">
+      <!-- Aging Distribution Chart -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="lg:col-span-1">
+          <app-card shadow="none" [padding]="true" class="h-full">
+            <div class="flex flex-col mb-2">
+              <span class="text-sm font-bold text-[var(--color-text-primary)]">Distribución por Antigüedad</span>
+              <span class="text-xs text-[var(--color-text-secondary)]">Saldos agrupados por días de vencimiento</span>
+            </div>
+            <div class="h-64">
+              <app-chart [options]="agingChartOptions()" [loading]="loading()"></app-chart>
+            </div>
+          </app-card>
+        </div>
+
+        <!-- Summary by Bucket Badges / Mini Cards -->
+        <div class="lg:col-span-2 flex flex-col justify-center gap-3">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div class="p-3.5 rounded-xl border border-border bg-surface flex flex-col">
+              <span class="text-xs font-medium text-emerald-600 dark:text-emerald-400">0 - 30 días</span>
+              <span class="text-base font-bold text-[var(--color-text-primary)] mt-1">{{ bucketTotals()['0-30'] | currency }}</span>
+              <span class="text-xs text-[var(--color-text-secondary)]">{{ bucketCounts()['0-30'] }} facturas</span>
+            </div>
+            <div class="p-3.5 rounded-xl border border-border bg-surface flex flex-col">
+              <span class="text-xs font-medium text-blue-600 dark:text-blue-400">31 - 60 días</span>
+              <span class="text-base font-bold text-[var(--color-text-primary)] mt-1">{{ bucketTotals()['31-60'] | currency }}</span>
+              <span class="text-xs text-[var(--color-text-secondary)]">{{ bucketCounts()['31-60'] }} facturas</span>
+            </div>
+            <div class="p-3.5 rounded-xl border border-border bg-surface flex flex-col">
+              <span class="text-xs font-medium text-amber-600 dark:text-amber-400">61 - 90 días</span>
+              <span class="text-base font-bold text-[var(--color-text-primary)] mt-1">{{ bucketTotals()['61-90'] | currency }}</span>
+              <span class="text-xs text-[var(--color-text-secondary)]">{{ bucketCounts()['61-90'] }} facturas</span>
+            </div>
+            <div class="p-3.5 rounded-xl border border-border bg-surface flex flex-col">
+              <span class="text-xs font-medium text-red-600 dark:text-red-400">90+ días</span>
+              <span class="text-base font-bold text-[var(--color-text-primary)] mt-1">{{ bucketTotals()['90+'] | currency }}</span>
+              <span class="text-xs text-[var(--color-text-secondary)]">{{ bucketCounts()['90+'] }} facturas</span>
+            </div>
+          </div>
+          <div class="p-4 rounded-xl bg-[var(--color-background-secondary,#f8fafc)] border border-border text-xs text-[var(--color-text-secondary)]">
+            <span class="font-semibold text-[var(--color-text-primary)]">Gestión de Cobro:</span>
+            Las cuentas con más de 60 días de vencimiento representan riesgo de incobrabilidad. Prioriza el seguimiento y acuerdos de pago sobre el segmento 90+ días.
+          </div>
+        </div>
+      </div>
+
+      <!-- Receivables Table -->
+      <div class="overflow-x-auto rounded-xl border border-border">
+        <table class="w-full text-left text-sm">
+          <thead class="bg-[var(--color-background-secondary,#f8fafc)] text-xs uppercase tracking-wider text-[var(--color-text-secondary)] border-b border-border">
+            <tr>
+              <th class="px-4 py-3 font-semibold">Documento</th>
+              <th class="px-4 py-3 font-semibold">Cliente</th>
+              <th class="px-4 py-3 font-semibold">Emisión</th>
+              <th class="px-4 py-3 font-semibold">Vencimiento</th>
+              <th class="px-4 py-3 font-semibold text-center">Días Mora</th>
+              <th class="px-4 py-3 font-semibold text-center">Antigüedad</th>
+              <th class="px-4 py-3 font-semibold text-right">Original</th>
+              <th class="px-4 py-3 font-semibold text-right">Pagado</th>
+              <th class="px-4 py-3 font-semibold text-right">Saldo</th>
+              <th class="px-4 py-3 font-semibold text-center">Estado</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-border bg-surface">
+            @if (loading()) {
+              @for (i of [1, 2, 3, 4, 5]; track i) {
+                <tr class="animate-pulse">
+                  <td class="px-4 py-3"><div class="h-4 bg-gray-200 rounded w-20"></div></td>
+                  <td class="px-4 py-3"><div class="h-4 bg-gray-200 rounded w-32"></div></td>
+                  <td class="px-4 py-3"><div class="h-4 bg-gray-200 rounded w-20"></div></td>
+                  <td class="px-4 py-3"><div class="h-4 bg-gray-200 rounded w-20"></div></td>
+                  <td class="px-4 py-3"><div class="h-4 bg-gray-200 rounded w-12 mx-auto"></div></td>
+                  <td class="px-4 py-3"><div class="h-4 bg-gray-200 rounded w-16 mx-auto"></div></td>
+                  <td class="px-4 py-3"><div class="h-4 bg-gray-200 rounded w-20 ml-auto"></div></td>
+                  <td class="px-4 py-3"><div class="h-4 bg-gray-200 rounded w-20 ml-auto"></div></td>
+                  <td class="px-4 py-3"><div class="h-4 bg-gray-200 rounded w-20 ml-auto"></div></td>
+                  <td class="px-4 py-3"><div class="h-4 bg-gray-200 rounded w-16 mx-auto"></div></td>
+                </tr>
+              }
+            } @else if (rows().length === 0) {
+              <tr>
+                <td colspan="10" class="px-4 py-8 text-center text-sm text-[var(--color-text-secondary)]">
+                  <div class="flex flex-col items-center justify-center gap-2">
+                    <app-icon name="check-circle" [size]="32" class="text-emerald-500"></app-icon>
+                    <span class="font-medium text-base text-[var(--color-text-primary)]">Sin Cuentas por Cobrar Pendientes</span>
+                    <span class="text-xs">No hay facturas con saldo abierto en este momento.</span>
+                  </div>
+                </td>
+              </tr>
+            } @else {
+              @for (row of rows(); track row.id) {
+                <tr class="hover:bg-[var(--color-background-secondary,#f8fafc)]/50 transition-colors">
+                  <td class="px-4 py-3 font-medium text-[var(--color-text-primary)] whitespace-nowrap">
+                    {{ row.document_number || ('#' + row.id) }}
+                  </td>
+                  <td class="px-4 py-3">
+                    <div class="flex flex-col">
+                      <span class="font-medium text-[var(--color-text-primary)]">{{ row.customer_name || 'Cliente sin nombre' }}</span>
+                      @if (row.customer_document) {
+                        <span class="text-xs text-[var(--color-text-secondary)]">{{ row.customer_document }}</span>
+                      }
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 text-[var(--color-text-secondary)] whitespace-nowrap">
+                    {{ row.issue_date | date:'dd/MM/yyyy' }}
+                  </td>
+                  <td class="px-4 py-3 text-[var(--color-text-secondary)] whitespace-nowrap">
+                    {{ row.due_date | date:'dd/MM/yyyy' }}
+                  </td>
+                  <td class="px-4 py-3 text-center whitespace-nowrap">
+                    <span class="font-medium" [class.text-red-600]="row.days_overdue > 30">
+                      {{ row.days_overdue }} d
+                    </span>
+                  </td>
+                  <td class="px-4 py-3 text-center whitespace-nowrap">
+                    <span
+                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold"
+                      [ngClass]="{
+                        'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400': row.aging_bucket === '0-30',
+                        'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400': row.aging_bucket === '31-60',
+                        'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400': row.aging_bucket === '61-90',
+                        'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400': row.aging_bucket === '90+'
+                      }"
+                    >
+                      {{ row.aging_bucket }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3 text-right font-medium whitespace-nowrap text-[var(--color-text-secondary)]">
+                    {{ row.original_amount | currency }}
+                  </td>
+                  <td class="px-4 py-3 text-right font-medium whitespace-nowrap text-emerald-600">
+                    {{ row.paid_amount | currency }}
+                  </td>
+                  <td class="px-4 py-3 text-right font-bold whitespace-nowrap text-[var(--color-text-primary)]">
+                    {{ row.balance | currency }}
+                  </td>
+                  <td class="px-4 py-3 text-center whitespace-nowrap">
+                    <span
+                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                      [ngClass]="{
+                        'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400': row.status === 'open',
+                        'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400': row.status === 'partial'
+                      }"
+                    >
+                      {{ row.status === 'open' ? 'Abierta' : 'Parcial' }}
+                    </span>
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      @if (totalPages() > 1) {
+        <div class="flex justify-center pt-2">
+          <app-pagination
+            [currentPage]="page()"
+            [totalPages]="totalPages()"
+            [total]="total()"
+            [limit]="limit()"
+            [infoStyle]="'range'"
+            (pageChange)="onPageChange($event)"
+          ></app-pagination>
+        </div>
+      }
+    </div>
+  </app-card>
+
+  <!-- Quick Links to other customer analytics views -->
+  <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+    <span class="text-sm font-bold text-[var(--color-text-primary)]">Otras Vistas de Clientes</span>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+      @for (view of customersViews; track view.key) {
+        <app-analytics-card [view]="view"></app-analytics-card>
+      }
+    </div>
+  </app-card>
+</div>

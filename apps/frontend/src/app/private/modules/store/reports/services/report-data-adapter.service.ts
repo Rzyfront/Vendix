@@ -37,9 +37,6 @@ export class ReportDataAdapterService {
     if (report.id === 'accounts-payable-aging') {
       return this.adaptAccountsPayableAging(rawData);
     }
-    if (report.id === 'customer-receivables') {
-      return this.adaptCustomerReceivables(rawData);
-    }
 
     const normalized = this.normalizeResponse(rawData);
     const reportType = this.resolveType(report, normalized);
@@ -392,23 +389,6 @@ export class ReportDataAdapterService {
       record_count: Number(d.record_count || 0),
     };
     return { data: d.top_suppliers || [], isSummary: true, summaryData, meta: undefined };
-  }
-
-  /**
-   * Transforms the customer-receivables dashboard response into a summary.
-   */
-  private adaptCustomerReceivables(raw: any): ReportAdaptedData {
-    const d = raw?.data ?? raw;
-    const summaryData: Record<string, any> = {
-      pending_amount: Number(d.total_pending?.amount || 0),
-      pending_count: Number(d.total_pending?.count || 0),
-      overdue_amount: Number(d.total_overdue?.amount || 0),
-      overdue_count: Number(d.total_overdue?.count || 0),
-      due_soon_amount: Number(d.due_soon?.amount || 0),
-      due_soon_count: Number(d.due_soon?.count || 0),
-      collected_this_month: Number(d.collected_this_month || 0),
-    };
-    return { data: [], isSummary: true, summaryData, meta: undefined };
   }
 
   private adaptBalanceSheet(raw: any): ReportAdaptedData {

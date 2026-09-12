@@ -297,7 +297,7 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     icon: 'truck',
   },
 
-  // Customers (3)
+  // Customers (4)
   {
     key: 'customers_summary',
     title: 'Resumen de Clientes',
@@ -324,6 +324,16 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     route: '/admin/analytics/customers/abandoned-carts',
     category: 'customers',
     icon: 'shopping-cart',
+  },
+  {
+    // QUI-540: Cuentas por cobrar de clientes
+    key: 'customers_receivable',
+    title: 'Cuentas por Cobrar',
+    description: 'Cartera abierta y morosidad de clientes',
+    detailedDescription: 'Gestiona las cuentas por cobrar pendientes de clientes con distribución por antigüedad de mora y detalle de saldos.',
+    route: '/admin/analytics/customers/receivable',
+    category: 'customers',
+    icon: 'hand-coins',
   },
 
   // Reviews (1)
