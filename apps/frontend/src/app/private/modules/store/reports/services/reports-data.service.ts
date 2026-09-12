@@ -19,12 +19,33 @@ const lastRangePerReport = new Map<string, string>();
 })
 export class ReportsDataService {
   private http = inject(HttpClient);
-  private adapter = inject(ReportDataAdapterService);
-  /** High TTL for heavy analytics queries: 5 minutes (QUI-544). */
-  private readonly CACHE_TTL = 300_000;
+  /**
+   * Global cache TTL for report datasets (30 seconds).
+   *
+   * Architectural Rationale & Impact Analysis:
+   * - Previously set to 5 minutes (300,000 ms), which caused significant UX friction:
+   *   operational mutations (e.g., registering an expense, completing a sale, paying an advance)
+   *   were not reflected in reports unless the operator performed a hard page reload (F5).
+   * - 30 seconds provides the optimal trade-off:
+   *   1. Smooth pagination: rapid navigation between pages (1 -> 2 -> 3 -> 1) remains instant
+   *      and memory-cached without re-querying the backend.
+   *   2. Freshness: natural navigation between modules guarantees fresh data within 30s.
+   *   3. Complementary invalidation: `clearCache()` is actively called by `ReportsEffects` on
+   *      report selection/filter change, by `ExpensesEffects` on any expense mutation, and by
+   *      the "Actualizar" sticky-header action for immediate on-demand synchronization.
+   *   4. Memory safety: expired entries are automatically pruned on each fetch cycle below.
+   */
+  private readonly CACHE_TTL = 30_000;
 
   private withCache<T>(key: string, factory: () => Observable<T>): Observable<T> {
     const now = Date.now();
+
+    for (const [k, v] of reportsCache.entries()) {
+      if (now - v.lastFetch >= this.CACHE_TTL) {
+        reportsCache.delete(k);
+      }
+    }
+
     const cached = reportsCache.get(key);
     if (cached && now - cached.lastFetch < this.CACHE_TTL) {
       return cached.observable as Observable<T>;

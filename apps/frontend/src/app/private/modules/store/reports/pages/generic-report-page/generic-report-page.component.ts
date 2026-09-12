@@ -4,6 +4,8 @@ import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ReportViewerComponent } from '../../components/report-viewer/report-viewer.component';
 import { ReportsActions } from '../../state/reports.actions';
+import { ReportsDataService } from '../../services/reports-data.service';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import {
   selectSelectedReport,
   selectReportData,
@@ -34,12 +36,15 @@ import {
       (dateRangeChange)="onDateRangeChange($event)"
       (pageChange)="onPageChange($event)"
       (exportClick)="onExport()"
+      (refreshClick)="onRefresh()"
     />
   `,
 })
 export class GenericReportPageComponent {
   private store = inject(Store);
   private route = inject(ActivatedRoute);
+  private reportsDataService = inject(ReportsDataService);
+  private toast = inject(ToastService);
 
   readonly report = toSignal(this.store.select(selectSelectedReport));
   readonly data = toSignal(this.store.select(selectReportData));
@@ -69,5 +74,16 @@ export class GenericReportPageComponent {
 
   onExport(): void {
     this.store.dispatch(ReportsActions.exportReport());
+  }
+
+  onRefresh(): void {
+    const reportId = this.route.snapshot.data['reportId'];
+    if (reportId) {
+      this.reportsDataService.clearCache(reportId);
+    } else {
+      this.reportsDataService.clearCache();
+    }
+    this.store.dispatch(ReportsActions.loadReportData());
+    this.toast.success('Datos del reporte actualizados');
   }
 }

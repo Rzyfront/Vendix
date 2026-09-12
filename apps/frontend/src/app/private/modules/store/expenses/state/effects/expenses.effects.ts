@@ -8,8 +8,12 @@ import {
   exhaustMap,
   catchError,
   withLatestFrom,
+  tap,
 } from 'rxjs/operators';
 import { ExpensesService } from '../../services/expenses.service';
+import { ReportsDataService } from '../../../reports/services/reports-data.service';
+import { AnalyticsService } from '../../../analytics/services/analytics.service';
+import { AnalyticsRefreshService } from '../../../shared/services/analytics-refresh.service';
 import * as ExpensesActions from '../actions/expenses.actions';
 import { selectExpensesState } from '../selectors/expenses.selectors';
 
@@ -18,6 +22,9 @@ export class ExpensesEffects {
   private actions$ = inject(Actions);
   private store = inject(Store);
   private expensesService = inject(ExpensesService);
+  private reportsDataService = inject(ReportsDataService);
+  private analyticsService = inject(AnalyticsService);
+  private analyticsRefresh = inject(AnalyticsRefreshService);
 
   // Load expenses using filter-as-state from store
   loadExpenses$ = createEffect(() =>
@@ -75,7 +82,13 @@ export class ExpensesEffects {
     ),
   );
 
-  // After any mutation success, reload expenses + summary
+  // After any mutation success, reload expenses + summary and clear report/analytics caches.
+  // Architectural rationale for cross-domain cache invalidation:
+  // Expense mutations directly impact financial health metrics, operational cash,
+  // tax summaries, and multiple report tables (expense summary, cash flow, profit & loss).
+  // Purging ReportsDataService cache, invalidating AnalyticsService cache, and triggering
+  // AnalyticsRefreshService ensures that navigating back to analytics or reports displays
+  // accurate data immediately without requiring a browser refresh or waiting for TTL expiry.
   mutationSuccess$ = createEffect(() =>
     this.actions$.pipe(
       ofType(
@@ -88,6 +101,11 @@ export class ExpensesEffects {
         ExpensesActions.cancelExpenseSuccess,
         ExpensesActions.refundExpenseSuccess,
       ),
+      tap(() => {
+        this.reportsDataService.clearCache();
+        this.analyticsService.invalidateCache();
+        this.analyticsRefresh.triggerRefresh();
+      }),
       switchMap(() => [
         ExpensesActions.loadExpenses(),
         ExpensesActions.loadExpensesSummary(),

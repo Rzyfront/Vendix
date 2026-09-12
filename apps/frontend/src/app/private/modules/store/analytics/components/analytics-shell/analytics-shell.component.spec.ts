@@ -8,6 +8,8 @@ import {
   getViewsByCategory,
 } from '../../config/analytics-registry';
 import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
+import { AnalyticsService } from '../../services/analytics.service';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 describe('AnalyticsShellComponent', () => {
   let fixture: ComponentFixture<AnalyticsShellComponent>;
@@ -15,6 +17,8 @@ describe('AnalyticsShellComponent', () => {
   let router: Router;
   let navigateSpy: jasmine.Spy;
   let dateRangeSyncSpy: { dateRange: jasmine.Spy };
+  let analyticsServiceSpy: jasmine.SpyObj<AnalyticsService>;
+  let toastServiceSpy: jasmine.SpyObj<ToastService>;
 
   const makeRouteStub = (
     categoryId: AnalyticsCategoryId,
@@ -25,11 +29,15 @@ describe('AnalyticsShellComponent', () => {
 
   beforeEach(() => {
     dateRangeSyncSpy = { dateRange: jasmine.createSpy('dateRange').and.returnValue(null) };
+    analyticsServiceSpy = jasmine.createSpyObj('AnalyticsService', ['invalidateCache']);
+    toastServiceSpy = jasmine.createSpyObj('ToastService', ['success', 'error', 'info', 'warning']);
 
     TestBed.configureTestingModule({
       providers: [
         { provide: ActivatedRoute, useValue: makeRouteStub('sales') },
         { provide: DateRangeSyncService, useValue: dateRangeSyncSpy },
+        { provide: AnalyticsService, useValue: analyticsServiceSpy },
+        { provide: ToastService, useValue: toastServiceSpy },
       ],
     });
 
@@ -59,10 +67,28 @@ describe('AnalyticsShellComponent', () => {
     expect(tabs.every((tab) => !!tab.route)).toBe(true);
   });
 
-  it('renders the Ver Reportes header action', () => {
+  it('renders the header actions including Actualizar and Ver Reportes', () => {
     const actions = component.headerActions();
-    expect(actions.length).toBe(1);
-    expect(actions[0].id).toBe('view-reports');
+    expect(actions.length).toBe(2);
+    expect(actions.some((a) => a.id === 'refresh')).toBe(true);
+    expect(actions.some((a) => a.id === 'view-reports')).toBe(true);
+  });
+
+  it('handles refresh action by invalidating cache and toasting', () => {
+    const childMock = { loadData: jasmine.createSpy('loadData') };
+    component.onActivate(childMock);
+    component.onActionClick('refresh');
+    expect(analyticsServiceSpy.invalidateCache).toHaveBeenCalledTimes(1);
+    expect(childMock.loadData).toHaveBeenCalledTimes(1);
+    expect(toastServiceSpy.success).toHaveBeenCalledWith('Datos de analítica actualizados');
+  });
+
+  it('delegates refresh action to child implementing Refreshable contract', () => {
+    const refreshableChild = { refresh: jasmine.createSpy('refresh') };
+    component.onActivate(refreshableChild);
+    component.onActionClick('refresh');
+    expect(analyticsServiceSpy.invalidateCache).toHaveBeenCalledTimes(1);
+    expect(refreshableChild.refresh).toHaveBeenCalledTimes(1);
   });
 
   it('navigates to the report route for the current analytics URL', () => {
