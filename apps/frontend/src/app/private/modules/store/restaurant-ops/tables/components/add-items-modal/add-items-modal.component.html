@@ -217,10 +217,11 @@
       <strong>{{ totalPreview() | currency }}</strong>
     </div>
     <div class="footer-actions">
-      <app-button variant="ghost" size="sm" (clicked)="onCancel()">Cancelar</app-button>
+      <app-button variant="outline-danger" size="sm" [fullWidth]="true" (clicked)="onCancel()">Cancelar</app-button>
       <app-button
         variant="primary"
         size="sm"
+        [fullWidth]="true"
         [loading]="loading()"
         [disabled]="!hasItems() || hasMissingVariant()"
         (clicked)="onSubmit()"

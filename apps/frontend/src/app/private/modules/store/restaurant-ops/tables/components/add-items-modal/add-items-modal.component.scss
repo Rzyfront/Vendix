@@ -458,6 +458,18 @@
     gap: 0.5rem;
   }
 
+  /* Dueño: en móvil Cancelar y Agregar reparten el ancho 50/50. A 360px dos
+     botones dimensionados por su texto dejan a "Agregar" más angosto que
+     "Cancelar", que es justo al revés de la importancia de cada acción. */
+  .footer-actions {
+    width: 100%;
+
+    > * {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+  }
+
   .total-preview {
     padding: 0.5rem 0.75rem;
     font-size: 0.8rem;
