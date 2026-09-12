@@ -1325,6 +1325,30 @@ export class ProductQueryDto {
   @IsBoolean()
   is_ingredient?: boolean;
 
+  /**
+   * Antepone los productos con `is_featured=true` en el orden del listado
+   * (desempatando por `created_at desc`). Ausente → el orden actual del
+   * catálogo se mantiene intacto (`created_at desc`).
+   *
+   * Mismo patrón `@Transform` que `is_ingredient`: el ValidationPipe global
+   * usa `enableImplicitConversion: true`, así que un `@Type(() => Boolean)`
+   * convertiría `'false'` en `true`. Este `@Transform` lee `obj[key]` crudo
+   * en vez de `value` para evitar esa coacción.
+   */
+  @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === undefined || raw === null || raw === '') {
+      return undefined;
+    }
+    if (raw === true || raw === 'true') return true;
+    if (raw === false || raw === 'false') return false;
+    // Cualquier otra cosa se entrega intacta para que `@IsBoolean` la rechace.
+    return raw;
+  })
+  @IsBoolean()
+  featured_first?: boolean;
+
   // Hidrata una selección concreta de productos (los que el usuario marcó en el
   // stack de edición masiva), aceptando `?ids=1&ids=2` o `?ids=1,2`.
   @IsOptional()

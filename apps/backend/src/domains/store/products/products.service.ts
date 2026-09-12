@@ -1537,6 +1537,7 @@ export class ProductsService {
       barcode,
       include_stock,
       include_variants,
+      featured_first,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -1682,7 +1683,12 @@ export class ProductsService {
             },
           },
         },
-        orderBy: { created_at: 'desc' },
+        // featured_first antepone is_featured; created_at desc siempre queda
+        // como desempate para que el orden sea estable entre lotes cuando el
+        // frontend pagina por scroll (mismo criterio sin el flag).
+        orderBy: featured_first
+          ? [{ is_featured: 'desc' }, { created_at: 'desc' }]
+          : { created_at: 'desc' },
       }),
       this.prisma.products.count({ where }),
       this.loadMergedSettings(),
