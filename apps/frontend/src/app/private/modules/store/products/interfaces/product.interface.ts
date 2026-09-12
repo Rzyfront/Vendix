@@ -589,6 +589,12 @@ export interface ProductQueryDto {
   // (`include_variants?: boolean`, default false) y devuelve
   // `product_variants` en línea para expandir el selector de yield.
   include_variants?: boolean;
+  /**
+   * Ordena los `is_featured` primero (desempate por `created_at desc`).
+   * Usado por el picker de productos del modal "Agregar a la cuenta" para
+   * priorizar destacados en el primer lote sin paginar.
+   */
+  featured_first?: boolean;
 }
 
 // Respuestas paginadas

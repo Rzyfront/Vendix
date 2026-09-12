@@ -399,6 +399,12 @@ export interface SellableProductOption {
    * level, so we carry it here to avoid `as any` in the template.
    */
   image_url?: string | null;
+  /**
+   * Destacado del catálogo. El backend ya lo devuelve en el listado
+   * (`GET /store/products`); se declara aquí para leerlo sin `as any` al
+   * ordenar/priorizar destacados en el picker con `featured_first`.
+   */
+  is_featured?: boolean;
 }
 
 /**

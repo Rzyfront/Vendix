@@ -1167,8 +1167,19 @@
     }
 
     .session-cta__secondary {
-      flex-shrink: 0;
+      // Causa raíz del corte de texto: `flex-shrink: 0` no cedía ancho al
+      // botón, y el <button> interno de `app-button` lleva `min-w-0`
+      // (Tailwind) — en vez de desbordar el contenedor, el botón se
+      // comprimía y "Agregar items" quedaba cortado a media palabra. Ahora
+      // reparte el espacio disponible igual que `__primary` (flex: 1 1 0)
+      // y, si aun así no alcanza, trunca con elipsis en vez de cortar
+      // crudo. NO reemplazar por `flex-shrink: 0` de nuevo.
+      flex: 1 1 0;
+      min-width: 0;
       min-height: 44px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .session-cta__primary {
