@@ -29,5 +29,5 @@ skills: [vendix-frontend, vendix-backend-api, vendix-error-handling, vendix-fisc
   - [ ] Edición conserva cliente salvo cambio explícito
   - [ ] Cotización y separé conservan customer_id
   - [ ] Factura from-order hereda B y reimprime B
-  - [ ] F-007 — alias con carro A se descarta en silencio y factura A (minor)
+  - [x] F-007 — alias con carro A se descarta en silencio y factura A (minor) → decisión alias-gana + R5 clean
 - **Status:** blocked — Blocker: backend boot-loop (health 000) + ng serve caído; matriz viva en evidence/coverage-matrix.md
