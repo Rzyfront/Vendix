@@ -665,6 +665,13 @@ export class RouteFlowService {
     // also enforces this in the settle modal but the backend is the source
     // of truth — a retenedor with no withholding line item would leave the
     // fiscal accounting unbalanced.
+    //
+    // NO aplica a una parada prepagada: la retención se practica sobre el pago,
+    // y ese pago ya ocurrió fuera de la ruta (con su propia retención, si la
+    // hubo). Exigir aquí un desglose sería exigir recaudo sobre una orden
+    // saldada — el modal de liquidación ya oculta los campos cuando la parada
+    // es prepaga (`isWithholdingAgent() && !isPrepaid()`), así que sin esta
+    // condición el backend rechazaba con 400 lo que la UI dejaba confirmar.
     const isWithholdingAgent = !!stop.dispatch_note.customer?.is_withholding_agent;
     const withholdingAmount = Number(dto.withholding_amount || 0);
     const breakdown = dto.withholding_breakdown as
@@ -674,7 +681,7 @@ export class RouteFlowService {
       Number(breakdown?.retefuente || 0) +
       Number(breakdown?.reteiva || 0) +
       Number(breakdown?.reteica || 0);
-    if (isWithholdingAgent && dto.result === 'delivered') {
+    if (isWithholdingAgent && dto.result === 'delivered' && !stopIsPrepaid) {
       if (withholdingAmount <= 0 || !breakdown || breakdownSum <= 0) {
         throw new BadRequestException(
           `El cliente es agente retenedor: la liquidación requiere un desglose de retención (retefuente / reteiva / reteica) con suma > 0.`,
@@ -698,7 +705,12 @@ export class RouteFlowService {
     const total_paid = collected + anticipo;
 
     if (dto.result === 'delivered') {
-      // Must cover full net (or be prepaid)
+      // El cobro debe cubrir el neto completo — salvo que la parada esté
+      // prepagada, en cuyo caso el dinero ya entró antes del despacho y exigir
+      // recaudo aquí lo cobraría dos veces. `stopIsPrepaid` es DERIVADO del
+      // saldo vivo de la orden (ver `resolveIsPrepaid`), no de la bandera
+      // congelada de la remisión: una orden pagada después de armar la planilla
+      // entra por aquí con recaudo 0 y se entrega sin error.
       if (!stopIsPrepaid && total_paid + withholding < net) {
         throw new BadRequestException(
           `Suma de collected + anticipo + withholding (${total_paid + withholding}) es menor que el total de la remisión (${net})`,
