@@ -65,12 +65,14 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
 
               Alturas medidas con los tokens reales:
                 · con subtítulo:  77px → 49px  (-36%)
-                · sin subtítulo:  54px → 36px  (-33%)
-              Sin subtítulo manda el botón de cierre, no el título: por eso
-              baja a p-1 (24x24 área táctil). 24px es el mínimo exacto de
-              WCAG 2.2 AA 2.5.8 Target Size (Minimum); queda por debajo de
-              los 44px de la guía AAA 2.5.5 a propósito, porque el pedido
-              explícito fue recortar 30-40% de alto. Desde md: vuelve a p-2.
+                · sin subtítulo:  54px → 44px  (-18%)
+              Sin subtítulo manda el botón de cierre, no el título. Llegó a
+              estar en 24x24 (p-1) para recortar 33%, pero por pedido
+              explícito del dueño el cierre volvió a ser grande: caja fija
+              de 32x32 en móvil y 36x36 desde md, tratada como acción
+              destructiva — outline danger en reposo, tinte al hover y
+              relleno sólido al presionar (active:). Recupera los 44px de
+              área táctil de la guía AAA 2.5.5 a cambio de 8px de header.
             -->
             @if (hasHeader()) {
               <div
@@ -101,7 +103,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
                 @if (showCloseButton()) {
                   <button
                     type="button"
-                    class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all duration-200 p-1 md:p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-text-muted)]/20 focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+                    class="inline-flex items-center justify-center flex-shrink-0 h-8 w-8 md:h-9 md:w-9 border border-[rgba(var(--color-error-rgb),0.45)] text-[var(--color-error)] hover:bg-[rgba(var(--color-error-rgb),0.12)] hover:border-[var(--color-error)] active:bg-[var(--color-error)] active:text-white active:border-[var(--color-error)] transition-all duration-200 rounded-[var(--radius-md)] focus:outline-none focus:ring-2 focus:ring-[rgba(var(--color-error-rgb),0.4)]"
                     [class.absolute]="overlayCloseButton()"
                     [class.top-4]="overlayCloseButton()"
                     [class.right-4]="overlayCloseButton()"

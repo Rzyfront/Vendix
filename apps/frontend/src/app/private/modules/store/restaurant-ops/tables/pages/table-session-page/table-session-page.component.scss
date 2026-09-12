@@ -1160,10 +1160,15 @@
     border-top: 1px solid var(--color-border, #e5e7eb);
     box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.06);
 
+    // El host de `app-button` reservaba 44px, pero el <button> interno bajó
+    // a `h-8` (32px) con la pasada de densidad móvil: la caja quedaba más
+    // alta que el botón y el icono se veía descentrado ("torcido"). Los tres
+    // botones de la barra fuerzan `!h-11` por `customClasses` — la altura la
+    // decide el botón, no el hueco — así que el host ya no necesita imponer
+    // `min-height`. El `__more` además fuerza `!w-11 !px-0` para quedar
+    // cuadrado alrededor del icono.
     .session-cta__more {
       flex: 0 0 auto;
-      min-width: 44px;
-      min-height: 44px;
     }
 
     .session-cta__secondary {
@@ -1176,7 +1181,6 @@
       // crudo. NO reemplazar por `flex-shrink: 0` de nuevo.
       flex: 1 1 0;
       min-width: 0;
-      min-height: 44px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -1184,7 +1188,6 @@
 
     .session-cta__primary {
       flex: 1 1 auto;
-      min-height: 44px;
     }
   }
 

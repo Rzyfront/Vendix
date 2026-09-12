@@ -202,20 +202,23 @@
 }
 
 /* Dueño: el subtotal vive SIEMPRE visible en el pie del modal (slot="footer"),
-   no en el body scrolleable — sobrevive al scroll de la lista. Comparte fila
-   con las acciones (`.footer-row`): subtotal a la izquierda, botones a la
-   derecha. `flex: 1 1 auto` le da el espacio sobrante sin empujar los
-   botones fuera de pantalla. */
+   no en el body scrolleable — sobrevive al scroll de la lista.
+
+   Disposición pedida por el dueño: el subtotal es una BARRA de ancho completo
+   SOBRE la botonera, no una columna que compite con ella. Compartir fila
+   condenaba a las dos partes a truncarse en pantallas angostas; apilarlas le
+   da al monto todo el ancho y a los botones el suyo. */
 .footer-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
   width: 100%;
 }
 
 .footer-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 0.5rem;
   flex-shrink: 0;
 }
@@ -223,9 +226,11 @@
 .total-preview {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 0.5rem;
   min-width: 0;
-  flex: 1 1 auto;
+  width: 100%;
+  flex: 0 0 auto;
   padding: 0.6rem 0.9rem;
   background: var(--color-primary-50, #eff6ff);
   border-radius: var(--radius-md, 8px);
