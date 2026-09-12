@@ -1511,6 +1511,8 @@ export class PaymentsService {
               organization_id: order.stores?.organization_id,
               store_id: createPosPaymentDto.store_id,
               order_number: order.order_number,
+              customer_id: order.customer_id ? Number(order.customer_id) : null,
+              document_number: order.order_number,
               subtotal_amount: Number(order.subtotal_amount || 0),
               tax_amount: Number(order.tax_amount || 0),
               // Plan Despacho Economía — FASE 4 paso 15. Crédito con flete →

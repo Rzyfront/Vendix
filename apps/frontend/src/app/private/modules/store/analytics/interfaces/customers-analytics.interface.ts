@@ -58,3 +58,26 @@ export interface CustomersByChannel {
   };
   channels: AcquisitionChannel[];
 }
+
+// QUI-540: Customer Accounts Receivable row
+export interface CustomerReceivableRow {
+  id: number;
+  customer_id: number;
+  customer_name: string;
+  customer_email: string;
+  customer_document: string;
+  document_number: string;
+  source_type: string;
+  source_id: number;
+  issue_date: string | Date;
+  due_date: string | Date;
+  days_overdue: number;
+  aging_bucket: '0-30' | '31-60' | '61-90' | '90+';
+  original_amount: number;
+  paid_amount: number;
+  balance: number;
+  currency: string;
+  status: string;
+  last_payment_date: string | Date | null;
+}
+

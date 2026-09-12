@@ -16,11 +16,12 @@ export class ArEventsListener {
   @OnEvent('credit_sale.created')
   async handleCreditSaleCreated(event: {
     order_id: number;
-    customer_id: number;
+    customer_id?: number;
     total_amount: number;
     document_number?: string;
-    organization_id: number;
-    store_id: number;
+    order_number?: string;
+    organization_id?: number;
+    store_id?: number;
     due_date?: Date;
     /**
      * Source discriminator. The dispatch-route settlement flow emits
@@ -37,15 +38,47 @@ export class ArEventsListener {
       // creates the AR row directly. Skip the duplicate here.
       if (event.source_type === 'dispatch_route') return;
 
+      let customerId = event.customer_id;
+      let documentNumber = event.document_number || event.order_number;
+      let organizationId = event.organization_id;
+      let storeId = event.store_id;
+
+      if ((!customerId || !organizationId || !storeId) && event.order_id) {
+        const order = await this.prisma.orders.findUnique({
+          where: { id: event.order_id },
+          select: {
+            customer_id: true,
+            order_number: true,
+            store_id: true,
+            stores: { select: { organization_id: true } },
+          },
+        });
+        if (order) {
+          if (!customerId && order.customer_id) customerId = order.customer_id;
+          if (!documentNumber && order.order_number) documentNumber = order.order_number;
+          if (!storeId) storeId = order.store_id;
+          if (!organizationId && order.stores?.organization_id) {
+            organizationId = order.stores.organization_id;
+          }
+        }
+      }
+
+      if (!customerId || !storeId || !organizationId) {
+        this.logger.warn(
+          `Cannot create AR for credit_sale order #${event.order_id}: missing customer_id (${customerId}), store_id (${storeId}), or organization_id (${organizationId})`,
+        );
+        return;
+      }
+
       const ar = await this.ar_service.createFromEvent({
-        customer_id: event.customer_id,
+        customer_id: customerId,
         source_type: 'credit_sale',
         source_id: event.order_id,
-        document_number: event.document_number,
+        document_number: documentNumber,
         original_amount: event.total_amount,
         due_date: event.due_date,
-        organization_id: event.organization_id,
-        store_id: event.store_id,
+        organization_id: organizationId,
+        store_id: storeId,
       });
 
       this.logger.log(
