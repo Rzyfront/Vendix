@@ -740,17 +740,49 @@ export class OrderDetailsPageComponent {
   });
 
   /**
+   * Un pedido a domicilio (`home_delivery`) SIEMPRE se entrega por el flujo de
+   * despacho — remisión, ruta o app de entrega — aunque sus platos hayan
+   * pasado por cocina. Entregar los platos es entregarlos al domiciliario, no
+   * al cliente: son dos hechos distintos. Este predicado es el que impide que
+   * la detección de cocina (`isKitchenOrder`) se coma el botón "Despachar
+   * Orden" en un domicilio de restaurante. Su espejo backend vive en
+   * `OrderFlowService.markKitchenOrderDelivered`, que por la misma razón deja
+   * la orden en `processing` cuando la cocina termina.
+   */
+  readonly requiresDispatchFlow = computed<boolean>(
+    () => (this.order()?.delivery_type || 'direct_delivery') === 'home_delivery',
+  );
+
+  /**
+   * Platos ya disparados a cocina que aún no están entregados (ticket ni
+   * `delivered` ni `cancelled`). Solo informa: despachar un domicilio con
+   * cocina pendiente se advierte, nunca se bloquea — el operador puede estar
+   * armando la ruta mientras el último plato sale.
+   */
+  readonly undeliveredKitchenItems = computed<OrderItem[]>(() => {
+    const order = this.order();
+    if (!order?.order_items) return [];
+    return order.order_items.filter((it) => {
+      const ks = this.kitchenStateFor(it);
+      return !!ks && ks.status !== 'delivered' && ks.status !== 'cancelled';
+    });
+  });
+
+  /**
    * Whether this order can produce a remisión (dispatch note). Mirrors the
-   * backend gate in `createFromOrder`: kitchen orders finalize directly and
-   * `direct_delivery` hands goods over at the counter — neither goes through
-   * the remisión + recaudo cycle. Drives whether the unified "Despachar orden"
-   * button opens the con/sin-remisión chooser or ships directly.
+   * backend gate in `createFromOrder`: `direct_delivery` hands goods over at
+   * the counter, so it never goes through the remisión + recaudo cycle. Una
+   * orden de cocina tampoco lo hace... SALVO que sea a domicilio
+   * (`requiresDispatchFlow`), donde la remisión es justamente el documento del
+   * envío. Drives whether the unified "Despachar orden" button opens the
+   * con/sin-remisión chooser or ships directly.
    */
   readonly canGenerateRemision = computed<boolean>(() => {
     const order = this.order();
     if (!order) return false;
     const delivery = order.delivery_type || 'direct_delivery';
-    return !this.isKitchenOrder() && delivery !== 'direct_delivery';
+    if (delivery === 'direct_delivery') return false;
+    return !this.isKitchenOrder() || this.requiresDispatchFlow();
   });
 
   /**
@@ -883,13 +915,26 @@ export class OrderDetailsPageComponent {
       }
 
       case 'processing':
-        if (this.isKitchenOrder()) {
-          // Kitchen orders skip shipping/dispatch entirely: once the kitchen
+        if (this.isKitchenOrder() && !this.requiresDispatchFlow()) {
+          // Kitchen orders consumed in the store (mesa / mostrador / para
+          // llevar) skip shipping/dispatch entirely: once the kitchen
           // finishes, the operator finalizes directly. Reuse the exact same
           // `finish` action config/handler as `delivered` (backend allows
-          // `processing → finished`).
+          // `processing → finished`). Un domicilio NO entra aquí: su entrega
+          // la estampa el flujo de despacho (ver `requiresDispatchFlow`).
           actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
         } else if (this.canGenerateRemision()) {
+          // Domicilio de restaurante con platos aún en cocina: se avisa, no se
+          // bloquea. El despacho sigue siendo la única vía de entrega.
+          if (this.requiresDispatchFlow() && this.undeliveredKitchenItems().length > 0) {
+            actions.push({
+              id: 'kitchen-info',
+              type: 'alert',
+              color: 'info',
+              icon: 'chef-hat',
+              label: `Hay ${this.undeliveredKitchenItems().length} plato(s) en cocina sin entregar. Puedes despachar igual cuando el domiciliario los reciba.`,
+            } as OrderActionConfig);
+          }
           // Unified dispatch entry point: ONE button opens the con/sin-remisión
           // chooser. "Con remisión" runs the wizard (document + optional route)
           // then ships the order; "sin remisión" just marks it shipped. Both
@@ -2056,12 +2101,21 @@ export class OrderDetailsPageComponent {
 
   /**
    * "Envío directo" (entrega completa): en un solo gesto crea una remisión
-   * confirmada SIN ruta, la marca como entregada y finaliza la orden.
-   * Encadena tres endpoints existentes en secuencia:
+   * confirmada SIN ruta y la marca como entregada. Encadena DOS endpoints:
    *   1. `POST /store/dispatch-notes/from-order/:orderId`  (confirmed, mode:none;
    *      `items: []` = quick-accept de todo lo pendiente).
    *   2. `POST /store/dispatch-notes/:id/deliver` (con `courier_name` del modal).
-   *   3. `POST /store/orders/:id/flow/confirm-delivery`.
+   *
+   * NO se llama a `flow/confirm-delivery`. Ese tercer paso forzaba la orden a
+   * `finished` y era el bug del flujo de despacho en restaurante: al tener
+   * platos en cocina sin entregar, `confirmDelivery` lanza
+   * `ORDER_HAS_PENDING_KITCHEN_ITEMS` y el gesto moría DESPUÉS de haber creado
+   * y entregado la remisión — orden a medio camino y sin botón para
+   * recuperarla. El estado correcto lo deriva el reconciliador único
+   * (`reconcileOrderFromDispatch`, disparado por `dispatch_note.delivered`):
+   * remisión entregada + saldo 0 → Finalizada; con saldo pendiente →
+   * Entregada. Una sola fuente de verdad para el estado de la orden.
+   *
    * Ante un fallo en cualquier paso mostramos el toast y abortamos; al terminar
    * recargamos la orden para reflejar el nuevo estado. Reutiliza el mismo
    * `isProcessingAction` de los demás flujos para el loading.
@@ -2081,8 +2135,7 @@ export class OrderDetailsPageComponent {
       await firstValueFrom(
         this.dispatchNotesService.deliver(note.id, { courier_name: courierName }),
       );
-      await firstValueFrom(this.ordersService.flowConfirmDelivery(orderId));
-      this.toastService.success('Orden entregada y finalizada');
+      this.toastService.success('Orden entregada');
       this.loadData();
     } catch (err: any) {
       this.toastService.error(

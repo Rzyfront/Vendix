@@ -1202,8 +1202,17 @@ export class PaymentsService {
         // waiting at home. The state machine (processing vs finished) is
         // handled by `updateOrderPaymentStatus` based on
         // `hasKitchenItems`.
+        //
+        // La condicion es `!is_draft`, NO `requires_payment`: una venta a
+        // credito (fiado / cuotas) manda `requires_payment=false` y su
+        // `payment_form` queda en '2'. Exigir `requires_payment` dejaba al
+        // domicilio fiado de un restaurante SIN comanda en el KDS — la orden
+        // existia, el cliente esperaba, y la cocina nunca se enteraba. Las
+        // tres ramas de `updateOrderPaymentStatus` (contado, digital,
+        // credito) excluyen igualmente el borrador, asi que esta condicion es
+        // exactamente la misma que decide el estado de la orden.
         // ----------------------------------------------------------------
-        if (createPosPaymentDto.requires_payment && !createPosPaymentDto.is_draft) {
+        if (!createPosPaymentDto.is_draft) {
           // Resolve industries once per call (no cache to keep the patch
           // safe; the per-payment cost is one extra small query).
           const storeRow = await tx.stores.findUnique({

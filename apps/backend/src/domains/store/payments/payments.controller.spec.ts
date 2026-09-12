@@ -3,6 +3,7 @@ import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { ResponseService } from '../../../common/responses/response.service';
+import { AuditService } from '../../../common/audit/audit.service';
 import {
   CreatePaymentDto,
   CreateOrderPaymentDto,
@@ -65,6 +66,22 @@ describe('PaymentsController', () => {
             updated: jest.fn((data) => data),
             deleted: jest.fn((data) => data),
             error: jest.fn((error) => ({ success: false, error })),
+          },
+        },
+        // El controlador inyecta AuditService desde que el timeline del POS
+        // emite sus tres filas canónicas (payment.attempt / succeeded /
+        // failed) en la capa de controlador. Sin el provider, el
+        // TestingModule no resuelve el constructor y TODOS los casos del
+        // archivo caen antes de ejercitar nada. Mock mudo: la auditoría es
+        // fire-and-forget y tiene sus propias pruebas.
+        {
+          provide: AuditService,
+          useValue: {
+            log: jest.fn().mockResolvedValue(undefined),
+            logCustom: jest.fn().mockResolvedValue(undefined),
+            logCreate: jest.fn().mockResolvedValue(undefined),
+            logUpdate: jest.fn().mockResolvedValue(undefined),
+            logDelete: jest.fn().mockResolvedValue(undefined),
           },
         },
       ],
