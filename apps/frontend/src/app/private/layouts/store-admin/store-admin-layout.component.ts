@@ -829,6 +829,12 @@ export class StoreAdminLayoutComponent {
           route: '/admin/reports/payroll',
           alwaysVisible: true,
         },
+        {
+          label: 'Despachos',
+          icon: 'circle',
+          route: '/admin/reports/dispatch',
+          alwaysVisible: true,
+        },
       ],
     },
     {
