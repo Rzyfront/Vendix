@@ -1,5 +1,14 @@
-import {Component, OnInit, OnDestroy, inject,
-  DestroyRef, signal, computed} from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  inject,
+  DestroyRef,
+  signal,
+  computed,
+  effect,
+  untracked,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -53,10 +62,11 @@ import { EChartsOption } from 'echarts';
 import { formatChartPeriod, getDefaultStartDate, getDefaultEndDate } from '../../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../../shared/utils/date-range-params.util';
 import { AnalyticsService } from '../../../services/analytics.service';
+import { AnalyticsRefreshService } from '../../../../shared/services/analytics-refresh.service';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 
 @Component({
-  selector: 'vendix-overview-summary',
+  selector: 'app-overview-summary',
   standalone: true,
   imports: [
     CommonModule,
@@ -81,6 +91,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly analyticsService = inject(AnalyticsService);
+  private readonly analyticsRefresh = inject(AnalyticsRefreshService);
   private readonly toastService = inject(ToastService);
 // Observables from store
   summary$: Observable<OverviewSummary | null> = this.store.select(
@@ -180,6 +191,18 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
       typeof window !== 'undefined' &&
       window.innerWidth < OverviewSummaryComponent.MOBILE_BREAKPOINT
     );
+  }
+
+  constructor() {
+    effect(() => {
+      const count = this.analyticsRefresh.refreshSignal();
+      if (count > 0) {
+        untracked(() => {
+          this.store.dispatch(OverviewActions.loadOverviewSummary());
+          this.store.dispatch(OverviewActions.loadOverviewTrends());
+        });
+      }
+    });
   }
 
   ngOnInit(): void {

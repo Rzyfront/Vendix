@@ -1,4 +1,4 @@
-import { Component, DestroyRef, OnInit, inject, computed, signal  } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject, computed, signal, effect, untracked } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
@@ -8,6 +8,7 @@ import { ChartComponent } from '../../../../../../shared/components/chart/chart.
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { ProfitLossSummary, RefundsSummary, AnalyticsService } from '../../services/analytics.service';
+import { AnalyticsRefreshService, Refreshable } from '../../../shared/services/analytics-refresh.service';
 import { EChartsOption } from 'echarts';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
@@ -192,11 +193,21 @@ import {
 
 `,
 })
-export class ProfitLossComponent implements OnInit {
+export class ProfitLossComponent implements OnInit, Refreshable {
   private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
+  private analyticsRefresh = inject(AnalyticsRefreshService);
   private currencyService = inject(CurrencyFormatService);
   private readonly route = inject(ActivatedRoute);
+
+  constructor() {
+    effect(() => {
+      const count = this.analyticsRefresh.refreshSignal();
+      if (count > 0) {
+        untracked(() => this.loadData());
+      }
+    });
+  }
 
   loading = signal(true);
   exporting = signal(false);
@@ -217,6 +228,10 @@ export class ProfitLossComponent implements OnInit {
       this.dateRange.set(urlRange);
     }
     this.currencyService.loadCurrency();
+    this.loadData();
+  }
+
+  refresh(): void {
     this.loadData();
   }
 

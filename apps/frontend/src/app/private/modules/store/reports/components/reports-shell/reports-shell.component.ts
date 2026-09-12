@@ -104,16 +104,62 @@ export class ReportsShellComponent {
       }));
   });
 
-  private readonly categoryActionConfig: Record<string, { id: string; label: string; icon: string; moduleKey?: string }> = {
-    accounting: { id: 'view-module', label: 'Ver Contabilidad', icon: 'scale', moduleKey: 'accounting' },
-    payroll: { id: 'view-module', label: 'Ver Nomina', icon: 'banknote', moduleKey: 'payroll' },
+  /** Report-specific module action overrides (e.g. expenses-summary -> Ver Gastos). */
+  private readonly REPORT_ACTION_OVERRIDES: Record<string, { id: string; label: string; icon: string; moduleKey?: string; route?: string }> = {
+    'expenses-summary': {
+      id: 'view-module',
+      label: 'Ver Gastos',
+      icon: 'receipt',
+      moduleKey: 'expenses',
+      route: '/admin/expenses',
+    },
+    'cash-sessions': {
+      id: 'view-module',
+      label: 'Ver Cajas',
+      icon: 'calculator',
+      moduleKey: 'cash-registers',
+      route: '/admin/cash-registers',
+    },
   };
 
-  readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
-    const categoryId = this.categoryId();
-    const config = categoryId ? this.categoryActionConfig[categoryId] : undefined;
-    const reportId = this.extractReportId(this.router.url);
+  /** Category-level default actions. */
+  private readonly CATEGORY_ACTION_DEFAULTS: Record<string, { id: string; label: string; icon: string; moduleKey?: string; route?: string }> = {
+    accounting: { id: 'view-module', label: 'Ver Contabilidad', icon: 'scale', moduleKey: 'accounting', route: '/admin/accounting' },
+    payroll: { id: 'view-module', label: 'Ver Nomina', icon: 'banknote', moduleKey: 'payroll', route: '/admin/payroll' },
+  };
 
+  private resolveNavigationAction(
+    reportId: string | null,
+    categoryId?: string,
+  ): StickyHeaderActionButton | null {
+    // 1. Report-level override
+    if (reportId && this.REPORT_ACTION_OVERRIDES[reportId]) {
+      const config = this.REPORT_ACTION_OVERRIDES[reportId];
+      if (config.moduleKey && !this.authFacade.isModuleVisible(config.moduleKey)) {
+        return null;
+      }
+      return { id: config.id, label: config.label, icon: config.icon, variant: 'outline' };
+    }
+
+    // 2. Category-level default
+    if (categoryId && this.CATEGORY_ACTION_DEFAULTS[categoryId]) {
+      const config = this.CATEGORY_ACTION_DEFAULTS[categoryId];
+      if (config.moduleKey && !this.authFacade.isModuleVisible(config.moduleKey)) {
+        return null;
+      }
+      return { id: config.id, label: config.label, icon: config.icon, variant: 'outline' };
+    }
+
+    // 3. Fallback: Ver Analítica
+    return {
+      id: 'view-analytics',
+      label: 'Ver Analitica',
+      icon: 'bar-chart-3',
+      variant: 'outline',
+    };
+  }
+
+  readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
     const actions: StickyHeaderActionButton[] = [
       {
         id: 'refresh',
@@ -123,48 +169,12 @@ export class ReportsShellComponent {
       },
     ];
 
-    if (config?.moduleKey && !this.authFacade.isModuleVisible(config.moduleKey)) {
-      return actions;
-    }
-
-    if (reportId === 'expenses-summary') {
-      if (this.authFacade.isModuleVisible('expenses')) {
-        actions.push({
-          id: 'view-module',
-          label: 'Ver Gastos',
-          icon: 'receipt',
-          variant: 'outline',
-        });
-      }
-      return actions;
-    }
-
-    if (reportId === 'cash-sessions') {
-      if (this.authFacade.isModuleVisible('cash-registers')) {
-        actions.push({
-          id: 'view-module',
-          label: 'Ver Cajas',
-          icon: 'calculator',
-          variant: 'outline',
-        });
-      }
-      return actions;
-    }
-
-    if (config) {
-      actions.push({
-        id: config.id,
-        label: config.label,
-        icon: config.icon,
-        variant: 'outline',
-      });
-    } else {
-      actions.push({
-        id: 'view-analytics',
-        label: 'Ver Analitica',
-        icon: 'bar-chart-3',
-        variant: 'outline',
-      });
+    const navAction = this.resolveNavigationAction(
+      this.extractReportId(this.router.url),
+      this.categoryId(),
+    );
+    if (navAction) {
+      actions.push(navAction);
     }
 
     return actions;
@@ -218,19 +228,13 @@ export class ReportsShellComponent {
 
     if (actionId === 'view-module') {
       const reportId = this.extractReportId(this.router.url);
-      const moduleRoute = reportId ? this.reportToModuleRoute[reportId] : undefined;
-      if (moduleRoute) {
-        this.router.navigateByUrl(moduleRoute);
-      } else {
-        // Fallback to module root
-        const categoryId = this.categoryId();
-        const fallbacks: Record<string, string> = {
-          accounting: '/admin/accounting',
-          payroll: '/admin/payroll',
-          financial: '/admin/expenses',
-        };
-        this.router.navigateByUrl(fallbacks[categoryId || ''] || '/admin');
-      }
+      const categoryId = this.categoryId();
+      const target =
+        (reportId && this.REPORT_ACTION_OVERRIDES[reportId]?.route) ||
+        (reportId && this.reportToModuleRoute[reportId]) ||
+        (categoryId && this.CATEGORY_ACTION_DEFAULTS[categoryId]?.route) ||
+        '/admin';
+      this.router.navigateByUrl(target);
       return;
     }
 

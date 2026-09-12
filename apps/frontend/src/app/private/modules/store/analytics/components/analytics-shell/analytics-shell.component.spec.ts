@@ -83,6 +83,14 @@ describe('AnalyticsShellComponent', () => {
     expect(toastServiceSpy.success).toHaveBeenCalledWith('Datos de analítica actualizados');
   });
 
+  it('delegates refresh action to child implementing Refreshable contract', () => {
+    const refreshableChild = { refresh: jasmine.createSpy('refresh') };
+    component.onActivate(refreshableChild);
+    component.onActionClick('refresh');
+    expect(analyticsServiceSpy.invalidateCache).toHaveBeenCalledTimes(1);
+    expect(refreshableChild.refresh).toHaveBeenCalledTimes(1);
+  });
+
   it('navigates to the report route for the current analytics URL', () => {
     spyOnProperty(router, 'url', 'get').and.returnValue('/admin/analytics/sales/by-product');
     component.onActionClick('view-reports');

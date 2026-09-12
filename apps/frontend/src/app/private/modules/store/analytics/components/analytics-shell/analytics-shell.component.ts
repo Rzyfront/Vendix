@@ -14,7 +14,7 @@ import {
 import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 import { dateRangeToQueryParams } from '../../../shared/utils/date-range-params.util';
 import { AnalyticsService } from '../../services/analytics.service';
-import { AnalyticsRefreshService } from '../../../shared/services/analytics-refresh.service';
+import { AnalyticsRefreshService, Refreshable } from '../../../shared/services/analytics-refresh.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 @Component({
@@ -130,17 +130,25 @@ export class AnalyticsShellComponent {
   private loadActiveChildData(): void {
     const child = this.activeChildComponent;
     if (!child) return;
+
+    // 1. Preferred contract: child implements Refreshable
+    if (this.isRefreshable(child)) {
+      child.refresh();
+      return;
+    }
+
+    // 2. Fallbacks for unmigrated legacy analytics components
     if (typeof child.loadData === 'function') {
       child.loadData();
     } else if (typeof child.loadChartData === 'function') {
-      if (typeof child.invalidateModeData === 'function') {
-        child.invalidateModeData();
-      }
+      child.invalidateModeData?.();
       child.loadChartData();
     } else if (typeof child.loadSummary === 'function') {
       child.loadSummary();
-    } else if (typeof child.refresh === 'function') {
-      child.refresh();
     }
+  }
+
+  private isRefreshable(comp: unknown): comp is Refreshable {
+    return typeof (comp as Partial<Refreshable>)?.refresh === 'function';
   }
 }

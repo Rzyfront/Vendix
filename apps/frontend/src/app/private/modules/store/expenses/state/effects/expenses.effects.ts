@@ -82,7 +82,13 @@ export class ExpensesEffects {
     ),
   );
 
-  // After any mutation success, reload expenses + summary and clear report/analytics caches
+  // After any mutation success, reload expenses + summary and clear report/analytics caches.
+  // Architectural rationale for cross-domain cache invalidation:
+  // Expense mutations directly impact financial health metrics, operational cash,
+  // tax summaries, and multiple report tables (expense summary, cash flow, profit & loss).
+  // Purging ReportsDataService cache, invalidating AnalyticsService cache, and triggering
+  // AnalyticsRefreshService ensures that navigating back to analytics or reports displays
+  // accurate data immediately without requiring a browser refresh or waiting for TTL expiry.
   mutationSuccess$ = createEffect(() =>
     this.actions$.pipe(
       ofType(
