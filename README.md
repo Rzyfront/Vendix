@@ -28,7 +28,7 @@ watch usa FSEvents y el HMR funciona.
 
 | Requisito | Cómo |
 | --- | --- |
-| **Node 22** (la matriz de Angular 20 acepta `^20.19 \|\| ^22.12 \|\| ^24`) | `nvm use` — el repo trae `.nvmrc` |
+| **Node 24** (la matriz de Angular 20 acepta `^20.19 \|\| ^22.12 \|\| ^24`) | `nvm use` — el repo trae `.nvmrc` |
 | **Colima + Docker CLI** | `brew install colima docker docker-compose` |
 | **Entradas en `/etc/hosts`** | ver abajo |
 | **CA local confiada** | ver `ssl/README-INSTALLATION.md` |

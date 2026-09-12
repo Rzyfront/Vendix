@@ -11,6 +11,8 @@ import { GeneralSettingsStore } from '../general/services/general-settings.store
 import { StoreSettingsService } from '../general/services/store-settings.service';
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import {
+  ECOMMERCE_INVOICING_SETTINGS_DEFAULTS,
+  EcommerceInvoicingSettings,
   POS_INVOICING_SETTINGS_DEFAULTS,
   PosDianFailurePolicy,
   PosInvoicingSettings,
@@ -26,26 +28,37 @@ interface FailurePolicyOption {
 }
 
 /**
- * Comportamiento fiscal del POS, dentro de la pestaña «Facturación».
+ * Emisión automática de factura — sección UNIFICADA de los DOS carriles de
+ * venta: mostrador (POS) y tienda en línea (e-commerce). Hoy vive montada en
+ * la pestaña «Venta» y, transitoriamente, también en la sub-pestaña «Caja» de
+ * «Facturación» (esa segunda ubicación se retira en un paso posterior — no es
+ * tarea de este componente).
  *
  * ## Qué es configurable acá y qué NO
  *
- * Configurable: si la venta de mostrador dispara el documento electrónico sola,
- * y qué se hace con el fallo cuando la DIAN no lo acepta.
+ * Configurable: si la venta de mostrador dispara el documento electrónico
+ * sola (`invoicing.pos.auto_emit`), si el pedido en línea hace lo mismo
+ * (`invoicing.ecommerce.auto_emit`), y qué se hace en el mostrador cuando la
+ * DIAN no acepta el documento (`invoicing.pos.on_failure`).
  *
- * NO configurable —y no es un olvido—: que el fallo BLOQUEE la venta. El evento
- * que dispara la emisión se emite después de confirmar el cobro, así que cuando
- * esta preferencia se lee ya no queda venta que bloquear. Ofrecer un «bloquear»
- * obligaría a emitir dentro de la transacción del pago, que es exactamente lo
- * que este carril existe para evitar: el cajero tiene fila y la DIAN tarda.
+ * NO configurable —y no es un olvido—: que el fallo BLOQUEE la venta. El
+ * evento que dispara la emisión de mostrador se emite después de CERRAR la
+ * venta (al cobrar, o al confirmar una venta a crédito que se cierra sin
+ * cobrar), así que cuando esta preferencia se lee ya no queda venta que
+ * bloquear. Ofrecer un «bloquear» obligaría a emitir dentro de la transacción
+ * de cierre, que es exactamente lo que este carril existe para evitar: el
+ * cajero tiene fila y la DIAN tarda. `on_failure` es EXCLUSIVO del mostrador:
+ * no existe (todavía) una política de fallo configurable para e-commerce.
  *
  * ## Por qué guarda por su cuenta
  *
  * Igual que la sección AIU: el botón de la cabecera manda TODAS las secciones
- * del borrador de golpe, y acá viaja sólo `{ invoicing: { pos: <lo que cambió> } }`.
- * El backend mezcla `invoicing.pos` POR CLAVE, así que reenviar los dos campos
- * cada vez reescribiría con valores viejos lo que otra pantalla acabara de
- * cambiar.
+ * del borrador de golpe, y acá viaja sólo lo que cambió, por sub-clave:
+ * `{ invoicing: { pos?: <diff>, ecommerce?: <diff> } }`. El backend mezcla
+ * `invoicing` POR SUB-CLAVE, así que reenviar un bloque completo (o el que no
+ * cambió) reescribiría con valores viejos lo que otra pantalla acabara de
+ * cambiar. Cada carril mantiene su propio `persisted` — la foto de referencia
+ * del diff — precisamente para que el diff de uno nunca dependa del otro.
  */
 @Component({
   selector: 'app-pos-invoicing-settings-section',
@@ -62,29 +75,40 @@ interface FailurePolicyOption {
       anchorId="section-pos-invoicing"
       icon="receipt"
       iconTone="green"
-      title="Facturación electrónica en el POS"
-      hint="La venta de mostrador nunca espera a la DIAN. Acá defines si el documento sale solo y qué pasa cuando no se puede emitir.">
+      title="Emisión automática de factura"
+      hint="Gobierna los dos carriles de venta de la tienda: mostrador (POS) y tienda en línea. Cada uno se enciende o apaga por separado.">
       <app-setting-toggle
-        label="Emitir el documento al cerrar la venta"
-        [description]="autoEmitDescription()"
+        label="Venta en mostrador (POS)"
+        [description]="posAutoEmitDescription()"
         [disabled]="saving()"
         [ngModel]="autoEmit()"
         (ngModelChange)="autoEmit.set($event)" />
+
+      <app-setting-toggle
+        label="Tienda en línea"
+        [description]="ecommerceAutoEmitDescription()"
+        [disabled]="saving()"
+        [ngModel]="ecommerceAutoEmit()"
+        (ngModelChange)="ecommerceAutoEmit.set($event)" />
+
+      <p class="field-label">Mostrador (POS)</p>
 
       <div class="notice notice--info">
         <app-icon name="info" [size]="16" class="notice__icon" />
         <div class="notice__body">
           <p class="notice__title">El cobro nunca queda esperando.</p>
           <p>
-            La emisión ocurre después de confirmar el pago, no dentro de él. Si
-            la DIAN tarda o rechaza, la venta ya está cerrada y el cajero puede
-            seguir atendiendo: el indicador fiscal del POS avisa sin interrumpir
-            y nunca exige un clic para continuar.
+            En el mostrador, la emisión ocurre después de cerrar la venta —al
+            cobrar, o al confirmar una venta a crédito que se cierra sin
+            cobrar—, nunca dentro de esa operación. Si la DIAN tarda o rechaza,
+            la venta ya está cerrada y el cajero puede seguir atendiendo: el
+            indicador fiscal del POS avisa sin interrumpir y nunca exige un
+            clic para continuar.
           </p>
         </div>
       </div>
 
-      <p class="field-label">Cuando el documento no se pueda emitir</p>
+      <p class="field-label">Cuando el documento del mostrador no se pueda emitir</p>
       <div
         class="policy-options"
         role="radiogroup"
@@ -360,30 +384,49 @@ export class PosInvoicingSettingsSection {
   protected readonly onFailure = signal<PosDianFailurePolicy>(
     POS_INVOICING_SETTINGS_DEFAULTS.on_failure,
   );
+  protected readonly ecommerceAutoEmit = signal<boolean>(
+    ECOMMERCE_INVOICING_SETTINGS_DEFAULTS.auto_emit,
+  );
 
-  /** Última versión confirmada por el backend. Es la referencia del diff. */
+  /** Última versión confirmada por el backend para el mostrador. Referencia del diff. */
   private readonly persisted = signal<Required<PosInvoicingSettings>>(
     POS_INVOICING_SETTINGS_DEFAULTS,
+  );
+
+  /**
+   * Última versión confirmada por el backend para la tienda en línea.
+   * Referencia del diff de ese carril — SEPARADA de `persisted` a propósito:
+   * el diff de un carril no debe depender del estado del otro.
+   */
+  private readonly persistedEcommerce = signal<Required<EcommerceInvoicingSettings>>(
+    ECOMMERCE_INVOICING_SETTINGS_DEFAULTS,
   );
 
   protected readonly saving = signal(false);
 
   constructor() {
-    this.seed(this.store.settings().invoicing?.pos);
+    this.seedPos(this.store.settings().invoicing?.pos);
+    this.seedEcommerce(this.store.settings().invoicing?.ecommerce);
   }
 
-  protected readonly autoEmitDescription = computed(() =>
+  protected readonly posAutoEmitDescription = computed(() =>
     this.autoEmit()
-      ? 'Al confirmar el cobro, Vendix emite el documento electrónico de la venta sin que el cajero haga nada.'
+      ? 'Al cerrar la venta en el mostrador, Vendix emite el documento electrónico sin que el cajero haga nada — también en una venta a crédito, que se cierra sin cobrar.'
       : 'El cajero cierra la venta y el documento se emite después, a mano, desde el detalle del pedido.',
   );
 
+  protected readonly ecommerceAutoEmitDescription = computed(() =>
+    this.ecommerceAutoEmit()
+      ? 'Al cerrarse un pedido de la tienda en línea, Vendix emite el documento electrónico automáticamente, sin que nadie tenga que pedirlo.'
+      : 'El pedido se cierra igual y el documento se emite después, a mano, desde el detalle del pedido.',
+  );
+
   /**
-   * Sólo lo que cambió: el backend mezcla `invoicing.pos` por clave, así que
-   * mandar de más reescribe con valores viejos lo que otro proceso pudo haber
-   * cambiado entre la carga y el guardado.
+   * Sólo lo que cambió del mostrador: el backend mezcla `invoicing.pos` por
+   * clave, así que mandar de más reescribe con valores viejos lo que otro
+   * proceso pudo haber cambiado entre la carga y el guardado.
    */
-  private readonly changes = computed<PosInvoicingSettings>(() => {
+  private readonly posChanges = computed<PosInvoicingSettings>(() => {
     const base = this.persisted();
     const payload: PosInvoicingSettings = {};
 
@@ -397,8 +440,22 @@ export class PosInvoicingSettingsSection {
     return payload;
   });
 
+  /** Igual que `posChanges`, pero para `invoicing.ecommerce`. */
+  private readonly ecommerceChanges = computed<EcommerceInvoicingSettings>(() => {
+    const base = this.persistedEcommerce();
+    const payload: EcommerceInvoicingSettings = {};
+
+    if (this.ecommerceAutoEmit() !== base.auto_emit) {
+      payload.auto_emit = this.ecommerceAutoEmit();
+    }
+
+    return payload;
+  });
+
   protected readonly dirty = computed(
-    () => Object.keys(this.changes()).length > 0,
+    () =>
+      Object.keys(this.posChanges()).length > 0 ||
+      Object.keys(this.ecommerceChanges()).length > 0,
   );
 
   protected onPolicyChange(next: PosDianFailurePolicy): void {
@@ -407,36 +464,59 @@ export class PosInvoicingSettingsSection {
   }
 
   protected discard(): void {
-    this.seed(this.persisted());
+    this.seedPos(this.persisted());
+    this.seedEcommerce(this.persistedEcommerce());
   }
 
   protected async save(): Promise<void> {
     if (this.saving() || !this.dirty()) return;
 
-    const payload = this.changes();
+    const posPayload = this.posChanges();
+    const ecommercePayload = this.ecommerceChanges();
+
+    // Sólo las sub-claves con cambios: si únicamente cambió un carril, el
+    // otro NO viaja en el body — mandarlo de más reescribiría con valores
+    // viejos lo que otra pantalla acabara de cambiar en esa sub-clave.
+    const invoicing: { pos?: PosInvoicingSettings; ecommerce?: EcommerceInvoicingSettings } = {};
+    if (Object.keys(posPayload).length > 0) {
+      invoicing.pos = posPayload;
+    }
+    if (Object.keys(ecommercePayload).length > 0) {
+      invoicing.ecommerce = ecommercePayload;
+    }
+
     this.saving.set(true);
 
     try {
       const response = await firstValueFrom(
-        this.settingsService.saveSettingsNow({ invoicing: { pos: payload } }),
+        this.settingsService.saveSettingsNow({ invoicing }),
       );
 
-      // Se re-siembra desde la respuesta canónica del PATCH y no desde el estado
-      // local: el backend normaliza, y la pantalla debe quedar mostrando lo que
-      // de verdad se persistió.
-      const saved = response?.data?.invoicing?.pos;
-      this.seed(saved ?? { ...this.persisted(), ...payload });
+      // Se re-siembra desde la respuesta canónica del PATCH y no desde el
+      // estado local: el backend normaliza, y la pantalla debe quedar
+      // mostrando lo que de verdad se persistió. Cada carril se re-siembra
+      // con su propia sub-clave, presente o no en la respuesta.
+      const savedPos = response?.data?.invoicing?.pos;
+      const savedEcommerce = response?.data?.invoicing?.ecommerce;
+      this.seedPos(savedPos ?? { ...this.persisted(), ...posPayload });
+      this.seedEcommerce(
+        savedEcommerce ?? { ...this.persistedEcommerce(), ...ecommercePayload },
+      );
 
       // La copia del shell queda rancia tras el PATCH y volver a esta pestaña
-      // la re-sembraría con los valores viejos. Se parchea sólo esta sección:
-      // recargar el borrador completo borraría lo que el usuario tenga sin
-      // guardar en las otras pestañas.
+      // la re-sembraría con los valores viejos. Se parchea sólo esta sección
+      // (las dos sub-claves): recargar el borrador completo borraría lo que
+      // el usuario tenga sin guardar en las otras pestañas.
       this.store.settings.update((current) => ({
         ...current,
-        invoicing: { ...(current.invoicing ?? {}), pos: this.persisted() },
+        invoicing: {
+          ...(current.invoicing ?? {}),
+          pos: this.persisted(),
+          ecommerce: this.persistedEcommerce(),
+        },
       }));
 
-      this.toast.success('Configuración fiscal del POS guardada.');
+      this.toast.success('Configuración de emisión automática guardada.');
     } catch (error) {
       this.toast.error(parseApiError(error).userMessage);
     } finally {
@@ -446,11 +526,11 @@ export class PosInvoicingSettingsSection {
 
   /**
    * Normaliza lo que venga del backend (ausente, nulo, o escrito a mano en el
-   * JSON) a los dos valores que la pantalla edita, y fija esa foto como
-   * referencia del diff. Un `on_failure` fuera del dominio cae al default, que
-   * es el que SÍ deja constancia.
+   * JSON) a los dos valores que la pantalla edita para el mostrador, y fija
+   * esa foto como referencia del diff. Un `on_failure` fuera del dominio cae
+   * al default, que es el que SÍ deja constancia.
    */
-  private seed(source: PosInvoicingSettings | undefined): void {
+  private seedPos(source: PosInvoicingSettings | undefined): void {
     const normalized: Required<PosInvoicingSettings> = {
       // Ausente significa el default del backend (true), no false.
       auto_emit:
@@ -464,5 +544,17 @@ export class PosInvoicingSettingsSection {
     this.persisted.set(normalized);
     this.autoEmit.set(normalized.auto_emit);
     this.onFailure.set(normalized.on_failure);
+  }
+
+  /** Igual que `seedPos`, pero para el carril de tienda en línea. */
+  private seedEcommerce(source: EcommerceInvoicingSettings | undefined): void {
+    const normalized: Required<EcommerceInvoicingSettings> = {
+      // Ausente significa el default del backend (true), no false.
+      auto_emit:
+        source?.auto_emit ?? ECOMMERCE_INVOICING_SETTINGS_DEFAULTS.auto_emit,
+    };
+
+    this.persistedEcommerce.set(normalized);
+    this.ecommerceAutoEmit.set(normalized.auto_emit);
   }
 }

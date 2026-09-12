@@ -460,11 +460,31 @@ export interface PosInvoicingSettings {
   on_failure?: PosDianFailurePolicy;
 }
 
+/**
+ * Comportamiento fiscal del carril de e-commerce (tienda en línea).
+ *
+ * Hasta esta sección el carril emitía SIEMPRE, sin bandera que lo gobernara —
+ * a diferencia del POS, que ya respetaba `pos.auto_emit`. La leen
+ * `InvoicingService.getEcommerceInvoicingSettings()` y, a través de ella, las
+ * dos compuertas del carril: `CheckoutService.createInvoiceIfConfigured()` y
+ * `WebhookHandlerService.autoSendOrderInvoice()`.
+ */
+export interface EcommerceInvoicingSettings {
+  /**
+   * Emitir el documento electrónico automáticamente al cerrar la venta online.
+   *
+   * Default `true` (ver `DEFAULT_ECOMMERCE_AUTO_EMIT`).
+   */
+  auto_emit?: boolean;
+}
+
 export interface InvoicingSettings {
   /** Régimen de IVA para contratos AIU (`operation_type = '09'`). */
   aiu?: AiuSettings;
   /** Comportamiento fiscal de la venta de mostrador. */
   pos?: PosInvoicingSettings;
+  /** Comportamiento fiscal de la venta en línea (e-commerce). */
+  ecommerce?: EcommerceInvoicingSettings;
 }
 
 /**
@@ -488,6 +508,15 @@ export const DEFAULT_POS_AUTO_EMIT = true;
  * plazo vencido.
  */
 export const DEFAULT_POS_DIAN_FAILURE_POLICY: PosDianFailurePolicy = 'queue';
+
+/**
+ * Emisión automática de e-commerce, en `true` a propósito.
+ *
+ * Hoy la tienda en línea emite SIEMPRE, sin ninguna bandera que lo controle.
+ * Si este default fuera `false`, el día que se despliegue la clave apagaría
+ * la emisión de TODAS las tiendas de golpe, sin que nadie lo haya pedido.
+ */
+export const DEFAULT_ECOMMERCE_AUTO_EMIT = true;
 
 export interface StoreSettings {
   /**
@@ -835,25 +864,9 @@ export interface ReceiptsSettings {
   email_receipt: boolean;
   receipt_header: string;
   receipt_footer: string;
-  /**
-   * Electronic-invoicing block, surfaced instead of the receipt toggles once the
-   * store is actually issuing electronic invoices — i.e. its DIAN configuration
-   * is `environment='production'` with `enablement_status='enabled'`, NOT merely
-   * when the fiscal wizard was completed. Optional so settings rows written
-   * before this block stay valid.
-   */
-  auto_issue_invoice?: boolean;
   /** Printed copies per sale. 0 = do not print. */
   invoice_copies?: number;
-  send_invoice_email?: boolean;
   print_pos_ticket?: boolean;
-  /**
-   * Handing the printed graphic representation to the buyer. Colombian law
-   * requires the invoice to be DELIVERED to the acquirer, in physical or
-   * electronic form — not specifically by email. So this is the second lawful
-   * channel, and the UI requires at least one of the two to stay on.
-   */
-  deliver_printed?: boolean;
   /**
    * @deprecated Superseded by `printing.invoice`. Kept so settings rows written
    * before the per-document block stay valid and can be migrated; it was never

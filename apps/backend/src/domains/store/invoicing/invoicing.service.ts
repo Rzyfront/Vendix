@@ -57,8 +57,10 @@ import {
 import { resolveUneceUnitCode } from '../products/services/uom-uncefact.util';
 import {
   AiuSettings,
+  DEFAULT_ECOMMERCE_AUTO_EMIT,
   DEFAULT_POS_AUTO_EMIT,
   DEFAULT_POS_DIAN_FAILURE_POLICY,
+  EcommerceInvoicingSettings,
   PosInvoicingSettings,
 } from '../settings/interfaces/store-settings.interface';
 import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/dian-document-types';
@@ -652,6 +654,78 @@ export class InvoicingService {
     } catch (error) {
       this.logger.warn(
         `No se pudieron leer los ajustes de facturación del POS; se usan los defaults: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return fallback;
+    }
+  }
+
+  /**
+   * `store_settings.invoicing.ecommerce` de la tienda en contexto, con sus
+   * defaults ya aplicados. Gemela de `getPosInvoicingSettings()` — mismo
+   * contrato, mismo `try/catch` que nunca deja escapar el error, misma razón:
+   * quien llame a este método está resolviendo una venta online ya cobrada, y
+   * no poder leer una preferencia no puede ser peor que la preferencia misma.
+   *
+   * ## El fallback legado que su gemela no necesita
+   *
+   * Antes de caer al default fijo (`DEFAULT_ECOMMERCE_AUTO_EMIT`), se consulta
+   * `receipts.auto_issue_invoice` del MISMO JSON. Esa clave es un interruptor
+   * que el comerciante SÍ ve y apaga desde la UI ("Emitir factura
+   * automáticamente" en Recibos), pero que hasta hoy no tenía ningún lector:
+   * apagarlo no cambiaba nada. La migración v3→v4 de `SettingsMigratorService`
+   * traslada esa intención ya registrada (sólo el caso explícito `false`) a
+   * `invoicing.{pos,ecommerce}.auto_emit` y borra la clave muda — pero esa
+   * migración es PEREZOSA: sólo se dispara cuando alguien lee los settings a
+   * través de `SettingsService` (panel de configuración,
+   * `settings.service.ts:330`) o vía el backfill de superadmin
+   * (`SettingsSyncService`, invocado desde
+   * `POST /superadmin/settings/sync-all-stores`,
+   * `settings-sync.service.ts:57`). Este método consulta `store_settings` con
+   * Prisma crudo, así que NUNCA ve la migración correr — para una tienda que
+   * apagó el interruptor y cuyo panel nadie ha abierto, sin este fallback
+   * seguiría emitiendo automáticamente pese a la preferencia ya declarada.
+   *
+   * Este fallback es TRANSITORIO: puede retirarse cuando todas las tiendas
+   * hayan pasado por el backfill (`sync-all-stores`) y `receipts` ya no cargue
+   * la clave en ninguna fila de producción.
+   */
+  async getEcommerceInvoicingSettings(): Promise<
+    Required<EcommerceInvoicingSettings>
+  > {
+    const fallback: Required<EcommerceInvoicingSettings> = {
+      auto_emit: DEFAULT_ECOMMERCE_AUTO_EMIT,
+    };
+
+    try {
+      const store_id = this.getContext().store_id;
+      if (typeof store_id !== 'number') return fallback;
+
+      const row = await this.prisma.store_settings.findFirst({
+        where: { store_id },
+        select: { settings: true },
+      });
+
+      const settings = row?.settings as Record<string, any> | null;
+      const ecommerce = settings?.invoicing?.ecommerce;
+      const receipts = settings?.receipts;
+
+      if (typeof ecommerce?.auto_emit === 'boolean') {
+        return { auto_emit: ecommerce.auto_emit };
+      }
+
+      // Sin valor explícito en la clave nueva: el interruptor legado, si fue
+      // apagado a mano, gana sobre el default — ver comentario de clase.
+      return {
+        auto_emit:
+          receipts?.auto_issue_invoice === false
+            ? false
+            : fallback.auto_emit,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `No se pudieron leer los ajustes de facturación de e-commerce; se usan los defaults: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

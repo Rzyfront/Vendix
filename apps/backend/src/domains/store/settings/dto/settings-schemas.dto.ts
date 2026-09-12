@@ -691,11 +691,6 @@ export class ReceiptsSettingsDto {
   // ── Electronic invoicing ──────────────────────────────────
   // Only meaningful once the store's `invoicing` fiscal area is active: an
   // habilitado merchant issues electronic invoices, not internal sale receipts.
-  @ApiProperty({ example: true, required: false })
-  @IsOptional()
-  @IsBoolean()
-  auto_issue_invoice?: boolean;
-
   @ApiProperty({ example: 1, required: false, description: '0 = no imprimir' })
   @IsOptional()
   @IsInt()
@@ -703,24 +698,10 @@ export class ReceiptsSettingsDto {
   @Max(5)
   invoice_copies?: number;
 
-  @ApiProperty({ example: true, required: false })
-  @IsOptional()
-  @IsBoolean()
-  send_invoice_email?: boolean;
-
   @ApiProperty({ example: false, required: false })
   @IsOptional()
   @IsBoolean()
   print_pos_ticket?: boolean;
-
-  // ── Delivery channel ──────────────────────────────────────
-  // The law requires DELIVERING the invoice to the acquirer, physically or
-  // electronically — email is not the only lawful channel. The frontend enforces
-  // "at least one of send_invoice_email / deliver_printed".
-  @ApiProperty({ example: false, required: false })
-  @IsOptional()
-  @IsBoolean()
-  deliver_printed?: boolean;
 
   // ── Print formats ─────────────────────────────────────────
   @ApiProperty({
@@ -1697,6 +1678,26 @@ export class PosInvoicingSettingsDto {
   on_failure?: 'queue' | 'ignore';
 }
 
+/**
+ * Comportamiento fiscal del carril de e-commerce (tienda en línea).
+ *
+ * Sin esta declaración el `ValidationPipe` con `whitelist:true` borraría la
+ * clave del PATCH en silencio, respondiendo 200. La contraparte del merge por
+ * sub-clave vive en `settings.service.ts` (el loop `['aiu','pos','ecommerce']`);
+ * faltando cualquiera de las dos, la preferencia no se persiste.
+ */
+export class EcommerceInvoicingSettingsDto {
+  @ApiProperty({
+    example: true,
+    required: false,
+    description:
+      'Emite el documento electrónico automáticamente al cerrar una venta en la tienda en línea. Default true: hoy este carril emite SIEMPRE sin bandera, así que apagarlo sin cambiar el default afectaría a todas las tiendas de golpe.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  auto_emit?: boolean;
+}
+
 export class InvoicingSettingsDto {
   @ApiProperty({ type: AiuSettingsDto, required: false })
   @IsOptional()
@@ -1709,6 +1710,12 @@ export class InvoicingSettingsDto {
   @ValidateNested()
   @Type(() => PosInvoicingSettingsDto)
   pos?: PosInvoicingSettingsDto;
+
+  @ApiProperty({ type: EcommerceInvoicingSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EcommerceInvoicingSettingsDto)
+  ecommerce?: EcommerceInvoicingSettingsDto;
 }
 
 /**
