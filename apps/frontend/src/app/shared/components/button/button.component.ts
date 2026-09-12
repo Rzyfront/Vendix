@@ -228,11 +228,14 @@ export class ButtonComponent {
     ];
 
     // Size classes - mobile-first con alturas consistentes con inputs y selectors
+    // El dueño pidió un escalón más denso en móvil: `md` y `lg` ahora usan
+    // bajo `sm:` (640px) la misma métrica que antes tenía `sm`. La métrica
+    // desktop (desde `sm:`) NO cambió — sigue siendo la de siempre.
     const sizeClasses = {
       xsm: ['h-7', 'px-2', 'text-xs'], // 28px - extra small
       sm: ['h-8', 'px-2.5', 'text-sm', 'sm:h-9', 'sm:px-3'], // 32px móvil → 36px desktop
-      md: ['h-10', 'px-3', 'text-sm', 'sm:h-11', 'sm:px-4', 'sm:text-base'], // 40px móvil → 44px desktop
-      lg: ['h-12', 'px-4', 'text-base', 'sm:h-[3.25rem]', 'sm:px-6', 'sm:text-lg'], // 48px móvil → 52px desktop
+      md: ['h-8', 'px-2.5', 'text-sm', 'sm:h-11', 'sm:px-4', 'sm:text-base'], // 32px móvil → 44px desktop (desktop sin cambios)
+      lg: ['h-10', 'px-3', 'text-sm', 'sm:h-[3.25rem]', 'sm:px-6', 'sm:text-lg'], // 40px móvil → 52px desktop (desktop sin cambios)
     };
 
     // Variant classes — POS-inspired style

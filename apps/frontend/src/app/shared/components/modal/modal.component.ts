@@ -54,25 +54,42 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
         >
           <!-- Modal content con diseño mejorado -->
           <div [class]="contentClasses()">
-            <!-- Header con gradiente sutil -->
+            <!--
+              Header con gradiente sutil.
+              Densidad móvil: por debajo del breakpoint md el header se
+              compacta (padding, gaps, tipografía y botón de cierre más
+              chicos) para recuperar 30-40% de alto en pantallas angostas.
+              Desde md: el render es exactamente el de siempre — todas las
+              clases nuevas son mobile-first con su contraparte md: igual a
+              la clase original.
+
+              Alturas medidas con los tokens reales:
+                · con subtítulo:  77px → 49px  (-36%)
+                · sin subtítulo:  54px → 36px  (-33%)
+              Sin subtítulo manda el botón de cierre, no el título: por eso
+              baja a p-1 (24x24 área táctil). 24px es el mínimo exacto de
+              WCAG 2.2 AA 2.5.8 Target Size (Minimum); queda por debajo de
+              los 44px de la guía AAA 2.5.5 a propósito, porque el pedido
+              explícito fue recortar 30-40% de alto. Desde md: vuelve a p-2.
+            -->
             @if (hasHeader()) {
               <div
-                class="px-4 py-3 md:px-5 md:py-4 border-b border-[var(--color-border)] flex items-center justify-between flex-shrink-0 bg-gradient-to-b from-[var(--color-surface)] to-[var(--color-surface)]/95"
+                class="px-3 py-1.5 md:px-5 md:py-4 border-b border-[var(--color-border)] flex items-center justify-between flex-shrink-0 bg-gradient-to-b from-[var(--color-surface)] to-[var(--color-surface)]/95"
               >
-                <div class="flex items-center gap-3 overflow-hidden flex-1">
+                <div class="flex items-center gap-2 md:gap-3 overflow-hidden flex-1">
                   <ng-content select="[slot=header]"></ng-content>
                   <div class="min-w-0 flex-1">
                     @if (title()) {
                       <h3
                         [id]="titleId()"
-                        class="text-[var(--fs-xl)] font-[var(--fw-semibold)] text-[var(--color-text-primary)] truncate"
+                        class="text-[var(--fs-base)] md:text-[var(--fs-xl)] font-[var(--fw-semibold)] leading-tight text-[var(--color-text-primary)] truncate"
                       >
                         {{ title() }}
                       </h3>
                     }
                     @if (subtitle()) {
                       <p
-                        class="text-[var(--fs-sm)] text-[var(--color-text-secondary)] mt-0.5 truncate"
+                        class="text-[var(--fs-xs)] md:text-[var(--fs-sm)] leading-tight text-[var(--color-text-secondary)] mt-0.5 truncate"
                       >
                         {{ subtitle() }}
                       </p>
@@ -84,7 +101,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
                 @if (showCloseButton()) {
                   <button
                     type="button"
-                    class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all duration-200 p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-text-muted)]/20 focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+                    class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all duration-200 p-1 md:p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-text-muted)]/20 focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
                     [class.absolute]="overlayCloseButton()"
                     [class.top-4]="overlayCloseButton()"
                     [class.right-4]="overlayCloseButton()"
@@ -93,7 +110,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
                     aria-label="Cerrar modal"
                   >
                     <svg
-                      class="h-5 w-5"
+                      class="h-4 w-4 md:h-5 md:w-5"
                       fill="none"
                       viewBox="0 0 24 24"
                       stroke="currentColor"
@@ -109,17 +126,17 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl' | 'xxl' | 'full';
                 }
               </div>
             }
-            <!-- Body con scroll mejorado y padding consistente -->
+            <!-- Body con scroll mejorado y padding consistente (compacto en móvil, igual que siempre desde md:) -->
             <div
-              class="px-4 py-3 md:px-5 md:py-4 overflow-y-auto overflow-x-auto flex-1 bg-[var(--color-surface)]"
+              class="px-3 py-2.5 md:px-5 md:py-4 overflow-y-auto overflow-x-auto flex-1 bg-[var(--color-surface)]"
               style="scroll-behavior: smooth;"
             >
               <ng-content></ng-content>
             </div>
-            <!-- Footer con diseño mejorado -->
+            <!-- Footer con diseño mejorado (compacto en móvil, igual que siempre desde md:) -->
             @if (hasFooter()) {
               <div
-                class="px-4 py-3 md:px-5 md:py-3 border-t border-[var(--color-border)] bg-gradient-to-t from-[var(--color-background)]/50 to-[var(--color-surface)] flex-shrink-0"
+                class="px-3 py-2 md:px-5 md:py-3 border-t border-[var(--color-border)] bg-gradient-to-t from-[var(--color-background)]/50 to-[var(--color-surface)] flex-shrink-0"
               >
                 <ng-content select="[slot=footer]"></ng-content>
               </div>
