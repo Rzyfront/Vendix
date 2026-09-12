@@ -13,6 +13,9 @@ import {
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 import { dateRangeToQueryParams } from '../../../shared/utils/date-range-params.util';
+import { AnalyticsService } from '../../services/analytics.service';
+import { AnalyticsRefreshService } from '../../../shared/services/analytics-refresh.service';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 @Component({
   selector: 'app-analytics-shell',
@@ -25,6 +28,10 @@ export class AnalyticsShellComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly dateRangeSync = inject(DateRangeSyncService);
+  private readonly analyticsService = inject(AnalyticsService);
+  private readonly analyticsRefresh = inject(AnalyticsRefreshService);
+  private readonly toast = inject(ToastService);
+  private activeChildComponent: any = null;
 
   // `initialValue` evita el "no initial value" warning del audit script zoneless
   // y permite que `categoryId` se lea sincrónicamente dentro de `computed()`.
@@ -59,6 +66,7 @@ export class AnalyticsShellComponent {
   });
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
+    { id: 'refresh', label: 'Actualizar', icon: 'refresh-cw', variant: 'outline' },
     { id: 'view-reports', label: 'Ver Reportes', icon: 'file-text', variant: 'outline' },
   ]);
 
@@ -97,7 +105,18 @@ export class AnalyticsShellComponent {
     '/admin/analytics/financial/refunds': '/admin/reports/financial/financial-refunds',
   };
 
+  onActivate(componentRef: any): void {
+    this.activeChildComponent = componentRef;
+  }
+
   onActionClick(actionId: string): void {
+    if (actionId === 'refresh') {
+      this.analyticsService.invalidateCache();
+      this.analyticsRefresh.triggerRefresh();
+      this.loadActiveChildData();
+      this.toast.success('Datos de analítica actualizados');
+      return;
+    }
     if (actionId === 'view-reports') {
       const currentUrl = this.router.url.split('?')[0];
       const reportRoute = this.analyticsToReportRoute[currentUrl]
@@ -105,6 +124,23 @@ export class AnalyticsShellComponent {
       this.router.navigate([reportRoute], {
         queryParams: dateRangeToQueryParams(this.dateRangeSync.dateRange()),
       });
+    }
+  }
+
+  private loadActiveChildData(): void {
+    const child = this.activeChildComponent;
+    if (!child) return;
+    if (typeof child.loadData === 'function') {
+      child.loadData();
+    } else if (typeof child.loadChartData === 'function') {
+      if (typeof child.invalidateModeData === 'function') {
+        child.invalidateModeData();
+      }
+      child.loadChartData();
+    } else if (typeof child.loadSummary === 'function') {
+      child.loadSummary();
+    } else if (typeof child.refresh === 'function') {
+      child.refresh();
     }
   }
 }

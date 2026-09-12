@@ -20,6 +20,7 @@ export class ReportsEffects {
   selectReportAndLoad$ = createEffect(() =>
     this.actions$.pipe(
       ofType(ReportsActions.selectReport),
+      tap(({ reportId }) => this.reportsDataService.clearCache(reportId)),
       map(() => ReportsActions.loadReportData()),
     ),
   );
@@ -27,6 +28,7 @@ export class ReportsEffects {
   reloadOnFilterChange$ = createEffect(() =>
     this.actions$.pipe(
       ofType(ReportsActions.setDateRange, ReportsActions.setFiscalPeriod),
+      tap(() => this.reportsDataService.clearCache()),
       map(() => ReportsActions.loadReportData()),
     ),
   );
