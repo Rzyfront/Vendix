@@ -403,8 +403,56 @@ export class TablesService {
   }
 
   /**
+   * Calcula la luminancia relativa WCAG de un hex de marca y decide si es
+   * lo bastante oscuro para teñir el QR sin arriesgar la lectura.
+   *
+   * IMPORTANTE: el umbral (0.35) protege la ESCANEABILIDAD, no la estética.
+   * Por encima de él, la tinta de marca no da suficiente contraste contra el
+   * fondo blanco del QR y el lector puede fallar — en ese caso se ignora el
+   * color de marca y se vuelve al negro clásico, que siempre escanea.
+   *
+   * Acepta `#RGB` y `#RRGGBB`, con o sin `#`. Cualquier hex que no parsea
+   * cae a negro (mismo criterio de "nunca reventar" que `QrService`).
+   */
+  private resolveQrDarkColor(primaryHex: string | null | undefined): string {
+    const FALLBACK = '#000000';
+    if (!primaryHex) return FALLBACK;
+
+    let hex = primaryHex.trim().replace(/^#/, '');
+    if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+      hex = hex
+        .split('')
+        .map((c) => c + c)
+        .join('');
+    }
+    if (!/^[0-9a-fA-F]{6}$/.test(hex)) return FALLBACK;
+
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+
+    const linearize = (channel: number) => {
+      const c = channel / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    };
+
+    const luminance =
+      0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b);
+
+    return luminance < 0.35 ? `#${hex}` : FALLBACK;
+  }
+
+  /**
    * Genera la URL pública de la mesa + el QR (data URL PNG) que apunta a
    * esa URL. El QR contiene `${ecommerceUrl}/?mesa=${public_token}`.
+   *
+   * A 80 mm impresos (tarjeta tipo cartel), 320 px equivalen a ~108 DPI:
+   * se ve pixelado en papel. 800 px dan ~254 DPI, nítido para impresión.
+   *
+   * El QR se tiñe con `branding.primary_color` de la tienda SOLO cuando
+   * ese color es lo bastante oscuro (ver `resolveQrDarkColor`); si no hay
+   * color de marca, la fila de settings no existe, o el color es demasiado
+   * claro, el QR se genera en negro clásico.
    *
    * Reutiliza `QrService.generateDataUrl` (common/services/qr.service) —
    * inyectado en el módulo. La resolución del dominio primario se
@@ -433,9 +481,24 @@ export class TablesService {
       );
     }
 
+    // Lectura defensiva: la fila puede no existir, `settings` puede ser
+    // null, y `branding` puede faltar dentro del JSON. Cualquiera de esos
+    // casos deja `primaryColor` en `undefined` → QR negro, sin lanzar error.
+    const settingsRow = await this.prisma.store_settings.findUnique({
+      where: { store_id: storeId },
+      select: { settings: true },
+    });
+    const branding = (settingsRow?.settings as { branding?: { primary_color?: string } } | null)
+      ?.branding;
+    const darkColor = this.resolveQrDarkColor(branding?.primary_color);
+
     const baseUrl = this.buildEcommerceUrl(domain.hostname);
     const publicUrl = `${baseUrl}/?mesa=${table.public_token}`;
-    const qrDataUrl = await this.qrService.generateDataUrl(publicUrl, 320);
+    const qrDataUrl = await this.qrService.generateDataUrl(
+      publicUrl,
+      800,
+      darkColor,
+    );
 
     return { public_url: publicUrl, qr_data_url: qrDataUrl };
   }

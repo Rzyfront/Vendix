@@ -35,6 +35,7 @@ import {
   TransferResult,
 } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
+import { TableQrPrintService } from '../../services/table-qr-print.service';
 import { TableFloorMapComponent } from '../../components/table-floor-map/table-floor-map.component';
 import { TableFormModalComponent } from '../../components/table-form-modal/table-form-modal.component';
 import { TableQrModalComponent } from '../../components/table-qr-modal/table-qr-modal.component';
@@ -85,6 +86,7 @@ interface TableRow extends Table {
 })
 export class TablesManagePageComponent implements OnInit {
   private readonly tablesService = inject(TablesService);
+  private readonly qrPrint = inject(TableQrPrintService);
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
@@ -381,10 +383,9 @@ export class TablesManagePageComponent implements OnInit {
   }
 
   /**
-   * Imprime los QR de TODAS las mesas visibles en un solo documento.
-   * Itera `getQr` por cada mesa con `forkJoin`, construye un HTML con
-   * una grilla de QRs (nombre + zona + QR + URL) y dispara la impresión
-   * vía un iframe oculto (patrón de `PosTicketService.printHTML`).
+   * Imprime los QR de TODAS las mesas visibles en un solo documento: una
+   * hoja A4 de marca por mesa. Itera `getQr` por cada mesa con `forkJoin` y
+   * delega la composición y la impresión en `TableQrPrintService`.
    */
   printAllQr(): void {
     const list = this.tables();
@@ -413,7 +414,27 @@ export class TablesManagePageComponent implements OnInit {
       });
   }
 
+  /**
+   * Delega en el emisor único. `printMany` es `async`: la promesa se captura
+   * aquí para que un fallo del diálogo de impresión no quede flotando sin
+   * manejar y el operador vea el error.
+   */
   private printQrSheets(tables: Table[], results: TableQrResponse[]): void {
+    this.qrPrint.printMany(tables, results).catch(() => {
+      this.toastService.error('No se pudieron imprimir los QR de las mesas');
+    });
+  }
+
+  /**
+   * @deprecated Emisor viejo: grilla gris de dos columnas, sin marca y con
+   * `print()` disparado antes de que las imágenes cargaran. El emisor único es
+   * `TableQrPrintService`. Sin llamadores; se conserva por la regla del repo
+   * de no borrar código.
+   */
+  private printQrSheetsLegacy(
+    tables: Table[],
+    results: TableQrResponse[],
+  ): void {
     const cards = tables
       .map((t, i) => {
         const r = results[i];
@@ -471,6 +492,11 @@ export class TablesManagePageComponent implements OnInit {
     setTimeout(() => iframe.remove(), 1000);
   }
 
+  /**
+   * @deprecated Sólo lo consume `printQrSheetsLegacy`. El escape del emisor
+   * vivo lo hace `TableQrPrintService`. Se conserva por la regla del repo de
+   * no borrar código.
+   */
   private escapeHtml(s: string): string {
     return s
       .replace(/&/g, '&amp;')

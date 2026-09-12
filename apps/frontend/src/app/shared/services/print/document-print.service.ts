@@ -405,10 +405,29 @@ export class DocumentPrintService {
   }
 
   /**
+   * Imprime un documento HTML COMPLETO ya compuesto por el llamador —
+   * `<html>`, `<head>`, su propio `@page` y su propio `<body>`.
+   *
+   * A diferencia de `print()`, aquí el llamador decide el papel: se usa cuando
+   * el documento NO es un recibo configurable por `receipts.printing` sino una
+   * pieza con geometría propia (un cartel A4 de QR de mesa, por ejemplo).
+   *
+   * El valor de este seam es heredar el motor correcto: la espera a que el
+   * documento parsee y a que CADA imagen haga fetch + decode antes de abrir el
+   * diálogo. Llamar `print()` justo después de `doc.close()` —lo que hacen los
+   * emisores no migrados— dispara la impresión antes de que el logo remoto
+   * (S3) haya llegado: la vista previa en pantalla SÍ lo muestra porque el
+   * iframe vive lo suficiente, pero el papel sale sin él.
+   */
+  async printHtmlDocument(documentHtml: string): Promise<void> {
+    await this.sendToPrinter(documentHtml);
+  }
+
+  /**
    * Imprime directamente un HTML completo compilado por el Print Gateway (ej: preview o render directo)
    */
   async printGatewayHtml(documentHtml: string): Promise<void> {
-    await this.sendToPrinter(documentHtml);
+    await this.printHtmlDocument(documentHtml);
   }
 
   /**
