@@ -743,10 +743,21 @@ footer {
     margin-bottom: var(--spacing-sm-mobile);
   }
 
-  .grid,
+  /* [DESACTIVADO] gap global en pantallas <=480px. Gemela de la regla ya
+     desactivada arriba: pisaba las utilidades gap-* de Tailwind (misma
+     especificidad, declarada despues) y ademas metia 4px entre CADA hijo de
+     cualquier contenedor flex, incluidos los de altura cero.
+
+     Sintoma concreto: en `div.main-content` de los layouts admin (flex column)
+     los cuatro banners vacios -suscripcion, obligacion fiscal, arribo, reporte
+     semanal- median 0px pero cobraban gap igual, asi que entre el <header> y el
+     <main> del outlet aparecian 5 x 4px = 20px de aire muerto que no existia en
+     tablet ni escritorio. Al desactivarla, cada contenedor recupera su gap
+     explicito (gap-2/gap-4/...) o el default 0 de Tailwind. */
+  /* .grid,
   .flex {
     gap: var(--spacing-xs-mobile);
-  }
+  } */
 }
 
 /* Loading Inter Font */
