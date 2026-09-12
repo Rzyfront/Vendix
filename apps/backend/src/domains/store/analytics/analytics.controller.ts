@@ -808,7 +808,27 @@ export class AnalyticsController {
   /**
    * QUI-540: cuentas por cobrar de clientes (open + partial) con
    * bucketing de antigüedad (0-30 / 31-60 / 61-90 / 90+).
+   * Preview paginado.
    */
+  @Get('customers/receivable')
+  @Permissions('store:analytics:read')
+  async getAccountsReceivable(@Query() query: AnalyticsQueryDto) {
+    const result =
+      await this.customers_analytics_service.getAccountsReceivable(query);
+    return this.response_service.paginated(
+      result.data,
+      result.total,
+      result.page,
+      result.limit,
+    );
+  }
+
+  @Get('customers/receivables')
+  @Permissions('store:analytics:read')
+  async getAccountsReceivablesAlias(@Query() query: AnalyticsQueryDto) {
+    return this.getAccountsReceivable(query);
+  }
+
   @Get('customers/receivable/export')
   @Permissions('store:analytics:read')
   async exportAccountsReceivable(
@@ -837,6 +857,15 @@ export class AnalyticsController {
     await this.emitReport(res, 'cuentas_por_cobrar', tz, [
       this.toSheet('Cuentas por Cobrar', columns, rows, tz),
     ]);
+  }
+
+  @Get('customers/receivables/export')
+  @Permissions('store:analytics:read')
+  async exportAccountsReceivablesAlias(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    return this.exportAccountsReceivable(query, res);
   }
 
   @Get('customers/abandoned-carts/summary')

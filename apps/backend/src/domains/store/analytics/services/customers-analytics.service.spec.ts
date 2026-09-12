@@ -11,6 +11,10 @@ type MockStorePrismaService = {
   store_settings: { findFirst: jest.Mock };
   $queryRaw: jest.Mock;
   withoutScope: jest.Mock;
+  accounts_receivable?: {
+    count: jest.Mock;
+    findMany: jest.Mock;
+  };
 } & Partial<StorePrismaService>;
 
 describe('CustomersAnalyticsService.getAbandonedCartsSummary (QUI-628)', () => {
@@ -178,3 +182,137 @@ describe('CustomersAnalyticsService.getAbandonedCartsSummary (QUI-628)', () => {
     expect(sqls.some((s) => s.includes("c.state = 'converted'"))).toBe(true);
   });
 });
+
+describe('CustomersAnalyticsService.getAccountsReceivable (QUI-540)', () => {
+  let service: CustomersAnalyticsService;
+  let prisma: MockStorePrismaService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    prisma = {
+      store_settings: { findFirst: jest.fn() },
+      $queryRaw: jest.fn(),
+      withoutScope: jest.fn(),
+      accounts_receivable: {
+        count: jest.fn(),
+        findMany: jest.fn(),
+      },
+    } as MockStorePrismaService;
+
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 10, organization_id: 2, is_super_admin: false, is_owner: false });
+
+    service = new CustomersAnalyticsService(prisma as any);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('queries open and partial accounts_receivable with positive balance', async () => {
+    const mockReceivables = [
+      {
+        id: 1,
+        customer_id: 101,
+        source_type: 'order',
+        source_id: 50,
+        document_number: 'REC-001',
+        original_amount: 1000,
+        paid_amount: 200,
+        balance: 800,
+        currency: 'COP',
+        issue_date: new Date('2026-06-01'),
+        due_date: new Date('2026-06-15'),
+        days_overdue: 25,
+        last_payment_date: null,
+        status: 'partial',
+        customer: {
+          first_name: 'Juan',
+          last_name: 'Perez',
+          email: 'juan@example.com',
+          document_number: '12345678',
+        },
+      },
+      {
+        id: 2,
+        customer_id: 102,
+        source_type: 'order',
+        source_id: 51,
+        document_number: 'REC-002',
+        original_amount: 500,
+        paid_amount: 0,
+        balance: 500,
+        currency: 'COP',
+        issue_date: new Date('2026-05-01'),
+        due_date: new Date('2026-05-10'),
+        days_overdue: 75,
+        last_payment_date: null,
+        status: 'open',
+        customer: null,
+      },
+    ];
+
+    prisma.accounts_receivable!.count.mockResolvedValue(2);
+    prisma.accounts_receivable!.findMany.mockResolvedValue(mockReceivables);
+
+    const result = await service.getAccountsReceivable({ page: 1, limit: 10 } as any);
+
+    expect(prisma.accounts_receivable!.count).toHaveBeenCalledWith({
+      where: {
+        store_id: 10,
+        status: { in: ['open', 'partial'] },
+        balance: { gt: 0 },
+      },
+    });
+
+    expect(prisma.accounts_receivable!.findMany).toHaveBeenCalledWith({
+      where: {
+        store_id: 10,
+        status: { in: ['open', 'partial'] },
+        balance: { gt: 0 },
+      },
+      select: expect.any(Object),
+      orderBy: { due_date: 'asc' },
+      skip: 0,
+      take: 10,
+    });
+
+    expect(result.total).toBe(2);
+    expect(result.page).toBe(1);
+    expect(result.limit).toBe(10);
+    expect(result.data).toHaveLength(2);
+
+    expect(result.data[0]).toEqual({
+      id: 1,
+      customer_id: 101,
+      customer_name: 'Juan Perez',
+      customer_email: 'juan@example.com',
+      customer_document: '12345678',
+      document_number: 'REC-001',
+      source_type: 'order',
+      source_id: 50,
+      issue_date: mockReceivables[0].issue_date,
+      due_date: mockReceivables[0].due_date,
+      days_overdue: 25,
+      aging_bucket: '0-30',
+      original_amount: 1000,
+      paid_amount: 200,
+      balance: 800,
+      currency: 'COP',
+      status: 'partial',
+      last_payment_date: null,
+    });
+
+    expect(result.data[1].aging_bucket).toBe('61-90');
+    expect(result.data[1].customer_name).toBe('');
+  });
+
+  it('throws when store context is missing', async () => {
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue(null as any);
+
+    await expect(service.getAccountsReceivable({} as any)).rejects.toThrow();
+  });
+});
+
