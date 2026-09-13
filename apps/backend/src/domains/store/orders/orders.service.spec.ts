@@ -614,7 +614,7 @@ describe('OrdersService', () => {
    *
    * El resto del flujo (promociones, cupones, shipping, stock) se cubre con
    * verificaciones de integración contra el flujo canónico
-   * `flow/pay`/`flow/cancel` y con `npm run buildcheck:test` para no
+   * `flow/pay`/`flow/cancel` y con `npm run test:path` para no
    * arrastrar mocks pesados.
    */
   describe('updateOrderFromEditor — gates previos al commit', () => {
@@ -722,6 +722,17 @@ describe('OrdersService', () => {
         mockPrismaService.orders.findFirst.mockResolvedValue(editableOrder);
         mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
         mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
+        // F-164 — `assertVariantRequiredForPrepared` (dentro de la
+        // transacción, ANTES del claim atómico) resuelve por
+        // `products.findUnique`, no por `findMany`. Sin este mock el
+        // producto #1 "no existe" y el test corta en SYS_NOT_FOUND_001
+        // antes de llegar al claim que dice estar probando.
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
         mockPrismaService.orders.updateMany.mockResolvedValue({
           count: 0,
         } as any);
@@ -758,6 +769,15 @@ describe('OrdersService', () => {
           .mockResolvedValueOnce(lockedOrder); // second: post-claim state lookup
         mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
         mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
+        // F-164 — mismo mock que el test anterior: sin `findUnique` el
+        // validator corta el pipeline antes del claim atómico que este
+        // test necesita ejercitar.
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
         mockPrismaService.orders.updateMany.mockResolvedValue({
           count: 0,
         } as any);
@@ -789,6 +809,14 @@ describe('OrdersService', () => {
           .mockResolvedValueOnce(null);
         mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
         mockPrismaService.products.findMany.mockResolvedValue([{ id: 1 }]);
+        // F-164 — idem: el validator de variantes corre antes del claim y
+        // necesita `findUnique`, no `findMany`.
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
         mockPrismaService.orders.updateMany.mockResolvedValue({
           count: 0,
         } as any);
@@ -897,6 +925,16 @@ describe('OrdersService', () => {
       const contextSpy = spyContext();
       try {
         arrangeEditableDraft();
+        // F-164 — `arrangeEditableDraft` no cubre `products.findUnique`;
+        // el validator de variantes (dentro de la transacción, antes del
+        // claim) lo necesita para no cortar en SYS_NOT_FOUND_001. Mismo
+        // patrón que las specs "PERMITE editar..." más abajo.
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
 
         const result = await service.updateOrderFromEditor(500, fullDto);
 
@@ -1215,6 +1253,14 @@ describe('OrdersService', () => {
       const contextSpy = spyContext();
       try {
         arrangeEditableDraft();
+        // F-164 — mismo mock de `products.findUnique` que el resto de
+        // specs que llegan a la transacción; ver comentario arriba.
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
         // La orden ya tenía un cupón (couponChanged=true): el editor
         // intenta decrementar el viejo e incrementar el nuevo.
         const orderWithOldCoupon = {
@@ -1277,6 +1323,14 @@ describe('OrdersService', () => {
       const contextSpy = spyContext();
       try {
         arrangeEditableDraft();
+        // F-164 — mismo mock de `products.findUnique`; ver comentario en
+        // la primera spec que usa `arrangeEditableDraft()`.
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
         const tamperedOrder = {
           ...persistedOrder,
           subtotal_amount: 999, // diverge del recalculado (100)
@@ -1367,6 +1421,14 @@ describe('OrdersService', () => {
         // No hay cache hit.
         mockPrismaService.audit_logs.findFirst.mockResolvedValue(null);
         arrangeEditableDraft();
+        // F-164 — mismo mock de `products.findUnique`; ver comentario en
+        // la primera spec que usa `arrangeEditableDraft()`.
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
 
         await service.updateOrderFromEditor(500, {
           ...fullDto,

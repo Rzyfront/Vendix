@@ -8,6 +8,16 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { payments_state_enum } from '@prisma/client';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { TaxesService } from '../taxes/taxes.service';
+import { TaxFiscalType } from '../taxes/dto';
+// F-166: `TaxesService.resolveLineTotals` es una fachada delgada que delega
+// EXACTO (sin normalizar entradas ni leer estado, ver taxes.service.ts:189-194)
+// en esta función pura. El mock del provider delega a la misma función real
+// en vez de una constante fija, para que el espía cuente llamadas sin
+// congelar la aritmética que B.1/B.3 tienen que instrumentar.
+import {
+  resolveLineTotals as resolveLineTotalsPure,
+  type TaxRateForResolution,
+} from '../taxes/utils/tax-inclusive-math.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
@@ -51,6 +61,16 @@ describe('PaymentsService', () => {
   let couponsService: CouponsService;
   let fiscalThreshold: FiscalInvoiceThresholdService;
   let kitchenFire: KitchenFireService;
+  // F-157/F-166: handles tipados CONCRETOS del mock de TaxesService,
+  // declarados en el ámbito del describe para que los tests los usen
+  // DIRECTO por closure — nunca recuperados con `as jest.Mock` (eso
+  // borra el tipo, ver F-157) ni desde `(service as any).taxes_service`.
+  let calculateProductTaxesMock: jest.MockedFunction<
+    TaxesService['calculateProductTaxes']
+  >;
+  let resolveLineTotalsMock: jest.MockedFunction<
+    TaxesService['resolveLineTotals']
+  >;
 
   const mockUser = {
     id: 1,
@@ -119,6 +139,50 @@ describe('PaymentsService', () => {
       registerUse: jest.fn(),
     };
 
+    // F-157 (ronda 2, corregido): el retipado anterior NO ataba. Dos borrados
+    // encadenados: (a) `Partial<TaxesService>` declaraba la propiedad como el
+    // MÉTODO, y los tests recuperaban el mock con
+    // `(service as any).taxes_service.calculateProductTaxes as jest.Mock`,
+    // que es `Mock<any, any>` — el `as jest.Mock` borra cualquier genérico
+    // puesto en `jest.fn<...>()`; (b) el genérico `jest.fn<ReturnType<X>,
+    // Parameters<X>>()` es tautológico: se recalcula contra la firma ACTUAL
+    // de `X` en cada compilación, así que un ensanche de `X` (ADR-10:
+    // `unclosed_residual_cents`, `invalid_inputs`, `resolved_from`) amplía
+    // el tipo del mock EN EL MISMO MOVIMIENTO y nunca llega a chocar con
+    // nada. Medido con sonda fuera del repo: `mockResolvedValue({
+    // campo_inventado: 'basura' })`, `mockResolvedValue(undefined)` y
+    // `mockResolvedValue(42)` compilaban los tres — ver
+    // docs/critical-plans/CP-pos-exclusive-tax-double-charge/findings/F-157.md.
+    //
+    // Lo que sí ata: un HANDLE tipado concreto (`jest.MockedFunction<T>`)
+    // creado una sola vez y usado DIRECTO por closure en los tests — nunca
+    // recuperado desde `Partial<TaxesService>` ni con `as jest.Mock`. Ver los
+    // `let calculateProductTaxesMock` / `let resolveLineTotalsMock` a nivel
+    // de `describe`. Sonda que reproduce el ensanche de ADR-10 con un tipo
+    // propio (+`unclosed_residual_cents`/`invalid_inputs`/`resolved_from`
+    // requeridos) confirma que ESTE patrón sí rompe en compilación cuando el
+    // fixture no los declara.
+    calculateProductTaxesMock = jest.fn() as jest.MockedFunction<
+      TaxesService['calculateProductTaxes']
+    >;
+    // F-166: `resolveLineTotals` delega al kernel puro real
+    // (`tax-inclusive-math.util.ts`) en vez de una constante — el espía
+    // cuenta llamadas SIN reemplazar la matemática que `rescaleTaxInfo`
+    // (F-016) instrumenta. Antes, el único provider de este método era un
+    // parche local `jest.fn().mockReturnValue({...fijo...})` dentro del test
+    // de F-157 que ignoraba sus argumentos: congelaba la aritmética y
+    // cualquier test que llegara a `rescaleTaxInfo` sin ese parche moría con
+    // "resolveLineTotals is not a function" (F-166).
+    resolveLineTotalsMock = jest.fn(
+      (finalPrice: number, rates: TaxRateForResolution[]) =>
+        resolveLineTotalsPure(finalPrice, rates),
+    ) as jest.MockedFunction<TaxesService['resolveLineTotals']>;
+
+    const mockTaxesService: Partial<TaxesService> = {
+      calculateProductTaxes: calculateProductTaxesMock,
+      resolveLineTotals: resolveLineTotalsMock,
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
@@ -132,7 +196,7 @@ describe('PaymentsService', () => {
         },
         {
           provide: TaxesService,
-          useValue: { calculateProductTaxes: jest.fn() },
+          useValue: mockTaxesService,
         },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
         {
@@ -1471,6 +1535,204 @@ describe('PaymentsService', () => {
       const details = audit.mock.calls[0][3];
       expect(details.grand_total).toBe(PERSISTED_GRAND_TOTAL);
       expect(details.grand_total).not.toBe(DTO_TOTAL_ESTIMATE);
+    });
+  });
+
+  describe('buildPosOrderItem — TaxesService.calculateProductTaxes contract (F-157/F-166)', () => {
+    // F-157/F-166: la forma completa del contrato real
+    // (`taxes.service.ts:174-179`: total_rate, total_tax_amount, base, total,
+    // taxes[] con tax_rate_id/name/rate/tax_type/is_inclusive/amount/base por
+    // tasa) NO llega intacta al snapshot — `rescaleTaxInfo`
+    // (`payments.service.ts:2807-2848`) toma total_rate/total_tax_amount/base/
+    // total y sobrescribe is_inclusive/base/amount POR TASA desde el retorno
+    // de `resolveLineTotals`, no desde `calculateProductTaxes`. De los 11
+    // campos del contrato, sólo 4 sobreviven intactos hasta
+    // `order_item_taxes`: `tax_rate_id`, `name` (-> `tax_name`), `rate` (->
+    // `tax_rate`) y `tax_type`. Los tests de abajo assertan exactamente esos
+    // cuatro, más los dos efectos que SÍ dependen de la matemática real
+    // (F-166: `resolveLineTotals` delega al kernel puro, ya no es una
+    // constante congelada) — `total` header (via `catalog_final_price`/
+    // `final_unit_price`) y el par `rate`+`is_inclusive` como INPUT de la
+    // fórmula (via `tax_amount`). `total_rate`/`total_tax_amount`/`base`
+    // (header) y `taxes[].amount`/`taxes[].base` (por tasa) del retorno de
+    // `calculateProductTaxes` son estructuralmente INALCANZABLES por esta vía
+    // — `rescaleTaxInfo` nunca los lee (ni directo ni como input de
+    // `resolveLineTotals`) — así que NO se declaran observados aquí.
+    const dtoStoreId = 1;
+
+    const product = {
+      id: 10,
+      name: 'Producto con IVA exclusivo',
+      sku: 'SKU-10',
+      base_price: 10000,
+      is_on_sale: false,
+      sale_price: null,
+      product_type: 'simple',
+      allow_pos_price_override: true,
+      cost_price: 6000,
+      price_unit_quantity: null,
+    };
+
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: 1,
+      roles: ['super_admin'],
+    };
+
+    // Tipo del contrato real anotado explícito (no inferido): es la pieza que
+    // realmente ata el ensanche de ADR-10. Un fixture escrito a mano contra
+    // este alias deja de compilar el día que `unclosed_residual_cents`/
+    // `invalid_inputs`/`resolved_from` se vuelvan campos requeridos del
+    // retorno real, sin que nadie tenga que acordarse de tocar este archivo.
+    type CalcProductTaxesResult = Awaited<
+      ReturnType<TaxesService['calculateProductTaxes']>
+    >;
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('propaga tax_rate_id/name/rate/tax_type hasta order_item_taxes; total/rate/is_inclusive recomputan vía el kernel real de resolveLineTotals (F-157/F-166)', async () => {
+      const tx = {
+        products: { findFirst: jest.fn().mockResolvedValue(product) },
+      };
+      const item = { product_id: product.id, quantity: 1, unit_price: 0 };
+
+      const catalogTaxes: CalcProductTaxesResult = {
+        total_rate: 0.19,
+        total_tax_amount: 1900,
+        base: 10000,
+        total: 11900,
+        taxes: [
+          {
+            tax_rate_id: 501,
+            name: 'INC 19%',
+            rate: 0.19,
+            tax_type: TaxFiscalType.INC,
+            is_inclusive: false,
+            amount: 1900,
+            base: 10000,
+          },
+        ],
+      };
+      calculateProductTaxesMock.mockResolvedValue(catalogTaxes);
+
+      // F-166: ya no hace falta ningún parche local de `resolveLineTotals` —
+      // el provider del módulo (`beforeEach`) lo delega al kernel puro real
+      // (`resolveLineTotalsPure`), así que `rescaleTaxInfo` (F-016) recibe
+      // matemática de verdad, no una constante.
+      const result = await (service as any).buildPosOrderItem(
+        tx,
+        item,
+        dtoStoreId,
+        posUser,
+        undefined,
+      );
+
+      expect(calculateProductTaxesMock).toHaveBeenCalledWith(
+        product.id,
+        10000,
+        expect.objectContaining({ client: tx, store_id: dtoStoreId }),
+      );
+
+      // F-166: el seam existe y cuenta — sin override de precio,
+      // `rescaleTaxInfo` llama a `resolveLineTotals` exactamente una vez con
+      // el precio final y las tasas del catálogo (no con la base/monto del
+      // catálogo, que quedan descartados).
+      expect(resolveLineTotalsMock).toHaveBeenCalledTimes(1);
+      expect(resolveLineTotalsMock).toHaveBeenCalledWith(11900, [
+        { rate: 0.19, is_inclusive: false },
+      ]);
+
+      // Con el kernel real (sin ninguna tasa inclusiva, `hasLoop=false` en
+      // `resolveInclusiveClearing`) `base` sale IGUAL al `finalPrice` que
+      // entra (11900, no 10000) y el agregado se liquida OTRA VEZ sobre ese
+      // mismo número (2261 = 11900 × 0,19, no 1900). Esto es exactamente
+      // QUI-832 (la tasa exclusiva se cobra dos veces: catalogTaxInfo ya la
+      // sumó una vez para llegar a total=11900, y `rescaleTaxInfo` la vuelve
+      // a sumar sobre ese total) — el defecto que la Fase B corrige, FUERA
+      // del alcance de este arnés. El valor de este test es que ahora
+      // reporta la aritmética REAL de hoy, no una constante inventada que
+      // ocultaba el problema (ver F-166: el parche viejo devolvía
+      // 10000/1900/11900 sin importar el input, así que jamás pudo delatar
+      // esto).
+      expect(result.unit_price).toBe(11900);
+      expect(result.final_unit_price).toBe(11900);
+      expect(result.catalog_final_price).toBe(11900);
+      // `tax_amount_item`/`tax_rate` header: recomputados por el kernel real
+      // a partir de `total` + `taxes[0].rate`/`is_inclusive` — no son un
+      // passthrough del `total_tax_amount`/`total_rate` de calculateProductTaxes
+      // (esos dos quedan descartados, ver comentario del describe).
+      expect(result.tax_amount_item).toBe(2261);
+      expect(result.tax_rate).toBeCloseTo(0.19);
+      expect(result.order_item_taxes.create).toHaveLength(1);
+      expect(result.order_item_taxes.create[0]).toMatchObject({
+        // Los 4 campos que SÍ sobreviven intactos desde calculateProductTaxes:
+        tax_rate_id: 501,
+        tax_name: 'INC 19%',
+        tax_rate: 0.19,
+        tax_type: TaxFiscalType.INC,
+        // Recomputado por el kernel real (11900 × 0,19 = 2261, doble-carga de
+        // QUI-832), no un eco del `amount` del catálogo (1900):
+        tax_amount: 2261,
+        is_inclusive: false,
+      });
+    });
+
+    it('el kernel real de resolveLineTotals recomputa el monto para una tasa distinta — no hay constante congelada detrás (F-166)', async () => {
+      // Antes del fix de F-166, `resolveLineTotals` era un
+      // `jest.fn().mockReturnValue({...fijo...})`: cualquier tasa que se le
+      // pasara devolvía SIEMPRE 1900/19%. Este caso usa una tasa distinta
+      // (10% en vez de 19%) para demostrar que el resultado depende de
+      // verdad de lo que devuelve `calculateProductTaxes` — con la
+      // constante congelada, `tax_amount` seguiría dando 1900; con el kernel
+      // real da 1100 (11000 × 0,10 — mismo mecanismo de doble-carga que el
+      // caso anterior, ver su comentario).
+      const tx = {
+        products: { findFirst: jest.fn().mockResolvedValue(product) },
+      };
+      const item = { product_id: product.id, quantity: 1, unit_price: 0 };
+
+      const catalogTaxes: CalcProductTaxesResult = {
+        total_rate: 0.1,
+        total_tax_amount: 1000,
+        base: 10000,
+        total: 11000,
+        taxes: [
+          {
+            tax_rate_id: 777,
+            name: 'IVA 10%',
+            rate: 0.1,
+            tax_type: TaxFiscalType.IVA,
+            is_inclusive: false,
+            amount: 1000,
+            base: 10000,
+          },
+        ],
+      };
+      calculateProductTaxesMock.mockResolvedValue(catalogTaxes);
+
+      const result = await (service as any).buildPosOrderItem(
+        tx,
+        item,
+        dtoStoreId,
+        posUser,
+        undefined,
+      );
+
+      expect(resolveLineTotalsMock).toHaveBeenCalledTimes(1);
+      expect(resolveLineTotalsMock).toHaveBeenCalledWith(11000, [
+        { rate: 0.1, is_inclusive: false },
+      ]);
+      expect(result.tax_amount_item).toBe(1100);
+      expect(result.order_item_taxes.create[0]).toMatchObject({
+        tax_rate_id: 777,
+        tax_name: 'IVA 10%',
+        tax_rate: 0.1,
+        tax_type: TaxFiscalType.IVA,
+        tax_amount: 1100,
+      });
     });
   });
 });

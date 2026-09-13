@@ -5,6 +5,11 @@ import { TablesService } from './tables.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from 'src/common/errors';
+// F-165: `resolveOrderLineFinals` (vía `findOne`) sólo expone `.total` — para
+// observar `unclosed_residual_cents` (el campo que declara el contrato
+// closest-below, F-158) hay que llamar al kernel directamente con los mismos
+// insumos, igual que en `final-price.util.spec.ts`.
+import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
 
 describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
   let service: TableSessionsService;
@@ -1358,7 +1363,13 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       expect(Number(item.total_price)).toBe(20000);
     });
 
-    it('findOne inclusivo no crece el total: unit 10000 + INC 19% → 10000', async () => {
+    it('findOne inclusivo closest-below: unit 10000 + INC 19% → 9999.99 (residuo declarado)', async () => {
+      // F-165: misma deriva closest-below que F-158 (`final-price.util.spec.ts`).
+      // Con truncado a 2 decimales no existe base cuyo bruto dé 10.000,00
+      // exacto (`tax-inclusive-math.util.ts:79-83,95`); el kernel elige el
+      // mayor bruto por debajo y DECLARA el céntimo que no cierra. El
+      // contrato NO promete que el bruto se conserve exacto — la expectativa
+      // vieja (10000) estaba un día por detrás del kernel.
       (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
         findOneRow({
           id: 503,
@@ -1383,8 +1394,18 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       const view = await service.findOne(83);
       const item = (view.order as any).order_items[0];
 
-      expect(item.final_unit_price).toBe(10000);
-      expect(item.final_total_price).toBe(10000);
+      expect(item.final_unit_price).toBe(9999.99);
+      expect(item.final_total_price).toBe(9999.99);
+
+      // `resolveOrderLineFinals` (el camino real de `findOne`) sólo expone
+      // `.total`, no `unclosed_residual_cents` — esta aserción NO observa el
+      // camino bajo prueba, llama al kernel aparte con los mismos insumos
+      // para dejar constancia del residuo que la respuesta HTTP no declara
+      // (mismo gap que F-158 documentó en `final-price.util.spec.ts`).
+      expect(
+        resolveLineTotals(10000, [{ rate: 0.19, is_inclusive: true }])
+          .unclosed_residual_cents,
+      ).toBe(1);
     });
 
     it('findOne cocina NO recibe finales y no dispara el batch (ADR-10)', async () => {

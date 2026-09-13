@@ -5,6 +5,11 @@ import {
   resolveOrderLineFinals,
   resolveVariantEffectivePrice,
 } from './final-price.util';
+// F-158: `calculateVariantFinalPrice`/`resolveOrderLineFinals` solo exponen
+// `.total` — para observar `unclosed_residual_cents` (el campo que declara el
+// contrato closest-below) hay que llamar al kernel directamente con los
+// mismos insumos.
+import { resolveLineTotals } from './tax-inclusive-math.util';
 
 /**
  * Precio FINAL con impuesto (display-only).
@@ -117,13 +122,22 @@ describe('final-price.util', () => {
       product_tax_assignments: assignments,
     });
 
-    it('variante inclusiva: override 10000 + INC 19% → 10000', () => {
+    it('variante inclusiva: override 10000 + INC 19% → 9999.99 (closest-below, residuo declarado)', () => {
+      // F-158: con truncado a 2 decimales no existe base cuyo bruto dé
+      // 10.000,00 exacto (`tax-inclusive-math.util.ts:79-83,95`); el kernel
+      // elige el mayor bruto por debajo (closest-below) y DECLARA el
+      // céntimo que no cierra. El bruto NO se conserva exacto.
       expect(
         calculateVariantFinalPrice(
           { price_override: 10000 },
           product([inc19]),
         ),
-      ).toBe(10000);
+      ).toBe(9999.99);
+
+      expect(
+        resolveLineTotals(10000, [{ rate: 0.19, is_inclusive: true }])
+          .unclosed_residual_cents,
+      ).toBe(1);
     });
 
     it('variante agregada: override 10000 + EXC 19% → 11900', () => {
@@ -149,10 +163,18 @@ describe('final-price.util', () => {
       ).toEqual({ final_unit_price: 11900, final_total_price: 23800 });
     });
 
-    it('línea inclusiva: unit 10000 + INC 19% → final_unit 10000', () => {
+    it('línea inclusiva: unit 10000 + INC 19% → final_unit 9999.99 (closest-below, residuo declarado)', () => {
+      // F-158: mismo contrato closest-below que `calculateVariantFinalPrice`
+      // — el bruto de 10000 con INC 19% inclusivo no cierra exacto a 2
+      // decimales, así que el final por unidad es 9999.99, no 10000.
       expect(
         resolveOrderLineFinals(10000, 3, [{ rate: 0.19, is_inclusive: true }]),
-      ).toEqual({ final_unit_price: 10000, final_total_price: 30000 });
+      ).toEqual({ final_unit_price: 9999.99, final_total_price: 29999.97 });
+
+      expect(
+        resolveLineTotals(10000, [{ rate: 0.19, is_inclusive: true }])
+          .unclosed_residual_cents,
+      ).toBe(1);
     });
 
     it('sin tasas el final es el unit intacto', () => {
