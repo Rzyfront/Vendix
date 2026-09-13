@@ -590,3 +590,234 @@ export function prorateByPayment(
   const ratio = Math.min(paid / total, 1);
   return component * ratio;
 }
+
+// =============================================================================
+// DISPATCH (despacho / planillas de ruta) — PLAN-analytics-despachos-2026-09-12
+// -----------------------------------------------------------------------------
+// Antes de este bloque, "qué parada cuenta" y "qué es recaudo" vivían
+// duplicadas en CUATRO sitios: `dispatch-analytics.service.ts:764`
+// (`countStops` privado), `dispatch-analytics.service.ts:594` (rutas activas
+// inline en `buildVehiculoRows`), `route-flow.service.ts:1265` y
+// `carrier-delivery.service.ts:84`. Este bloque es la ÚNICA fuente; añadir una
+// quinta copia privada es la regresión que este contrato existe para evitar.
+// =============================================================================
+
+/**
+ * Resultados de parada (`dispatch_route_stops.status` / `.result`, mismos
+ * literales) que cuentan como CUMPLIDA en lectura histórica.
+ *
+ * `partial` está incluido A PROPÓSITO aunque la liquidación ya no pueda
+ * producirlo (`settleStop` lo rechaza con `DISPATCH_ROUTE_PARTIAL_DISABLED`
+ * — ver skill `vendix-dispatch-routes`, "Sin pago parcial"): el valor
+ * sobrevive en el enum de Postgres por paradas liquidadas ANTES de esa regla.
+ * Quitarlo de aquí volvería no-terminales esas paradas históricas ya
+ * liquidadas y descuadraría cualquier serie que incluya ese rango.
+ */
+export const DISPATCH_FULFILLED_STOP_RESULTS = ['delivered', 'partial'] as const;
+
+/** Forma runtime de {@link DISPATCH_FULFILLED_STOP_RESULTS} para `.has`. */
+export const DISPATCH_FULFILLED_STOP_RESULT_SET: ReadonlySet<string> = new Set(
+  DISPATCH_FULFILLED_STOP_RESULTS,
+);
+
+/**
+ * Resultados de parada que son TERMINALES: la parada ya no puede transicionar.
+ * Superconjunto de {@link DISPATCH_FULFILLED_STOP_RESULTS} más `rejected` y
+ * `released`. Es el denominador de cumplimiento — ver
+ * {@link computeFulfillmentRate}.
+ */
+export const DISPATCH_TERMINAL_STOP_RESULTS = [
+  'delivered',
+  'partial',
+  'rejected',
+  'released',
+] as const;
+
+/** Forma runtime de {@link DISPATCH_TERMINAL_STOP_RESULTS} para `.has`. */
+export const DISPATCH_TERMINAL_STOP_RESULT_SET: ReadonlySet<string> = new Set(
+  DISPATCH_TERMINAL_STOP_RESULTS,
+);
+
+/**
+ * Estados de `dispatch_routes.status` en los que la ruta sigue EN CURSO
+ * (no cerrada, no anulada). Usado para "rutas activas" en flota y en el
+ * resumen de despachos.
+ */
+export const DISPATCH_ACTIVE_ROUTE_STATES = [
+  'draft',
+  'dispatched',
+  'in_transit',
+] as const;
+
+/** Forma runtime de {@link DISPATCH_ACTIVE_ROUTE_STATES} para `.has`. */
+export const DISPATCH_ACTIVE_ROUTE_STATE_SET: ReadonlySet<string> = new Set(
+  DISPATCH_ACTIVE_ROUTE_STATES,
+);
+
+/** Estados de `dispatch_routes.status` en los que la ruta ya CERRÓ (cuadrada). */
+export const DISPATCH_CLOSED_ROUTE_STATES = ['closed'] as const;
+
+/**
+ * Estados de `dispatch_routes.status` que se EXCLUYEN de todo monto agregado.
+ * Una ruta anulada nunca ocurrió económicamente: ninguna analítica de dinero
+ * (recaudo, valor entregado, retenciones, varianza) puede sumar sus paradas.
+ */
+export const DISPATCH_EXCLUDED_ROUTE_STATES = ['voided'] as const;
+
+/**
+ * Subtipos de `dispatch_notes.subtype` que representan una ENTREGA A CLIENTE.
+ * Las analíticas de despacho (KPIs de entrega/recaudo) filtran por este
+ * conjunto para excluir traslados de bodega (`transfer_out`/`transfer_in`),
+ * recepciones de compra (`purchase_receipt`) y devoluciones de cliente
+ * (`customer_return`) — ninguna de ellas es una "entrega" que un operador
+ * espera ver en el tablero de Despachos.
+ */
+export const DISPATCH_OUTBOUND_SUBTYPES = ['customer_delivery'] as const;
+
+/** Conteo de paradas de una planilla por balde de estado (B.2 planillas). */
+export interface DispatchStopCounts {
+  delivered: number;
+  rejected: number;
+  released: number;
+  pending: number;
+}
+
+/**
+ * Clasifica las paradas de una ruta en los 4 baldes que pinta el listado de
+ * planillas. Única fuente — antes vivía privada en
+ * `dispatch-analytics.service.ts:764` como `countStops`.
+ */
+export function countDispatchStops(
+  stops: readonly { status: string }[],
+): DispatchStopCounts {
+  let delivered = 0;
+  let rejected = 0;
+  let released = 0;
+  let pending = 0;
+  for (const s of stops) {
+    if (DISPATCH_FULFILLED_STOP_RESULT_SET.has(s.status)) delivered += 1;
+    else if (s.status === 'rejected') rejected += 1;
+    else if (s.status === 'released') released += 1;
+    else pending += 1; // pending | in_progress
+  }
+  return { delivered, rejected, released, pending };
+}
+
+/** Entrada mínima de parada para {@link computeCashCollected}. */
+export interface DispatchCashStopInput {
+  is_prepaid: boolean;
+  payment_method?: string | null;
+  collected_amount?: number | string | null;
+  anticipo_amount?: number | string | null;
+}
+
+/**
+ * RECAUDO EN CAJA — RÉPLICA EXACTA de la fórmula de `route-flow.service.ts`
+ * `close()` (líneas ~1141-1152). Debe conciliar con `cash_variance`
+ * (`declared_cash - cash_collected`), que el cierre persiste y NUNCA se
+ * recalcula después.
+ *
+ * Filtra paradas no-prepagadas cuyo `payment_method` es nulo o `'cash'`
+ * (default conservador para COD en DSD): pagos con tarjeta/transferencia NO
+ * son caja física y quedan fuera de esta cifra a propósito — por eso
+ * `cash_collected` casi siempre es MENOR que `delivered_value`
+ * ({@link computeDeliveredValue}), nunca al revés.
+ *
+ * NO cambiar esta fórmula sin actualizar también `route-flow.service.ts`: el
+ * test de paridad en `analytics-metrics.contract.spec.ts` alimenta el MISMO
+ * set de paradas a esta función y a una réplica inline del cálculo original
+ * y exige el mismo número.
+ */
+export function computeCashCollected(
+  stops: readonly DispatchCashStopInput[],
+): number {
+  return stops
+    .filter((s) => !s.is_prepaid)
+    .filter((s) => !s.payment_method || s.payment_method === 'cash')
+    .reduce(
+      (sum, s) =>
+        sum + Number(s.collected_amount || 0) + Number(s.anticipo_amount || 0),
+      0,
+    );
+}
+
+/** Entrada mínima de parada para {@link computeDeliveredValue}. */
+export interface DispatchDeliveredValueStopInput {
+  /** `dispatch_route_stops.status` (o `.result`, mismos literales). */
+  status: string;
+  is_prepaid: boolean;
+  collected_amount?: number | string | null;
+  anticipo_amount?: number | string | null;
+  withholding_amount?: number | string | null;
+  /** `dispatch_notes.grand_total` de la remisión ligada a esta parada. */
+  grand_total?: number | string | null;
+}
+
+/**
+ * VALOR ENTREGADO — distinto de {@link computeCashCollected} a propósito
+ * (nunca se etiquetan igual): suma `collected_amount + anticipo_amount +
+ * withholding_amount` de TODA parada CUMPLIDA (delivered/partial), más el
+ * `grand_total` de las paradas cumplidas que además son `is_prepaid`.
+ *
+ * La retención (`withholding_amount`) se incluye siempre que la parada esté
+ * cumplida, sea o no prepagada: es una obligación fiscal ya CANCELADA aunque
+ * el cliente no entregue dinero en mano, así que omitirla produce un
+ * "faltante" falso en el valor entregado. El `grand_total` prepagado se suma
+ * aparte porque una parada prepagada normalmente no acumula
+ * `collected_amount` en ruta (ya se cobró antes) — sin ese término el valor
+ * entregado de una ruta con ventas prepagadas quedaría subestimado.
+ */
+export function computeDeliveredValue(
+  stops: readonly DispatchDeliveredValueStopInput[],
+): number {
+  let total = 0;
+  for (const s of stops) {
+    if (!DISPATCH_FULFILLED_STOP_RESULT_SET.has(s.status)) continue;
+    total +=
+      Number(s.collected_amount || 0) +
+      Number(s.anticipo_amount || 0) +
+      Number(s.withholding_amount || 0);
+    if (s.is_prepaid) {
+      total += Number(s.grand_total || 0);
+    }
+  }
+  return total;
+}
+
+/** Entrada mínima de parada para {@link computeFulfillmentRate}. */
+export interface DispatchFulfillmentStopInput {
+  /** `dispatch_route_stops.status` (o `.result`, mismos literales). */
+  status: string;
+}
+
+/**
+ * TASA DE CUMPLIMIENTO, como PORCENTAJE (0..100) — mismo convenio que
+ * {@link computeEffectiveTaxRate}, no como fracción 0..1.
+ *
+ *   cumplidas / (terminales − liberadas)
+ *
+ * Las paradas `released` se EXCLUYEN del denominador: la remisión se movió a
+ * otra planilla (reasignación), así que no entregarla en ESTA ruta no es un
+ * fallo de cumplimiento de esta ruta. Incluirlas penalizaría a un operador por
+ * una remisión que otro conductor sí va a entregar.
+ *
+ * A diferencia de {@link computeGrowth} (que devuelve `null` sin base), aquí
+ * el denominador vacío devuelve `0`: una ruta sin ninguna parada terminal
+ * (todavía en curso) tiene 0 % de cumplimiento medido hasta ahora, no "sin
+ * base de comparación" — son preguntas distintas.
+ */
+export function computeFulfillmentRate(
+  stops: readonly DispatchFulfillmentStopInput[],
+): number {
+  let fulfilled = 0;
+  let terminal = 0;
+  let released = 0;
+  for (const s of stops) {
+    if (DISPATCH_FULFILLED_STOP_RESULT_SET.has(s.status)) fulfilled += 1;
+    if (DISPATCH_TERMINAL_STOP_RESULT_SET.has(s.status)) terminal += 1;
+    if (s.status === 'released') released += 1;
+  }
+  const denominator = terminal - released;
+  if (denominator <= 0) return 0;
+  return (fulfilled / denominator) * 100;
+}

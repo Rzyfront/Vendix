@@ -18,6 +18,17 @@ import {
   PASSTHROUGH_TAX_TYPES,
   PASSTHROUGH_TAX_SET,
   prorateByPayment,
+  // DISPATCH block — PLAN-analytics-despachos-2026-09-12
+  DISPATCH_FULFILLED_STOP_RESULTS,
+  DISPATCH_TERMINAL_STOP_RESULTS,
+  DISPATCH_ACTIVE_ROUTE_STATES,
+  DISPATCH_CLOSED_ROUTE_STATES,
+  DISPATCH_EXCLUDED_ROUTE_STATES,
+  DISPATCH_OUTBOUND_SUBTYPES,
+  countDispatchStops,
+  computeCashCollected,
+  computeDeliveredValue,
+  computeFulfillmentRate,
 } from './analytics-metrics.contract';
 
 /**
@@ -255,6 +266,201 @@ describe('Analytics-metrics contract (Anchor regression)', () => {
       expect(cov.units_total).toBe(100);
       expect(cov.units_without_cost).toBe(0);
       expect(cov.coverage_ratio).toBe(1);
+    });
+  });
+
+  // ===========================================================================
+  // DISPATCH block — PLAN-analytics-despachos-2026-09-12, Paso 1.
+  // ===========================================================================
+  describe('Dispatch constants — canonical tuples', () => {
+    it('exports DISPATCH_FULFILLED_STOP_RESULTS', () => {
+      expect(DISPATCH_FULFILLED_STOP_RESULTS).toEqual(['delivered', 'partial']);
+    });
+
+    it('exports DISPATCH_TERMINAL_STOP_RESULTS', () => {
+      expect(DISPATCH_TERMINAL_STOP_RESULTS).toEqual([
+        'delivered',
+        'partial',
+        'rejected',
+        'released',
+      ]);
+    });
+
+    it('exports DISPATCH_ACTIVE_ROUTE_STATES', () => {
+      expect(DISPATCH_ACTIVE_ROUTE_STATES).toEqual([
+        'draft',
+        'dispatched',
+        'in_transit',
+      ]);
+    });
+
+    it('exports DISPATCH_CLOSED_ROUTE_STATES', () => {
+      expect(DISPATCH_CLOSED_ROUTE_STATES).toEqual(['closed']);
+    });
+
+    it('exports DISPATCH_EXCLUDED_ROUTE_STATES', () => {
+      expect(DISPATCH_EXCLUDED_ROUTE_STATES).toEqual(['voided']);
+    });
+
+    it('exports DISPATCH_OUTBOUND_SUBTYPES', () => {
+      expect(DISPATCH_OUTBOUND_SUBTYPES).toEqual(['customer_delivery']);
+    });
+  });
+
+  describe('countDispatchStops — mirrors the former private countStops', () => {
+    it('buckets delivered/partial together, and pending/in_progress together', () => {
+      const stops = [
+        { status: 'delivered' },
+        { status: 'partial' },
+        { status: 'rejected' },
+        { status: 'released' },
+        { status: 'pending' },
+        { status: 'in_progress' },
+      ];
+      expect(countDispatchStops(stops)).toEqual({
+        delivered: 2,
+        rejected: 1,
+        released: 1,
+        pending: 2,
+      });
+    });
+
+    it('returns all-zero counts for an empty route', () => {
+      expect(countDispatchStops([])).toEqual({
+        delivered: 0,
+        rejected: 0,
+        released: 0,
+        pending: 0,
+      });
+    });
+  });
+
+  describe('computeCashCollected — PARITY with route-flow.service.ts close() (:1141-1152)', () => {
+    // Réplica INLINE, literal, del bloque original de `route-flow.service.ts`
+    // (líneas ~1141-1152) tal como existía antes de que `close()` empezara a
+    // llamar a `computeCashCollected`. Esta función NO se importa de ningún
+    // lado — es una copia congelada a propósito, para que este test detecte
+    // cualquier divergencia futura entre el contrato y la fórmula original.
+    function originalCashCollectedFromRouteFlow(
+      stops: {
+        is_prepaid: boolean;
+        payment_method?: string | null;
+        collected_amount?: number | string | null;
+        anticipo_amount?: number | string | null;
+      }[],
+    ): number {
+      return stops
+        .filter((s) => !s.is_prepaid)
+        .filter((s) => !s.payment_method || s.payment_method === 'cash')
+        .reduce(
+          (sum, s) =>
+            sum + Number(s.collected_amount || 0) + Number(s.anticipo_amount || 0),
+          0,
+        );
+    }
+
+    const stops = [
+      // Cash, no prepagada → cuenta.
+      { is_prepaid: false, payment_method: null, collected_amount: 50000, anticipo_amount: 0 },
+      // Cash explícito, no prepagada → cuenta.
+      { is_prepaid: false, payment_method: 'cash', collected_amount: 30000, anticipo_amount: 5000 },
+      // Transferencia → NO cuenta como caja.
+      { is_prepaid: false, payment_method: 'transfer', collected_amount: 20000, anticipo_amount: 0 },
+      // Tarjeta → NO cuenta como caja.
+      { is_prepaid: false, payment_method: 'card', collected_amount: 15000, anticipo_amount: 0 },
+      // Prepagada en cash → NO cuenta (excluida por is_prepaid, sin importar el método).
+      { is_prepaid: true, payment_method: 'cash', collected_amount: 99999, anticipo_amount: 0 },
+      // Cash, no prepagada, con anticipo → ambos términos cuentan.
+      { is_prepaid: false, payment_method: null, collected_amount: 0, anticipo_amount: 12000 },
+    ];
+
+    it('exige el MISMO número que la fórmula original de route-flow.service.ts', () => {
+      const fromContract = computeCashCollected(stops);
+      const fromOriginal = originalCashCollectedFromRouteFlow(stops);
+      expect(fromContract).toBe(fromOriginal);
+      expect(fromContract).toBe(50000 + (30000 + 5000) + 0 + 0 + 0 + 12000);
+    });
+
+    it('conserva paridad también en el caso vacío', () => {
+      expect(computeCashCollected([])).toBe(originalCashCollectedFromRouteFlow([]));
+      expect(computeCashCollected([])).toBe(0);
+    });
+  });
+
+  describe('computeDeliveredValue — collected+anticipo+withholding on fulfilled, + grand_total on prepaid-fulfilled', () => {
+    it('sums the cash-basis components for a non-prepaid fulfilled stop', () => {
+      const value = computeDeliveredValue([
+        {
+          status: 'delivered',
+          is_prepaid: false,
+          collected_amount: 40000,
+          anticipo_amount: 1000,
+          withholding_amount: 2000,
+          grand_total: 999999, // ignored: not prepaid
+        },
+      ]);
+      expect(value).toBe(43000);
+    });
+
+    it('adds grand_total ON TOP for a prepaid fulfilled stop (not instead of)', () => {
+      const value = computeDeliveredValue([
+        {
+          status: 'partial', // partial counts as fulfilled (historical read)
+          is_prepaid: true,
+          collected_amount: 0,
+          anticipo_amount: 0,
+          withholding_amount: 3000, // a prepaid order can still carry a withholding
+          grand_total: 100000,
+        },
+      ]);
+      expect(value).toBe(3000 + 100000);
+    });
+
+    it('ignores non-fulfilled stops entirely (rejected/released/pending)', () => {
+      const value = computeDeliveredValue([
+        { status: 'rejected', is_prepaid: false, collected_amount: 5000 },
+        { status: 'released', is_prepaid: false, collected_amount: 5000 },
+        { status: 'pending', is_prepaid: false, collected_amount: 5000 },
+      ]);
+      expect(value).toBe(0);
+    });
+  });
+
+  describe('computeFulfillmentRate — fulfilled / (terminal - released), as a PERCENTAGE', () => {
+    it('excludes released stops from the denominator', () => {
+      // 2 delivered, 1 rejected, 2 released, 1 pending (non-terminal, ignored).
+      const stops = [
+        { status: 'delivered' },
+        { status: 'delivered' },
+        { status: 'rejected' },
+        { status: 'released' },
+        { status: 'released' },
+        { status: 'pending' },
+      ];
+      // terminal = 5 (delivered x2, rejected x1, released x2), released = 2
+      // denominator = 5 - 2 = 3; fulfilled = 2 → 2/3 * 100
+      expect(computeFulfillmentRate(stops)).toBeCloseTo((2 / 3) * 100);
+    });
+
+    it('returns 0 when the denominator is 0 (no terminal stops yet)', () => {
+      expect(computeFulfillmentRate([{ status: 'pending' }])).toBe(0);
+      expect(computeFulfillmentRate([])).toBe(0);
+    });
+
+    it('returns 0 when every terminal stop was released', () => {
+      expect(
+        computeFulfillmentRate([{ status: 'released' }, { status: 'released' }]),
+      ).toBe(0);
+    });
+
+    it('returns 100 when every non-released terminal stop is fulfilled', () => {
+      expect(
+        computeFulfillmentRate([
+          { status: 'delivered' },
+          { status: 'partial' },
+          { status: 'released' },
+        ]),
+      ).toBe(100);
     });
   });
 });

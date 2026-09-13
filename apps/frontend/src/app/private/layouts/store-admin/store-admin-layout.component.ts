@@ -763,6 +763,18 @@ export class StoreAdminLayoutComponent {
           route: '/admin/analytics/financial',
           alwaysVisible: true,
         },
+        {
+          label: 'Despachos',
+          icon: 'circle',
+          route: '/admin/analytics/dispatch',
+          // Two sidebar children are labeled "Despachos" (this one and the
+          // Reportes one below). `moduleKeyMap` in menu-filter.service.ts is
+          // indexed by label, so a flat map cannot tell them apart. This
+          // explicit `panelUiKey` (the same field catalog-derived nodes
+          // already use — see MenuItem.panelUiKey) wins over the label
+          // lookup in filterItemsRecursive's Case 2.
+          panelUiKey: 'analytics_dispatch',
+        },
       ],
     },
     {
@@ -833,7 +845,10 @@ export class StoreAdminLayoutComponent {
           label: 'Despachos',
           icon: 'circle',
           route: '/admin/reports/dispatch',
-          alwaysVisible: true,
+          // Same label collision as the Analíticas → Despachos entry above;
+          // this explicit panelUiKey disambiguates it in
+          // filterItemsRecursive's Case 2 (menu-filter.service.ts).
+          panelUiKey: 'reports_dispatch',
         },
       ],
     },

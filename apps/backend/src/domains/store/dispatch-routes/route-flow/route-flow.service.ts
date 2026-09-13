@@ -27,6 +27,7 @@ import {
   aggregateRouteTotals,
   deriveStopIsPrepaid,
 } from '../utils/route-stop-calc';
+import { computeCashCollected } from '../../analytics/analytics-metrics.contract';
 import {
   PRINT_DEFAULTS,
   type PrintDocumentConfig,
@@ -1142,13 +1143,10 @@ export class RouteFlowService {
     // We treat as cash any collected_amount on a non-prepaid stop whose
     // payment_method is null/'cash' (the conservative default for COD DSD).
     // Stops paid via transfer/card are excluded from the cash reconciliation.
-    const cash_collected = route.stops
-      .filter((s) => !s.is_prepaid)
-      .filter((s) => !s.payment_method || s.payment_method === 'cash')
-      .reduce(
-        (sum, s) => sum + Number(s.collected_amount || 0) + Number(s.anticipo_amount || 0),
-        0,
-      );
+    // Formula centralized in the analytics contract (single source of truth,
+    // PLAN-analytics-despachos-2026-09-12 Paso 1) — same result, byte-for-byte
+    // (see the parity test in analytics-metrics.contract.spec.ts).
+    const cash_collected = computeCashCollected(route.stops);
     const cash_variance = declared_cash - cash_collected;
 
     const updated = await this.prisma.$transaction(async (tx) => {

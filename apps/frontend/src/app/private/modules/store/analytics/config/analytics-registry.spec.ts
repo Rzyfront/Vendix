@@ -11,14 +11,14 @@ import {
 
 describe('AnalyticsRegistry', () => {
   describe('ANALYTICS_CATEGORIES', () => {
-    it('should have 8 categories', () => {
-      expect(ANALYTICS_CATEGORIES).toHaveSize(8);
+    it('should have 9 categories', () => {
+      expect(ANALYTICS_CATEGORIES).toHaveSize(9);
     });
 
     it('should have all required category ids', () => {
       const expectedIds: AnalyticsCategoryId[] = [
         'overview', 'sales', 'inventory', 'products',
-        'purchases', 'customers', 'reviews', 'financial',
+        'purchases', 'customers', 'reviews', 'financial', 'dispatch',
       ];
       const actualIds = ANALYTICS_CATEGORIES.map(c => c.id);
       expect(actualIds).toEqual(expectedIds);
@@ -34,8 +34,8 @@ describe('AnalyticsRegistry', () => {
   });
 
   describe('ANALYTICS_VIEWS', () => {
-    it('should have 24 views', () => {
-      expect(ANALYTICS_VIEWS).toHaveSize(24);
+    it('should have 28 views', () => {
+      expect(ANALYTICS_VIEWS).toHaveSize(28);
     });
 
     it('should have unique keys', () => {
@@ -61,9 +61,14 @@ describe('AnalyticsRegistry', () => {
       expect(salesViews).toHaveSize(6);
     });
 
-    it('should have inventory with 5 views', () => {
+    it('should have inventory with 6 views', () => {
       const inventoryViews = getViewsByCategory('inventory');
-      expect(inventoryViews).toHaveSize(5);
+      expect(inventoryViews).toHaveSize(6);
+    });
+
+    it('should have dispatch with 3 views', () => {
+      const dispatchViews = getViewsByCategory('dispatch');
+      expect(dispatchViews).toHaveSize(3);
     });
   });
 
@@ -122,7 +127,7 @@ describe('AnalyticsRegistry', () => {
   describe('getSidebarEntries', () => {
     it('should return entries for all categories', () => {
       const entries = getSidebarEntries();
-      expect(entries).toHaveSize(8);
+      expect(entries).toHaveSize(9);
     });
 
     it('should have valid route, icon, and panelUiKey for each entry', () => {

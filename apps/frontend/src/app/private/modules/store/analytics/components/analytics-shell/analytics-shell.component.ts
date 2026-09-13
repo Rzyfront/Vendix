@@ -95,6 +95,12 @@ export class AnalyticsShellComponent {
     '/admin/analytics/financial/profit-loss': '/admin/reports/financial/profit-loss',
     '/admin/analytics/financial/tax-summary': '/admin/reports/financial/tax-summary',
     '/admin/analytics/financial/refunds': '/admin/reports/financial/financial-refunds',
+    // Dispatch — PLAN-analytics-despachos-2026-09-12. The 3 analytics views
+    // don't map 1:1 to a report grain (remisiones/planillas/vehículos), so
+    // all three point at the category catalog page instead of one report.
+    '/admin/analytics/dispatch/summary': '/admin/reports/dispatch',
+    '/admin/analytics/dispatch/fulfillment': '/admin/reports/dispatch',
+    '/admin/analytics/dispatch/collections': '/admin/reports/dispatch',
   };
 
   onActionClick(actionId: string): void {

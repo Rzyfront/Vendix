@@ -262,9 +262,11 @@ export function getDefaultStoreSettings(): StoreSettings {
         analytics_products: true,
         analytics_customers: true,
         analytics_financial: true,
+        analytics_dispatch: true,
 
         // Reportes
         reports: true,
+        reports_dispatch: true,
 
         // Gastos
         expenses: true,

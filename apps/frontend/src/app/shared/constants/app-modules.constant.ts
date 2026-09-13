@@ -390,6 +390,11 @@ export const APP_MODULES: {
           label: 'Financiero',
           description: 'P\u00e9rdidas y ganancias, m\u00e1rgenes financieros',
         },
+        {
+          key: 'analytics_dispatch',
+          label: 'Despachos',
+          description: 'Cumplimiento de entrega, portadores y recaudo de rutas',
+        },
       ],
     },
 
@@ -496,6 +501,13 @@ export const APP_MODULES: {
       key: 'reports',
       label: 'Reportes',
       description: 'Reportes y análisis de datos del negocio',
+    },
+
+    // Reportes → Despachos (módulo hermano plano; `reports` no tiene hijos)
+    {
+      key: 'reports_dispatch',
+      label: 'Despachos',
+      description: 'Reportes de remisiones, planillas de ruta y flota',
     },
 
     // Contabilidad (padre con hijos)

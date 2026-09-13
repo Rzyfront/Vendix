@@ -61,6 +61,13 @@ import {
   AbandonedCartsAnalyticsQueryDto,
 } from '../interfaces/abandoned-carts-analytics.interface';
 import { PaginatedResponse } from '../interfaces/analytics.interface';
+import {
+  DispatchAnalyticsQueryDto,
+  DispatchSummaryEnvelope,
+  DispatchTrendsEnvelope,
+  DispatchFulfillmentEnvelope,
+  DispatchCollectionsEnvelope,
+} from '../interfaces/dispatch-analytics.interface';
 
 // Purchases interfaces
 export interface PurchasesSummary {
@@ -897,6 +904,58 @@ export class AnalyticsService {
       params: this.buildParams(query),
       responseType: 'blob',
     });
+  }
+
+  // ==================== DISPATCH ANALYTICS ====================
+  // PLAN-analytics-despachos-2026-09-12 / step 4. Cache keys carry the store
+  // scope via `withCache` -> `storeScopeKey()` — see the class doc on
+  // `analyticsCache` above; a scope-less key would leak numbers across
+  // tenants when a multi-store admin switches stores within the TTL.
+
+  getDispatchSummary(
+    query: DispatchAnalyticsQueryDto = {},
+  ): Observable<DispatchSummaryEnvelope> {
+    const cacheKey = `dispatch-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<DispatchSummaryEnvelope>(this.getApiUrl('dispatch/summary'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  getDispatchTrends(
+    query: DispatchAnalyticsQueryDto = {},
+  ): Observable<DispatchTrendsEnvelope> {
+    const cacheKey = `dispatch-trends-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<DispatchTrendsEnvelope>(this.getApiUrl('dispatch/trends'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  getDispatchFulfillment(
+    query: DispatchAnalyticsQueryDto = {},
+  ): Observable<DispatchFulfillmentEnvelope> {
+    const cacheKey = `dispatch-fulfillment-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<DispatchFulfillmentEnvelope>(
+        this.getApiUrl('dispatch/fulfillment'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  getDispatchCollections(
+    query: DispatchAnalyticsQueryDto = {},
+  ): Observable<DispatchCollectionsEnvelope> {
+    const cacheKey = `dispatch-collections-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<DispatchCollectionsEnvelope>(
+        this.getApiUrl('dispatch/collections'),
+        { params: this.buildParams(query) },
+      ),
+    );
   }
 
   // ==================== PURCHASES ANALYTICS ====================
