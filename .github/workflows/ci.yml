@@ -2,7 +2,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, dev]
+    branches: [main, develop]
 
 permissions:
   contents: read
@@ -323,18 +323,97 @@ jobs:
       - name: Generar Prisma Client
         working-directory: apps/backend
         run: npx prisma generate
-      # SALVEDAD (KG-9(a)): esto NO es un "typecheck completo" del backend.
-      # `apps/backend/tsconfig.build.json` excluye `**/*spec.ts`, asi que ni
-      # `nest build` aqui ni `npm run buildcheck:be` en local compilan las
-      # specs. Un spec con error de tipos -- p.ej. los 4 `TS2554` de aridad de
-      # `reservations.service.spec.ts` (QUI-649), que llegaron a produccion --
-      # pasa este job en verde. La unica compuerta que SI las compila es
-      # `backend-test` (jest via ts-jest), y hoy esta con `if: false`. Cualquier
-      # afirmacion de "typecheck completo" apoyada en este job hereda esta
-      # salvedad y debe decirlo.
+      # F-161 (plan CP-pos-exclusive-tax-double-charge, QUI-832): cierra el
+      # hueco que describe el comentario de abajo -- el arnés `buildcheck:types`
+      # (`tsconfig.check.json`) existía desde el paso A.3, pero ninguna compuerta
+      # lo invocaba. Va ANTES de `nest build` a propósito: medido EN FRÍO
+      # (borrando `dist/tsconfig.check.tsbuildinfo`, que es el caso en cualquier
+      # checkout limpio como este runner) tarda `real 73,81 s`; en caliente,
+      # segundos. `nest build` tarda minutos. Typechequea TODO `src/`, specs --
+      # a diferencia de `tsconfig.build.json`, `tsconfig.check.json` sólo excluye
+      # `node_modules`, `dist` y `scripts`. Así falla rápido si un cambio (p.ej.
+      # ensanchar el retorno de `TaxesService.calculateProductTaxes` en la fase B
+      # de este plan) rompe la firma que usa un spec, antes de gastar tiempo en
+      # el build de producción de abajo.
+      - name: Typecheck de specs (buildcheck:types)
+        working-directory: apps/backend
+        run: npm run buildcheck:types
+      # SALVEDAD (KG-9(a)) -- actualizado por F-161: el paso de arriba ya cierra
+      # la mitad de este hueco, así que lo que sigue describe sólo lo que AÚN no
+      # cubre `nest build`. `apps/backend/tsconfig.build.json` sigue excluyendo
+      # `**/*spec.ts`, así que ni `nest build` aquí ni `npm run buildcheck:be` en
+      # local compilan las specs -- ya no es un problema para el typecheck,
+      # porque el paso de arriba las tipa antes de llegar aquí. Lo que sigue SIN
+      # ninguna compuerta en CI es la EJECUCIÓN de esas specs (jest corriendo las
+      # aserciones, no sólo tipando) para la MAYORÍA del backend. Desde F-123 y
+      # F-113 hay dos compuertas de ejecución, y ninguna cubre todo:
+      # `backend-test-scoped` corre de verdad 36 suites (`payments`, `orders`,
+      # `tables`, `taxes`), y `backend-test` -- el único que correría las 309 --
+      # sigue con `if: false`. O sea: fuera de esos cuatro directorios la
+      # ejecución de los specs NO tiene compuerta. Cualquier afirmación de
+      # "cobertura completa" apoyada sólo en este job hereda esta salvedad y
+      # debe decirlo.
       - name: nest build
         working-directory: apps/backend
         run: npm run build
+
+  backend-test-scoped:
+    # F-123 y F-113 (plan crítico CP-pos-exclusive-tax-double-charge, QUI-832).
+    # Ambos hallazgos dicen lo mismo: el plan promete tests de regresión y hoy
+    # NINGÚN spec del backend se ejecuta en CI, así que esos tests pasarían en
+    # la máquina de quien los escriba y nadie los volvería a correr. El defecto
+    # original (eca276ce6, 2026-09-10) no tocó un solo spec de payments y llegó
+    # a producción; sin este job el siguiente viaja igual.
+    #
+    # Este job NO toca el `if: false` de `backend-test` (abajo). Aquella
+    # decisión tiene dueño y fecha (@lider-dev, 14-ago) y su precondición
+    # ("re-enable when baseline tests fixed") sigue sin cumplirse. Este job es
+    # su contrario: no intenta correr las 309 suites del repo, corre SÓLO la
+    # superficie del plan, y su línea base está VERDE -- medida, no supuesta.
+    #
+    # Alcance, y por qué es ése: `payments` (12 specs, donde vive el doble
+    # cobro), `orders` (17, el carril que persiste), `tables` (3, el carril de
+    # mesa de ADR-08) y `taxes` (4, el kernel). 36 suites, 706 tests.
+    # `invoicing` queda FUERA a propósito y no por comodidad: tiene 93 specs él
+    # solo, más del doble que los otros cuatro directorios juntos. Medido: una
+    # corrida local `--runInBand` de los cinco pasó de 30 minutos sin terminar,
+    # mientras que estos cuatro tardan `real 260,31 s` (36/36 suites, 706/706
+    # tests, verde, 2026-09-13). El carril de facturación se verifica por
+    # archivo en los pasos C.x del plan, que nombran sus specs uno a uno.
+    #
+    # Si algún día este job roza el timeout, la salida NO es apagarlo -- eso
+    # devuelve el repo al estado que F-113 describe. Es partirlo por dominio
+    # con `strategy: matrix`, como propone el punto 3(b) del comentario largo
+    # de `backend-test`.
+    name: Backend Tests (acotado al carril POS)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      # Los specs importan tipos del cliente de Prisma; sin esto fallan al
+      # compilar en ts-jest. No necesita base de datos.
+      - name: Generar Prisma Client (para tipos en specs)
+        working-directory: apps/backend
+        run: npx prisma generate
+      # `test:path` (apps/backend/package.json, paso A.3) es `jest --runInBand`
+      # y propaga el código de salida real. Deliberadamente NO es el
+      # `buildcheck:test` de la raíz, que imprime FAIL y sale 0 cuando un worker
+      # muere por OOM -- un envoltorio que a veces miente no sirve de compuerta.
+      - name: jest acotado al carril POS (--runInBand)
+        working-directory: apps/backend
+        run: >-
+          npm run test:path --
+          src/domains/store/payments
+          src/domains/store/orders
+          src/domains/store/tables
+          src/domains/store/taxes
 
   backend-test:
     # Hotfix post-PR-576: `tsconfig.build.json` excluye `**/*spec.ts` y
