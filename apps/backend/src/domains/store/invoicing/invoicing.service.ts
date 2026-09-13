@@ -65,6 +65,10 @@ import {
 } from '../settings/interfaces/store-settings.interface';
 import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/dian-document-types';
 import {
+  ORDER_PAYMENT_MEANS_INCLUDE,
+  resolveOrderDianPaymentMeans,
+} from '../payments/order-payment-means.contract';
+import {
   regimeFromTaxableBasis,
   resolveAiuTaxableBasis,
   validateInvoiceProfileConfig,
@@ -2184,6 +2188,14 @@ export class InvoicingService {
           orderBy: { created_at: 'desc' },
           take: 1,
         },
+        // Los pagos COBRADOS de la orden, con su método de tienda y el método
+        // de sistema que lleva el `dian_code`. Es lo que decide el par
+        // forma/medio de pago que se declara en `cac:PaymentMeans`. Se usa el
+        // include canónico compartido (y no uno escrito a mano acá) porque una
+        // superficie que olvide anidar `system_payment_method` no rompe la
+        // compilación: se queda sin `dian_code` y declara silenciosamente el
+        // default, que es exactamente el defecto que esto cierra.
+        payments: ORDER_PAYMENT_MEANS_INCLUDE,
       },
     });
 
@@ -2356,6 +2368,26 @@ export class InvoicingService {
     const acquirerRail = resolveAcquirerRail(declaredAcquirer);
     const customer_name = acquirerRail.identity.name;
 
+    /**
+     * CÓMO SE PAGÓ ESTA ORDEN, DICHO EN EL IDIOMA DE LA DIAN.
+     *
+     * Estas dos columnas quedaban en NULL en toda factura nacida de una orden,
+     * así que `ubl-invoice.builder.ts` caía en sus fallbacks (`'1'` y `'10'`) y
+     * CADA venta de tienda se declaraba «contado, en efectivo» — también las
+     * pagadas con tarjeta y también las que no se habían cobrado. El
+     * `schema.prisma` ya documentaba que `payment_form` «se propaga desde
+     * `orders.payment_form`»; esta línea es esa propagación, que nunca existió.
+     *
+     * La política vive entera en el contrato compartido y NO se reimplementa
+     * acá: es la misma que resuelve la etiqueta del tiquete POS y la columna
+     * «Método de pago» de los reportes. Si divergiera, una orden podría
+     * imprimirse «Tarjeta» y declararse «Efectivo».
+     */
+    const { payment_form, payment_means_code } = resolveOrderDianPaymentMeans(
+      order,
+      order.payments,
+    );
+
     const invoice = await this.prisma.invoices.create({
       data: {
         organization_id: context.organization_id,
@@ -2386,6 +2418,10 @@ export class InvoicingService {
         total_amount: new Prisma.Decimal(total),
         currency: 'COP',
         issue_date: new Date(),
+        // `cac:PaymentMeans/cbc:ID` y `cbc:PaymentMeansCode`, resueltos arriba
+        // desde los pagos cobrados de la orden.
+        payment_form,
+        payment_means_code,
         created_by_user_id: context.user_id,
         invoice_items: {
           create: items,
@@ -2561,6 +2597,23 @@ export class InvoicingService {
         `${customer.first_name || ''} ${customer.last_name || ''}`.trim())
       : undefined;
 
+    /**
+     * Par forma/medio de pago, por el MISMO contrato que `createFromOrder`.
+     *
+     * `sales_orders` no tiene columna `payment_form` ni relación `payments`: un
+     * pedido de venta registra qué se va a vender, no cómo se cobró. Por eso el
+     * contrato se invoca SIN evidencia, y con esa ausencia resuelve lo único
+     * cierto — `'2'` crédito (no hay cobro registrado) e instrumento `'1'` no
+     * definido. Lo que se evita es que la columna quede NULL y el emisor caiga
+     * en su fallback declarando «contado en efectivo» una venta que nadie
+     * cobró: el default silencioso afirma un movimiento de caja inexistente.
+     *
+     * Se llama al contrato, y no se escriben los literales a mano, para que el
+     * día que los pedidos de venta sí registren cobro la propagación ya esté
+     * puesta y baste con pasarle los pagos.
+     */
+    const { payment_form, payment_means_code } = resolveOrderDianPaymentMeans();
+
     const invoice = await this.prisma.invoices.create({
       data: {
         organization_id: context.organization_id,
@@ -2581,6 +2634,9 @@ export class InvoicingService {
         total_amount: new Prisma.Decimal(total),
         currency: 'COP',
         issue_date: new Date(),
+        // `cac:PaymentMeans/cbc:ID` y `cbc:PaymentMeansCode` — ver arriba.
+        payment_form,
+        payment_means_code,
         created_by_user_id: context.user_id,
         invoice_items: {
           create: items,

@@ -94,7 +94,21 @@ export interface InvoicePdfData {
   qr_code_buffer?: Buffer;
 
   // Pago
+  //
+  // Ambos son CÓDIGOS DIAN crudos, tal como viven en las columnas de
+  // `invoices`, no etiquetas legibles: traducirlos es trabajo de este builder
+  // (ver `drawPaymentInfo`), que es el único que conoce la convención sin
+  // acentos del PDF. Quien los alimente con texto ya traducido no rompe nada
+  // —la traducción cae al valor recibido— pero se sale del contrato.
+
+  /** `cbc:ID` — forma de pago: `'1'` contado, `'2'` crédito. */
   payment_form?: string;
+  /**
+   * `cbc:PaymentMeansCode` — medio de pago: `'10'` efectivo, `'48'` tarjeta de
+   * crédito, `'42'` consignación… El nombre del campo es anterior a que
+   * existieran las columnas DIAN y se conserva por compatibilidad; el dato es
+   * `invoices.payment_means_code`.
+   */
   payment_method?: string;
 
   /**
@@ -392,7 +406,11 @@ export class InvoicePdfBuilder {
         this.drawTotals(doc, L, data);
 
         // --- Payment Info ---
-        if (data.payment_form || data.notes) {
+        // `payment_method` entra en la condición: una factura puede traer el
+        // MEDIO sin la FORMA (columnas independientes, y la captura manual
+        // permite llenar una sola). Sin él, un documento que sólo declara
+        // «Tarjeta de Credito» se imprimía sin bloque de pago.
+        if (data.payment_form || data.payment_method || data.notes) {
           doc.moveDown(0.5);
           this.drawPaymentInfo(doc, L, data);
         }
@@ -1171,22 +1189,53 @@ export class InvoicePdfBuilder {
     doc.font('Helvetica').fontSize(this.fs(L, 9));
 
     if (data.payment_form) {
-      const payment_labels: Record<string, string> = {
-        cash: 'Contado',
-        credit: 'Credito',
-        debit_card: 'Tarjeta Debito',
-        credit_card: 'Tarjeta Credito',
-        bank_transfer: 'Transferencia Bancaria',
-        electronic: 'Pago Electronico',
+      /**
+       * FORMA de pago, dominio `invoices.payment_form`: sólo `'1'` y `'2'`.
+       *
+       * Este diccionario mapeaba otro dominio entero —`cash`, `credit_card`,
+       * `bank_transfer`— que ninguna factura escribe nunca, y además mezclaba
+       * forma con medio. Mientras la columna estuvo en NULL el error era
+       * invisible porque el bloque no se pintaba; el día que se pobló habría
+       * impreso literalmente «Forma de pago: 1».
+       */
+      const payment_form_labels: Record<string, string> = {
+        '1': 'Contado',
+        '2': 'Credito',
       };
-      const label = payment_labels[data.payment_form] || data.payment_form;
+      const label = payment_form_labels[data.payment_form] || data.payment_form;
       doc.text(`Forma de pago: ${label}`, L.margin, doc.y, {
         width: L.content,
       });
     }
 
     if (data.payment_method) {
-      doc.text(`Metodo de pago: ${data.payment_method}`, L.margin, doc.y + 2, {
+      /**
+       * MEDIO de pago, dominio `invoices.payment_means_code` (tabla DIAN
+       * `MediosPago-2.1.gc`). NO confundir con la forma: forma responde
+       * «¿contado o crédito?», medio responde «¿con qué instrumento?».
+       *
+       * Es una COPIA DELIBERADA de `PAYMENT_MEANS_LABELS` en
+       * `print-formats/providers/fiscal-document-print.mapper.ts` — el carril
+       * HTML del mismo documento, que ya traducía bien. Se duplica en vez de
+       * extraerse a un módulo común porque los dos carriles deben imprimir la
+       * misma palabra y este archivo evita acentos por codificación de fuente
+       * del PDF, mientras el HTML sí los lleva («Consignación», «Crédito»): son
+       * la misma tabla en dos alfabetos, no una tabla reutilizable tal cual.
+       * Si allá se agrega un código, agregarlo acá también.
+       */
+      const payment_means_labels: Record<string, string> = {
+        '10': 'Efectivo',
+        '20': 'Cheque',
+        '42': 'Consignacion / Transferencia',
+        '47': 'Transferencia Debito Bancaria',
+        '48': 'Tarjeta de Credito',
+        '49': 'Tarjeta de Debito',
+        '1': 'Instrumento no definido',
+        ZZZ: 'Acuerdo mutuo',
+      };
+      const means_label =
+        payment_means_labels[data.payment_method] || data.payment_method;
+      doc.text(`Metodo de pago: ${means_label}`, L.margin, doc.y + 2, {
         width: L.content,
       });
     }

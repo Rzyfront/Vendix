@@ -232,6 +232,21 @@ export class InvoicePdfService {
       currency: invoice.currency || 'COP',
       notes: invoice.notes || undefined,
 
+      // Pago
+      //
+      // La representación gráfica tiene que decir lo MISMO que el XML que la
+      // acompaña: es el mismo documento fiscal en dos soportes, y un PDF que
+      // calla la forma de pago mientras el XML declara crédito deja al cliente
+      // sin la única constancia impresa de que la venta fue a plazo.
+      //
+      // Estas dos asignaciones no existían: el bloque «INFORMACION DE PAGO» del
+      // builder nunca recibía dato y por eso jamás se pintaba, aunque las
+      // columnas estuvieran pobladas. Se entregan los CÓDIGOS crudos ('1'/'2' y
+      // '10'/'48'/…), no etiquetas ya traducidas — traducir es trabajo del
+      // builder, que es quien conoce la convención sin acentos del PDF.
+      payment_form: invoice.payment_form || undefined,
+      payment_method: invoice.payment_means_code || undefined,
+
       // Items
       items: (invoice.invoice_items || []).map((item: any) => ({
         description: item.description,
@@ -429,8 +444,14 @@ export class InvoicePdfService {
       // QR is the block most likely to be too tight on a roll — a preview that
       // omits it would hide exactly what needs judging.
       qr_code_buffer: await this.renderVerificationQr(sample_qr_url),
-      payment_form: 'cash',
-      payment_method: 'Efectivo',
+      // Los MISMOS códigos DIAN que trae una factura real ('1' contado, '10'
+      // efectivo), no las etiquetas ya traducidas que había antes ('cash',
+      // 'Efectivo'). La muestra existe para que el comerciante juzgue su papel:
+      // si le alimenta un dominio que ninguna factura usa, deja de ejercitar la
+      // traducción del builder y una etiqueta rota se vería bien en la muestra
+      // y mal en la factura.
+      payment_form: '1',
+      payment_method: '10',
     });
   }
 
