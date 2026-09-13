@@ -31,6 +31,11 @@ import {
   OPERATING_REVENUE_SQL,
   round2,
 } from '../analytics-metrics.contract';
+import {
+  ORDER_PAYMENT_MEANS_INCLUDE,
+  resolveOrderPaymentLabel,
+  type OrderPaymentForMeans,
+} from '../../payments/order-payment-means.contract';
 
 // Aggregated sales summary tolerates 1-2 min of staleness → short TTL (ms).
 const SALES_SUMMARY_CACHE_TTL_MS = 120_000;
@@ -43,6 +48,38 @@ const ORDER_EXPORT_BATCH_SIZE = 1000;
 const ORDER_EXPORT_HARD_LIMIT = 100_000;
 
 /**
+ * Instante del pago MÁS RECIENTE de la orden, o `null` si no hay ninguno
+ * cobrado con fecha.
+ *
+ * Se calcula como un máximo explícito y no leyendo un extremo del arreglo a
+ * propósito. El include de pagos es ahora el compartido
+ * ({@link ORDER_PAYMENT_MEANS_INCLUDE}), que ordena por `paid_at` ASCENDENTE
+ * para que la etiqueta del pago mixto se lea en el orden en que el cliente
+ * pagó. Depender de esa posición ataría el `paid_at` del reporte a una decisión
+ * que se tomó por la ETIQUETA: el día que el contrato cambie su `orderBy`, o
+ * que un llamador traiga los pagos de otra consulta, la columna «Fecha de pago»
+ * empezaría a mentir en silencio, que es exactamente el tipo de regresión que
+ * ningún test de compilación ve.
+ *
+ * El filtro por estado es redundante con el del include y también deliberado:
+ * un pago `pending` nunca debe fijar la fecha de cobro.
+ */
+function resolveLatestPaidAt(
+  payments?: readonly OrderPaymentForMeans[] | null,
+): Date | null {
+  let latest: Date | null = null;
+  for (const payment of payments ?? []) {
+    if (!payment || payment.state !== 'succeeded') continue;
+    const value = payment.paid_at;
+    if (!value) continue;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) continue;
+    if (latest === null || date.getTime() > latest.getTime()) latest = date;
+  }
+  return latest;
+}
+
+/**
  * One row per ORDER, with the order-level monetary totals stated EXACTLY ONCE.
  * Values are raw: money as `number`, dates as raw `Date` instants (the
  * ReportBuilder formats them in the store timezone in the emission phase).
@@ -51,7 +88,17 @@ export interface OrderExportRow {
   order_number: string;
   /** Raw creation instant. NOT formatted — emission phase renders it in TZ. */
   created_at: Date | null;
-  /** Raw payment instant of the first succeeded payment, if any. */
+  /**
+   * Raw payment instant of the MOST RECENT succeeded payment, if any — la fecha
+   * en que la orden quedó efectivamente saldada. En un pago mixto (un abono en
+   * efectivo y el saldo con tarjeta días después) el instante que interesa para
+   * conciliar es el último, no el primero.
+   *
+   * Se calcula explícitamente sobre el arreglo (ver {@link resolveLatestPaidAt})
+   * y NO se toma de una posición del mismo: el include comparte el orden
+   * cronológico ASCENDENTE del contrato de medio de pago, donde `payments[0]`
+   * es el pago MÁS ANTIGUO.
+   */
   paid_at: Date | null;
   customer_name: string;
   customer_document: string;
@@ -1257,19 +1304,11 @@ export class SalesAnalyticsService {
               document_type: true,
             },
           },
-          payments: {
-            where: { state: 'succeeded' },
-            include: {
-              store_payment_method: {
-                select: {
-                  display_name: true,
-                  system_payment_method: { select: { display_name: true } },
-                },
-              },
-            },
-            orderBy: { paid_at: 'desc' },
-            take: 1,
-          },
+          // Contrato compartido: TODOS los pagos cobrados, no sólo el último.
+          // Con `take: 1` una orden pagada mitad en efectivo y mitad con
+          // tarjeta declaraba un solo método y contaminaba cualquier
+          // conciliación por medio de pago.
+          payments: ORDER_PAYMENT_MEANS_INCLUDE,
         },
         orderBy: { id: 'desc' },
         take: ORDER_EXPORT_BATCH_SIZE,
@@ -1285,17 +1324,17 @@ export class SalesAnalyticsService {
           ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
             'Cliente'
           : 'Anónimo';
-        const payment = order.payments?.[0];
-        const paymentMethod =
-          payment?.store_payment_method?.display_name ||
-          payment?.store_payment_method?.system_payment_method?.display_name ||
-          'N/A';
+        // Una sola definición de la etiqueta, compartida con el tiquete POS y
+        // la factura electrónica. Devuelve `undefined` cuando no hay pago
+        // cobrado con nombre: el `'N/A'` es el placeholder que este reporte
+        // eligió, y es contrato visible de su columna «Método de Pago».
+        const paymentMethod = resolveOrderPaymentLabel(order.payments) ?? 'N/A';
 
         orders.push({
           order_number: order.order_number,
           // RAW instant — do NOT format here (emission phase renders in TZ).
           created_at: order.created_at ?? null,
-          paid_at: payment?.paid_at ?? null,
+          paid_at: resolveLatestPaidAt(order.payments),
           customer_name: customerName,
           customer_document: customer?.document_number || '',
           customer_document_type: customer?.document_type || '',
