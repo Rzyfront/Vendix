@@ -10,6 +10,10 @@ import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
 import { mapUserAddress } from '../lib/customer-address';
 import { formatFiscalMoney } from './fiscal-document-print.mapper';
+import {
+  ORDER_PAYMENT_MEANS_INCLUDE,
+  resolveOrderPaymentLabel,
+} from '../../payments/order-payment-means.contract';
 
 @Injectable()
 export class PosSaleTicketDataProvider implements IDocumentDataProvider {
@@ -87,6 +91,18 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
             opener: { select: { first_name: true, last_name: true } },
           },
         },
+        // El tiquete decía QUÉ se vendió y CUÁNTO, pero nunca CÓMO se pagó:
+        // el compositor ya sabía dibujar la fila «Pago (<método>)» y el
+        // catálogo de campos ya la declaraba activa, pero esta consulta no
+        // traía `payments`, así que `document.payment_method` llegaba
+        // `undefined` y la fila se omitía en silencio.
+        //
+        // Se usa el include CANÓNICO del contrato compartido, no uno propio:
+        // filtra `state: 'succeeded'` (cobrar es lo que declara el método,
+        // no intentarlo), anida `system_payment_method` para la cascada de
+        // nombres y ordena por `paid_at` para que un pago mixto se lea en el
+        // orden en que el cliente pagó.
+        payments: ORDER_PAYMENT_MEANS_INCLUDE,
       },
     });
 
@@ -167,6 +183,23 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       if (Number.isFinite(total)) {
         model.totals.grand_total = total;
         model.totals.grand_total_formatted = formatFiscalMoney(total);
+      }
+
+      // El efectivo recibido y el vuelto NO salen de la factura —son del cobro,
+      // y la factura no los conoce— pero sí comparten papel con los totales que
+      // acabamos de reformatear. Sin esto la tirilla de una orden ya facturada
+      // imprimía «TOTAL: $10.000,00» y justo debajo «Recibido: $10.000»: el
+      // mismo peso escrito de dos maneras, que se lee como dos cifras
+      // distintas. El formato lo manda el DOCUMENTO, no el origen del dato.
+      if (model.document.amount_received !== undefined) {
+        model.document.amount_received_formatted = formatFiscalMoney(
+          model.document.amount_received,
+        );
+      }
+      if (model.document.change_due !== undefined) {
+        model.document.change_due_formatted = formatFiscalMoney(
+          model.document.change_due,
+        );
       }
     } catch {
       // Ver docblock: la tirilla pre-fiscal con filas de orden es el fallback.
@@ -369,6 +402,64 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     }));
   }
 
+  /**
+   * Formato de moneda de la TIRILLA PRE-FISCAL (filas de la orden): pesos
+   * enteros, separador de miles es-CO. Estaba repetido inline en cada total;
+   * se nombra una sola vez para que las filas nuevas de pago impriman
+   * exactamente igual que el TOTAL que tienen al lado.
+   *
+   * NO confundir con `formatFiscalMoney` (2 decimales), que es el formato del
+   * snapshot de factura y sólo aplica en `overrideWithInvoiceSnapshot`.
+   */
+  private formatOrderMoney(amount: number): string {
+    return `$${Number(amount || 0).toLocaleString('es-CO')}`;
+  }
+
+  /**
+   * Efectivo entregado y vuelto, leídos del pago en efectivo de la orden.
+   *
+   * El POS los escribe dentro de `payments.gateway_response`
+   * (`metadata.amount_received` y `change`), que es `Json?` en Prisma: puede
+   * llegar `null`, una cadena, un arreglo o un objeto sin esas claves. Por eso
+   * se comprueba la FORMA antes de leer: asumirla reventaría el tiquete entero
+   * por un pago viejo con otro contenido.
+   *
+   * Ambos valores salen del MISMO pago —el primer cobro que traiga alguno— y no
+   * de una búsqueda independiente por campo: son las dos mitades de un único
+   * acto de entrega de efectivo, y cruzar el recibido de un pago con el vuelto
+   * de otro imprimiría una cuenta que nunca ocurrió.
+   *
+   * Una venta con tarjeta no tiene ninguno de los dos y ambos quedan
+   * `undefined`: el compositor no emite las filas (no hay vuelto que inventar).
+   */
+  private resolveCashTender(payments: any[]): {
+    amount_received?: number;
+    change_due?: number;
+  } {
+    const finite = (value: unknown): number | undefined => {
+      if (value === null || value === undefined || value === '') return undefined;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    };
+    const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+      typeof value === 'object' && value !== null && !Array.isArray(value);
+
+    for (const payment of payments || []) {
+      if (!payment || payment.state !== 'succeeded') continue;
+
+      const gateway = payment.gateway_response;
+      if (!isPlainObject(gateway)) continue;
+
+      const metadata = isPlainObject(gateway.metadata) ? gateway.metadata : {};
+      const received = finite(metadata.amount_received);
+      const change = finite(gateway.change);
+      if (received === undefined && change === undefined) continue;
+
+      return { amount_received: received, change_due: change };
+    }
+    return {};
+  }
+
   private mapOrderToStandardModel(order: any, signedLogoUrl?: string): StandardPrintDataModel {
     const store = order.stores || {};
     const org = store.organizations || {};
@@ -408,6 +499,17 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     }));
 
     const taxes = this.aggregateTaxes(order.order_items);
+
+    // Etiqueta del método de pago — la resuelve el contrato compartido, no
+    // este archivo: soporta pago mixto («Efectivo + Tarjeta»), respeta el
+    // alias que la tienda le puso al método y devuelve `undefined` cuando no
+    // hay ningún cobro con nombre. Ese `undefined` se propaga tal cual: la
+    // fila no se emite. Un tiquete que dice «Efectivo» por defecto afirma una
+    // entrada de caja que nadie hizo.
+    const paymentMethod = resolveOrderPaymentLabel(order.payments);
+    const { amount_received, change_due } = this.resolveCashTender(
+      order.payments,
+    );
 
     const subtotal = Number(order.subtotal_amount || 0);
     const discount = Number(order.discount_amount || 0);
@@ -451,6 +553,24 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         // C.3 QUI-733 — mesa + mesero en el recibo POS.
         table_number: tableName,
         waiter_name: waiterName,
+        // Spread condicional en los tres: el modelo los declara opcionales y
+        // el compositor decide por PRESENCIA (`doc.payment_method`,
+        // `Number(doc.amount_received) > 0`). Escribir la clave con
+        // `undefined` es equivalente para él, pero deja el campo visible en el
+        // JSON del editor de formatos como si el dato existiera vacío.
+        ...(paymentMethod ? { payment_method: paymentMethod } : {}),
+        ...(amount_received !== undefined
+          ? {
+              amount_received,
+              amount_received_formatted: this.formatOrderMoney(amount_received),
+            }
+          : {}),
+        ...(change_due !== undefined
+          ? {
+              change_due,
+              change_due_formatted: this.formatOrderMoney(change_due),
+            }
+          : {}),
         // QUI-737 (B.4) — alias de venta rápida ("Mesa 5"). Va en la CABECERA
         // junto al número de orden, NO bajo el bloque "Datos del Cliente"
         // (`customer`): el alias no es un cliente formal y no debe leerse como
@@ -465,15 +585,15 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       taxes,
       totals: {
         subtotal,
-        subtotal_formatted: `$${subtotal.toLocaleString('es-CO')}`,
+        subtotal_formatted: this.formatOrderMoney(subtotal),
         discount_total: discount,
-        discount_total_formatted: `$${discount.toLocaleString('es-CO')}`,
+        discount_total_formatted: this.formatOrderMoney(discount),
         shipping_total: shipping,
-        shipping_total_formatted: `$${shipping.toLocaleString('es-CO')}`,
+        shipping_total_formatted: this.formatOrderMoney(shipping),
         tax_total: tax,
-        tax_total_formatted: `$${tax.toLocaleString('es-CO')}`,
+        tax_total_formatted: this.formatOrderMoney(tax),
         grand_total: grandTotal,
-        grand_total_formatted: `$${grandTotal.toLocaleString('es-CO')}`,
+        grand_total_formatted: this.formatOrderMoney(grandTotal),
       },
     };
   }
