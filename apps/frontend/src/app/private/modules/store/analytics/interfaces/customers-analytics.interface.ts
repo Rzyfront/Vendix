@@ -78,6 +78,10 @@ export interface CustomerReceivableRow {
   balance: number;
   currency: string;
   status: string;
+  status_label?: string;
   last_payment_date: string | Date | null;
+  installment_info?: string | null;
+  installment_current?: number | null;
+  installment_total?: number | null;
 }
 

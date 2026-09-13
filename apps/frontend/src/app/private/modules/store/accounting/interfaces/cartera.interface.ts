@@ -21,6 +21,7 @@ export interface AccountReceivable {
   notes?: string;
   ar_payments?: ArPayment[];
   payment_agreements?: PaymentAgreement[];
+  order_installments?: AgreementInstallment[];
   created_at: string;
   updated_at: string;
 }

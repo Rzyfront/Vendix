@@ -3,14 +3,16 @@
 // Contenedor principal de la tabla
 .table-container {
   position: relative;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   border-radius: var(--radius-lg);
   border: var(--border-width) solid var(--color-border);
   background-color: var(--color-surface);
   box-shadow: var(--shadow-sm);
 
   // Contenedor con scroll horizontal para tablas muy anchas
-  &.table-scrollable {
+  &.table-scrollable,
+  & {
     overflow-x: auto;
 
     // Personalización del scroll horizontal usando tokens
@@ -61,6 +63,7 @@
       z-index: var(--z-base);
       transition: background-color var(--transition-fast) ease;
       padding: var(--control-padding);
+      white-space: nowrap;
 
       // Glass: el `background-color: var(--color-background)` de arriba es opaco
       // a propósito (el th es sticky y debe tapar las filas que pasan por
@@ -153,9 +156,9 @@
           display: block;
           overflow: hidden;
           text-overflow: ellipsis;
-          // white-space: nowrap; // Removed to allow wrapping
-          word-break: break-word; // Ensure long words don't overflow
-          min-width: 80px; // Minimum width to prevent crushing
+          white-space: nowrap;
+          word-break: normal;
+          min-width: 60px;
           color: var(--color-text-primary);
           transition: color var(--transition-fast) ease;
         }

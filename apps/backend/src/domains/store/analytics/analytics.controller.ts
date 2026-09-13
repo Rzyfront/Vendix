@@ -841,18 +841,16 @@ export class AnalyticsController {
       await this.customers_analytics_service.getAccountsReceivableForExport(query);
 
     const columns: ReportColumn[] = [
-      { key: 'document_number', header: 'Documento', type: 'text' },
+      { key: 'document_number', header: 'ID de Órdenes', type: 'text' },
       { key: 'customer_name', header: 'Cliente', type: 'text' },
       { key: 'customer_document', header: 'NIT/Doc', type: 'text' },
-      { key: 'customer_email', header: 'Correo', type: 'text' },
-      { key: 'issue_date', header: 'Emisión', type: 'date-only' },
       { key: 'due_date', header: 'Vencimiento', type: 'date-only' },
+      { key: 'installment_info', header: 'Cuota', type: 'text' },
       { key: 'days_overdue', header: 'Días Mora', type: 'number' },
-      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
       { key: 'original_amount', header: 'Original', type: 'currency' },
       { key: 'paid_amount', header: 'Pagado', type: 'currency' },
       { key: 'balance', header: 'Saldo', type: 'currency' },
-      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'status_label', header: 'Estado', type: 'text' },
     ];
 
     await this.emitReport(res, 'cuentas_por_cobrar', tz, [

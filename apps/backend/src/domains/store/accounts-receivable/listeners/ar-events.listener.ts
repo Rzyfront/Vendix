@@ -70,13 +70,25 @@ export class ArEventsListener {
         return;
       }
 
+      let dueDate = event.due_date;
+      if (!dueDate && event.order_id) {
+        const firstInst = await this.prisma.order_installments.findFirst({
+          where: { order_id: event.order_id },
+          orderBy: { installment_number: 'asc' },
+          select: { due_date: true },
+        });
+        if (firstInst?.due_date) {
+          dueDate = firstInst.due_date;
+        }
+      }
+
       const ar = await this.ar_service.createFromEvent({
         customer_id: customerId,
         source_type: 'credit_sale',
         source_id: event.order_id,
         document_number: documentNumber,
         original_amount: event.total_amount,
-        due_date: event.due_date,
+        due_date: dueDate,
         organization_id: organizationId,
         store_id: storeId,
       });

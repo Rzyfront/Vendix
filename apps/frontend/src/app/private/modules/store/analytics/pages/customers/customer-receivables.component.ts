@@ -216,60 +216,105 @@ export class CustomerReceivablesComponent implements OnInit {
       '61-90': 0,
       '90+': 0,
     };
+    const counts: Record<string, number> = {
+      '0-30': 0,
+      '31-60': 0,
+      '61-90': 0,
+      '90+': 0,
+    };
 
     for (const row of data) {
       const b = row.aging_bucket || '0-30';
       buckets[b] = (buckets[b] || 0) + (Number(row.balance) || 0);
+      counts[b] = (counts[b] || 0) + 1;
     }
 
-    const chartData = [
-      { name: '0-30 días', value: Math.round(buckets['0-30'] * 100) / 100, itemStyle: { color: '#10b981' } },
-      { name: '31-60 días', value: Math.round(buckets['31-60'] * 100) / 100, itemStyle: { color: '#3b82f6' } },
-      { name: '61-90 días', value: Math.round(buckets['61-90'] * 100) / 100, itemStyle: { color: '#f59e0b' } },
-      { name: '90+ días', value: Math.round(buckets['90+'] * 100) / 100, itemStyle: { color: '#ef4444' } },
-    ];
+    const bucketColors: Record<string, string> = {
+      '0-30': '#10b981',
+      '31-60': '#3b82f6',
+      '61-90': '#f59e0b',
+      '90+': '#ef4444',
+    };
+    const bucketNames: Record<string, string> = {
+      '0-30': '0-30 días',
+      '31-60': '31-60 días',
+      '61-90': '61-90 días',
+      '90+': '90+ días',
+    };
 
+    const categories = Object.keys(buckets).map((k) => bucketNames[k]);
+    const barValues = Object.keys(buckets).map((k) => ({
+      value: Math.round(buckets[k] * 100) / 100,
+      itemStyle: { color: bucketColors[k], borderRadius: [6, 6, 0, 0] },
+      bucketKey: k,
+    }));
     const symbol = this.currencyService.currencySymbol() || '$';
 
     this.agingChartOptions.set({
       tooltip: {
-        trigger: 'item',
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        backgroundColor: 'rgba(15, 23, 42, 0.92)',
+        borderWidth: 0,
+        textStyle: { color: '#fff', fontSize: 12 },
         formatter: (params: any) => {
-          const val = params.value?.toLocaleString() ?? 0;
-          return `${params.name}: <b>${symbol} ${val}</b> (${params.percent}%)`;
+          const p = Array.isArray(params) ? params[0] : params;
+          const key = (p?.data?.bucketKey || '').toString();
+          const count = counts[key] ?? 0;
+          return `
+            <div style="font-weight:600;margin-bottom:4px">${p.name}</div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="width:8px;height:8px;border-radius:50%;background:${p.color};display:inline-block"></span>
+              <span>Saldo:</span>
+              <b style="margin-left:auto">${symbol} ${p.value?.toLocaleString() ?? 0}</b>
+            </div>
+            <div style="margin-top:4px;font-size:11px;opacity:0.85">${count} factura${count === 1 ? '' : 's'}</div>
+          `;
         },
       },
-      legend: {
-        bottom: '0%',
-        left: 'center',
-        textStyle: {
+      grid: {
+        left: 16,
+        right: 16,
+        top: 36,
+        bottom: 8,
+        containLabel: true,
+      },
+      xAxis: {
+        type: 'category',
+        data: categories,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: {
           color: 'var(--color-text-secondary, #64748b)',
-          fontSize: 11,
+          fontSize: 12,
+          fontWeight: 500,
         },
+      },
+      yAxis: {
+        type: 'value',
+        show: false,
       },
       series: [
         {
-          name: 'Antigüedad',
-          type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '42%'],
-          avoidLabelOverlap: false,
+          name: 'Saldo',
+          type: 'bar',
+          data: barValues,
+          barWidth: '46%',
           itemStyle: {
-            borderRadius: 6,
-            borderColor: 'var(--color-surface, #fff)',
-            borderWidth: 2,
+            borderRadius: [6, 6, 0, 0],
           },
           label: {
-            show: false,
-          },
-          emphasis: {
-            label: {
-              show: true,
-              fontSize: 12,
-              fontWeight: 'bold',
+            show: true,
+            position: 'top',
+            color: 'var(--color-text-primary, #0f172a)',
+            fontSize: 11,
+            fontWeight: 600,
+            formatter: (p: any) => {
+              const v = Number(p.value) || 0;
+              if (v === 0) return '';
+              return symbol + ' ' + v.toLocaleString();
             },
           },
-          data: chartData,
         },
       ],
     });

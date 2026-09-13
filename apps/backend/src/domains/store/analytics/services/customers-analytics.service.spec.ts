@@ -15,6 +15,12 @@ type MockStorePrismaService = {
     count: jest.Mock;
     findMany: jest.Mock;
   };
+  order_installments?: {
+    findMany: jest.Mock;
+  };
+  agreement_installments?: {
+    findMany: jest.Mock;
+  };
 } & Partial<StorePrismaService>;
 
 describe('CustomersAnalyticsService.getAbandonedCartsSummary (QUI-628)', () => {
@@ -198,6 +204,12 @@ describe('CustomersAnalyticsService.getAccountsReceivable (QUI-540)', () => {
         count: jest.fn(),
         findMany: jest.fn(),
       },
+      order_installments: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      agreement_installments: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     } as MockStorePrismaService;
 
     jest
@@ -302,11 +314,52 @@ describe('CustomersAnalyticsService.getAccountsReceivable (QUI-540)', () => {
       balance: 800,
       currency: 'COP',
       status: 'partial',
+      status_label: 'Parcial',
       last_payment_date: null,
+      installment_info: null,
+      installment_current: null,
+      installment_total: null,
     });
 
     expect(result.data[1].aging_bucket).toBe('61-90');
     expect(result.data[1].customer_name).toBe('');
+  });
+
+  it('resolves effective due_date and installment_info from pending order installments', async () => {
+    const mockReceivable = {
+      id: 10,
+      customer_id: 101,
+      source_type: 'credit_sale',
+      source_id: 200,
+      document_number: 'POS-2026-0099',
+      original_amount: 100000,
+      paid_amount: 66666,
+      balance: 33334,
+      currency: 'COP',
+      issue_date: new Date('2026-09-01'),
+      due_date: new Date('2026-10-01'), // Old initial due date
+      days_overdue: 0,
+      last_payment_date: null,
+      status: 'partial',
+      customer: { first_name: 'Carlos', last_name: 'Ruiz', email: 'c@r.com', document_number: '999' },
+    };
+
+    prisma.accounts_receivable!.count.mockResolvedValue(1);
+    prisma.accounts_receivable!.findMany.mockResolvedValue([mockReceivable]);
+
+    // Cuota 1 y 2 pagadas, cuota 3 pendiente para diciembre
+    prisma.order_installments!.findMany.mockResolvedValue([
+      { order_id: 200, installment_number: 1, due_date: new Date('2026-10-01'), state: 'paid' },
+      { order_id: 200, installment_number: 2, due_date: new Date('2026-11-01'), state: 'paid' },
+      { order_id: 200, installment_number: 3, due_date: new Date('2026-12-01'), state: 'pending' },
+    ]);
+
+    const result = await service.getAccountsReceivable({ page: 1, limit: 10 } as any);
+
+    expect(result.data[0].due_date).toEqual(new Date('2026-12-01'));
+    expect(result.data[0].installment_info).toBe('Cuota 3 de 3');
+    expect(result.data[0].installment_current).toBe(3);
+    expect(result.data[0].installment_total).toBe(3);
   });
 
   it('throws when store context is missing', async () => {

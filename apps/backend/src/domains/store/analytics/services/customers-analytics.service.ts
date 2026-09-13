@@ -956,7 +956,8 @@ export class CustomersAnalyticsService {
   /**
    * QUI-540: Cuentas por cobrar de clientes (preview paginado).
    * Retorna cuentas por cobrar con status IN ('open', 'partial') y balance > 0,
-   * ordenadas por due_date asc con bucketing de antigüedad y paginación.
+   * ordenadas por due_date asc    * QUI-540: Cuentas por cobrar de clientes con días de mora,
+   * cálculo de antigüedad y estado en español.
    */
   async getAccountsReceivable(query: AnalyticsQueryDto) {
     const context = RequestContextService.getContext();
@@ -1009,12 +1010,22 @@ export class CustomersAnalyticsService {
     ]);
 
     const now = new Date();
+    const statusLabelMap: Record<string, string> = {
+      open: 'Abierta',
+      partial: 'Parcial',
+      paid: 'Pagada',
+      written_off: 'Castigada',
+    };
+
+    const planMap = await this.resolveInstallmentPlans(receivables);
 
     const data = receivables.map((r) => {
+      const plan = planMap.get(r.id);
+      const effectiveDueDate = plan?.nextDueDate || r.due_date;
       const days =
-        r.days_overdue > 0
+        r.days_overdue > 0 && !plan
           ? r.days_overdue
-          : Math.max(0, Math.floor((now.getTime() - r.due_date.getTime()) / 86400000));
+          : Math.max(0, Math.floor((now.getTime() - effectiveDueDate.getTime()) / 86400000));
       const bucket =
         days <= 30
           ? '0-30'
@@ -1026,6 +1037,7 @@ export class CustomersAnalyticsService {
       const customerName = r.customer
         ? `${r.customer.first_name || ''} ${r.customer.last_name || ''}`.trim()
         : '';
+
       return {
         id: r.id,
         customer_id: r.customer_id,
@@ -1036,7 +1048,7 @@ export class CustomersAnalyticsService {
         source_type: r.source_type,
         source_id: r.source_id,
         issue_date: r.issue_date,
-        due_date: r.due_date,
+        due_date: effectiveDueDate,
         days_overdue: days,
         aging_bucket: bucket,
         original_amount: Math.round(Number(r.original_amount) * 100) / 100,
@@ -1044,7 +1056,11 @@ export class CustomersAnalyticsService {
         balance: Math.round(Number(r.balance) * 100) / 100,
         currency: r.currency,
         status: r.status,
+        status_label: statusLabelMap[r.status] || r.status,
         last_payment_date: r.last_payment_date,
+        installment_info: plan?.installmentInfo ?? null,
+        installment_current: plan?.installmentCurrent ?? null,
+        installment_total: plan?.installmentTotal ?? null,
       };
     });
 
@@ -1057,34 +1073,24 @@ export class CustomersAnalyticsService {
   }
 
   /**
-   * QUI-540: cuentas por cobrar de clientes con bucketing de antigüedad.
-   *
-   * Una fila por `accounts_receivable` con status='open' o 'partial',
-   * enriquecida con datos del cliente y bucketed en:
-   *   - '0-30 días' (current)
-   *   - '31-60 días'
-   *   - '61-90 días'
-   *   - '90+ días' (riesgo de incobrabilidad)
-   *
-   * El campo `days_overdue` que ya existe en la tabla lo respetamos si
-   * está poblado; si no, lo calculamos desde `due_date` vs `now()`.
-   *
-   * `issue_date` y `due_date` son DATE (sin hora), pero Prisma los devuelve
-   * como Date instants. El emitter los formatea con TZ.
+   * Exportación completa de cuentas por cobrar para Excel.
+   * Sin paginación (take: 10000 de seguridad) con cálculo de antigüedad y orden due_date ASC.
    */
   async getAccountsReceivableForExport(query: AnalyticsQueryDto) {
     const context = RequestContextService.getContext();
     if (!context?.store_id || !context.organization_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
+
     const storeId = context.store_id;
+    const where: any = {
+      store_id: storeId,
+      status: { in: ['open', 'partial'] },
+      balance: { gt: 0 },
+    };
 
     const receivables = await this.prisma.accounts_receivable.findMany({
-      where: {
-        store_id: storeId,
-        status: { in: ['open', 'partial'] },
-        balance: { gt: 0 },
-      },
+      where,
       select: {
         id: true,
         customer_id: true,
@@ -1114,11 +1120,22 @@ export class CustomersAnalyticsService {
     });
 
     const now = new Date();
+    const statusLabelMap: Record<string, string> = {
+      open: 'Abierta',
+      partial: 'Parcial',
+      paid: 'Pagada',
+      written_off: 'Castigada',
+    };
+
+    const planMap = await this.resolveInstallmentPlans(receivables);
 
     return receivables.map((r) => {
-      const days = r.days_overdue > 0
-        ? r.days_overdue
-        : Math.max(0, Math.floor((now.getTime() - r.due_date.getTime()) / 86400000));
+      const plan = planMap.get(r.id);
+      const effectiveDueDate = plan?.nextDueDate || r.due_date;
+      const days =
+        r.days_overdue > 0 && !plan
+          ? r.days_overdue
+          : Math.max(0, Math.floor((now.getTime() - effectiveDueDate.getTime()) / 86400000));
       const bucket =
         days <= 30
           ? '0-30'
@@ -1130,6 +1147,7 @@ export class CustomersAnalyticsService {
       const customerName = r.customer
         ? `${r.customer.first_name || ''} ${r.customer.last_name || ''}`.trim()
         : '';
+
       return {
         id: r.id,
         customer_id: r.customer_id,
@@ -1140,7 +1158,7 @@ export class CustomersAnalyticsService {
         source_type: r.source_type,
         source_id: r.source_id,
         issue_date: r.issue_date,
-        due_date: r.due_date,
+        due_date: effectiveDueDate,
         days_overdue: days,
         aging_bucket: bucket,
         original_amount: Math.round(Number(r.original_amount) * 100) / 100,
@@ -1148,8 +1166,149 @@ export class CustomersAnalyticsService {
         balance: Math.round(Number(r.balance) * 100) / 100,
         currency: r.currency,
         status: r.status,
+        status_label: statusLabelMap[r.status] || r.status,
         last_payment_date: r.last_payment_date,
+        installment_info: plan?.installmentInfo ?? null,
+        installment_current: plan?.installmentCurrent ?? null,
+        installment_total: plan?.installmentTotal ?? null,
       };
     });
+  }
+
+  /**
+   * Resuelve en lote los planes de cuotas de una lista de cuentas por cobrar,
+   * buscando tanto en `order_installments` (ventas a crédito desde POS / ecommerce)
+   * como en `agreement_installments` (acuerdos de pago formalizados en contabilidad).
+   *
+   * Retorna para cada cuenta:
+   * - `nextDueDate`: fecha de la próxima cuota pendiente (o última si ya están saldadas).
+   * - `installmentInfo`: ej. "Cuota 2 de 3", "Cuota 3 de 3", etc.
+   * - `installmentCurrent`: número de la cuota pendiente actual.
+   * - `installmentTotal`: total de cuotas del plan.
+   */
+  private async resolveInstallmentPlans(
+    receivables: Array<{
+      id: number;
+      source_type: string;
+      source_id: number | null;
+    }>,
+  ): Promise<
+    Map<
+      number,
+      {
+        nextDueDate: Date | null;
+        installmentInfo: string | null;
+        installmentCurrent: number | null;
+        installmentTotal: number | null;
+      }
+    >
+  > {
+    const result = new Map<
+      number,
+      {
+        nextDueDate: Date | null;
+        installmentInfo: string | null;
+        installmentCurrent: number | null;
+        installmentTotal: number | null;
+      }
+    >();
+
+    if (!receivables || receivables.length === 0) return result;
+
+    const orderIds = receivables
+      .filter(
+        (r) =>
+          r.source_id &&
+          (r.source_type === 'credit_sale' || r.source_type === 'order'),
+      )
+      .map((r) => r.source_id as number);
+
+    const arIds = receivables.map((r) => r.id);
+
+    const [orderInstallments, agreementInstallments] = await Promise.all([
+      orderIds.length > 0
+        ? this.prisma.order_installments.findMany({
+            where: { order_id: { in: orderIds } },
+            select: {
+              order_id: true,
+              installment_number: true,
+              due_date: true,
+              state: true,
+            },
+            orderBy: { installment_number: 'asc' },
+          })
+        : Promise.resolve([]),
+      arIds.length > 0
+        ? this.prisma.agreement_installments.findMany({
+            where: {
+              payment_agreement: {
+                accounts_receivable_id: { in: arIds },
+              },
+            },
+            select: {
+              due_date: true,
+              installment_number: true,
+              state: true,
+              payment_agreement: {
+                select: { accounts_receivable_id: true },
+              },
+            },
+            orderBy: { installment_number: 'asc' },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    // Agrupar cuotas de orden por order_id
+    const orderMap = new Map<
+      number,
+      Array<{ installment_number: number; due_date: Date; state: string }>
+    >();
+    for (const inst of orderInstallments) {
+      const list = orderMap.get(inst.order_id) || [];
+      list.push(inst);
+      orderMap.set(inst.order_id, list);
+    }
+
+    // Agrupar cuotas de acuerdo por accounts_receivable_id
+    const arMap = new Map<
+      number,
+      Array<{ installment_number: number; due_date: Date; state: string }>
+    >();
+    for (const inst of agreementInstallments) {
+      const arId = inst.payment_agreement.accounts_receivable_id;
+      const list = arMap.get(arId) || [];
+      list.push(inst);
+      arMap.set(arId, list);
+    }
+
+    for (const r of receivables) {
+      const insts =
+        (r.source_id && orderMap.get(r.source_id)) ||
+        arMap.get(r.id) ||
+        [];
+
+      if (insts.length > 0) {
+        const pending = insts.filter((i) => i.state !== 'paid');
+        if (pending.length > 0) {
+          const next = pending[0];
+          result.set(r.id, {
+            nextDueDate: next.due_date,
+            installmentInfo: `Cuota ${next.installment_number} de ${insts.length}`,
+            installmentCurrent: next.installment_number,
+            installmentTotal: insts.length,
+          });
+        } else {
+          const last = insts[insts.length - 1];
+          result.set(r.id, {
+            nextDueDate: last.due_date,
+            installmentInfo: `Cuotas completas (${insts.length}/${insts.length})`,
+            installmentCurrent: last.installment_number,
+            installmentTotal: insts.length,
+          });
+        }
+      }
+    }
+
+    return result;
   }
 }

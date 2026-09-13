@@ -13,3 +13,40 @@
 :host ::ng-deep .results-header {
   padding: 0.75rem 1rem;
 }
+
+/* Receivables table — visual hierarchy with bucket color stripes and totals footer */
+.receivables-table-wrapper {
+  background: var(--color-surface, #fff);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.receivables-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  backdrop-filter: blur(4px);
+}
+
+.receivables-table tbody tr {
+  border-left: 3px solid transparent;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.receivables-table tbody tr[data-bucket='0-30'] {
+  border-left-color: #10b981;
+}
+.receivables-table tbody tr[data-bucket='31-60'] {
+  border-left-color: #3b82f6;
+}
+.receivables-table tbody tr[data-bucket='61-90'] {
+  border-left-color: #f59e0b;
+}
+.receivables-table tbody tr[data-bucket='90+'] {
+  border-left-color: #ef4444;
+}
+
+.receivables-tfoot tr {
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.6) 0%, rgba(241, 245, 249, 0.85) 100%);
+  border-top: 2px solid var(--color-border, #e2e8f0);
+}
+
