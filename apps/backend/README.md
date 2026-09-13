@@ -148,5 +148,53 @@ npm run test        # Unit tests
 npm run test:e2e    # End-to-end (integración)
 ```
 
+### Type-check del arnés (specs incluidas, `scripts/` excluido)
+
+`tsconfig.check.json` extiende `tsconfig.json` y excluye sólo `node_modules`,
+`dist` y `scripts` — a diferencia de `tsconfig.build.json`, **no** excluye
+`**/*spec.ts`. Es el único sitio donde este repo tipa la aritmética de dinero
+de las specs sin tocar producción; `scripts/` no se despliega en la imagen de
+producción, así que sus errores no bloquean este gate.
+
+```bash
+npm run buildcheck:types   # tsc -p tsconfig.check.json --noEmit
+```
+
+### Ejecutar tests por ruta (`test:path`)
+
+`test:path` invoca jest directamente, **acotado a la ruta indicada** (un spec
+o un directorio), con `--runInBand` (un solo proceso, sin worker pool) y
+propagando el **código de salida real** de jest. Se llamó `buildcheck:test`
+hasta la auditoría F-162 del plan `CP-pos-exclusive-tax-double-charge`
+(QUI-832): colisionaba de nombre con el script `buildcheck:test` de la raíz
+del monorepo (`bash scripts/buildcheck.sh --test`), que existe desde antes y
+sigue existiendo con ese nombre — con el mismo nombre en dos `package.json`
+había que saber desde qué directorio se invocaba para saber cuál corría.
+
+El motivo de `test:path` **no** es que el script de la raíz mienta sobre su
+código de salida: medido dos veces de forma independiente, `bash
+scripts/buildcheck.sh --test <ruta>` devolvió el código de salida real (no
+cero) ante un jest rojo por fallo de aserción, igual que este script.
+`scripts/buildcheck.sh` ya acepta un filtro de ruta y ya usa `--runInBand` en
+ese modo (`scripts/buildcheck.sh:72-75` y `:449-456`). El único modo en el que
+el script de la raíz puede imprimir `FAIL` y salir con `0` es al correr la
+suite **completa sin filtro** (pool de varios workers), si uno de ellos muere
+por OOM antes de reportar — un escenario distinto del fallo de aserción, y no
+el que motiva este script. La razón real de `test:path` es de conveniencia:
+es la invocación directa, sin el envoltorio de la raíz, para cuando ya se
+está trabajando dentro de `apps/backend`.
+
+```bash
+npm run test:path -- src/domains/store/taxes
+npm run test:path -- src/domains/store/taxes/some.spec.ts
+```
+
+**La suite completa de jest NO es una compuerta de este plan.** Cada paso
+verifica únicamente sus propios archivos de prueba, por ruta. Correr todo
+`apps/backend/src` toma ≈10 h, muy por encima del `timeout-minutes: 25` de
+CI, y el job `backend-test` de `.github/workflows/ci.yml` está en `if: false`
+desde el 2026-08-14. Un cambio que necesite correr toda la suite como
+compuerta requiere su propio plan.
+
 ---
 **Vendix Backend V2.0** - *Seguridad y Escalabilidad Enterprise*

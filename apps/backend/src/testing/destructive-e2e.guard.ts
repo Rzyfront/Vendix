@@ -38,7 +38,7 @@
  * ```bash
  * VENDIX_DESTRUCTIVE_E2E=1 \
  * DATABASE_URL='postgresql://...@localhost:5432/vendix_test' \
- *   npm run buildcheck:test -- src/domains/auth
+ *   npm run test:path -- src/domains/auth
  * ```
  *
  * El segundo cinturón (`assertDisposableDatabase`) es lo que impide que un
