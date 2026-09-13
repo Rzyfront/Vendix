@@ -1364,6 +1364,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'customer_name', header: 'Cliente', type: 'text' },
       { key: 'emission_date', header: 'Fecha Emisión', type: 'date' },
       { key: 'grand_total', header: 'Total', type: 'currency', footer: 'sum' },
+      { key: 'metodo_pago', header: 'Método de Pago', type: 'text' },
     ],
     exportFilename: 'remisiones_despacho',
     stats: [

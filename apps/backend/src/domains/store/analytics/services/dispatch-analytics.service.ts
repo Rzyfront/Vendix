@@ -34,6 +34,10 @@ import {
   DispatchDeliveredValueStopInput,
   DispatchFulfillmentStopInput,
 } from '../analytics-metrics.contract';
+import {
+  ORDER_PAYMENT_MEANS_INCLUDE,
+  resolveOrderPaymentLabel,
+} from '../../payments/order-payment-means.contract';
 
 /**
  * Error code for an invalid dispatch-report range (ERR-02). Thrown as a plain
@@ -150,6 +154,8 @@ export interface DispatchStopRow extends StopPickInput {
     vehicle: { plate: string | null } | null;
   } | null;
   settled_by_user: { first_name: string; last_name: string } | null;
+  /** Medio con el que se recaudó la parada al liquidarla (VarChar libre). */
+  payment_method: string | null;
 }
 
 /** Entrada mínima de remisión/parada (ADR-01, pasos 3-5). */
@@ -208,6 +214,37 @@ export function fullName(
   return name.length > 0 ? name : null;
 }
 
+/**
+ * Etiquetas del recaudo capturado al liquidar la parada
+ * (`dispatch_route_stops.payment_method`). Mismo vocabulario que el selector
+ * del modal de liquidación (`stop-settle-modal`), más `credit` para la parada
+ * que se entregó a plazo.
+ */
+const STOP_PAYMENT_METHOD_LABELS: Readonly<Record<string, string>> = {
+  cash: 'Efectivo',
+  transfer: 'Transferencia',
+  card: 'Tarjeta',
+  credit: 'Crédito',
+};
+
+/**
+ * Etiqueta legible del recaudo de la parada, o `null` si la parada no declaró
+ * ninguno.
+ *
+ * La columna es un `VarChar(40)` libre —el DTO de liquidación sólo valida
+ * `@IsString()` + `@MaxLength(40)`— así que un valor fuera del vocabulario
+ * canónico es posible. Se devuelve TAL CUAL en vez de tragarlo: una celda
+ * vacía diría «no se recaudó», que es una afirmación distinta y falsa, y
+ * escondería justo el dato que hay que corregir en el origen.
+ */
+export function resolveStopPaymentLabel(
+  value: string | null | undefined,
+): string | null {
+  const raw = (value ?? '').trim();
+  if (!raw) return null;
+  return STOP_PAYMENT_METHOD_LABELS[raw.toLowerCase()] ?? raw;
+}
+
 // ---------------------------------------------------------------------------
 // Filas crudas: Date + números sin formatear. El formato vive en las columnas
 // del controller / ReportBuilder (skill vendix-report-xlsx, regla 3).
@@ -232,6 +269,12 @@ export interface RemisionRow {
   parada_estado: string | null;
   /** Derivado de `invoice.payment_date IS NOT NULL` (sin crédito en ruta). */
   is_prepaid: boolean;
+  /**
+   * Etiqueta del método de pago, ya legible (es texto, no hay formato que
+   * delegar a la columna). Manda el recaudo de la parada; si la remisión no
+   * pasó por ruta, cae al método de la orden asociada; `null` si ninguno.
+   */
+  metodo_pago: string | null;
   delivered_at: Date | null;
 }
 
@@ -448,6 +491,11 @@ export class DispatchAnalyticsService {
         },
         delivered_by_user: { select: USER_NAME_SELECT },
         invoice: { select: { payment_date: true } },
+        // Fallback del método de pago para la remisión que nunca pasó por una
+        // ruta (venta en mostrador que se despacha directo): el recaudo vive
+        // en los pagos de la orden. Contrato compartido, no una lectura
+        // propia: `take: 1` perdería la mitad de un pago mixto.
+        order: { include: { payments: ORDER_PAYMENT_MEANS_INCLUDE } },
       },
       orderBy: [{ emission_date: 'desc' }, { id: 'desc' }],
       take: DISPATCH_EXPORT_LIMIT + 1,
@@ -508,6 +556,14 @@ export class DispatchAnalyticsService {
         reasignada,
         parada_estado: stop?.status ?? null,
         is_prepaid: !!n.invoice?.payment_date,
+        // Precedencia: manda el recaudo de la parada ACTIVA —la misma que ya
+        // define `parada_estado` y `numero_ruta`, no otra— porque en DSD el
+        // dinero entra en la calle y no en caja. Sólo si esa parada no declaró
+        // método (o la remisión nunca pasó por ruta) se cae a la orden.
+        metodo_pago:
+          resolveStopPaymentLabel(stop?.payment_method) ??
+          resolveOrderPaymentLabel(n.order?.payments) ??
+          null,
         delivered_at: n.delivered_at,
       };
     });

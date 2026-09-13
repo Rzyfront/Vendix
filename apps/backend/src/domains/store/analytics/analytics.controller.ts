@@ -1269,6 +1269,7 @@ export class AnalyticsController {
       { key: 'reasignada', header: 'Reasignada', type: 'text' },
       { key: 'parada_estado', header: 'Estado Parada', type: 'text' },
       { key: 'is_prepaid', header: 'Prepaga', type: 'text' },
+      { key: 'metodo_pago', header: 'Método de Pago', type: 'text' },
       { key: 'delivered_at', header: 'Entrega', type: 'date' },
     ];
 
