@@ -50,6 +50,11 @@ import { WithholdingPreviewResult } from '../../withholding-tax/interfaces/withh
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { InvoicingService } from '../../invoicing/services/invoicing.service';
 import { PosUvtThreshold } from '../../invoicing/interfaces/invoice.interface';
+import {
+  catalogInclusiveDefault,
+  estimateNetBase,
+  estimatePriceWithTax,
+} from '../../products/utils/product-tax-inclusive.util';
 
 /**
  * Presentational "faltan N und para el siguiente tramo" hint for an auto-apply
@@ -2051,6 +2056,7 @@ export class PosCartService {
     }
 
     const taxRate = this.calculateRateSum(product);
+    const { inclusiveRate, additionalRate } = this.calculateInclusiveRateSplit(product);
     const resolution = this.priceResolver.resolveWithTier(
       {
         id: product.id,
@@ -2089,11 +2095,56 @@ export class PosCartService {
           // Per-product/per-variant packaging override (cascade).
           override_units_per_package: o.override_units_per_package ?? null,
         })),
-      taxRate,
+      // F-215 (C.8, tercera boca — 2026-09-14): SIEMPRE 0, nunca `taxRate`.
+      // `resolveWithTier` multiplica ciegamente `unitPrice*(1+taxRate)`
+      // (mismo defecto en su espejo backend,
+      // `products/services/price-resolver.service.ts:398`), sin mirar
+      // `is_inclusive`: con INC 8% incluido y una tarifa fijando 15.000,
+      // devolvía `unitPrice` 15.000 y `unitPriceWithTax` 16.200 — los dos mal
+      // (el neto real es 13.888,89, el bruto ya es 15.000, no crece). Pasar 0
+      // acá dejar `resolution.unitPrice` como el precio YA resuelto por la
+      // tarifa SIN impuesto aplicado — que es exactamente lo que
+      // `payments.service.ts:2693-2733` hace del lado del servidor (mismo
+      // truco, mismo motivo) antes de despejarlo con el kernel real
+      // (`calculateProductTaxes`/`resolveInclusiveClearing`,
+      // `dian-money.util.ts`). El reparto neto/bruto ahora vive abajo, fuera
+      // de este archivo compartido con `pos-product.service.ts` y
+      // `quotation-form-modal.component.ts` — no se le cambia la semántica a
+      // `resolveWithTier` para no arrastrar el mismo defecto (o un cambio no
+      // pedido) a esos otros dos llamadores.
+      0,
     );
 
-    const unitPrice = this.roundMoney(resolution.unitPrice);
-    const finalUnitPrice = this.roundMoney(resolution.unitPriceWithTax);
+    // `resolution.unitPrice` es el precio que la tarifa fija ANTES de
+    // impuesto — con IVA/INC exclusivo eso YA es la base neta (sin cambios,
+    // caso histórico). Con impuesto INCLUIDO, ese mismo número es el precio
+    // FINAL ya resuelto (F-011, `tax-inclusive-math.util.ts`: "el input
+    // finalPrice es el precio FINAL ya resuelto (sale/tier/override). Nunca
+    // se despeja sobre base_price crudo"): la tarifa fija un precio de
+    // góndola, no una base gravable. `estimateNetBase`/`estimatePriceWithTax`
+    // (`product-tax-inclusive.util.ts`) son la misma fórmula que ya usa el
+    // formulario de producto para el signo neto/bruto; acá se reutilizan
+    // para el PRECIO, no sólo para mostrar, así que el redondeo a centavos
+    // ocurre UNA sola vez, abajo, sobre el resultado final — nunca sobre un
+    // intermedio. Cuando `additionalRate` es 0 (caso de producción real: INC
+    // 8% inclusivo sin impuesto adicional, tienda 105), `finalUnitPrice`
+    // queda IGUAL a `resolution.unitPrice` sin ninguna operación de punto
+    // flotante de por medio (suma de 0), o sea cero deriva contra el bruto
+    // que el backend compara para decidir si hubo override
+    // (`payments.service.ts:2834-2849`, tolerancia `>= 0.01`). Con impuesto
+    // adicional agregado mezclado (hoy sin casos reales — QUI-832: 0 filas
+    // cruzan tarifa aplicada + impuesto inclusivo), la deriva queda acotada a
+    // una fracción de centavo (un redondeo de la base neta multiplicado por
+    // una tasa < 1), muy por debajo de esa misma tolerancia.
+    const unitPrice = this.roundMoney(
+      estimateNetBase(resolution.unitPrice, inclusiveRate),
+    );
+    const finalUnitPrice = this.roundMoney(
+      estimatePriceWithTax(resolution.unitPrice, [
+        { rateFraction: inclusiveRate, inclusive: true },
+        { rateFraction: additionalRate, inclusive: false },
+      ]),
+    );
     const maxQuantity = this.getMaxSellableQuantity(
       product,
       variant,
@@ -2763,6 +2814,47 @@ export class PosCartService {
         return rateSum + assignmentRate;
       }, 0) || 0
     );
+  }
+
+  /**
+   * F-215 (C.8, tercera boca — 2026-09-14): reparto inclusivo/adicional de
+   * `product.tax_assignments`, mismo dato de `calculateRateSum` pero sin
+   * cegarse a `is_inclusive`. Precedencia asignación > categoría > tasa —
+   * dueño único del criterio en `product-tax-inclusive.util.ts`
+   * (`catalogInclusiveDefault`), reutilizado tal cual y no reescrito: es el
+   * mismo fallback (`categoria.is_inclusive ?? categoria.tax_rates[0]
+   * .is_inclusive ?? false`) que ya rige el formulario de producto (F-007/
+   * F-022/F-024). `assignment.is_inclusive`/`tax_categories.is_inclusive`
+   * llegan en el payload del backend (`products.service.ts` los trae con
+   * `include`, no `select`, así que ningún escalar se recorta) aunque
+   * `ProductTaxAssignment`/`TaxCategory` (pos-product.service.ts) no los
+   * declaren — misma lectura a la defensiva que ya usa
+   * `pos-custom-item-modal.component.ts:readIsInclusive`, no se amplía una
+   * interfaz de otro dueño.
+   */
+  private calculateInclusiveRateSplit(product: any): {
+    inclusiveRate: number;
+    additionalRate: number;
+  } {
+    let inclusiveRate = 0;
+    let additionalRate = 0;
+    for (const assignment of product.tax_assignments ?? []) {
+      const rates = assignment?.tax_categories?.tax_rates ?? [];
+      const assignmentRate = rates.reduce(
+        (sum: number, tr: any) => sum + parseFloat(tr?.rate || '0'),
+        0,
+      );
+      if (assignmentRate === 0) continue;
+      const isInclusive =
+        assignment?.is_inclusive ??
+        catalogInclusiveDefault(assignment?.tax_categories);
+      if (isInclusive) {
+        inclusiveRate += assignmentRate;
+      } else {
+        additionalRate += assignmentRate;
+      }
+    }
+    return { inclusiveRate, additionalRate };
   }
 
   private calculateTaxCategoryRate(

@@ -90,6 +90,11 @@ describe('PosCartService — loadFromOrder (editor hydration)', () => {
           provide: InvoicingService,
           useValue: { getPosUvtThreshold: () => of({ data: null }) },
         },
+        // `PosCartService` inyecta `AuthFacade` (pos-cart.service.ts:89), que
+        // a su vez inyecta el `Store` de NgRx. Sin este doble, el TestBed
+        // instancia el facade real y muere con NG0201 antes de llegar a la
+        // aserción. Mismo doble que ya usan los demás describes del archivo.
+        { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
       ],
     });
 
@@ -241,6 +246,11 @@ describe('PosCartService — removeFromCart (modo adoptado)', () => {
           provide: InvoicingService,
           useValue: { getPosUvtThreshold: () => of({ data: null }) },
         },
+        // `PosCartService` inyecta `AuthFacade` (pos-cart.service.ts:89), que
+        // a su vez inyecta el `Store` de NgRx. Sin este doble, el TestBed
+        // instancia el facade real y muere con NG0201 antes de llegar a la
+        // aserción. Mismo doble que ya usan los demás describes del archivo.
+        { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
       ],
     });
 
@@ -677,6 +687,186 @@ describe('PosCartService — precio con impuesto incluido al repetir producto', 
     service.addToCart({ product, quantity: 1 }).subscribe((state) => {
       expect(state.items[0].finalPrice).toBe(11900);
       done();
+    });
+  });
+});
+
+/**
+ * CP-pos-exclusive-tax-double-charge — C.8, tercera boca (2026-09-14).
+ *
+ * `processApplyTierToCartItem` pasaba `calculateRateSum(product)` (ciego a
+ * `is_inclusive`) como `taxRate` a `PriceResolverService.resolveWithTier`,
+ * que suma `unitPrice*(1+taxRate)` sin mirar si la tasa ya vive dentro del
+ * precio. Con una tarifa de cliente fijando 15.000 sobre un producto con IVA/
+ * INC INCLUIDO del 8 %, el resultado era `unitPrice` 15.000 (mal: la base
+ * neta real es 13.888,89) y `unitPriceWithTax` 16.200 (mal: el bruto ya es
+ * 15.000, no crece). El caso EXCLUSIVO (19 %) ya funcionaba bien y sirve de
+ * regresión negativa.
+ *
+ * Se usa el `PriceResolverService` REAL (no un stub) porque no tiene
+ * dependencias propias y es exactamente la pieza cuyo contrato con el nuevo
+ * reparto neto/bruto hay que validar de punta a punta.
+ */
+describe('PosCartService — tarifa de cliente con impuesto incluido (C.8, tercera boca)', () => {
+  let service: PosCartService;
+
+  const buildTieredProduct = (
+    taxAssignments: any[],
+    productOverrides: Record<string, unknown> = {},
+  ) =>
+    ({
+      id: 7001,
+      name: 'Producto con tarifa Mayorista',
+      sku: 'MAY-01',
+      price: 20000, // base_price sin tarifa — irrelevante, la tarifa fija 15.000
+      final_price: 20000,
+      stock: 0,
+      track_inventory: false,
+      isActive: true,
+      has_variants: false,
+      has_multiple_price_tiers: true,
+      enabled_price_tier_ids: [501],
+      product_variants: [],
+      tax_assignments: taxAssignments,
+      ...productOverrides,
+    }) as any;
+
+  const mayoristaTier = { id: 501, name: 'Mayorista', discount_percentage: 0 } as any;
+  const overrideAt15000 = [
+    { variant_id: null, price_tier_id: 501, override_price: 15000, override_units_per_package: null },
+  ] as any;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        PosCartService,
+        PriceResolverService, // real: sin dependencias, es la pieza bajo prueba
+        { provide: PosProductService, useValue: { getProductById: () => of(null) } },
+        { provide: PosApiService, useValue: {} },
+        {
+          provide: PosSaleUnitService,
+          useValue: {
+            configFor: () => ({
+              priceUnitQuantity: 1,
+              unitsPerCapture: 1,
+              captureUnit: null,
+            }),
+          },
+        },
+        { provide: PriceTierCacheService, useValue: {} },
+        {
+          provide: WithholdingTaxService,
+          useValue: {
+            previewWithholding: () => of({ lines: [], total_withholding: 0 }),
+          },
+        },
+        { provide: CurrencyFormatService, useValue: {} },
+        {
+          provide: InvoicingService,
+          useValue: { getPosUvtThreshold: () => of({ data: null }) },
+        },
+        { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+      ],
+    });
+    service = TestBed.inject(PosCartService);
+  });
+
+  it('IVA/INC INCLUIDO del 8%: la tarifa de 15.000 es el bruto — no crece, y la base neta despeja a 13.888,89', (done) => {
+    const product = buildTieredProduct([
+      {
+        product_id: 7001,
+        tax_category_id: 96,
+        is_inclusive: true,
+        tax_categories: {
+          id: 96,
+          name: 'INC',
+          is_inclusive: true,
+          tax_rates: [{ id: 68, rate: '0.08', is_inclusive: false }],
+        },
+      },
+    ]);
+
+    service.addToCart({ product, quantity: 1 }).subscribe((added) => {
+      const itemId = added.items[0].id;
+      service
+        .applyTierToCartItem(itemId, mayoristaTier, overrideAt15000)
+        .subscribe((state) => {
+          const item = state.items[0];
+          expect(item.finalPrice).toBe(15000);
+          expect(item.unitPrice).toBe(13888.89);
+          done();
+        });
+    });
+  });
+
+  it('IVA EXCLUSIVO del 19% (regresión): la tarifa de 15.000 sigue siendo la base neta y el bruto sube a 17.850', (done) => {
+    const product = buildTieredProduct([
+      {
+        product_id: 7001,
+        tax_category_id: 1,
+        is_inclusive: false,
+        tax_categories: {
+          id: 1,
+          name: 'IVA',
+          is_inclusive: false,
+          tax_rates: [{ id: 1, rate: '0.19', is_inclusive: false }],
+        },
+      },
+    ]);
+
+    service.addToCart({ product, quantity: 1 }).subscribe((added) => {
+      const itemId = added.items[0].id;
+      service
+        .applyTierToCartItem(itemId, mayoristaTier, overrideAt15000)
+        .subscribe((state) => {
+          const item = state.items[0];
+          expect(item.unitPrice).toBe(15000);
+          expect(item.finalPrice).toBe(17850);
+          done();
+        });
+    });
+  });
+
+  it('mixto — INC 8% incluido + IVA 19% adicional: el bruto de tarifa no se pierde y la base neta despeja sólo lo inclusivo', (done) => {
+    // Sin casos reales hoy (QUI-832: 0 filas cruzan tarifa aplicada + impuesto
+    // inclusivo en toda la base), pero la fórmula debe sostenerse si aparece.
+    const product = buildTieredProduct([
+      {
+        product_id: 7001,
+        tax_category_id: 96,
+        is_inclusive: true,
+        tax_categories: {
+          id: 96,
+          name: 'INC',
+          is_inclusive: true,
+          tax_rates: [{ id: 68, rate: '0.08', is_inclusive: false }],
+        },
+      },
+      {
+        product_id: 7001,
+        tax_category_id: 1,
+        is_inclusive: false,
+        tax_categories: {
+          id: 1,
+          name: 'IVA',
+          is_inclusive: false,
+          tax_rates: [{ id: 1, rate: '0.19', is_inclusive: false }],
+        },
+      },
+    ]);
+
+    service.addToCart({ product, quantity: 1 }).subscribe((added) => {
+      const itemId = added.items[0].id;
+      service
+        .applyTierToCartItem(itemId, mayoristaTier, overrideAt15000)
+        .subscribe((state) => {
+          const item = state.items[0];
+          // netBase = 15.000 / 1.08 = 13.888,888... → 13.888,89
+          expect(item.unitPrice).toBe(13888.89);
+          // bruto = 15.000 (INC ya adentro) + 13.888,89 × 0,19 = 17.638,89
+          expect(item.finalPrice).toBe(17638.89);
+          done();
+        });
     });
   });
 });
