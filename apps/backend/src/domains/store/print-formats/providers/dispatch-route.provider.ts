@@ -120,11 +120,19 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
         state_label: 'Despachada',
         notes: 'Planilla demo con 4 paradas y 1 anulada.',
       },
-      // C.2 (ADR-12, G-13) — irrelevante en la práctica: no hay
-      // `unit_price`/`total_price` en este formato (`items: []` siempre).
-      // `taxable_base`/`false` por default de R-2: no hay settings de
-      // tienda/organización en memoria.
-      money_basis: 'taxable_base',
+      // F-213 (C.3, minor — revisión 2026-09-14): este formato SIEMPRE tiene
+      // `tax_total === 0` e `items: []` (no es un documento de línea a línea,
+      // agrega COD de varias remisiones en `grand_total`). Con
+      // `money_basis: 'taxable_base'` la regla anti-huérfana de §5.3 SÍ
+      // autoriza la fila «Subtotal» cuando `taxTotal === 0` — y el resultado
+      // era «Subtotal: $0» junto a un TOTAL real, sin relación entre ambos.
+      // `'gross'` suprime Subtotal e Impuesto enteros (y no deja nota «IVA
+      // incluido» porque `prints_vat_breakdown` es `false`): sólo queda
+      // TOTAL, que es la única cifra que esta planilla puede respaldar.
+      // C.2 ya marcaba esta elección como «irrelevante» para este formato;
+      // F-213 prueba que no lo es, y resuelve la ambigüedad a favor de
+      // `'gross'` sin tocar el compositor compartido ni las plantillas.
+      money_basis: 'gross',
       prints_vat_breakdown: false,
       items: [],
       taxes: [],
@@ -270,8 +278,8 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
         state_label: route.status,
         notes: route.notes || undefined,
       },
-      // C.2 (ADR-12, G-13) — ver mismo comentario en `getSampleData`.
-      money_basis: 'taxable_base',
+      // F-213 (C.3, minor) — ver mismo comentario en `getSampleData`.
+      money_basis: 'gross',
       prints_vat_breakdown: false,
       items: [],
       taxes: [],

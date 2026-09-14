@@ -495,7 +495,15 @@
             }
           </div>
 
-          <div class="summary-details" [class.expanded]="summaryExpanded()">
+          <!-- F-134 (C.9, major — revisión 2026-09-14): Subtotal/Impuestos/
+               Descuento/Envío se recalculan sin anunciarse a lectores de
+               pantalla. `aria-live` + `aria-atomic` sin tocar layout/copy. -->
+          <div
+            class="summary-details"
+            [class.expanded]="summaryExpanded()"
+            aria-live="polite"
+            aria-atomic="true"
+          >
             <div class="summary-row">
               <span>Productos</span>
               <span class="summary-value">{{ cartState()?.summary?.itemCount || 0 }}</span>
@@ -528,7 +536,8 @@
             }
           </div>
 
-          <div class="total-section">
+          <!-- F-134 (C.9, major) -->
+          <div class="total-section" aria-live="polite" aria-atomic="true">
             <p class="total-label">Total a Pagar</p>
             <p class="total-amount">{{ totalToPay() | currency }}</p>
           </div>
@@ -560,7 +569,8 @@
     <!-- Vista desktop: Total + acciones completas (Cancelar / Anterior /
          Guardar borrador / Siguiente|Confirmar). -->
     <div class="footer-desktop">
-      <div class="footer-left">
+      <!-- F-134 (C.9, major) -->
+      <div class="footer-left" aria-live="polite" aria-atomic="true">
         <span class="footer-total-label">Total</span>
         <span class="footer-total-amount">{{ totalToPay() | currency }}</span>
       </div>

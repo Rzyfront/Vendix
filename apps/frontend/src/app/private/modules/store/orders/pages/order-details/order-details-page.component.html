@@ -867,7 +867,15 @@
 	                    </div>
 
                     <!-- Price -->
+                    <!-- F-136 (C.9, major — revisión 2026-09-14): antes eran
+                         dos cifras sin una sola palabra que las distinguiera
+                         (sólo tamaño y color). Se agrega un rótulo visible
+                         para la cifra ambigua y uno para lector de pantalla
+                         en la segunda, sin tocar el layout existente. -->
                     <div class="text-right flex-shrink-0">
+                      <p class="text-[10px] font-medium uppercase tracking-wide text-gray-400 leading-none">
+                        Total línea
+                      </p>
                       <p class="font-bold text-gray-900 text-sm sm:text-lg">
                         {{
                           (item.final_total_price ?? item.total_price) || 0
@@ -875,7 +883,7 @@
                         }}
                       </p>
                       <p class="text-xs text-gray-500">
-                        {{ item.quantity }} x
+                        <span class="sr-only">Precio unitario: </span>{{ item.quantity }} x
                         {{
                           (item.final_unit_price ?? item.unit_price) || 0
                             | currency

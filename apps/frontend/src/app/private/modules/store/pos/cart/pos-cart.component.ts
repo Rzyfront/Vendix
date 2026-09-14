@@ -121,7 +121,11 @@ import {
         </div>
 
         <!-- Totals Row (High Contrast) -->
-        <div class="px-3 py-3 bg-muted/20">
+        <!-- F-134 (C.9, major — revisión 2026-09-14): Subtotal/Impuestos/Total
+             se recalculan por acción del cajero (cambio de cantidad, cupón,
+             etc.) y no se anunciaban a lectores de pantalla. 'aria-live' +
+             'aria-atomic' sin cambiar el layout ni el copy existente. -->
+        <div class="px-3 py-3 bg-muted/20" aria-live="polite" aria-atomic="true">
           <div class="space-y-1.5 mb-4">
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Subtotal</span>
@@ -656,7 +660,13 @@ import {
                     </p>
                   }
                   <div class="flex items-center gap-2 mt-0.5">
-                    <span class="text-[10px] text-text-muted">
+                    <!-- F-137 (C.9, major — revisión 2026-09-14): 'text-text-muted'
+                         (10px) rinde 3,27:1, bajo el mínimo AA (4,5:1) que el
+                         propio repo se exige (skills/vendix-ui-ux/SKILL.md:51)
+                         para una cifra que decide un cobro (la base gravable).
+                         '#5C6672' es el mismo tono que theme.service.ts:437 ya
+                         valida en ~4,6:1; se sube además a 12px. -->
+                    <span class="text-xs text-[#5C6672]">
                       Base: {{ formatCurrency(item.unitPrice)
                       }}{{ unitPriceSuffix(item) }}
                     </span>
@@ -842,6 +852,13 @@ import {
                       </button>
                     } @else {
                       <div class="flex flex-col gap-0.5">
+                        <!-- F-141 (C.9, minor — revisión 2026-09-14): 'sm' mide
+                             28px (bajo los 44px que skills/vendix-ui-ux/SKILL.md:25
+                             exige para blancos táctiles). 'md' sólo llega a 36px;
+                             'lg' es el único tamaño del propio componente que
+                             cumple 44px, así que es el que se usa acá — sin
+                             tocar el default compartido 'sm' que usan otros
+                             consumidores. -->
                         <app-quantity-control
                           [value]="item.quantity"
                           [min]="1"
@@ -850,7 +867,7 @@ import {
                           "
                           [unitsPerPackage]="getRequiredStockPerUnit(item)"
                           [editable]="true"
-                          [size]="'sm'"
+                          [size]="'lg'"
                           (valueChange)="updateQuantity(item.id, $event)"
                           (valueClamped)="onQuantityClamped(item, $event)"
                         ></app-quantity-control>
@@ -863,7 +880,13 @@ import {
                     }
                   </div>
                   <div class="flex shrink-0 items-center justify-end gap-2">
-                    <span class="text-sm font-extrabold leading-none text-primary">
+                    <!-- F-134 (C.9, major): cifra de línea sin nombre; el
+                         'aria-label' da el mismo contexto que un lector de
+                         pantalla necesita, sin agregar texto visible nuevo. -->
+                    <span
+                      class="text-sm font-extrabold leading-none text-primary"
+                      [attr.aria-label]="'Total de línea: ' + formatCurrency(item.totalPrice)"
+                    >
                       {{ formatCurrency(item.totalPrice) }}
                     </span>
                     @if (item.itemType !== 'custom' && canEditItemPrice(item)) {
