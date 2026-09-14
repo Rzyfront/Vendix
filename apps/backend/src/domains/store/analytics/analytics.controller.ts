@@ -830,6 +830,23 @@ export class AnalyticsController {
     return this.getAccountsReceivable(query);
   }
 
+  @Get('customers/receivable/summary')
+  @Permissions('store:analytics:read')
+  async getAccountsReceivableSummary(@Query() query: AnalyticsQueryDto) {
+    const result =
+      await this.customers_analytics_service.getAccountsReceivableSummary(query);
+    return this.response_service.success(
+      result,
+      'Resumen de cuentas por cobrar obtenido',
+    );
+  }
+
+  @Get('customers/receivables/summary')
+  @Permissions('store:analytics:read')
+  async getAccountsReceivablesSummaryAlias(@Query() query: AnalyticsQueryDto) {
+    return this.getAccountsReceivableSummary(query);
+  }
+
   @Get('customers/receivable/export')
   @Permissions('store:analytics:read')
   async exportAccountsReceivable(

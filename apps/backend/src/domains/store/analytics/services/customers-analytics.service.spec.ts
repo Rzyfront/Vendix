@@ -14,6 +14,7 @@ type MockStorePrismaService = {
   accounts_receivable?: {
     count: jest.Mock;
     findMany: jest.Mock;
+    aggregate: jest.Mock;
   };
   order_installments?: {
     findMany: jest.Mock;
@@ -203,6 +204,7 @@ describe('CustomersAnalyticsService.getAccountsReceivable (QUI-540)', () => {
       accounts_receivable: {
         count: jest.fn(),
         findMany: jest.fn(),
+        aggregate: jest.fn(),
       },
       order_installments: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -366,6 +368,49 @@ describe('CustomersAnalyticsService.getAccountsReceivable (QUI-540)', () => {
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue(null as any);
 
     await expect(service.getAccountsReceivable({} as any)).rejects.toThrow();
+  });
+
+  it('calculates executive summary across the full portfolio with aging distribution', async () => {
+    prisma.accounts_receivable!.aggregate.mockResolvedValue({
+      _sum: {
+        original_amount: 150000,
+        paid_amount: 50000,
+        balance: 100000,
+      },
+      _count: 2,
+    });
+
+    const now = new Date();
+    const mockAllReceivables = [
+      {
+        id: 1,
+        source_type: 'order',
+        source_id: 10,
+        balance: 60000,
+        due_date: new Date(now.getTime() - 10 * 86400000), // 10 days overdue -> '0-30'
+        days_overdue: 10,
+      },
+      {
+        id: 2,
+        source_type: 'order',
+        source_id: 11,
+        balance: 40000,
+        due_date: new Date(now.getTime() - 45 * 86400000), // 45 days overdue -> '31-60'
+        days_overdue: 45,
+      },
+    ];
+    prisma.accounts_receivable!.findMany.mockResolvedValue(mockAllReceivables);
+
+    const summary = await service.getAccountsReceivableSummary();
+
+    expect(summary.total_balance).toBe(100000);
+    expect(summary.total_original).toBe(150000);
+    expect(summary.total_paid).toBe(50000);
+    expect(summary.total_documents).toBe(2);
+    expect(summary.bucket_totals['0-30']).toBe(60000);
+    expect(summary.bucket_totals['31-60']).toBe(40000);
+    expect(summary.bucket_counts['0-30']).toBe(1);
+    expect(summary.bucket_counts['31-60']).toBe(1);
   });
 });
 

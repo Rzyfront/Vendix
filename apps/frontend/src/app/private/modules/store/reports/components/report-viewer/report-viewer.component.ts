@@ -65,7 +65,8 @@ function formatCellValue(value: any, type?: string, key?: string): string {
     return statusMap[String(value).toLowerCase()] || String(value);
   }
   if (type === 'date') {
-    return formatDateOnlyUTC(value);
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? String(value) : formatDateOnlyUTC(value);
   }
   if (type !== 'currency' && type !== 'percentage' && type !== 'number') {
     return String(value);

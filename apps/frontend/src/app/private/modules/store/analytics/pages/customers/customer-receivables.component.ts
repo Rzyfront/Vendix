@@ -31,7 +31,10 @@ import {
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { AnalyticsService } from '../../services/analytics.service';
-import { CustomerReceivableRow } from '../../interfaces/customers-analytics.interface';
+import {
+  CustomerReceivableRow,
+  CustomerReceivablesSummary,
+} from '../../interfaces/customers-analytics.interface';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
@@ -59,6 +62,7 @@ export class CustomerReceivablesComponent implements OnInit {
   private readonly toastService = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
 
+  readonly summary = signal<CustomerReceivablesSummary | null>(null);
   readonly rows = signal<CustomerReceivableRow[]>([]);
   readonly total = signal<number>(0);
   readonly page = signal<number>(1);
@@ -71,22 +75,45 @@ export class CustomerReceivablesComponent implements OnInit {
     Math.max(1, Math.ceil(this.total() / this.limit())),
   );
 
-  readonly totalBalance = computed(() =>
+  readonly totalBalance = computed(() => {
+    const s = this.summary();
+    if (s) return s.total_balance;
+    return this.rows().reduce((acc, row) => acc + (Number(row.balance) || 0), 0);
+  });
+
+  readonly totalOriginal = computed(() => {
+    const s = this.summary();
+    if (s) return s.total_original;
+    return this.rows().reduce(
+      (acc, row) => acc + (Number(row.original_amount) || 0),
+      0,
+    );
+  });
+
+  readonly totalPaid = computed(() => {
+    const s = this.summary();
+    if (s) return s.total_paid;
+    return this.rows().reduce((acc, row) => acc + (Number(row.paid_amount) || 0), 0);
+  });
+
+  readonly pageBalance = computed(() =>
     this.rows().reduce((acc, row) => acc + (Number(row.balance) || 0), 0),
   );
 
-  readonly totalOriginal = computed(() =>
+  readonly pageOriginal = computed(() =>
     this.rows().reduce(
       (acc, row) => acc + (Number(row.original_amount) || 0),
       0,
     ),
   );
 
-  readonly totalPaid = computed(() =>
+  readonly pagePaid = computed(() =>
     this.rows().reduce((acc, row) => acc + (Number(row.paid_amount) || 0), 0),
   );
 
   readonly bucketTotals = computed(() => {
+    const s = this.summary();
+    if (s?.bucket_totals) return s.bucket_totals;
     const totals: Record<string, number> = {
       '0-30': 0,
       '31-60': 0,
@@ -101,6 +128,8 @@ export class CustomerReceivablesComponent implements OnInit {
   });
 
   readonly bucketCounts = computed(() => {
+    const s = this.summary();
+    if (s?.bucket_counts) return s.bucket_counts;
     const counts: Record<string, number> = {
       '0-30': 0,
       '31-60': 0,
@@ -128,7 +157,32 @@ export class CustomerReceivablesComponent implements OnInit {
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
+    this.loadSummary();
     this.loadData();
+  }
+
+  loadSummary(): void {
+    this.analyticsService
+      .getCustomerReceivablesSummary()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res: any) => {
+          const sumData = res?.data ?? res;
+          if (sumData) {
+            this.summary.set(sumData);
+            if (
+              typeof sumData.total_documents === 'number' &&
+              sumData.total_documents > 0
+            ) {
+              this.total.set(sumData.total_documents);
+            }
+            this.updateAgingChartFromSummary(sumData);
+          }
+        },
+        error: () => {
+          // Fallback a gráfico por página si summary falla
+        },
+      });
   }
 
   loadData(): void {
@@ -154,14 +208,18 @@ export class CustomerReceivablesComponent implements OnInit {
                 : list.length;
 
           this.rows.set(list);
-          this.total.set(totalCount);
-          this.updateAgingChart(list);
+          if (!this.summary()) {
+            this.total.set(totalCount);
+            this.updateAgingChart(list);
+          }
           this.loading.set(false);
         },
         error: () => {
           this.rows.set([]);
-          this.total.set(0);
-          this.updateAgingChart([]);
+          if (!this.summary()) {
+            this.total.set(0);
+            this.updateAgingChart([]);
+          }
           this.loading.set(false);
           this.toastService.error(
             'Error al cargar las cuentas por cobrar de clientes',
@@ -209,6 +267,22 @@ export class CustomerReceivablesComponent implements OnInit {
       });
   }
 
+  private updateAgingChartFromSummary(summary: CustomerReceivablesSummary): void {
+    const buckets: Record<string, number> = summary.bucket_totals || {
+      '0-30': 0,
+      '31-60': 0,
+      '61-90': 0,
+      '90+': 0,
+    };
+    const counts: Record<string, number> = summary.bucket_counts || {
+      '0-30': 0,
+      '31-60': 0,
+      '61-90': 0,
+      '90+': 0,
+    };
+    this.renderAgingChart(buckets, counts);
+  }
+
   private updateAgingChart(data: CustomerReceivableRow[]): void {
     const buckets: Record<string, number> = {
       '0-30': 0,
@@ -229,6 +303,13 @@ export class CustomerReceivablesComponent implements OnInit {
       counts[b] = (counts[b] || 0) + 1;
     }
 
+    this.renderAgingChart(buckets, counts);
+  }
+
+  private renderAgingChart(
+    buckets: Record<string, number>,
+    counts: Record<string, number>,
+  ): void {
     const bucketColors: Record<string, string> = {
       '0-30': '#10b981',
       '31-60': '#3b82f6',
@@ -244,7 +325,7 @@ export class CustomerReceivablesComponent implements OnInit {
 
     const categories = Object.keys(buckets).map((k) => bucketNames[k]);
     const barValues = Object.keys(buckets).map((k) => ({
-      value: Math.round(buckets[k] * 100) / 100,
+      value: Math.round((buckets[k] || 0) * 100) / 100,
       itemStyle: { color: bucketColors[k], borderRadius: [6, 6, 0, 0] },
       bucketKey: k,
     }));

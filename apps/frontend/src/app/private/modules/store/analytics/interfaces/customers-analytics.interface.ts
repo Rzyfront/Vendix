@@ -85,3 +85,12 @@ export interface CustomerReceivableRow {
   installment_total?: number | null;
 }
 
+export interface CustomerReceivablesSummary {
+  total_balance: number;
+  total_original: number;
+  total_paid: number;
+  total_documents: number;
+  bucket_totals: Record<string, number>;
+  bucket_counts: Record<string, number>;
+}
+

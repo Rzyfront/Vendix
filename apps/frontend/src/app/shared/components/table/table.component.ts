@@ -136,8 +136,7 @@ export class TableComponent {
       'w-full',
       'border-collapse',
       'bg-surface',
-      'table-scrollable',
-      'overflow-x-auto',
+      'overflow-hidden',
     ];
 
     const sizeClasses: Record<TableSize, string[]> = {

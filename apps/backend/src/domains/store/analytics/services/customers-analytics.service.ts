@@ -1073,6 +1073,92 @@ export class CustomersAnalyticsService {
   }
 
   /**
+   * QUI-540: Resumen ejecutivo consolidado de cuentas por cobrar para KPIs y gráfico.
+   * Calcula saldo total, monto original, recaudado, total de documentos y
+   * distribución por antigüedad sobre la totalidad de la cartera activa de la tienda.
+   */
+  async getAccountsReceivableSummary(query?: AnalyticsQueryDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id || !context.organization_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+    const where = {
+      store_id: storeId,
+      status: { in: ['open', 'partial'] },
+      balance: { gt: 0 },
+    };
+
+    const [aggregate, allReceivables] = await Promise.all([
+      this.prisma.accounts_receivable.aggregate({
+        where,
+        _sum: {
+          original_amount: true,
+          paid_amount: true,
+          balance: true,
+        },
+        _count: true,
+      }),
+      this.prisma.accounts_receivable.findMany({
+        where,
+        select: {
+          id: true,
+          source_type: true,
+          source_id: true,
+          balance: true,
+          due_date: true,
+          days_overdue: true,
+        },
+      }),
+    ]);
+
+    const now = new Date();
+    const planMap = await this.resolveInstallmentPlans(allReceivables);
+
+    const bucketTotals: Record<string, number> = {
+      '0-30': 0,
+      '31-60': 0,
+      '61-90': 0,
+      '90+': 0,
+    };
+    const bucketCounts: Record<string, number> = {
+      '0-30': 0,
+      '31-60': 0,
+      '61-90': 0,
+      '90+': 0,
+    };
+
+    for (const r of allReceivables) {
+      const plan = planMap.get(r.id);
+      const effectiveDueDate = plan?.nextDueDate || r.due_date;
+      const days =
+        r.days_overdue > 0 && !plan
+          ? r.days_overdue
+          : Math.max(0, Math.floor((now.getTime() - effectiveDueDate.getTime()) / 86400000));
+      const bucket =
+        days <= 30
+          ? '0-30'
+          : days <= 60
+            ? '31-60'
+            : days <= 90
+              ? '61-90'
+              : '90+';
+      const bal = Math.round(Number(r.balance || 0) * 100) / 100;
+      bucketTotals[bucket] = Math.round((bucketTotals[bucket] + bal) * 100) / 100;
+      bucketCounts[bucket] = (bucketCounts[bucket] || 0) + 1;
+    }
+
+    return {
+      total_balance: Math.round(Number(aggregate._sum.balance || 0) * 100) / 100,
+      total_original: Math.round(Number(aggregate._sum.original_amount || 0) * 100) / 100,
+      total_paid: Math.round(Number(aggregate._sum.paid_amount || 0) * 100) / 100,
+      total_documents: aggregate._count || 0,
+      bucket_totals: bucketTotals,
+      bucket_counts: bucketCounts,
+    };
+  }
+
+  /**
    * Exportación completa de cuentas por cobrar para Excel.
    * Sin paginación (take: 10000 de seguridad) con cálculo de antigüedad y orden due_date ASC.
    */

@@ -54,6 +54,7 @@ import {
   CustomersAnalyticsQueryDto,
   CustomersByChannel,
   CustomerReceivableRow,
+  CustomerReceivablesSummary,
 } from '../interfaces/customers-analytics.interface';
 import {
   AbandonedCartsSummary,
@@ -968,6 +969,18 @@ export class AnalyticsService {
     return this.withCache(cacheKey, () =>
       this.http.get<PaginatedResponse<CustomerReceivableRow>>(
         this.getApiUrl('customers/receivable'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  getCustomerReceivablesSummary(
+    query: Record<string, any> = {},
+  ): Observable<ApiResponse<CustomerReceivablesSummary>> {
+    const cacheKey = `customer-receivables-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<CustomerReceivablesSummary>>(
+        this.getApiUrl('customers/receivable/summary'),
         { params: this.buildParams(query) },
       ),
     );

@@ -217,16 +217,16 @@
             <tfoot class="receivables-tfoot">
               <tr>
                 <td colspan="5" class="px-4 py-3 text-right text-xs uppercase tracking-wider text-[var(--color-text-secondary)] font-semibold">
-                  Totales ({{ rows().length }} factura{{ rows().length === 1 ? '' : 's' }})
+                  Totales de la página ({{ rows().length }} factura{{ rows().length === 1 ? '' : 's' }})
                 </td>
                 <td class="px-4 py-3 text-right font-medium whitespace-nowrap text-[var(--color-text-secondary)]">
-                  {{ totalOriginal() | currency }}
+                  {{ pageOriginal() | currency }}
                 </td>
                 <td class="px-4 py-3 text-right font-medium whitespace-nowrap text-emerald-600">
-                  {{ totalPaid() | currency }}
+                  {{ pagePaid() | currency }}
                 </td>
                 <td class="px-4 py-3 text-right font-bold whitespace-nowrap text-[var(--color-text-primary)]">
-                  {{ totalBalance() | currency }}
+                  {{ pageBalance() | currency }}
                 </td>
                 <td class="px-4 py-3"></td>
               </tr>
