@@ -91,6 +91,13 @@ export class TablesFloorPageComponent implements OnInit {
     () => this.adminTablesSseService.connectionState(),
   );
   readonly sseMode = computed(() => this.adminTablesSseService.mode());
+  /**
+   * Mesa que llamó al mesero (`table_call_waiter`). Alimenta el destello
+   * dorado de 1s en `TableFloorMapComponent` vía `[callingTableId]`.
+   */
+  readonly callingTableId = computed(
+    () => this.adminTablesSseService.waiterCall()?.table_id ?? null,
+  );
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     {
