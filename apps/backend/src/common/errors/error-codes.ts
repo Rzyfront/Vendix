@@ -5863,6 +5863,19 @@ export const ErrorCodes = {
     devMessage:
       'La landing de esta tienda no está disponible para recibir mensajes de contacto.',
   },
+
+  // D.13 (plan CP-pos-exclusive-tax-double-charge, QUI-832) — compuerta G3,
+  // `order-arithmetic.guard.ts`. Registrado y NO cableado a ningún escritor
+  // todavía: la bandera `ORDER_ARITHMETIC_GUARD_ENABLED` nace en `false` (ver
+  // registry/err.md ERR-24 del bundle del plan). Sólo puede lanzarse si
+  // alguien enciende la bandera Y llama a `assertOrderLineTotalInvariant`
+  // explícitamente.
+  ORD_LINE_TOTAL_MISMATCH_001: {
+    code: 'ORD_LINE_TOTAL_MISMATCH_001',
+    httpStatus: 422,
+    devMessage:
+      'total_price de la línea no cuadra con unit_price × line_units fuera de tolerancia (I-1).',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

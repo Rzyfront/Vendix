@@ -408,12 +408,33 @@ jobs:
     # Alcance, y por qué es ése: `payments` (12 specs, donde vive el doble
     # cobro), `orders` (17, el carril que persiste), `tables` (3, el carril de
     # mesa de ADR-08) y `taxes` (4, el kernel). 36 suites, 706 tests.
-    # `invoicing` queda FUERA a propósito y no por comodidad: tiene 93 specs él
-    # solo, más del doble que los otros cuatro directorios juntos. Medido: una
-    # corrida local `--runInBand` de los cinco pasó de 30 minutos sin terminar,
-    # mientras que estos cuatro tardan `real 260,31 s` (36/36 suites, 706/706
-    # tests, verde, 2026-09-13). El carril de facturación se verifica por
-    # archivo en los pasos C.x del plan, que nombran sus specs uno a uno.
+    #
+    # F-211 (D.13, plan CP-pos-exclusive-tax-double-charge, QUI-832,
+    # 2026-09-14): `print-formats` (35 specs) e `invoicing` (93 specs) se
+    # SUMAN a este job. Todo el trabajo de C.3/C.4/C.5/C.6 de ese plan
+    # -- la regla anti-huérfana del compositor, las etiquetas, el borrado de
+    # los cuatro emisores locales, la paridad del ticket -- vive en
+    # `print-formats`, y un commit de 34 archivos (`491033241`) lo tocó
+    # entero sin que un solo spec de ese dominio corriera en el servidor.
+    # `invoicing` se había dejado fuera antes por su costo (ver la nota
+    # histórica de abajo), y además tenía 4 rojos preexistentes en
+    # `invoice-delivery.service.spec.ts` -- reproducidos el 2026-09-14 sobre
+    # HEAD `58ac6793b` limpio en un worktree efímero, así que no eran ruido
+    # de este plan. Encender la compuerta sobre un rojo permanente es
+    # garantizar que alguien la vuelva a apagar; por eso el orden fue
+    # arreglar esos 4 primero (mismo PR) y sólo entonces añadir el paso.
+    # Con eso: 164 suites en este job (36 + 35 + 93), verde.
+    #
+    # Nota histórica -- por qué `invoicing` se había dejado fuera: tiene 93
+    # specs él solo, más que los otros cuatro directorios originales juntos.
+    # Medido entonces: una corrida local `--runInBand` de los cinco pasó de 30
+    # minutos sin terminar, mientras que los cuatro originales tardaban
+    # `real 260,31 s` (36/36 suites, 706/706 tests, verde, 2026-09-13). Sigue
+    # siendo cierto que el directorio es pesado; lo que cambió es que dejarlo
+    # fuera de CI significaba que el dominio que este plan reescribe no tenía
+    # puerta. Si el tiempo total del job se vuelve un problema real, la salida
+    # es partir el job con `strategy: matrix` (ver más abajo), no volver a
+    # sacar `invoicing`.
     #
     # Si algún día este job roza el timeout, la salida NO es apagarlo -- eso
     # devuelve el repo al estado que F-113 describe. Es partirlo por dominio
@@ -468,7 +489,7 @@ jobs:
       # un directorio.
       #
       # F1 (ronda 3, plan CP-pos-exclusive-tax-double-charge, QUI-832): estos
-      # cuatro `run:` van SEPARADOS a propósito, uno por directorio, y no es
+      # `run:` van SEPARADOS a propósito, uno por directorio, y no es
       # redundancia para "juntarlos de nuevo" -- medido: los argumentos
       # posicionales de jest son un OR de regex, no una lista de rutas. Con una
       # ruta buena y una mala en la MISMA invocación, jest corre las que casan y
@@ -477,9 +498,10 @@ jobs:
       #     -> EXIT=0 (101 tests, corrió sólo `taxes`)
       #   npx jest --runInBand src/domains/store/tablez
       #     -> EXIT=1 ("0 matches")
-      # Con las cuatro rutas juntas en un solo `run:`, un rename de directorio
-      # (o un typo) deja la compuerta midiendo 3 de 4 en verde. Separados, cada
-      # `name:` dice en el log de Checks cuál falló sin abrir nada.
+      # Con todas las rutas juntas en un solo `run:`, un rename de directorio
+      # (o un typo) deja la compuerta midiendo N-1 de N en verde. Separados,
+      # cada `name:` dice en el log de Checks cuál falló sin abrir nada. F-211
+      # suma `print-formats` e `invoicing` a la misma lista, mismo patrón.
       # G5 (ronda 3, plan CP-pos-exclusive-tax-double-charge, QUI-832): cada
       # paso escribe SU log a un archivo además de a stdout, para que comparar
       # dos corridas no exija leer el log crudo del job a ojo (se sube como
@@ -514,7 +536,28 @@ jobs:
           mkdir -p jest-logs
           set -o pipefail
           npm run test:path -- src/domains/store/taxes 2>&1 | tee jest-logs/taxes.log
-      # G5: artefacto de los cuatro logs de arriba. `if: always()` para que
+      # F-211 (D.13, QUI-832, 2026-09-14): el dominio que este plan reescribe
+      # (C.3/C.4/C.5/C.6 -- compositor, etiquetas, emisores locales, paridad
+      # de ticket) no tenía puerta en CI. Mismo patrón que los cuatro pasos
+      # de arriba.
+      - name: jest — print-formats
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/print-formats 2>&1 | tee jest-logs/print-formats.log
+      # F-211 (D.13, QUI-832, 2026-09-14): antes fuera del job por costo (ver
+      # la nota histórica más arriba). Sus 4 rojos preexistentes en
+      # `invoice-delivery.service.spec.ts` se arreglaron en el mismo PR que
+      # añade este paso -- nunca se encendió una compuerta sobre un rojo
+      # permanente.
+      - name: jest — invoicing
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/invoicing 2>&1 | tee jest-logs/invoicing.log
+      # G5: artefacto de los logs de arriba. `if: always()` para que
       # quede subido incluso si un paso de jest falló. Acción fijada por
       # etiqueta (`@v4`), igual que `actions/checkout` y `actions/setup-node`
       # en este mismo archivo — no se introduce una convención nueva aquí.
@@ -527,19 +570,22 @@ jobs:
           retention-days: 14
       # Sin esto el job no deja ningún rastro legible en la pestaña Checks sin
       # abrir el log crudo paso por paso. `if: always()` para que el resumen
-      # aparezca también cuando uno de los cuatro pasos de arriba falló.
+      # aparezca también cuando uno de los pasos de arriba falló. F-211
+      # (D.13, QUI-832, 2026-09-14): la lista y el `find` de abajo se
+      # ensanchan a los seis subdominios reales del job, no sólo los cuatro
+      # originales.
       - name: Resumen en Checks
         if: always()
         working-directory: apps/backend
         run: |
           echo "### Backend Tests — carril POS" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Corre 4 de los $(find src/domains -mindepth 2 -maxdepth 2 -type d | wc -l | tr -d ' ') subdominios de \`apps/backend/src/domains\`:" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`payments\`, \`orders\`, \`tables\`, \`taxes\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "Corre 6 de los $(find src/domains -mindepth 2 -maxdepth 2 -type d | wc -l | tr -d ' ') subdominios de \`apps/backend/src/domains\`:" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`payments\`, \`orders\`, \`tables\`, \`taxes\`, \`print-formats\`, \`invoicing\`." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "| | specs |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| en esta compuerta | $(find src/domains/store/payments src/domains/store/orders src/domains/store/tables src/domains/store/taxes -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| en esta compuerta | $(find src/domains/store/payments src/domains/store/orders src/domains/store/tables src/domains/store/taxes src/domains/store/print-formats src/domains/store/invoicing -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
           echo "| en el repo | $(find src -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "El resto del backend **no se ejecuta en ningun job** (\`backend-test\` sigue en \`if: false\`)." >> "$GITHUB_STEP_SUMMARY"
