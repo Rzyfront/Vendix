@@ -168,6 +168,41 @@ export class InvoiceDataRequestsService {
   }
 
   /**
+   * C.8 (CP-pos-exclusive-tax-double-charge, ADR-06, FB-15) — `unit_price`/
+   * `total_price` siguen en la BASE (R-1: ningún lector viejo cambia de
+   * magnitud). El bruto viaja en campos ADITIVOS nuevos, derivado con el
+   * mismo fallback textual del ADR: `final_unit_price` si ya está poblado,
+   * si no `unit_price + tax_amount_item / line_units`. Mismo cálculo puro
+   * que `account.service.ts#deriveLineGross` — duplicado a propósito (no
+   * importado): ese archivo vive en el dominio `ecommerce/account` y este
+   * en `store/invoicing`, y ya hay una segunda copia local en
+   * `ecommerce-tables.service.ts` por la misma razón de no cruzar dominios
+   * para una función de 6 líneas.
+   */
+  private deriveLineGross(item: {
+    unit_price: any;
+    total_price: any;
+    tax_amount_item?: any;
+    final_unit_price?: any;
+    price_unit_quantity?: any;
+    quantity: any;
+  }): { unit_price_gross: number; line_total_gross: number } {
+    const netUnit = Number(item.unit_price ?? 0);
+    const netTotal = Number(item.total_price ?? 0);
+    const lineUnits = Number(item.price_unit_quantity ?? item.quantity ?? 1) || 1;
+    const grossUnit =
+      item.final_unit_price != null
+        ? Number(item.final_unit_price)
+        : netUnit + Number(item.tax_amount_item ?? 0) / lineUnits;
+    const multiplier = netUnit !== 0 ? netTotal / netUnit : Number(item.quantity ?? 0);
+    const grossTotal = Math.round(grossUnit * multiplier * 100) / 100;
+    return {
+      unit_price_gross: Math.round(grossUnit * 100) / 100,
+      line_total_gross: grossTotal,
+    };
+  }
+
+  /**
    * Public read-only order summary for anonymous ecommerce checkouts.
    * Unlike getByToken(), this endpoint must keep working after the invoice
    * data request is submitted/completed so guests retain purchase support.
@@ -193,6 +228,12 @@ export class InvoiceDataRequestsService {
                 unit_price: true,
                 total_price: true,
                 tax_amount_item: true,
+                // C.8 (ADR-06) — insumos del fallback de bruto derivado
+                // (`final_unit_price ?? unit_price + tax_amount_item/line_units`).
+                // Mismo campo que `account.service.ts#deriveLineGross`
+                // necesita para el mismo cálculo.
+                final_unit_price: true,
+                price_unit_quantity: true,
                 products: {
                   select: {
                     product_images: {
@@ -309,6 +350,7 @@ export class InvoiceDataRequestsService {
         unit_price: item.unit_price,
         total_price: item.total_price,
         tax_amount_item: item.tax_amount_item,
+        ...this.deriveLineGross(item as any),
         image_url: item.products?.product_images?.[0]?.image_url
           ? await this.s3Service.signUrl(item.products.product_images[0].image_url)
           : null,

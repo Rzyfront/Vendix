@@ -5,6 +5,7 @@ import {
   IsBoolean,
   IsArray,
   ArrayMinSize,
+  ArrayMaxSize,
   IsDateString,
   IsIn,
   IsEnum,
@@ -309,6 +310,12 @@ export class CreatePosPaymentDto {
    */
   @IsOptional()
   @IsArray()
+  // F-094 punto 3 — mismo carril que `AddItemsToTableSessionDto.items`
+  // (`table-session.dto.ts`): cada línea resuelve sus impuestos dentro de
+  // un `$transaction`, y este endpoint de cobro también es alcanzable sin
+  // cota previa. Mismo tope que el resto del repo
+  // (`bulk-orders.dto.ts`/`batch-create-adjustments.dto.ts`).
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => PosOrderItemDto)
   items?: PosOrderItemDto[];

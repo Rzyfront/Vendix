@@ -283,6 +283,23 @@ export class SplitOrderService {
         inventory_consumed_at_fire: boolean;
         skip_kds: boolean;
         products: { product_type: string } | null;
+        // F-048 — el split mueve la línea ENTERA a una sub-orden nueva (id
+        // distinto): sin `price_unit_quantity` el multiplicador de un plato
+        // por peso/presentación se pierde aguas abajo (cae a `quantity`
+        // plana), y sin `order_item_taxes` el desglose por-tasa desaparece
+        // del lado que quedó huérfano (el FK apunta a la línea vieja,
+        // cancelada). Se copian ambos 1:1 — es un MOVE, no un split
+        // proporcional, así que no hay nada que prorratear.
+        price_unit_quantity: number | null;
+        order_item_taxes: Array<{
+          tax_rate_id: number | null;
+          tax_name: string;
+          tax_rate: Prisma.Decimal | number;
+          tax_amount: Prisma.Decimal | number;
+          tax_type: string | null;
+          is_compound: boolean | null;
+          is_inclusive: boolean;
+        }>;
       }>;
     },
     groups: number[][],
@@ -427,7 +444,23 @@ export class SplitOrderService {
               // financial only; inventory was already consumed at fire,
               // and we must NOT let the payment path re-consume it.
               inventory_consumed_at_fire: it.inventory_consumed_at_fire,
+              price_unit_quantity: it.price_unit_quantity,
               updated_at: new Date(),
+              ...((it.order_item_taxes ?? []).length > 0
+                ? {
+                    order_item_taxes: {
+                      create: (it.order_item_taxes ?? []).map((row) => ({
+                        tax_rate_id: row.tax_rate_id,
+                        tax_name: row.tax_name,
+                        tax_rate: row.tax_rate,
+                        tax_amount: row.tax_amount,
+                        tax_type: row.tax_type as any,
+                        is_compound: row.is_compound,
+                        is_inclusive: row.is_inclusive,
+                      })),
+                    },
+                  }
+                : {}),
             },
           });
         }
@@ -539,6 +572,9 @@ export class SplitOrderService {
       include: {
         order_items: {
           orderBy: { id: 'asc' },
+          // F-048 — el desglose por-tasa viaja con la línea al moverla a la
+          // sub-orden; sin este include no hay nada que copiar.
+          include: { order_item_taxes: true },
         },
       },
     });

@@ -2444,6 +2444,18 @@ export class OrdersService {
         previousByKey.set(key, prev as any);
       }
 
+      // F-035 / F-047 (C.8, documentado y acotado, NO arreglado en este
+      // paso — mismo hueco que `updateOrderItems` § arriba en este archivo):
+      // `order_item_taxes` no tiene `onDelete` en su FK a `order_items`
+      // (Restrict/NoAction por defecto de Postgres), así que este
+      // `deleteMany` lanza P2003 en CUALQUIER orden que ya tenga desglose
+      // fiscal — y `create` deja ese desglose desde la creación
+      // (`buildOrderItemTaxesCreate`) cuando `tax_amount_item > 0`. El
+      // arreglo real (borrar `order_item_taxes` antes, recrear por línea
+      // tras el `createMany` de abajo con las tasas resueltas server-side, y
+      // un código de error propio en vez de un P2003 crudo) requiere un
+      // commit dedicado — cae fuera del `Output` declarado de C.8 (que no
+      // toca `error-codes.ts`) y no se implementa aquí.
       await tx.order_items.deleteMany({ where: { order_id: orderId } });
 
       const variantIds = dto.items

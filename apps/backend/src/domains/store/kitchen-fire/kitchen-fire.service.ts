@@ -10,6 +10,7 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
 import { FireOrderItemsDto, KitchenTicketQueryDto, ResendOrderItemsDto } from './dto';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { KdsSessionsService } from '../kds/sessions/kds-sessions.service';
+import { roundMoney2 } from '../taxes/utils/final-price.util';
 
 /**
  * Single source of truth for the kitchen-ticket payload shape returned to
@@ -2971,6 +2972,9 @@ export class KitchenFireService {
 
     const originals = await this.prisma.order_items.findMany({
       where: { id: { in: partial.map((e) => e.order_item_id) } },
+      // F-048 — el desglose (`order_item_taxes`, ADR-08) tiene que viajar a
+      // la línea nueva; sin incluirlo acá no hay nada que proporcionar.
+      include: { order_item_taxes: true },
     });
     // Tipo explicito: el Map inferido desde tuplas ensancha el valor a `{}` y todo
     // acceso a propiedades falla. Cuarta vez que aparece este patron en el repo.
@@ -3000,6 +3004,28 @@ export class KitchenFireService {
         // La linea ORIGINAL se queda con el resto SIN exclusion, y la nueva lleva
         // la excepcion. Al reves obligaria a mover la exclusion capturada al pedir
         // y a reescribir la fila que el cliente ya vio en su cuenta.
+        //
+        // F-048 (ADR-08 commit 5) — `tax_amount_item IS NULL` no es un
+        // marcador permanente: antes de este fix, la línea nueva nacía SIN
+        // `tax_rate`/`tax_amount_item` (quedaban NULL) y sin sus propias filas
+        // `order_item_taxes`, así que un normalizador que clasificara "línea
+        // pre-fix" por esa ausencia la habría re-invertido, y en paralelo la
+        // original conservaba el desglose fiscal ENTERO sobre un `total_price`
+        // ya encogido (`TAX_SUBTOTAL_MISMATCH`). Los dos importes por-unidad
+        // (`tax_rate`, `tax_amount_item`) son invariantes bajo un cambio de
+        // `quantity` — se copian tal cual; `order_item_taxes` es por-LÍNEA
+        // (DB-08) y se reparte proporcional a las unidades de cada mitad.
+        const originalTaxRows = original.order_item_taxes ?? [];
+        const proportion = qty > 0 ? remaining / qty : 0;
+        // El reparto se cierra por diferencia, no redondeando las dos mitades
+        // por separado: `roundMoney2(x*p) + roundMoney2(x*(1-p))` puede
+        // perder o ganar un centavo respecto de `x`, y ese centavo sale
+        // directo del invariante `Σ order_item_taxes = impuesto de la línea`.
+        const keptTaxById = new Map<number, number>();
+        for (const row of originalTaxRows) {
+          keptTaxById.set(row.id, roundMoney2(Number(row.tax_amount) * proportion));
+        }
+
         await tx.order_items.update({
           where: { id: original.id },
           data: {
@@ -3008,6 +3034,14 @@ export class KitchenFireService {
             updated_at: new Date(),
           },
         });
+        for (const row of originalTaxRows) {
+          await tx.order_item_taxes.update({
+            where: { id: row.id },
+            data: {
+              tax_amount: new Prisma.Decimal(keptTaxById.get(row.id) ?? 0),
+            },
+          });
+        }
 
         const created = await tx.order_items.create({
           data: {
@@ -3018,6 +3052,10 @@ export class KitchenFireService {
             quantity: units,
             unit_price: original.unit_price,
             total_price: new Prisma.Decimal(unitPrice * units),
+            tax_rate: original.tax_rate,
+            tax_amount_item: original.tax_amount_item,
+            final_unit_price: original.final_unit_price,
+            price_unit_quantity: original.price_unit_quantity,
             item_type: original.item_type,
             cost_price: original.cost_price,
             is_price_overridden: original.is_price_overridden,
@@ -3033,6 +3071,25 @@ export class KitchenFireService {
             split_from_order_item_id:
               original.split_from_order_item_id ?? original.id,
             updated_at: new Date(),
+            ...(originalTaxRows.length > 0
+              ? {
+                  order_item_taxes: {
+                    create: originalTaxRows.map((row) => ({
+                      tax_rate_id: row.tax_rate_id,
+                      tax_name: row.tax_name,
+                      tax_rate: row.tax_rate,
+                      tax_amount: new Prisma.Decimal(
+                        roundMoney2(
+                          Number(row.tax_amount) - (keptTaxById.get(row.id) ?? 0),
+                        ),
+                      ),
+                      tax_type: row.tax_type,
+                      is_compound: row.is_compound,
+                      is_inclusive: row.is_inclusive,
+                    })),
+                  },
+                }
+              : {}),
           },
         });
 
