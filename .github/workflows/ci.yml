@@ -324,12 +324,24 @@ jobs:
         # specs (NgRx Store, Breadcrumb analytics, etc.) fail in
         # origin/dev and are tracked in separate tickets — not in
         # scope of QUI-723.
+        #
+        # F-217 (QUI-832): esta lista es literal, no un patron. Mientras
+        # `pos-cart.service.spec.ts` no estuvo aca, este job se puso VERDE sin
+        # ejecutar una sola de las specs de impuesto del carrito POS — el verde
+        # decia "los 3 archivos de la lista pasan", no "el frontend pasa", y se
+        # leyo como lo segundo. Las tres bocas del IVA inclusivo (alta/fusion,
+        # tarifa de cliente) viven en ese archivo; sin este `--include` su
+        # cobertura era invisible para la compuerta. Medido local con Chrome
+        # real: 16 de 16 en verde. Toda spec nueva que deba GATEAR necesita su
+        # propia linea aca; escribirla y no agregarla es escribir un test que
+        # CI nunca corre.
         run: >-
           npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox
           --progress=false
           --include='**/interceptors/auth.interceptor.spec.ts'
           --include='**/pos/utils/document-format-hint.util.spec.ts'
           --include='**/pos/utils/phone-format-hint.util.spec.ts'
+          --include='**/pos/services/pos-cart.service.spec.ts'
 
   backend-build:
     name: Backend Build (prisma + nest)
