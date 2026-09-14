@@ -1134,7 +1134,16 @@ export class PosCartService {
   private serializeItemsForAdoptedOrder(items: CartItem[]): any[] {
     return items.map((it) => {
       const unitPrice = Number((it.unitPrice ?? 0).toFixed(2));
-      const quantity = Number(it.quantity ?? 0);
+      // F-002 (C.8, blocker — revisión 2026-09-14): el multiplicador de línea
+      // NUNCA es `quantity` a secas (ver encabezado de `line-units.util.ts`).
+      // Con producto de PESO (`quantity=1`, el peso es el multiplicador) o
+      // con escala de precio (`price_unit_quantity ≠ 1`), `unitPrice ×
+      // quantity` desincroniza `total_price`/`tax_amount_item` contra
+      // `unit_price`, el mismo defecto que F-012/F-037 ya corrigieron
+      // server-side (`orders.service.ts:2177-2198`) para el editor.
+      // `resolveLineUnits` es el mismo multiplicador que ya usa este
+      // servicio para el subtotal del carrito (`:2587`).
+      const lineUnits = resolveLineUnits(it);
       return {
         item_type: it.itemType === 'custom' ? 'custom' : 'product',
         product_id:
@@ -1150,14 +1159,20 @@ export class PosCartService {
         // (BRUTO) mientras `unit_price` de arriba es `it.unitPrice` (BASE,
         // tras el fix del monto) — dos magnitudes distintas en la misma
         // fila. `total_price` ahora queda en la MISMA magnitud que
-        // `unit_price` (DB-01: `total_price = unit_price × price_units`).
+        // `unit_price` (DB-01: `total_price = unit_price × price_units`,
+        // donde `price_units = resolveLineUnits`, no `quantity`).
         // `tax_amount_item` viaja explícito (antes no se mandaba) para que
-        // el backend no calcule `tax_amount = 0` por omisión.
-        total_price: Number((unitPrice * quantity).toFixed(2)),
+        // el backend no calcule `tax_amount = 0` por omisión. Este endpoint
+        // (`PUT /store/orders/:id/items`) suma `tax_amount_item` VERBATIM
+        // por línea sin multiplicador (`orders.service.ts:1396-1398`), así
+        // que aquí el campo viaja como total DE LÍNEA — a diferencia del
+        // editor (`pos.component.ts#buildEditorRequest`), que lo divide
+        // porque el servidor sí multiplica por su propio multiplicador.
+        total_price: Number((unitPrice * lineUnits).toFixed(2)),
         tax_amount_item: Number(
           (
             (Number(it.finalPrice ?? it.unitPrice ?? 0) - unitPrice) *
-            quantity
+            lineUnits
           ).toFixed(2),
         ),
         product_variant_id: it.variant_id ?? null,

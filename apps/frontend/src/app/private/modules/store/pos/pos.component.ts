@@ -3948,9 +3948,15 @@ export class PosComponent {
         // BRUTO (`finalUnitPrice × quantity`) mientras `unit_price` de
         // arriba es BASE — mandar ambos en la misma fila persistía
         // `order_items.total_price` bruto junto a `unit_price` neto,
-        // violando DB-01 (`total_price = unit_price × price_units`). Ahora
-        // queda en la MISMA magnitud que `unit_price`.
-        total_price: Number(item?.unitPrice ?? 0) * Number(item?.quantity ?? 0),
+        // violando DB-01 (`total_price = unit_price × price_units`, donde
+        // `price_units = resolveLineUnits`, no `quantity` — revisión
+        // 2026-09-14: `quantity` a secas desincroniza esta línea contra
+        // `tax_amount_item` de abajo, que ya usa `resolveLineUnits`, en
+        // productos de peso o con escala de precio). Ahora queda en la
+        // MISMA magnitud que `unit_price` y con el MISMO multiplicador que
+        // `tax_amount_item`.
+        total_price:
+          Number(item?.unitPrice ?? 0) * resolveLineUnits(item),
         final_unit_price: Number(item?.finalPrice ?? item?.unitPrice ?? 0),
         // F-003 (C.8, blocker) — `item?.taxAmount` es el total DE LÍNEA; el
         // editor multiplica `tax_amount_item` por el multiplicador de línea
