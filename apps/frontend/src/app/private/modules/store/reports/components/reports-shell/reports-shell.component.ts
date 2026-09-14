@@ -140,6 +140,7 @@ export class ReportsShellComponent {
     'inventory-low-stock': '/admin/analytics/inventory/overview',
     'inventory-movements': '/admin/analytics/inventory/movements',
     'inventory-movement-analysis': '/admin/analytics/inventory/movement-analysis',
+    'inventory-ingredient-consumption': '/admin/analytics/inventory/ingredient-consumption',
     // Products
     'product-performance': '/admin/analytics/products/performance',
     'product-top-sellers': '/admin/analytics/products/top-sellers',
