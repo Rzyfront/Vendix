@@ -32,6 +32,11 @@ interface TableCell {
    * mesas sin sesión activa — el template lo trata como null.
    */
   live: AdminTablesLivePayload | null;
+  /**
+   * True mientras dura el destello dorado del llamado al mesero
+   * (expira 1s después de recibirse `callingTableId`).
+   */
+  isCalling: boolean;
   /** Posición absoluta resuelta (px) usada por el lienzo. */
   x: number;
   y: number;
@@ -125,6 +130,12 @@ export class TableFloorMapComponent {
    * `tables.active_session` ya expone el id de la sesión abierta.
    */
   readonly liveCounts = input<Map<number, AdminTablesLivePayload> | null>(null);
+  /**
+   * Id de la mesa que llamó al mesero (`AdminTablesSseService.waiterCall`).
+   * OPCIONAL — sin este input no hay destello. La expiración de 1s se
+   * gestiona internamente con `setTimeout` (signals, sin NgZone).
+   */
+  readonly callingTableId = input<number | null>(null);
   readonly tableClicked = output<Table>();
   readonly tableMoved = output<TableMovedEvent>();
 
@@ -146,6 +157,10 @@ export class TableFloorMapComponent {
 
   /** Punteros activos (por id) para pan / drag / pinch. */
   private readonly pointers = new Map<number, ActivePointer>();
+
+  /** Id de la mesa con destello visible (expira 1s tras el llamado). */
+  private readonly callingVisibleId = signal<number | null>(null);
+  private callingTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Id de la mesa en drag (null = se está paneando el fondo o nada). */
   private draggingId: number | null = null;
@@ -174,6 +189,26 @@ export class TableFloorMapComponent {
   private static readonly MAX_FIT_ATTEMPTS = 5;
 
   constructor() {
+    // Destello dorado del llamado al mesero: refleja `callingTableId`
+    // en una señal interna que expira 1s después (signals + setTimeout,
+    // sin NgZone). Un llamado nuevo reinicia el temporizador.
+    effect(() => {
+      const id = this.callingTableId();
+      untracked(() => {
+        if (this.callingTimer != null) {
+          clearTimeout(this.callingTimer);
+          this.callingTimer = null;
+        }
+        this.callingVisibleId.set(id);
+        if (id != null) {
+          this.callingTimer = setTimeout(() => {
+            this.callingVisibleId.set(null);
+            this.callingTimer = null;
+          }, 1000);
+        }
+      });
+    });
+
     // Al cambiar la lista de mesas, limpiar overrides locales obsoletos.
     // Reencuadra la vista la primera vez que llegan mesas.
     effect(() => {
@@ -212,6 +247,7 @@ export class TableFloorMapComponent {
     const list = this.tables() ?? [];
     const overrides = this.localPositions();
     const liveMap = this.liveCounts();
+    const callingId = this.callingVisibleId();
     let autoIndex = 0;
     return list.map((t) => {
       const status = t.effective_status ?? t.status;
@@ -245,6 +281,7 @@ export class TableFloorMapComponent {
         isOccupied: status === 'occupied',
         guestCount: t.active_session?.guest_count ?? null,
         live,
+        isCalling: callingId != null && callingId === t.id,
         x,
         y,
       };
