@@ -227,26 +227,17 @@ describe('ProductsBulkController', () => {
       };
 
       const error = new BadRequestException('Product name is required');
-      const expectedErrorResponse = {
-        error: 'Product name is required',
-        message: 'Product name is required',
-        statusCode: 400,
-      };
 
       mockProductsBulkService.uploadProducts.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(expectedErrorResponse);
 
-      const result = await controller.uploadProducts(
-        bulkUploadDto,
-        mockRequest as any,
-      );
-
-      expect(result).toEqual(expectedErrorResponse);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Product name is required',
-        'Product name is required',
-        400,
-      );
+      // El controller ya no atrapa el error del servicio (ver comentario en
+      // uploadProducts, arriba en el controller): la excepción debe llegar
+      // intacta al filtro global, no volver envuelta en un sobre de
+      // ResponseService.
+      await expect(
+        controller.uploadProducts(bulkUploadDto, mockRequest as any),
+      ).rejects.toBe(error);
+      expect(mockResponseService.error).not.toHaveBeenCalled();
     });
 
     it('should handle database conflicts', async () => {
@@ -261,26 +252,16 @@ describe('ProductsBulkController', () => {
       };
 
       const error = new ConflictException('El SKU ya está en uso');
-      const expectedErrorResponse = {
-        error: 'El SKU ya está en uso',
-        message: 'El SKU ya está en uso',
-        statusCode: 409,
-      };
 
       mockProductsBulkService.uploadProducts.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(expectedErrorResponse);
 
-      const result = await controller.uploadProducts(
-        bulkUploadDto,
-        mockRequest as any,
-      );
-
-      expect(result).toEqual(expectedErrorResponse);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'El SKU ya está en uso',
-        'El SKU ya está en uso',
-        409,
-      );
+      // Mismo contrato que "should handle validation errors before
+      // processing": el controller deja subir la excepción al filtro
+      // global en vez de envolverla en un sobre propio.
+      await expect(
+        controller.uploadProducts(bulkUploadDto, mockRequest as any),
+      ).rejects.toBe(error);
+      expect(mockResponseService.error).not.toHaveBeenCalled();
     });
 
     it('should handle empty products array', async () => {
@@ -667,26 +648,22 @@ describe('ProductsBulkController', () => {
         mimetype: 'text/csv',
       };
 
+      const parserError = Object.assign(
+        new Error(
+          'El archivo CSV debe contener al menos una fila de encabezados y una fila de datos',
+        ),
+        { status: 400 },
+      );
       mockProductsBulkService.parseFile.mockImplementation(() => {
-        throw Object.assign(
-          new Error(
-            'El archivo CSV debe contener al menos una fila de encabezados y una fila de datos',
-          ),
-          { status: 400 },
-        );
+        throw parserError;
       });
-      mockResponseService.error.mockReturnValue({ success: false });
 
-      await controller.uploadProductsFromFile(
-        mockFile as any,
-        mockRequest as any,
-      );
-
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'El archivo CSV debe contener al menos una fila de encabezados y una fila de datos',
-        'El archivo CSV debe contener al menos una fila de encabezados y una fila de datos',
-        400,
-      );
+      // Igual que en uploadProducts: sin try/catch a propósito, el fallo del
+      // parser sube intacto al filtro global en vez de volver como envelope.
+      await expect(
+        controller.uploadProductsFromFile(mockFile as any, mockRequest as any),
+      ).rejects.toBe(parserError);
+      expect(mockResponseService.error).not.toHaveBeenCalled();
       expect(mockProductsBulkService.uploadProducts).not.toHaveBeenCalled();
     });
 

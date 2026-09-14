@@ -611,7 +611,65 @@ jobs:
           echo "| en esta compuerta | $(find src/domains/store/payments src/domains/store/orders src/domains/store/tables src/domains/store/taxes src/domains/store/print-formats src/domains/store/invoicing -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
           echo "| en el repo | $(find src -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "El resto del backend **no se ejecuta en ningun job** (\`backend-test\` sigue en \`if: false\`)." >> "$GITHUB_STEP_SUMMARY"
+          echo "El resto del backend **no se ejecuta en ningun job** salvo \`products\` (job aparte, ver \`Backend Tests (products)\`); \`backend-test\` sigue en \`if: false\`." >> "$GITHUB_STEP_SUMMARY"
+
+  backend-test-products:
+    # F-219 (plan crítico CP-pos-exclusive-tax-double-charge, QUI-832): el
+    # dominio `products` (12 specs, 250 tests) no corría en NINGÚN job de CI
+    # -- ni en `backend-test-scoped` (payments/orders/tables/taxes/
+    # print-formats/invoicing) ni en `backend-test` (deshabilitado con
+    # `if: false` más abajo). Así fue como tres defectos de arnés
+    # preexistentes (CACHE_MANAGER sin doblar en products.service.spec.ts,
+    # Prisma mockeado sin `units_of_measure` en products-bulk.service.spec.ts,
+    # dos excepciones sin atrapar en products-bulk.controller.spec.ts tras un
+    # cambio deliberado del controller) acumularon 65 pruebas rojas sin que
+    # ningún run verde lo reflejara.
+    #
+    # Job PROPIO, y no un séptimo paso de `backend-test-scoped`, a propósito:
+    # medido en local (2026-09-14) con las 3 causas ya arregladas y el
+    # cliente de Prisma regenerado, `products` tarda 145 s (12/12 suites,
+    # 245/250 tests, 5 skips preexistentes ajenos a este hallazgo). Sumarlo
+    # en serie a `backend-test-scoped` -- que ya corrió en 36m35s contra su
+    # techo de 45 min, o sea con sólo 8m25s de margen tras el crecimiento de
+    # F-211 -- lo dejaría en ~39 min con un margen de apenas ~6 min (13%):
+    # el mismo patrón que F-220 ya documentó como un volado (29m19s verde vs
+    # 30m18s cortado fue la razón de subir aquel techo de 30 a 45). Un job
+    # nuevo corre en PARALELO al carril POS -- no le suma un segundo -- y no
+    # es un required status check hasta que alguien lo añada al ruleset de
+    # ramas: corre pero no bloquea, que es lo que hace falta para observar su
+    # propia estabilidad antes de exigirlo.
+    name: Backend Tests (products)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    # 20 min: mismo presupuesto que `backend-build` (arriba) para un setup
+    # equivalente (checkout + npm ci + prisma generate). El propio jest de
+    # `products` mide 145 s en local; incluso con un runner de CI más lento y
+    # el arranque de ts-jest, este techo deja margen amplio.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Generar Prisma Client (para tipos en specs)
+        working-directory: apps/backend
+        run: npx prisma generate
+      - name: jest — products
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/products 2>&1 | tee jest-logs/products.log
+      - name: Subir logs de jest (artefacto)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-products-jest-logs
+          path: apps/backend/jest-logs/
+          retention-days: 14
 
   backend-test:
     # Hotfix post-PR-576: `tsconfig.build.json` excluye `**/*spec.ts` y
