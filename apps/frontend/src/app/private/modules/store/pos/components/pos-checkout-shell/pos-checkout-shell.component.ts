@@ -334,6 +334,19 @@ export class PosCheckoutShellComponent {
   });
 
   /**
+   * POS 'Para llevar' a nivel de orden. El paso Consumo posee el fulfillment;
+   * en 'entrega' TODA la orden se empaca aunque ninguna línea del carrito
+   * traiga la marca per-línea (el carrito POS no tiene toggle por línea: la
+   * elección es del pedido). Los caminos que empujan ítems a una mesa leen
+   * esto para estampar `is_takeaway` sin mutar el carrito.
+   */
+  readonly isTakeawayOrder = computed<boolean>(
+    () =>
+      this.showConsumoStep() &&
+      this.consumoStep()?.fulfillment() === 'entrega',
+  );
+
+  /**
    * Orden dinámico de pasos. `delivery` es fijo — [Cliente, Envío, Cobro], Cobro
    * SIEMPRE al final. Los flujos no-delivery se cruzan con {@link customerRequired}
    * y {@link showConsumoStep}:
@@ -1915,7 +1928,11 @@ export class PosCheckoutShellComponent {
         // `pos.component.ts`: son los DOS caminos por los que el POS empuja
         // items a una mesa, y si solo uno lo llevara la marca dependería de qué
         // botón usó el cajero.
-        ...(it.isTakeaway && { is_takeaway: true }),
+        // Orden 'Para llevar' (paso Consumo en 'entrega'): estampa TODAS las
+        // líneas aunque el carrito no traiga la marca per-línea.
+        ...((it.isTakeaway || this.isTakeawayOrder()) && {
+          is_takeaway: true,
+        }),
       }));
     if (items.length === 0) {
       this.submittingDraft.set(false);
@@ -2101,6 +2118,10 @@ export class PosCheckoutShellComponent {
     total_price: number;
     tax_rate?: number;
   }> {
+    // NOTA takeaway: NO se envía `is_takeaway` aunque la orden sea 'Para
+    // llevar' — POST /store/orders (`CreateOrderItemDto`) no declara el campo
+    // y el ValidationPipe global (`forbidNonWhitelisted`) lo rechazaría con
+    // 400. El cobro por /store/payments/pos es el carril que persiste la marca.
     return items
       .filter((it) => it.itemType !== 'custom')
       .map((it) => ({
