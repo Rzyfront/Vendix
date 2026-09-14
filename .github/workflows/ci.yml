@@ -13,10 +13,14 @@ on:
   # ni uno solo de los commits de las fases B, C y D.
   #
   # Sólo `develop`: `main` recibe trabajo por PR de release (git-workflow R10) y
-  # ahí `pull_request` ya dispara. `dorny/paths-filter` sobre un evento `push`
-  # compara `github.event.before..after` vía API sin necesitar checkout; ante un
-  # `before` nulo marca todo como cambiado, que sobre-dispara pero nunca
-  # sub-dispara.
+  # ahí `pull_request` ya dispara.
+  #
+  # OJO (F-193, medido en la corrida 34792807926): este bloque obligó a añadir
+  # `actions/checkout` al job `changes`. `dorny/paths-filter` resuelve un
+  # `pull_request` contra la API de GitHub sin tocar el árbol, pero un `push` lo
+  # resuelve con git LOCAL (`before..after`) -- sin checkout muere con exit 128
+  # y arrastra los doce jobs que dependen de él. Este comentario afirmaba lo
+  # contrario hasta que la primera corrida real lo falsificó en ocho segundos.
   push:
     branches: [develop]
 
@@ -427,7 +431,14 @@ jobs:
     # idéntico al de `backend-test`, y la salida NO es subir el heap: es volver
     # a un pool con `--maxWorkers=2` y `workerIdleMemoryLimit`, pagando el
     # arranque a cambio del reciclado.
-    name: Backend Tests — sólo payments/orders/tables/taxes (36 de 401 specs)
+    # OJO: este `name:` es el IDENTIFICADOR que el ruleset de ramas fija como
+    # required status check. Si se renombra, el check obligatorio deja de
+    # reportar y TODOS los PRs quedan bloqueados esperando un nombre que ya no
+    # existe. Por eso no lleva cifras dentro: el alcance concreto (cuántas specs
+    # de cuántas) va al `$GITHUB_STEP_SUMMARY` del último paso, que se puede
+    # actualizar sin tocar nada. Decía «sólo payments/orders/tables/taxes (36 de
+    # 401 specs)» y ese 401 caduca cada vez que alguien añade una spec.
+    name: Backend Tests (carril POS)
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.backend == 'true'
@@ -522,7 +533,16 @@ jobs:
         working-directory: apps/backend
         run: |
           echo "### Backend Tests — carril POS" >> "$GITHUB_STEP_SUMMARY"
-          echo "Alcance: payments, orders, tables, taxes (36 specs de 401)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Corre 4 de los $(find src/domains -mindepth 2 -maxdepth 2 -type d | wc -l | tr -d ' ') subdominios de \`apps/backend/src/domains\`:" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`payments\`, \`orders\`, \`tables\`, \`taxes\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | specs |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| en esta compuerta | $(find src/domains/store/payments src/domains/store/orders src/domains/store/tables src/domains/store/taxes -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| en el repo | $(find src -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "El resto del backend **no se ejecuta en ningun job** (\`backend-test\` sigue en \`if: false\`)." >> "$GITHUB_STEP_SUMMARY"
 
   backend-test:
     # Hotfix post-PR-576: `tsconfig.build.json` excluye `**/*spec.ts` y
