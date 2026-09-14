@@ -202,12 +202,12 @@ export class FinancialAnalyticsService {
         SUM(oit.tax_amount)::decimal AS total_tax,
         CASE
           WHEN oit.tax_rate > 0
-            -- F-117: `order_item_taxes.tax_rate` es Decimal(6,5) y guarda una
-            -- FRACCION (0.19), nunca un porcentaje (19). Dividir por
-            -- `tax_rate / 100` divide en realidad por 0.0019 e infla la base
-            -- gravable 100x. El escritor (`payments.service.ts` `roundRate`)
-            -- persiste la fraccion tal cual; aqui se deshace con el mismo
-            -- divisor, sin reescalar.
+            -- F-117: order_item_taxes.tax_rate es Decimal(6,5) y guarda una
+            -- FRACCION (0.19), nunca un porcentaje (19). Un divisor con un
+            -- cien de mas en el denominador infla la base gravable 100x.
+            -- El escritor (payments.service.ts roundRate) persiste la
+            -- fraccion tal cual; aqui se deshace con el mismo divisor,
+            -- sin reescalar.
             THEN SUM(oit.tax_amount) / oit.tax_rate
           ELSE 0
         END::decimal AS taxable_amount
