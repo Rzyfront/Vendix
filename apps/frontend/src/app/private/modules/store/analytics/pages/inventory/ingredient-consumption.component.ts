@@ -4,8 +4,10 @@ import {
   DestroyRef,
   OnInit,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, ActivatedRoute } from '@angular/router';
@@ -37,6 +39,7 @@ import {
   InventoryAnalyticsQueryDto,
 } from '../../interfaces/inventory-analytics.interface';
 import { AnalyticsService } from '../../services/analytics.service';
+import { AnalyticsRefreshService, Refreshable } from '../../../shared/services/analytics-refresh.service';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
@@ -286,12 +289,22 @@ import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util'
     </div>
   `,
 })
-export class IngredientConsumptionComponent implements OnInit {
+export class IngredientConsumptionComponent implements OnInit, Refreshable {
   private readonly destroyRef = inject(DestroyRef);
   private readonly analyticsService = inject(AnalyticsService);
+  private readonly analyticsRefresh = inject(AnalyticsRefreshService);
   private readonly toastService = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly route = inject(ActivatedRoute);
+
+  constructor() {
+    effect(() => {
+      const count = this.analyticsRefresh.refreshSignal();
+      if (count > 0) {
+        untracked(() => this.loadData());
+      }
+    });
+  }
 
   // State
   readonly loading = signal(true);
@@ -428,6 +441,10 @@ export class IngredientConsumptionComponent implements OnInit {
     if (urlRange) {
       this.dateRange.set(urlRange);
     }
+    this.loadData();
+  }
+
+  refresh(): void {
     this.loadData();
   }
 
