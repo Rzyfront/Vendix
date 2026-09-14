@@ -919,6 +919,11 @@ export class StoreAdminLayoutComponent {
           icon: 'circle',
           route: '/admin/help/center',
         },
+        {
+          label: 'Videos de Capacitación',
+          icon: 'video',
+          route: '/admin/help/videos',
+        },
       ],
     },
     {

@@ -5053,6 +5053,22 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Cannot delete category with associated articles',
   },
+  // Video Library
+  VIDEO_NOT_FOUND: {
+    code: 'VIDEO_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Video not found',
+  },
+  VIDEO_CATEGORY_NOT_FOUND: {
+    code: 'VIDEO_CATEGORY_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Video category not found',
+  },
+  VIDEO_CATEGORY_HAS_VIDEOS: {
+    code: 'VIDEO_CATEGORY_HAS_VIDEOS',
+    httpStatus: 409,
+    devMessage: 'Cannot delete category with associated videos',
+  },
   HELP_IMAGE_REQUIRED: {
     code: 'HELP_IMAGE_REQUIRED',
     httpStatus: 400,

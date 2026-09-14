@@ -130,6 +130,27 @@ export const superAdminRoutes: Routes = [
           ).then((c) => c.ArticleFormComponent),
       },
       {
+        path: 'video-library',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/video-library/video-library-admin.component'
+          ).then((c) => c.VideoLibraryAdminComponent),
+      },
+      {
+        path: 'video-library/new',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/video-library/pages/video-form/video-form.component'
+          ).then((c) => c.VideoFormComponent),
+      },
+      {
+        path: 'video-library/:id/edit',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/video-library/pages/video-form/video-form.component'
+          ).then((c) => c.VideoFormComponent),
+      },
+      {
         path: 'monitoring',
         loadChildren: () =>
           import(
