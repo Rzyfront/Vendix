@@ -42,6 +42,15 @@ jobs:
       mobile: ${{ steps.filter.outputs.mobile }}
       backend: ${{ steps.filter.outputs.backend }}
     steps:
+      # OBLIGATORIO desde que existe el disparador `push` (F-193, ronda 3).
+      # `dorny/paths-filter` resuelve los cambios de un `pull_request` contra la
+      # API de GitHub, sin necesitar el arbol -- por eso este job funcionó dos
+      # años sin checkout. En un evento `push` NO usa la API: compara
+      # `github.event.before..after` con git LOCAL, y sin checkout muere en la
+      # primera orden con `fatal: not a git repository` (exit 128), tumbando el
+      # job y saltándose los doce restantes. Medido en la corrida 34792807926,
+      # el primer `push` a `develop` de este workflow.
+      - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
         with:
