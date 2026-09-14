@@ -336,34 +336,44 @@
   .status,
   .status .status-label { transition: none; }
   .table-cell:hover { transform: none; }
-  .table-cell.is-calling { animation: none; }
+  // Sin parpadeo, pero la mesa que llamó queda resaltada en dorado fijo.
+  .table-cell.is-calling {
+    animation: none;
+    border-color: #eab308;
+    background-color: rgba(234, 179, 8, 0.35);
+    box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.45);
+  }
 }
 
 // ------------------------------------------------------------------
 // Destello dorado — llamado al mesero (`table_call_waiter`)
 // ------------------------------------------------------------------
-// Parpadeo intermitente de 1s sobre la celda que llamó. Puramente
-// visual: no toca el estado ni los colores por estado de la mesa.
+// La mesa COMO TAL se ilumina en dorado intermitente durante ~4s.
+// Puramente visual: no toca el estado de la mesa; al expirar la clase
+// la celda vuelve a sus colores por estado.
 @keyframes waiter-call-flash {
   0%, 100% {
     border-color: #eab308;
+    background-color: rgba(234, 179, 8, 0.18);
     box-shadow:
-      inset 0 1px 0 color-mix(in srgb, #fff 45%, transparent),
+      inset 0 0 18px 2px rgba(234, 179, 8, 0.35),
       0 0 0 3px rgba(234, 179, 8, 0.35),
       0 0 24px 2px rgba(234, 179, 8, 0.55);
   }
   50% {
     border-color: #fde047;
+    background-color: rgba(234, 179, 8, 0.45);
     box-shadow:
-      inset 0 1px 0 color-mix(in srgb, #fff 60%, transparent),
+      inset 0 0 28px 6px rgba(234, 179, 8, 0.6),
       0 0 0 6px rgba(234, 179, 8, 0.55),
       0 0 36px 6px rgba(234, 179, 8, 0.8);
   }
 }
 
 .table-cell.is-calling {
+  z-index: 2;
   border-color: #eab308;
-  animation: waiter-call-flash 1s ease-in-out;
+  animation: waiter-call-flash 1s ease-in-out 4;
 }
 
 // ------------------------------------------------------------------

@@ -1096,9 +1096,15 @@ export class EcommerceTablesService {
       }
     }
 
-    await this.dispatchStaffNotification(
+    // Entrega GENERAL (decisión del dueño): el llamado llega a TODO el
+    // staff, no solo al mesero asignado. Se usa `createAndBroadcast` en vez
+    // de `dispatchStaffNotification` a propósito: el envío dirigido
+    // (`sendToUser`) solo escribe en el subject por-usuario y jamás llega al
+    // subject por-tienda que alimentan el stream staff del plano y la campana
+    // general — por eso la mesa nunca destellaba cuando tenía meseros
+    // asignados. El broadcast alimenta campana + toast + destello para todos.
+    await this.notificationsService.createAndBroadcast(
       store_id,
-      table.id,
       'table_call_waiter',
       'Llamado de mesero',
       `Mesa ${table.name} solicita atención`,
@@ -1110,8 +1116,8 @@ export class EcommerceTablesService {
         note: note ?? null,
         customer_id: customerId,
         customer_name: customerName,
+        public_token: token,
       },
-      token,
     );
 
     this.logger.log(
