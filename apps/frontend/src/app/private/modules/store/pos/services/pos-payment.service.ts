@@ -571,7 +571,10 @@ export class PosPaymentService {
       customer_email: cartState.customer.email,
       customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
-      items: this.mapCartItemsForPos(cartState),
+      // QUI-653 — el envío (recoger en tienda o domicilio) siempre se empaca
+      // para llevar: estampa `is_takeaway` en todas las líneas para que el
+      // ticket KDS lo muestre. Esta función solo sirve al flujo de envío.
+      items: this.mapCartItemsForPos(cartState, true),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
       ),
