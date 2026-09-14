@@ -14,6 +14,10 @@ import {
   ORDER_PAYMENT_MEANS_INCLUDE,
   resolveOrderPaymentLabel,
 } from '../../payments/order-payment-means.contract';
+// C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — el tiquete declara
+// `money_basis: 'gross'` (G-01) y propaga el gate fiscal que C.1 resolvió,
+// usando las filas `org`/`store` que el `include` de C.1 ya trae en memoria.
+import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
 
 @Injectable()
 export class PosSaleTicketDataProvider implements IDocumentDataProvider {
@@ -62,7 +66,15 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         stores: {
           include: {
             addresses: { take: 1 },
-            organizations: true,
+            // C.1 — settings para el gate fiscal
+            // `resolvePrintsVatBreakdownForPrint` (misma forma que
+            // `FISCAL_DOCUMENT_PRINT_INCLUDE`).
+            store_settings: { select: { settings: true } },
+            organizations: {
+              include: {
+                organization_settings: { select: { settings: true } },
+              },
+            },
           },
         },
         // C.3 QUI-733 — mesa + mesero en el recibo POS. Se une la sesión
@@ -298,6 +310,9 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         change_due: 12500,
         change_due_formatted: '$12.500',
       },
+      // C.2 (ADR-12) — muestra en `'gross'`, paridad con `fetchDocumentData`.
+      money_basis: 'gross',
+      prints_vat_breakdown: true,
       items: [
         {
           index: 1,
@@ -310,6 +325,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           discount_amount: 5000,
           discount_formatted: '-$5.000',
           tax_rate: 19,
+          tax_amount: 9580,
           total_price: 60000,
           total_price_formatted: '$60.000',
         },
@@ -321,6 +337,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           unit_price: 27500,
           unit_price_formatted: '$27.500',
           tax_rate: 19,
+          tax_amount: 4391,
           total_price: 27500,
           total_price_formatted: '$27.500',
         },
@@ -494,6 +511,15 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       unit_price_formatted: `$${Number(it.unit_price || 0).toLocaleString('es-CO')}`,
       discount_amount: Number(it.discount_amount || 0),
       discount_formatted: it.discount_amount ? `-$${Number(it.discount_amount).toLocaleString('es-CO')}` : undefined,
+      // C.2 (ADR-12) — mismo mapeo que `quotation.provider.ts:101-104`: la
+      // línea trae su propio `tax_rate`/`tax_amount_item` denormalizado
+      // (`order_items`, igual columna que `quotation_items`). Con esto el
+      // compositor pinta la sublínea `IVA: r%` (`print-layout-composer
+      // .service.ts:793-794`) sin columna nueva — F-100.
+      tax_rate: it.tax_rate !== null && it.tax_rate !== undefined ? Number(it.tax_rate) : undefined,
+      tax_amount: it.tax_amount_item !== null && it.tax_amount_item !== undefined
+        ? Number(it.tax_amount_item)
+        : undefined,
       total_price: Number(it.total_price || 0),
       total_price_formatted: `$${Number(it.total_price || 0).toLocaleString('es-CO')}`,
     }));
@@ -581,6 +607,12 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           ? { customer_alias: order.customer_alias }
           : {}),
       },
+      // C.2 (ADR-12) — G-01: el tiquete de mostrador es papel comercial, el
+      // cliente ve el bruto. `org`/`store` son las mismas filas que ya trae
+      // el `include` de C.1 (`stores.store_settings` /
+      // `stores.organizations.organization_settings`).
+      money_basis: 'gross',
+      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(org, store),
       items,
       taxes,
       totals: {

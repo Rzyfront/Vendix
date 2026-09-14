@@ -197,10 +197,14 @@ export class SalesAnalyticsService {
     // v2: switched from grand_total to operating-revenue derivation. Old v1
     // cache entries are stale (would under-report when tax > 0) — bump the
     // version segment to invalidate during deploy.
+    // v3 (C.10 CP-pos-exclusive-tax-double-charge): P1 moves subtotal_amount
+    // ~19% on exclusive-tax lines. Old v2 entries would keep serving the
+    // inflated subtotal on sales cards — bump the key for visibility, no
+    // calculation logic changes.
     if (!storeId) {
       return this.computeSalesSummary(query);
     }
-    const cacheKey = `analytics:sales:summary:v2:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}:${query.channel ?? '_'}`;
+    const cacheKey = `analytics:sales:summary:v3:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}:${query.channel ?? '_'}`;
     const cached =
       await this.cache.get<
         Awaited<ReturnType<SalesAnalyticsService['computeSalesSummary']>>

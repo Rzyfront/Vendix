@@ -117,6 +117,15 @@ export interface BillItemView {
   unit_price: number;
   total: number;
   /**
+   * C.8 (R-1, F-077 partial) — campos ADITIVOS: `unit_price`/`total` de
+   * arriba NO cambian de magnitud (siguen en BASE). Derivados en lectura
+   * con el fallback de ADR-06 (`final_unit_price ?? (unit_price +
+   * tax_amount_item / line_units)`) — este endpoint nunca escribe
+   * `final_unit_price`, así que el fallback es el camino normal.
+   */
+  unit_price_gross: number;
+  line_total_gross: number;
+  /**
    * Diner-facing thumbnail: the variant's denormalized image when the line
    * is a variant, else the product's primary image (lowest `sort_order`),
    * else `null`.
@@ -135,6 +144,16 @@ export interface BillView {
   order_id: number;
   items: BillItemView[];
   subtotal: number;
+  /**
+   * C.8 (F-077 partial, major) — aditivo. `subtotal` (arriba) y
+   * `grand_total` (abajo) divergen exactamente en este monto cuando la
+   * línea es exclusiva; sin este campo la diferencia queda huérfana en el
+   * documento con el que el comensal anónimo decide pagar (ADR-07). Cierre
+   * PARCIAL de F-077: expone el dato; el rótulo de pie en el storefront no
+   * está en los `Resources` de este paso (ningún archivo de
+   * `store-ecommerce`/`table-banner` frontend fue asignado a C.8).
+   */
+  tax_amount: number;
   grand_total: number;
   /** Sum of applied (succeeded) payments against this order. */
   total_paid: number;
@@ -891,6 +910,11 @@ export class EcommerceTablesService {
         quantity: true,
         unit_price: true,
         total_price: true,
+        // C.8 — sólo para derivar `unit_price_gross`/`line_total_gross`
+        // (ADR-06 fallback en lectura). No cambia el resto del select.
+        final_unit_price: true,
+        tax_amount_item: true,
+        price_unit_quantity: true,
         variant_image_url: true,
         products: {
           select: {
@@ -920,11 +944,25 @@ export class EcommerceTablesService {
         const signedImageUrl = rawImageUrl
           ? ((await this.s3Service.signUrl(rawImageUrl)) ?? null)
           : null;
+        // C.8 (ADR-06 fallback en lectura): `final_unit_price ?? (unit_price
+        // + COALESCE(tax_amount_item,0) / line_units)`. `getBill` nunca
+        // escribe `final_unit_price` (F-005), así que este fallback es el
+        // camino normal, no la excepción.
+        const netUnit = Number(it.unit_price);
+        const netTotal = Number(it.total_price);
+        const lineUnits = Number(it.price_unit_quantity ?? it.quantity ?? 1) || 1;
+        const grossUnit =
+          it.final_unit_price != null
+            ? Number(it.final_unit_price)
+            : netUnit + Number(it.tax_amount_item ?? 0) / lineUnits;
+        const multiplier = netUnit !== 0 ? netTotal / netUnit : Number(it.quantity ?? 0);
         return {
           name: it.product_name,
           quantity: it.quantity,
-          unit_price: Number(it.unit_price),
-          total: Number(it.total_price),
+          unit_price: netUnit,
+          total: netTotal,
+          unit_price_gross: Math.round(grossUnit * 100) / 100,
+          line_total_gross: Math.round(grossUnit * multiplier * 100) / 100,
           image_url: signedImageUrl,
         };
       }),
@@ -940,6 +978,7 @@ export class EcommerceTablesService {
       order_id: session.order_id,
       items,
       subtotal: Number(order?.subtotal_amount ?? 0),
+      tax_amount: Number((order as any)?.tax_amount ?? 0),
       grand_total: Number(order?.grand_total ?? 0),
       total_paid: totalPaid,
       balance_due: balanceDue,

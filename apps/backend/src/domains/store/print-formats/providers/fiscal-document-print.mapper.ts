@@ -184,6 +184,33 @@ export interface FiscalDocumentPrintOptions {
    * de S3, el `<img>` daría 404 y el papel mostraría `alt="Logo"` literal.
    */
   signedLogoUrl?: string;
+  /**
+   * C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — base monetaria que
+   * declara el PROVIDER llamante, NUNCA este mapeador ni la plantilla
+   * (`print-gateway.service.ts:714-721` fusiona columnas por `id`). Nombrado
+   * en snake_case a propósito, igual que el campo del modelo
+   * (`StandardPrintDataModel.money_basis`): sin traducción, para que quede
+   * trivial auditar que el mapeador reenvía exactamente lo que el provider
+   * decidió.
+   *
+   * OPCIONAL: `profile-preview.service.ts:644` (fuera del alcance de C.2 —
+   * dominio `invoicing/profiles`, no `print-formats`) llama a este mapeador
+   * sin este campo. Si se vuelve requerido, ese call site deja de compilar
+   * y arreglarlo excede el alcance de este paso. El default vive en
+   * `mapFiscalDocumentToPrintData` (`?? 'taxable_base'`, R-2 de ADR-12); los
+   * cuatro providers de este dominio SÍ lo pasan explícito siempre.
+   */
+  money_basis?: 'gross' | 'taxable_base';
+  /**
+   * C.2 (ADR-12) — espejo backend de `selectPrintsVatBreakdown`, ya resuelto
+   * por el provider llamante con `resolvePrintsVatBreakdownForPrint(org, store)`
+   * sobre las filas que su propio `include` trae en memoria
+   * (`FISCAL_DOCUMENT_PRINT_INCLUDE` ya las declara para los cuatro).
+   *
+   * OPCIONAL por el mismo motivo que `money_basis` — ver comentario arriba.
+   * Default `?? false` (R-2 de ADR-12: fail-closed, "un papel no se retracta").
+   */
+  prints_vat_breakdown?: boolean;
 }
 
 /**
@@ -433,6 +460,13 @@ export function mapFiscalDocumentToPrintData(
       notes: invoice.notes || undefined,
       reference_document_number: options.referenceDocumentNumber,
     },
+    // C.2 (ADR-12) — reenvío literal de lo que el provider decidió: este
+    // mapeador no elige, no convierte, sólo coloca lo recibido en el modelo.
+    // El `??` sólo protege al llamante fuera de alcance que no declara nada
+    // (`profile-preview.service.ts:644`) con el default seguro de R-2; los
+    // cuatro providers de este dominio siempre pasan un valor explícito.
+    money_basis: options.money_basis ?? 'taxable_base',
+    prints_vat_breakdown: options.prints_vat_breakdown ?? false,
     fiscal: {
       cufe: invoice.cufe || undefined,
       qr_code_content: invoice.qr_code || undefined,

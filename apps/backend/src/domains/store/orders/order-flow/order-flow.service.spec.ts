@@ -714,7 +714,13 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     // `undefined` → ítem base sin disparar; `null` → ítem inexistente (404).
     item?: Record<string, unknown> | null;
     freshTicketStatus?: string | null;
-    activeItems?: Array<{ total_price: number; tax_amount_item: number | null }>;
+    // C.8/F-082 — `order_item_taxes` (fila autoritativa persistida por
+    // línea), no `tax_amount_item` (ambiguo en unidad, F-003): el `select`
+    // real de `cancelOrderItem` pide la relación, no el campo suelto.
+    activeItems?: Array<{
+      total_price: number;
+      order_item_taxes?: Array<{ tax_amount: number | null }>;
+    }>;
     withKds?: boolean;
   }) => {
     const txMock: any = {
@@ -729,7 +735,7 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
       order_items: {
         update: jest.fn().mockResolvedValue({}),
         findMany: jest.fn().mockResolvedValue(
-          opts.activeItems ?? [{ total_price: 50000, tax_amount_item: 0 }],
+          opts.activeItems ?? [{ total_price: 50000, order_item_taxes: [] }],
         ),
       },
       orders: { update: jest.fn().mockResolvedValue({}) },
@@ -861,8 +867,8 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
   it('happy before_fire: soft cancel + recálculo excluyendo cancelados', async () => {
     const { service, txMock, kitchenFireService } = buildService({
       activeItems: [
-        { total_price: 50000, tax_amount_item: 8000 },
-        { total_price: 20000, tax_amount_item: 0 },
+        { total_price: 50000, order_item_taxes: [{ tax_amount: 8000 }] },
+        { total_price: 20000, order_item_taxes: [{ tax_amount: 0 }] },
       ],
     });
 

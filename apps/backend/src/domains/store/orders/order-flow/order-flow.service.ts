@@ -2006,24 +2006,57 @@ export class OrderFlowService {
       });
 
       // Recálculo excluyendo cancelados (`cancelled_at IS NULL`).
+      //
+      // F-082 (blocker, C.8): antes sumaba `tax_amount_item` SIN
+      // multiplicador — ese campo no tiene una sola unidad (F-003: unos
+      // escritores lo mandan por unidad, otros por línea), así que sumarlo
+      // crudo subestima el impuesto bajo una convención y lo deja correcto
+      // sólo por casualidad bajo la otra. `order_item_taxes.tax_amount` SÍ es
+      // fiable: cada fila ya es el total de impuesto de esa línea tal como
+      // se persistió al crear/cobrar la orden (`checkout.service.ts:1653`,
+      // el carril POS), así que sumarla no requiere adivinar unidad.
       const activeItems = await tx.order_items.findMany({
         where: { order_id: orderId, cancelled_at: null },
-        select: { total_price: true, tax_amount_item: true },
+        select: {
+          total_price: true,
+          order_item_taxes: { select: { tax_amount: true } },
+        },
       });
       const subtotal = activeItems.reduce(
         (acc, it) => acc + Number(it.total_price),
         0,
       );
       const tax = activeItems.reduce(
-        (acc, it) => acc + Number(it.tax_amount_item ?? 0),
+        (acc, it) =>
+          acc +
+          // ADR-06 — nunca asumir la relación poblada: una fila sin
+          // desglose fiscal persistido (`order_item_taxes` vacío) no debe
+          // tronar el recálculo, sólo aportar cero impuesto.
+          (it.order_item_taxes ?? []).reduce(
+            (s, t) => s + Number(t.tax_amount ?? 0),
+            0,
+          ),
         0,
+      );
+      // F-082 (blocker, C.8): el recálculo anterior descartaba envío,
+      // propina y descuento del `grand_total` — una orden con domicilio y
+      // propina quedaba SIN esos montos apenas se cancelaba un ítem, aunque
+      // la orden siguiera teniendo ambos cargos. Esta cancelación no los
+      // recalcula (no hay línea de envío/propina que tocar aquí), sólo deja
+      // de perderlos. Clamp a 0 por paridad con el resto de carriles.
+      const shippingCost = Number((order as any).shipping_cost ?? 0);
+      const tipAmount = Number((order as any).tip_amount ?? 0);
+      const discountAmount = Number((order as any).discount_amount ?? 0);
+      const grandTotal = Math.max(
+        0,
+        subtotal + tax + shippingCost + tipAmount - discountAmount,
       );
       await tx.orders.update({
         where: { id: orderId },
         data: {
           subtotal_amount: new Prisma.Decimal(subtotal),
           tax_amount: new Prisma.Decimal(tax),
-          grand_total: new Prisma.Decimal(subtotal + tax),
+          grand_total: new Prisma.Decimal(grandTotal),
           updated_at: new Date(),
         },
       });

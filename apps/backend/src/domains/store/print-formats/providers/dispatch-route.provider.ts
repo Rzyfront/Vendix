@@ -107,6 +107,12 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
         state_label: 'Despachada',
         notes: 'Planilla demo con 4 paradas y 1 anulada.',
       },
+      // C.2 (ADR-12, G-13) — irrelevante en la práctica: no hay
+      // `unit_price`/`total_price` en este formato (`items: []` siempre).
+      // `taxable_base`/`false` por default de R-2: no hay settings de
+      // tienda/organización en memoria.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: false,
       items: [],
       taxes: [],
       totals: {
@@ -251,6 +257,9 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
         state_label: route.status,
         notes: route.notes || undefined,
       },
+      // C.2 (ADR-12, G-13) — ver mismo comentario en `getSampleData`.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: false,
       items: [],
       taxes: [],
       totals: {

@@ -2,6 +2,7 @@ import {
   calculateVariantFinalPrice,
   extractTypedRates,
   groupRatesByProductId,
+  resolveLineUnits,
   resolveOrderLineFinals,
   resolveVariantEffectivePrice,
 } from './final-price.util';
@@ -159,7 +160,9 @@ describe('final-price.util', () => {
   describe('resolveOrderLineFinals', () => {
     it('línea agregada: unit 10000 + 19% → final_unit 11900', () => {
       expect(
-        resolveOrderLineFinals(10000, 2, [{ rate: 0.19, is_inclusive: false }]),
+        resolveOrderLineFinals({ unit_price: 10000, quantity: 2 }, [
+          { rate: 0.19, is_inclusive: false },
+        ]),
       ).toEqual({ final_unit_price: 11900, final_total_price: 23800 });
     });
 
@@ -168,7 +171,9 @@ describe('final-price.util', () => {
       // — el bruto de 10000 con INC 19% inclusivo no cierra exacto a 2
       // decimales, así que el final por unidad es 9999.99, no 10000.
       expect(
-        resolveOrderLineFinals(10000, 3, [{ rate: 0.19, is_inclusive: true }]),
+        resolveOrderLineFinals({ unit_price: 10000, quantity: 3 }, [
+          { rate: 0.19, is_inclusive: true },
+        ]),
       ).toEqual({ final_unit_price: 9999.99, final_total_price: 29999.97 });
 
       expect(
@@ -178,24 +183,69 @@ describe('final-price.util', () => {
     });
 
     it('sin tasas el final es el unit intacto', () => {
-      expect(resolveOrderLineFinals(10000, 1, [])).toEqual({
+      expect(resolveOrderLineFinals({ unit_price: 10000, quantity: 1 }, [])).toEqual({
         final_unit_price: 10000,
         final_total_price: 10000,
       });
     });
 
     it('el total se redondea a 2 decimales', () => {
-      const { final_total_price } = resolveOrderLineFinals(100, 3, [
-        { rate: 0.19, is_inclusive: false },
-      ]);
+      const { final_total_price } = resolveOrderLineFinals(
+        { unit_price: 100, quantity: 3 },
+        [{ rate: 0.19, is_inclusive: false }],
+      );
       // 119 * 3 = 357 exacto; con tasa fraccionaria el redondeo manda.
       expect(final_total_price).toBe(357);
-      const odd = resolveOrderLineFinals(10.1, 3, [
+      const odd = resolveOrderLineFinals({ unit_price: 10.1, quantity: 3 }, [
         { rate: 0.19, is_inclusive: false },
       ]);
       expect(odd.final_total_price).toBe(
         Math.round(odd.final_unit_price * 3 * 100) / 100,
       );
+    });
+
+    // C.12 — F-202: la fila real id=1691 (quantity=1,
+    // price_unit_quantity=1000, unit_price=5000) publicaba 5950 donde la
+    // línea vale 5,95. Con la firma nueva el total sale 1.000× menor.
+    it('C.12/F-202 — línea con escala 1000: el total usa quantity/escala, no quantity', () => {
+      const exc19 = [{ rate: 0.19, is_inclusive: false }];
+      const scaled = resolveOrderLineFinals(
+        { unit_price: 5000, quantity: 1, price_unit_quantity: 1000 },
+        exc19,
+      );
+      expect(scaled.final_unit_price).toBe(5950);
+      expect(scaled.final_total_price).toBe(5.95);
+      const legacy = resolveOrderLineFinals(
+        { unit_price: 5000, quantity: 1 },
+        exc19,
+      );
+      expect(legacy.final_total_price).toBe(5950);
+      expect(scaled.final_total_price).toBe(legacy.final_total_price / 1000);
+    });
+
+    // C.12 — F-016: con peso capturado el multiplicador es el peso,
+    // aunque `quantity` diga otra cosa (p. ej. quantity=3, weight=1.35).
+    it('C.12/F-016 — línea con peso: el total usa weight, no quantity', () => {
+      const weighed = resolveOrderLineFinals(
+        { unit_price: 10000, quantity: 3, weight: 1.35 },
+        [{ rate: 0.19, is_inclusive: false }],
+      );
+      expect(weighed.final_unit_price).toBe(11900);
+      expect(weighed.final_total_price).toBe(16065);
+    });
+
+    // C.12 — guarda: multiplicador degenerado (0, negativo, NaN) no
+    // divide por cero ni negativiza el total; peso 0 cae a la rama
+    // de cantidad.
+    it('C.12 — guarda contra multiplicador ≤ 0', () => {
+      expect(resolveLineUnits({ quantity: 0 })).toBe(0);
+      expect(resolveLineUnits({ quantity: -2 })).toBe(0);
+      expect(resolveLineUnits({ quantity: NaN })).toBe(0);
+      expect(
+        resolveOrderLineFinals({ unit_price: 100, quantity: 0 }, []).final_total_price,
+      ).toBe(0);
+      // Peso 0 no anula la línea: cae a la rama de cantidad.
+      expect(resolveLineUnits({ quantity: 2, weight: 0 })).toBe(2);
     });
   });
 

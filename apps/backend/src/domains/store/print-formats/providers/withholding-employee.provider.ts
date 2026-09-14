@@ -104,6 +104,13 @@ export class WithholdingEmployeeCertificateDataProvider implements IDocumentData
         email: employee.email,
         ...mapUserAddress(employee.addresses?.[0]),
       },
+      // C.2 (ADR-12, G-14..16) — irrelevante en la practica: no hay
+      // `unit_price`/`total_price` (`items: []`), y el `tax_total` que este
+      // certificado imprime es RETENCION, no IVA (`prints_vat_breakdown` no
+      // aplica). `taxable_base`/`false` por default de R-2: no hay settings
+      // de tienda/organizacion en memoria.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: false,
       items: [],
       taxes: [
         {
@@ -158,6 +165,9 @@ export class WithholdingEmployeeCertificateDataProvider implements IDocumentData
         address: 'Calle 80 # 10-20, Bogotá D.C.',
         city: 'Bogotá D.C.',
       },
+      // C.2 (ADR-12) - muestra en paridad con `fetchDocumentData`.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: false,
       items: [],
       taxes: [
         {
