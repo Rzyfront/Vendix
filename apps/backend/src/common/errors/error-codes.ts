@@ -5876,6 +5876,24 @@ export const ErrorCodes = {
     devMessage:
       'total_price de la línea no cuadra con unit_price × line_units fuera de tolerancia (I-1).',
   },
+
+  // B.3 (plan CP-pos-exclusive-tax-double-charge, QUI-832) — F-065 / ERR-23
+  // del registro del plan. `TaxesService.calculateProductTaxes` ahora expone
+  // `has_tax_assignment` para que el llamador distinga «producto sin
+  // impuestos asignados» de «producto con impuestos resueltos a cero»; este
+  // código es lo que ese llamador debe lanzar cuando `has_tax_assignment ===
+  // false` en un contexto donde la línea ya tenía impuesto (p. ej. al cerrar
+  // una cuenta de mesa cuyo producto perdió su `product_tax_assignments`
+  // — caso real: purga de Roma Motos). Sitio de lanzamiento identificado
+  // (`payments.service.ts`, fuera del alcance de este cambio — ver BLOCKER
+  // REPORT del paso B.3 en evidence/B3-taxes-ejecucion.md): aún no está
+  // cableado.
+  POS_TABLE_LINE_TAX_UNRESOLVABLE_001: {
+    code: 'POS_TABLE_LINE_TAX_UNRESOLVABLE_001',
+    httpStatus: 422,
+    devMessage:
+      'El producto de esta línea perdió su asignación fiscal y el impuesto no se puede resolver; no se puede normalizar a IVA cero en silencio.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

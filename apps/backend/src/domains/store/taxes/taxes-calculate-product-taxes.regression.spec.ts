@@ -207,4 +207,36 @@ describe('TaxesService.calculateProductTaxes — contrato por-tasa (A.3)', () =>
       }),
     );
   });
+
+  // F-065/ERR-23 (CP-pos-exclusive-tax-double-charge, QUI-832): un producto
+  // que perdió su `product_tax_assignments` (caso real: purga de Roma Motos)
+  // y uno que nunca tuvo impuesto deben poder distinguirse de un producto
+  // con impuestos resueltos a 0 — sin este campo ambos casos eran
+  // `{ total_tax_amount: 0, taxes: [] }` indistinguibles y la normalización
+  // de mesa los trataba a todos como "exento".
+  it('sin asignaciones fiscales ⇒ has_tax_assignment=false y sigue sin lanzar (F-065)', async () => {
+    const service = buildService();
+    const out = await service.calculateProductTaxes(7, 18500, {
+      client: clientWith([]) as any,
+    });
+
+    expect(out.has_tax_assignment).toBe(false);
+    // Comportamiento por defecto intacto (F-065 no cambia esto: sólo expone
+    // la señal para que el llamador la use).
+    expect(out.total_tax_amount).toBe(0);
+    expect(out.taxes).toEqual([]);
+    expect(out.base).toBe(18500);
+  });
+
+  it('con asignación fiscal viva ⇒ has_tax_assignment=true aunque la tasa sea 0 (F-065)', async () => {
+    const service = buildService();
+    const out = await service.calculateProductTaxes(7, 18500, {
+      client: clientWith([
+        assignmentRow({ rates: [{ id: 1, name: 'Exento', rate: 0 }] }),
+      ]) as any,
+    });
+
+    expect(out.has_tax_assignment).toBe(true);
+    expect(out.total_tax_amount).toBe(0);
+  });
 });

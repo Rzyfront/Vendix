@@ -24,6 +24,42 @@ import {
   OrganizationFiscalScope,
 } from '@common/services/fiscal-scope.service';
 
+/**
+ * Tipo explícito del retorno de `calculateProductTaxes` (F-065/ERR-23,
+ * CP-pos-exclusive-tax-double-charge). Existe SOLO para poder declarar
+ * `has_tax_assignment` como OPCIONAL en la superficie de tipos: sin esta
+ * anotación, TS infiere el campo como obligatorio (está presente en todo
+ * literal que retorna el método) y `CalculatedTaxInfo`/`CatalogTaxInfo`/
+ * `DeclaredGrossTaxInfo` en `payments.service.ts` — derivados vía
+ * `Awaited<ReturnType<TaxesService['calculateProductTaxes']>>` — dejan de
+ * compilar en cada objeto construido a mano que todavía no lo declara
+ * (archivo prohibido en este cambio; ver BLOCKER REPORT de la ejecución).
+ * `resolved_from` se mantiene `string` (no el literal `'catalog'`) a
+ * propósito: es la misma razón documentada más abajo por la que el método
+ * nunca tuvo tipo de retorno explícito — un literal ahí colapsaría la
+ * intersección con `{ resolved_from: 'declared_gross' }` a `never`.
+ */
+interface CalculateProductTaxesResult {
+  total_rate: number;
+  total_tax_amount: number;
+  base: number;
+  total: number;
+  taxes: {
+    tax_rate_id: number;
+    name: string;
+    rate: number;
+    tax_type: TaxFiscalType;
+    is_inclusive: boolean;
+    amount: number;
+    base: number;
+  }[];
+  unclosed_residual_cents: number;
+  invalid_inputs: unknown[];
+  /** F-065/ERR-23 — ver docblock de `calculateProductTaxes` más abajo. */
+  has_tax_assignment?: boolean;
+  resolved_from: string;
+}
+
 @Injectable()
 export class TaxesService {
   constructor(
@@ -87,6 +123,25 @@ export class TaxesService {
    * (`store-prisma.service.ts:436` → `{ products: { store_id } }`) hay que
    * reponerlo a mano. Sin `client`, el scoping automático sigue aplicando y el
    * filtro extra es redundante pero inocuo.
+   *
+   * `has_tax_assignment` (F-065, ERR-23 — CP-pos-exclusive-tax-double-charge):
+   * `true` si el producto tiene al menos una fila viva en
+   * `product_tax_assignments` (aunque esa asignación resuelva a una tasa de
+   * 0 %); `false` cuando NO hay ninguna. Antes de este campo, «sin
+   * impuestos asignados» y «con impuestos resueltos a cero» eran
+   * indistinguibles: ambos devolvían `{ total_tax_amount: 0, taxes: [] }`.
+   * Caso real: la purga de productos de Roma Motos borró asignaciones
+   * fiscales de productos con líneas de mesa abiertas; al cerrar la cuenta,
+   * la normalización tomaba el retorno como «producto exento» y emitía el
+   * documento con base inflada e IVA cero (sub-declaración DIAN invisible).
+   * El llamador que persiste el documento final (hoy `payments.service.ts`,
+   * fuera del alcance de este cambio) es quien debe leer este campo y
+   * lanzar `POS_TABLE_LINE_TAX_UNRESOLVABLE_001` cuando
+   * `has_tax_assignment === false` en una línea que sí esperaba impuesto,
+   * en vez de normalizar a IVA cero en silencio. Este método NO lanza ese
+   * error ni cambia su comportamiento por defecto: lo consumen POS,
+   * vitrina, checkout y órdenes, y romper ese contrato es una regresión
+   * mayor fuera de este alcance.
    */
   // CAVEAT (QUI-772 / 2026-08-31). Este resolver SUMA todas las tasas de
   // todas las categorías. El otro camino,
@@ -102,7 +157,7 @@ export class TaxesService {
       client?: { product_tax_assignments: { findMany: (args: any) => any } };
       store_id?: number;
     },
-  ) {
+  ): Promise<CalculateProductTaxesResult> {
     const db = options?.client ?? this.prisma;
     const assignments = await db.product_tax_assignments.findMany({
       where: {
@@ -184,6 +239,10 @@ export class TaxesService {
       // llegar. Se propagan tal cual, sin recomputar nada.
       unclosed_residual_cents: resolved.unclosed_residual_cents,
       invalid_inputs: resolved.invalid_inputs,
+      // F-065/ERR-23: discrimina «sin impuestos asignados» de «impuestos
+      // resueltos a cero» — ver docblock de la función. Aditivo: un
+      // consumidor que lo ignore sigue funcionando igual que antes.
+      has_tax_assignment: assignments.length > 0,
       // Discriminante de procedencia (ADR-03/ADR-10): ÉSTE es el único sitio
       // donde nace un desglose SIN invertir. No se anota un tipo de retorno
       // explícito a propósito: dejar que TS infiera `resolved_from: string`
