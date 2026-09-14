@@ -1153,6 +1153,18 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Este cupón no aplica a los productos del carrito. Revisa las condiciones del cupón o quítalo.',
   CPN_VALIDATE_001:
     'No se pudo validar el cupón. Revisa los datos e inténtalo de nuevo.',
+
+  // Impresión de formatos (F-154, plan CP-pos-exclusive-tax-double-charge,
+  // QUI-832). `PRINT_TOKEN_SYNTAX_001` lo lanza
+  // `print-template-compiler.service.ts:93-98` cuando una plantilla
+  // personalizada tiene un token mal cerrado; el commit de formatos lo
+  // asciende a primera pared del mostrador. Sin esta entrada el cajero veía
+  // 'Ocurrio un error. Intente de nuevo.' y reintentaba indefinidamente
+  // sobre un fallo 100 % determinista. El copy dice las tres cosas que él
+  // necesita: la venta YA quedó cobrada, el papel no va a salir por más que
+  // reintente, y a quién avisar.
+  PRINT_TOKEN_SYNTAX_001:
+    'La venta quedó registrada, pero el formato de impresión tiene un error en su plantilla y el documento no se puede generar. Reintentar no lo resuelve: avisa al administrador para que corrija la plantilla.',
 };
 
 export const EMPTY_CART_MESSAGE = 'El carrito está vacío.';
