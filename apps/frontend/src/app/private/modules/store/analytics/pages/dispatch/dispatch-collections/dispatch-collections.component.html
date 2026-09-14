@@ -1,0 +1,120 @@
+<div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+  <!-- KPI cards -->
+  @if (loading() && !envelope()) {
+    <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
+          <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+          <div class="h-8 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      }
+    </div>
+  } @else {
+    <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <app-stats
+        title="Valor Entregado"
+        [value]="(envelope()?.totals?.delivered_value ?? 0) | currency"
+        smallText="Operación: incluye prepagos y retenciones"
+        iconName="package"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+        [loading]="loading()"
+      ></app-stats>
+
+      <app-stats
+        title="Recaudo en Caja"
+        [value]="(envelope()?.totals?.cash_collected ?? 0) | currency"
+        smallText="Concilia con el cierre de caja"
+        iconName="wallet"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-600"
+        [loading]="loading()"
+      ></app-stats>
+
+      <app-stats
+        title="Retenciones"
+        [value]="(envelope()?.totals?.total_withholdings ?? 0) | currency"
+        smallText="Retefuente + reteiva + reteica"
+        iconName="scale"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-600"
+        [loading]="loading()"
+      ></app-stats>
+
+      <app-stats
+        title="Diferencia de Caja"
+        [value]="formatVariance(envelope()?.totals?.cash_variance)"
+        [smallText]="varianceSmallText(envelope()?.totals?.cash_variance)"
+        iconName="circle-dollar-sign"
+        [iconBgColor]="varianceIconBg(envelope()?.totals?.cash_variance)"
+        [iconColor]="varianceIconColor(envelope()?.totals?.cash_variance)"
+        [loading]="loading()"
+      ></app-stats>
+    </div>
+  }
+
+  <!-- Header + filters -->
+  <div
+    class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-surface px-4 py-3 border-b border-border rounded-lg mx-1 mb-4"
+  >
+    <div class="flex items-center gap-2.5 min-w-0">
+      <div
+        class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0"
+      >
+        <app-icon name="wallet" class="text-[var(--color-primary)]"></app-icon>
+      </div>
+      <div class="min-w-0">
+        <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
+          Recaudo de Rutas
+        </h1>
+        <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
+          Recaudo en caja, retenciones y diferencia de caja por ruta · ventana por fecha de planilla
+        </p>
+      </div>
+    </div>
+    <app-options-dropdown
+      class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+      [filters]="filterConfigs"
+      [filterValues]="filterValues()"
+      [actions]="dropdownActions"
+      triggerLabel="Filtros"
+      triggerIcon="filter"
+      [debounceMs]="350"
+      (filterChange)="onFilterChange($event)"
+      (clearAllFilters)="onClearAllFilters()"
+    ></app-options-dropdown>
+  </div>
+
+  <!-- Chart -->
+  <app-card shadow="none" [responsivePadding]="true">
+    <span class="text-sm font-bold text-[var(--color-text-primary)]">Desglose de Retenciones</span>
+    <div class="h-[320px] mt-2">
+      <app-chart [options]="withholdingChartOptions()" [loading]="loading()"></app-chart>
+    </div>
+  </app-card>
+
+  <!-- Table -->
+  <app-card shadow="none" [responsivePadding]="true">
+    <span class="text-sm font-bold text-[var(--color-text-primary)]">Rutas del Periodo</span>
+    <div class="mt-3">
+      <app-responsive-data-view
+        [data]="envelope()?.routes ?? []"
+        [columns]="routeColumns"
+        [cardConfig]="routeCardConfig"
+        [loading]="loading()"
+        emptyMessage="No hay rutas cerradas en el periodo"
+        emptyIcon="truck"
+      ></app-responsive-data-view>
+    </div>
+  </app-card>
+
+  <!-- Quick links -->
+  <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+    <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Despachos</span>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+      @for (view of dispatchViews; track view.key) {
+        <app-analytics-card [view]="view"></app-analytics-card>
+      }
+    </div>
+  </app-card>
+</div>

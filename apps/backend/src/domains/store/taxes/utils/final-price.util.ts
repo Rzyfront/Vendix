@@ -14,8 +14,10 @@ import { resolveLineTotals } from './tax-inclusive-math.util';
  *   heredan las tasas del producto.
  * - `calculateVariantFinalPrice`: efectivo variante (sale > override > base
  *   del producto) resuelto con `resolveLineTotals`.
+ * - `resolveLineUnits`: multiplicador canónico de línea (ADR-06 punto 5:
+ *   `line_units`) con sus tres ramas — peso, escala, cantidad.
  * - `resolveOrderLineFinals`: final por línea de orden/mesa sobre el
- *   `unit_price` persistido × cantidad, redondeado a 2.
+ *   `unit_price` persistido × `line_units`, redondeado a 2.
  */
 
 export interface TypedTaxRate {
@@ -128,19 +130,54 @@ export function roundMoney2(value: number): number {
 }
 
 /**
+ * Entrada mínima de línea que el serializador necesita leer. `weight` es el
+ * peso capturado (`order_items.weight`) y `price_unit_quantity` la escala
+ * snapshot (`order_items.price_unit_quantity`, NULL = 1).
+ */
+export interface OrderLineUnitsInput {
+  quantity: unknown;
+  weight?: unknown;
+  price_unit_quantity?: unknown;
+}
+
+/**
+ * Multiplicador canónico de línea — el `line_units` que ADR-06 punto 5 usa en
+ * su fallback de lectura y nunca define. Tres ramas (C.12, cierra F-028):
+ * peso capturado, escala (`quantity / price_unit_quantity`), cantidad pura.
+ * Con guarda contra multiplicador ≤ 0: un multiplicador degenerado (0,
+ * negativo o NaN) devuelve 0 en vez de dividir por cero o negativizar el
+ * total. En la línea ordinaria (sin peso ni escala) devuelve `quantity`,
+ * idéntico al comportamiento anterior.
+ */
+export function resolveLineUnits(
+  line: OrderLineUnitsInput | null | undefined,
+): number {
+  const weight = Number(line?.weight ?? 0);
+  if (Number.isFinite(weight) && weight > 0) return weight;
+  const quantity = Number(line?.quantity ?? 0);
+  const scaleRaw = Number(line?.price_unit_quantity ?? 1);
+  const scale = Number.isFinite(scaleRaw) && scaleRaw > 1 ? scaleRaw : 1;
+  const units = scale > 1 ? quantity / scale : quantity;
+  return Number.isFinite(units) && units > 0 ? units : 0;
+}
+
+/**
  * Finales por línea de orden/mesa (display-only): el `unit_price` persistido
  * (que ya es el efectivo de la variante al crear la línea) resuelto con las
- * tasas del producto, y ese valor × cantidad redondeado a 2.
+ * tasas del producto, y ese valor × `line_units` redondeado a 2.
+ * `final_unit_price` no depende del multiplicador: sólo el total de línea
+ * cambia (C.12, cierra F-202).
  */
 export function resolveOrderLineFinals(
-  unitPrice: number | string,
-  quantity: number,
+  line: OrderLineUnitsInput & { unit_price: unknown },
   rates: TypedTaxRate[] | null | undefined,
 ): { final_unit_price: number; final_total_price: number } {
-  const final_unit_price = resolveLineTotals(Number(unitPrice), rates ?? []).total;
-  const qty = Number(quantity);
+  const final_unit_price = resolveLineTotals(
+    Number(line?.unit_price),
+    rates ?? [],
+  ).total;
   return {
     final_unit_price,
-    final_total_price: roundMoney2(final_unit_price * (Number.isFinite(qty) ? qty : 0)),
+    final_total_price: roundMoney2(final_unit_price * resolveLineUnits(line)),
   };
 }

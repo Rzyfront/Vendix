@@ -608,7 +608,11 @@ export class FinancialAnalyticsService {
     // (revenue.total_invoiced, bottom_line.balance, comparison.balance). Bumped
     // with the shape so a rolling deploy cannot serve a v3-shaped object to a
     // frontend that reads `cash.*` and would render every card as 0.
-    const cacheKey = `analytics:financial:profit-loss:v4:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
+    // `v5` (C.10 CP-pos-exclusive-tax-double-charge): P1 moves subtotal_amount
+    // ~19% on exclusive-tax lines. Old v4 entries would keep serving the
+    // inflated figures on financial cards — bump the key for visibility, no
+    // calculation logic changes.
+    const cacheKey = `analytics:financial:profit-loss:v5:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
     const cached =
       await this.cache.get<
         Awaited<ReturnType<FinancialAnalyticsService['computeProfitLossSummary']>>
@@ -621,7 +625,7 @@ export class FinancialAnalyticsService {
   }
 
   /**
-   * Bug 5/11 — Invalida todas las entradas del cache `profit-loss:v4:*` para
+   * Bug 5/11 — Invalida todas las entradas del cache `profit-loss:v5:*` para
    * un store. Usado por `FinancialAnalyticsCacheInvalidationListener` cuando
    * llega `expense.state_changed`, `payment.received` o `refund.completed`.
    *
@@ -632,7 +636,7 @@ export class FinancialAnalyticsService {
    * `reset()` (cache-manager v5). El catch final evita bloquear el flujo.
    */
   async invalidateCache(storeId: number, prefix = 'profit-loss'): Promise<void> {
-    const keyPrefix = `analytics:financial:${prefix}:v4:${storeId}:`;
+    const keyPrefix = `analytics:financial:${prefix}:v5:${storeId}:`;
     const pattern = `${keyPrefix}*`;
     try {
       const store: any = (this.cache as any).store;

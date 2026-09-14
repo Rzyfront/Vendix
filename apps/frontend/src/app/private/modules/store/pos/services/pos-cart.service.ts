@@ -1132,27 +1132,45 @@ export class PosCartService {
    * para add y remove en modo adoptado: ambos envían la lista completa.
    */
   private serializeItemsForAdoptedOrder(items: CartItem[]): any[] {
-    return items.map((it) => ({
-      item_type: it.itemType === 'custom' ? 'custom' : 'product',
-      product_id:
-        it.itemType === 'custom' || !it.product?.id
-          ? null
-          : Number(it.product.id),
-      product_name: it.product?.name ?? '',
-      quantity: it.quantity,
-      unit_price: Number((it.unitPrice ?? 0).toFixed(2)),
-      final_unit_price: Number((it.finalPrice ?? it.unitPrice ?? 0).toFixed(2)),
-      total_price: Number((it.totalPrice ?? 0).toFixed(2)),
-      product_variant_id: it.variant_id ?? null,
-      variant_sku: it.variant_sku ?? null,
-      variant_attributes: it.variant_attributes ?? null,
-      description: it.description ?? it.notes ?? null,
-      // CP-POS-MODAL-SCOPE-001 / Phase F.4 — `skip_kds` belongs to the
-      // flow/pay pipeline (POS-vs-KDS modal on charge), NOT to the items-edit
-      // endpoint. Backend's `UpdateOrderItemsDto` does not declare it and
-      // `forbidNonWhitelisted` rejects with 400 SYS_VALIDATION_001. The flag
-      // continues to flow on `cartState.customer` and `processSaleWithPayment`.
-    }));
+    return items.map((it) => {
+      const unitPrice = Number((it.unitPrice ?? 0).toFixed(2));
+      const quantity = Number(it.quantity ?? 0);
+      return {
+        item_type: it.itemType === 'custom' ? 'custom' : 'product',
+        product_id:
+          it.itemType === 'custom' || !it.product?.id
+            ? null
+            : Number(it.product.id),
+        product_name: it.product?.name ?? '',
+        quantity: it.quantity,
+        unit_price: unitPrice,
+        final_unit_price: Number((it.finalPrice ?? it.unitPrice ?? 0).toFixed(2)),
+        // F-002 (C.8, blocker): antes mandaba `it.totalPrice`, que
+        // `mapOrderItemToCartItem` define como `finalUnitPrice × quantity`
+        // (BRUTO) mientras `unit_price` de arriba es `it.unitPrice` (BASE,
+        // tras el fix del monto) — dos magnitudes distintas en la misma
+        // fila. `total_price` ahora queda en la MISMA magnitud que
+        // `unit_price` (DB-01: `total_price = unit_price × price_units`).
+        // `tax_amount_item` viaja explícito (antes no se mandaba) para que
+        // el backend no calcule `tax_amount = 0` por omisión.
+        total_price: Number((unitPrice * quantity).toFixed(2)),
+        tax_amount_item: Number(
+          (
+            (Number(it.finalPrice ?? it.unitPrice ?? 0) - unitPrice) *
+            quantity
+          ).toFixed(2),
+        ),
+        product_variant_id: it.variant_id ?? null,
+        variant_sku: it.variant_sku ?? null,
+        variant_attributes: it.variant_attributes ?? null,
+        description: it.description ?? it.notes ?? null,
+        // CP-POS-MODAL-SCOPE-001 / Phase F.4 — `skip_kds` belongs to the
+        // flow/pay pipeline (POS-vs-KDS modal on charge), NOT to the items-edit
+        // endpoint. Backend's `UpdateOrderItemsDto` does not declare it and
+        // `forbidNonWhitelisted` rejects with 400 SYS_VALIDATION_001. The flag
+        // continues to flow on `cartState.customer` and `processSaleWithPayment`.
+      };
+    });
   }
 
   /**
@@ -2562,8 +2580,12 @@ export class PosCartService {
     );
     const taxAmount = items.reduce((sum, item) => sum + item.taxAmount, 0);
 
-    // Subtotal should be Net Amount (without tax) for display
-    const subtotal = grossTotal - taxAmount;
+    // C.6 (R-4) — el subtotal es la base NETA recibida (`unitPrice` neto ×
+    // `lineUnits`), nunca `grossTotal − taxAmount`: con truncado DIAN la
+    // resta no es exacta y deja un residuo huérfano entre Subtotal e IVA.
+    const subtotal = this.roundMoney(
+      items.reduce((sum, item) => sum + item.unitPrice * resolveLineUnits(item), 0),
+    );
 
     // Total is based on Gross Total minus Discounts
     const total = grossTotal - discountAmount;

@@ -8,6 +8,7 @@ import {
   UpdateRecipeDto,
   CreateRecipeItemDto,
   UpdateRecipeItemDto,
+  RecipeItemInputDto,
   RecipeQueryDto,
 } from './dto';
 
@@ -573,11 +574,23 @@ export class RecipesService {
 
   // ----------------------------------------------------- Recipe items CRUD
 
-  async addItem(recipeId: number, dto: CreateRecipeItemDto) {
-    const recipe = await this.findOne(recipeId);
+  /**
+   * Helper reusable de validaciones por línea de insumo (Step 1 del plan de sincronización atómica BOM).
+   *
+   * Aplica las cuatro invariantes por ítem:
+   * 0. Cantidad > 0 (RECIPE_ITEM_INVALID_QUANTITY)
+   * 1. No autorreferencia con el producto yield (RECIPE_SELF_REFERENCE)
+   * 2. Componente existente en la misma tienda (RECIPE_COMPONENT_NOT_FOUND)
+   * 2.b Insumo sin variantes (RECIPE_COMPONENT_HAS_VARIANTS)
+   */
+  private async assertComponentValid(
+    recipe: { product_id: number; id?: number },
+    dto: { component_product_id: number; quantity: number },
+    tx?: any,
+  ): Promise<void> {
+    const client = tx ?? this.prisma;
 
-    // 0. Quantity must be > 0. The DTO already enforces this, but a service
-    //    guard catches direct internal calls and gives a precise error code.
+    // 0. Cantidad debe ser > 0
     if (!(dto.quantity > 0)) {
       throw new VendixHttpException(
         ErrorCodes.RECIPE_ITEM_INVALID_QUANTITY,
@@ -585,13 +598,13 @@ export class RecipesService {
       );
     }
 
-    // 1. Self-reference: a recipe cannot include its own yield product.
+    // 1. No autorreferencia: un plato no puede ser su propio insumo
     if (dto.component_product_id === recipe.product_id) {
       throw new VendixHttpException(ErrorCodes.RECIPE_SELF_REFERENCE);
     }
 
-    // 2. Component product must exist in the same store.
-    const component = await this.prisma.products.findFirst({
+    // 2. Componente debe existir en la misma tienda
+    const component = await client.products.findFirst({
       where: { id: dto.component_product_id },
       select: { id: true, store_id: true },
     });
@@ -599,19 +612,8 @@ export class RecipesService {
       throw new VendixHttpException(ErrorCodes.RECIPE_COMPONENT_NOT_FOUND);
     }
 
-    // 2.b El insumo NO puede tener variantes.
-    //
-    // `recipe_items` sólo guarda `component_product_id` — no hay columna de
-    // variante. Con un insumo variantizado el consumo apunta a la fila BASE de
-    // `stock_levels` (product_variant_id NULL), que en un producto con
-    // variantes está vacía: la producción "descuenta" de un saldo inexistente y
-    // el inventario real no se mueve. No falla nada, y esa es la peor parte.
-    //
-    // Decisión de producto (ago 2026): en vez de agregar la columna, la
-    // restricción de unicidad, el constructor de recetas y el camino de cocina
-    // —funcionalidad nueva—, un insumo es un producto simple. Cada presentación
-    // que la receta consuma es su propio producto.
-    const componentVariantCount = await this.prisma.product_variants.count({
+    // 2.b El insumo NO puede tener variantes
+    const componentVariantCount = await client.product_variants.count({
       where: { product_id: dto.component_product_id },
     });
     if (componentVariantCount > 0) {
@@ -620,6 +622,206 @@ export class RecipesService {
         `El producto ${dto.component_product_id} tiene ${componentVariantCount} variante(s) y no puede usarse como insumo. Crea un producto simple por cada presentación que la receta consuma.`,
       );
     }
+  }
+
+  /**
+   * Replaces all items in a recipe atomically within a single transaction.
+   *
+   * Reconciles incoming lines against existing DB rows:
+   *  - Deletes items omitted in `items`
+   *  - Updates existing items in-place (persisting changes to `component_product_id`,
+   *    quantity, waste mode/values, and optional flag)
+   *  - Creates newly added items
+   *
+   * All validations of `addItem` (quantity > 0, self-reference, uniqueness,
+   * same store, no variants on ingredients, and cycle detection) are enforced
+   * across the full reconciled list via `assertComponentValid` and `assertNoCycleAddingLink`.
+   *
+   * Returns the updated recipe with populated component products, matching `findOne`.
+   */
+  async replaceItems(recipeId: number, items: RecipeItemInputDto[]) {
+    const recipe = await this.findOne(recipeId);
+
+    // 1. Uniqueness across incoming items (no duplicate components or IDs)
+    const seenComponentIds = new Set<number>();
+    for (const item of items) {
+      if (seenComponentIds.has(item.component_product_id)) {
+        throw new VendixHttpException(ErrorCodes.RECIPE_ITEM_DUP);
+      }
+      seenComponentIds.add(item.component_product_id);
+    }
+
+    const seenItemIds = new Set<number>();
+    for (const item of items) {
+      if (item.id != null) {
+        if (seenItemIds.has(item.id)) {
+          throw new VendixHttpException(
+            ErrorCodes.RECIPE_ITEM_DUP,
+            `El insumo con id ${item.id} está duplicado en la solicitud.`,
+          );
+        }
+        seenItemIds.add(item.id);
+      }
+    }
+
+    // 2. Line validations with assertComponentValid + cycle detection
+    for (const item of items) {
+      await this.assertComponentValid(recipe, item);
+      await this.assertNoCycleAddingLink(
+        recipe.product_id,
+        item.component_product_id,
+      );
+    }
+
+    // 3. Verify existing items belonging to this recipe
+    const existingItems = await this.prisma.recipe_items.findMany({
+      where: { recipe_id: recipeId },
+      select: { id: true, component_product_id: true },
+    });
+    const existingItemMap = new Map<
+      number,
+      { id: number; component_product_id: number }
+    >();
+    for (const it of existingItems) {
+      existingItemMap.set(it.id, it);
+    }
+
+    for (const item of items) {
+      if (item.id != null && !existingItemMap.has(item.id)) {
+        throw new VendixHttpException(ErrorCodes.RECIPE_ITEM_NOT_FOUND);
+      }
+    }
+
+    // 4. Transactional execution: delete omitted, update existing, create new, update timestamp
+    const incomingIds = new Set<number>(
+      items.filter((it) => it.id != null).map((it) => it.id!),
+    );
+    const toDeleteIds = existingItems
+      .filter((it) => !incomingIds.has(it.id))
+      .map((it) => it.id);
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        // Step A: Delete removed items first to free any unique (recipe_id, component_product_id) constraints
+        if (toDeleteIds.length > 0) {
+          await tx.recipe_items.deleteMany({
+            where: { id: { in: toDeleteIds }, recipe_id: recipeId },
+          });
+        }
+
+        // Step B: Update existing items or create new items
+        for (const item of items) {
+          if (item.id != null) {
+            await tx.recipe_items.update({
+              where: { id: item.id },
+              data: {
+                component_product_id: item.component_product_id,
+                quantity: new Prisma.Decimal(item.quantity),
+                waste_percent:
+                  item.waste_percent != null
+                    ? new Prisma.Decimal(item.waste_percent)
+                    : new Prisma.Decimal(0),
+                waste_mode: item.waste_mode ?? 'percent',
+                waste_absolute:
+                  item.waste_absolute != null
+                    ? new Prisma.Decimal(item.waste_absolute)
+                    : new Prisma.Decimal(0),
+                is_optional: item.is_optional ?? false,
+                updated_at: new Date(),
+              },
+            });
+          } else {
+            await tx.recipe_items.create({
+              data: {
+                recipe_id: recipeId,
+                component_product_id: item.component_product_id,
+                quantity: new Prisma.Decimal(item.quantity),
+                waste_percent:
+                  item.waste_percent != null
+                    ? new Prisma.Decimal(item.waste_percent)
+                    : new Prisma.Decimal(0),
+                waste_mode: item.waste_mode ?? 'percent',
+                waste_absolute:
+                  item.waste_absolute != null
+                    ? new Prisma.Decimal(item.waste_absolute)
+                    : new Prisma.Decimal(0),
+                is_optional: item.is_optional ?? false,
+                updated_at: new Date(),
+              },
+            });
+          }
+        }
+
+        // Step C: Update recipe updated_at timestamp
+        await tx.recipes.update({
+          where: { id: recipeId },
+          data: { updated_at: new Date() },
+        });
+
+        // Step D: Retrieve refreshed recipe with component details (matching findOne shape)
+        const updatedRecipe = await tx.recipes.findFirst({
+          where: { id: recipeId },
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                base_price: true,
+                stock_unit: true,
+                is_ingredient: true,
+                is_sellable: true,
+                is_combo: true,
+                is_batch_produced: true,
+              },
+            },
+            product_variant: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+              },
+            },
+            items: {
+              orderBy: { id: 'asc' },
+              include: {
+                component_product: {
+                  select: {
+                    id: true,
+                    name: true,
+                    sku: true,
+                    stock_unit: true,
+                    is_ingredient: true,
+                    is_sellable: true,
+                    base_price: true,
+                    cost_price: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+        if (!updatedRecipe) {
+          throw new VendixHttpException(ErrorCodes.RECIPE_NOT_FOUND);
+        }
+        return this.stripCocinaRecipeMoney(updatedRecipe);
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new VendixHttpException(ErrorCodes.RECIPE_ITEM_DUP);
+      }
+      throw error;
+    }
+  }
+
+  async addItem(recipeId: number, dto: CreateRecipeItemDto) {
+    const recipe = await this.findOne(recipeId);
+
+    // 0, 1, 2, 2.b: Validaciones de invariantes por línea (helper reusable)
+    await this.assertComponentValid(recipe, dto);
 
     // 3. Unique (recipe_id, component_product_id) — surface a friendly error
     //    instead of letting Prisma throw a raw P2002.

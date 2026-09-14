@@ -126,6 +126,12 @@ export class PosOrderItemDto {
   @Type(() => Number)
   cost?: number;
 
+  // F-085/F-206: el contrato vuelve a 4 cifras. Estrecharlo a 3 convertía una
+  // pesada legítima (p. ej. 1234,5 g ⇒ 1,2345 kg por conversión de unidad) en
+  // un 400 DESPUÉS de pesar, sin cota en ningún cliente. La garantía vive en
+  // el servidor (`getPosLineUnits` redondea a 3 antes de multiplicar, en
+  // paridad con `numeric(10,3)`), no en rechazar la entrada: la 4ª cifra se
+  // redondea, nunca se cobra de más ni deriva la relectura.
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 4 })
   @Min(0)

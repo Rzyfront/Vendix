@@ -1,20 +1,53 @@
 <div>
-  <!-- A.3 CP-facturacion-fixes — banner de alerta fiscal. `fiscal_alert_code` lo
-       fija el auto-envío del webhook cuando la emisión falla (nunca bloquea el
-       pago); null = sin alerta. Lleva al operador a emitir manualmente. -->
-  @if (order()?.fiscal_alert_code) {
+  <!-- C.9 CP-pos-exclusive-tax-double-charge — banner de alerta fiscal derivado
+       del diccionario (`orders/utils/fiscal-alert-dictionary.ts`), nunca copy
+       fijo: `fiscal_alert_code` lo fija el auto-envío del webhook cuando la
+       emisión falla (nunca bloquea el pago); null = sin alerta. El código sale
+       del título y va en línea secundaria rotulada; el cuerpo usa
+       text-text-primary (el secondary no llega a 4,5:1). -->
+  @if (fiscalAlert(); as alert) {
     <div
+      role="alert"
       class="bg-warning-light border border-warning/30 rounded-lg p-4 mb-6 flex items-start gap-3"
     >
-      <div class="text-warning shrink-0 mt-0.5">⚠️</div>
+      <div class="text-warning shrink-0 mt-0.5" aria-hidden="true">⚠️</div>
       <div class="flex-1">
         <p class="font-semibold text-text-primary text-sm">
-          Alerta fiscal: factura sin emitir ({{ order()?.fiscal_alert_code }})
+          {{ alert.title }}
         </p>
-        <p class="text-xs text-text-secondary mt-1">
-          El envío automático a la DIAN falló para esta orden. Revísala en el
-          módulo de facturación y emite el documento manualmente.
+        <p class="text-xs text-text-primary mt-0.5">
+          Código: {{ order()?.fiscal_alert_code }}
         </p>
+        <p class="text-xs text-text-primary mt-1">
+          {{ alert.body }}
+        </p>
+        <div class="flex gap-2 mt-3">
+          @if (alert.action.kind === 'emit-invoice') {
+            <button
+              type="button"
+              class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white"
+              (click)="createInvoiceFromOrder()"
+            >
+              {{ alert.action.label }}
+            </button>
+          } @else if (alert.action.kind === 'open-refund') {
+            <button
+              type="button"
+              class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white"
+              (click)="openRefundModal()"
+            >
+              {{ alert.action.label }}
+            </button>
+          } @else {
+            <button
+              type="button"
+              class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white"
+              (click)="goToSupport()"
+            >
+              {{ alert.action.label }}
+            </button>
+          }
+        </div>
       </div>
     </div>
   }
@@ -2098,12 +2131,8 @@
             </h2>
 
             <div class="space-y-2.5">
-              <div class="flex justify-between items-center text-sm">
-                <span class="text-text-secondary">Subtotal</span>
-                <span class="font-semibold text-gray-900">{{
-                  orderData.subtotal_amount || 0 | currency
-                }}</span>
-              </div>
+              <!-- C.7 (§5.3, base gross): sin fila Subtotal — las líneas ya
+                   van en bruto y un Subtotal en base quedaría huérfano. -->
 
               <!-- Applied promotions (persisted snapshot) -->
               @if (appliedPromotions().length > 0) {
@@ -2183,12 +2212,16 @@
                   orderData.shipping_cost || 0 | currency
                 }}</span>
               </div>
-              <div class="flex justify-between items-center text-sm">
-                <span class="text-text-secondary">Impuestos</span>
-                <span class="font-semibold text-gray-900">{{
-                  orderData.tax_amount || 0 | currency
-                }}</span>
-              </div>
+              <!-- C.7 (§5.3, base gross): sin fila de impuesto que sume; con
+                   desglose respaldado, nota informativa fuera de la aritmética. -->
+              @if (showDetailVatNote()) {
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">IVA incluido</span>
+                  <span class="font-semibold text-gray-900">{{
+                    orderData.tax_amount || 0 | currency
+                  }}</span>
+                </div>
+              }
               <div
                 class="pt-3 mt-1 border-t border-border flex justify-between items-center"
               >

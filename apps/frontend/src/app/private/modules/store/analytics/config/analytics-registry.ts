@@ -25,7 +25,8 @@ export type AnalyticsCategoryId =
   | 'purchases'
   | 'customers'
   | 'reviews'
-  | 'financial';
+  | 'financial'
+  | 'dispatch';
 
 export interface AnalyticsCategory {
   id: AnalyticsCategoryId;
@@ -48,7 +49,7 @@ export interface AnalyticsView {
 }
 
 // ─────────────────────────────────────────────
-// Categories (8 total)
+// Categories (9 total)
 // ─────────────────────────────────────────────
 
 export const ANALYTICS_CATEGORIES: AnalyticsCategory[] = [
@@ -116,10 +117,18 @@ export const ANALYTICS_CATEGORIES: AnalyticsCategory[] = [
     color: 'var(--color-text-primary)',
     panelUiKey: 'analytics_financial',
   },
+  {
+    id: 'dispatch',
+    label: 'Despachos',
+    description: 'Cumplimiento de entrega, portadores y recaudo de rutas',
+    icon: 'truck',
+    color: 'var(--color-warning)',
+    panelUiKey: 'analytics_dispatch',
+  },
 ];
 
 // ─────────────────────────────────────────────
-// Views (24 total)
+// Views (28 total)
 // ─────────────────────────────────────────────
 
 export const ANALYTICS_VIEWS: AnalyticsView[] = [
@@ -364,6 +373,35 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     route: '/admin/analytics/financial/refunds',
     category: 'financial',
     icon: 'rotate-ccw',
+  },
+
+  // Dispatch (3)
+  {
+    key: 'dispatch_summary',
+    title: 'Resumen de Despachos',
+    description: 'Cumplimiento de entrega y recaudo del periodo',
+    detailedDescription: 'Visualiza el cumplimiento de entrega, el valor entregado y el recaudo en caja de tus rutas de despacho.',
+    route: '/admin/analytics/dispatch/summary',
+    category: 'dispatch',
+    icon: 'truck',
+  },
+  {
+    key: 'dispatch_fulfillment',
+    title: 'Cumplimiento por Portador',
+    description: 'Ranking de conductores y repartidores por cumplimiento',
+    detailedDescription: 'Compara el cumplimiento de entrega entre conductores internos, conductores externos, auxiliares y domiciliarios.',
+    route: '/admin/analytics/dispatch/fulfillment',
+    category: 'dispatch',
+    icon: 'user-round',
+  },
+  {
+    key: 'dispatch_collections',
+    title: 'Recaudo de Rutas',
+    description: 'Recaudo en caja, retenciones y diferencia de caja por ruta',
+    detailedDescription: 'Concilia el recaudo en caja, el valor entregado y las retenciones practicadas por cada ruta cerrada.',
+    route: '/admin/analytics/dispatch/collections',
+    category: 'dispatch',
+    icon: 'wallet',
   },
 ];
 

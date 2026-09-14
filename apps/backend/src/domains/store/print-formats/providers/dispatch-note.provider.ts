@@ -6,6 +6,12 @@ import { IDocumentDataProvider } from '../interfaces/document-data-provider.inte
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+// C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-08: la remisión
+// declara `money_basis: 'gross'` y propaga el gate fiscal de C.1. NOTA
+// (F-101): esto sólo toca el riel del GATEWAY (`print-formats/`); el PDF
+// legado (`dispatch-note-pdf.builder.ts`) y el fallback local del frontend
+// (`dispatch-note-print.service.ts`) son otro riel — C.7 y C.5.
+import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
 
 @Injectable()
 export class DispatchNoteDataProvider implements IDocumentDataProvider {
@@ -28,7 +34,15 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
         stores: {
           include: {
             addresses: { take: 1 },
-            organizations: true,
+            // C.1 — settings para el gate fiscal
+            // `resolvePrintsVatBreakdownForPrint` (misma forma que
+            // `FISCAL_DOCUMENT_PRINT_INCLUDE`).
+            store_settings: { select: { settings: true } },
+            organizations: {
+              include: {
+                organization_settings: { select: { settings: true } },
+              },
+            },
           },
         },
         orders: {
@@ -45,6 +59,7 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
     }
 
     const store = note.stores || {};
+    const org = store.organizations || {};
     const order = note.orders || ({} as any);
     const user = order.users || {};
     const storeAddr = store.addresses?.[0] || {};
@@ -94,6 +109,9 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
         shipping_tracking_number: note.tracking_number || undefined,
         notes: note.notes || undefined,
       },
+      // C.2 (ADR-12) — G-08: papel comercial, el destinatario ve el bruto.
+      money_basis: 'gross',
+      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(org, store),
       items,
       taxes: [],
       totals: {
@@ -138,6 +156,9 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
         shipping_tracking_number: 'GUIA-889922001',
         notes: 'Entregar en horario de oficina. Solicitar sello y firma.',
       },
+      // C.2 (ADR-12) — muestra en `'gross'`, paridad con `fetchDocumentData`.
+      money_basis: 'gross',
+      prints_vat_breakdown: true,
       items: [
         {
           index: 1,

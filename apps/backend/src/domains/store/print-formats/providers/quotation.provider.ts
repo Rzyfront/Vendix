@@ -9,6 +9,9 @@ import { StandardPrintDataModel } from '../interfaces/standard-print-data.model'
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
 import { mapUserAddress } from '../lib/customer-address';
+// C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-07: cotización
+// declara `money_basis: 'taxable_base'` y propaga el gate de C.1.
+import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
 
 /**
  * Etiquetas de `quotation_status_enum` en español. Mismo diccionario de siete
@@ -64,7 +67,15 @@ export class QuotationDataProvider implements IDocumentDataProvider {
         store: {
           include: {
             addresses: { take: 1 },
-            organizations: true,
+            // C.1 — settings para el gate fiscal
+            // `resolvePrintsVatBreakdownForPrint` (misma forma que
+            // `FISCAL_DOCUMENT_PRINT_INCLUDE`).
+            store_settings: { select: { settings: true } },
+            organizations: {
+              include: {
+                organization_settings: { select: { settings: true } },
+              },
+            },
           },
         },
       },
@@ -152,6 +163,11 @@ export class QuotationDataProvider implements IDocumentDataProvider {
         // pequeña de la oferta.
         terms_and_conditions: quot.terms_and_conditions || undefined,
       },
+      // C.2 (ADR-12) — declaración fija de negocio (G-07): cotización siempre
+      // sobre base gravable; el gate de IVA se resuelve con org/store ya en
+      // memoria por el include de C.1.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(org, store),
       items,
       taxes: this.aggregateTaxes(quot.quotation_items),
       totals: {
@@ -255,6 +271,9 @@ export class QuotationDataProvider implements IDocumentDataProvider {
         terms_and_conditions:
           'Forma de pago: 50% anticipado, 50% contra entrega.\nTiempo de entrega: 10 días hábiles después de la orden de compra.\nGarantía: 12 meses por defectos de fábrica.',
       },
+      // C.2 (ADR-12) — muestra en `'taxable_base'`, paridad con `fetchDocumentData`.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: true,
       items: [
         {
           index: 1,

@@ -307,8 +307,10 @@ export class DocumentPrintService {
 
   /**
    * Imprime un documento mediante el Print Gateway Centralizado del backend.
-   * Si ocurre algún error o el gateway no está disponible, hace fallback
-   * transparente al emisor local (legacy).
+   * C.5 (R-5) — el `fallbackRequest` vive solo para papeles SIN dinero
+   * (tiquete de despacho): ningún emisor de dinero lo pasa; si el gateway
+   * falla, se retorna `null` y el caller muestra el error. Sin fallback
+   * silencioso.
    */
   async printViaGateway(params: {
     formatType: PrintFormatType;

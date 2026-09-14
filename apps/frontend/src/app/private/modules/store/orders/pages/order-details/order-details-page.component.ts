@@ -112,6 +112,10 @@ import {
   RepartosApiError,
 } from '../../../../store-delivery/services/repartos.service';
 import { STATUS_LABELS as DISPATCH_NOTE_STATUS_LABELS } from '../../../dispatch-notes/constants/dispatch-note.constants';
+import {
+  resolveFiscalAlert,
+  type FiscalAlertEntry,
+} from '../../utils/fiscal-alert-dictionary';
 
 export interface LifecycleStep {
   key: string;
@@ -180,6 +184,16 @@ export class OrderDetailsPageComponent {
   private destroyRef = inject(DestroyRef);
   orderId: string | null = null;
   order = signal<Order | null>(null);
+  /**
+   * C.9 CP-pos-exclusive-tax-double-charge — entrada del diccionario de alerta
+   * fiscal para el `fiscal_alert_code` de la orden; `null` = sin banner. El
+   * copy del banner se deriva de aquí, nunca de texto fijo en la plantilla.
+   */
+  readonly fiscalAlert = computed<FiscalAlertEntry | null>(() => {
+    const code = this.order()?.fiscal_alert_code;
+    if (!code) return null;
+    return resolveFiscalAlert(code);
+  });
   readonly appliedTierSummary = computed(() => {
     const order = this.order();
     const groups = new Map<string, { name: string; total: number; count: number }>();
@@ -324,6 +338,19 @@ export class OrderDetailsPageComponent {
   readonly unfiredPreparedItems = this.pendingKitchenItems;
   /** True if the active store is a restaurant (industries cascade). */
   readonly isRestaurant = computed<boolean>(() => this.authFacade.isRestaurant());
+  /**
+   * C.7 (§5.3, base gross) — esta superficie pinta líneas en BRUTO
+   * (`final_total_price ?? total_price`): el pie no lleva Subtotal ni fila
+   * de impuesto que sume; sólo TOTAL y, con desglose respaldado, la nota
+   * informativa fuera de la aritmética.
+   */
+  readonly showDetailVatNote = computed(() => {
+    const order = this.order();
+    const tax = Number(
+      (order as unknown as { tax_amount?: unknown } | null)?.tax_amount ?? 0,
+    );
+    return this.authFacade.printsVatBreakdown() && tax > 0;
+  });
   /**
    * Plan KDS fire-flows (F3): show the per-plate kitchen dispatch UI only
    * for restaurant stores, when there is at least one pending prepared
@@ -2718,6 +2745,15 @@ export class OrderDetailsPageComponent {
     this.showRefundModal.set(true);
   }
 
+  /**
+   * C.9 — CTA de soporte de la fila *default* del diccionario de alerta
+   * fiscal: un código que este panel no reconoce nunca ofrece emitir; lleva
+   * al centro de ayuda y soporte de la tienda (`/admin/help/support`).
+   */
+  goToSupport(): void {
+    void this.router.navigate(['/admin/help/support']);
+  }
+
   onRefundSubmitted(): void {
     this.showRefundModal.set(false);
     this.toastService.success('Reembolso procesado exitosamente');
@@ -3952,13 +3988,18 @@ export class OrderDetailsPageComponent {
 
   /**
    * Visibilidad del botón «Emitir factura electrónica»: la orden admite
-   * factura Y la tienda está emitiendo en producción. Las dos condiciones,
-   * porque ofrecer el botón a una tienda que el backend va a rechazar
-   * (`INVOICING_ENABLEMENT_001`) es prometer lo que no se puede cumplir.
+   * factura Y la tienda está emitiendo en producción Y el diccionario de
+   * alerta fiscal lo permite. Las tres condiciones, porque ofrecer el botón
+   * a una tienda que el backend va a rechazar (`INVOICING_ENABLEMENT_001`)
+   * es prometer lo que no se puede cumplir — y ofrecerlo bajo
+   * `POS_EXCLUSIVE_TAX_DOUBLE` o un código desconocido quema un consecutivo
+   * con base inflada (C.9 CP-pos-exclusive-tax-double-charge).
    */
-  readonly canEmitInvoice = computed(
-    () => this.reinvoiceable() && this.electronicEmissionLive(),
-  );
+  readonly canEmitInvoice = computed(() => {
+    const code = this.order()?.fiscal_alert_code;
+    const emitAllowed = !code || resolveFiscalAlert(code).allowEmitInvoiceCta;
+    return this.reinvoiceable() && this.electronicEmissionLive() && emitAllowed;
+  });
 
   /**
    * ¿Esta tienda está habilitada para emitir facturación electrónica EN

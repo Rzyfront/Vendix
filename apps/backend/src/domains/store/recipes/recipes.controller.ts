@@ -7,6 +7,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -17,6 +18,8 @@ import {
   UpdateRecipeDto,
   CreateRecipeItemDto,
   UpdateRecipeItemDto,
+  RecipeItemInputDto,
+  ParseReplaceRecipeItemsPipe,
   RecipeQueryDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -145,6 +148,19 @@ export class RecipesController {
   }
 
   // ----------------------------------------------------- Recipe items CRUD
+
+  @Put(':id/items')
+  @Permissions('store:recipes:update')
+  async replaceItems(
+    @Param('id', ParseIntPipe) id: number,
+    @Body(new ParseReplaceRecipeItemsPipe()) dto: { items: RecipeItemInputDto[] },
+  ) {
+    const result = await this.recipesService.replaceItems(id, dto.items);
+    return this.responseService.updated(
+      result,
+      'Insumos de la receta actualizados exitosamente',
+    );
+  }
 
   @Post(':id/items')
   @Permissions('store:recipes:update')

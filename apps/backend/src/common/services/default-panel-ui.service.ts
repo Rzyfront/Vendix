@@ -146,6 +146,7 @@ export class DefaultPanelUIService {
         analytics_products: true,
         analytics_customers: true,
         analytics_financial: true,
+        analytics_dispatch: true,
         expenses: true,
         // Restaurant Operations (Restaurant Suite — Fase I).
         // Phase I decisions: `default_visible_for_privileged_users=true`
@@ -175,6 +176,7 @@ export class DefaultPanelUIService {
         memberships_members: true,
         memberships_access: true,
         reports: true,
+        reports_dispatch: true,
         invoicing: true,
         invoicing_invoices: true,
         invoicing_resolutions: true,

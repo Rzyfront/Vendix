@@ -6,6 +6,9 @@ import { IDocumentDataProvider } from '../interfaces/document-data-provider.inte
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+// C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-10: orden de compra
+// declara `money_basis: 'taxable_base'` y propaga el gate de C.1.
+import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
 
 @Injectable()
 export class PurchaseOrderDataProvider implements IDocumentDataProvider {
@@ -28,7 +31,15 @@ export class PurchaseOrderDataProvider implements IDocumentDataProvider {
         stores: {
           include: {
             addresses: { take: 1 },
-            organizations: true,
+            // C.1 — settings para el gate fiscal
+            // `resolvePrintsVatBreakdownForPrint` (misma forma que
+            // `FISCAL_DOCUMENT_PRINT_INCLUDE`).
+            store_settings: { select: { settings: true } },
+            organizations: {
+              include: {
+                organization_settings: { select: { settings: true } },
+              },
+            },
           },
         },
         suppliers: true,
@@ -41,6 +52,7 @@ export class PurchaseOrderDataProvider implements IDocumentDataProvider {
     }
 
     const store = po.stores || {};
+    const org = store.organizations || {};
     const supplier = po.suppliers || {};
     const storeAddr = store.addresses?.[0] || {};
 
@@ -83,6 +95,11 @@ export class PurchaseOrderDataProvider implements IDocumentDataProvider {
         state_label: po.state,
         notes: po.notes || undefined,
       },
+      // C.2 (ADR-12) — declaración fija de negocio (G-10): orden de compra
+      // siempre sobre base gravable; el gate de IVA se resuelve con org/store
+      // ya en memoria por el include de C.1.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(org, store),
       items,
       taxes: [],
       totals: {
@@ -126,6 +143,9 @@ export class PurchaseOrderDataProvider implements IDocumentDataProvider {
         state_label: 'Aprobada',
         notes: 'Entregar en bodega central antes del viernes. Pago a 30 días contra factura.',
       },
+      // C.2 (ADR-12) — muestra en `'taxable_base'`, paridad con `fetchDocumentData`.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: true,
       items: [
         {
           index: 1,

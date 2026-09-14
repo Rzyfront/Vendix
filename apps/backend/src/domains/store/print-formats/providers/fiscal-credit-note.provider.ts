@@ -14,6 +14,9 @@ import {
   resolveRawLogoKey,
 } from './fiscal-document-print.mapper';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
+// C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-04: nota crédito
+// fiscal declara `money_basis: 'taxable_base'` y propaga el gate de C.1.
+import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
 
 /**
  * Tipos de `invoices.invoice_type` que ESTE formato puede imprimir.
@@ -113,6 +116,11 @@ export class FiscalCreditNoteDataProvider implements IDocumentDataProvider {
       pendingLabel: 'Nota crédito pendiente',
       referenceDocumentNumber,
       signedLogoUrl,
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(
+        note.organization,
+        note.store,
+      ),
     });
   }
 
@@ -153,6 +161,10 @@ export class FiscalCreditNoteDataProvider implements IDocumentDataProvider {
       fiscal: {
         cude: 'c1d2e3f4a5b67890123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0',
       },
+      // C.2 (ADR-12) — muestra en `'taxable_base'`, paridad con
+      // `fetchDocumentData`.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: true,
       items: [
         {
           index: 1,

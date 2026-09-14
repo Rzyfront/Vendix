@@ -1728,6 +1728,11 @@ export class TableSessionsService {
                 quantity: true,
                 unit_price: true,
                 total_price: true,
+                // C.12 — el serializador canonico lee el multiplicador de
+                // la propia linea (peso + escala); sin proyectarlos la
+                // cuenta QR-mesa hereda el multiplicador viejo (F-202).
+                weight: true,
+                price_unit_quantity: true,
                 inventory_consumed_at_fire: true,
                 // CP-POLLO-ARABE-727 F.1 Round 4 (C.4) — insumos para derivar
                 // `variant_label` con el mismo criterio de
@@ -1833,7 +1838,15 @@ export class TableSessionsService {
             : [];
         finalsByItemId.set(
           it.id,
-          resolveOrderLineFinals(Number(it.unit_price), it.quantity, rates),
+          resolveOrderLineFinals(
+            {
+              unit_price: it.unit_price,
+              quantity: it.quantity,
+              weight: it.weight,
+              price_unit_quantity: it.price_unit_quantity,
+            },
+            rates,
+          ),
         );
       }
     }

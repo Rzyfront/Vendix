@@ -3936,7 +3936,14 @@ export class PosComponent {
         description: item?.description ?? item?.notes ?? null,
         quantity: Number(item?.quantity ?? 0),
         unit_price: Number(item?.unitPrice ?? 0),
-        total_price: Number(item?.totalPrice ?? item?.finalPrice ?? 0),
+        // F-002-like (C.8, mismo defecto que `serializeItemsForAdoptedOrder`
+        // en `pos-cart.service.ts`): `item?.totalPrice`/`finalPrice` son
+        // BRUTO (`finalUnitPrice × quantity`) mientras `unit_price` de
+        // arriba es BASE — mandar ambos en la misma fila persistía
+        // `order_items.total_price` bruto junto a `unit_price` neto,
+        // violando DB-01 (`total_price = unit_price × price_units`). Ahora
+        // queda en la MISMA magnitud que `unit_price`.
+        total_price: Number(item?.unitPrice ?? 0) * Number(item?.quantity ?? 0),
         final_unit_price: Number(item?.finalPrice ?? item?.unitPrice ?? 0),
         tax_amount_item: Number(item?.taxAmount ?? 0),
         tax_rate: item?.taxRate ?? null,

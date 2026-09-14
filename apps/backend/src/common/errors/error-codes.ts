@@ -1236,6 +1236,18 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Stock insuficiente para una o más líneas del POS',
   },
+  // QUI-832 / F-070 — el guard de override del POS móvil. El móvil manda el
+  // NETO en la línea (F-001); con el fix ese neto difiere del catálogo y el
+  // guard lo confunde con una edición de precio. Sin `error_code` el móvil
+  // no distingue esta causa de cualquier otro 400 y soporte no puede
+  // pivotar. Se mantiene 400 (mismo status observable que antes), se gana
+  // el código. Copy de cliente: ver `error-messages.ts` (carril C.5/C.6).
+  POS_PRICE_OVERRIDE_NOT_ALLOWED_001: {
+    code: 'POS_PRICE_OVERRIDE_NOT_ALLOWED_001',
+    httpStatus: 400,
+    devMessage:
+      'El producto no permite editar el precio en POS y el precio enviado difiere del catálogo',
+  },
   // CP-POS-CREAR-EDITAR-COBRAR-001 — gate obligatorio de cliente en POS.
   // Política canónica: `settings.checkout.require_customer_data=true`. Una orden
   // POS sin cliente queda huérfana y no se puede cobrar, facturar ni atender

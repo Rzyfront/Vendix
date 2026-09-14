@@ -384,3 +384,104 @@ describe('PosCartService — removeFromCart (modo libre, QUI-806)', () => {
     });
   });
 });
+
+/**
+ * C.6 CP-pos-exclusive-tax-double-charge — el subtotal del resumen compone
+ * la base NETA recibida (`unitPrice` neto × `lineUnits`), nunca
+ * `grossTotal − taxAmount` (celda 4 de la matriz: con truncado DIAN la
+ * resta no es exacta y deja un residuo huérfano entre Subtotal e IVA).
+ *
+ * PENDIENTE DE CORRER: `ng test` exige ChromeHeadless y esta máquina no
+ * tiene binario de Chrome (`which chrome` vacío). Comando para Rafael:
+ * `npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox
+ * --include='**/pos-cart.service.spec.ts'` desde `apps/frontend`.
+ */
+describe('PosCartService — calculateSummary base neta (C.6)', () => {
+  let service: PosCartService;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        PosCartService,
+        { provide: PosProductService, useValue: {} },
+        { provide: PosApiService, useValue: {} },
+        { provide: PosSaleUnitService, useValue: {} },
+        { provide: PriceResolverService, useValue: {} },
+        { provide: PriceTierCacheService, useValue: {} },
+        {
+          provide: WithholdingTaxService,
+          useValue: {
+            previewWithholding: () => of({ lines: [], total_withholding: 0 }),
+          },
+        },
+        { provide: CurrencyFormatService, useValue: {} },
+        {
+          provide: InvoicingService,
+          useValue: { getPosUvtThreshold: () => of({ data: null }) },
+        },
+        { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+      ],
+    });
+    service = TestBed.inject(PosCartService);
+  });
+
+  const orderWith = (items: any[]) => ({
+    id: 502,
+    order_number: 'ORD-C6-001',
+    notes: '',
+    users: { id: 99, first_name: 'Juan', last_name: 'Pérez' },
+    order_promotions: [],
+    coupon_uses: [],
+    order_items: items,
+  });
+
+  const adopted = {
+    id: '1',
+    name: 'Producto 1',
+    sku: 'SKU-1',
+    price: 1000,
+    final_price: 1000,
+  };
+
+  it('el subtotal es la base neta (unit × qty), no el bruto menos impuesto', (done) => {
+    // Base 1000 × 2 = 2000. La resta vieja daba 2000 − 380 = 1620 por el
+    // mapeo `tax_amount_item × quantity` (doble conteo ajeno a C.6).
+    const order = orderWith([
+      {
+        product_id: 1,
+        product_name: 'Producto 1',
+        quantity: 2,
+        unit_price: 1000,
+        final_unit_price: 1000,
+        total_price: 2000,
+        tax_amount_item: 190,
+        products: adopted,
+      },
+    ]);
+
+    service.loadFromOrder(order).subscribe((state) => {
+      expect(state.summary.subtotal).toBe(2000);
+      done();
+    });
+  });
+
+  it('con impuesto en cero el subtotal coincide con el bruto', (done) => {
+    const order = orderWith([
+      {
+        product_id: 2,
+        product_name: 'Producto 2',
+        quantity: 1,
+        unit_price: 5000,
+        final_unit_price: 5000,
+        total_price: 5000,
+        tax_amount_item: 0,
+        products: { ...adopted, id: '2', name: 'Producto 2' },
+      },
+    ]);
+
+    service.loadFromOrder(order).subscribe((state) => {
+      expect(state.summary.subtotal).toBe(5000);
+      done();
+    });
+  });
+});

@@ -10,6 +10,14 @@ import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
 import { mapUserAddress } from '../lib/customer-address';
 import { formatFiscalMoney } from './fiscal-document-print.mapper';
+import {
+  ORDER_PAYMENT_MEANS_INCLUDE,
+  resolveOrderPaymentLabel,
+} from '../../payments/order-payment-means.contract';
+// C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — el tiquete declara
+// `money_basis: 'gross'` (G-01) y propaga el gate fiscal que C.1 resolvió,
+// usando las filas `org`/`store` que el `include` de C.1 ya trae en memoria.
+import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
 
 @Injectable()
 export class PosSaleTicketDataProvider implements IDocumentDataProvider {
@@ -58,7 +66,15 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         stores: {
           include: {
             addresses: { take: 1 },
-            organizations: true,
+            // C.1 — settings para el gate fiscal
+            // `resolvePrintsVatBreakdownForPrint` (misma forma que
+            // `FISCAL_DOCUMENT_PRINT_INCLUDE`).
+            store_settings: { select: { settings: true } },
+            organizations: {
+              include: {
+                organization_settings: { select: { settings: true } },
+              },
+            },
           },
         },
         // C.3 QUI-733 — mesa + mesero en el recibo POS. Se une la sesión
@@ -87,6 +103,18 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
             opener: { select: { first_name: true, last_name: true } },
           },
         },
+        // El tiquete decía QUÉ se vendió y CUÁNTO, pero nunca CÓMO se pagó:
+        // el compositor ya sabía dibujar la fila «Pago (<método>)» y el
+        // catálogo de campos ya la declaraba activa, pero esta consulta no
+        // traía `payments`, así que `document.payment_method` llegaba
+        // `undefined` y la fila se omitía en silencio.
+        //
+        // Se usa el include CANÓNICO del contrato compartido, no uno propio:
+        // filtra `state: 'succeeded'` (cobrar es lo que declara el método,
+        // no intentarlo), anida `system_payment_method` para la cascada de
+        // nombres y ordena por `paid_at` para que un pago mixto se lea en el
+        // orden en que el cliente pagó.
+        payments: ORDER_PAYMENT_MEANS_INCLUDE,
       },
     });
 
@@ -168,6 +196,23 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         model.totals.grand_total = total;
         model.totals.grand_total_formatted = formatFiscalMoney(total);
       }
+
+      // El efectivo recibido y el vuelto NO salen de la factura —son del cobro,
+      // y la factura no los conoce— pero sí comparten papel con los totales que
+      // acabamos de reformatear. Sin esto la tirilla de una orden ya facturada
+      // imprimía «TOTAL: $10.000,00» y justo debajo «Recibido: $10.000»: el
+      // mismo peso escrito de dos maneras, que se lee como dos cifras
+      // distintas. El formato lo manda el DOCUMENTO, no el origen del dato.
+      if (model.document.amount_received !== undefined) {
+        model.document.amount_received_formatted = formatFiscalMoney(
+          model.document.amount_received,
+        );
+      }
+      if (model.document.change_due !== undefined) {
+        model.document.change_due_formatted = formatFiscalMoney(
+          model.document.change_due,
+        );
+      }
     } catch {
       // Ver docblock: la tirilla pre-fiscal con filas de orden es el fallback.
     }
@@ -177,11 +222,11 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
    * Agrega `invoice_taxes` por `(tax_name, tax_rate)` sumando importes YA
    * truncados — igual que `aggregateHeaderTaxes` del calculador.
    *
-   * A diferencia de `aggregateTaxes` (filas de orden, donde la base se DERIVA
-   * como `tax/rate`), acá la base es CONOCIDA (`taxable_amount` persistido) y
-   * se suma directa: derivarla reintroduciría el céntimo que el truncado
-   * quiere evitar. La escala cruda de `rate` se preserva igual que allá
-   * (`invoice_taxes.tax_rate` es `Decimal(5,2)` en porcentaje).
+   * Igual que `aggregateTaxes` (filas de orden, donde desde C.6 la base se
+   * LEE de `item.total_price`), acá la base es CONOCIDA (`taxable_amount`
+   * persistido) y se suma directa: derivarla reintroduciría el céntimo que
+   * el truncado quiere evitar. La escala cruda de `rate` se preserva igual
+   * que allá (`invoice_taxes.tax_rate` es `Decimal(5,2)` en porcentaje).
    */
   private aggregateInvoiceTaxes(invoiceTaxes: any[]): Array<{
     name: string;
@@ -265,6 +310,9 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         change_due: 12500,
         change_due_formatted: '$12.500',
       },
+      // C.2 (ADR-12) — muestra en `'gross'`, paridad con `fetchDocumentData`.
+      money_basis: 'gross',
+      prints_vat_breakdown: true,
       items: [
         {
           index: 1,
@@ -277,6 +325,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           discount_amount: 5000,
           discount_formatted: '-$5.000',
           tax_rate: 19,
+          tax_amount: 9580,
           total_price: 60000,
           total_price_formatted: '$60.000',
         },
@@ -288,6 +337,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           unit_price: 27500,
           unit_price_formatted: '$27.500',
           tax_rate: 19,
+          tax_amount: 4391,
           total_price: 27500,
           total_price_formatted: '$27.500',
         },
@@ -369,6 +419,64 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     }));
   }
 
+  /**
+   * Formato de moneda de la TIRILLA PRE-FISCAL (filas de la orden): pesos
+   * enteros, separador de miles es-CO. Estaba repetido inline en cada total;
+   * se nombra una sola vez para que las filas nuevas de pago impriman
+   * exactamente igual que el TOTAL que tienen al lado.
+   *
+   * NO confundir con `formatFiscalMoney` (2 decimales), que es el formato del
+   * snapshot de factura y sólo aplica en `overrideWithInvoiceSnapshot`.
+   */
+  private formatOrderMoney(amount: number): string {
+    return `$${Number(amount || 0).toLocaleString('es-CO')}`;
+  }
+
+  /**
+   * Efectivo entregado y vuelto, leídos del pago en efectivo de la orden.
+   *
+   * El POS los escribe dentro de `payments.gateway_response`
+   * (`metadata.amount_received` y `change`), que es `Json?` en Prisma: puede
+   * llegar `null`, una cadena, un arreglo o un objeto sin esas claves. Por eso
+   * se comprueba la FORMA antes de leer: asumirla reventaría el tiquete entero
+   * por un pago viejo con otro contenido.
+   *
+   * Ambos valores salen del MISMO pago —el primer cobro que traiga alguno— y no
+   * de una búsqueda independiente por campo: son las dos mitades de un único
+   * acto de entrega de efectivo, y cruzar el recibido de un pago con el vuelto
+   * de otro imprimiría una cuenta que nunca ocurrió.
+   *
+   * Una venta con tarjeta no tiene ninguno de los dos y ambos quedan
+   * `undefined`: el compositor no emite las filas (no hay vuelto que inventar).
+   */
+  private resolveCashTender(payments: any[]): {
+    amount_received?: number;
+    change_due?: number;
+  } {
+    const finite = (value: unknown): number | undefined => {
+      if (value === null || value === undefined || value === '') return undefined;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    };
+    const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+      typeof value === 'object' && value !== null && !Array.isArray(value);
+
+    for (const payment of payments || []) {
+      if (!payment || payment.state !== 'succeeded') continue;
+
+      const gateway = payment.gateway_response;
+      if (!isPlainObject(gateway)) continue;
+
+      const metadata = isPlainObject(gateway.metadata) ? gateway.metadata : {};
+      const received = finite(metadata.amount_received);
+      const change = finite(gateway.change);
+      if (received === undefined && change === undefined) continue;
+
+      return { amount_received: received, change_due: change };
+    }
+    return {};
+  }
+
   private mapOrderToStandardModel(order: any, signedLogoUrl?: string): StandardPrintDataModel {
     const store = order.stores || {};
     const org = store.organizations || {};
@@ -403,11 +511,31 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       unit_price_formatted: `$${Number(it.unit_price || 0).toLocaleString('es-CO')}`,
       discount_amount: Number(it.discount_amount || 0),
       discount_formatted: it.discount_amount ? `-$${Number(it.discount_amount).toLocaleString('es-CO')}` : undefined,
+      // C.2 (ADR-12) — mismo mapeo que `quotation.provider.ts:101-104`: la
+      // línea trae su propio `tax_rate`/`tax_amount_item` denormalizado
+      // (`order_items`, igual columna que `quotation_items`). Con esto el
+      // compositor pinta la sublínea `IVA: r%` (`print-layout-composer
+      // .service.ts:793-794`) sin columna nueva — F-100.
+      tax_rate: it.tax_rate !== null && it.tax_rate !== undefined ? Number(it.tax_rate) : undefined,
+      tax_amount: it.tax_amount_item !== null && it.tax_amount_item !== undefined
+        ? Number(it.tax_amount_item)
+        : undefined,
       total_price: Number(it.total_price || 0),
       total_price_formatted: `$${Number(it.total_price || 0).toLocaleString('es-CO')}`,
     }));
 
     const taxes = this.aggregateTaxes(order.order_items);
+
+    // Etiqueta del método de pago — la resuelve el contrato compartido, no
+    // este archivo: soporta pago mixto («Efectivo + Tarjeta»), respeta el
+    // alias que la tienda le puso al método y devuelve `undefined` cuando no
+    // hay ningún cobro con nombre. Ese `undefined` se propaga tal cual: la
+    // fila no se emite. Un tiquete que dice «Efectivo» por defecto afirma una
+    // entrada de caja que nadie hizo.
+    const paymentMethod = resolveOrderPaymentLabel(order.payments);
+    const { amount_received, change_due } = this.resolveCashTender(
+      order.payments,
+    );
 
     const subtotal = Number(order.subtotal_amount || 0);
     const discount = Number(order.discount_amount || 0);
@@ -451,6 +579,24 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         // C.3 QUI-733 — mesa + mesero en el recibo POS.
         table_number: tableName,
         waiter_name: waiterName,
+        // Spread condicional en los tres: el modelo los declara opcionales y
+        // el compositor decide por PRESENCIA (`doc.payment_method`,
+        // `Number(doc.amount_received) > 0`). Escribir la clave con
+        // `undefined` es equivalente para él, pero deja el campo visible en el
+        // JSON del editor de formatos como si el dato existiera vacío.
+        ...(paymentMethod ? { payment_method: paymentMethod } : {}),
+        ...(amount_received !== undefined
+          ? {
+              amount_received,
+              amount_received_formatted: this.formatOrderMoney(amount_received),
+            }
+          : {}),
+        ...(change_due !== undefined
+          ? {
+              change_due,
+              change_due_formatted: this.formatOrderMoney(change_due),
+            }
+          : {}),
         // QUI-737 (B.4) — alias de venta rápida ("Mesa 5"). Va en la CABECERA
         // junto al número de orden, NO bajo el bloque "Datos del Cliente"
         // (`customer`): el alias no es un cliente formal y no debe leerse como
@@ -461,19 +607,25 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           ? { customer_alias: order.customer_alias }
           : {}),
       },
+      // C.2 (ADR-12) — G-01: el tiquete de mostrador es papel comercial, el
+      // cliente ve el bruto. `org`/`store` son las mismas filas que ya trae
+      // el `include` de C.1 (`stores.store_settings` /
+      // `stores.organizations.organization_settings`).
+      money_basis: 'gross',
+      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(org, store),
       items,
       taxes,
       totals: {
         subtotal,
-        subtotal_formatted: `$${subtotal.toLocaleString('es-CO')}`,
+        subtotal_formatted: this.formatOrderMoney(subtotal),
         discount_total: discount,
-        discount_total_formatted: `$${discount.toLocaleString('es-CO')}`,
+        discount_total_formatted: this.formatOrderMoney(discount),
         shipping_total: shipping,
-        shipping_total_formatted: `$${shipping.toLocaleString('es-CO')}`,
+        shipping_total_formatted: this.formatOrderMoney(shipping),
         tax_total: tax,
-        tax_total_formatted: `$${tax.toLocaleString('es-CO')}`,
+        tax_total_formatted: this.formatOrderMoney(tax),
         grand_total: grandTotal,
-        grand_total_formatted: `$${grandTotal.toLocaleString('es-CO')}`,
+        grand_total_formatted: this.formatOrderMoney(grandTotal),
       },
     };
   }
@@ -486,13 +638,12 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
    * presentarlos en la sección "Tributos" del tiquete se agrupan por
    * `(tax_name, tax_rate)` y se suman los `tax_amount`.
    *
-   * NO recalculamos la base con `base × tarifa` — eso introduce un céntimo
-   * de más por redondeo y descuadra contra `order.tax_amount`. La base se
-   * DERIVA de la línea (`tax_amount / tax_rate` cuando `tax_rate > 0`,
-   * 0 en otro caso) y se suma dentro del grupo. La suma de bases dentro
-   * del grupo no es igual a `tax_amount_total / tax_rate` porque la base
-   * de cada línea arrastra su propio redondeo — pero es la forma
-   * contablemente honesta: cada línea aporta lo que aportó.
+   * C.6 (R-4, F-105) — la base se LEE de la línea (`item.total_price`, base
+   * neta por INV-0: `total_price = unit_price × price_units`), nunca se
+   * deriva como `tax_amount / tax_rate`: con truncado DIAN la inversión no
+   * es exacta y con tasa 0 inventa base 0. En línea multi-tarifa la base se
+   * prorratea por participación de cuota (sólo magnitudes recibidas); si la
+   * línea no trae impuesto, su base va a su primera fila por convención.
    *
    * La escala cruda de `rate` se preserva (`Decimal(6,5)` ⇒ 0.19, NO 19).
    */
@@ -510,26 +661,33 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     >();
 
     for (const item of orderItems || []) {
-      for (const t of item.order_item_taxes || []) {
+      const rows = item.order_item_taxes || [];
+      const lineBase = Number(item.total_price || 0);
+      const lineTax = rows.reduce(
+        (sum: number, t: any) => sum + Number(t.tax_amount || 0),
+        0,
+      );
+      rows.forEach((t: any, idx: number) => {
         const name = t.tax_name || 'IVA';
         const rate = Number(t.tax_rate || 0);
         const taxAmount = Number(t.tax_amount || 0);
         const key = `${name}|${rate}`;
 
-        const lineBase = rate > 0 ? taxAmount / rate : 0;
+        const rowBase =
+          lineTax > 0 ? (lineBase * taxAmount) / lineTax : idx === 0 ? lineBase : 0;
         const existing = grouped.get(key);
         if (existing) {
           existing.tax_amount += taxAmount;
-          existing.base_amount += lineBase;
+          existing.base_amount += rowBase;
         } else {
           grouped.set(key, {
             name,
             rate,
             tax_amount: taxAmount,
-            base_amount: lineBase,
+            base_amount: rowBase,
           });
         }
-      }
+      });
     }
 
     return Array.from(grouped.values()).map((g) => ({

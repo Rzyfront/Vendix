@@ -470,9 +470,11 @@ export function renderPosTicketBody(
 
     taxedItems.forEach((item, index) => {
       const taxAmount = item.tax ?? 0;
-      const taxPercent = item.totalPrice
-        ? ((taxAmount / item.totalPrice) * 100).toFixed(2)
-        : '0.00';
+      // C.11/F-203 — la tasa se rotula sobre la BASE, no sobre el total:
+      // `19 / 1,19 = 15,97 %` era una tasa exclusiva presentada como
+      // participación inclusiva (familia QUI-832 en impresión).
+      const base = item.totalPrice - taxAmount;
+      const taxPercent = base > 0 ? ((taxAmount / base) * 100).toFixed(2) : '0.00';
       html += `<p style="margin: 2px 0; font-size: 11px;">A${index + 1}. ${esc(item.name)} - Imp: ${taxPercent}% - ${money(taxAmount)}</p>`;
     });
 

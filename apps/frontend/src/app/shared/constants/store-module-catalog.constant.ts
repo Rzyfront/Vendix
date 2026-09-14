@@ -104,6 +104,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   analytics_products: '/admin/analytics/products',
   analytics_customers: '/admin/analytics/customers',
   analytics_financial: '/admin/analytics/financial',
+  analytics_dispatch: '/admin/analytics/dispatch',
 
   expenses: '/admin/expenses',
 
@@ -128,6 +129,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   invoicing_dian_config: '/admin/invoicing/dian-config',
 
   reports: '/admin/reports/overview',
+  reports_dispatch: '/admin/reports/dispatch',
 
   // Contabilidad. Los sub-tabs viven bajo super-pestañas
   // (configuration / cartera / taxes); las rutas planas antiguas redirigen.

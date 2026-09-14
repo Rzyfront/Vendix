@@ -152,17 +152,23 @@ export class UpdateOrderEditorItemDto {
   @Min(1)
   quantity: number;
 
+  // F-081 (blocker, C.8): sin `@Min(0)` este campo aceptaba negativos y se
+  // persistía verbatim — con ADR-05 (el subtotal se compone desde ESTA
+  // base) eso hacía `recalculatedSubtotal`/`grand_total` negativos.
   @Transform(({ value }) => parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   unit_price: number;
 
   @Transform(({ value }) => parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   total_price: number;
 
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   final_unit_price?: number;
 
   @IsOptional()
@@ -190,9 +196,13 @@ export class UpdateOrderEditorItemDto {
   })
   tax_rate?: number;
 
+  // F-081 (blocker, C.8): idem — aceptaba negativos y, para líneas sin
+  // producto, sigue decidiendo el impuesto de cabecera (ver
+  // `orders.service.ts` § 11 en `updateOrderFromEditor`).
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
   tax_amount_item?: number;
 
   @IsOptional()

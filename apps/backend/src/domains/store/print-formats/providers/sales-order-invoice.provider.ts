@@ -8,6 +8,9 @@ import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
+// C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-06: factura comercial
+// declara `money_basis: 'taxable_base'` y propaga el gate de C.1.
+import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
 
 @Injectable()
 export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
@@ -50,7 +53,15 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
         stores: {
           include: {
             addresses: { take: 1 },
-            organizations: true,
+            // C.1 — settings para el gate fiscal
+            // `resolvePrintsVatBreakdownForPrint` (misma forma que
+            // `FISCAL_DOCUMENT_PRINT_INCLUDE`).
+            store_settings: { select: { settings: true } },
+            organizations: {
+              include: {
+                organization_settings: { select: { settings: true } },
+              },
+            },
           },
         },
       },
@@ -125,6 +136,11 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
         notes: order.notes,
         internal_notes: order.internal_notes,
       },
+      // C.2 (ADR-12) — declaración fija de negocio (G-06): esta factura
+      // comercial siempre imprime sobre base gravable; el gate de IVA se
+      // resuelve con org/store ya en memoria por el include de C.1.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(org, store),
       items,
       taxes,
       totals: {
@@ -224,6 +240,9 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
         state_label: 'En Proceso',
         channel: 'ecommerce',
       },
+      // C.2 (ADR-12) — muestra en `'taxable_base'`, paridad con `fetchDocumentData`.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: true,
       items: [
         {
           index: 1,
