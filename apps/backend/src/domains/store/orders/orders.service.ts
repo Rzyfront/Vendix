@@ -36,6 +36,7 @@ import {
 import { resolvePackSize } from '../products/services/packaging.util';
 import {
   normalizePriceUnitLines,
+  resolvePriceUnits,
   roundMoney,
 } from '../products/services/price-unit.util';
 import {
@@ -3763,6 +3764,24 @@ export class OrdersService {
     const taxAmount = Number(item.tax_amount_item ?? 0);
     if (taxAmount <= 0) return undefined;
 
+    // F-044/F-046: `tax_amount_item` es POR UNIDAD DE PRECIO (canon C-2),
+    // pero la fila `order_item_taxes` respalda la LÍNEA completa: se escala
+    // por `quantity/scale` (`resolvePriceUnits` compartido con el cobro).
+    // Peso ⇒ 1, A PROPÓSITO y no por descuido (F-207): la cabecera del carril
+    // de órdenes toma `Σ TAI` crudo y `normalizePriceUnitLines` EXCLUYE el
+    // peso, así que ×1 mantiene OIT == cabecera con cualquier unidad de
+    // entrada (comportamiento idéntico al pre-fix para peso). Escalar por el
+    // peso sin mover la cabecera rompería I-5; la convención peso del carril
+    // (header+OIT juntos, convergencia con `resolveLineUnits` canónico que
+    // devuelve `weight`) se decide en B.3 con medición (D), no acá.
+    const lineUnits =
+      Number((item as any).weight || 0) > 0
+        ? 1
+        : resolvePriceUnits(
+            Number(item.quantity || 1),
+            (item as any).price_unit_quantity,
+          );
+
     if (resolved && resolved.length > 0) {
       const amounts = splitTaxSnapshotAcrossRates(
         taxAmount,
@@ -3773,7 +3792,9 @@ export class OrdersService {
           tax_rate_id: row.id,
           tax_name: row.name,
           tax_rate: new Prisma.Decimal(row.rate as any),
-          tax_amount: new Prisma.Decimal(amounts[index]),
+          tax_amount: new Prisma.Decimal(
+            roundMoney(amounts[index] * lineUnits),
+          ),
           tax_type: (row.tax_type ?? 'iva') as any,
           is_compound: row.is_compound ?? false,
           is_inclusive: row.is_inclusive ?? false,
@@ -3785,7 +3806,9 @@ export class OrdersService {
     // snapshot del DTO con defaults conservadores para que el tiquete
     // muestre la línea de IVA en vez de salir en blanco. Sin asignación no
     // hay verdad inclusiva: la fila es agregada (ERR-03: sin tasa no se
-    // decide impuesto, nunca se lanza).
+    // decide impuesto, nunca se lanza). F-044: también se escala a la línea
+    // (`tax_rate_id: null` la sigue marcando como fallback, distinguible de
+    // una fila resuelta contra catálogo).
     return {
       create: [
         {
@@ -3794,7 +3817,7 @@ export class OrdersService {
           tax_rate: new Prisma.Decimal(
             item.tax_rate != null ? item.tax_rate : 0,
           ),
-          tax_amount: new Prisma.Decimal(item.tax_amount_item as any),
+          tax_amount: new Prisma.Decimal(roundMoney(taxAmount * lineUnits)),
           tax_type: 'iva' as const,
           is_compound: false,
           is_inclusive: false,

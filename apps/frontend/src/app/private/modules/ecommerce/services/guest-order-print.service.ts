@@ -278,12 +278,20 @@ export class GuestOrderPrintService {
     ${paymentHtml}
 
     <!-- Totals -->
+    <!-- C.7 (§5.3, base taxable, sin bandera fiscal en payload de invitado):
+         Subtotal sólo sin impuesto; la fila de impuesto vuelve cuando el
+         payload traiga respaldo (C.8/B2). -->
     <div style="display: flex; justify-content: flex-end; margin-bottom: 24px;">
       <div style="width: 260px;">
+        ${
+          Number(order.tax_amount || 0) === 0
+            ? `
         <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
           <span style="color: #6b7280;">Subtotal</span>
           <span style="font-family: 'Courier New', monospace; color: #374151;">${fmt(Number(order.subtotal_amount))}</span>
-        </div>
+        </div>`
+            : ''
+        }
         ${
           Number(order.discount_amount) > 0
             ? `
@@ -296,10 +304,6 @@ export class GuestOrderPrintService {
         <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
           <span style="color: #6b7280;">Envio</span>
           <span style="font-family: 'Courier New', monospace; color: #374151;">${Number(order.shipping_cost) === 0 ? 'Gratis' : fmt(Number(order.shipping_cost))}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
-          <span style="color: #6b7280;">IVA / Impuestos</span>
-          <span style="font-family: 'Courier New', monospace; color: #374151;">${fmt(Number(order.tax_amount))}</span>
         </div>
         <div style="display: flex; justify-content: space-between; padding: 10px 0 0; margin-top: 6px; border-top: 2px solid #111827; font-size: 18px; font-weight: 700;">
           <span>TOTAL</span>

@@ -440,7 +440,9 @@ export class PrintLayoutComposerService {
   private getFieldCustomLabel(section: any, keyOrId: string, defaultLabel: string): string {
     if (!section?.fields || !Array.isArray(section.fields)) return defaultLabel;
     const f = section.fields.find((field: any) => field.id === keyOrId || field.key === keyOrId);
-    return (f?.custom_label && f.custom_label.trim().length > 0) ? f.custom_label : defaultLabel;
+    // C.4 — precedencia `custom_label || label || defaultLabel`, la misma
+    // que `renderExtraSectionFields` ya usaba en :467. Sin `fields`, paridad.
+    return (f?.custom_label && String(f.custom_label).trim()) || f?.label || defaultLabel;
   }
 
   /**
@@ -861,6 +863,30 @@ export class PrintLayoutComposerService {
     const showRecv = this.isFieldActive(section, 'f_recv');
     const showChg = this.isFieldActive(section, 'f_chg');
 
+    // C.3 — regla anti-huérfana (§5.3 de design-P2-presentation.md, ADR-07/12):
+    // el compositor decide qué filas fiscales salen; la definición sólo puede
+    // ocultar por `enabled`, nunca forzar una fila que la base no respalda.
+    // R-2: `money_basis` ausente = 'taxable_base'; `prints_vat_breakdown`
+    // ausente = false (fail-closed: un papel no se retracta). En `tokenized`
+    // (editor) se conserva la conducta vieja para no esconderle campos.
+    const isTokenized = mode === 'tokenized';
+    const moneyBasis =
+      (data as any).money_basis ?? 'taxable_base';
+    const taxTotal = Number(totals.tax_total || 0);
+    const canShowTax =
+      (data as any).prints_vat_breakdown === true && taxTotal > 0;
+    const showSubtotal = isTokenized
+      ? showSub
+      : moneyBasis === 'taxable_base' &&
+        showSub &&
+        (canShowTax || taxTotal === 0);
+    const showTaxRow = isTokenized
+      ? showTax
+      : moneyBasis === 'taxable_base' && showTax && canShowTax;
+    // Nota informativa, fuera de la aritmética y fuera de la tabla.
+    const showVatNote =
+      !isTokenized && moneyBasis === 'gross' && canShowTax;
+
     const subVal = mode === 'tokenized'
       ? '<span class="vendix-token-pill" data-token="order.subtotal_amount">&#123;&#123; money order.subtotal_amount &#125;&#125;</span>'
       : this.compiler.escapeHtml(totals.subtotal_formatted || `$${Number(totals.subtotal || 0).toLocaleString('es-CO')}`);
@@ -906,60 +932,61 @@ export class PrintLayoutComposerService {
       <div class="print-section section-totals" data-section-id="sec_totals">
         <div class="totals-table-wrapper">
           <table class="totals-table">
-            ${showSub ? `<tr data-element-id="f_sub" data-section-id="sec_totals" data-token="order.subtotal_amount">
-              <td class="total-label">Subtotal:</td>
+            ${showSubtotal ? `<tr data-element-id="f_sub" data-section-id="sec_totals" data-token="order.subtotal_amount">
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_sub', 'Subtotal'))}:</td>
               <td class="total-val">${subVal}</td>
             </tr>` : ''}
             ${showDisc && (mode === 'tokenized' || Number(totals.discount_total) > 0) ? `
             <tr data-element-id="f_disc" data-section-id="sec_totals" data-token="order.discount_amount">
-              <td class="total-label">Descuento:</td>
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_disc', 'Descuento'))}:</td>
               <td class="total-val discount">${discVal}</td>
             </tr>` : ''}
             ${showShip && (mode === 'tokenized' || Number(totals.shipping_total) > 0) ? `
             <tr data-element-id="f_ship" data-section-id="sec_totals" data-token="order.shipping_total">
-              <td class="total-label">Envío:</td>
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_ship', 'Envío'))}:</td>
               <td class="total-val">${shipVal}</td>
             </tr>` : ''}
-            ${showTax && (mode === 'tokenized' || Number(totals.tax_total) > 0) ? `
+            ${showTaxRow && (mode === 'tokenized' || Number(totals.tax_total) > 0) ? `
             <tr data-element-id="f_tax" data-section-id="sec_totals" data-token="order.tax_amount">
-              <td class="total-label">Impuestos (IVA):</td>
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_tax', 'Impuestos (IVA)'))}:</td>
               <td class="total-val">${taxVal}</td>
             </tr>` : ''}
             ${showReten && Number(totals.withholding_total) > 0 ? `
             <tr data-element-id="f_reten" data-section-id="sec_totals" data-token="order.withholding_amount">
-              <td class="total-label">Retención:</td>
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_reten', 'Retención'))}:</td>
               <td class="total-val discount">${retenVal}</td>
             </tr>` : ''}
             ${showTip && (mode === 'tokenized' || Number(totals.tip_amount) > 0) ? `
             <tr data-element-id="f_tip" data-section-id="sec_totals" data-token="order.tip_amount">
-              <td class="total-label">Propina:</td>
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_tip', 'Propina'))}:</td>
               <td class="total-val">${tipVal}</td>
             </tr>` : ''}
             ${showTot ? `<tr class="grand-total-row" data-element-id="f_tot" data-section-id="sec_totals" data-token="order.grand_total">
-              <td class="total-label">TOTAL:</td>
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_tot', 'TOTAL'))}:</td>
               <td class="total-val grand-total">${grandVal}</td>
             </tr>` : ''}
             ${showWords && totals.grand_total_in_words ? `
             <tr class="total-in-words-row" data-element-id="f_words" data-section-id="sec_totals" data-token="order.grand_total_in_words">
-              <td class="total-label" colspan="2">Valor en letras: ${this.compiler.escapeHtml(totals.grand_total_in_words)}</td>
+              <td class="total-label" colspan="2">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_words', 'Valor en letras'))}: ${this.compiler.escapeHtml(totals.grand_total_in_words)}</td>
             </tr>` : ''}
             ${showPaym && (mode === 'tokenized' || doc.payment_method) ? `
             <tr class="payment-info-row" data-element-id="f_paym" data-section-id="sec_totals" data-token="order.payment_method">
-              <td class="total-label">Pago (${mode === 'tokenized' ? 'Método' : this.compiler.escapeHtml(doc.payment_method)}):</td>
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_paym', 'Pago'))} (${mode === 'tokenized' ? 'Método' : this.compiler.escapeHtml(doc.payment_method)}):</td>
               <td class="total-val">${paymVal}</td>
             </tr>` : ''}
             ${showRecv && (mode === 'tokenized' || Number(doc.amount_received) > 0) ? `
             <tr class="payment-info-row" data-element-id="f_recv" data-section-id="sec_totals" data-token="order.amount_received">
-              <td class="total-label">Recibido:</td>
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_recv', 'Recibido'))}:</td>
               <td class="total-val">${paymVal}</td>
             </tr>` : ''}
             ${showChg && (mode === 'tokenized' || Number(doc.change_due) > 0) ? `
             <tr class="change-info-row" data-element-id="f_chg" data-section-id="sec_totals" data-token="order.change_due">
-              <td class="total-label">Cambio:</td>
+              <td class="total-label">${this.compiler.escapeHtml(this.getFieldCustomLabel(section, 'f_chg', 'Cambio'))}:</td>
               <td class="total-val">${chgVal}</td>
             </tr>` : ''}
           </table>
         </div>
+        ${showVatNote ? `<div class="vat-included-note" data-element-id="f_vat_note" data-section-id="sec_totals">IVA incluido: ${taxVal}</div>` : ''}
       </div>
     `;
   }

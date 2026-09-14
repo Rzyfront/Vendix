@@ -422,7 +422,12 @@ export class OrdersListComponent {
     {
       label: 'Imprimir',
       icon: 'printer',
-      action: (order: Order) => this.printService.printOrder(order),
+      action: (order: Order) =>
+        this.printService.printOrder(order).catch(() => {
+          this.toastService.error(
+            'No se pudo imprimir la orden: reintenta; si persiste, revisa el Hub de formatos de impresión.',
+          );
+        }),
       variant: 'info',
       show: (order: Order) => !['cancelled', 'refunded'].includes(order.state),
     },

@@ -14,6 +14,7 @@ import {
   CommitResult,
 } from '../inventory/shared/services/order-stock-commit.service';
 import { TaxesService } from '../taxes/taxes.service';
+import { truncMoney } from '../taxes/utils/tax-inclusive-math.util';
 import { LocationsService } from '../inventory/locations/locations.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { sellableStockLevelsWhere } from '../inventory/shared/helpers/pos-stock-scope.helper';
@@ -2398,7 +2399,13 @@ export class PaymentsService {
 
   private getPosLineUnits(item: any): number {
     const weight = Number(item.weight || 0);
-    if (weight > 0) return weight;
+    // F-085: el peso se redondea a 3 decimales ANTES de usarse como
+    // multiplicador, para que el total calculado coincida con el peso que
+    // Postgres realmente guarda (`numeric(10,3)` redondea al persistir; una
+    // 4ª cifra sólo vive en memoria y la relectura de I-1 deriva). Se REDONDEA
+    // (no trunca): la columna redondea, y truncar divergería del valor
+    // almacenado en el mismo sentido que el hallazgo quiere eliminar.
+    if (weight > 0) return Math.round(weight * 1000) / 1000;
     return Number(item.quantity || 0);
   }
 
@@ -2411,12 +2418,19 @@ export class PaymentsService {
    * IVA exclusivo una segunda vez sobre él. Esa rama murió; sin
    * `final_unit_price` no hay bruto declarado, `null`.
    */
+  /**
+   * B.1/F-088 — el bruto declarado manda; ausente es `null`, nunca 0. Una
+   * cadena vacía (formulario con campo vacío) es AUSENCIA, no precio 0: con
+   * la conversión vieja (`Number("") = 0`) la línea se cobraba 0 con permiso
+   * de override. El 0 numérico explícito se honra (decidido por escrito en
+   * `payments.service.spec.ts`, bloque B.1/F-088).
+   */
   private resolveDeclaredGrossUnitPrice(item: any): number | null {
-    if (item.final_unit_price !== undefined && item.final_unit_price !== null) {
-      return this.roundMoney(Number(item.final_unit_price));
-    }
+    const raw = item?.final_unit_price;
+    if (raw === undefined || raw === null) return null;
+    if (typeof raw === 'string' && raw.trim() === '') return null;
 
-    return null;
+    return this.roundMoney(Number(raw));
   }
 
   private resolveCatalogUnitBasePrice(product: any, variant?: any): number {
@@ -2486,20 +2500,29 @@ export class PaymentsService {
       );
     }
 
+    // F-018: la rama custom calculaba la cuota en float (`base × rate`) sin
+    // truncado DIAN, y ADR-04 asciende justo esas filas a autoritativas. Se
+    // trunca cada cuota con el mismo `truncMoney` del kernel (Anexo 1.9
+    // §11.2, hacia cero) y el total es la suma de cuotas truncadas — no el
+    // float re-redondeado. No se enruta por `resolveLineTotals`: ese solver
+    // interpreta el input como bruto-respecto-de-lo-inclusivo y apilaría el
+    // markup exclusivo encima de un total que ya lo contiene.
     const taxes = (taxCategory.tax_rates || []).map((rate: any) => {
       const rateValue = Number(rate.rate || 0);
       return {
         tax_rate_id: rate.id,
         name: rate.name,
         rate: rateValue,
-        amount: basePrice * rateValue,
+        amount: truncMoney(basePrice * rateValue),
       };
     });
     const totalRate = taxes.reduce((sum, tax) => sum + tax.rate, 0);
 
     return {
       total_rate: totalRate,
-      total_tax_amount: basePrice * totalRate,
+      total_tax_amount: this.roundMoney(
+        taxes.reduce((sum, tax) => sum + tax.amount, 0),
+      ),
       taxes,
     };
   }
@@ -2775,7 +2798,10 @@ export class PaymentsService {
 
     if (isPriceOverridden) {
       if (!product.allow_pos_price_override) {
-        throw new BadRequestException(
+        // F-070: tipado para que el móvil distinga esta causa (neto
+        // confundido con edición, F-001) de cualquier otro 400.
+        throw new VendixHttpException(
+          ErrorCodes.POS_PRICE_OVERRIDE_NOT_ALLOWED_001,
           `El producto "${product.name}" no permite editar el precio en POS.`,
         );
       }

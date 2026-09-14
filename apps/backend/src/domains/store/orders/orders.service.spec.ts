@@ -1875,4 +1875,88 @@ describe('OrdersService', () => {
       expect(unscoped).toBe(mockUnscopedPrismaService);
     });
   });
+
+  /**
+   * F-044/F-046 (B.2) — la fila OIT respalda la LÍNEA, no la unidad.
+   *
+   * `tax_amount_item` viaja por unidad de precio (canon C-2), pero
+   * `buildOrderItemTaxesCreate` persistía el escalar tal cual: una línea con
+   * `quantity > 1` dejaba `Σ OIT = impuesto unitario` y todo lector por suma
+   * la leía corta (factura corta + `TAX_SUBTOTAL_MISMATCH` post-consecutivo).
+   * Estos tests fijan el escalado por unidades de precio en las dos ramas.
+   */
+  describe('buildOrderItemTaxesCreate — escalado F-044/F-046', () => {
+    const call = (item: any, resolved: any) =>
+      (service as any).buildOrderItemTaxesCreate(item, resolved);
+
+    const singleRate = [
+      {
+        id: 7,
+        name: 'IVA 19%',
+        rate: 0.19,
+        tax_type: 'iva',
+        is_compound: false,
+        is_inclusive: false,
+      },
+    ];
+
+    it('rama resuelta: qty 3 × 1.900/u ⇒ OIT = 5.700', () => {
+      const out = call(
+        { quantity: 3, tax_amount_item: 1900, tax_rate: 0.19 },
+        singleRate,
+      );
+
+      expect(out.create).toHaveLength(1);
+      expect(Number(out.create[0].tax_amount)).toBe(5700);
+      expect(out.create[0].tax_rate_id).toBe(7);
+    });
+
+    it('fallback: qty 3 × 1.900/u ⇒ OIT = 5.700 con tax_rate_id null', () => {
+      const out = call(
+        { quantity: 3, tax_amount_item: 1900, tax_rate: 0.19 },
+        null,
+      );
+
+      expect(out.create).toHaveLength(1);
+      expect(Number(out.create[0].tax_amount)).toBe(5700);
+      expect(out.create[0].tax_rate_id).toBeNull();
+    });
+
+    it('línea por peso: el multiplicador es 1 aunque quantity sea 1', () => {
+      const out = call(
+        { quantity: 1, weight: 1.35, tax_amount_item: 1900, tax_rate: 0.19 },
+        singleRate,
+      );
+
+      expect(Number(out.create[0].tax_amount)).toBe(1900);
+    });
+
+    it('escala QUI-648: quantity 4 con price_unit_quantity 2 ⇒ ×2', () => {
+      const out = call(
+        {
+          quantity: 4,
+          price_unit_quantity: 2,
+          tax_amount_item: 1900,
+          tax_rate: 0.19,
+        },
+        singleRate,
+      );
+
+      expect(Number(out.create[0].tax_amount)).toBe(3800);
+    });
+
+    it('qty 1 no cambia ningún número (régimen histórico intacto)', () => {
+      const out = call(
+        { quantity: 1, tax_amount_item: 1900, tax_rate: 0.19 },
+        singleRate,
+      );
+
+      expect(Number(out.create[0].tax_amount)).toBe(1900);
+    });
+
+    it('impuesto 0 o ausente ⇒ sin filas', () => {
+      expect(call({ quantity: 3, tax_amount_item: 0 }, singleRate)).toBeUndefined();
+      expect(call({ quantity: 3 }, singleRate)).toBeUndefined();
+    });
+  });
 });

@@ -372,11 +372,16 @@ interface GuestOrderSummary {
           }
 
           <!-- TOTALES -->
+          <!-- C.7 (§5.3, base taxable, sin bandera fiscal en payload de
+               invitado): Subtotal sólo sin impuesto; la fila Impuestos
+               vuelve cuando BillItemView traiga respaldo (C.8/B2). -->
           <section class="order-section totals-panel">
-            <div class="total-row">
-              <span>Subtotal</span>
-              <span>{{ data.order.subtotal_amount | currency }}</span>
-            </div>
+            @if ((data.order.tax_amount || 0) === 0) {
+              <div class="total-row">
+                <span>Subtotal</span>
+                <span>{{ data.order.subtotal_amount | currency }}</span>
+              </div>
+            }
 
             @for (
               p of data.order.applied_promotions || [];
@@ -418,10 +423,6 @@ interface GuestOrderSummary {
               </div>
             }
 
-            <div class="total-row">
-              <span>Impuestos</span>
-              <span>{{ data.order.tax_amount | currency }}</span>
-            </div>
             <div class="total-row">
               <span>Envío</span>
               <span>{{

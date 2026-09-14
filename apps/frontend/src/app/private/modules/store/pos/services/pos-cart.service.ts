@@ -2580,8 +2580,12 @@ export class PosCartService {
     );
     const taxAmount = items.reduce((sum, item) => sum + item.taxAmount, 0);
 
-    // Subtotal should be Net Amount (without tax) for display
-    const subtotal = grossTotal - taxAmount;
+    // C.6 (R-4) — el subtotal es la base NETA recibida (`unitPrice` neto ×
+    // `lineUnits`), nunca `grossTotal − taxAmount`: con truncado DIAN la
+    // resta no es exacta y deja un residuo huérfano entre Subtotal e IVA.
+    const subtotal = this.roundMoney(
+      items.reduce((sum, item) => sum + item.unitPrice * resolveLineUnits(item), 0),
+    );
 
     // Total is based on Gross Total minus Discounts
     const total = grossTotal - discountAmount;

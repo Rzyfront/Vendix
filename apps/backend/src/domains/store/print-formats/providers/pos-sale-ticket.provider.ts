@@ -222,11 +222,11 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
    * Agrega `invoice_taxes` por `(tax_name, tax_rate)` sumando importes YA
    * truncados — igual que `aggregateHeaderTaxes` del calculador.
    *
-   * A diferencia de `aggregateTaxes` (filas de orden, donde la base se DERIVA
-   * como `tax/rate`), acá la base es CONOCIDA (`taxable_amount` persistido) y
-   * se suma directa: derivarla reintroduciría el céntimo que el truncado
-   * quiere evitar. La escala cruda de `rate` se preserva igual que allá
-   * (`invoice_taxes.tax_rate` es `Decimal(5,2)` en porcentaje).
+   * Igual que `aggregateTaxes` (filas de orden, donde desde C.6 la base se
+   * LEE de `item.total_price`), acá la base es CONOCIDA (`taxable_amount`
+   * persistido) y se suma directa: derivarla reintroduciría el céntimo que
+   * el truncado quiere evitar. La escala cruda de `rate` se preserva igual
+   * que allá (`invoice_taxes.tax_rate` es `Decimal(5,2)` en porcentaje).
    */
   private aggregateInvoiceTaxes(invoiceTaxes: any[]): Array<{
     name: string;
@@ -638,13 +638,12 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
    * presentarlos en la sección "Tributos" del tiquete se agrupan por
    * `(tax_name, tax_rate)` y se suman los `tax_amount`.
    *
-   * NO recalculamos la base con `base × tarifa` — eso introduce un céntimo
-   * de más por redondeo y descuadra contra `order.tax_amount`. La base se
-   * DERIVA de la línea (`tax_amount / tax_rate` cuando `tax_rate > 0`,
-   * 0 en otro caso) y se suma dentro del grupo. La suma de bases dentro
-   * del grupo no es igual a `tax_amount_total / tax_rate` porque la base
-   * de cada línea arrastra su propio redondeo — pero es la forma
-   * contablemente honesta: cada línea aporta lo que aportó.
+   * C.6 (R-4, F-105) — la base se LEE de la línea (`item.total_price`, base
+   * neta por INV-0: `total_price = unit_price × price_units`), nunca se
+   * deriva como `tax_amount / tax_rate`: con truncado DIAN la inversión no
+   * es exacta y con tasa 0 inventa base 0. En línea multi-tarifa la base se
+   * prorratea por participación de cuota (sólo magnitudes recibidas); si la
+   * línea no trae impuesto, su base va a su primera fila por convención.
    *
    * La escala cruda de `rate` se preserva (`Decimal(6,5)` ⇒ 0.19, NO 19).
    */
@@ -662,26 +661,33 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     >();
 
     for (const item of orderItems || []) {
-      for (const t of item.order_item_taxes || []) {
+      const rows = item.order_item_taxes || [];
+      const lineBase = Number(item.total_price || 0);
+      const lineTax = rows.reduce(
+        (sum: number, t: any) => sum + Number(t.tax_amount || 0),
+        0,
+      );
+      rows.forEach((t: any, idx: number) => {
         const name = t.tax_name || 'IVA';
         const rate = Number(t.tax_rate || 0);
         const taxAmount = Number(t.tax_amount || 0);
         const key = `${name}|${rate}`;
 
-        const lineBase = rate > 0 ? taxAmount / rate : 0;
+        const rowBase =
+          lineTax > 0 ? (lineBase * taxAmount) / lineTax : idx === 0 ? lineBase : 0;
         const existing = grouped.get(key);
         if (existing) {
           existing.tax_amount += taxAmount;
-          existing.base_amount += lineBase;
+          existing.base_amount += rowBase;
         } else {
           grouped.set(key, {
             name,
             rate,
             tax_amount: taxAmount,
-            base_amount: lineBase,
+            base_amount: rowBase,
           });
         }
-      }
+      });
     }
 
     return Array.from(grouped.values()).map((g) => ({

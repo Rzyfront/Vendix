@@ -72,19 +72,20 @@ export class OrderPdfBuilder {
 
         let y = MARGIN;
 
-        doc.fontSize(20).font('Helvetica-Bold').text('INVOICE', MARGIN, y);
+        // C.7/F-107 — documento que se entrega en Colombia: rótulos en español.
+        doc.fontSize(20).font('Helvetica-Bold').text('ORDEN', MARGIN, y);
         y += 30;
 
         doc.fontSize(10).font('Helvetica');
-        doc.text(`Order #: ${data.order_number}`, MARGIN, y);
+        doc.text(`Orden: ${data.order_number}`, MARGIN, y);
         y += 15;
-        doc.text(`Date: ${formatDate(data.order_date)}`, MARGIN, y);
+        doc.text(`Fecha: ${formatDate(data.order_date)}`, MARGIN, y);
         y += 15;
-        doc.text(`Store: ${data.store_name}`, MARGIN, y);
+        doc.text(`Tienda: ${data.store_name}`, MARGIN, y);
         y += 15;
-        doc.text(`Status: ${data.status}`, MARGIN, y);
+        doc.text(`Estado: ${data.status}`, MARGIN, y);
         y += 15;
-        doc.text(`Payment: ${data.payment_status}`, MARGIN, y);
+        doc.text(`Pago: ${data.payment_status}`, MARGIN, y);
         y += 30;
 
         doc
@@ -97,7 +98,7 @@ export class OrderPdfBuilder {
         doc.text('Customer', MARGIN, y);
         y += 15;
         doc.font('Helvetica').fontSize(10);
-        doc.text(data.customer_name || 'Guest', MARGIN, y);
+        doc.text(data.customer_name || 'Consumidor final', MARGIN, y);
         y += 12;
         if (data.customer_email) {
           doc.text(data.customer_email, MARGIN, y);
@@ -111,16 +112,19 @@ export class OrderPdfBuilder {
           .stroke();
         y += 15;
 
+        // C.7/F-107 — la tabla suma: columna de total de línea (el
+        // `total_price` que el alimentador ya trae) + rótulos en español.
+        // Anchos: 240+40+70+140 = 490 ≤ CONTENT_WIDTH (512).
         const col1X = MARGIN;
-        const col2X = MARGIN + 250;
-        const col3X = MARGIN + 320;
-        const col4X = MARGIN + 380;
-        const col5X = MARGIN + 450;
+        const col4X = MARGIN + 250;
+        const col5X = MARGIN + 295;
+        const col6X = MARGIN + 370;
 
         doc.font('Helvetica-Bold').fontSize(10);
-        doc.text('Item', col1X, y);
-        doc.text('Qty', col4X, y, { width: 50, align: 'right' });
-        doc.text('Price', col5X, y, { width: 70, align: 'right' });
+        doc.text('Artículo', col1X, y);
+        doc.text('Cant.', col4X, y, { width: 40, align: 'right' });
+        doc.text('Precio', col5X, y, { width: 70, align: 'right' });
+        doc.text('Total', col6X, y, { width: 140, align: 'right' });
         y += 20;
 
         doc.font('Helvetica').fontSize(9);
@@ -136,13 +140,17 @@ export class OrderPdfBuilder {
               ? item.description.substring(0, 40) + '...'
               : item.description;
 
-          doc.text(itemName, col1X, y, { width: 280 });
+          doc.text(itemName, col1X, y, { width: 240 });
           doc.text(item.quantity.toString(), col4X, y, {
-            width: 50,
+            width: 40,
             align: 'right',
           });
           doc.text(formatCurrency(item.unit_price, data.currency), col5X, y, {
             width: 70,
+            align: 'right',
+          });
+          doc.text(formatCurrency(item.total_price, data.currency), col6X, y, {
+            width: 140,
             align: 'right',
           });
           y += 14;
@@ -212,7 +220,7 @@ export class OrderPdfBuilder {
         y += 15;
 
         if (data.discount_amount > 0) {
-          doc.text('Discount:', rightAlignX, y, { width: 80, align: 'right' });
+          doc.text('Descuento:', rightAlignX, y, { width: 80, align: 'right' });
           doc.text(
             `-${formatCurrency(data.discount_amount, data.currency)}`,
             valueX,
@@ -223,7 +231,7 @@ export class OrderPdfBuilder {
         }
 
         if (data.tax_amount > 0) {
-          doc.text('Tax:', rightAlignX, y, { width: 80, align: 'right' });
+          doc.text('Impuestos:', rightAlignX, y, { width: 80, align: 'right' });
           doc.text(formatCurrency(data.tax_amount, data.currency), valueX, y, {
             width: 70,
             align: 'right',
@@ -232,7 +240,7 @@ export class OrderPdfBuilder {
         }
 
         if (data.shipping_amount > 0) {
-          doc.text('Shipping:', rightAlignX, y, { width: 80, align: 'right' });
+          doc.text('Envío:', rightAlignX, y, { width: 80, align: 'right' });
           doc.text(
             formatCurrency(data.shipping_amount, data.currency),
             valueX,

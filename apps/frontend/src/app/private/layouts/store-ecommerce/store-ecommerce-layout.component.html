@@ -773,6 +773,15 @@
         <span>Subtotal</span>
         <span>{{ bill.subtotal | currency }}</span>
       </div>
+      <!-- C.7 (§5.3): la fila de impuesto vuelve con respaldo (C.8/B2 extiende
+           el bill con `tax_amount` + `prints_vat_breakdown`). Sin dato no hay
+           fila: una diferencia sin explicar es el huérfano F-077. -->
+      @if ($any(bill).tax_amount > 0) {
+      <div class="bill-panel__summary-row">
+        <span>Impuestos</span>
+        <span>{{ $any(bill).tax_amount | currency }}</span>
+      </div>
+      }
       @if (bill.total_paid != null) {
       <div class="bill-panel__summary-row">
         <span>Pagado</span>

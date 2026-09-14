@@ -1924,4 +1924,376 @@ describe('PaymentsService', () => {
       });
     });
   });
+
+  /**
+   * F-196 (B.2) — el camino de override de `invertDeclaredGross` por fin
+   * tiene tests. Es el cambio de comportamiento más delicado de B.2 (fuerza
+   * `is_inclusive: true` en TODAS las tasas al invertir un bruto declarado,
+   * ADR-01) y se desplegaba sin una sola aserción sobre su aritmética.
+   */
+  describe('buildPosOrderItem — camino override con bruto declarado (F-196)', () => {
+    const dtoStoreId = 1;
+
+    const product = {
+      id: 10,
+      name: 'Producto con IVA exclusivo',
+      sku: 'SKU-10',
+      base_price: 10000,
+      is_on_sale: false,
+      sale_price: null,
+      product_type: 'simple',
+      allow_pos_price_override: true,
+      cost_price: 6000,
+      price_unit_quantity: null,
+    };
+
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: 1,
+      roles: ['super_admin'],
+    };
+
+    type CalcProductTaxesResult = Awaited<
+      ReturnType<TaxesService['calculateProductTaxes']>
+    >;
+
+    const catalogExclusive = (): CalcProductTaxesResult => ({
+      total_rate: 0.19,
+      total_tax_amount: 1900,
+      base: 10000,
+      total: 11900,
+      taxes: [
+        {
+          tax_rate_id: 501,
+          name: 'IVA 19%',
+          rate: 0.19,
+          tax_type: TaxFiscalType.IVA,
+          is_inclusive: false,
+          amount: 1900,
+          base: 10000,
+        },
+      ],
+      unclosed_residual_cents: 0,
+      invalid_inputs: [],
+      resolved_from: 'catalog',
+    });
+
+    const txFor = (p: any) => ({
+      products: { findFirst: jest.fn().mockResolvedValue(p) },
+    });
+
+    it('bruto declarado con tasa exclusiva: UNA llamada al solver, tasas forzadas a inclusivas, se cobra el bruto declarado', async () => {
+      calculateProductTaxesMock.mockResolvedValue(catalogExclusive());
+      // Bruto declarado 13.000 ≠ catálogo 11.900 ⇒ override, con permiso.
+      const item = {
+        product_id: product.id,
+        quantity: 1,
+        final_unit_price: 13000,
+      };
+
+      const result = await (service as any).buildPosOrderItem(
+        txFor(product),
+        item,
+        dtoStoreId,
+        posUser,
+        undefined,
+      );
+
+      // (1) El kernel corre exactamente UNA vez — nunca dos (el doble
+      // resolve era QUI-832).
+      expect(resolveLineTotalsMock).toHaveBeenCalledTimes(1);
+      // (2) El solver recibe TODAS las tasas como inclusivas: describe el
+      // INPUT (bruto declarado), no el catálogo (ADR-01).
+      const ratesArg = resolveLineTotalsMock.mock.calls[0][1] as any[];
+      expect(ratesArg).toHaveLength(1);
+      expect(ratesArg.every((r) => r.is_inclusive === true)).toBe(true);
+      // (3) El total cobrado es EL BRUTO DECLARADO, no el bruto × (1+r).
+      expect(result.final_unit_price).toBe(13000);
+      expect(result.is_price_overridden).toBe(true);
+      // Y el flag persistido sigue siendo el del catálogo (ADR-03).
+      expect(result.order_item_taxes.create[0].is_inclusive).toBe(false);
+    });
+
+    it('mixto (una inclusiva + una exclusiva): el forzado a true también cubre la exclusiva', async () => {
+      const mixed: CalcProductTaxesResult = {
+        total_rate: 0.24,
+        total_tax_amount: 2400,
+        base: 10000,
+        total: 12400,
+        taxes: [
+          {
+            tax_rate_id: 501,
+            name: 'IVA 19%',
+            rate: 0.19,
+            tax_type: TaxFiscalType.IVA,
+            is_inclusive: false,
+            amount: 1900,
+            base: 10000,
+          },
+          {
+            tax_rate_id: 502,
+            name: 'INC 5%',
+            rate: 0.05,
+            tax_type: TaxFiscalType.INC,
+            is_inclusive: true,
+            amount: 500,
+            base: 10000,
+          },
+        ],
+        unclosed_residual_cents: 0,
+        invalid_inputs: [],
+        resolved_from: 'catalog',
+      };
+      calculateProductTaxesMock.mockResolvedValue(mixed);
+      const item = {
+        product_id: product.id,
+        quantity: 1,
+        final_unit_price: 13000,
+      };
+
+      const result = await (service as any).buildPosOrderItem(
+        txFor(product),
+        item,
+        dtoStoreId,
+        posUser,
+        undefined,
+      );
+
+      expect(resolveLineTotalsMock).toHaveBeenCalledTimes(1);
+      const ratesArg = resolveLineTotalsMock.mock.calls[0][1] as any[];
+      expect(ratesArg).toHaveLength(2);
+      expect(ratesArg.every((r) => r.is_inclusive === true)).toBe(true);
+      expect(result.final_unit_price).toBe(13000);
+    });
+
+    it('F-070: sin permiso de override el rechazo trae error_code tipado', async () => {
+      calculateProductTaxesMock.mockResolvedValue(catalogExclusive());
+      const item = {
+        product_id: product.id,
+        quantity: 1,
+        final_unit_price: 13000,
+      };
+      const tx = txFor({ ...product, allow_pos_price_override: false });
+
+      let caught: any;
+      try {
+        await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+        );
+      } catch (e) {
+        caught = e;
+      }
+
+      expect(caught).toBeDefined();
+      expect(caught.errorCode).toBe('POS_PRICE_OVERRIDE_NOT_ALLOWED_001');
+    });
+  });
+
+  /**
+   * F-014 (B.2) — las dos tuberías de redondeo divergen 1¢ con `lineUnits`
+   * fraccionario y más de una tasa. No se afirma una igualdad que no existe:
+   * se fija la tolerancia `|Σ OIT − TAI × L| ≤ 0,01 × n_tasas`, ejercitada
+   * con el caso calculado del hallazgo (base 10,06; 19% + 8%; L = 2,5).
+   */
+  describe('buildPosOrderItem — tolerancia de redondeo multi-tasa (F-014)', () => {
+    it('|Σ order_item_taxes − tax_amount_item × lineUnits| ≤ 0,01 × n_tasas', async () => {
+      const dtoStoreId = 1;
+      const product: any = {
+        id: 11,
+        name: 'Mixto 19+8',
+        sku: 'SKU-11',
+        base_price: 10.06,
+        is_on_sale: false,
+        sale_price: null,
+        product_type: 'simple',
+        allow_pos_price_override: true,
+        cost_price: 6,
+        price_unit_quantity: null,
+      };
+      const posUser: any = {
+        id: 1,
+        email: 'cajero@example.com',
+        organization_id: 1,
+        roles: ['super_admin'],
+      };
+      // Cuotas del hallazgo: [1,91 ; 0,80], total 2,71.
+      calculateProductTaxesMock.mockResolvedValue({
+        total_rate: 0.27,
+        total_tax_amount: 2.71,
+        base: 10.06,
+        total: 12.77,
+        taxes: [
+          {
+            tax_rate_id: 501,
+            name: 'IVA 19%',
+            rate: 0.19,
+            tax_type: TaxFiscalType.IVA,
+            is_inclusive: false,
+            amount: 1.91,
+            base: 10.06,
+          },
+          {
+            tax_rate_id: 502,
+            name: 'IVA 8%',
+            rate: 0.08,
+            tax_type: TaxFiscalType.IVA,
+            is_inclusive: false,
+            amount: 0.8,
+            base: 10.06,
+          },
+        ],
+        unclosed_residual_cents: 0,
+        invalid_inputs: [],
+        resolved_from: 'catalog',
+      });
+      const tx = {
+        products: { findFirst: jest.fn().mockResolvedValue(product) },
+      };
+      const item = { product_id: product.id, quantity: 2.5, unit_price: 0 };
+
+      const result = await (service as any).buildPosOrderItem(
+        tx,
+        item,
+        dtoStoreId,
+        posUser,
+        undefined,
+      );
+
+      const rows = result.order_item_taxes.create as any[];
+      expect(rows).toHaveLength(2);
+      const sumOit = rows.reduce((s, r) => s + Number(r.tax_amount), 0);
+      const bound = 0.01 * rows.length;
+      expect(Math.abs(sumOit - result.tax_amount_item * 2.5)).toBeLessThanOrEqual(
+        bound + 1e-9,
+      );
+    });
+  });
+
+  /**
+   * F-018 (B.2) — la rama custom truncaba en float y ADR-04 asciende esas
+   * filas a autoritativas. Cada cuota pasa por `truncMoney` (DIAN Anexo 1.9
+   * §11.2) y el total es la suma de cuotas truncadas.
+   */
+  describe('calculateTaxCategoryTaxes — truncado DIAN (F-018)', () => {
+    it('trunca cada cuota y suma truncados, no el float', async () => {
+      const tx = {
+        stores: {
+          findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }),
+        },
+        tax_categories: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 9,
+            tax_rates: [
+              { id: 91, name: 'IVA 19%', rate: 0.19 },
+              { id: 92, name: 'IVA 5%', rate: 0.05 },
+            ],
+          }),
+        },
+      };
+
+      const out = await (service as any).calculateTaxCategoryTaxes(
+        tx,
+        9,
+        10.06,
+        1,
+      );
+
+      // Float: 1,9114 + 0,503 = 2,4144. Truncado DIAN: 1,91 + 0,50 = 2,41.
+      expect(out.taxes[0].amount).toBe(1.91);
+      expect(out.taxes[1].amount).toBe(0.5);
+      expect(out.total_tax_amount).toBe(2.41);
+    });
+  });
+
+  /**
+   * F-085 (B.2) — el peso se redondea a 3 decimales antes de multiplicar,
+   * igual que la columna `numeric(10,3)`. La 4ª cifra sólo vivía en memoria
+   * y la relectura de I-1 derivaba.
+   */
+  describe('getPosLineUnits — redondeo de peso F-085', () => {
+    const units = (item: any) => (service as any).getPosLineUnits(item);
+
+    it('redondea el peso a 3 decimales', () => {
+      expect(units({ weight: 1.23456, quantity: 1 })).toBe(1.235);
+    });
+
+    it('sin peso usa la cantidad intacta', () => {
+      expect(units({ quantity: 3 })).toBe(3);
+    });
+  });
+});
+
+/**
+ * B.1/F-186 + F-088 — contrato de `resolveDeclaredGrossUnitPrice`, la puerta
+ * de entrada del bruto declarado en el cobro POS. Decidido por escrito:
+ * ausente (`undefined`/`null`) y cadena vacía son AUSENCIA (`null`); el 0
+ * numérico explícito se honra como bruto 0 (con permiso de override aguas
+ * abajo). La cadena vacía ya no se convierte en 0 (F-088: cobraba 0).
+ */
+describe('PaymentsService — resolveDeclaredGrossUnitPrice (B.1/F-186)', () => {
+  let service: PaymentsService;
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PaymentsService,
+        { provide: PaymentGatewayService, useValue: {} },
+        { provide: PaymentValidatorService, useValue: {} },
+        { provide: WebhookHandlerService, useValue: {} },
+        { provide: StorePrismaService, useValue: {} },
+        { provide: StockLevelManager, useValue: {} },
+        { provide: TaxesService, useValue: {} },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: SettingsService, useValue: {} },
+        { provide: PromotionEngineService, useValue: {} },
+        { provide: CouponsService, useValue: {} },
+        { provide: SessionsService, useValue: {} },
+        { provide: MovementsService, useValue: {} },
+        { provide: PaymentEncryptionService, useValue: {} },
+        { provide: InvoiceDataRequestsService, useValue: {} },
+        { provide: WompiClientFactory, useValue: {} },
+        { provide: WompiProcessor, useValue: {} },
+        { provide: FiscalInvoiceThresholdService, useValue: {} },
+        { provide: OrderStockCommitService, useValue: {} },
+        { provide: SellableStockAllocator, useValue: {} },
+        { provide: PriceResolverService, useValue: {} },
+        { provide: WithholdingFlowService, useValue: {} },
+        { provide: KitchenFireService, useValue: {} },
+        { provide: TableSessionsService, useValue: {} },
+        { provide: SerialNumberEnforcementService, useValue: {} },
+        { provide: InventorySerialNumbersService, useValue: {} },
+        { provide: RequestContextService, useValue: {} },
+        { provide: AuditService, useValue: {} },
+      ],
+    }).compile();
+    service = module.get<PaymentsService>(PaymentsService);
+  });
+
+  const read = (item: any): number | null =>
+    (service as any).resolveDeclaredGrossUnitPrice(item);
+
+  it('bruto definido pasa por roundMoney', () => {
+    expect(read({ final_unit_price: 11900 })).toBe(11900);
+    expect(read({ final_unit_price: 11900.005 })).toBe(11900.01);
+  });
+
+  it('ausente, nulo o indefinido es null', () => {
+    expect(read({})).toBeNull();
+    expect(read({ final_unit_price: null })).toBeNull();
+    expect(read({ final_unit_price: undefined })).toBeNull();
+  });
+
+  it('cadena vacía o en blanco es ausencia, no precio 0 (F-088)', () => {
+    expect(read({ final_unit_price: '' })).toBeNull();
+    expect(read({ final_unit_price: '   ' })).toBeNull();
+  });
+
+  it('cero numérico explícito se honra como bruto 0 (decidido por escrito)', () => {
+    expect(read({ final_unit_price: 0 })).toBe(0);
+  });
 });

@@ -339,6 +339,19 @@ export class OrderDetailsPageComponent {
   /** True if the active store is a restaurant (industries cascade). */
   readonly isRestaurant = computed<boolean>(() => this.authFacade.isRestaurant());
   /**
+   * C.7 (§5.3, base gross) — esta superficie pinta líneas en BRUTO
+   * (`final_total_price ?? total_price`): el pie no lleva Subtotal ni fila
+   * de impuesto que sume; sólo TOTAL y, con desglose respaldado, la nota
+   * informativa fuera de la aritmética.
+   */
+  readonly showDetailVatNote = computed(() => {
+    const order = this.order();
+    const tax = Number(
+      (order as unknown as { tax_amount?: unknown } | null)?.tax_amount ?? 0,
+    );
+    return this.authFacade.printsVatBreakdown() && tax > 0;
+  });
+  /**
    * Plan KDS fire-flows (F3): show the per-plate kitchen dispatch UI only
    * for restaurant stores, when there is at least one pending prepared
    * item, and the order is not in a terminal state (cancelled/refunded).

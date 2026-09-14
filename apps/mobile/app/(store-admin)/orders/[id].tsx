@@ -349,7 +349,9 @@ function OrderItemDetail({
           </Text>
           <View style={styles.productMetaRow}>
             <Text style={styles.productMetaText}>
-              {item.quantity} x {money(item.unit_price, currency)}
+              {/* C.11/F-007 — líneas en bruto como el detalle web
+                  (`final_*` del backend, con fallback al crudo). */}
+              {item.quantity} x {money(item.final_unit_price ?? item.unit_price, currency)}
             </Text>
             {(item.variant_sku || variant?.sku || product?.sku) && (
               <Text style={styles.productSku} numberOfLines={1}>
@@ -358,7 +360,7 @@ function OrderItemDetail({
             )}
           </View>
         </View>
-        <Text style={styles.productTotal}>{money(item.total_price, currency)}</Text>
+        <Text style={styles.productTotal}>{money(item.final_total_price ?? item.total_price, currency)}</Text>
       </View>
 
       {attributes.length > 0 && (
@@ -783,20 +785,21 @@ const OrderDetail = () => {
         </SectionCard>
 
         <SectionCard title="Resumen financiero" icon="wallet">
+          {/* C.7 (§5.3, base taxable, sin bandera fiscal en el payload
+              móvil): Subtotal sólo sin impuesto; la fila Impuestos vuelve
+              cuando el payload traiga respaldo (tren MO/C.11). */}
           <View style={styles.moneyRows}>
-            <View style={styles.moneyRow}>
-              <Text style={styles.moneyLabel}>Subtotal</Text>
-              <Text style={styles.moneyValue}>{money(order.subtotal_amount, currency)}</Text>
-            </View>
+            {Number(order.tax_amount || 0) === 0 && (
+              <View style={styles.moneyRow}>
+                <Text style={styles.moneyLabel}>Subtotal</Text>
+                <Text style={styles.moneyValue}>{money(order.subtotal_amount, currency)}</Text>
+              </View>
+            )}
             <View style={styles.moneyRow}>
               <Text style={styles.moneyLabel}>Descuento</Text>
               <Text style={[styles.moneyValue, Number(order.discount_amount) > 0 && styles.discountValue]}>
                 -{money(order.discount_amount, currency)}
               </Text>
-            </View>
-            <View style={styles.moneyRow}>
-              <Text style={styles.moneyLabel}>Impuestos</Text>
-              <Text style={styles.moneyValue}>{money(order.tax_amount, currency)}</Text>
             </View>
             <View style={styles.moneyRow}>
               <Text style={styles.moneyLabel}>Envío</Text>
