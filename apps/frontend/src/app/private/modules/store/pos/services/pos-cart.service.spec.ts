@@ -487,3 +487,196 @@ describe('PosCartService — calculateSummary base neta (C.6)', () => {
     });
   });
 });
+
+/**
+ * Impuesto INCLUIDO en el precio publicado — el carrito no puede volver a
+ * sumarlo (caso de producción: store 105 "Pollo Arabe", producto 4258
+ * "1/4 de Pollo", 14-sep-2026).
+ *
+ * SÍNTOMA: el cajero tocaba dos veces la tarjeta del mismo producto y el
+ * cobro respondía HTTP 400 `POS_PRICE_OVERRIDE_NOT_ALLOWED_001` — "El
+ * producto no permite editar el precio en POS" — sin que nadie hubiera
+ * editado un precio.
+ *
+ * CAUSA: `processAddToCart` tiene dos ramas y sólo una tomaba el precio del
+ * servidor. La de ALTA sin variante usaba `product.final_price` (ya resuelto
+ * por el backend con `is_inclusive`), pero la de MERGE —y la de alta CON
+ * variante— recalculaban con `calculateItemFinalPriceWithBase`, que multiplica
+ * por `1 + calculateRateSum(product)`. `calculateRateSum` suma las tasas sin
+ * mirar `is_inclusive` ni una vez, así que con INC 8 % incluido la línea
+ * pasaba de 18.500 a 19.980: el impuesto que ya venía DENTRO del precio se
+ * sumaba una segunda vez, en el cliente.
+ *
+ * POR QUÉ TERMINABA EN UN 400: el POS manda ese número como
+ * `final_unit_price`. `payments.service.ts` (`buildPosOrderItem`) reconstruye
+ * el precio de catálogo (18.500), ve una diferencia de 1.480 ≥ 0,01, lo
+ * clasifica como override manual y, con `allow_pos_price_override = false`,
+ * rechaza el cobro. El guard del backend estaba bien; el dato que llegaba
+ * estaba mal.
+ *
+ * ALCANCE REAL EN PROD: desde que nació la asignación INC (12-sep-2026) no
+ * existía UNA SOLA línea `POS-xxxx` con `quantity >= 2` en esa tienda. El
+ * defecto bloqueaba el 100 % de las ventas POS con producto repetido.
+ *
+ * POR QUÉ LA SUITE PASABA EN VERDE: ningún test agregaba dos veces el mismo
+ * producto con `is_inclusive = true`. De ahí este bloque.
+ *
+ * PENDIENTE DE CORRER: `ng test` exige ChromeHeadless y esta máquina no tiene
+ * binario de Chrome. Estos casos los verifica CI.
+ */
+describe('PosCartService — precio con impuesto incluido al repetir producto', () => {
+  let service: PosCartService;
+
+  /**
+   * Espejo del producto real: precio publicado 18.500 con INC 8 % INCLUIDO.
+   * `final_price` es lo que devuelve el backend (`resolveLineTotals`): con
+   * impuesto incluido NO crece, por eso vale lo mismo que `price`.
+   */
+  const inclusiveProduct = () =>
+    ({
+      id: '4258',
+      name: '1/4 de Pollo',
+      sku: 'PA54',
+      price: 18500,
+      final_price: 18500,
+      stock: 0,
+      track_inventory: false,
+      isActive: true,
+      has_variants: false,
+      product_variants: [],
+      tax_assignments: [
+        {
+          product_id: 4258,
+          tax_category_id: 96,
+          is_inclusive: true,
+          tax_categories: {
+            id: 96,
+            name: 'INC',
+            tax_type: 'inc',
+            is_inclusive: true,
+            // La fila de la TASA dice lo contrario que la asignación; la
+            // precedencia canónica (asignación > categoría > tasa) hace ganar
+            // a la asignación, igual que en `final-price.util.ts` del backend.
+            tax_rates: [{ id: 68, rate: '0.08', is_inclusive: false }],
+          },
+        },
+      ],
+    }) as any;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        PosCartService,
+        { provide: PosProductService, useValue: { getProductById: () => of(null) } },
+        { provide: PosApiService, useValue: {} },
+        {
+          provide: PosSaleUnitService,
+          useValue: {
+            // Producto por pieza: toda la aritmética colapsa a la histórica.
+            configFor: () => ({
+              priceUnitQuantity: 1,
+              unitsPerCapture: 1,
+              captureUnit: null,
+            }),
+          },
+        },
+        {
+          provide: PriceResolverService,
+          useValue: {
+            resolve: (product: any, variant?: any) => ({
+              unitPrice: Number(
+                variant?.price_override ?? product?.base_price ?? 0,
+              ),
+            }),
+          },
+        },
+        { provide: PriceTierCacheService, useValue: {} },
+        {
+          provide: WithholdingTaxService,
+          useValue: {
+            previewWithholding: () => of({ lines: [], total_withholding: 0 }),
+          },
+        },
+        { provide: CurrencyFormatService, useValue: {} },
+        {
+          provide: InvoicingService,
+          useValue: { getPosUvtThreshold: () => of({ data: null }) },
+        },
+        { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+      ],
+    });
+    service = TestBed.inject(PosCartService);
+  });
+
+  it('repetir la tarjeta del producto no le suma el impuesto ya incluido', (done) => {
+    const product = inclusiveProduct();
+
+    service.addToCart({ product, quantity: 1 }).subscribe((first) => {
+      // Alta: el precio sale del servidor, intacto.
+      expect(first.items.length).toBe(1);
+      expect(first.items[0].finalPrice).toBe(18500);
+
+      // Segunda pulsación de la MISMA tarjeta: la línea se fusiona.
+      service.addToCart({ product, quantity: 1 }).subscribe((merged) => {
+        expect(merged.items.length).toBe(1);
+        expect(merged.items[0].quantity).toBe(2);
+        // La invariante: el precio unitario NO cambia por fusionar. 19.980
+        // era el defecto (18.500 × 1,08) y es lo que disparaba el 400.
+        expect(merged.items[0].finalPrice).toBe(18500);
+        expect(merged.items[0].totalPrice).toBe(37000);
+        done();
+      });
+    });
+  });
+
+  it('la variante toma su propio final_price desde el primer agregado', (done) => {
+    // La rama de alta CON variante usaba la misma función defectuosa, así que
+    // un producto con variantes e impuesto incluido rompía sin repetir nada.
+    const product = { ...inclusiveProduct(), has_variants: true };
+    const variant = {
+      id: 991,
+      sku: 'PA54-G',
+      price_override: 18500,
+      final_price: 18500,
+      stock: 0,
+      track_inventory_override: false,
+    } as any;
+
+    service.addToCart({ product, quantity: 1, variant }).subscribe((state) => {
+      expect(state.items.length).toBe(1);
+      expect(state.items[0].finalPrice).toBe(18500);
+      done();
+    });
+  });
+
+  it('sin final_price del servidor sigue valiendo la aritmética local para tasa agregada', (done) => {
+    // Respaldo, no camino feliz: si el payload no trae `final_price`, la tasa
+    // EXCLUSIVA debe seguir sumándose o la línea se cobraría de menos.
+    const product = {
+      ...inclusiveProduct(),
+      id: '9001',
+      name: 'Producto con IVA agregado',
+      price: 10000,
+      final_price: null,
+      tax_assignments: [
+        {
+          product_id: 9001,
+          tax_category_id: 1,
+          is_inclusive: false,
+          tax_categories: {
+            id: 1,
+            name: 'IVA',
+            tax_type: 'iva',
+            is_inclusive: false,
+            tax_rates: [{ id: 1, rate: '0.19', is_inclusive: false }],
+          },
+        },
+      ],
+    } as any;
+
+    service.addToCart({ product, quantity: 1 }).subscribe((state) => {
+      expect(state.items[0].finalPrice).toBe(11900);
+      done();
+    });
+  });
+});
