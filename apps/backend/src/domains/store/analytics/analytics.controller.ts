@@ -809,7 +809,44 @@ export class AnalyticsController {
   /**
    * QUI-540: cuentas por cobrar de clientes (open + partial) con
    * bucketing de antigüedad (0-30 / 31-60 / 61-90 / 90+).
+   * Preview paginado.
    */
+  @Get('customers/receivable')
+  @Permissions('store:analytics:read')
+  async getAccountsReceivable(@Query() query: AnalyticsQueryDto) {
+    const result =
+      await this.customers_analytics_service.getAccountsReceivable(query);
+    return this.response_service.paginated(
+      result.data,
+      result.total,
+      result.page,
+      result.limit,
+    );
+  }
+
+  @Get('customers/receivables')
+  @Permissions('store:analytics:read')
+  async getAccountsReceivablesAlias(@Query() query: AnalyticsQueryDto) {
+    return this.getAccountsReceivable(query);
+  }
+
+  @Get('customers/receivable/summary')
+  @Permissions('store:analytics:read')
+  async getAccountsReceivableSummary(@Query() query: AnalyticsQueryDto) {
+    const result =
+      await this.customers_analytics_service.getAccountsReceivableSummary(query);
+    return this.response_service.success(
+      result,
+      'Resumen de cuentas por cobrar obtenido',
+    );
+  }
+
+  @Get('customers/receivables/summary')
+  @Permissions('store:analytics:read')
+  async getAccountsReceivablesSummaryAlias(@Query() query: AnalyticsQueryDto) {
+    return this.getAccountsReceivableSummary(query);
+  }
+
   @Get('customers/receivable/export')
   @Permissions('store:analytics:read')
   async exportAccountsReceivable(
@@ -821,23 +858,30 @@ export class AnalyticsController {
       await this.customers_analytics_service.getAccountsReceivableForExport(query);
 
     const columns: ReportColumn[] = [
-      { key: 'document_number', header: 'Documento', type: 'text' },
+      { key: 'document_number', header: 'ID de Órdenes', type: 'text' },
       { key: 'customer_name', header: 'Cliente', type: 'text' },
       { key: 'customer_document', header: 'NIT/Doc', type: 'text' },
-      { key: 'customer_email', header: 'Correo', type: 'text' },
-      { key: 'issue_date', header: 'Emisión', type: 'date-only' },
       { key: 'due_date', header: 'Vencimiento', type: 'date-only' },
+      { key: 'installment_info', header: 'Cuota', type: 'text' },
       { key: 'days_overdue', header: 'Días Mora', type: 'number' },
-      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
       { key: 'original_amount', header: 'Original', type: 'currency' },
       { key: 'paid_amount', header: 'Pagado', type: 'currency' },
       { key: 'balance', header: 'Saldo', type: 'currency' },
-      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'status_label', header: 'Estado', type: 'text' },
     ];
 
     await this.emitReport(res, 'cuentas_por_cobrar', tz, [
       this.toSheet('Cuentas por Cobrar', columns, rows, tz),
     ]);
+  }
+
+  @Get('customers/receivables/export')
+  @Permissions('store:analytics:read')
+  async exportAccountsReceivablesAlias(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    return this.exportAccountsReceivable(query, res);
   }
 
   @Get('customers/abandoned-carts/summary')

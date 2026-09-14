@@ -125,6 +125,7 @@ export const reportsRoutes: Routes = [
           { path: 'customer-acquisition',        data: { reportId: 'customer-acquisition' },        loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'customer-abandoned-carts',    data: { reportId: 'customer-abandoned-carts' },    loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'customers-top',               data: { reportId: 'customers-top' },               loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'customers-receivable',        data: { reportId: 'customers-receivable' },        loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {

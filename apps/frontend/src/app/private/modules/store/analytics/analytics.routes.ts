@@ -283,6 +283,14 @@ export const analyticsRoutes: Routes = [
                 (c) => c.AbandonedCartsComponent,
               ),
           },
+          {
+            // QUI-540: Cuentas por cobrar de clientes
+            path: 'receivable',
+            loadComponent: () =>
+              import('./pages/customers/customer-receivables.component').then(
+                (c) => c.CustomerReceivablesComponent,
+              ),
+          },
         ],
       },
       // Reviews Analytics (shell)

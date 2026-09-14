@@ -86,6 +86,7 @@ export class AnalyticsShellComponent {
     '/admin/analytics/customers/summary': '/admin/reports/customers/customer-summary',
     '/admin/analytics/customers/acquisition': '/admin/reports/customers/customer-acquisition',
     '/admin/analytics/customers/abandoned-carts': '/admin/reports/customers/customer-abandoned-carts',
+    '/admin/analytics/customers/receivable': '/admin/reports/customers/customers-receivable',
     // Purchases
     '/admin/analytics/purchases/summary': '/admin/reports/purchases/purchase-summary',
     '/admin/analytics/purchases/by-supplier': '/admin/reports/purchases/purchase-by-supplier',

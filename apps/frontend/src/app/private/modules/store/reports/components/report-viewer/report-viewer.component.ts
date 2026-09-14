@@ -19,6 +19,7 @@ import {
   TableColumn,
   ItemListCardConfig,
 } from '../../../../../../shared/components';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
 interface StatCard {
   title: string;
@@ -48,11 +49,24 @@ const TYPE_ICONS: Record<string, { icon: string; bg: string; color: string }> = 
  * Un valor no numérico se devuelve tal cual: una columna mal tipada muestra su
  * texto, no un `0` inventado.
  */
-function formatCellValue(value: any, type?: string): string {
+function formatCellValue(value: any, type?: string, key?: string): string {
   if (value === null || value === undefined || value === '') return '';
+  if (key === 'status' || key === 'state' || key === 'status_label') {
+    const statusMap: Record<string, string> = {
+      open: 'Abierta',
+      partial: 'Parcial',
+      paid: 'Pagada',
+      written_off: 'Castigada',
+      active: 'Activo',
+      completed: 'Completado',
+      pending: 'Pendiente',
+      cancelled: 'Cancelado',
+    };
+    return statusMap[String(value).toLowerCase()] || String(value);
+  }
   if (type === 'date') {
     const d = new Date(value);
-    return isNaN(d.getTime()) ? String(value) : d.toLocaleDateString('es-CO');
+    return isNaN(d.getTime()) ? String(value) : formatDateOnlyUTC(value);
   }
   if (type !== 'currency' && type !== 'percentage' && type !== 'number') {
     return String(value);
@@ -84,7 +98,8 @@ function toTableColumns(columns: ReportColumn[]): TableColumn[] {
     key: col.key,
     label: col.header,
     align: col.align,
-    transform: (value: any) => formatCellValue(value, col.type),
+    defaultValue: '—',
+    transform: (value: any) => formatCellValue(value, col.type, col.key),
   }));
 }
 
@@ -444,6 +459,9 @@ export class ReportViewerComponent {
   readonly paginatedData = computed(() => {
     const d = this.data();
     if (!d || d.length === 0) return [];
+    if (this.totalItems() > d.length) {
+      return d;
+    }
     const start = (this.currentPage() - 1) * this.itemsPerPage();
     return d.slice(start, start + this.itemsPerPage());
   });
