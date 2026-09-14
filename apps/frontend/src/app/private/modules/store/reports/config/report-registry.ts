@@ -707,14 +707,17 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     route: '/admin/reports/inventory/inventory-ingredient-consumption',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
-    type: 'nested' as ReportType,
+    type: 'list' as ReportType,
+    trackKey: 'ingredient_id',
     columns: [
+      { key: 'ingredient_name', header: 'Insumo / Ingrediente', type: 'text' },
       { key: 'dish_name', header: 'Plato / Preparación', type: 'text' },
       { key: 'dish_quantity', header: 'Cant. Platos', type: 'number', footer: 'sum' },
       { key: 'consumed_quantity', header: 'Cant. Consumida', type: 'number', footer: 'sum' },
       { key: 'unit', header: 'Unidad', type: 'text' },
       { key: 'unit_cost', header: 'Costo Unit.', type: 'currency' },
       { key: 'total_cost', header: 'Costo Total', type: 'currency', footer: 'sum' },
+      { key: 'orders_count', header: 'Órdenes', type: 'number', footer: 'sum' },
     ],
     exportFilename: 'consumo_insumos',
     stats: [
