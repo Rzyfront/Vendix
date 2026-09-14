@@ -128,6 +128,13 @@ import {
 } from './services/pos-restaurant-integration.service';
 import { TaxesService } from '../products/services/taxes.service';
 import { TaxCategory } from '../products/interfaces';
+// F-003 (C.8) — `item.taxAmount` es el total DE LÍNEA (`pos-cart.service.ts`
+// lo define así en cada sitio que lo calcula); el editor
+// (`orders.service.ts` `updateOrderFromEditor`) trata `tax_amount_item` como
+// POR-UNIDAD para líneas sin `product_id` y lo vuelve a multiplicar por el
+// multiplicador de línea. Mismo `resolveLineUnits` + división que ya usan
+// `pos-payment.service.ts`/`pos-order.service.ts` para el mismo campo.
+import { resolveLineUnits } from './utils/line-units.util';
 
 const DEFAULT_CART_SUMMARY: CartSummary = {
   subtotal: 0,
@@ -3945,7 +3952,18 @@ export class PosComponent {
         // queda en la MISMA magnitud que `unit_price`.
         total_price: Number(item?.unitPrice ?? 0) * Number(item?.quantity ?? 0),
         final_unit_price: Number(item?.finalPrice ?? item?.unitPrice ?? 0),
-        tax_amount_item: Number(item?.taxAmount ?? 0),
+        // F-003 (C.8, blocker) — `item?.taxAmount` es el total DE LÍNEA; el
+        // editor multiplica `tax_amount_item` por el multiplicador de línea
+        // para las líneas sin `product_id` (custom/servicio), así que había
+        // que mandarlo dividido — igual que `pos-payment.service.ts:180-183`
+        // y `pos-order.service.ts:1095-1098` ya hacen para el mismo campo.
+        tax_amount_item: (() => {
+          const lineUnits = resolveLineUnits(item);
+          const taxAmount = Number(item?.taxAmount ?? 0);
+          return taxAmount > 0 && lineUnits > 0
+            ? Number((taxAmount / lineUnits).toFixed(2))
+            : 0;
+        })(),
         tax_rate: item?.taxRate ?? null,
         tax_category_id: item?.taxCategoryId ?? null,
         applied_price_tier_id: item?.applied_price_tier_id ?? null,

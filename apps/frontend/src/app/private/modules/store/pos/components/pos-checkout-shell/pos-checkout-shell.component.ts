@@ -42,6 +42,11 @@ import { PosCustomer } from '../../models/customer.model';
 import { PosShippingSaleData } from '../../models/shipping.model';
 import { FulfillmentType } from '../pos-fulfillment-selector.component';
 import { PosOrderCreateResult } from '../../models/order.model';
+// F-003 (C.8) — `it.taxAmount` es el total DE LÍNEA; el editor
+// (`orders.service.ts` `updateOrderFromEditor`) trata `tax_amount_item` como
+// POR-UNIDAD para líneas sin `product_id`. Mismo `resolveLineUnits` +
+// división que `pos-payment.service.ts`/`pos-order.service.ts` ya usan.
+import { resolveLineUnits } from '../../utils/line-units.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
@@ -1265,7 +1270,17 @@ export class PosCheckoutShellComponent {
           (it.finalPrice ?? it.unitPrice ?? 0).toFixed(2),
         ),
         total_price: Number((it.totalPrice ?? 0).toFixed(2)),
-        tax_amount_item: Number((it.taxAmount ?? 0).toFixed(2)),
+        // F-003 (C.8, blocker) — dividir por el multiplicador de línea antes
+        // de mandarlo: sin esto el editor lo vuelve a multiplicar por
+        // `priceUnitsQty` en las líneas sin `product_id` (custom/servicio) y
+        // dobla el IVA (mismo defecto que atacaba F-003 en `pos.component.ts`).
+        tax_amount_item: (() => {
+          const lineUnits = resolveLineUnits(it);
+          const taxAmount = Number(it.taxAmount ?? 0);
+          return taxAmount > 0 && lineUnits > 0
+            ? Number((taxAmount / lineUnits).toFixed(2))
+            : 0;
+        })(),
         tax_rate: typeof it.taxRate === 'number' ? it.taxRate : undefined,
         tax_category_id: it.taxCategoryId ?? undefined,
         applied_price_tier_id: it.appliedPriceTierId ?? undefined,

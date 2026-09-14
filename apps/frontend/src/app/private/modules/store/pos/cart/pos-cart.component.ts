@@ -126,13 +126,13 @@ import {
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Subtotal</span>
               <span class="font-medium">{{
-                formatCurrency(summary()?.subtotal || 0)
+                formatCurrency(summary().subtotal || 0)
               }}</span>
             </div>
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Impuestos</span>
               <span class="font-medium">{{
-                formatCurrency(summary()?.taxAmount || 0)
+                formatCurrency(summary().taxAmount || 0)
               }}</span>
             </div>
 
@@ -668,10 +668,17 @@ import {
                       </span>
                     }
                     @if (getItemTaxAmount(item) > 0) {
+                      <!-- F-139: el diseño y el guion E2E-1 paso 3 piden ver
+                           "+IVA $988.000" en pantalla; el badge sólo pintaba
+                           el signo y el importe, sin la palabra "IVA" — un
+                           lector de pantalla lo anunciaba como "más 988.000
+                           pesos" sin decir de qué. Rótulo visible + aria-label
+                           explícito, y tamaño por encima de 9px. -->
                       <span
-                        class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-orange-100 text-orange-800"
+                        class="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800"
+                        [attr.aria-label]="'IVA de la línea: ' + formatCurrency(getItemTaxAmount(item))"
                       >
-                        +{{ formatCurrency(getItemTaxAmount(item)) }}
+                        +IVA {{ formatCurrency(getItemTaxAmount(item)) }}
                       </span>
                     }
                     @if (item.isPriceOverridden) {
@@ -1214,7 +1221,14 @@ private cartService = inject(PosCartService);
   /** Per-product (number key) override cache so the selector resolves instantly. */
   readonly productOverrides = signal<Record<number, ProductPriceTierOverride[]>>({});
   readonly isEmpty = toSignal(this.cartService.isEmpty, { initialValue: false });
-  readonly summary = toSignal(this.cartService.summary, { initialValue: null! });
+  // F-140 — el puente `toSignal(cartService.summary, { initialValue: null! })`
+  // mentia al tipo (CartSummary declarado, null real) y abria una ventana de
+  // un ciclo de CD con Subtotal/Impuestos/Total en $0 en cada montaje, porque
+  // `toObservable` emite via effect y no de forma sincrona al suscribirse.
+  // `cartService.cartSummary` (pos-cart.service.ts) ya es el `computed`
+  // fuente que ese puente envolvia — usarlo directo, igual que `cartState`
+  // arriba, elimina el puente y con el la ventana en null.
+  readonly summary = this.cartService.cartSummary;
   /**
    * Net withholding the customer practices on this sale (role='suffered'),
    * resolved server-side via the preview endpoint. Reduces the amount to
