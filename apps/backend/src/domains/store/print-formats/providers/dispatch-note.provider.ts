@@ -31,7 +31,14 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
     const note = await this.prisma.dispatch_notes.findFirst({
       where: { id, store_id: storeId },
       include: {
-        stores: {
+        // C.3 (fix 2026-09-14): la relacion real en schema.prisma es
+        // `store`/`order` (singular) — `stores`/`orders` (plural, el nombre
+        // del modelo/tabla) no existe como campo de include en
+        // `dispatch_notes` y Prisma lo rechaza en runtime con
+        // PrismaClientValidationError, tumbando CADA render de remision con
+        // 500. Compilaba porque `StorePrismaService` no estrecha el tipo de
+        // include lo suficiente para que tsc lo atrape.
+        store: {
           include: {
             addresses: { take: 1 },
             // C.1 — settings para el gate fiscal
@@ -45,7 +52,7 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
             },
           },
         },
-        orders: {
+        order: {
           include: {
             order_items: true,
             users: true,
@@ -58,9 +65,9 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
       throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
     }
 
-    const store = note.stores || {};
+    const store = note.store || {};
     const org = store.organizations || {};
-    const order = note.orders || ({} as any);
+    const order = note.order || ({} as any);
     const user = order.users || {};
     const storeAddr = store.addresses?.[0] || {};
 

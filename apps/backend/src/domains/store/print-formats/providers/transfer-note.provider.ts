@@ -55,8 +55,13 @@ export class TransferNoteDataProvider implements IDocumentDataProvider {
       include: {
         stock_transfer_items: {
           include: {
+            // C.3 (fix 2026-09-14): `products` no tiene columna `unit`
+            // (rompía con PrismaClientValidationError, 500 en CADA render de
+            // traslado). Nunca se leyó — el traslado no imprime unidad, solo
+            // nombre/SKU — así que se retira en vez de mapear a
+            // `stock_unit`/`stock_uom` para no inventar un campo nuevo.
             products: {
-              select: { id: true, name: true, sku: true, unit: true },
+              select: { id: true, name: true, sku: true },
             },
             product_variants: {
               select: { id: true, sku: true, name: true },
