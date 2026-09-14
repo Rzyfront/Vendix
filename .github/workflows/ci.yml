@@ -475,7 +475,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    timeout-minutes: 30
+    # F-220: 30 minutos era el techo, no el margen. Medido en dos corridas
+    # consecutivas del mismo job: `a2777f21a` cerro en VERDE a los 29m19s --41
+    # segundos por debajo del limite-- y `427b7b076` se corto a los 30m18s
+    # dentro de `jest -- invoicing`, con los otros cinco carriles ya en verde.
+    # O sea que el resultado del job no lo decidia el codigo sino el reloj: la
+    # unica compuerta de backend venia siendo un volado. Un `cancelled` se lee
+    # igual que el `cancelled` que deja un push encadenado, asi que ademas
+    # confundia las dos causas. 45 minutos da ~50 % de margen sobre la corrida
+    # verde conocida. El arreglo de fondo es partir los seis carriles en jobs
+    # paralelos (hoy corren en serie en un solo runner), pero eso cambia los
+    # required status checks del ruleset y no se toca sin acuerdo.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
