@@ -150,13 +150,27 @@ npm run test:e2e    # End-to-end (integración)
 
 ### Type-check del arnés (specs incluidas, `scripts/` excluido)
 
-`tsconfig.check.json` extiende `tsconfig.json` y excluye sólo `node_modules`,
-`dist` y `scripts` — a diferencia de `tsconfig.build.json`, **no** excluye
-`**/*spec.ts`. Es el único sitio donde este repo tipa la aritmética de dinero
-de las specs sin tocar producción; `scripts/` no se despliega en la imagen de
-producción, así que sus errores no bloquean este gate.
+`tsconfig.check.json` extiende `tsconfig.json` con una superficie **positiva**
+y explícita — `"include": ["src/**/*", "prisma/**/*", "prisma.config.ts"]`
+(ronda 3, F4; antes era por exclusión: `"exclude": ["node_modules", "dist",
+"scripts"]`, heredando el `include` implícito `**/*` de `tsconfig.json`) — a
+diferencia de `tsconfig.build.json`, **sí** tipa `**/*spec.ts`. Es el único
+sitio donde este repo tipa la aritmética de dinero de las specs sin tocar
+producción; `scripts/` no se despliega en la imagen de producción y queda
+fuera del `include`, así que sus errores no bloquean este gate. `test/**`
+también queda fuera a propósito: corre bajo otro runner
+(`test/jest-e2e.json`) y ningún job de CI lo invoca, así que tiparlo aquí
+daría una falsa sensación de cobertura. El `.tsbuildinfo` incremental vive en
+`node_modules/.cache/tsconfig.check.tsbuildinfo` — no en `dist/`, que `nest
+build` borra un paso después (`nest-cli.json`: `"deleteOutDir": true`).
+
+**Requiere `npx prisma generate` previo en un clon limpio.** El cliente
+Prisma generado vive en `node_modules/@prisma/client` (gitignored, no se
+commitea) y 412 archivos bajo `src/` lo importan; sin generarlo antes, este
+comando falla por módulos faltantes, no por errores de tipos reales.
 
 ```bash
+npx prisma generate        # una vez, en un clon limpio o tras cambiar el schema
 npm run buildcheck:types   # tsc -p tsconfig.check.json --noEmit
 ```
 
@@ -195,6 +209,19 @@ verifica únicamente sus propios archivos de prueba, por ruta. Correr todo
 CI, y el job `backend-test` de `.github/workflows/ci.yml` está en `if: false`
 desde el 2026-08-14. Un cambio que necesite correr toda la suite como
 compuerta requiere su propio plan.
+
+### Qué corre hoy en CI (y qué no) — `backend-test-scoped`
+
+`backend-test` (arriba) sigue en `if: false` — **ningún** PR lo dispara. Eso
+**no** significa que ninguna spec del backend corra en CI: el job
+`backend-test-scoped` de `.github/workflows/ci.yml` sí corre en cada PR que
+toque `apps/backend/**`, con `test:path` acotado a cuatro directorios
+(`payments`, `orders`, `tables`, `taxes` — 36 specs). Lo que **no** corre en
+ningún job es el resto: 365 specs de las 401 del repo, `invoicing` incluido
+(93 specs él solo, el directorio más grande fuera del alcance). Ese carril de
+facturación se verifica por archivo, spec a spec, en los pasos C.x del plan
+`CP-pos-exclusive-tax-double-charge` — no por un job de CI que lo corra
+completo.
 
 ---
 **Vendix Backend V2.0** - *Seguridad y Escalabilidad Enterprise*

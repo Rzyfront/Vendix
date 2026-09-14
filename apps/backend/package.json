@@ -23,8 +23,8 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "// test:path — `npm run test:path -- <path>` runs ONLY that path (spec file or dir), --runInBand (single process), real exit code. Direct jest invocation scoped to a path, no root wrapper. Not a full-suite gate — see README.md": "",
-    "test:path": "jest --runInBand",
+    "// test:path — `npm run test:path -- <path>` runs ONLY that path (spec file or dir), --runInBand (single process), real exit code. Direct jest invocation scoped to a path, no root wrapper. Not a full-suite gate — see README.md. Wrapped by scripts/test-path.sh (ronda 3, F2): without a path this used to silently run all 401 specs (~10h); the wrapper exits 2 with a message instead.": "",
+    "test:path": "sh scripts/test-path.sh",
     "// ----- PRISMA & DATABASE -----": "",
     "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
@@ -164,6 +164,9 @@
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
+    "setupFilesAfterEnv": [
+      "<rootDir>/testing/jest.setup.ts"
+    ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"
     ],

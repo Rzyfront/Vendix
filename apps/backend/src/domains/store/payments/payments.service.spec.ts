@@ -173,9 +173,22 @@ describe('PaymentsService', () => {
     // de F-157 que ignoraba sus argumentos: congelaba la aritmética y
     // cualquier test que llegara a `rescaleTaxInfo` sin ese parche moría con
     // "resolveLineTotals is not a function" (F-166).
+    //
+    // F3 (ronda 3, CP-pos-exclusive-tax-double-charge): reenvía por
+    // rest/spread (`...args`) y NO con parámetros nombrados. Una flecha de
+    // aridad 2 es asignable a `jest.MockedFunction<TaxesService[
+    // 'resolveLineTotals']>` aunque el método real gane un tercer parámetro
+    // — TypeScript permite pasar una función con MENOS parámetros donde se
+    // espera una con más — así que el mock compilaría igual, descartaría el
+    // argumento nuevo en silencio, y `resolveLineTotalsPure` se invocaría con
+    // `undefined` en su lugar (el mismo mecanismo de F-157, sin curar, en el
+    // método hermano). Con `...args: Parameters<TaxesService[
+    // 'resolveLineTotals']>` la aridad del mock SIGUE la del método real: si
+    // `resolveLineTotalsPure` no acepta el argumento nuevo, la compilación
+    // falla ahí — que es justo la señal que se quiere.
     resolveLineTotalsMock = jest.fn(
-      (finalPrice: number, rates: TaxRateForResolution[]) =>
-        resolveLineTotalsPure(finalPrice, rates),
+      (...args: Parameters<TaxesService['resolveLineTotals']>) =>
+        resolveLineTotalsPure(...args),
     ) as jest.MockedFunction<TaxesService['resolveLineTotals']>;
 
     const mockTaxesService: Partial<TaxesService> = {

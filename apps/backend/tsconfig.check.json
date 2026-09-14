@@ -1,4 +1,21 @@
 {
+  // F4 (ronda 3, plan CP-pos-exclusive-tax-double-charge, QUI-832): superficie
+  // POSITIVA y explícita en vez de por negación. Antes este archivo era
+  // `"exclude": ["node_modules", "dist", "scripts"]` heredando el `include`
+  // implícito `**/*` de `tsconfig.json` -- eso metía `test/app.e2e-spec.ts`
+  // (corre bajo OTRO runner, `test/jest-e2e.json`, y ningún job de CI lo
+  // invoca) y de regalo cualquier directorio nuevo que alguien cree mañana,
+  // sin que nadie lo pidiera. `test/**` queda FUERA de este `include` a
+  // propósito: tiparlo aquí daría una falsa sensación de cobertura sobre un
+  // archivo que ninguna compuerta ejecuta.
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "dist", "scripts"]
+  "compilerOptions": {
+    // Caché fuera de `dist/`: `nest build` (`nest-cli.json`:
+    // `"deleteOutDir": true`) borra `dist/` un paso después en CI, así que
+    // dejar el `.tsbuildinfo` ahí paga el arranque en frío siempre. Sin esta
+    // clave, TS lo escribe junto al `tsconfig` (aquí, dentro de `dist/` por
+    // el `outDir` heredado) por defecto.
+    "tsBuildInfoFile": "./node_modules/.cache/tsconfig.check.tsbuildinfo"
+  },
+  "include": ["src/**/*", "prisma/**/*", "prisma.config.ts"]
 }
