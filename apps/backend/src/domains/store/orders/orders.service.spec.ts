@@ -1922,13 +1922,46 @@ describe('OrdersService', () => {
       expect(out.create[0].tax_rate_id).toBeNull();
     });
 
-    it('línea por peso: el multiplicador es 1 aunque quantity sea 1', () => {
+    /**
+     * F-207 (cerrado) — el multiplicador de línea por peso es el PESO, no 1.
+     *
+     * `tax_amount_item` viaja por unidad de precio (canon C-2): para una
+     * línea de 1,35 kg, `1900` es el impuesto de 1 kg, y el OIT debe
+     * respaldar la línea completa: `1900 × 1,35 = 2565`. Con ×1 (defecto
+     * previo) el OIT quedaba en `1900` — corto por el factor del peso frente
+     * a lo que el carril de cobro (`payments.service.ts:getPosLineUnits`)
+     * cobra de verdad, y corto frente a la cabecera de la propia orden
+     * (`pos-cart.service.ts:calculateSummary` suma el impuesto YA
+     * multiplicado por peso). Éste es el caso que fija el canon.
+     */
+    it('línea por peso: el multiplicador es el peso, igual que getPosLineUnits', () => {
       const out = call(
         { quantity: 1, weight: 1.35, tax_amount_item: 1900, tax_rate: 0.19 },
         singleRate,
       );
 
-      expect(Number(out.create[0].tax_amount)).toBe(1900);
+      // Réplica de `payments.service.ts:getPosLineUnits` — misma cascada
+      // peso⇒escala⇒cantidad, mismo redondeo a 3 decimales (F-085) — para que
+      // este spec falle si los dos carriles vuelven a divergir.
+      const getPosLineUnits = (i: { weight?: number; quantity?: number }) => {
+        const weight = Number(i.weight || 0);
+        if (weight > 0) return Math.round(weight * 1000) / 1000;
+        return Number(i.quantity || 0);
+      };
+
+      expect(Number(out.create[0].tax_amount)).toBe(
+        1900 * getPosLineUnits({ weight: 1.35, quantity: 1 }),
+      );
+      expect(Number(out.create[0].tax_amount)).toBe(2565);
+    });
+
+    it('línea por peso: peso fraccionario no entero también escala (2,5 kg)', () => {
+      const out = call(
+        { quantity: 1, weight: 2.5, tax_amount_item: 1000, tax_rate: 0.19 },
+        singleRate,
+      );
+
+      expect(Number(out.create[0].tax_amount)).toBe(2500);
     });
 
     it('escala QUI-648: quantity 4 con price_unit_quantity 2 ⇒ ×2', () => {

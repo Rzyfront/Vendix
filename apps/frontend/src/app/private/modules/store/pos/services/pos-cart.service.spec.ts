@@ -392,9 +392,11 @@ describe('PosCartService — removeFromCart (modo libre, QUI-806)', () => {
  * resta no es exacta y deja un residuo huérfano entre Subtotal e IVA).
  *
  * PENDIENTE DE CORRER: `ng test` exige ChromeHeadless y esta máquina no
- * tiene binario de Chrome (`which chrome` vacío). Comando para Rafael:
- * `npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox
- * --include='**/pos-cart.service.spec.ts'` desde `apps/frontend`.
+ * tiene binario de Chrome (`which chrome` vacío). Comando para Rafael, desde
+ * `apps/frontend`: `npx ng test --watch=false
+ * --browsers=ChromeHeadlessNoSandbox --include` apuntando a este spec.
+ * (El glob no se escribe aquí: la secuencia de cierre de comentario que
+ * lleva dentro termina el bloque y el resto se compila como código.)
  */
 describe('PosCartService — calculateSummary base neta (C.6)', () => {
   let service: PosCartService;

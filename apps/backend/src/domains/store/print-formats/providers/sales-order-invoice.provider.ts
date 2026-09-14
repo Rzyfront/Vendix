@@ -161,11 +161,16 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
   /**
    * QUI-751 — agrega los impuestos de línea en uno por cabecera.
    *
-   * Espejo del helper de `pos-sale-ticket.provider.ts`. Mismo invariante:
-   * la base se deriva `tax_amount / tax_rate` (no `base × tarifa`), la
-   * escala cruda de `rate` se preserva (`Decimal(6,5)` ⇒ 0.19, NO 19),
-   * y se agrupa por `(tax_name, tax_rate)` para que dos tarifas del
-   * mismo tributo no se sumen en una sola fila.
+   * F-205 (CP-pos-exclusive-tax-double-charge, C.2) — espejo EXACTO del
+   * helper de `pos-sale-ticket.provider.ts` tras su fix C.6/F-105: la base
+   * se LEE de la línea (`item.total_price`, base neta por INV-0), nunca se
+   * deriva como `tax_amount / tax_rate` — con truncado DIAN la inversión no
+   * es exacta y con tasa 0 inventaba base 0. En línea multi-tarifa la base
+   * se prorratea por participación de cuota (sólo magnitudes recibidas); si
+   * la línea no trae impuesto, su base va a su primera fila por convención.
+   * La escala cruda de `rate` se preserva (`Decimal(6,5)` ⇒ 0.19, NO 19), y
+   * se agrupa por `(tax_name, tax_rate)` para que dos tarifas del mismo
+   * tributo no se sumen en una sola fila.
    */
   private aggregateTaxes(orderItems: any[]): Array<{
     name: string;
@@ -181,26 +186,37 @@ export class SalesOrderInvoiceDataProvider implements IDocumentDataProvider {
     >();
 
     for (const item of orderItems || []) {
-      for (const t of item.order_item_taxes || []) {
+      const rows = item.order_item_taxes || [];
+      const lineBase = Number(item.total_price || 0);
+      const lineTax = rows.reduce(
+        (sum: number, t: any) => sum + Number(t.tax_amount || 0),
+        0,
+      );
+      rows.forEach((t: any, idx: number) => {
         const name = t.tax_name || 'IVA';
-        const rate = Number(t.tax_rate || 0);
+        // `order_item_taxes.tax_rate` es fracción (`Decimal(6,5)` ⇒ 0.19); la
+        // fila de impuesto se pinta como `(${rate}%)` — sin este ×100 salía
+        // "(0.19%)" en vez de "(19%)". Redondeado a 2 decimales de
+        // porcentaje para no arrastrar ruido de punto flotante.
+        const rate = Math.round(Number(t.tax_rate || 0) * 10000) / 100;
         const taxAmount = Number(t.tax_amount || 0);
         const key = `${name}|${rate}`;
 
-        const lineBase = rate > 0 ? taxAmount / rate : 0;
+        const rowBase =
+          lineTax > 0 ? (lineBase * taxAmount) / lineTax : idx === 0 ? lineBase : 0;
         const existing = grouped.get(key);
         if (existing) {
           existing.tax_amount += taxAmount;
-          existing.base_amount += lineBase;
+          existing.base_amount += rowBase;
         } else {
           grouped.set(key, {
             name,
             rate,
             tax_amount: taxAmount,
-            base_amount: lineBase,
+            base_amount: rowBase,
           });
         }
-      }
+      });
     }
 
     return Array.from(grouped.values()).map((g) => ({

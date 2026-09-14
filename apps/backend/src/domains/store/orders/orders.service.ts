@@ -31,12 +31,12 @@ import { ShippingCalculatorService } from '../shipping/shipping-calculator.servi
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
 import {
   groupRatesByProductId,
+  resolveLineUnits,
   resolveOrderLineFinals,
 } from '../taxes/utils/final-price.util';
 import { resolvePackSize } from '../products/services/packaging.util';
 import {
   normalizePriceUnitLines,
-  resolvePriceUnits,
   roundMoney,
 } from '../products/services/price-unit.util';
 import {
@@ -3766,21 +3766,32 @@ export class OrdersService {
 
     // F-044/F-046: `tax_amount_item` es POR UNIDAD DE PRECIO (canon C-2),
     // pero la fila `order_item_taxes` respalda la LÍNEA completa: se escala
-    // por `quantity/scale` (`resolvePriceUnits` compartido con el cobro).
-    // Peso ⇒ 1, A PROPÓSITO y no por descuido (F-207): la cabecera del carril
-    // de órdenes toma `Σ TAI` crudo y `normalizePriceUnitLines` EXCLUYE el
-    // peso, así que ×1 mantiene OIT == cabecera con cualquier unidad de
-    // entrada (comportamiento idéntico al pre-fix para peso). Escalar por el
-    // peso sin mover la cabecera rompería I-5; la convención peso del carril
-    // (header+OIT juntos, convergencia con `resolveLineUnits` canónico que
-    // devuelve `weight`) se decide en B.3 con medición (D), no acá.
-    const lineUnits =
-      Number((item as any).weight || 0) > 0
-        ? 1
-        : resolvePriceUnits(
-            Number(item.quantity || 1),
-            (item as any).price_unit_quantity,
-          );
+    // por `line_units` (peso, escala o cantidad).
+    //
+    // F-207 (cerrado): la rama de peso escalaba ×1 en vez de ×peso, alegando
+    // que la cabecera (`orders.tax_amount`, `createOrderDto.tax_amount`)
+    // llegaba como "Σ TAI cruda" y que escalar solo el OIT rompería I-5
+    // (`orders.tax_amount = Σ order_item_taxes.tax_amount`). Medido: FALSO.
+    // El único emisor web de este carril (`pos-cart.service.ts:calculateSummary`)
+    // arma la cabecera como `Σ item.taxAmount` — el impuesto TOTAL de cada
+    // línea, ya multiplicado por `resolveLineUnits(item)` (peso incluido,
+    // `line-units.util.ts:88-93`) — y solo DESPUÉS lo divide por ese mismo
+    // multiplicador para producir el `tax_amount_item` por unidad
+    // (`pos-cart.service.ts:1092-1096`, `mapCartItemForPos`). Con ×1 en el
+    // backend, `Σ order_item_taxes` quedaba en `tax_amount_item` (impuesto
+    // total / peso) mientras la cabecera ya traía el impuesto total: I-5
+    // estaba ROTA para toda línea por peso, no protegida. ×peso la restaura,
+    // y además iguala lo que el carril de cobro cobra de verdad
+    // (`payments.service.ts:getPosLineUnits`, misma cascada peso⇒escala⇒qty).
+    // Se reusa el multiplicador canónico compartido con `resolveOrderLineFinals`
+    // (mismo archivo, misma línea) en vez de reimplementarlo — así el bruto
+    // (`final_total_price`/`line_total_gross`, C.12) y el desglose fiscal
+    // (esta función) nunca vuelven a divergir en su multiplicador.
+    const lineUnits = resolveLineUnits({
+      quantity: item.quantity,
+      weight: (item as any).weight,
+      price_unit_quantity: (item as any).price_unit_quantity,
+    });
 
     if (resolved && resolved.length > 0) {
       const amounts = splitTaxSnapshotAcrossRates(

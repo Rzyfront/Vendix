@@ -67,6 +67,12 @@ export interface VoucherSummary {
   order: VoucherOrder;
   customer?: VoucherCustomer;
   store?: VoucherStore;
+  /**
+   * C.7 (CP-pos-exclusive-tax-double-charge, ADR-12) — gate fiscal resuelto
+   * por el backend. Sin esto en `true` el comprobante impreso no desglosa
+   * Subtotal/Impuestos (regla anti-huérfana §5.3: o van juntos, o ninguno).
+   */
+  prints_vat_breakdown?: boolean;
 }
 
 /**
@@ -278,9 +284,10 @@ export class GuestOrderPrintService {
     ${paymentHtml}
 
     <!-- Totals -->
-    <!-- C.7 (§5.3, base taxable, sin bandera fiscal en payload de invitado):
-         Subtotal sólo sin impuesto; la fila de impuesto vuelve cuando el
-         payload traiga respaldo (C.8/B2). -->
+    <!-- C.7 (§5.3, base taxable): sin impuesto, Subtotal solo alcanza. Con
+         impuesto, Subtotal e Impuestos van JUNTOS o NINGUNO — nunca un
+         Subtotal huérfano sin su fila de IVA al lado — gateado ahora por
+         prints_vat_breakdown (backend, C.7). -->
     <div style="display: flex; justify-content: flex-end; margin-bottom: 24px;">
       <div style="width: 260px;">
         ${
@@ -290,7 +297,17 @@ export class GuestOrderPrintService {
           <span style="color: #6b7280;">Subtotal</span>
           <span style="font-family: 'Courier New', monospace; color: #374151;">${fmt(Number(order.subtotal_amount))}</span>
         </div>`
-            : ''
+            : summary.prints_vat_breakdown
+              ? `
+        <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
+          <span style="color: #6b7280;">Subtotal</span>
+          <span style="font-family: 'Courier New', monospace; color: #374151;">${fmt(Number(order.subtotal_amount))}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
+          <span style="color: #6b7280;">Impuestos</span>
+          <span style="font-family: 'Courier New', monospace; color: #374151;">${fmt(Number(order.tax_amount))}</span>
+        </div>`
+              : ''
         }
         ${
           Number(order.discount_amount) > 0

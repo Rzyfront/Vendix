@@ -101,7 +101,15 @@ export class QuotationDataProvider implements IDocumentDataProvider {
       discount_formatted: it.discount_amount
         ? `-$${Number(it.discount_amount).toLocaleString('es-CO')}`
         : undefined,
-      tax_rate: it.tax_rate !== null && it.tax_rate !== undefined ? Number(it.tax_rate) : undefined,
+      // `quotation_items.tax_rate` es `Decimal(6,5)` — FRACCIÓN (0.19), no
+      // porcentaje. El compositor concatena literal `${item.tax_rate}%` en
+      // la sublínea "IVA: r%", así que sin este ×100 el papel real
+      // imprimía "IVA: 0.19%" en vez de "IVA: 19%". Redondeado a 2
+      // decimales de porcentaje para no arrastrar ruido de punto flotante.
+      tax_rate:
+        it.tax_rate !== null && it.tax_rate !== undefined
+          ? Math.round(Number(it.tax_rate) * 10000) / 100
+          : undefined,
       tax_amount: it.tax_amount_item !== null && it.tax_amount_item !== undefined
         ? Number(it.tax_amount_item)
         : undefined,
@@ -195,9 +203,13 @@ export class QuotationDataProvider implements IDocumentDataProvider {
    * "Impuesto" y no "IVA": una cotización puede llevar INC o IBUA, y nombrar
    * un tributo que el dato no afirma es inventar clasificación fiscal.
    *
-   * La base se deriva `tax_amount / tax_rate` —no `total × tarifa`— igual que
-   * en los demás proveedores, para que la base impresa cuadre con el impuesto
-   * impreso aunque la línea traiga descuento.
+   * F-205 (CP-pos-exclusive-tax-double-charge, C.2) — la base se LEE de
+   * `item.total_price` (base neta por INV-0, ya resuelta por
+   * `quotations.service.ts` incluyendo `price_unit_quantity`), nunca se
+   * deriva como `tax_amount / tax_rate`: con truncado DIAN la inversión no
+   * es exacta. Cada línea trae a lo sumo una tarifa, así que no hace falta
+   * prorratear por cuota — espejo de `pos-sale-ticket.provider.ts` (C.6)
+   * para el caso de una sola tarifa por línea.
    */
   private aggregateTaxes(quotationItems: any[]): Array<{
     name: string;
@@ -213,11 +225,15 @@ export class QuotationDataProvider implements IDocumentDataProvider {
     >();
 
     for (const item of quotationItems || []) {
-      const rate = Number(item.tax_rate || 0);
+      // `quotation_items.tax_rate` es fracción (`Decimal(6,5)` ⇒ 0.19); esta
+      // fila se pinta como `(${rate}%)` — sin este ×100 salía "(0.19%)" en
+      // vez de "(19%)". El filtro `rate <= 0` sigue funcionando igual
+      // (0 sigue siendo 0 multiplicado).
+      const rate = Math.round(Number(item.tax_rate || 0) * 10000) / 100;
       const taxAmount = Number(item.tax_amount_item || 0);
       if (rate <= 0 || taxAmount <= 0) continue;
 
-      const lineBase = taxAmount / rate;
+      const lineBase = Number(item.total_price || 0);
       const existing = grouped.get(rate);
       if (existing) {
         existing.tax_amount += taxAmount;

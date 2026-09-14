@@ -516,7 +516,16 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       // (`order_items`, igual columna que `quotation_items`). Con esto el
       // compositor pinta la sublínea `IVA: r%` (`print-layout-composer
       // .service.ts:793-794`) sin columna nueva — F-100.
-      tax_rate: it.tax_rate !== null && it.tax_rate !== undefined ? Number(it.tax_rate) : undefined,
+      //
+      // `order_items.tax_rate` es `Decimal(6,5)` — FRACCIÓN (0.19), no
+      // porcentaje. El compositor concatena literal `${item.tax_rate}%`, así
+      // que sin este ×100 el papel real imprimía "IVA: 0.19%" en vez de
+      // "IVA: 19%". Redondeado a 2 decimales de porcentaje para no arrastrar
+      // ruido de punto flotante (`0.19 * 100 = 18.999999999999996`).
+      tax_rate:
+        it.tax_rate !== null && it.tax_rate !== undefined
+          ? Math.round(Number(it.tax_rate) * 10000) / 100
+          : undefined,
       tax_amount: it.tax_amount_item !== null && it.tax_amount_item !== undefined
         ? Number(it.tax_amount_item)
         : undefined,
@@ -669,7 +678,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       );
       rows.forEach((t: any, idx: number) => {
         const name = t.tax_name || 'IVA';
-        const rate = Number(t.tax_rate || 0);
+        // `order_item_taxes.tax_rate` es fracción (`Decimal(6,5)` ⇒ 0.19); la
+        // fila de impuesto se pinta como `(${rate}%)` — sin este ×100 salía
+        // "(0.19%)" en vez de "(19%)". Mismo defecto que el de arriba.
+        const rate = Math.round(Number(t.tax_rate || 0) * 10000) / 100;
         const taxAmount = Number(t.tax_amount || 0);
         const key = `${name}|${rate}`;
 

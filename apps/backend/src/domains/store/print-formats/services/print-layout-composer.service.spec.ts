@@ -122,6 +122,46 @@ describe('PrintLayoutComposerService — renderTotalsSection (C.3/C.4)', () => {
     }
   });
 
+  it('taxable_base con desglose e impuesto = 0 muestra Subtotal sin fila de impuesto (combinacion §2.3 #2)', () => {
+    const html = render(
+      sectionNoFields,
+      dataWith({
+        money_basis: 'taxable_base',
+        prints_vat_breakdown: true,
+        totals: { ...dataWith().totals, tax_total: 0, grand_total: 100000 },
+      }),
+    );
+    expect(html).toContain('Subtotal:');
+    expect(html).not.toContain('Impuestos (IVA):');
+    expect(html).not.toContain('IVA incluido:');
+  });
+
+  it('gross con desglose e impuesto = 0 no deja Subtotal ni nota (combinacion §2.3 #5)', () => {
+    const html = render(
+      sectionNoFields,
+      dataWith({
+        money_basis: 'gross',
+        prints_vat_breakdown: true,
+        totals: { ...dataWith().totals, tax_total: 0, grand_total: 100000 },
+      }),
+    );
+    expect(html).not.toContain('Subtotal:');
+    expect(html).not.toContain('Impuestos (IVA):');
+    expect(html).not.toContain('IVA incluido:');
+    expect(html).toContain('TOTAL:');
+  });
+
+  it('gross sin gate fiscal esconde Subtotal e Impuestos y NO agrega la nota (combinacion §2.3 #6)', () => {
+    const html = render(
+      sectionNoFields,
+      dataWith({ money_basis: 'gross', prints_vat_breakdown: false }),
+    );
+    expect(html).not.toContain('Subtotal:');
+    expect(html).not.toContain('Impuestos (IVA):');
+    expect(html).not.toContain('IVA incluido:');
+    expect(html).toContain('TOTAL:');
+  });
+
   it('tokenized conserva la conducta del editor: muestra las filas activas aunque sea gross', () => {
     const html = render(
       sectionNoFields,

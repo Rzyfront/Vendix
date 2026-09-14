@@ -124,6 +124,14 @@ interface GuestOrderSummary {
   order: GuestOrderData;
   customer?: GuestOrderCustomer;
   store?: GuestOrderStore;
+  /**
+   * C.7 (CP-pos-exclusive-tax-double-charge, ADR-12) — gate fiscal resuelto
+   * por el backend (`resolvePrintsVatBreakdownForPrint`, fail-closed). Sin
+   * esto en `true` la sección de totales no muestra Subtotal/Impuestos
+   * juntos, aunque `order.tax_amount` sea positivo (regla anti-huérfana
+   * §5.3: o van los dos, o ninguno).
+   */
+  prints_vat_breakdown?: boolean;
 }
 
 @Component({
@@ -372,14 +380,24 @@ interface GuestOrderSummary {
           }
 
           <!-- TOTALES -->
-          <!-- C.7 (§5.3, base taxable, sin bandera fiscal en payload de
-               invitado): Subtotal sólo sin impuesto; la fila Impuestos
-               vuelve cuando BillItemView traiga respaldo (C.8/B2). -->
+          <!-- C.7 (§5.3, base taxable): sin impuesto, Subtotal solo alcanza.
+               Con impuesto, Subtotal e Impuestos van JUNTOS o NINGUNO —
+               nunca un Subtotal huérfano sin su fila de IVA al lado — y el
+               gate lo trae ahora prints_vat_breakdown (backend, C.7). -->
           <section class="order-section totals-panel">
             @if ((data.order.tax_amount || 0) === 0) {
               <div class="total-row">
                 <span>Subtotal</span>
                 <span>{{ data.order.subtotal_amount | currency }}</span>
+              </div>
+            } @else if (data.prints_vat_breakdown) {
+              <div class="total-row">
+                <span>Subtotal</span>
+                <span>{{ data.order.subtotal_amount | currency }}</span>
+              </div>
+              <div class="total-row">
+                <span>Impuestos</span>
+                <span>{{ data.order.tax_amount | currency }}</span>
               </div>
             }
 

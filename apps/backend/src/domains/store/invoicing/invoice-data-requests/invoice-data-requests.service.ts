@@ -20,6 +20,9 @@ import {
   DEFAULT_STORE_TIMEZONE,
   localDateString,
 } from '@common/utils/store-timezone.util';
+// C.7 (CP-pos-exclusive-tax-double-charge, ADR-12) — mismo resolvedor que usan
+// los providers del gateway de impresión para las superficies `@OptionalAuth`.
+import { resolvePrintsVatBreakdownForPrint } from '../../print-formats/services/print-vat-breakdown.resolver';
 
 interface InvoiceDataRequestCustomerData {
   first_name?: string | null;
@@ -272,6 +275,18 @@ export class InvoiceDataRequestsService {
             id: true,
             name: true,
             logo_url: true,
+            // C.7 (CP-pos-exclusive-tax-double-charge, ADR-12) — insumos de
+            // `resolvePrintsVatBreakdownForPrint`, misma forma que los
+            // providers del gateway de impresión. Este endpoint es
+            // `@Public()` (pedido de invitado): no hay usuario del que leer
+            // el estado fiscal, así que viaja resuelto en el payload.
+            store_settings: { select: { settings: true } },
+            organizations: {
+              select: {
+                fiscal_scope: true,
+                organization_settings: { select: { settings: true } },
+              },
+            },
           },
         },
       },
@@ -303,10 +318,20 @@ export class InvoiceDataRequestsService {
       })),
     );
 
+    // C.7 (ADR-12) — mismo gate fiscal que el gateway de impresión, resuelto
+    // aquí porque el endpoint es `@Public()` (sin usuario del que leerlo).
+    // `resolvePrintsVatBreakdownForPrint` es fail-closed: sin settings o sin
+    // responsabilidad de IVA declarada, devuelve `false`.
+    const printsVatBreakdown = resolvePrintsVatBreakdownForPrint(
+      request.store?.organizations,
+      request.store,
+    );
+
     return {
       token: request.token,
       invoice_data_status: request.status,
       invoice_data_expires_at: request.expires_at,
+      prints_vat_breakdown: printsVatBreakdown,
       customer: {
         first_name: request.first_name,
         last_name: request.last_name,
@@ -315,7 +340,11 @@ export class InvoiceDataRequestsService {
         email: request.email,
         phone: request.phone,
       },
-      store: request.store,
+      store: {
+        id: request.store.id,
+        name: request.store.name,
+        logo_url: request.store.logo_url,
+      },
       order: {
         id: request.order.id,
         order_number: request.order.order_number,
