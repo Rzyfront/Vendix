@@ -769,6 +769,17 @@
          de pantalla. Atributos estáticos sobre un bloque que ya re-renderiza
          por signal(): no requieren NgZone ni markForCheck (zoneless). -->
     <div class="bill-panel__summary" aria-live="polite" aria-atomic="true">
+      @if (bill_total_changed_notice()) {
+      <!-- F-133(b): aviso persistente — no un toast que desaparece solo —
+           cuando el `grand_total` que llega por SSE difiere del que el
+           comensal ya vio. Vive dentro de la misma región viva que el
+           resto del resumen para que un lector de pantalla lo anuncie
+           junto con la cifra nueva. -->
+      <div class="bill-panel__summary-row bill-panel__summary-row--notice">
+        <span aria-hidden="true"><app-icon name="info" [size]="16"></app-icon></span>
+        <span>Tu cuenta se actualizó: revisa el nuevo total antes de pagar.</span>
+      </div>
+      }
       <!-- C.7 (§5.3, ADR-12): Subtotal e Impuestos van JUNTOS o NINGUNO —
            `prints_vat_breakdown` (fail-closed, backend) es el gate fiscal;
            un Subtotal sin su fila de IVA al lado es el huérfano F-077. Sin
