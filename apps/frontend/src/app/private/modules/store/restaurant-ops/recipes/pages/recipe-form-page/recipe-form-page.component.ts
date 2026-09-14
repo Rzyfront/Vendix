@@ -10,7 +10,7 @@ import {
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { startWith } from 'rxjs/operators';
+import { startWith, switchMap } from 'rxjs/operators';
 import {
   AbstractControl,
   FormArray,
@@ -43,11 +43,10 @@ import { Product } from '../../../../products/interfaces/product.interface';
 import { RecipesService, RecipeMutationError } from '../../services';
 import {
   CreateRecipeDto,
-  CreateRecipeItemDto,
   Recipe,
   RecipeItemFormControls,
   RecipeProductVariant,
-  UpdateRecipeItemDto,
+  ReplaceRecipeItemDto,
 } from '../../interfaces';
 
 interface RecipeFormShape {
@@ -686,36 +685,56 @@ export class RecipeFormPageComponent implements OnInit {
       };
     }
 
+    const wasEditMode = this.isEditMode();
+    const itemsPayload: ReplaceRecipeItemDto[] = this.itemsArray.controls.map(
+      (group) => {
+        const rawItem = group.getRawValue();
+        return {
+          id: rawItem.id ?? undefined,
+          component_product_id: Number(rawItem.component_product_id),
+          quantity: Number(rawItem.quantity ?? 0),
+          waste_percent: Number(rawItem.waste_percent ?? 0),
+          waste_mode:
+            (rawItem.waste_mode as 'percent' | 'absolute') ?? 'percent',
+          waste_absolute: Number(rawItem.waste_absolute ?? 0),
+          is_optional: !!rawItem.is_optional,
+        };
+      },
+    );
+
     this.isSubmitting.set(true);
-    const upsert$ = this.isEditMode()
+    const upsert$ = wasEditMode
       ? this.recipesService.update(this.recipeId() as number, base)
       : this.recipesService.create(createDto as CreateRecipeDto);
 
     upsert$
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (recipe) => {
-          clearTimeout(safetyTimer);
-          // Defensive: a malformed response (e.g. HTTP 200 with {success:false}
-          // instead of 409) bypasses catchError and reaches `next` with
-          // `recipe` undefined. Treat it as an error.
+      .pipe(
+        switchMap((recipe) => {
           if (!recipe || recipe.id == null) {
-            const msg = 'Respuesta inválida del servidor. Intenta de nuevo.';
-            this.submitError.set(msg);
-            this.toastService.error(msg, 'No se pudo guardar la receta', 6000);
-            this.isSubmitting.set(false);
-            return;
-          }
-          const recipeId = recipe.id;
-          this.syncItems(recipeId).then(() => {
-            this.isSubmitting.set(false);
-            this.toastService.success(
-              this.isEditMode()
-                ? 'Receta actualizada correctamente'
-                : 'Receta creada correctamente',
+            throw new Error(
+              'Respuesta inválida del servidor. Intenta de nuevo.',
             );
-            this.router.navigate(['/admin/restaurant-ops/recipes']);
-          });
+          }
+          // If we were creating, switch mode to edit immediately with the created ID.
+          // That way, if replacing items fails and user clicks "Guardar" again,
+          // the retry performs an update on the newly created recipe instead of
+          // trying to create a duplicate recipe (409 conflict).
+          this.recipeId.set(recipe.id);
+          this.isEditMode.set(true);
+          return this.recipesService.replaceItems(recipe.id, itemsPayload);
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: () => {
+          clearTimeout(safetyTimer);
+          this.isSubmitting.set(false);
+          this.toastService.success(
+            wasEditMode
+              ? 'Receta actualizada correctamente'
+              : 'Receta creada correctamente',
+          );
+          this.router.navigate(['/admin/restaurant-ops/recipes']);
         },
         error: (err: unknown) => {
           clearTimeout(safetyTimer);
@@ -776,91 +795,5 @@ export class RecipeFormPageComponent implements OnInit {
           );
         },
       });
-  }
-
-  /**
-   * Reconciles the items FormArray with the backend: creates new items, updates
-   * existing ones, and removes any that disappeared from the form.
-   */
-  private async syncItems(recipeId: number): Promise<void> {
-    const originalIds = new Set(
-      (this.itemsArray.controls
-        .map((c) => c.controls.id.value)
-        .filter((v): v is number => typeof v === 'number') as number[]),
-    );
-    const currentIds = new Set<number>();
-
-    for (const group of this.itemsArray.controls) {
-      const raw = group.getRawValue();
-      const itemId = raw.id;
-
-      if (itemId == null) {
-        // CREATE: component_product_id is required (the immutable FK to the
-        // component product).
-        const createDto: CreateRecipeItemDto = {
-          component_product_id: raw.component_product_id as number,
-          quantity: Number(raw.quantity ?? 0),
-          waste_percent: Number(raw.waste_percent ?? 0),
-          waste_mode: (raw.waste_mode as 'percent' | 'absolute') ?? 'percent',
-          waste_absolute: Number(raw.waste_absolute ?? 0),
-          is_optional: raw.is_optional,
-        };
-        await new Promise<void>((resolve) => {
-          this.recipesService
-            .addItem(recipeId, createDto)
-            .pipe(takeUntilDestroyed(this.destroyRef))
-            .subscribe({
-              next: (created) => {
-                if (created?.id != null) currentIds.add(created.id);
-                resolve();
-              },
-              error: () => {
-                this.toastService.error('Error al agregar un componente');
-                resolve();
-              },
-            });
-        });
-      } else {
-        currentIds.add(itemId);
-        // UPDATE: component_product_id is NOT updatable — the backend
-        // UpdateRecipeItemDto whitelist rejects it with 400. Swapping a
-        // component means remove + add, not patch.
-        const updateDto: UpdateRecipeItemDto = {
-          quantity: Number(raw.quantity ?? 0),
-          waste_percent: Number(raw.waste_percent ?? 0),
-          waste_mode: (raw.waste_mode as 'percent' | 'absolute') ?? 'percent',
-          waste_absolute: Number(raw.waste_absolute ?? 0),
-          is_optional: raw.is_optional,
-        };
-        await new Promise<void>((resolve) => {
-          this.recipesService
-            .updateItem(recipeId, itemId, updateDto)
-            .pipe(takeUntilDestroyed(this.destroyRef))
-            .subscribe({
-              next: () => resolve(),
-              error: () => {
-                this.toastService.error('Error al actualizar un componente');
-                resolve();
-              },
-            });
-        });
-      }
-    }
-
-    const toDelete = [...originalIds].filter((id) => !currentIds.has(id));
-    for (const itemId of toDelete) {
-      await new Promise<void>((resolve) => {
-        this.recipesService
-          .removeItem(recipeId, itemId)
-          .pipe(takeUntilDestroyed(this.destroyRef))
-          .subscribe({
-            next: () => resolve(),
-            error: () => {
-              this.toastService.error('Error al eliminar un componente');
-              resolve();
-            },
-          });
-      });
-    }
   }
 }

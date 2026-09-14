@@ -217,12 +217,22 @@ export class KdsTicketDetailModalComponent {
   });
 
   constructor() {
-    // Whenever the ticket changes, refetch the recipes for the new
-    // (or newly-added) products. Cache by pair so re-firing
-    // the same dish is instant.
+    this.recipesService.recipeChanged$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((change) => {
+        this.invalidateRecipeCache(change.productId, change.variantId);
+        if (this.isOpen()) {
+          this.refreshRecipes();
+        }
+      });
+
+    // Whenever the ticket or open state changes, refetch the recipes for the
+    // new (or newly-added) products. Cache by pair so re-firing the same dish
+    // is instant.
     effect(() => {
+      const open = this.isOpen();
       const t = this.ticket();
-      if (!t) return;
+      if (!open || !t) return;
       for (const item of t.items ?? []) {
         const pid = item.product_id;
         if (typeof pid !== 'number') continue;
