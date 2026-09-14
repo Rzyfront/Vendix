@@ -87,6 +87,29 @@ describe('OrdersService', () => {
     $transaction: jest.fn((callback) => callback(mockPrismaService)),
   };
 
+  /**
+   * H1 (Round 3, lote 3) · QUI-832 — antes `withoutScope()` devolvía
+   * literalmente `mockPrismaService` (`mockReturnValue(mockPrismaService)`),
+   * así que la ruta SIN scope de tenant y la ruta CON scope eran el MISMO
+   * objeto dentro del test: ninguna aserción podía distinguir por cuál ruta
+   * pasó una consulta, y una fuga entre tiendas habría pasado en verde por
+   * construcción.
+   *
+   * Censo (grep sobre `orders.service.ts`): `OrdersService` no llama a
+   * `withoutScope()` en ningún método cubierto por este spec — el escape
+   * hatch sin scope lo usan `purchase-orders.service.ts` y
+   * `order-auto-fulfillment.listener.ts`, no esta clase. Es decir: HOY
+   * ningún test de este archivo depende del atajo (0 aserciones que migrar).
+   * Este mock deja el arnés listo para cuando `OrdersService` sí lo use, y
+   * el test de seam de abajo demuestra que el atajo peligroso vuelve a
+   * fallar si alguien lo reintroduce.
+   */
+  const mockUnscopedPrismaService = {
+    orders: { findFirst: jest.fn(), findMany: jest.fn(), findUnique: jest.fn() },
+    stores: { findFirst: jest.fn() },
+    products: { findFirst: jest.fn(), findMany: jest.fn() },
+  };
+
   const mockS3Service = {
     signUrl: jest.fn(async (url: string) => url),
     getPresignedUrl: jest.fn(async (key: string) => `signed:${key}`),
@@ -188,7 +211,10 @@ describe('OrdersService', () => {
 
     service = module.get<OrdersService>(OrdersService);
 
-    mockPrismaService.withoutScope.mockReturnValue(mockPrismaService);
+    // H1 (Round 3, lote 3) · QUI-832 — objeto DISTINTO de `mockPrismaService`,
+    // no el mismo mock. Ver comentario en la declaración de
+    // `mockUnscopedPrismaService` más arriba.
+    mockPrismaService.withoutScope.mockReturnValue(mockUnscopedPrismaService);
     mockRequestContextService.getContext.mockReturnValue({
       store_id: 1,
       organization_id: 1,
@@ -1596,6 +1622,27 @@ describe('OrdersService', () => {
       } finally {
         contextSpy.mockRestore();
       }
+    });
+  });
+
+  /**
+   * H1 (Round 3, lote 3) · QUI-832 — seam de detección.
+   *
+   * Antes: `mockPrismaService.withoutScope.mockReturnValue(mockPrismaService)`
+   * hacía que la ruta sin scope de tenant y la ruta con scope fueran
+   * literalmente el mismo objeto — ninguna aserción podía distinguirlas, y
+   * una fuga entre tiendas por esa vía pasaba en verde por construcción.
+   *
+   * Esta prueba es la demostración pedida: falla si alguien reintroduce ese
+   * atajo (ver informe de la fase para la corrida que lo prueba revirtiendo
+   * temporalmente la línea de arriba).
+   */
+  describe('withoutScope() seam — H1 (Round 3, lote 3)', () => {
+    it('devuelve un cliente DISTINTO del cliente con scope de tenant', () => {
+      const unscoped = mockPrismaService.withoutScope();
+
+      expect(unscoped).not.toBe(mockPrismaService);
+      expect(unscoped).toBe(mockUnscopedPrismaService);
     });
   });
 });
