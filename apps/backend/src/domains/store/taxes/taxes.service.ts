@@ -177,6 +177,21 @@ export class TaxesService {
       base: resolved.base,
       total: resolved.total,
       taxes,
+      // ADR-10/B.3 (ERR-03): el kernel (`resolveLineTotalsPure`) YA calcula
+      // estos dos campos; antes de este cambio el `return` los tiraba y el
+      // único aviso del carril del dinero (`payments.service.ts`,
+      // `invertDeclaredGross`) quedaba gateado en un valor que nunca podía
+      // llegar. Se propagan tal cual, sin recomputar nada.
+      unclosed_residual_cents: resolved.unclosed_residual_cents,
+      invalid_inputs: resolved.invalid_inputs,
+      // Discriminante de procedencia (ADR-03/ADR-10): ÉSTE es el único sitio
+      // donde nace un desglose SIN invertir. No se anota un tipo de retorno
+      // explícito a propósito: dejar que TS infiera `resolved_from: string`
+      // (en vez de fijar aquí el literal `'catalog'`) es lo que permite que
+      // `CatalogTaxInfo` y `DeclaredGrossTaxInfo`, en `payments.service.ts`,
+      // sigan siendo intersecciones válidas y NO colapsen a `never` — ver el
+      // comentario en `payments.service.ts` junto a `catalogTaxInfo`.
+      resolved_from: 'catalog',
     };
   }
 

@@ -167,11 +167,12 @@ describe('PaymentsService', () => {
     >;
     // F-166: `resolveLineTotals` delega al kernel puro real
     // (`tax-inclusive-math.util.ts`) en vez de una constante — el espía
-    // cuenta llamadas SIN reemplazar la matemática que `rescaleTaxInfo`
-    // (F-016) instrumenta. Antes, el único provider de este método era un
-    // parche local `jest.fn().mockReturnValue({...fijo...})` dentro del test
-    // de F-157 que ignoraba sus argumentos: congelaba la aritmética y
-    // cualquier test que llegara a `rescaleTaxInfo` sin ese parche moría con
+    // cuenta llamadas SIN reemplazar la matemática que `invertDeclaredGross`
+    // (F-016, antes `rescaleTaxInfo`) instrumenta. Antes, el único provider
+    // de este método era un parche local `jest.fn().mockReturnValue({...fijo...})`
+    // dentro del test de F-157 que ignoraba sus argumentos: congelaba la
+    // aritmética y cualquier test que llegara a `invertDeclaredGross` sin ese
+    // parche moría con
     // "resolveLineTotals is not a function" (F-166).
     //
     // F3 (ronda 3, CP-pos-exclusive-tax-double-charge): reenvía por
@@ -1555,22 +1556,27 @@ describe('PaymentsService', () => {
     // F-157/F-166: la forma completa del contrato real
     // (`taxes.service.ts:174-179`: total_rate, total_tax_amount, base, total,
     // taxes[] con tax_rate_id/name/rate/tax_type/is_inclusive/amount/base por
-    // tasa) NO llega intacta al snapshot — `rescaleTaxInfo`
-    // (`payments.service.ts:2807-2848`) toma total_rate/total_tax_amount/base/
-    // total y sobrescribe is_inclusive/base/amount POR TASA desde el retorno
-    // de `resolveLineTotals`, no desde `calculateProductTaxes`. De los 11
-    // campos del contrato, sólo 4 sobreviven intactos hasta
-    // `order_item_taxes`: `tax_rate_id`, `name` (-> `tax_name`), `rate` (->
-    // `tax_rate`) y `tax_type`. Los tests de abajo assertan exactamente esos
-    // cuatro, más los dos efectos que SÍ dependen de la matemática real
-    // (F-166: `resolveLineTotals` delega al kernel puro, ya no es una
-    // constante congelada) — `total` header (via `catalog_final_price`/
-    // `final_unit_price`) y el par `rate`+`is_inclusive` como INPUT de la
-    // fórmula (via `tax_amount`). `total_rate`/`total_tax_amount`/`base`
-    // (header) y `taxes[].amount`/`taxes[].base` (por tasa) del retorno de
-    // `calculateProductTaxes` son estructuralmente INALCANZABLES por esta vía
-    // — `rescaleTaxInfo` nunca los lee (ni directo ni como input de
-    // `resolveLineTotals`) — así que NO se declaran observados aquí.
+    // tasa) sólo se transforma cuando HAY bruto declarado que difiere del
+    // catálogo (`isPriceOverridden`, B.1/QUI-832): ahí `invertDeclaredGross`
+    // (`payments.service.ts:2810-2882`, antes `rescaleTaxInfo`) toma
+    // total_rate/total_tax_amount/base/total y sobrescribe base/amount POR
+    // TASA desde el retorno de `resolveLineTotals`. Desde B.2/ADR-03,
+    // `is_inclusive` YA NO se sobrescribe con el eco del solver: sobrevive el
+    // flag DEL CATÁLOGO vía el spread `...tax`, así que de los 11 campos del
+    // contrato ahora 5 sobreviven intactos hasta `order_item_taxes`:
+    // `tax_rate_id`, `name` (-> `tax_name`), `rate` (-> `tax_rate`),
+    // `tax_type` e `is_inclusive`.
+    //
+    // Los dos tests de abajo cubren el camino SIN bruto declarado (el `item`
+    // no manda `final_unit_price` ni `total_price`): ahí `resolveLineTotals`
+    // no se llama en absoluto (B.1 mata la rama que promovía `total_price` a
+    // bruto) y `taxInfo` es `catalogTaxInfo` VERBATIM, así que los 11 campos
+    // sobreviven intactos — incluido `tax_amount`, que es un eco directo de
+    // `total_tax_amount`/`taxes[].amount` de `calculateProductTaxes`, no un
+    // recompute del kernel. La aserción que de verdad importa en ambos tests
+    // es `resolveLineTotalsMock` en cero llamadas: es la que impide que
+    // QUI-832 (la tasa exclusiva re-liquidada sobre un total que ya la
+    // incluye) reaparezca.
     const dtoStoreId = 1;
 
     const product = {
@@ -1628,13 +1634,19 @@ describe('PaymentsService', () => {
             base: 10000,
           },
         ],
+        // B.3/ADR-10: campos que el ensanche de `calculateProductTaxes`
+        // agrega al contrato real — un catálogo sin residuo ni entradas
+        // inválidas es el caso normal.
+        unclosed_residual_cents: 0,
+        invalid_inputs: [],
+        resolved_from: 'catalog',
       };
       calculateProductTaxesMock.mockResolvedValue(catalogTaxes);
 
-      // F-166: ya no hace falta ningún parche local de `resolveLineTotals` —
-      // el provider del módulo (`beforeEach`) lo delega al kernel puro real
-      // (`resolveLineTotalsPure`), así que `rescaleTaxInfo` (F-016) recibe
-      // matemática de verdad, no una constante.
+      // B.1/QUI-832: el `item` no declara `final_unit_price` (y el móvil
+      // tampoco manda `total_price` aquí), así que `resolveDeclaredGrossUnitPrice`
+      // devuelve `null` → `isPriceOverridden = false` → `buildPosOrderItem`
+      // usa `catalogTaxInfo` VERBATIM, sin volver a pasarlo por el kernel.
       const result = await (service as any).buildPosOrderItem(
         tx,
         item,
@@ -1649,35 +1661,27 @@ describe('PaymentsService', () => {
         expect.objectContaining({ client: tx, store_id: dtoStoreId }),
       );
 
-      // F-166: el seam existe y cuenta — sin override de precio,
-      // `rescaleTaxInfo` llama a `resolveLineTotals` exactamente una vez con
-      // el precio final y las tasas del catálogo (no con la base/monto del
-      // catálogo, que quedan descartados).
-      expect(resolveLineTotalsMock).toHaveBeenCalledTimes(1);
-      expect(resolveLineTotalsMock).toHaveBeenCalledWith(11900, [
-        { rate: 0.19, is_inclusive: false },
-      ]);
+      // B.1: sin bruto declarado no hay nada que re-despejar — el guard de
+      // línea 0 llamadas es la aserción que de verdad impide la reincidencia
+      // de QUI-832 (una tasa exclusiva NUNCA se re-liquida sobre un total que
+      // ya la incluye). Las de dinero de abajo son consecuencia de ésta.
+      expect(resolveLineTotalsMock).toHaveBeenCalledTimes(0);
 
-      // Con el kernel real (sin ninguna tasa inclusiva, `hasLoop=false` en
-      // `resolveInclusiveClearing`) `base` sale IGUAL al `finalPrice` que
-      // entra (11900, no 10000) y el agregado se liquida OTRA VEZ sobre ese
-      // mismo número (2261 = 11900 × 0,19, no 1900). Esto es exactamente
-      // QUI-832 (la tasa exclusiva se cobra dos veces: catalogTaxInfo ya la
-      // sumó una vez para llegar a total=11900, y `rescaleTaxInfo` la vuelve
-      // a sumar sobre ese total) — el defecto que la Fase B corrige, FUERA
-      // del alcance de este arnés. El valor de este test es que ahora
-      // reporta la aritmética REAL de hoy, no una constante inventada que
-      // ocultaba el problema (ver F-166: el parche viejo devolvía
-      // 10000/1900/11900 sin importar el input, así que jamás pudo delatar
-      // esto).
-      expect(result.unit_price).toBe(11900);
+      // `catalogTaxInfo` pasa intacto: `unit_price` (= `taxInfo.base`) es el
+      // NETO del catálogo (10000), no el bruto (11900) — antes del fix
+      // `invertDeclaredGross` (entonces `rescaleTaxInfo`) recibía ese bruto
+      // como si NINGUNA tasa fuera inclusiva y el kernel volvía a sumar la
+      // tasa exclusiva encima
+      // (QUI-832: 11900 × 0,19 = 2261). `final_unit_price`/`catalog_final_price`
+      // siguen en 11900 porque siguen siendo el precio con impuesto del
+      // catálogo (10000 + 1900), que el fix no toca.
+      expect(result.unit_price).toBe(10000);
       expect(result.final_unit_price).toBe(11900);
       expect(result.catalog_final_price).toBe(11900);
-      // `tax_amount_item`/`tax_rate` header: recomputados por el kernel real
-      // a partir de `total` + `taxes[0].rate`/`is_inclusive` — no son un
-      // passthrough del `total_tax_amount`/`total_rate` de calculateProductTaxes
-      // (esos dos quedan descartados, ver comentario del describe).
-      expect(result.tax_amount_item).toBe(2261);
+      // Sin override, `tax_amount_item`/`tax_rate` SON el passthrough directo
+      // de `total_tax_amount`/`total_rate` de `calculateProductTaxes` — no hay
+      // recompute porque no hay resolve.
+      expect(result.tax_amount_item).toBe(1900);
       expect(result.tax_rate).toBeCloseTo(0.19);
       expect(result.order_item_taxes.create).toHaveLength(1);
       expect(result.order_item_taxes.create[0]).toMatchObject({
@@ -1686,22 +1690,23 @@ describe('PaymentsService', () => {
         tax_name: 'INC 19%',
         tax_rate: 0.19,
         tax_type: TaxFiscalType.INC,
-        // Recomputado por el kernel real (11900 × 0,19 = 2261, doble-carga de
-        // QUI-832), no un eco del `amount` del catálogo (1900):
-        tax_amount: 2261,
+        // Eco directo del `amount` del catálogo (1900) — ya no hay recompute
+        // del kernel que lo duplique (QUI-832 corregido):
+        tax_amount: 1900,
         is_inclusive: false,
       });
     });
 
-    it('el kernel real de resolveLineTotals recomputa el monto para una tasa distinta — no hay constante congelada detrás (F-166)', async () => {
+    it('sin bruto declarado, tax_amount_item es el passthrough real de calculateProductTaxes para una tasa distinta — no hay constante congelada detrás (F-166/B.1)', async () => {
       // Antes del fix de F-166, `resolveLineTotals` era un
       // `jest.fn().mockReturnValue({...fijo...})`: cualquier tasa que se le
       // pasara devolvía SIEMPRE 1900/19%. Este caso usa una tasa distinta
       // (10% en vez de 19%) para demostrar que el resultado depende de
-      // verdad de lo que devuelve `calculateProductTaxes` — con la
-      // constante congelada, `tax_amount` seguiría dando 1900; con el kernel
-      // real da 1100 (11000 × 0,10 — mismo mecanismo de doble-carga que el
-      // caso anterior, ver su comentario).
+      // verdad de lo que devuelve `calculateProductTaxes`, no de una
+      // constante congelada. Tras B.1, sin bruto declarado el guard de
+      // catálogo ni siquiera llama a `resolveLineTotals` (ver aserción de
+      // abajo): `tax_amount_item` es el eco directo de `total_tax_amount`
+      // (1000 = 11000 × 0,10), no un recompute del kernel.
       const tx = {
         products: { findFirst: jest.fn().mockResolvedValue(product) },
       };
@@ -1723,6 +1728,9 @@ describe('PaymentsService', () => {
             base: 10000,
           },
         ],
+        unclosed_residual_cents: 0,
+        invalid_inputs: [],
+        resolved_from: 'catalog',
       };
       calculateProductTaxesMock.mockResolvedValue(catalogTaxes);
 
@@ -1734,17 +1742,185 @@ describe('PaymentsService', () => {
         undefined,
       );
 
-      expect(resolveLineTotalsMock).toHaveBeenCalledTimes(1);
-      expect(resolveLineTotalsMock).toHaveBeenCalledWith(11000, [
-        { rate: 0.1, is_inclusive: false },
-      ]);
-      expect(result.tax_amount_item).toBe(1100);
+      expect(resolveLineTotalsMock).toHaveBeenCalledTimes(0);
+      expect(result.tax_amount_item).toBe(1000);
       expect(result.order_item_taxes.create[0]).toMatchObject({
         tax_rate_id: 777,
         tax_name: 'IVA 10%',
         tax_rate: 0.1,
         tax_type: TaxFiscalType.IVA,
-        tax_amount: 1100,
+        tax_amount: 1000,
+      });
+    });
+
+    it('V-2/B.4 — número de producción: base 5.200.000 con IVA 19% exclusivo persiste 6.188.000 (no la reincidencia 7.363.720 de la orden 5928), y G-1 no registra mismatch', async () => {
+      // Mismo catálogo que la orden 5928 (B.1/B.3), llevado hasta el snapshot
+      // completo vía `buildPosOrderItem` en vez de sólo `TaxesService` en
+      // aislado (eso ya lo cubre
+      // `taxes-calculate-product-taxes.regression.spec.ts`). Sin bruto
+      // declarado (`item` no manda `final_unit_price`), B.1 impide que este
+      // camino llegue a `invertDeclaredGross` — la aserción en cero llamadas
+      // es la que de verdad impide la reincidencia de QUI-832.
+      const tx = {
+        products: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValue({ ...product, base_price: 5200000 }),
+        },
+      };
+      const item = { product_id: product.id, quantity: 1, unit_price: 0 };
+
+      const catalogTaxes: CalcProductTaxesResult = {
+        total_rate: 0.19,
+        total_tax_amount: 988000,
+        base: 5200000,
+        total: 6188000,
+        taxes: [
+          {
+            tax_rate_id: 900,
+            name: 'IVA 19%',
+            rate: 0.19,
+            tax_type: TaxFiscalType.IVA,
+            is_inclusive: false,
+            amount: 988000,
+            base: 5200000,
+          },
+        ],
+        unclosed_residual_cents: 0,
+        invalid_inputs: [],
+        resolved_from: 'catalog',
+      };
+      calculateProductTaxesMock.mockResolvedValue(catalogTaxes);
+
+      const errorSpy = jest.spyOn((service as any).logger, 'error');
+
+      const result = await (service as any).buildPosOrderItem(
+        tx,
+        item,
+        dtoStoreId,
+        posUser,
+        undefined,
+      );
+
+      expect(resolveLineTotalsMock).toHaveBeenCalledTimes(0);
+      expect(result.unit_price).toBe(5200000);
+      expect(result.total_price).toBe(5200000);
+      expect(result.tax_amount_item).toBe(988000);
+      expect(result.final_unit_price).toBe(6188000);
+      expect(result.catalog_final_price).toBe(6188000);
+
+      // G-1 (ADR-11): con la línea sana, la compuerta de escritura no debe
+      // registrar `pos.line_gross_mismatch`.
+      const mismatchCalls = errorSpy.mock.calls.filter(
+        ([payload]) =>
+          (payload as any)?.event === 'pos.line_gross_mismatch',
+      );
+      expect(mismatchCalls).toHaveLength(0);
+    });
+
+    describe('buildOrderItemSnapshot — G-1 gate (ADR-11/B.4): registra, no lanza', () => {
+      // G-1 evaluado directo sobre `buildOrderItemSnapshot`, sin pasar por
+      // `buildPosOrderItem`: aísla la compuerta del resto del pipeline (el
+      // camino sano hasta aquí ya lo cubre el test de arriba). Los valores
+      // reproducen LITERAL el ejemplo de ADR-11/design-P1-code.md §6 para la
+      // orden 5928: el bruto reconstruido (`unit_price + tax_amount_item`)
+      // da `6.188.000 + 1.175.720 = 7.363.720`, que diverge de
+      // `final_unit_price` (`6.188.000`) con delta `1.175.720` — el defecto
+      // que el predicado viejo (`|unit_price × tax_rate − tax_amount_item| ≤
+      // 0,02`) no podía ver porque era internamente consistente.
+      const baseParams = {
+        item: {},
+        productName: 'Producto con IVA exclusivo',
+        itemType: 'physical',
+        quantity: 1,
+        lineUnits: 1,
+        catalogUnitPrice: 5200000,
+        catalogFinalPrice: 6188000,
+        costPrice: null,
+      };
+
+      it('registra pos.line_gross_mismatch con los diez campos y NO lanza', () => {
+        const errorSpy = jest.spyOn((service as any).logger, 'error');
+
+        let result: any;
+        expect(() => {
+          result = (service as any).buildOrderItemSnapshot({
+            ...baseParams,
+            unitBasePrice: 6188000,
+            finalUnitPrice: 6188000,
+            isPriceOverridden: true,
+            productId: 10,
+            storeId: 3,
+            userId: 42,
+            taxInfo: {
+              total_rate: 0.19,
+              total_tax_amount: 1175720,
+              taxes: [
+                {
+                  tax_rate_id: 900,
+                  name: 'IVA 19%',
+                  rate: 0.19,
+                  tax_type: TaxFiscalType.IVA,
+                  is_inclusive: false,
+                  amount: 1175720,
+                },
+              ],
+            },
+          });
+        }).not.toThrow();
+
+        // La compuerta REGISTRA, no bloquea (ADR-11): el snapshot se
+        // construye y se devuelve igual, con los valores tal como se iban a
+        // persistir.
+        expect(result.final_unit_price).toBe(6188000);
+
+        expect(errorSpy).toHaveBeenCalledWith({
+          event: 'pos.line_gross_mismatch',
+          store_id: 3,
+          user_id: 42,
+          product_id: 10,
+          resolved_from: 'custom',
+          unit_price: 6188000,
+          tax_amount_item: 1175720,
+          weight: 0,
+          final_unit_price: 6188000,
+          computed_gross_unit_price: 7363720,
+          delta: 1175720,
+        });
+      });
+
+      it('con la línea sana (bruto reconstruido == final_unit_price) no registra nada', () => {
+        const errorSpy = jest.spyOn((service as any).logger, 'error');
+
+        (service as any).buildOrderItemSnapshot({
+          ...baseParams,
+          unitBasePrice: 5200000,
+          finalUnitPrice: 6188000,
+          isPriceOverridden: false,
+          productId: 10,
+          storeId: 3,
+          userId: 42,
+          taxInfo: {
+            total_rate: 0.19,
+            total_tax_amount: 988000,
+            taxes: [
+              {
+                tax_rate_id: 900,
+                name: 'IVA 19%',
+                rate: 0.19,
+                tax_type: TaxFiscalType.IVA,
+                is_inclusive: false,
+                amount: 988000,
+              },
+            ],
+          },
+        });
+
+        const mismatchCalls = errorSpy.mock.calls.filter(
+          ([payload]) =>
+            (payload as any)?.event === 'pos.line_gross_mismatch',
+        );
+        expect(mismatchCalls).toHaveLength(0);
       });
     });
   });
