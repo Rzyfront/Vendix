@@ -145,4 +145,8 @@ export class InventoryAnalyticsQueryDto extends AnalyticsQueryDto {
   @Type(() => Number)
   @IsNumber()
   days_threshold?: number;
+
+  @IsOptional()
+  @IsIn(['ingredient', 'dish'])
+  group_by?: 'ingredient' | 'dish' = 'ingredient';
 }
