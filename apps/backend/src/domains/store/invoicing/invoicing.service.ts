@@ -106,6 +106,7 @@ import {
   contractAlreadyInvoiced,
   contractNotReadyForInvoice,
 } from './contract-invoice.errors';
+import { normalizeInvoiceTaxRate } from './utils/invoice-tax-rate.util';
 
 /**
  * Listing rows whose send/transmission state is an error or a pending send get
@@ -295,6 +296,15 @@ export function orderTaxFractionToInvoiceRate(
     normalized === 'ica' || normalized === 'reteica' ? 1000 : 100;
   return Math.round(fraction * factor * 100) / 100;
 }
+
+// F-212 — el desambiguador de magnitud vive en `utils/invoice-tax-rate.util`
+// porque lo comparten TRES sitios de dos capas: este escritor, el escritor de
+// notas (`credit-notes.service.ts`, copista puro que NO pasa por
+// `buildInvoiceTaxCreateInput`) y el lector de impresión
+// (`fiscal-document-print.mapper.ts`, función pura sin DI que no puede
+// importar este servicio). Se re-exporta para no romper a quien ya lo
+// importaba desde aquí.
+export { normalizeInvoiceTaxRate } from './utils/invoice-tax-rate.util';
 
 /**
  * Lo mínimo que la agregación necesita leer de cada línea de la orden.
@@ -3677,7 +3687,7 @@ export class InvoicingService {
       // campo ausente no son lo mismo para el input de Prisma.
       tax_rate_id: tax.tax_rate_id ?? undefined,
       tax_name: tax.tax_name,
-      tax_rate: new Prisma.Decimal(tax.tax_rate),
+      tax_rate: normalizeInvoiceTaxRate(tax.tax_rate, tax.tax_type),
       // `?? 0`: la fila puede llegar sin `taxable_amount`/`tax_amount` cuando
       // el DTO omitió lo que el servidor recalcula de todas formas. Persistir 0
       // es seguro: el reconciliador de aceptación reescribe el valor real.

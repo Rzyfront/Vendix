@@ -3,6 +3,7 @@ import {
   aggregateOrderTaxes,
   InvoicingService,
   needsOrderLineTaxSplit,
+  normalizeInvoiceTaxRate,
   orderTaxFractionToInvoiceRate,
 } from './invoicing.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
@@ -683,6 +684,59 @@ describe('InvoicingService · matriz fiscal createFromOrder+split+prevalidador',
       // de orden no tenía documento fiscal.
       expect(orderTaxFractionToInvoiceRate(0.007, 'ica')).not.toBe(0.7);
       expect(orderTaxFractionToInvoiceRate(0.007, 'ica')).toBe(7);
+    });
+  });
+
+  describe('normalizeInvoiceTaxRate — F-212, el escritor deja de poder persistir la fracción de IVA', () => {
+    it('IVA fracción (0.19) sin tax_rate_id resoluble se escala a porcentaje (19)', () => {
+      expect(normalizeInvoiceTaxRate(0.19, 'iva').toNumber()).toBe(19);
+    });
+
+    it('IVA fracción (0.05) también se escala — no es un caso especial de 19', () => {
+      expect(normalizeInvoiceTaxRate(0.05, 'iva').toNumber()).toBe(5);
+    });
+
+    it('sin tax_type (default contractual iva) también se escala', () => {
+      expect(normalizeInvoiceTaxRate(0.19, undefined).toNumber()).toBe(19);
+      expect(normalizeInvoiceTaxRate(0.19, null).toNumber()).toBe(19);
+    });
+
+    it('IVA ya en porcentaje (19) no se toca', () => {
+      expect(normalizeInvoiceTaxRate(19, 'iva').toNumber()).toBe(19);
+    });
+
+    it('IVA en 0 (exento) no se toca — el umbral es estrictamente > 0', () => {
+      expect(normalizeInvoiceTaxRate(0, 'iva').toNumber()).toBe(0);
+    });
+
+    it('IVA en el borde exacto (1) no se toca — el umbral es estrictamente < 1', () => {
+      expect(normalizeInvoiceTaxRate(1, 'iva').toNumber()).toBe(1);
+    });
+
+    it.each([
+      ['ica', 0.4],
+      ['ica', 0.966],
+      ['reteica', 0.007],
+      ['withholding', 0.1],
+      ['inc', 0.5],
+    ])(
+      'NO toca tarifas sub-1%% de tipos distintos de IVA (%s %s) — el ICA municipal colombiano SÍ tiene tarifas legítimas ahí',
+      (tax_type, rate) => {
+        expect(normalizeInvoiceTaxRate(rate, tax_type).toNumber()).toBe(rate);
+      },
+    );
+
+    it('REGRESIÓN F-212: la nota de crédito 170 heredó 0.19 de la factura 67 — la próxima vez que ese camino escriba, sale en 19', () => {
+      // El camino real es `!known` en `applyTaxCatalogToLine` (tax_rate_id no
+      // resuelve contra el catálogo) → `buildInvoiceTaxCreateInput`. Aquí se
+      // fija sólo el desambiguador puro; el camino completo lo cubre la
+      // matriz fiscal de más arriba con el motor real.
+      expect(normalizeInvoiceTaxRate(0.19, 'iva').toNumber()).not.toBe(0.19);
+      expect(normalizeInvoiceTaxRate(0.19, 'iva').toNumber()).toBe(19);
+    });
+
+    it('acepta el tax_rate como string sin perder precisión (forma en la que llega desde el motor)', () => {
+      expect(normalizeInvoiceTaxRate('0.19', 'iva').toNumber()).toBe(19);
     });
   });
 });
