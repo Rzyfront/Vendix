@@ -177,6 +177,17 @@ export class PosOrderItemDto {
   @Type(() => Boolean)
   skip_kds?: boolean;
 
+  // QUI-653 — "Para llevar" del POS (paso Consumo en 'entrega'). El frontend
+  // estampa la decisión de la orden en cada línea (ver `isTakeawayOrder` del
+  // checkout-shell); también acepta la marca per-línea del carrito
+  // (`CartItem.isTakeaway`). Persistido en `order_items.is_takeaway` para que
+  // el ticket de cocina lo muestre. Solo se envía cuando aplica: el default
+  // del backend ya es false.
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_takeaway?: boolean;
+
   // QUI-431 — Seriales seleccionados por el cajero para esta línea.
   // Solo aplica a productos serializados (`requires_serial_numbers=true`);
   // para el resto se ignora silenciosamente (compatibilidad total).

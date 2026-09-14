@@ -3089,6 +3089,11 @@ export class PaymentsService {
       // Solo aplica a líneas `product_type='prepared'`; para el resto se
       // ignora. Default false para preservar el comportamiento retail.
       skip_kds: !!params.item.skip_kds,
+      // QUI-653 — "Para llevar" del POS (cobro directo). El flag viaja en el
+      // DTO (`PosOrderItemDto.is_takeaway`, estampado por el checkout-shell
+      // cuando el paso Consumo está en 'entrega'). El fire a cocina ya lo
+      // propaga al ticket; aquí solo se persiste. Default false.
+      is_takeaway: !!params.item.is_takeaway,
     };
 
     if (params.tierSnap?.tier_id != null) {
