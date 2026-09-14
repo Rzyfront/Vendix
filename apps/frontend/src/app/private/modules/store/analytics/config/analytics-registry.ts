@@ -256,6 +256,15 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     category: 'inventory',
     icon: 'truck',
   },
+  {
+    key: 'inventory_ingredient_consumption',
+    title: 'Consumo de Insumos',
+    description: 'Insumos gastados y materias primas por plato y receta',
+    detailedDescription: 'Analiza el gasto de materia prima e insumos de cocina en el período seleccionado. Visualiza el total consolidado de cada ingrediente consumido y el desglose por plato.',
+    route: '/admin/analytics/inventory/ingredient-consumption',
+    category: 'inventory',
+    icon: 'utensils',
+  },
 
   // Products (3)
   {

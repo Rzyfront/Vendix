@@ -574,6 +574,104 @@ export class AnalyticsController {
     ]);
   }
 
+  @Get('inventory/ingredient-consumption')
+  @Permissions('store:analytics:read')
+  async getIngredientConsumption(
+    @Query() query: InventoryAnalyticsQueryDto,
+  ) {
+    const result =
+      await this.inventory_analytics_service.getIngredientConsumption(query);
+    return this.response_service.success(
+      result.data,
+      'Operation completed successfully',
+      result.meta,
+    );
+  }
+
+  @Get('inventory/ingredient-consumption/export')
+  @Permissions('store:analytics:read')
+  async exportIngredientConsumptionXlsx(
+    @Query() query: InventoryAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const { summaryRows, detailRows } =
+      await this.inventory_analytics_service.getIngredientConsumptionForExport(
+        query,
+      );
+
+    const summaryColumns: ReportColumn[] = [
+      { key: 'ingredient_name', header: 'Insumo', type: 'text', width: 25 },
+      { key: 'sku', header: 'SKU', type: 'text', width: 15 },
+      { key: 'unit', header: 'Unidad', type: 'text', width: 12 },
+      {
+        key: 'total_consumed',
+        header: 'Cant. Consumida',
+        type: 'number',
+        width: 16,
+      },
+      {
+        key: 'avg_unit_cost',
+        header: 'Costo Unit. Promedio',
+        type: 'currency',
+        width: 20,
+      },
+      {
+        key: 'total_cost',
+        header: 'Costo Total',
+        type: 'currency',
+        width: 18,
+      },
+      {
+        key: 'associated_dishes',
+        header: 'Platos Asociados',
+        type: 'text',
+        width: 35,
+      },
+    ];
+
+    const detailColumns: ReportColumn[] = [
+      { key: 'ingredient_name', header: 'Insumo', type: 'text', width: 25 },
+      { key: 'sku', header: 'SKU', type: 'text', width: 15 },
+      {
+        key: 'dish_name',
+        header: 'Plato / Preparación',
+        type: 'text',
+        width: 25,
+      },
+      {
+        key: 'dish_quantity',
+        header: 'Cant. Platos',
+        type: 'number',
+        width: 14,
+      },
+      {
+        key: 'consumed_quantity',
+        header: 'Insumo Gastado',
+        type: 'number',
+        width: 16,
+      },
+      { key: 'unit', header: 'Unidad', type: 'text', width: 12 },
+      {
+        key: 'unit_cost',
+        header: 'Costo Unitario',
+        type: 'currency',
+        width: 16,
+      },
+      {
+        key: 'total_cost',
+        header: 'Costo Total',
+        type: 'currency',
+        width: 18,
+      },
+    ];
+
+    await this.emitReport(res, 'consumo_insumos', tz, [
+      this.toSheet('Consolidado Insumos', summaryColumns, summaryRows, tz),
+      this.toSheet('Detalle por Plato', detailColumns, detailRows, tz),
+    ]);
+  }
+
   @Get('inventory/export')
   @Permissions('store:analytics:read')
   async exportInventoryAnalytics(

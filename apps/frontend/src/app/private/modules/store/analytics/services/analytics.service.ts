@@ -29,6 +29,7 @@ import {
   InventoryAnalyticsQueryDto,
   MovementSummaryItem,
   MovementTrend,
+  IngredientConsumptionAnalyticsRow,
 } from '../interfaces/inventory-analytics.interface';
 import { LowStockBySupplierAnalyticsEnvelope } from '../interfaces/low-stock-by-supplier-analytics.interface';
 import {
@@ -815,6 +816,25 @@ export class AnalyticsService {
 
   exportInventoryAnalytics(query: InventoryAnalyticsQueryDto = {}): Observable<Blob> {
     return this.http.get(this.getApiUrl('inventory/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  getIngredientConsumption(
+    query: InventoryAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<IngredientConsumptionAnalyticsRow[]>> {
+    const cacheKey = `ingredient-consumption-${this.storeScopeKey()}-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<IngredientConsumptionAnalyticsRow[]>>(
+        this.getApiUrl('inventory/ingredient-consumption'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  exportIngredientConsumption(query: InventoryAnalyticsQueryDto = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('inventory/ingredient-consumption/export'), {
       params: this.buildParams(query),
       responseType: 'blob',
     });
