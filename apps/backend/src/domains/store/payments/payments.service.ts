@@ -1396,6 +1396,15 @@ export class PaymentsService {
           // Typed tax breakdown so accounting posts one journal line per fiscal
           // type (IVA → 2408, INC → 2436, ICA → 241205) instead of collapsing to
           // 2408. Read from the persisted, typed order_item_taxes rows.
+          //
+          // F-111 (CP-pos-exclusive-tax-double-charge) — además del tipo y el
+          // monto, se trae `total_price` de la línea y `tax_rate` (ya
+          // fracción) de cada impuesto, para que `buildTaxBreakdown` pueda
+          // armar la compuerta de detección de `AutoEntryService.
+          // resolveTaxLines`: compara el impuesto declarado acá contra
+          // `tax_rate × total_price` calculado independientemente. `NO`
+          // dividir `tax_rate` — `order_item_taxes.tax_rate` es
+          // `Decimal(6,5)` y ya guarda la fracción (19 % = 0.19000).
           const orderItemsWithTaxes = await tx.order_items.findMany({
             where: {
               order_id: order.id,
@@ -1408,11 +1417,44 @@ export class PaymentsService {
               cancelled_at: null,
             },
             select: {
-              order_item_taxes: { select: { tax_type: true, tax_amount: true } },
+              // F-111 — NETO (`buildOrderItemSnapshot`: `total_price =
+              // unitBasePrice * lineUnits`), ya neto del descuento de tarifa
+              // multi-tarifa/sale/override (esos reducen `unitBasePrice`
+              // ANTES de persistir). El descuento promocional/cupón de
+              // orden (`orders.discount_amount`) es aparte: se calcula
+              // DESPUÉS, a nivel de orden, y NUNCA resta de
+              // `order_items.total_price` ni de `order_item_taxes.tax_amount`
+              // (ver `createOrUpdateOrderFromPos`/cierre de mesa, que suman
+              // `total_price` para el subtotal y restan el descuento sólo del
+              // `grand_total`). Como el impuesto de cada línea también se
+              // calculó sobre esa misma base ANTES del descuento de orden,
+              // `tax_rate × total_price` sigue siendo la comparación correcta
+              // con o sin promoción/cupón — no hace falta restar nada acá.
+              total_price: true,
+              // `is_inclusive` NO se lee acá, a propósito: `total_price` sale
+              // de `unitBasePrice`, que es el NETO en las dos ramas
+              // (`finalUnitPrice / (1 + total_rate)` en la rama custom,
+              // `taxInfo.base` en la de catálogo), así que un impuesto
+              // INCLUIDO ya viene absorbido y `tarifa × total_price` es la
+              // comparación correcta sin mirar el flag. Traerlo sugeriría una
+              // corrección que no hay que hacer.
+              order_item_taxes: {
+                select: { tax_type: true, tax_amount: true, tax_rate: true },
+              },
             },
           });
           const tax_breakdown = buildTaxBreakdown(
-            orderItemsWithTaxes.flatMap((i) => i.order_item_taxes || []),
+            orderItemsWithTaxes.flatMap((item) =>
+              (item.order_item_taxes || []).map((tax) => ({
+                ...tax,
+                // F-111 — la base de CADA impuesto de la línea es el
+                // `total_price` COMPLETO de esa línea. Una línea con más de
+                // un tipo de impuesto (p.ej. IVA + ICA) usa la misma base
+                // para ambos, y eso NO es una aproximación: ambos gravan el
+                // mismo neto y no se componen entre sí.
+                taxable_amount: Number(item.total_price || 0),
+              })),
+            ),
           );
 
           // CASO 2 (suffered): a customer who is a withholding agent retains

@@ -37,12 +37,32 @@ export interface AccountingEntryRetryJob {
  * - `SKIPPED_MISSING_MAPPING` menos de dos líneas válidas: falta la clave de
  *                              mapeo o la cuenta PUC. Es un DEFECTO de
  *                              configuración contable, no una decisión.
+ * - `DETECTED_TAX_MISMATCH`   F-111 (CP-pos-exclusive-tax-double-charge) —
+ *                              EXCEPCIÓN deliberada al contrato `SKIPPED_*`
+ *                              de arriba: acá NO se omitió nada, el asiento
+ *                              SÍ se creó y la línea de impuesto SÍ se
+ *                              emitió con el monto declarado (la venta no se
+ *                              bloquea, decisión del dueño del producto).
+ *                              `AutoEntryService.resolveTaxLines` la usa
+ *                              cuando el impuesto declarado (`tax_amount`,
+ *                              escrito por el resolver de impuestos) se
+ *                              desvía más de `TAX_MISMATCH_TOLERANCE_CENTS`
+ *                              del impuesto esperado (`tax_rate ×
+ *                              taxable_amount`, ambos escritos por el
+ *                              escritor de la línea de venta) — dos fuentes
+ *                              independientes que en el defecto real
+ *                              (IVA exclusivo aplicado dos veces) divergen.
+ *                              Se reusa `recordSkip` (nunca `recordFailure`)
+ *                              porque tampoco corresponde encolar un
+ *                              reintento: no hay nada que reintentar, el
+ *                              asiento ya quedó posteado y balanceado.
  */
 export type AutoEntrySkipCause =
   | 'SKIPPED_ZERO_AMOUNT'
   | 'SKIPPED_FLOW_DISABLED'
   | 'SKIPPED_AREA_INACTIVE'
-  | 'SKIPPED_MISSING_MAPPING';
+  | 'SKIPPED_MISSING_MAPPING'
+  | 'DETECTED_TAX_MISMATCH';
 
 /** Contexto mínimo para dejar rastro de una omisión sin asiento. */
 export interface AutoEntrySkipRecord {
