@@ -115,8 +115,13 @@ export class PosPaymentService {
     return this.cashRegisterService.getRegisterId();
   }
 
-  private mapCartItemsForPos(cartState: CartState): any[] {
-    return cartState.items.map((item) => this.mapCartItemForPos(item));
+  private mapCartItemsForPos(
+    cartState: CartState,
+    forceTakeaway = false,
+  ): any[] {
+    return cartState.items.map((item) =>
+      this.mapCartItemForPos(item, forceTakeaway),
+    );
   }
 
   private getAppliedPromotionIds(cartState: CartState): number[] {
@@ -126,7 +131,7 @@ export class PosPaymentService {
       .filter((promotionId) => Number.isFinite(promotionId));
   }
 
-  private mapCartItemForPos(item: CartItem): any {
+  private mapCartItemForPos(item: CartItem, forceTakeaway = false): any {
     // CP-POS-SVC-PERF-001 / Bugfix — `item.product.id` can be a number
     // (DB ids) or a string (synthetic ids for custom lines like
     // `custom-<uuid>`). Calling `.startsWith` on a number throws
@@ -210,6 +215,13 @@ export class PosPaymentService {
       // instead of the kitchen fire. Only meaningful for `prepared`
       // products; ignored for everything else.
       skip_kds: item.skipKds === true,
+      // QUI-653 — "Para llevar" a nivel de orden (paso Consumo en 'entrega',
+      // ver `isTakeawayOrder` del checkout-shell, que llega como
+      // `forceTakeaway`) o marca per-línea del carrito. Solo se envía cuando
+      // aplica: el backend ya tiene default false.
+      ...((item.isTakeaway === true || forceTakeaway === true) && {
+        is_takeaway: true,
+      }),
     };
   }
 
@@ -358,6 +370,9 @@ export class PosPaymentService {
     createdBy: string,
     tableSessionId?: number | null,
     tableId?: number | null,
+    // QUI-653 — decisión "Para llevar" de la orden (el shell la computa como
+    // `isTakeawayOrder`). Se estampa en las líneas sin mutar el carrito.
+    takeawayOrder?: boolean | null,
   ): Observable<any> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
@@ -407,7 +422,8 @@ export class PosPaymentService {
     //   calculation.
     const sale_data: any = {
       store_id: this.getStoreId(),
-      items: this.mapCartItemsForPos(cartState),
+      // QUI-653 — 'Para llevar' de la orden estampado por línea.
+      items: this.mapCartItemsForPos(cartState, takeawayOrder === true),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
       ),

@@ -76,6 +76,7 @@
               [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
               [tableId]="checkoutTableId()"
               [fulfillment]="consumoStep()?.fulfillment() ?? 'entrega'"
+              [takeawayOrder]="isTakeawayOrder()"
               [sessionId]="checkoutSessionId()"
               [isAnonymous]="isAnonymousSale()"
               [isAlias]="saleMode() === 'alias'"
