@@ -1321,6 +1321,9 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
 
     it('findOne agrega final_unit_price / final_total_price (agregado 19%)', async () => {
       // Línea de sesión con variante: unit 10000 + EXC 19% → 11900 × 2.
+      // F-151 — `tax_amount_item` no-null marca la línea como YA
+      // normalizada (post ADR-08 commit 5): `unit_price` es la base neta y
+      // el recálculo de `resolveOrderLineFinals` aplica.
       (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
         findOneRow({
           id: 502,
@@ -1329,6 +1332,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           quantity: 2,
           unit_price: new Prisma.Decimal(10000),
           total_price: new Prisma.Decimal(20000),
+          tax_amount_item: new Prisma.Decimal(1900),
         }),
       );
       (prismaMock.product_tax_assignments.findMany as jest.Mock)
@@ -1370,6 +1374,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       // mayor bruto por debajo y DECLARA el céntimo que no cierra. El
       // contrato NO promete que el bruto se conserve exacto — la expectativa
       // vieja (10000) estaba un día por detrás del kernel.
+      // F-151 — `tax_amount_item` no-null: misma marca de línea normalizada.
       (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
         findOneRow({
           id: 503,
@@ -1377,6 +1382,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           quantity: 1,
           unit_price: new Prisma.Decimal(10000),
           total_price: new Prisma.Decimal(10000),
+          tax_amount_item: new Prisma.Decimal(1899.99),
         }),
       );
       (prismaMock.product_tax_assignments.findMany as jest.Mock)
@@ -1406,6 +1412,45 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         resolveLineTotals(10000, [{ rate: 0.19, is_inclusive: true }])
           .unclosed_residual_cents,
       ).toBe(1);
+    });
+
+    it('F-151: línea pre-normalización (tax_amount_item NULL) NO recalcula impuesto sobre el bruto ya persistido — evita el doble cobro en pantalla', async () => {
+      // Ventana de transición: una línea escrita ANTES del fix de ADR-08
+      // commit 5 tiene `unit_price` = BRUTO (11900, convención anterior) y
+      // `tax_amount_item` NULL (el escritor de entonces nunca lo calculaba).
+      // Sin el marcador, `resolveOrderLineFinals` trataría 11900 como si
+      // fuera la base NETA y sumaría el 19% otra vez encima → 14161. El
+      // mismo producto, agregado hoy con el escritor corregido, muestra
+      // 11900 (ver test "agrega final_unit_price... agregado 19%" arriba,
+      // misma tasa) — sin el guard de F-151 las dos líneas divergirían.
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
+        findOneRow({
+          id: 504,
+          product_id: 7,
+          quantity: 1,
+          unit_price: new Prisma.Decimal(11900),
+          total_price: new Prisma.Decimal(11900),
+          tax_amount_item: null,
+        }),
+      );
+      (prismaMock.product_tax_assignments.findMany as jest.Mock)
+        .mockResolvedValue([
+          {
+            product_id: 7,
+            is_inclusive: false,
+            tax_categories: {
+              is_inclusive: false,
+              tax_rates: [{ rate: 0.19, is_inclusive: false }],
+            },
+          },
+        ]);
+
+      const view = await service.findOne(83);
+      const item = (view.order as any).order_items[0];
+
+      // El bruto persistido se muestra tal cual — NUNCA 14161 (doble cobro).
+      expect(item.final_unit_price).toBe(11900);
+      expect(item.final_total_price).toBe(11900);
     });
 
     it('findOne cocina NO recibe finales y no dispara el batch (ADR-10)', async () => {

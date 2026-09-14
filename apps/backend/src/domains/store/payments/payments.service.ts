@@ -2467,7 +2467,13 @@ export class PaymentsService {
   ): Promise<{
     total_rate: number;
     total_tax_amount: number;
-    taxes: { tax_rate_id: number; name: string; rate: number; amount: number }[];
+    taxes: {
+      tax_rate_id: number;
+      name: string;
+      rate: number;
+      amount: number;
+      is_inclusive: boolean;
+    }[];
   }> {
     if (!taxCategoryId) {
       return { total_rate: 0, total_tax_amount: 0, taxes: [] };
@@ -2507,6 +2513,18 @@ export class PaymentsService {
     // float re-redondeado. No se enruta por `resolveLineTotals`: ese solver
     // interpreta el input como bruto-respecto-de-lo-inclusivo y apilaría el
     // markup exclusivo encima de un total que ya lo contiene.
+    // F-052: el ítem custom no tiene `product_tax_assignments` (no hay
+    // producto), así que el ÚNICO lugar donde vive el flag INCLUIDO/AGREGADO
+    // para su categoría es `tax_categories.is_inclusive` — ya viene cargado
+    // en `taxCategory` (el `findFirst` de arriba no usa `select`, trae todos
+    // los escalares). Antes se hardcodeaba `false` en el snapshot
+    // (`buildOrderItemSnapshot`, `tax.is_inclusive ?? false`): una categoría
+    // inclusiva usada en un ítem custom persistía `is_inclusive: false` en
+    // `order_item_taxes`, y `needsOrderLineTaxSplit` (invoicing) partía el
+    // XML DIAN al revés con los importes cuadrando igual — el modo de falla
+    // que ADR-03 llama "el único real" del diseño, vivo justo en la rama que
+    // ADR-01 citaba como prueba de que la semántica funciona.
+    const categoryIsInclusive = taxCategory.is_inclusive ?? false;
     const taxes = (taxCategory.tax_rates || []).map((rate: any) => {
       const rateValue = Number(rate.rate || 0);
       return {
@@ -2514,6 +2532,7 @@ export class PaymentsService {
         name: rate.name,
         rate: rateValue,
         amount: truncMoney(basePrice * rateValue),
+        is_inclusive: categoryIsInclusive,
       };
     });
     const totalRate = taxes.reduce((sum, tax) => sum + tax.rate, 0);
@@ -2540,6 +2559,13 @@ export class PaymentsService {
     // `session.order_id` (cierre de mesa, orden ya existe) u `orderNumber`
     // (venta nueva, recién generado antes de mapear los ítems).
     orderRef?: string | number | null,
+    // F-065 (B.3→B.4): distingue el cierre de cuenta de mesa —líneas que
+    // pueden llevar tiempo abiertas y perder su asignación fiscal entre la
+    // apertura y el cierre (población real: purga de Roma Motos)— de la
+    // venta fresca (POS directo/checkout), que F-065 deja fuera a propósito:
+    // ese carril puede depender de productos legítimamente sin categoría
+    // asignada y auditarlo es un cambio aparte (evidence/B3-taxes-ejecucion.md).
+    isTableSessionLine = false,
   ): Promise<any> {
     const isCustomItem = item.item_type === 'custom' || !item.product_id;
     const lineUnits = this.getPosLineUnits(item);
@@ -2743,6 +2769,21 @@ export class PaymentsService {
       )),
       resolved_from: 'catalog',
     };
+    // F-065 (B.3→B.4): al cerrar una cuenta de mesa, un producto que perdió
+    // su `product_tax_assignments` entre la apertura y el cierre resolvía en
+    // silencio a IVA cero sobre base inflada — sub-declaración a la DIAN sin
+    // ninguna señal. `has_tax_assignment` (TaxesService, F-065) discrimina:
+    // `false` es "nunca tuvo asignación o la perdió", nunca "tasa 0%
+    // explícita" (una asignación viva a categoría 0% sigue siendo `true`).
+    // Acotado a `isTableSessionLine` a propósito: el carril de venta
+    // fresca/checkout puede depender de productos legítimamente sin
+    // categoría asignada y auditarlo es un cambio aparte, no éste.
+    if (isTableSessionLine && catalogTaxInfo.has_tax_assignment === false) {
+      throw new VendixHttpException(
+        ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001,
+        `El producto "${product.name}" perdió su asignación fiscal; no se puede cerrar la cuenta normalizando el impuesto a cero.`,
+      );
+    }
     // F-001: el precio publicado YA contiene lo inclusivo — el total NO crece.
     // Con todo inclusivo, `total === catalogUnitPrice` (119000, no 141610); lo
     // agregado sí suma encima vía el resolver.
@@ -3342,6 +3383,8 @@ export class PaymentsService {
                 user,
                 tierSnapshots[index],
                 session.order_id,
+                // F-065: esta rama SÍ es cierre de cuenta de mesa.
+                true,
               ),
             ),
           )

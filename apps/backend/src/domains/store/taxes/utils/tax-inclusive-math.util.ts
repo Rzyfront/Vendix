@@ -121,6 +121,15 @@ export function resolveLineTotals(
       rate: r?.rate,
       is_inclusive: r?.is_inclusive,
       rate_basis: r?.rate_basis,
+      // F-021: `TaxRateForResolution` no declara `fixed_base` (el espejo
+      // nunca recibe base propia, AIU es carve-out del motor) — pero el
+      // kernel activa ese carve-out con CUALQUIER `is_inclusive` verdadero
+      // cuyo `fixed_base` no sea `null`/`undefined`. Forzarlo explícito acá
+      // documenta la garantía en el punto de llamada en vez de dejarla
+      // implícita en "el objeto no tiene esa propiedad": si alguien amplía
+      // `TaxRateForResolution` con `fixed_base` sin leer esto, el carve-out
+      // se activaría en silencio sobre tasas agregadas (ADR-01/ADR-02).
+      fixed_base: undefined,
     })),
   );
 

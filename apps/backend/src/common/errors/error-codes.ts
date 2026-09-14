@@ -1379,6 +1379,34 @@ export const ErrorCodes = {
     devMessage:
       'Order cannot be paid: customer is required and pos.allow_anonymous_sales is disabled',
   },
+  // CP-pos-exclusive-tax-double-charge (QUI-832), C.8 — F-035 (major) /
+  // F-047 (blocker). `order_item_taxes` no tiene `onDelete` en su FK hacia
+  // `order_items` (requerida). `updateOrderItems`/`updateOrderFromEditor`
+  // reemplazan las líneas con un `deleteMany`; sobre una orden que ya
+  // persistió su desglose fiscal ese `deleteMany` violaría la FK (P2003).
+  // Este código se lanza ANTES de tocar una sola fila, así que ninguna
+  // transacción llega a intentar el `deleteMany`.
+  ORD_EDIT_TAX_BREAKDOWN_LOCKED_001: {
+    code: 'ORD_EDIT_TAX_BREAKDOWN_LOCKED_001',
+    httpStatus: 409,
+    devMessage:
+      'Order already has a persisted tax breakdown (order_item_taxes); replacing its items via this endpoint is not supported and would violate a database constraint',
+  },
+  // CP-pos-exclusive-tax-double-charge (QUI-832), C.8 — F-068 (major). El
+  // editor recalcula subtotal/impuesto/total server-side y los persiste
+  // dentro de la MISMA transacción; este código se lanza si la relectura
+  // (todavía dentro de la transacción, antes de comprometerla) no coincide
+  // con lo recién escrito — invariante interno que nunca debería violarse.
+  // A diferencia de `ORD_EDIT_RESPONSE_MISMATCH_001` (que se lanzaba
+  // DESPUÉS del commit, con la orden ya guardada), esta comprobación corre
+  // ANTES de que la transacción cierre: si lanza, Prisma revierte todo y la
+  // orden queda exactamente como estaba.
+  ORD_EDIT_TOTALS_ROLLBACK_001: {
+    code: 'ORD_EDIT_TOTALS_ROLLBACK_001',
+    httpStatus: 409,
+    devMessage:
+      'Order edit was not committed: recalculated totals did not match the row about to be persisted; the transaction was rolled back and nothing changed',
+  },
   INV_LOC_001: {
     code: 'INV_LOC_001',
     httpStatus: 404,

@@ -1818,6 +1818,246 @@ describe('PaymentsService', () => {
       expect(mismatchCalls).toHaveLength(0);
     });
 
+    /**
+     * F-065 — `has_tax_assignment` discrimina "producto sin impuesto" de
+     * "producto que perdió su asignación fiscal" (población real: purga de
+     * Roma Motos). Acotado a `isTableSessionLine` a propósito: el carril de
+     * venta fresca/checkout puede depender de productos legítimamente sin
+     * categoría asignada y auditarlo es un cambio aparte (B3-taxes-ejecucion.md).
+     */
+    describe('buildPosOrderItem — F-065: has_tax_assignment gate (sólo cierre de mesa)', () => {
+      const tx = {
+        products: { findFirst: jest.fn().mockResolvedValue(product) },
+      };
+      const item = { product_id: product.id, quantity: 1, unit_price: 0 };
+
+      const lostAssignment: CalcProductTaxesResult = {
+        total_rate: 0,
+        total_tax_amount: 0,
+        base: 10000,
+        total: 10000,
+        taxes: [],
+        unclosed_residual_cents: 0,
+        invalid_inputs: [],
+        resolved_from: 'catalog',
+        has_tax_assignment: false,
+      };
+
+      afterEach(() => {
+        jest.restoreAllMocks();
+      });
+
+      it('cierre de mesa (isTableSessionLine=true) + has_tax_assignment=false lanza POS_TABLE_LINE_TAX_UNRESOLVABLE_001', async () => {
+        calculateProductTaxesMock.mockResolvedValue(lostAssignment);
+
+        await expect(
+          (service as any).buildPosOrderItem(
+            tx,
+            item,
+            dtoStoreId,
+            posUser,
+            undefined,
+            123,
+            true,
+          ),
+        ).rejects.toMatchObject({
+          errorCode: ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001.code,
+        });
+      });
+
+      it('venta fresca (isTableSessionLine por defecto) + has_tax_assignment=false NO lanza — carril fuera de este cambio', async () => {
+        calculateProductTaxesMock.mockResolvedValue(lostAssignment);
+
+        const result = await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+        );
+
+        expect(result.tax_amount_item).toBe(0);
+      });
+
+      it('cierre de mesa + has_tax_assignment=true (0% legítimo con asignación viva) NO lanza', async () => {
+        calculateProductTaxesMock.mockResolvedValue({
+          ...lostAssignment,
+          has_tax_assignment: true,
+        });
+
+        const result = await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+          123,
+          true,
+        );
+
+        expect(result.tax_amount_item).toBe(0);
+      });
+
+      it('cierre de mesa + has_tax_assignment ausente (contrato viejo, sin el campo) NO lanza — compat con mocks/llamadores que no lo declaran', async () => {
+        const { has_tax_assignment: _omit, ...withoutField } = lostAssignment;
+        calculateProductTaxesMock.mockResolvedValue(withoutField as any);
+
+        const result = await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+          123,
+          true,
+        );
+
+        expect(result.tax_amount_item).toBe(0);
+      });
+    });
+
+    /**
+     * F-013 — el espejo de la compuerta G-1 en la rama custom usaba
+     * `taxInfo.base`, un campo que `calculateTaxCategoryTaxes` nunca
+     * devuelve (`undefined + monto = NaN`, y `roundMoney` colapsa `NaN` a
+     * `0` en silencio): cualquier ítem personalizado con categoría de
+     * impuesto disparaba un 409 falso. G-1 vive hoy en el punto común
+     * (`buildOrderItemSnapshot`) y sólo lee valores YA REDONDEADOS del
+     * `orderItem` a punto de persistirse — nunca `taxInfo.base` — así que
+     * el escenario que originaba el `NaN` ya no es alcanzable. Este test
+     * prueba el camino custom END TO END (no aislado) para que una
+     * regresión futura que reintroduzca `taxInfo.base` en la rama custom
+     * se vea aquí.
+     */
+    describe('buildPosOrderItem — ítem custom no dispara G-1 en falso (F-013)', () => {
+      afterEach(() => {
+        jest.restoreAllMocks();
+      });
+
+      it('ítem personalizado con categoría IVA 19% no registra pos.line_gross_mismatch', async () => {
+        const tx = {
+          stores: {
+            findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }),
+          },
+          tax_categories: {
+            findFirst: jest.fn().mockResolvedValue({
+              id: 9,
+              is_inclusive: false,
+              tax_rates: [{ id: 91, name: 'IVA 19%', rate: 0.19 }],
+            }),
+          },
+        };
+        const item = {
+          item_type: 'custom',
+          product_name: 'Instalación',
+          quantity: 1,
+          unit_price: 150000,
+          tax_category_id: 9,
+        };
+
+        const errorSpy = jest.spyOn((service as any).logger, 'error');
+
+        const result = await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+        );
+
+        const mismatchCalls = errorSpy.mock.calls.filter(
+          ([payload]) => (payload as any)?.event === 'pos.line_gross_mismatch',
+        );
+        expect(mismatchCalls).toHaveLength(0);
+        expect(result.final_unit_price).toBeCloseTo(178500, 2);
+      });
+    });
+
+    /**
+     * F-052 — la rama custom no tiene `product_tax_assignments` (no hay
+     * producto): el único sitio con el flag INCLUIDO/AGREGADO para su
+     * categoría es `tax_categories.is_inclusive`. Antes se hardcodeaba
+     * `false`: una categoría inclusiva usada en un ítem custom persistía
+     * `order_item_taxes.is_inclusive = false` y `needsOrderLineTaxSplit`
+     * (invoicing) partía el XML DIAN al revés con los importes cuadrando
+     * igual — el modo de falla que ADR-03 llama "el único real" del diseño.
+     */
+    describe('buildPosOrderItem — ítem custom persiste is_inclusive de la categoría (F-052)', () => {
+      afterEach(() => {
+        jest.restoreAllMocks();
+      });
+
+      it('categoría marcada is_inclusive=true se persiste en order_item_taxes, no hardcodeada a false', async () => {
+        const tx = {
+          stores: {
+            findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }),
+          },
+          tax_categories: {
+            findFirst: jest.fn().mockResolvedValue({
+              id: 9,
+              is_inclusive: true,
+              tax_rates: [{ id: 91, name: 'IVA 19% incluido', rate: 0.19 }],
+            }),
+          },
+        };
+        const item = {
+          item_type: 'custom',
+          product_name: 'Servicio con IVA incluido',
+          quantity: 1,
+          unit_price: 0,
+          final_unit_price: 119000,
+          tax_category_id: 9,
+        };
+
+        const result = await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+        );
+
+        expect(result.order_item_taxes.create).toHaveLength(1);
+        expect(result.order_item_taxes.create[0]).toMatchObject({
+          tax_rate_id: 91,
+          is_inclusive: true,
+        });
+      });
+
+      it('categoría sin is_inclusive (default false) sigue persistiendo false — sin regresión', async () => {
+        const tx = {
+          stores: {
+            findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }),
+          },
+          tax_categories: {
+            findFirst: jest.fn().mockResolvedValue({
+              id: 9,
+              tax_rates: [{ id: 91, name: 'IVA 19%', rate: 0.19 }],
+            }),
+          },
+        };
+        const item = {
+          item_type: 'custom',
+          product_name: 'Instalación',
+          quantity: 1,
+          unit_price: 150000,
+          tax_category_id: 9,
+        };
+
+        const result = await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+        );
+
+        expect(result.order_item_taxes.create[0]).toMatchObject({
+          is_inclusive: false,
+        });
+      });
+    });
+
     describe('buildOrderItemSnapshot — G-1 gate (ADR-11/B.4): registra, no lanza', () => {
       // G-1 evaluado directo sobre `buildOrderItemSnapshot`, sin pasar por
       // `buildPosOrderItem`: aísla la compuerta del resto del pipeline (el

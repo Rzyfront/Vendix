@@ -101,6 +101,15 @@ export class PosOrderItemDto {
   price_override_reason?: string;
 
   /**
+   * @deprecated F-010 (QUI-832) — el servidor NUNCA lee este campo en la
+   * rama de producto ni en la rama custom de `PaymentsService.buildPosOrderItem`
+   * (ambas recalculan la tasa desde `tax_category_id`/el catálogo). Se
+   * conserva sólo porque `forbidNonWhitelisted` rompería a los clientes que
+   * todavía lo mandan (POS web/móvil), y porque `orders.service.ts`
+   * (`UpdateOrderItemsDto`/editor) SÍ lo lee para otra unidad: ahí es la
+   * TASA DE LA LÍNEA (fracción), aquí NUNCA se persiste tal cual — el
+   * servidor recalcula. Enviarlo desde POS no tiene efecto.
+   *
    * Tasa del impuesto de la línea como FRACCIÓN: `0.19` es 19%. La columna es
    * `Decimal(6,5)`, así que mandar `19` desbordaba el numérico de Postgres y
    * salía un `500 SYS_INTERNAL_001` en lugar de un 400 accionable.
@@ -115,6 +124,14 @@ export class PosOrderItemDto {
   @Type(() => Number)
   tax_rate?: number;
 
+  /**
+   * @deprecated F-010 (QUI-832) — mismo caso que `tax_rate`: el carril POS
+   * (`PaymentsService.buildPosOrderItem`) ignora este valor y recalcula
+   * `tax_amount_item` desde el catálogo/`tax_category_id` (unidad canónica:
+   * impuesto POR UNIDAD DE PRECIO, ver `final-price.util.ts`). El editor de
+   * órdenes (`orders.service.ts`, otra unidad/otro carril) sí lo lee. Enviarlo
+   * desde POS no tiene efecto.
+   */
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)

@@ -2324,7 +2324,11 @@ export class PosCartService {
       // Update existing item
       const existingItem = currentState.items[existingItemIndex];
       const newQuantity = existingItem.quantity + request.quantity;
-      const finalUnitPrice = this.calculateItemFinalPriceWithBase(request.product, basePrice);
+      const finalUnitPrice = this.resolveCatalogFinalUnitPrice(
+        request.product,
+        request.variant,
+        basePrice,
+      );
       const mergedUnits = resolveLineUnits({
         ...existingItem,
         quantity: newQuantity,
@@ -2341,9 +2345,11 @@ export class PosCartService {
       };
     } else {
       // Add new item
-      const finalUnitPrice = request.variant
-        ? this.calculateItemFinalPriceWithBase(request.product, basePrice)
-        : (request.product.final_price || this.calculateItemFinalPrice(request.product));
+      const finalUnitPrice = this.resolveCatalogFinalUnitPrice(
+        request.product,
+        request.variant,
+        basePrice,
+      );
 
       // Calculate total price for weight products
       const weight = request.weight || 1;
@@ -2701,6 +2707,37 @@ export class PosCartService {
   private calculateItemTaxWithBase(product: any, basePrice: number, quantity: number): number {
     const rateSum = this.calculateRateSum(product);
     return basePrice * quantity * rateSum;
+  }
+
+  /**
+   * Precio final de catalogo de la linea: el que YA resolvio el servidor.
+   *
+   * `products.final_price` y `product_variants.final_price` salen de
+   * `resolveLineTotals` en el backend, que respeta `is_inclusive` con la
+   * precedencia asignacion > categoria > tasa y trunca a centavos igual que la
+   * DIAN. Es exactamente el numero que `payments.service.ts` reconstruye al
+   * cobrar para decidir si hubo override de precio.
+   *
+   * Recalcularlo aca con `calculateRateSum` —que suma las tasas SIN mirar
+   * `is_inclusive`— volvia a sumar el impuesto que ya venia dentro del precio
+   * publicado: con INC 8 % incluido, 18.500 pasaba a 19.980. El backend
+   * reconstruia 18.500, veia 1.480 de diferencia, marcaba override y, con
+   * `allow_pos_price_override = false`, rechazaba el cobro con
+   * POS_PRICE_OVERRIDE_NOT_ALLOWED_001.
+   *
+   * La aritmetica local queda solo como respaldo para payloads sin
+   * `final_price`. Con variante se cae al calculo sobre `basePrice` —que ya es
+   * variant-aware— y nunca a `product.final_price`, que seria el precio del
+   * padre y pisaria el `price_override` de la variante.
+   */
+  private resolveCatalogFinalUnitPrice(
+    product: Product,
+    variant: PosProductVariant | undefined,
+    basePrice: number,
+  ): number {
+    const serverFinal = variant ? variant.final_price : product.final_price;
+    if (serverFinal != null && Number(serverFinal) > 0) return Number(serverFinal);
+    return this.calculateItemFinalPriceWithBase(product, basePrice);
   }
 
   /**

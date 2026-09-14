@@ -1105,11 +1105,23 @@ export function resolveInclusiveClearing(
     iterations += 1;
   }
 
-  // Tripwires DENTRO del camino puro (F-004): si un refactor futuro rompe la
-  // construcción, esto grita en vez de colgar (F-006) o sobrecobrar (F-039).
-  if (iterations > INCLUSIVE_SOLVER_MAX_STEPS) {
+  // Tripwires DENTRO del camino puro (F-004/F-019/F-099): el chequeo viejo
+  // (`iterations > INCLUSIVE_SOLVER_MAX_STEPS`) era inalcanzable por
+  // construcción — el propio `while (iterations < MAX)` garantiza
+  // `iterations <= MAX` siempre al salir, así que la guarda nunca podía
+  // disparar. El modo de falla real (la cota se agota sin haber convergido)
+  // salía en SILENCIO con la base subestimada — sub-cobro mudo, sin
+  // excepción, sin log. Se compara contra el predicado real de
+  // no-convergencia: si se agotaron los `MAX` pasos Y el siguiente
+  // candidato seguiría siendo viable (`fOf(base+1¢) ≤ G`), el bucle no
+  // convergió — el `break` nunca ocurrió y el bucle se detuvo por la cota,
+  // no porque el óptimo ya estuviera hallado.
+  if (
+    iterations === INCLUSIVE_SOLVER_MAX_STEPS &&
+    fOf(base.plus(INCLUSIVE_CENT)).lessThanOrEqualTo(G)
+  ) {
     throw new Error(
-      `[dian-money] inclusive solver exceeded bound (${iterations} > ${INCLUSIVE_SOLVER_MAX_STEPS})`,
+      `[dian-money] inclusive solver exceeded bound (${iterations} steps, still converging)`,
     );
   }
   if (fOf(base).greaterThan(G) && fixedTotal.lessThanOrEqualTo(G)) {

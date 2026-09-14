@@ -37,6 +37,11 @@ describe('OrdersService', () => {
       deleteMany: jest.fn(),
       findMany: jest.fn(),
     },
+    // C.8 — F-035/F-047: `assertNoPersistedTaxBreakdown` consulta esto ANTES
+    // del `deleteMany` de `order_items` en `updateOrderItems` /
+    // `updateOrderFromEditor`. Default `null` en el beforeEach (ninguna
+    // orden de prueba tiene desglose fiscal salvo que un spec lo sobrescriba).
+    order_item_taxes: { findFirst: jest.fn() },
     order_promotions: {
       createMany: jest.fn(),
       deleteMany: jest.fn(),
@@ -225,6 +230,10 @@ describe('OrdersService', () => {
     // que sí necesitan una tasa concreta sobrescriben esto en su propio
     // cuerpo con `.mockResolvedValue([...])`.
     mockPrismaService.product_tax_assignments.findMany.mockResolvedValue([]);
+    // C.8 — F-035/F-047: default sin desglose fiscal persistido, así que el
+    // guard nuevo no bloquea ninguna spec existente. El spec dedicado abajo
+    // sobrescribe esto con una fila para probar el 409.
+    mockPrismaService.order_item_taxes.findFirst.mockResolvedValue(null);
     mockRequestContextService.getContext.mockReturnValue({
       store_id: 1,
       organization_id: 1,

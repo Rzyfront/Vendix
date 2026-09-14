@@ -202,7 +202,13 @@ export class FinancialAnalyticsService {
         SUM(oit.tax_amount)::decimal AS total_tax,
         CASE
           WHEN oit.tax_rate > 0
-            THEN SUM(oit.tax_amount) / (oit.tax_rate / 100)
+            -- F-117: `order_item_taxes.tax_rate` es Decimal(6,5) y guarda una
+            -- FRACCION (0.19), nunca un porcentaje (19). Dividir por
+            -- `tax_rate / 100` divide en realidad por 0.0019 e infla la base
+            -- gravable 100x. El escritor (`payments.service.ts` `roundRate`)
+            -- persiste la fraccion tal cual; aqui se deshace con el mismo
+            -- divisor, sin reescalar.
+            THEN SUM(oit.tax_amount) / oit.tax_rate
           ELSE 0
         END::decimal AS taxable_amount
       FROM order_item_taxes oit
@@ -216,6 +222,11 @@ export class FinancialAnalyticsService {
         AND o.state IN (${revenueStates})
         AND o.created_at >= ${startDate}
         AND o.created_at <= ${endDate}
+        -- F-117: excluir items cancelados — la consulta de ingresos gravados
+        -- (revenueRows, mas abajo) ya lo hace; taxRows quedaba desalineada y
+        -- podia contar el impuesto de una linea que la analitica de ingresos
+        -- ya excluia.
+        AND oi.cancelled_at IS NULL
       GROUP BY
         COALESCE(oit.tax_type::text, 'unclassified'),
         oit.tax_name,
