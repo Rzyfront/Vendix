@@ -603,6 +603,183 @@ describe('OrdersService', () => {
    * `forceOrderState`. La invariante que fijan estos tests: `state` no llega
    * jamás al `prisma.orders.update` de este método.
    */
+  /**
+   * C.8 — F-006 (major): 1º de los 3 sitios que el hallazgo nombra
+   * (`create` `:509`, editor, `updateOrderItems`). Antes, `create` escribía
+   * `final_unit_price: item.final_unit_price ?? item.unit_price` — sin
+   * override explícito del cliente, el bruto quedaba degradado al NETO.
+   * Ahora deriva el bruto server-side con `resolveFinalUnitPriceServerSide`
+   * (mismas tasas de catálogo que ya resuelve para `order_item_taxes`).
+   */
+  describe('create — F-006 final_unit_price server-side (C.8)', () => {
+    const contextSpy = () =>
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        is_super_admin: false,
+        is_owner: false,
+        user_id: 99,
+        request_id: 'req-test-create-001',
+      } as any);
+
+    it('deriva final_unit_price del catálogo (19%) cuando el DTO NO manda override', async () => {
+      const spy = contextSpy();
+      try {
+        // Un solo mock de `products.findUnique` sirve tanto para
+        // `assertVariantRequiredForPrepared` (id/name/product_type/variants)
+        // como para `resolveCostPrice` (cost_price): mismo objeto, más
+        // campos de los que cada caller lee.
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+          cost_price: 50,
+        } as any);
+        // Igual que arriba: sirve para `normalizePriceUnitLines`
+        // (price_unit_quantity) y para `resolveLineTaxesForOrder`
+        // (product_tax_assignments) — misma tasa 19% exclusiva que el resto
+        // de las specs de C.8 usan como canon.
+        mockPrismaService.products.findMany.mockResolvedValue([
+          {
+            id: 1,
+            price_unit_quantity: 1,
+            product_tax_assignments: [
+              {
+                is_inclusive: false,
+                tax_categories: {
+                  tax_type: 'iva',
+                  tax_rates: [
+                    {
+                      id: 10,
+                      name: 'IVA 19%',
+                      rate: 0.19,
+                      is_compound: false,
+                      is_inclusive: false,
+                      priority: 1,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ] as any);
+        const createdOrder = {
+          id: 900,
+          store_id: 1,
+          order_number: 'ORD-TEST-0001',
+          grand_total: 119,
+          currency: 'COP',
+          order_items: [
+            {
+              product_id: 1,
+              product_variant_id: null,
+              quantity: 1,
+              stock_units_consumed: null,
+              products: { track_inventory: false },
+            },
+          ],
+        };
+        mockPrismaService.orders.create.mockResolvedValue(createdOrder as any);
+
+        const dto = {
+          order_number: 'ORD-TEST-0001',
+          subtotal: 100,
+          tax_amount: 19,
+          total_amount: 119,
+          skip_schedule_validation: true,
+          items: [
+            {
+              product_id: 1,
+              product_name: 'Test product',
+              quantity: 1,
+              unit_price: 100,
+              total_price: 100,
+              tax_amount_item: 19,
+              tax_rate: 0.19,
+              // Sin `final_unit_price`: es justo el caso que F-006 cierra.
+            },
+          ],
+        } as any;
+
+        await service.create(dto, { id: 99 });
+
+        expect(mockPrismaService.orders.create).toHaveBeenCalledTimes(1);
+        const writtenItems = (
+          mockPrismaService.orders.create.mock.calls[0][0] as any
+        ).data.order_items.create;
+        expect(writtenItems).toHaveLength(1);
+        // 100 NETO × 1.19 = 119 BRUTO — antes de este fix, quedaba en 100
+        // (degradado al NETO por `?? item.unit_price`).
+        expect(Number(writtenItems[0].final_unit_price)).toBeCloseTo(119, 2);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('honra el override explícito del carril de órdenes cuando el DTO SÍ manda final_unit_price', async () => {
+      const spy = contextSpy();
+      try {
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+          cost_price: 50,
+        } as any);
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 1, price_unit_quantity: 1, product_tax_assignments: [] },
+        ] as any);
+        const createdOrder = {
+          id: 901,
+          store_id: 1,
+          order_number: 'ORD-TEST-0002',
+          grand_total: 150,
+          currency: 'COP',
+          order_items: [
+            {
+              product_id: 1,
+              product_variant_id: null,
+              quantity: 1,
+              stock_units_consumed: null,
+              products: { track_inventory: false },
+            },
+          ],
+        };
+        mockPrismaService.orders.create.mockResolvedValue(createdOrder as any);
+
+        const dto = {
+          order_number: 'ORD-TEST-0002',
+          subtotal: 100,
+          tax_amount: 0,
+          total_amount: 150,
+          skip_schedule_validation: true,
+          items: [
+            {
+              product_id: 1,
+              product_name: 'Test product',
+              quantity: 1,
+              unit_price: 100,
+              total_price: 100,
+              tax_amount_item: 0,
+              tax_rate: 0,
+              final_unit_price: 150, // Override explícito del carril de órdenes.
+            },
+          ],
+        } as any;
+
+        await service.create(dto, { id: 99 });
+
+        const writtenItems = (
+          mockPrismaService.orders.create.mock.calls[0][0] as any
+        ).data.order_items.create;
+        expect(Number(writtenItems[0].final_unit_price)).toBe(150);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
   describe('update — todo cambio de estado pasa por el seam de OrderFlowService', () => {
     const processingOrder = {
       id: 590,
@@ -1575,15 +1752,16 @@ describe('OrdersService', () => {
 
     // ----------------------------------------------------------------
     // CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 · ERR-11 spec.
-    //
-    // `ORD_EDIT_RESPONSE_MISMATCH_001` se dispara cuando la fila
-    // persistida dentro de la transacción difiere de los totales
-    // recalculados. Forzamos que el `findFirst` post-commit devuelva
-    // un row TAMPERED (subtotal_amount distinto del recalculado) y
-    // verificamos que el editor NUNCA devuelve éxito falso.
+    // C.8 — F-068: el chequeo se movió de DESPUÉS del commit (500,
+    // `ORD_EDIT_RESPONSE_MISMATCH_001`, orden ya guardada) a ANTES de que
+    // el callback de `$transaction` retorne (409,
+    // `ORD_EDIT_TOTALS_ROLLBACK_001`, Prisma revierte todo). Forzamos que
+    // el `findFirst` leído DENTRO de la transacción devuelva un row
+    // TAMPERED (subtotal_amount distinto del recalculado) y verificamos
+    // que el editor NUNCA devuelve éxito falso ni dice "se guardó".
     // ----------------------------------------------------------------
 
-    it('lanza 500 ORD_EDIT_RESPONSE_MISMATCH_001 cuando la fila persistida difiere del cálculo', async () => {
+    it('lanza 409 ORD_EDIT_TOTALS_ROLLBACK_001 (no compromete la fila) cuando la fila a persistir difiere del cálculo', async () => {
       setupContext();
       const contextSpy = spyContext();
       try {
@@ -1615,12 +1793,56 @@ describe('OrdersService', () => {
 
         expect(caught).toBeInstanceOf(VendixHttpException);
         expect(caught!.errorCode).toBe(
-          ErrorCodes.ORD_EDIT_RESPONSE_MISMATCH_001.code,
+          ErrorCodes.ORD_EDIT_TOTALS_ROLLBACK_001.code,
         );
         const responseBody = (caught as any).getResponse?.() ?? {};
         const details = (responseBody as any).details ?? {};
         expect(details?.expected?.subtotal).toBeDefined();
         expect(details?.actual?.subtotal).toBe(999);
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // C.8 — F-035 (major) / F-047 (blocker): `updateOrderFromEditor`
+    // reemplaza las líneas con `order_items.deleteMany` + recreación; si
+    // la orden ya tiene desglose fiscal persistido (`order_item_taxes`),
+    // ese `deleteMany` choca contra la FK `order_item_taxes_order_item_id_fkey`
+    // (sin `onDelete`, RESTRICT por default) y Prisma lanza P2003 crudo —
+    // un 500 sin código de negocio. `assertNoPersistedTaxBreakdown` corta
+    // ANTES, con 409 `ORD_EDIT_TAX_BREAKDOWN_LOCKED_001`, sin tocar una
+    // sola fila.
+    // ----------------------------------------------------------------
+    it('lanza 409 ORD_EDIT_TAX_BREAKDOWN_LOCKED_001 si la orden ya tiene order_item_taxes persistidos', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
+        // La orden ya tiene al menos un renglón de desglose fiscal.
+        mockPrismaService.order_item_taxes.findFirst.mockResolvedValueOnce({
+          id: 77,
+        } as any);
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, fullDto);
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_TAX_BREAKDOWN_LOCKED_001.code,
+        );
+        // La guarda corre ANTES del deleteMany: ninguna línea se toca.
+        expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
       } finally {
         contextSpy.mockRestore();
       }
@@ -1858,6 +2080,88 @@ describe('OrdersService', () => {
             }),
           }),
         );
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+  });
+
+  /**
+   * C.8 — F-035 (major) / F-047 (blocker): `updateOrderItems` es el OTRO
+   * escritor (además de `updateOrderFromEditor`) que reemplaza líneas con
+   * `order_items.deleteMany` + recreación. Misma FK, mismo P2003 crudo, y
+   * `assertNoPersistedTaxBreakdown` es el MISMO guard compartido — esta
+   * prueba cubre el sitio propio de `updateOrderItems` (orders.service.ts,
+   * dentro del `$transaction`, justo después de `assertVariantRequiredForPrepared`).
+   */
+  describe('updateOrderItems — F-035/F-047 guard (C.8)', () => {
+    it('lanza 409 ORD_EDIT_TAX_BREAKDOWN_LOCKED_001 si la orden ya tiene order_item_taxes persistidos', async () => {
+      mockRequestContextService.getContext.mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        is_super_admin: false,
+        user_id: 99,
+        request_id: 'req-test-002',
+      });
+      const contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({
+          store_id: 1,
+          organization_id: 1,
+          is_super_admin: false,
+          is_owner: false,
+          user_id: 99,
+          request_id: 'req-test-002',
+        });
+      try {
+        mockPrismaService.orders.findFirst.mockResolvedValue({
+          id: 700,
+          store_id: 1,
+          state: 'draft',
+        } as any);
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 1 },
+        ] as any);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
+        // La orden ya tiene desglose fiscal persistido.
+        mockPrismaService.order_item_taxes.findFirst.mockResolvedValueOnce({
+          id: 55,
+        } as any);
+
+        const dto = {
+          items: [
+            {
+              product_id: 1,
+              product_name: 'Test product',
+              quantity: 1,
+              unit_price: 100,
+              total_price: 100,
+              tax_amount_item: 0,
+              tax_rate: 0,
+            },
+          ],
+        } as any;
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderItems(700, dto);
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_TAX_BREAKDOWN_LOCKED_001.code,
+        );
+        // La guarda corre ANTES del deleteMany: ninguna línea se toca.
+        expect(
+          mockPrismaService.order_items.deleteMany,
+        ).not.toHaveBeenCalled();
       } finally {
         contextSpy.mockRestore();
       }
