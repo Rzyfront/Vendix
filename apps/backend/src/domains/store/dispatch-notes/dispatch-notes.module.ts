@@ -4,7 +4,7 @@ import { DispatchNotesService } from './dispatch-notes.service';
 import { DispatchNotesController } from './dispatch-notes.controller';
 import { ReceiptScanProcessor } from './receipt-scan.processor';
 import { DispatchNoteFlowService } from './dispatch-note-flow/dispatch-note-flow.service';
-import { DispatchNotePdfService } from './pdf/dispatch-note-pdf.service';
+import { DispatchNotePdfModule } from './pdf/dispatch-note-pdf.module';
 import { DispatchNumberGenerator } from './utils/dispatch-number-generator';
 import { RouteNumberGenerator } from '../dispatch-routes/utils/route-number-generator';
 import { DispatchNoteEventsListener } from './listeners/dispatch-note-events.listener';
@@ -29,10 +29,12 @@ import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
 // ADR-15 §4 (CP-pos-exclusive-tax-double-charge, unificación
 // remisión-gateway) — `DispatchNotesController` llama `PrintGatewayService`
 // en `POST /:id/pdf` en vez de a `DispatchNotePdfService` directo.
-// `PrintFormatsModule`, a su vez, importa ESTE módulo para que su
-// `DispatchNotePdfRenderer` pueda inyectar `DispatchNotePdfService` — ciclo
-// de módulos genuino, resuelto con `forwardRef` en AMBOS lados (ver también
-// `print-formats.module.ts`).
+// La arista es de UN SOLO sentido: `PrintFormatsModule` NO importa este
+// módulo, toma `DispatchNotePdfService` del módulo hoja `DispatchNotePdfModule`
+// (el porqué, con el error de arranque medido, está en
+// `pdf/dispatch-note-pdf.module.ts`). El `forwardRef` de acá se queda porque
+// `PrintFormatsModule` sí tiene otras aristas que vuelven a este dominio por
+// `store.module.ts`, y cuesta cero.
 import { PrintFormatsModule } from '../print-formats/print-formats.module';
 
 @Module({
@@ -40,6 +42,9 @@ import { PrintFormatsModule } from '../print-formats/print-formats.module';
     ResponseModule,
     PrismaModule,
     S3Module,
+    // ADR-15 §4 — el PDF de la remisión vive en su propio módulo hoja, que
+    // también consume `PrintFormatsModule`. Ver `pdf/dispatch-note-pdf.module.ts`.
+    DispatchNotePdfModule,
     InventoryModule,
     InventorySerialNumbersModule,
     OrderStockCommitModule,
@@ -57,7 +62,6 @@ import { PrintFormatsModule } from '../print-formats/print-formats.module';
   providers: [
     DispatchNotesService,
     DispatchNoteFlowService,
-    DispatchNotePdfService,
     DispatchNumberGenerator,
     RouteNumberGenerator,
     DispatchNoteEventsListener,
@@ -70,11 +74,10 @@ import { PrintFormatsModule } from '../print-formats/print-formats.module';
   ],
   exports: [
     DispatchNotesService,
-    // ADR-15 §4 — `PrintFormatsModule` inyecta este servicio en
-    // `DispatchNotePdfRenderer` (ver comentario del import de
-    // `PrintFormatsModule` arriba). Sigue siendo el mismo builder pdfkit de
-    // siempre; sólo cambia quién lo llama.
-    DispatchNotePdfService,
+    // ADR-15 §4 — se re-exporta el módulo hoja, no el proveedor suelto: quien
+    // importe `DispatchNotesModule` sigue viendo `DispatchNotePdfService` sin
+    // que exista una segunda declaración del servicio.
+    DispatchNotePdfModule,
   ],
 })
 export class DispatchNotesModule {}

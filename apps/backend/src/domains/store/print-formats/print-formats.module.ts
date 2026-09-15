@@ -1,4 +1,4 @@
-import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
+import { Module, OnModuleInit } from '@nestjs/common';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseService } from '@common/responses/response.service';
 import { QrService } from '../../../common/services/qr.service';
@@ -92,14 +92,13 @@ import { WithholdingEmployeeCertificateDataProvider } from './providers/withhold
 // import, Nest no resuelve la inyección de `PrintFiscalGateService` en este
 // módulo y el booteo falla con `UnknownDependenciesException`.
 import { InvoiceProviderModule } from '../invoicing/providers/invoice-provider.module';
-// ADR-15 §4 — `DispatchNotePdfRenderer` necesita `DispatchNotePdfService`,
-// que vive en `DispatchNotesModule`. `DispatchNotesModule`, a su vez, importa
-// ESTE módulo para que `DispatchNotesController` use `PrintGatewayService`
-// (`POST /store/dispatch-notes/:id/pdf`) — dependencia circular de módulos
-// genuina, no accidental. `forwardRef` en AMBOS `imports` (ver también
-// `dispatch-notes.module.ts`) es el mecanismo que ya usa este repo para este
-// caso (mismo patrón que `settings.module.ts` ↔ `cash-registers.module.ts`).
-import { DispatchNotesModule } from '../dispatch-notes/dispatch-notes.module';
+// ADR-15 §4 — `DispatchNotePdfRenderer` necesita `DispatchNotePdfService`, y
+// lo toma del módulo HOJA que lo publica, NO de `DispatchNotesModule`.
+// Importar el módulo de dominio entero cerraba el grafo de `require` contra
+// `NotificationsModule` y el backend no arrancaba; `forwardRef` no lo salva
+// porque el ciclo es de carga, no de inyección. El porqué completo, con el
+// error medido, está en `dispatch-note-pdf.module.ts`.
+import { DispatchNotePdfModule } from '../dispatch-notes/pdf/dispatch-note-pdf.module';
 
 @Module({
   imports: [
@@ -110,8 +109,9 @@ import { DispatchNotesModule } from '../dispatch-notes/dispatch-notes.module';
     // [print-fiscal-gate] — ver import arriba. Aporta
     // `FiscalProductionReadinessService` al grafo de DI del módulo de impresión.
     InvoiceProviderModule,
-    // ADR-15 §4 — ver comentario del import de `DispatchNotesModule` arriba.
-    forwardRef(() => DispatchNotesModule),
+    // ADR-15 §4 — hoja, sin `forwardRef`: no hay ciclo que romper porque
+    // este módulo no vuelve acá. Ver el import arriba.
+    DispatchNotePdfModule,
   ],
   // ORDEN DELIBERADO. `PrintTemplatesLibraryController` sirve
   // `store/print-formats/library`; `PrintFormatsController` sirve
