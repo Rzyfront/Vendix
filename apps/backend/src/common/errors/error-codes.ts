@@ -5380,6 +5380,25 @@ export const ErrorCodes = {
     devMessage:
       'La estación tiene una sesión abierta: ciérrala antes de desactivarla',
   },
+  // El borrado FÍSICO (`DELETE /store/kds/:id?hard=true`) no arrastra
+  // historial: `kitchen_tickets.kds_id` es NOT NULL con FK RESTRICT y las
+  // sesiones son auditoría de turnos. Con sesiones o tickets, 409 y vía
+  // normal (baja lógica). Sin historial sí se puede borrar la fila.
+  KDS_HAS_HISTORY: {
+    code: 'KDS_HAS_HISTORY',
+    httpStatus: 409,
+    devMessage:
+      'La estación tiene historial (sesiones o tickets de cocina): desactívala en lugar de eliminarla',
+  },
+  // `products.kds_id` es SET NULL, así que la DB dejaría borrar — pero
+  // dejaría platos huérfanos de tablero que caerían al default en el fire.
+  // 409 con conteo para que el operador reasigne antes de reintentar.
+  KDS_HAS_PRODUCTS: {
+    code: 'KDS_HAS_PRODUCTS',
+    httpStatus: 409,
+    devMessage:
+      'La estación tiene productos asignados: reasígnalos a otra estación antes de eliminarla',
+  },
   KDS_SESSION_NOT_FOUND: {
     code: 'KDS_SESSION_NOT_FOUND',
     httpStatus: 404,
