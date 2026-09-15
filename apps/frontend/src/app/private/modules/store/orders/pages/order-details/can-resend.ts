@@ -41,6 +41,10 @@ export function hasCancellationDecision(
  *  - Un `kitchen_ticket_items` con `status === 'delivered'` veta SALVO
  *    decisión persistida (el remake de un plato entregado-cancelado
  *    vuelve a consumir o no según la decisión).
+ *  - Una fila con `cancelled_at` (soft cancel por ítem o cancelación de
+ *    la orden, que marca TODOS sus ítems disparados) veta SALVO decisión
+ *    persistida: sin esta excepción el remake post-cancelación quedaría
+ *    muerto en la UI aunque el backend lo acepte.
  *  - Sin decisión, el veto actual queda intacto.
  *
  * Pura: no toca signals ni estado de componente. Exportada para que el
@@ -49,7 +53,10 @@ export function hasCancellationDecision(
 export function canResendOrderItem(
   item: Pick<
     OrderItem,
-    'inventory_consumed_at_fire' | 'kitchen_ticket_items' | 'cancellation_type'
+    | 'inventory_consumed_at_fire'
+    | 'kitchen_ticket_items'
+    | 'cancellation_type'
+    | 'cancelled_at'
   >,
   orderState: OrderState | string | null | undefined,
 ): boolean {
@@ -64,6 +71,7 @@ export function canResendOrderItem(
     return false;
   }
   const decided = hasCancellationDecision(item);
+  if (item.cancelled_at != null && !decided) return false;
   if (orderState === 'cancelled') {
     // Remake post-cancelación: solo con decisión persistida.
     return decided;

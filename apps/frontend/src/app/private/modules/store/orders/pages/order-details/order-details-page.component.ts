@@ -3699,8 +3699,8 @@ export class OrderDetailsPageComponent {
    * no ofrezco acciones que el backend rechazaría con 422.
    */
   canResend(item: OrderItem): boolean {
-    // Fila cancelada: excluida de acciones posteriores (badge + motivo).
-    if (item.cancelled_at) return false;
+    // La regla de fila cancelada vive en `canResendOrderItem` (testeable):
+    // veta SALVO decisión reuse/waste, que es el remake post-cancelación.
     return canResendOrderItem(item, this.order()?.state);
   }
 
