@@ -40,6 +40,10 @@ export class VideoLibraryService {
     return this.http.post<{ view_count: number }>(`${this.api_url}/videos/${id}/view`, {});
   }
 
+  toggleLike(id: number, liked: boolean): Observable<{ like_count: number }> {
+    return this.http.post<{ like_count: number }>(`${this.api_url}/videos/${id}/like`, { liked });
+  }
+
   getCategories(): Observable<VideoCategory[]> {
     return this.http.get<VideoCategory[]>(`${this.api_url}/categories`);
   }

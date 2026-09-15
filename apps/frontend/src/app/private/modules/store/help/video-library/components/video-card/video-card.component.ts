@@ -1,4 +1,4 @@
-import { Component, input, computed } from '@angular/core';
+import { Component, input, output, computed } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
@@ -33,10 +33,21 @@ import { Video } from '../../models/video.model';
 
         <!-- Meta -->
         <div class="flex flex-col justify-start min-w-0 flex-1 py-0.5">
-          <h4 class="text-xs font-semibold text-neutral-900 dark:text-neutral-100 line-clamp-2 leading-tight group-hover:text-primary transition-colors">
-            {{ video().title }}
-          </h4>
-          <span class="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1 truncate">
+          <div class="flex items-start justify-between gap-1">
+            <h4 class="text-xs font-semibold text-neutral-900 dark:text-neutral-100 line-clamp-2 leading-tight group-hover:text-primary transition-colors">
+              {{ video().title }}
+            </h4>
+            <button
+              type="button"
+              (click)="$event.preventDefault(); $event.stopPropagation(); shareClicked.emit(video())"
+              class="p-1 rounded-md text-neutral-400 hover:text-primary hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors shrink-0"
+              title="Compartir video"
+              aria-label="Compartir video"
+            >
+              <app-icon name="share-2" [size]="13"></app-icon>
+            </button>
+          </div>
+          <span class="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5 truncate">
             {{ video().category.name }}
           </span>
           <div class="flex items-center gap-1.5 text-[11px] text-neutral-400 dark:text-neutral-500 mt-0.5">
@@ -93,9 +104,20 @@ import { Video } from '../../models/video.model';
 
           <!-- Details -->
           <div class="flex flex-col flex-1 min-w-0">
-            <h3 class="text-sm font-bold text-neutral-900 dark:text-neutral-100 line-clamp-2 leading-snug group-hover:text-primary transition-colors">
-              {{ video().title }}
-            </h3>
+            <div class="flex items-start justify-between gap-1.5">
+              <h3 class="text-sm font-bold text-neutral-900 dark:text-neutral-100 line-clamp-2 leading-snug group-hover:text-primary transition-colors">
+                {{ video().title }}
+              </h3>
+              <button
+                type="button"
+                (click)="$event.preventDefault(); $event.stopPropagation(); shareClicked.emit(video())"
+                class="p-1.5 rounded-lg text-neutral-400 hover:text-primary hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors shrink-0"
+                title="Compartir video"
+                aria-label="Compartir video"
+              >
+                <app-icon name="share-2" [size]="14"></app-icon>
+              </button>
+            </div>
 
             <!-- Category & Module -->
             <div class="flex items-center gap-1.5 mt-1 text-xs text-neutral-500 dark:text-neutral-400 truncate">
@@ -123,6 +145,7 @@ import { Video } from '../../models/video.model';
 export class VideoCardComponent {
   video = input.required<Video>();
   layout = input<'vertical' | 'horizontal'>('vertical');
+  shareClicked = output<Video>();
 
   thumbnailUrl = computed(() => {
     const v = this.video();

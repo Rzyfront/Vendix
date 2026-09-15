@@ -32,7 +32,9 @@ export interface Video {
   category_id: number;
   module?: string | null;
   tags: string[];
+  keywords?: string[];
   view_count: number;
+  like_count: number;
   created_by_id?: number | null;
   store_id?: number | null;
   is_featured: boolean;
@@ -53,6 +55,7 @@ export interface VideoStats {
   published: number;
   draft: number;
   total_views: number;
+  total_likes?: number;
 }
 
 export interface VideosResponse {

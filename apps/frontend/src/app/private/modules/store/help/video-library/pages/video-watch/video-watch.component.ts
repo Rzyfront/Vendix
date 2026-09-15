@@ -13,10 +13,12 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { SpinnerComponent } from '../../../../../../../shared/components/spinner/spinner.component';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
+import { BreadcrumbService } from '../../../../../../../core/services/breadcrumb.service';
 import { VideoLibraryService } from '../../services/video-library.service';
 import { Video, TimestampBookmark } from '../../models/video.model';
 import { VideoPlayerComponent } from '../../components/video-player/video-player.component';
 import { VideoCardComponent } from '../../components/video-card/video-card.component';
+import { VideoShareModalComponent } from '../../components/video-share-modal/video-share-modal.component';
 
 @Component({
   selector: 'app-video-watch',
@@ -28,6 +30,7 @@ import { VideoCardComponent } from '../../components/video-card/video-card.compo
     SpinnerComponent,
     VideoPlayerComponent,
     VideoCardComponent,
+    VideoShareModalComponent,
   ],
   template: `
     <div class="max-w-7xl mx-auto p-3 sm:p-4 md:p-6 w-full">
@@ -55,7 +58,7 @@ import { VideoCardComponent } from '../../components/video-card/video-card.compo
               [videoSource]="video()!.video_source"
               [externalId]="video()!.external_id"
               [seekSeconds]="seekSeconds()"
-              [autoplay]="true"
+              [autoplay]="false"
             ></app-video-player>
 
             <!-- Video Title -->
@@ -168,7 +171,7 @@ import { VideoCardComponent } from '../../components/video-card/video-card.compo
             @if (relatedVideos().length > 0) {
               <div class="flex flex-col gap-2">
                 @for (rel of relatedVideos(); track rel.id) {
-                  <app-video-card [video]="rel" layout="horizontal"></app-video-card>
+                  <app-video-card [video]="rel" layout="horizontal" (shareClicked)="shareVideo($event)"></app-video-card>
                 }
               </div>
             } @else {
@@ -183,12 +186,19 @@ import { VideoCardComponent } from '../../components/video-card/video-card.compo
           Video no encontrado.
         </div>
       }
+
+      <!-- Modal para compartir video -->
+      <app-video-share-modal
+        [(isOpen)]="isShareModalOpen"
+        [video]="shareTargetVideo()"
+      ></app-video-share-modal>
     </div>
   `,
 })
 export class VideoWatchComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private videoService = inject(VideoLibraryService);
+  private breadcrumbService = inject(BreadcrumbService);
   private toast = inject(ToastService);
   private destroyRef = inject(DestroyRef);
 
@@ -197,7 +207,9 @@ export class VideoWatchComponent implements OnInit {
   isLoading = signal<boolean>(true);
   seekSeconds = signal<number | null>(null);
   isLiked = signal<boolean>(false);
-  likesCount = signal<number>(12);
+  likesCount = signal<number>(0);
+  isShareModalOpen = signal<boolean>(false);
+  shareTargetVideo = signal<Video | null>(null);
 
   timestamps = computed<TimestampBookmark[]>(() => {
     const v = this.video();
@@ -238,6 +250,16 @@ export class VideoWatchComponent implements OnInit {
           this.relatedVideos.set(data.related_videos || []);
           this.isLoading.set(false);
 
+          // Update header breadcrumb and title with the actual video title
+          this.breadcrumbService.updateCurrentTitle(data.title);
+
+          // Restore like status and count
+          this.likesCount.set(data.like_count || 0);
+          if (typeof window !== 'undefined' && window.localStorage) {
+            const stored = localStorage.getItem(`vendix_liked_video_${data.id}`) === 'true';
+            this.isLiked.set(stored);
+          }
+
           // Track view count
           this.videoService
             .incrementView(data.id)
@@ -256,19 +278,37 @@ export class VideoWatchComponent implements OnInit {
   }
 
   toggleLike() {
-    this.isLiked.update((v) => !v);
-    this.likesCount.update((c) => (this.isLiked() ? c + 1 : Math.max(0, c - 1)));
+    const v = this.video();
+    if (!v) return;
+    const newLiked = !this.isLiked();
+    this.isLiked.set(newLiked);
+    this.likesCount.update((c) => (newLiked ? c + 1 : Math.max(0, c - 1)));
+
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const storageKey = `vendix_liked_video_${v.id}`;
+      if (newLiked) {
+        localStorage.setItem(storageKey, 'true');
+      } else {
+        localStorage.removeItem(storageKey);
+      }
+    }
+
+    // Persist like in backend database
+    this.videoService
+      .toggleLike(v.id, newLiked)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          if (res?.like_count !== undefined) {
+            this.likesCount.set(res.like_count);
+          }
+        },
+      });
   }
 
-  shareVideo() {
-    const url = window.location.href;
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(url).then(() => {
-        this.toast.success('Enlace del video copiado al portapapeles');
-      });
-    } else {
-      this.toast.info(`Enlace: ${url}`);
-    }
+  shareVideo(target?: Video) {
+    this.shareTargetVideo.set(target || this.video());
+    this.isShareModalOpen.set(true);
   }
 
   private extractTimestamps(text: string): TimestampBookmark[] {

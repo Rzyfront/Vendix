@@ -1,6 +1,7 @@
 import { Component, OnInit, inject, signal, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
 
@@ -9,47 +10,53 @@ import { SpinnerComponent } from '../../../../../shared/components/spinner/spinn
 import { VideoLibraryService } from './services/video-library.service';
 import { Video, VideoCategory } from './models/video.model';
 import { VideoCardComponent } from './components/video-card/video-card.component';
+import { VideoShareModalComponent } from './components/video-share-modal/video-share-modal.component';
 
 @Component({
   selector: 'app-video-feed',
   standalone: true,
   imports: [
     CommonModule,
+    RouterModule,
     FormsModule,
     IconComponent,
     SpinnerComponent,
     VideoCardComponent,
+    VideoShareModalComponent,
   ],
   template: `
-    <div class="flex flex-col gap-5 p-4 md:p-6 max-w-7xl mx-auto w-full">
+    <div class="video-feed-container">
       <!-- Header -->
-      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div class="help-header flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 class="text-2xl md:text-3xl font-bold text-neutral-900 dark:text-neutral-100 tracking-tight">
-            Videos de Capacitación
-          </h1>
-          <p class="text-sm text-neutral-500 dark:text-neutral-400 mt-1">
-            Tutoriales oficiales y guías prácticas para optimizar la operación de tu negocio
-          </p>
+          <h2 class="help-title">Videos de Capacitación</h2>
+          <p class="help-subtitle">Tutoriales oficiales y guías prácticas para optimizar la operación de tu negocio</p>
         </div>
 
-        <!-- Search Input -->
-        <div class="relative w-full md:w-80">
-          <app-icon
-            name="search"
-            [size]="18"
-            class="absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
-          ></app-icon>
+        <a
+          routerLink="/admin/help/center"
+          class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary/10 hover:bg-primary/15 text-primary text-xs font-semibold border border-primary/20 transition-all self-start sm:self-auto group no-underline"
+        >
+          <app-icon name="book-open" [size]="16" class="text-primary group-hover:scale-110 transition-transform"></app-icon>
+          <span>Centro de Ayuda</span>
+          <app-icon name="arrow-right" [size]="14"></app-icon>
+        </a>
+      </div>
+
+      <!-- Search Bar -->
+      <div class="search-section">
+        <div class="search-input-wrapper">
+          <app-icon name="search" [size]="18" class="search-icon"></app-icon>
           <input
             type="text"
-            class="w-full pl-10 pr-10 py-2.5 bg-surface border border-neutral-200 dark:border-neutral-700 rounded-xl text-sm focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-neutral-900 dark:text-neutral-100 placeholder-neutral-400"
+            class="search-input"
             placeholder="Buscar tutoriales..."
             [ngModel]="searchQuery()"
             (ngModelChange)="onSearchChange($event)"
           />
           @if (searchQuery()) {
             <button
-              class="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+              class="clear-btn"
               (click)="clearSearch()"
               aria-label="Limpiar búsqueda"
             >
@@ -59,45 +66,28 @@ import { VideoCardComponent } from './components/video-card/video-card.component
         </div>
       </div>
 
-      <!-- Categories Pills Bar (YouTube Style) -->
+      <!-- Category Filters -->
       @if (categories().length > 0) {
-        <div class="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+        <div class="category-filters">
           <button
-            class="px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition-all cursor-pointer"
-            [ngClass]="
-              !selectedCategory()
-                ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 shadow-sm'
-                : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700'
-            "
+            class="category-chip"
+            [class.active]="!selectedCategory()"
             (click)="selectCategory(null)"
           >
             Todos
           </button>
           @for (cat of categories(); track cat.id) {
             <button
-              class="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold shrink-0 transition-all cursor-pointer"
-              [ngClass]="
-                selectedCategory() === cat.slug
-                  ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 shadow-sm'
-                  : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700'
-              "
+              class="category-chip"
+              [class.active]="selectedCategory() === cat.slug"
               (click)="selectCategory(cat.slug)"
             >
               @if (cat.icon) {
                 <app-icon [name]="cat.icon" [size]="14"></app-icon>
               }
-              <span>{{ cat.name }}</span>
+              {{ cat.name }}
               @if (cat._count?.videos) {
-                <span
-                  class="text-[10px] px-1.5 py-0.2 rounded-full"
-                  [ngClass]="
-                    selectedCategory() === cat.slug
-                      ? 'bg-white/20 text-white dark:bg-neutral-900/20 dark:text-neutral-900'
-                      : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300'
-                  "
-                >
-                  {{ cat._count!.videos }}
-                </span>
+                <span class="chip-count">{{ cat._count!.videos }}</span>
               }
             </button>
           }
@@ -115,7 +105,7 @@ import { VideoCardComponent } from './components/video-card/video-card.component
       @if (!isLoading() && videos().length > 0) {
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6">
           @for (video of videos(); track video.id) {
-            <app-video-card [video]="video" layout="vertical"></app-video-card>
+            <app-video-card [video]="video" layout="vertical" (shareClicked)="onShareVideo($event)"></app-video-card>
           }
         </div>
       }
@@ -146,8 +136,148 @@ import { VideoCardComponent } from './components/video-card/video-card.component
           }
         </div>
       }
+
+      <!-- Modal para compartir video -->
+      <app-video-share-modal
+        [(isOpen)]="isShareModalOpen"
+        [video]="selectedVideoForShare()"
+      ></app-video-share-modal>
     </div>
   `,
+  styles: [
+    `
+      .video-feed-container {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 1.5rem 1rem;
+        width: 100%;
+      }
+
+      .help-header {
+        margin-bottom: 1.5rem;
+      }
+
+      .help-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--color-text, #111827);
+        margin: 0 0 0.25rem 0;
+      }
+
+      .help-subtitle {
+        font-size: 0.875rem;
+        color: var(--color-text-secondary, #6b7280);
+        margin: 0;
+      }
+
+      /* Search */
+      .search-section {
+        margin-bottom: 1.25rem;
+      }
+
+      .search-input-wrapper {
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+
+      .search-icon {
+        position: absolute;
+        left: 14px;
+        color: var(--color-text-tertiary, #9ca3af);
+        pointer-events: none;
+      }
+
+      .search-input {
+        width: 100%;
+        padding: 0.75rem 2.5rem 0.75rem 2.75rem;
+        border: 1px solid var(--color-border, #e5e7eb);
+        border-radius: 12px;
+        font-size: 0.9375rem;
+        background: var(--color-surface, #fff);
+        color: var(--color-text, #111827);
+        outline: none;
+        transition: all 0.15s;
+      }
+
+      .search-input:focus {
+        border-color: var(--color-primary, #3b82f6);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+      }
+
+      .search-input::placeholder {
+        color: var(--color-text-tertiary, #9ca3af);
+      }
+
+      .clear-btn {
+        position: absolute;
+        right: 12px;
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 4px;
+        color: var(--color-text-tertiary, #9ca3af);
+        border-radius: 4px;
+      }
+
+      .clear-btn:hover {
+        color: var(--color-text, #111827);
+      }
+
+      /* Category Filters */
+      .category-filters {
+        display: flex;
+        gap: 0.5rem;
+        overflow-x: auto;
+        padding-bottom: 0.5rem;
+        margin-bottom: 1.25rem;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+      }
+
+      .category-filters::-webkit-scrollbar {
+        display: none;
+      }
+
+      .category-chip {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border: 1px solid var(--color-border, #e5e7eb);
+        border-radius: 20px;
+        background: var(--color-surface, #fff);
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--color-text-secondary, #6b7280);
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.15s;
+      }
+
+      .category-chip:hover {
+        border-color: var(--color-primary, #3b82f6);
+        color: var(--color-primary, #3b82f6);
+      }
+
+      .category-chip.active {
+        background: var(--color-primary, #3b82f6);
+        border-color: var(--color-primary, #3b82f6);
+        color: white;
+      }
+
+      .chip-count {
+        font-size: 11px;
+        background: rgba(0, 0, 0, 0.08);
+        padding: 1px 6px;
+        border-radius: 10px;
+      }
+
+      .category-chip.active .chip-count {
+        background: rgba(255, 255, 255, 0.25);
+      }
+    `,
+  ],
 })
 export class VideoFeedComponent implements OnInit {
   private videoService = inject(VideoLibraryService);
@@ -159,6 +289,8 @@ export class VideoFeedComponent implements OnInit {
   selectedCategory = signal<string | null>(null);
   searchQuery = signal<string>('');
   isLoading = signal<boolean>(true);
+  isShareModalOpen = signal<boolean>(false);
+  selectedVideoForShare = signal<Video | null>(null);
 
   ngOnInit() {
     this.loadCategories();
@@ -222,5 +354,10 @@ export class VideoFeedComponent implements OnInit {
     this.searchQuery.set('');
     this.selectedCategory.set(null);
     this.loadVideos();
+  }
+
+  onShareVideo(video: Video) {
+    this.selectedVideoForShare.set(video);
+    this.isShareModalOpen.set(true);
   }
 }

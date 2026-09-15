@@ -4,16 +4,19 @@ import {
   output,
   computed,
   effect,
+  signal,
   viewChild,
   ElementRef,
   inject,
 } from '@angular/core';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
+import { SpinnerComponent } from '../../../../../../../shared/components/spinner/spinner.component';
 import { VideoSourceType } from '../../models/video.model';
 
 @Component({
   selector: 'app-video-player',
   standalone: true,
+  imports: [SpinnerComponent],
   template: `
     <div class="relative w-full aspect-video bg-neutral-900 rounded-2xl overflow-hidden shadow-xl border border-neutral-800">
       @if (isDirectVideo()) {
@@ -21,10 +24,22 @@ import { VideoSourceType } from '../../models/video.model';
           #html5Player
           [src]="videoUrl()"
           controls
+          preload="auto"
+          playsinline
           [autoplay]="autoplay()"
           class="w-full h-full object-contain"
+          (loadstart)="onWaiting()"
+          (waiting)="onWaiting()"
+          (playing)="onPlaying()"
+          (canplay)="onCanPlay()"
           (ended)="onEnded()"
         ></video>
+        @if (isBuffering()) {
+          <div class="absolute inset-0 flex flex-col items-center justify-center bg-neutral-950/90 backdrop-blur-sm pointer-events-none transition-opacity z-20">
+            <app-spinner size="lg"></app-spinner>
+            <span class="text-xs text-white/90 mt-3 font-medium">Cargando video...</span>
+          </div>
+        }
       } @else if (embedUrl()) {
         <iframe
           #iframePlayer
@@ -40,6 +55,16 @@ import { VideoSourceType } from '../../models/video.model';
       }
     </div>
   `,
+  styles: [
+    `
+      /* Suprimir el círculo/botón de carga central nativo del Shadow DOM de Chromium */
+      video::-webkit-media-controls-overlay-play-button,
+      video::-webkit-media-controls-overlay-enclosure {
+        display: none !important;
+        -webkit-appearance: none;
+      }
+    `,
+  ],
 })
 export class VideoPlayerComponent {
   private sanitizer = inject(DomSanitizer);
@@ -55,6 +80,7 @@ export class VideoPlayerComponent {
   html5Player = viewChild<ElementRef<HTMLVideoElement>>('html5Player');
   iframePlayer = viewChild<ElementRef<HTMLIFrameElement>>('iframePlayer');
 
+  isBuffering = signal<boolean>(false);
   isDirectVideo = computed(() => this.videoSource() === 'DIRECT_S3');
 
   embedUrl = computed<SafeResourceUrl | null>(() => {
@@ -119,6 +145,18 @@ export class VideoPlayerComponent {
         }
       }
     });
+  }
+
+  onWaiting() {
+    this.isBuffering.set(true);
+  }
+
+  onPlaying() {
+    this.isBuffering.set(false);
+  }
+
+  onCanPlay() {
+    this.isBuffering.set(false);
   }
 
   onEnded() {

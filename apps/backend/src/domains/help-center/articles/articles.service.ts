@@ -10,72 +10,10 @@ import { Prisma } from '@prisma/client';
  * "cómo hago una transferencia entre bodegas" busque de verdad por
  * `transferencia` y `bodegas`.
  */
-const STOPWORDS = new Set([
-  'como',
-  'cómo',
-  'para',
-  'que',
-  'qué',
-  'los',
-  'las',
-  'del',
-  'una',
-  'uno',
-  'con',
-  'por',
-  'mis',
-  'sus',
-  'este',
-  'esta',
-  'esto',
-  'donde',
-  'dónde',
-  'cual',
-  'cuál',
-  'hago',
-  'hacer',
-  'puedo',
-  'quiero',
-  'necesito',
-]);
-
-function tokenize(input: string): string[] {
-  return Array.from(
-    new Set(
-      input
-        .toLowerCase()
-        .split(/[^\p{L}\p{N}]+/u)
-        .filter((token) => token.length >= 3 && !STOPWORDS.has(token)),
-    ),
-  ).slice(0, 8);
-}
-
-/**
- * Cuántos de los tokens buscados acierta el artículo. El título y las
- * etiquetas pesan el triple que el cuerpo: que una palabra esté ahí es señal de
- * que el artículo TRATA de eso, no de que lo menciona de paso.
- */
-function relevanceOf(
-  article: {
-    title: string;
-    summary: string;
-    content: string;
-    tags: string[];
-  },
-  tokens: string[],
-): number {
-  const title = article.title.toLowerCase();
-  const summary = article.summary.toLowerCase();
-  const content = article.content.toLowerCase();
-  const tags = article.tags.map((tag) => tag.toLowerCase());
-  return tokens.reduce((score, token) => {
-    if (title.includes(token)) return score + 3;
-    if (tags.some((tag) => tag.includes(token))) return score + 3;
-    if (summary.includes(token)) return score + 2;
-    if (content.includes(token)) return score + 1;
-    return score;
-  }, 0);
-}
+import {
+  tokenizeQuery,
+  calculateRelevance,
+} from '../../../common/helpers/keywords.helper';
 
 function byRelevance<
   T extends {
@@ -83,6 +21,7 @@ function byRelevance<
     summary: string;
     content: string;
     tags: string[];
+    keywords?: string[];
   },
 >(articles: T[], tokens: string[]): T[] {
   if (!tokens.length) return articles;
@@ -90,7 +29,7 @@ function byRelevance<
     .map((article, index) => ({
       article,
       index,
-      score: relevanceOf(article, tokens),
+      score: calculateRelevance(article, tokens),
     }))
     // `index` desempata para que el orden sea estable: a igual puntaje manda el
     // criterio de la consulta (más leídos primero).
@@ -126,6 +65,25 @@ export class ArticlesService {
       }),
       ...(type && { type: type as any }),
       ...(module && { module }),
+      ...(query.search && (() => {
+        const cleanSearch = query.search.trim();
+        const searchTokens = tokenizeQuery(cleanSearch);
+        return {
+          OR: [
+            { title: { contains: cleanSearch, mode: 'insensitive' } },
+            { summary: { contains: cleanSearch, mode: 'insensitive' } },
+            { content: { contains: cleanSearch, mode: 'insensitive' } },
+            { tags: { has: cleanSearch.toLowerCase() } },
+            { keywords: { has: cleanSearch.toLowerCase() } },
+            ...searchTokens.flatMap((t) => [
+              { title: { contains: t, mode: 'insensitive' as const } },
+              { summary: { contains: t, mode: 'insensitive' as const } },
+              { tags: { has: t } },
+              { keywords: { has: t } },
+            ]),
+          ],
+        };
+      })()),
     };
 
     const [data, total] = await Promise.all([
@@ -192,7 +150,7 @@ export class ArticlesService {
     }
 
     const search_term = q.trim();
-    const tokens = tokenize(search_term);
+    const tokens = tokenizeQuery(search_term);
 
     const matching = (token: string): Prisma.help_articlesWhereInput => ({
       OR: [
@@ -202,6 +160,7 @@ export class ArticlesService {
         // Las etiquetas son el único lugar donde caben las grafías que el texto
         // no usa —"multitarifa" cuando el artículo escribe "multi-tarifa"—.
         { tags: { has: token } },
+        { keywords: { has: token } },
       ],
     });
 

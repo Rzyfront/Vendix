@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { VideoLibraryService } from './video-library.service';
 import { VideoQueryDto, VideoSearchQueryDto } from './dto/video-query.dto';
@@ -35,6 +35,16 @@ export class VideoLibraryController {
   @ApiOperation({ summary: 'Increment video view count' })
   async incrementView(@Param('id') id: string) {
     return this.videoLibraryService.incrementView(+id);
+  }
+
+  @Post('videos/:id/like')
+  @Public()
+  @ApiOperation({ summary: 'Toggle or increment/decrement video like count' })
+  async toggleLike(
+    @Param('id') id: string,
+    @Body() body?: { liked?: boolean },
+  ) {
+    return this.videoLibraryService.toggleLike(+id, body?.liked);
   }
 
   @Get('categories')

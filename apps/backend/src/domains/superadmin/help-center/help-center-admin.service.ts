@@ -12,6 +12,7 @@ import {
   AdminArticleQueryDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
+import { normalizeKeywords } from '../../../common/helpers/keywords.helper';
 
 @Injectable()
 export class HelpCenterAdminService {
@@ -37,6 +38,8 @@ export class HelpCenterAdminService {
         OR: [
           { title: { contains: search, mode: 'insensitive' as const } },
           { summary: { contains: search, mode: 'insensitive' as const } },
+          { tags: { has: search.toLowerCase().trim() } },
+          { keywords: { has: search.toLowerCase().trim() } },
         ],
       }),
     };
@@ -138,6 +141,7 @@ export class HelpCenterAdminService {
         category_id: dto.category_id,
         module: dto.module || null,
         tags: dto.tags || [],
+        keywords: normalizeKeywords(dto.keywords),
         cover_image_url,
         is_featured: dto.is_featured || false,
         sort_order: dto.sort_order || 0,
@@ -209,6 +213,7 @@ export class HelpCenterAdminService {
         ...(dto.category_id && { category_id: dto.category_id }),
         ...(dto.module !== undefined && { module: dto.module || null }),
         ...(dto.tags && { tags: dto.tags }),
+        ...(dto.keywords !== undefined && { keywords: normalizeKeywords(dto.keywords) }),
         ...(cover_image_url !== undefined && { cover_image_url }),
         ...(dto.is_featured !== undefined && { is_featured: dto.is_featured }),
         ...(dto.sort_order !== undefined && { sort_order: dto.sort_order }),

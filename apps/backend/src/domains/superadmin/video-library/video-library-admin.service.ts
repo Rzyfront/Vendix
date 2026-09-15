@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { S3Service } from '../../../common/services/s3.service';
-import { S3PathHelper } from '../../../common/helpers/s3-path.helper';
 import { ImageContext } from '@common/config/image-presets';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import {
@@ -13,13 +12,13 @@ import {
   VideoSourceTypeEnum,
 } from './dto';
 import { Prisma } from '@prisma/client';
+import { normalizeKeywords } from '../../../common/helpers/keywords.helper';
 
 @Injectable()
 export class VideoLibraryAdminService {
   constructor(
     private readonly globalPrisma: GlobalPrismaService,
     private readonly s3Service: S3Service,
-    private readonly s3PathHelper: S3PathHelper,
   ) {}
 
   // ==========================================
@@ -33,11 +32,17 @@ export class VideoLibraryAdminService {
     const where: Prisma.videosWhereInput = {
       ...(status && { status: status as any }),
       ...(video_source && { video_source: video_source as any }),
-      ...(category && { category: { slug: category } }),
+      ...(category && {
+        category: isNaN(Number(category))
+          ? { slug: category }
+          : { OR: [{ slug: category }, { id: Number(category) }] },
+      }),
       ...(search && {
         OR: [
           { title: { contains: search, mode: 'insensitive' as const } },
           { summary: { contains: search, mode: 'insensitive' as const } },
+          { tags: { has: search.toLowerCase().trim() } },
+          { keywords: { has: search.toLowerCase().trim() } },
         ],
       }),
     };
@@ -115,21 +120,25 @@ export class VideoLibraryAdminService {
       thumbnail_url = `https://img.youtube.com/vi/${external_id}/maxresdefault.jpg`;
     }
 
+    const sanitizedVideoUrl = this.s3Service.sanitizeForStorage(dto.video_url) || dto.video_url;
+    const sanitizedThumbnailUrl = this.s3Service.sanitizeForStorage(thumbnail_url) || thumbnail_url;
+
     const video = await this.globalPrisma.videos.create({
       data: {
         title: dto.title,
         slug: finalSlug,
         summary: dto.summary,
         description: dto.description || null,
-        video_url: dto.video_url,
+        video_url: sanitizedVideoUrl,
         video_source: video_source as any,
         external_id: external_id || null,
         duration_seconds: dto.duration_seconds || 0,
-        thumbnail_url: thumbnail_url || null,
+        thumbnail_url: sanitizedThumbnailUrl || null,
         status: (dto.status || 'DRAFT') as any,
         category_id: dto.category_id,
         module: dto.module || null,
         tags: dto.tags || [],
+        keywords: normalizeKeywords(dto.keywords),
         is_featured: dto.is_featured || false,
         sort_order: dto.sort_order || 0,
         created_by_id: userId,
@@ -175,6 +184,13 @@ export class VideoLibraryAdminService {
       video_source = video_source || parsed.video_source;
     }
 
+    const sanitizedVideoUrl = dto.video_url !== undefined
+      ? (this.s3Service.sanitizeForStorage(dto.video_url) || dto.video_url)
+      : undefined;
+    const sanitizedThumbnailUrl = dto.thumbnail_url !== undefined
+      ? (this.s3Service.sanitizeForStorage(dto.thumbnail_url) || dto.thumbnail_url)
+      : undefined;
+
     const updated = await this.globalPrisma.videos.update({
       where: { id },
       data: {
@@ -182,15 +198,16 @@ export class VideoLibraryAdminService {
         ...(slug && { slug }),
         ...(dto.summary !== undefined && { summary: dto.summary }),
         ...(dto.description !== undefined && { description: dto.description }),
-        ...(dto.video_url && { video_url: dto.video_url }),
+        ...(sanitizedVideoUrl && { video_url: sanitizedVideoUrl }),
         ...(video_source && { video_source: video_source as any }),
         ...(external_id !== undefined && { external_id }),
         ...(dto.duration_seconds !== undefined && { duration_seconds: dto.duration_seconds }),
-        ...(dto.thumbnail_url !== undefined && { thumbnail_url: dto.thumbnail_url }),
+        ...(sanitizedThumbnailUrl !== undefined && { thumbnail_url: sanitizedThumbnailUrl }),
         ...(dto.status && { status: dto.status as any }),
         ...(dto.category_id && { category_id: dto.category_id }),
         ...(dto.module !== undefined && { module: dto.module }),
         ...(dto.tags && { tags: dto.tags }),
+        ...(dto.keywords !== undefined && { keywords: normalizeKeywords(dto.keywords) }),
         ...(dto.is_featured !== undefined && { is_featured: dto.is_featured }),
         ...(dto.sort_order !== undefined && { sort_order: dto.sort_order }),
         ...(dto.store_id !== undefined && { store_id: dto.store_id }),
@@ -227,12 +244,15 @@ export class VideoLibraryAdminService {
   // ==========================================
 
   async getVideoStats() {
-    const [total, published, draft, viewsResult] = await Promise.all([
+    const [total, published, draft, viewsResult, likesResult] = await Promise.all([
       this.globalPrisma.videos.count(),
       this.globalPrisma.videos.count({ where: { status: 'PUBLISHED' } }),
       this.globalPrisma.videos.count({ where: { status: 'DRAFT' } }),
       this.globalPrisma.videos.aggregate({
         _sum: { view_count: true },
+      }),
+      this.globalPrisma.videos.aggregate({
+        _sum: { like_count: true },
       }),
     ]);
 
@@ -241,6 +261,7 @@ export class VideoLibraryAdminService {
       published,
       draft,
       total_views: viewsResult._sum.view_count || 0,
+      total_likes: likesResult._sum.like_count || 0,
     };
   }
 
@@ -332,7 +353,7 @@ export class VideoLibraryAdminService {
   }
 
   // ==========================================
-  // THUMBNAIL UPLOAD
+  // THUMBNAIL & VIDEO UPLOADS
   // ==========================================
 
   async uploadThumbnail(file: Express.Multer.File) {
@@ -351,11 +372,16 @@ export class VideoLibraryAdminService {
       throw new VendixHttpException(ErrorCodes.HELP_IMAGE_TYPE_INVALID);
     }
 
-    const s3Path = await this.s3Service.uploadImage(file, ImageContext.ARTICLE);
-    const signedUrl = await this.s3Service.signUrl(s3Path);
+    const path = 'global/video-library/thumbnails';
+    const cleanName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const key = `${path}/${Date.now()}-${cleanName}`;
+    const result = await this.s3Service.uploadImage(file.buffer, key, {
+      context: ImageContext.ARTICLE,
+    });
+    const signedUrl = await this.s3Service.signUrl(result.key);
 
     return {
-      key: s3Path,
+      key: result.key,
       url: signedUrl,
     };
   }
@@ -404,8 +430,18 @@ export class VideoLibraryAdminService {
       return { video_source: VideoSourceTypeEnum.VIMEO, external_id: vimeoMatch[1] };
     }
 
+    if (
+      url.includes('video-library') ||
+      url.includes('.mp4') ||
+      url.includes('.webm') ||
+      url.includes('.mov') ||
+      url.includes('s3')
+    ) {
+      return { video_source: VideoSourceTypeEnum.DIRECT_S3 };
+    }
+
     return {
-      video_source: existingSource || (url.includes('s3') ? VideoSourceTypeEnum.DIRECT_S3 : VideoSourceTypeEnum.YOUTUBE),
+      video_source: existingSource || VideoSourceTypeEnum.YOUTUBE,
     };
   }
 

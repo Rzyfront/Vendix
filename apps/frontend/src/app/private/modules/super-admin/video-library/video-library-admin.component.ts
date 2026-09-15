@@ -94,7 +94,7 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
             [class.text-primary]="activeTab() === 'videos'"
             [class.border-transparent]="activeTab() !== 'videos'"
             [class.text-neutral-500]="activeTab() !== 'videos'"
-            (click)="activeTab.set('videos')"
+            (click)="setTab('videos')"
           >
             Videos de Capacitación
           </button>
@@ -104,7 +104,7 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
             [class.text-primary]="activeTab() === 'categories'"
             [class.border-transparent]="activeTab() !== 'categories'"
             [class.text-neutral-500]="activeTab() !== 'categories'"
-            (click)="activeTab.set('categories')"
+            (click)="setTab('categories')"
           >
             Categorías
           </button>
@@ -115,14 +115,21 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
           <div class="p-4 md:p-6 flex flex-col gap-4">
             <!-- Filter Bar -->
             <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-              <div class="flex flex-1 flex-col sm:flex-row items-center gap-3">
-                <div class="w-full sm:w-72">
+              <div class="flex flex-1 flex-col sm:flex-row items-stretch sm:items-center flex-wrap gap-3">
+                <div class="w-full sm:w-64 md:w-72">
                   <app-inputsearch
                     placeholder="Buscar videos..."
                     (searchChange)="onSearch($event)"
                   ></app-inputsearch>
                 </div>
-                <div class="w-full sm:w-48">
+                <div class="w-full sm:w-60 md:w-64">
+                  <app-selector
+                    placeholder="Categoría"
+                    [options]="categoryOptions()"
+                    [formControl]="categoryControl"
+                  ></app-selector>
+                </div>
+                <div class="w-full sm:w-48 md:w-52">
                   <app-selector
                     placeholder="Estado"
                     [options]="statusOptions"
@@ -186,8 +193,19 @@ export class VideoLibraryAdminComponent implements OnInit {
   isDeleteModalOpen = signal<boolean>(false);
   videoToDelete = signal<Video | null>(null);
 
+  categories = signal<VideoCategory[]>([]);
   searchQuery = signal<string>('');
+  categoryControl = new FormControl<string>('');
   statusControl = new FormControl<string>('');
+
+  categoryOptions = computed<SelectorOption[]>(() => [
+    { label: 'Todas las categorías', value: '' },
+    ...this.categories().map((cat) => ({
+      label: cat.name,
+      value: cat.slug,
+      icon: cat.icon || undefined,
+    })),
+  ]);
 
   statusOptions: SelectorOption[] = [
     { label: 'Todos los estados', value: '' },
@@ -200,18 +218,18 @@ export class VideoLibraryAdminComponent implements OnInit {
     {
       key: 'title',
       label: 'Video',
-      width: '35%',
+      width: '30%',
     },
     {
       key: 'category',
       label: 'Categoría',
-      width: '18%',
+      width: '16%',
       transform: (val: any) => val?.name || 'General',
     },
     {
       key: 'duration_seconds',
       label: 'Duración',
-      width: '12%',
+      width: '10%',
       transform: (sec: number) => {
         if (!sec) return '—';
         const m = Math.floor(sec / 60);
@@ -222,13 +240,19 @@ export class VideoLibraryAdminComponent implements OnInit {
     {
       key: 'view_count',
       label: 'Vistas',
-      width: '12%',
+      width: '10%',
       transform: (views: number) => `${views || 0}`,
+    },
+    {
+      key: 'like_count',
+      label: 'Likes',
+      width: '10%',
+      transform: (likes: number) => `${likes || 0}`,
     },
     {
       key: 'status',
       label: 'Estado',
-      width: '15%',
+      width: '14%',
       badge: true,
       transform: (status: string) =>
         status === 'PUBLISHED' ? 'Publicado' : status === 'DRAFT' ? 'Borrador' : 'Archivado',
@@ -272,11 +296,33 @@ export class VideoLibraryAdminComponent implements OnInit {
 
   ngOnInit() {
     this.loadStats();
+    this.loadCategories();
     this.loadVideos();
 
     this.statusControl.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.loadVideos());
+
+    this.categoryControl.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.loadVideos());
+  }
+
+  setTab(tab: 'videos' | 'categories') {
+    this.activeTab.set(tab);
+    if (tab === 'videos') {
+      this.loadCategories();
+    }
+  }
+
+  loadCategories() {
+    this.videoService
+      .getCategories()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (cats) => this.categories.set(cats || []),
+        error: () => this.categories.set([]),
+      });
   }
 
   loadStats() {
@@ -292,6 +338,7 @@ export class VideoLibraryAdminComponent implements OnInit {
     this.loadingVideos.set(true);
     const query = {
       search: this.searchQuery() || undefined,
+      category: this.categoryControl.value || undefined,
       status: this.statusControl.value || undefined,
     };
 

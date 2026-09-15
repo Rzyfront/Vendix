@@ -5506,6 +5506,7 @@ model help_articles {
   category_id     Int
   module          String?                  @db.VarChar(50)
   tags            String[]
+  keywords        String[]                 @default([])
   cover_image_url String?                  @db.Text
   view_count      Int                      @default(0)
   created_by_id   Int?
@@ -5569,7 +5570,9 @@ model videos {
   category_id      Int
   module           String?                @db.VarChar(50)
   tags             String[]
+  keywords         String[]               @default([])
   view_count       Int                    @default(0)
+  like_count       Int                    @default(0)
   created_by_id    Int?
   store_id         Int?
   is_featured      Boolean                @default(false)

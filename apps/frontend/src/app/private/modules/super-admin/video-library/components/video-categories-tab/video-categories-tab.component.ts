@@ -66,7 +66,7 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
                 <div class="flex items-start justify-between gap-2">
                   <div class="flex items-center gap-2.5">
                     <div class="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-                      <app-icon [name]="cat.icon || 'video'" [size]="16"></app-icon>
+                      <app-icon [name]="cat.icon || 'folder'" [size]="16"></app-icon>
                     </div>
                     <div>
                       <h4 class="text-sm font-bold text-neutral-900 dark:text-neutral-100">{{ cat.name }}</h4>
@@ -124,8 +124,9 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
         <form [formGroup]="form" (ngSubmit)="saveCategory()" class="flex flex-col gap-4 p-4">
           <app-input
             label="Nombre"
-            placeholder="ej: Facturación DIAN"
+            placeholder="ej: Clientes, Inventario, Facturación DIAN"
             [formControl]="$any(form.get('name'))"
+            (ngModelChange)="onNameChange($event)"
             [required]="true"
           ></app-input>
 
@@ -136,11 +137,39 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
             [rows]="2"
           ></app-textarea>
 
-          <app-input
-            label="Icono (Lucide)"
-            placeholder="ej: video, store, cart, settings, tag"
-            [formControl]="$any(form.get('icon'))"
-          ></app-input>
+          <div>
+            <label class="block text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-1.5">
+              Icono del Módulo (Lucide)
+            </label>
+            <div class="flex items-center gap-2 mb-2">
+              <div class="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
+                <app-icon [name]="form.get('icon')?.value || 'folder'" [size]="20"></app-icon>
+              </div>
+              <div class="flex-1">
+                <app-input
+                  placeholder="ej: users, package, warehouse, store"
+                  [formControl]="$any(form.get('icon'))"
+                ></app-input>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-1.5 mt-1">
+              <span class="text-[11px] text-neutral-400 mr-1">Módulos:</span>
+              @for (preset of moduleIconPresets; track preset.icon) {
+                <button
+                  type="button"
+                  (click)="selectIconPreset(preset.icon)"
+                  class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium border transition-colors cursor-pointer"
+                  [class]="form.get('icon')?.value === preset.icon
+                    ? 'bg-primary text-white border-primary shadow-sm'
+                    : 'bg-neutral-50 dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-600 dark:text-neutral-300 hover:border-primary/40'"
+                  [title]="preset.name"
+                >
+                  <app-icon [name]="preset.icon" [size]="12"></app-icon>
+                  <span>{{ preset.name }}</span>
+                </button>
+              }
+            </div>
+          </div>
 
           <div class="flex items-center justify-between pt-2">
             <app-toggle
@@ -187,15 +216,62 @@ export class VideoCategoriesTabComponent implements OnInit {
   editingCategory = signal<VideoCategory | null>(null);
   categoryToDelete = signal<VideoCategory | null>(null);
 
+  readonly moduleIconPresets = [
+    { name: 'Clientes', icon: 'users' },
+    { name: 'Productos', icon: 'package' },
+    { name: 'Inventario', icon: 'warehouse' },
+    { name: 'Punto de Venta (POS)', icon: 'shopping-cart' },
+    { name: 'Facturación / DIAN', icon: 'file-text' },
+    { name: 'Restaurante / Mesas', icon: 'utensils' },
+    { name: 'Configuración', icon: 'settings' },
+    { name: 'Primeros Pasos', icon: 'rocket' },
+    { name: 'Proveedores / Envíos', icon: 'truck' },
+    { name: 'Finanzas', icon: 'dollar-sign' },
+    { name: 'Soporte / Ayuda', icon: 'help-circle' },
+    { name: 'General', icon: 'folder' },
+  ];
+
   form: FormGroup = this.fb.group({
     name: ['', [Validators.required, Validators.maxLength(100)]],
     description: ['', [Validators.maxLength(500)]],
-    icon: ['video', [Validators.maxLength(50)]],
+    icon: ['folder', [Validators.maxLength(50)]],
     is_active: [true],
   });
 
   ngOnInit() {
     this.loadCategories();
+  }
+
+  selectIconPreset(icon: string) {
+    this.form.patchValue({ icon });
+  }
+
+  onNameChange(name: string) {
+    if (this.editingCategory()) return;
+    const lower = (name || '').toLowerCase().trim();
+    if (lower.includes('client')) {
+      this.form.patchValue({ icon: 'users' });
+    } else if (lower.includes('product')) {
+      this.form.patchValue({ icon: 'package' });
+    } else if (lower.includes('inventari') || lower.includes('stock')) {
+      this.form.patchValue({ icon: 'warehouse' });
+    } else if (lower.includes('pos') || lower.includes('venta') || lower.includes('punto')) {
+      this.form.patchValue({ icon: 'shopping-cart' });
+    } else if (lower.includes('factur') || lower.includes('dian') || lower.includes('recibo')) {
+      this.form.patchValue({ icon: 'file-text' });
+    } else if (lower.includes('restauran') || lower.includes('mesa') || lower.includes('cocina')) {
+      this.form.patchValue({ icon: 'utensils' });
+    } else if (lower.includes('config') || lower.includes('ajuste')) {
+      this.form.patchValue({ icon: 'settings' });
+    } else if (lower.includes('paso') || lower.includes('inici') || lower.includes('comenzar')) {
+      this.form.patchValue({ icon: 'rocket' });
+    } else if (lower.includes('envi') || lower.includes('proveedor') || lower.includes('ruta')) {
+      this.form.patchValue({ icon: 'truck' });
+    } else if (lower.includes('soport') || lower.includes('ayuda')) {
+      this.form.patchValue({ icon: 'help-circle' });
+    } else if (lower.includes('nomina') || lower.includes('finanz') || lower.includes('precio')) {
+      this.form.patchValue({ icon: 'dollar-sign' });
+    }
   }
 
   loadCategories() {
@@ -218,7 +294,7 @@ export class VideoCategoriesTabComponent implements OnInit {
 
   openCreateModal() {
     this.editingCategory.set(null);
-    this.form.reset({ name: '', description: '', icon: 'video', is_active: true });
+    this.form.reset({ name: '', description: '', icon: 'folder', is_active: true });
     this.isModalOpen.set(true);
   }
 
@@ -227,7 +303,7 @@ export class VideoCategoriesTabComponent implements OnInit {
     this.form.patchValue({
       name: cat.name,
       description: cat.description,
-      icon: cat.icon || 'video',
+      icon: cat.icon || 'folder',
       is_active: cat.is_active,
     });
     this.isModalOpen.set(true);

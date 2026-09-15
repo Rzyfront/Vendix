@@ -75,6 +75,11 @@ export class CreateVideoDto {
   tags?: string[];
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  keywords?: string[];
+
+  @IsOptional()
   @IsBoolean()
   is_featured?: boolean;
 

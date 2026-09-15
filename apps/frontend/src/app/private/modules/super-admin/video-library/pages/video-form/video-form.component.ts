@@ -16,7 +16,7 @@ import {
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { StickyHeaderComponent, StickyHeaderActionButton } from '../../../../../../shared/components/sticky-header/sticky-header.component';
+import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { ImageSourceModalComponent } from '../../../../../../shared/components/image-source-modal/image-source-modal.component';
 import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
@@ -47,8 +47,6 @@ import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
         [showBackButton]="true"
         backRoute="/super-admin/video-library"
         variant="glass"
-        [actions]="headerActions()"
-        (actionClicked)="onHeaderAction($event)"
       ></app-sticky-header>
 
       @if (loadingVideo()) {
@@ -94,19 +92,19 @@ import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
             </div>
           </section>
 
-          <!-- Section 2: Video URL & Player Source -->
-          <section class="bg-surface rounded-2xl border border-neutral-200 dark:border-neutral-800 p-5 shadow-sm flex flex-col gap-4">
-            <div class="flex items-center gap-2 pb-2 border-b border-neutral-100 dark:border-neutral-800">
+          <!-- Section 2: Video Media & Source -->
+          <section class="bg-surface rounded-2xl border border-neutral-200 dark:border-neutral-800 p-5 shadow-sm flex flex-col gap-5">
+            <div class="flex items-center gap-2 pb-3 border-b border-neutral-100 dark:border-neutral-800">
               <app-icon name="play-circle" [size]="18" class="text-primary"></app-icon>
               <h2 class="text-sm font-bold text-neutral-900 dark:text-neutral-100 uppercase tracking-wide">
-                Origen y Enlace Multimedia
+                Contenido del Video (Enlace Externo)
               </h2>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-input
-                label="URL del Video (YouTube, Loom, Vimeo o S3)"
-                placeholder="https://www.youtube.com/watch?v=..."
+                label="URL del Video (YouTube, Loom, Vimeo)"
+                placeholder="https://www.youtube.com/watch?v=... o https://youtu.be/..."
                 [formControl]="$any(form.get('video_url'))"
                 [required]="true"
                 (blur)="onVideoUrlBlur()"
@@ -122,7 +120,7 @@ import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <app-input
-                label="Duración (segundos)"
+                label="Duración manual (segundos)"
                 placeholder="ej: 320 (para 5 min 20 seg)"
                 type="number"
                 [formControl]="$any(form.get('duration_seconds'))"
@@ -133,6 +131,13 @@ import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
                 placeholder="ej: ID de YouTube"
                 [formControl]="$any(form.get('external_id'))"
               ></app-input>
+            </div>
+
+            <div class="p-3 bg-neutral-50 dark:bg-neutral-900/40 rounded-xl border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400 flex items-start gap-2">
+              <app-icon name="info" [size]="16" class="text-primary mt-0.5 shrink-0"></app-icon>
+              <span>
+                Recomendamos alojar los videos en YouTube (en modo <em>Oculto / Unlisted</em> o Público). Al pegar un enlace de YouTube, se autocompletará automáticamente la plataforma, el ID del video y la portada en alta resolución.
+              </span>
             </div>
           </section>
 
@@ -158,12 +163,12 @@ import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
               <div class="flex flex-col gap-2">
                 <app-input
-                  label="URL de Miniatura"
+                  label="URL o Clave de Miniatura"
                   placeholder="https://..."
                   [formControl]="$any(form.get('thumbnail_url'))"
                 ></app-input>
                 <span class="text-xs text-neutral-400">
-                  Si dejas este campo vacío con un enlace de YouTube, se autocompletará con la carátula oficial en HD de YouTube.
+                  Si dejas este campo vacío con un enlace de YouTube, se autocompletará automáticamente con la carátula oficial en HD de YouTube. También puedes subir una imagen personalizada con el botón "Subir Imagen".
                 </span>
               </div>
 
@@ -215,6 +220,17 @@ import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
               placeholder="facturación, dian, caja, tutorial"
               [formControl]="$any(form.get('tags_str'))"
             ></app-input>
+
+            <div>
+              <app-input
+                label="Palabras clave / Keywords de búsqueda (separadas por coma)"
+                placeholder="ej: cambiar cliente orden, crear producto, guardar pedido, borrar producto"
+                [formControl]="$any(form.get('keywords_str'))"
+              ></app-input>
+              <span class="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1 block">
+                💡 <strong>Keywords de búsqueda:</strong> Agrega palabras o frases sobre lo que enseñas en este video. Permite que búsquedas en lenguaje natural (ej: <em>cómo cambiarle el cliente a una orden</em>) encuentren este video con máxima relevancia.
+              </span>
+            </div>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-neutral-100 dark:border-neutral-800">
               <app-toggle
@@ -280,22 +296,11 @@ export class VideoFormComponent implements OnInit {
     { label: 'YouTube', value: 'YOUTUBE' },
     { label: 'Loom', value: 'LOOM' },
     { label: 'Vimeo', value: 'VIMEO' },
-    { label: 'Archivo Directo S3', value: 'DIRECT_S3' },
   ];
 
   categoryOptions = computed<SelectorOption[]>(() =>
     this.categories().map((c) => ({ label: c.name, value: c.id.toString() })),
   );
-
-  headerActions = computed<StickyHeaderActionButton[]>(() => [
-    {
-      id: 'save',
-      label: this.isEditMode() ? 'Guardar Cambios' : 'Publicar Video',
-      icon: 'check',
-      variant: 'primary',
-      disabled: this.form.invalid || this.saving(),
-    },
-  ]);
 
   form: FormGroup = this.fb.group({
     title: ['', [Validators.required, Validators.maxLength(255)]],
@@ -309,6 +314,7 @@ export class VideoFormComponent implements OnInit {
     category_id: ['', [Validators.required]],
     module: [''],
     tags_str: [''],
+    keywords_str: [''],
     is_featured: [false],
     is_published: [true],
   });
@@ -352,9 +358,11 @@ export class VideoFormComponent implements OnInit {
             category_id: video.category_id.toString(),
             module: video.module || '',
             tags_str: video.tags ? video.tags.join(', ') : '',
+            keywords_str: (video as any).keywords ? (video as any).keywords.join(', ') : '',
             is_featured: video.is_featured,
             is_published: video.status === 'PUBLISHED',
           });
+
           this.loadingVideo.set(false);
         },
         error: (err) => {
@@ -407,15 +415,12 @@ export class VideoFormComponent implements OnInit {
       });
   }
 
-  onHeaderAction(actionId: string) {
-    if (actionId === 'save') {
-      this.onSubmit();
-    }
-  }
-
   onSubmit() {
     if (this.form.invalid) {
       this.form.markAllAsTouched();
+      if (!this.form.get('video_url')?.value) {
+        this.toast.error('Por favor, ingresa la URL del video');
+      }
       return;
     }
 
@@ -424,6 +429,10 @@ export class VideoFormComponent implements OnInit {
 
     const tags = val.tags_str
       ? val.tags_str.split(',').map((t: string) => t.trim()).filter(Boolean)
+      : [];
+
+    const keywords = val.keywords_str
+      ? val.keywords_str.split(',').map((k: string) => k.trim()).filter(Boolean)
       : [];
 
     const payload = {
@@ -439,6 +448,7 @@ export class VideoFormComponent implements OnInit {
       category_id: +val.category_id,
       module: val.module || null,
       tags,
+      keywords,
       is_featured: val.is_featured,
     };
 
