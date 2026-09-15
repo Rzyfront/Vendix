@@ -5,6 +5,7 @@ import { RESOLUTION_PUBLIC_SELECT } from '../../invoicing/utils/technical-key.ut
 import { normalizeInvoiceTaxRateNumber } from '../../invoicing/utils/invoice-tax-rate.util';
 import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
 import { resolveFiscalIssuerForPrint } from '../services/fiscal-issuer-identity';
+import { roundMoney2 } from '../../taxes/utils/final-price.util';
 
 /**
  * A.3 (CP-facturacion-impuesto-incluido-redondeo, F-066) — el mapeador es una
@@ -258,13 +259,36 @@ export function mapFiscalDocumentToPrintData(
   const res = invoice.resolution || ({} as any);
 
   const items = (invoice.invoice_items || []).map((it: any, idx: number) => {
-    const unitPrice = Number(it.unit_price ?? it.price ?? 0);
-    const totalPrice = Number(
-      it.total_amount ??
-        it.total_price ??
-        it.total ??
-        unitPrice * Number(it.quantity || 1),
-    );
+    const rawUnitPrice = Number(it.unit_price ?? it.price ?? 0);
+    const lineTaxAmount = Number(it.tax_amount || 0);
+    const lineQuantity = Number(it.quantity || 1);
+    const snapshotLineTotal = it.total_amount ?? it.total_price ?? it.total;
+    // C.7 — el documento fiscal declara `money_basis: 'taxable_base'` y su pie
+    // imprime `Subtotal:` desde `invoices.subtotal_amount`, que es la BASE. La
+    // columna de total de línea leía `invoice_items.total_amount`, que es el
+    // BRUTO: verificado sobre la factura 66, línea 145 = 289.000 × 1 + 54.910
+    // de IVA = 343.910. Asi que Σ(columna) daba 5.577.530 contra
+    // `Subtotal: $4.687.000`, y la condición negativa de C.3 —si hay fila
+    // `Subtotal`, Σ líneas la iguala sin residuo— fallaba en los cuatro
+    // documentos que pasan por este mapeador. Se imprime la base de línea
+    // (`total_amount − tax_amount`); el impuesto ya viaja en la fila
+    // `Impuestos:` y en la DISCRIMINACIÓN DE IMPUESTOS, y contarlo dos veces
+    // en el mismo papel es exactamente lo que este plan persigue.
+    //
+    // Sin snapshot se conserva el fallback histórico intacto (`unitario ×
+    // cantidad`, que ya es base para una línea exclusiva): restarle impuesto
+    // a un total que nadie persistió sería inventar una base.
+    const totalPrice =
+      snapshotLineTotal === null || snapshotLineTotal === undefined
+        ? rawUnitPrice * lineQuantity
+        : roundMoney2(Number(snapshotLineTotal) - lineTaxAmount);
+    // `invoice_items.is_inclusive` marca la línea cuyo `unit_price` YA lleva el
+    // impuesto dentro: bajo base gravable ese unitario contradice su propia
+    // columna de total, así que se deriva de la base de línea.
+    const unitPrice =
+      it.is_inclusive === true && lineQuantity > 0
+        ? roundMoney2(totalPrice / lineQuantity)
+        : rawUnitPrice;
     const variantSku =
       it.sku ||
       it.product_variant?.sku ||

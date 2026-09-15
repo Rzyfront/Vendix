@@ -7,6 +7,7 @@ import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { mapUserAddress } from '../lib/customer-address';
+import { fractionalRateToPercent } from '../lib/tax-rate-percent.util';
 
 /**
  * [print-editor-dsk P8] — Certificado de retención SUFRIDA
@@ -100,7 +101,14 @@ export class WithholdingSufferedDataProvider implements IDocumentDataProvider {
       taxes: [
         {
           name: calculation.concept?.name || 'Retención',
-          rate: Number(calculation.withholding_rate || calculation.concept?.rate || 0),
+          // C.7 — `withholding_calculations.withholding_rate` y
+          // `withholding_concepts.rate` son FRACCIÓN (0.0250 = 2,5 %) y el
+          // compositor concatena `(${rate}%)`: sin escalar, el certificado
+          // decía «Retención en la fuente compras 2.5% (0.025%)».
+          rate:
+            fractionalRateToPercent(
+              calculation.withholding_rate || calculation.concept?.rate || 0,
+            ) ?? 0,
           base_amount: Number(calculation.base_amount || 0),
           tax_amount: Number(calculation.withholding_amount || 0),
           base_formatted: `$${Number(calculation.base_amount || 0).toLocaleString('es-CO')}`,

@@ -84,7 +84,13 @@ describe('DispatchNoteDataProvider', () => {
         ordered_quantity: 20,
         dispatched_quantity: 5,
         unit_price: '50000.00',
-        total_price: '250000.00',
+        // I-6 — `dispatch_note_items.total_price` lo escribe el servicio como
+        // `unit_price × dispatched_quantity − descuento + tax_amount`
+        // (`dispatch-notes.service.ts:1247` y `:1749`): es BRUTO de línea.
+        // 50.000 × 5 + 47.500 = 297.500. La fixture anterior decía 250.000 —
+        // una fila que el escritor nunca pudo producir, y por eso el censo
+        // pasaba con el unitario en base (F-228).
+        total_price: '297500.00',
         discount_amount: '0.00',
         tax_amount: '47500.00',
       },
@@ -172,8 +178,41 @@ describe('DispatchNoteDataProvider', () => {
       product_name: 'Taladro Percutor 750W',
       variant_sku: 'TAL-750W',
       quantity: 5,
-      unit_price: 50000,
-      total_price: 250000,
+      // F-228 — la remisión declara `money_basis: 'gross'`: las dos columnas
+      // de línea van en la MISMA magnitud. El unitario prorratea el impuesto
+      // de línea (47.500 / 5 = 9.500) sobre la base (50.000) → 59.500.
+      unit_price: 59500,
+      total_price: 297500,
+    });
+  });
+
+  it('3b. la fila cuadra consigo misma: unitario × cantidad = total (F-228)', async () => {
+    const { prisma } = prismaWith(partialDispatchNoteRow());
+    const data = await new DispatchNoteDataProvider(prisma).fetchDocumentData(
+      7,
+      501,
+    );
+
+    const linea = data.items[0]!;
+    expect(linea.unit_price! * linea.quantity!).toBe(linea.total_price);
+    // Y Σ de totales de línea cierra contra el total del documento, que es la
+    // cifra que el papel imprime bajo `money_basis: 'gross'` (sin fila
+    // `Subtotal:` ni `Impuestos:`, suprimidas por la regla anti-huérfana).
+    const suma = data.items.reduce((a, i) => a + Number(i.total_price || 0), 0);
+    expect(suma).toBe(data.totals.grand_total);
+  });
+
+  it('3c. sin impuesto de línea el unitario queda intacto (traslado)', async () => {
+    const { prisma } = prismaWith(transferDispatchNoteRow());
+    const data = await new DispatchNoteDataProvider(prisma).fetchDocumentData(
+      7,
+      502,
+    );
+
+    expect(data.items[0]).toMatchObject({
+      quantity: 40,
+      unit_price: 2000,
+      total_price: 80000,
     });
   });
 
