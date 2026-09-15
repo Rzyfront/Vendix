@@ -12,8 +12,9 @@ import { resolveLineTotals } from './tax-inclusive-math.util';
  *   ?? primera_tasa.is_inclusive ?? false`). Las asignaciones viven solo a
  *   nivel producto (`product_tax_assignments.product_id`): las variantes
  *   heredan las tasas del producto.
- * - `calculateVariantFinalPrice`: efectivo variante (sale > override > base
- *   del producto) resuelto con `resolveLineTotals`.
+ * - `calculateVariantFinalPrice`: efectivo variante (sale variante > override >
+ *   sale producto > base producto, F-216 — misma escalera que el cobro)
+ *   resuelto con `resolveLineTotals`.
  * - `resolveLineUnits`: multiplicador canónico de línea (ADR-06 punto 5:
  *   `line_units`) con sus tres ramas — peso, escala, cantidad.
  * - `resolveOrderLineFinals`: final por línea de orden/mesa sobre el
@@ -77,16 +78,38 @@ export function extractTypedRates(product: ProductLike | null | undefined): Type
   return rates;
 }
 
-/** Precio efectivo de la variante: sale > override > base del producto. */
+/**
+ * Precio efectivo de la variante: sale de variante > override de variante >
+ * sale del producto > base del producto.
+ *
+ * F-216: los dos ultimos peldanos y los guardas `> 0` son nuevos, y existen
+ * para que esta funcion — el productor de DISPLAY — diga exactamente lo mismo
+ * que el productor de COBRO (`payments.service.ts:2436`
+ * `resolveCatalogUnitBasePrice`), que ya resolvia asi. Antes caia directo a
+ * `base_price` sin mirar `product.is_on_sale`: una variante sin precio propio
+ * sobre un producto en oferta se publicaba al precio SIN descuento mientras el
+ * cobro usaba el precio CON descuento. Eso era a la vez un error visible en
+ * pantalla y una divergencia de un descuento entero contra el guard de
+ * override del cobro (tolerancia `>= 0.01`), que con
+ * `allow_pos_price_override = false` es un 400 en el mostrador.
+ *
+ * Los guardas `> 0` tambien se alinean con el cobro: un `price_override` de 0
+ * o un `sale_price` de 0 no son un precio, son un campo sin llenar. El cobro
+ * ya los saltaba; publicarlos como precio final de 0 era la otra mitad de la
+ * misma divergencia.
+ */
 export function resolveVariantEffectivePrice(
   variant: VariantLike | null | undefined,
   product: ProductLike | null | undefined,
 ): number {
-  if (variant?.is_on_sale && variant?.sale_price) {
+  if (variant?.is_on_sale && Number(variant?.sale_price ?? 0) > 0) {
     return Number(variant.sale_price);
   }
-  if (variant?.price_override != null) {
+  if (variant?.price_override != null && Number(variant.price_override) > 0) {
     return Number(variant.price_override);
+  }
+  if (product?.is_on_sale && Number(product?.sale_price ?? 0) > 0) {
+    return Number(product.sale_price);
   }
   return Number(product?.base_price ?? 0);
 }

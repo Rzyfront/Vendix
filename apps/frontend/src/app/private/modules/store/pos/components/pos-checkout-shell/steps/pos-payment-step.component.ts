@@ -102,6 +102,13 @@ export class PosPaymentStepComponent implements OnInit {
    */
   readonly fulfillment = input<FulfillmentType>('entrega');
   /**
+   * QUI-653 — decisión "Para llevar" de la orden, computada por el shell
+   * (`isTakeawayOrder`: paso Consumo visible + restaurante + fulfillment en
+   * 'entrega'). Se reenvía a `processSaleWithPayment` para estampar
+   * `is_takeaway` por línea. Default false = comportamiento actual.
+   */
+  readonly takeawayOrder = input<boolean>(false);
+  /**
    * CP-POS-MODAL-SCOPE-001 / Phase F.11 — when the shell is paying an
    * EXISTING draft order (edit → Actualizar → Cobrar path), the charge
    * must hit POST `/store/orders/:id/flow/pay` (ordersService.flowPayOrder),
@@ -694,6 +701,8 @@ export class PosPaymentStepComponent implements OnInit {
           'current_user',
           this.sessionId() ?? null,
           this.tableId() ?? null,
+          // QUI-653 — 'Para llevar' de la orden hacia `order_items.is_takeaway`.
+          this.takeawayOrder(),
         );
 
     obs.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({

@@ -44,7 +44,9 @@ import {
  *
  * Permission policy:
  *   - POST /           → store:kitchen_fire:create
+ *   - POST /resend      → store:kitchen_fire:resend
  *   - POST /tickets/…  → store:kitchen_fire:update
+ *   - POST /tickets/:id/cancel → store:kitchen_fire:cancel
  *   - GET  /tickets    → store:kitchen_fire:read
  *   - GET  /snapshot   → store:kitchen_fire:read
  *   - GET  /stream     → store:kitchen_fire:read
@@ -111,24 +113,29 @@ export class KitchenFireController {
 
   // ------------------------------------------------------------ QUI-762 resend
   /**
-   * Reenviar un plato a cocina creando un ticket NUEVO sin volver a consumir
-   * insumos. Caso de uso: un ticket anterior caducó o se perdió y la orden
-   * sigue vigente. Mismo body que `fire` (`FireOrderItemsDto`) para no
-   * inventar un DTO paralelo. Mismo permiso — la operación es gemela del
-   * fire, solo cambia el efecto contable.
+   * Reenviar un plato a cocina creando un ticket NUEVO. Caso de uso: un ticket
+   * anterior caducó o se perdió y la orden sigue vigente, o remake
+   * post-cancelación con decisión reuse/waste. Mismo body que `fire`
+   * (`FireOrderItemsDto` + `reason`) para no inventar un DTO paralelo.
+   * Permiso fino propio (`store:kitchen_fire:resend`), no el `create` del
+   * fire: reenviar es una operación distinta (solo owner/admin).
    *
-   * NO toca stock. NO crea `inventory_transactions`. NO emite `kitchen.fired`
-   * (ese evento es de consumo; el resend no consume). Sí emite `ticket.created`
+   * Decisión reuse/waste (la particiona el servicio por
+   * `order_items.cancellation_type`): `after_fire_reused` y el resto NO tocan
+   * stock ni emiten `kitchen.fired`; `after_fire_waste` re-consume insumos
+   * (nuevo BOM + `kitchen.fired` con su COGS). Siempre emite `ticket.created`
    * en el SSE para que el KDS reciba el ticket nuevo.
    *
    * Validaciones devuelven 422 con `KITCHEN_FIRE_NOT_RESENDABLE` si:
-   *  - la orden está cancelada o devuelta,
+   *  - la orden está devuelta, o cancelada sin ser remake con decisión
+   *    (`reason='remake_dish'` + decisión en TODOS los items),
    *  - algún item no tiene `inventory_consumed_at_fire=true` (en ese caso
    *    el cliente debe disparar un fire normal),
-   *  - algún item ya tiene un `kitchen_ticket_item` con `status='delivered'`.
+   *  - algún item ya tiene un `kitchen_ticket_item` con `status='delivered'`
+   *    (salvo en el remake post-cancelación).
    */
   @Post('resend')
-  @Permissions('store:kitchen_fire:create')
+  @Permissions('store:kitchen_fire:resend')
   async resend(@Body() dto: ResendOrderItemsDto) {
     try {
       const result = await this.kitchenFireService.resendOrderItems(dto);
@@ -136,9 +143,13 @@ export class KitchenFireController {
         result.cancelledTicketIds.length > 0
           ? `, cancelados #${result.cancelledTicketIds.join(',#')}`
           : '';
+      const wasteSuffix =
+        result.wasteRefiredItemIds.length > 0
+          ? `, con nuevo consumo en #${result.wasteRefiredItemIds.join(',#')}`
+          : ' (sin consumo nuevo)';
       return this.responseService.created(
         result,
-        `Reenvio ejecutado: ticket #${result.ticketId} (sin consumo nuevo${cancelledSuffix}).`,
+        `Reenvio ejecutado: ticket #${result.ticketId}${wasteSuffix}${cancelledSuffix}.`,
       );
     } catch (error) {
       // Mismo comentario que en `fire` arriba: rethrow para que el
@@ -386,7 +397,7 @@ export class KitchenFireController {
   }
 
   @Post('tickets/:id/cancel')
-  @Permissions('store:kitchen_fire:update')
+  @Permissions('store:kitchen_fire:cancel')
   async cancelTicket(@Param('id', ParseIntPipe) id: number) {
     try {
       const ticket = await this.kitchenFireService.cancelTicket(id);

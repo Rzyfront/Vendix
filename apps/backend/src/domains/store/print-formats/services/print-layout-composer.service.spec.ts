@@ -122,6 +122,46 @@ describe('PrintLayoutComposerService — renderTotalsSection (C.3/C.4)', () => {
     }
   });
 
+  it('taxable_base con desglose e impuesto = 0 muestra Subtotal sin fila de impuesto (combinacion §2.3 #2)', () => {
+    const html = render(
+      sectionNoFields,
+      dataWith({
+        money_basis: 'taxable_base',
+        prints_vat_breakdown: true,
+        totals: { ...dataWith().totals, tax_total: 0, grand_total: 100000 },
+      }),
+    );
+    expect(html).toContain('Subtotal:');
+    expect(html).not.toContain('Impuestos (IVA):');
+    expect(html).not.toContain('IVA incluido:');
+  });
+
+  it('gross con desglose e impuesto = 0 no deja Subtotal ni nota (combinacion §2.3 #5)', () => {
+    const html = render(
+      sectionNoFields,
+      dataWith({
+        money_basis: 'gross',
+        prints_vat_breakdown: true,
+        totals: { ...dataWith().totals, tax_total: 0, grand_total: 100000 },
+      }),
+    );
+    expect(html).not.toContain('Subtotal:');
+    expect(html).not.toContain('Impuestos (IVA):');
+    expect(html).not.toContain('IVA incluido:');
+    expect(html).toContain('TOTAL:');
+  });
+
+  it('gross sin gate fiscal esconde Subtotal e Impuestos y NO agrega la nota (combinacion §2.3 #6)', () => {
+    const html = render(
+      sectionNoFields,
+      dataWith({ money_basis: 'gross', prints_vat_breakdown: false }),
+    );
+    expect(html).not.toContain('Subtotal:');
+    expect(html).not.toContain('Impuestos (IVA):');
+    expect(html).not.toContain('IVA incluido:');
+    expect(html).toContain('TOTAL:');
+  });
+
   it('tokenized conserva la conducta del editor: muestra las filas activas aunque sea gross', () => {
     const html = render(
       sectionNoFields,
@@ -129,5 +169,75 @@ describe('PrintLayoutComposerService — renderTotalsSection (C.3/C.4)', () => {
       'tokenized',
     );
     expect(html).toContain('Subtotal:');
+  });
+});
+
+/**
+ * F-102 — el editor (`tokenized`) no puede afirmar un tributo que no calculó
+ * nadie. Antes del fix, sin tributos reales (`taxes: []` — el caso de
+ * remisión/ticket de cocina/certificados de retención, que NUNCA los
+ * declaran) el modo tokenized inyectaba `{ name: 'IVA', rate: 19,
+ * base_amount: 100000, tax_amount: 19000 }` como si fuera dato real, en un
+ * documento cuyo render real (`mode !== 'tokenized'`) descarta la sección
+ * completa un renglón más abajo. El comerciante diseñaba el formato viendo
+ * una tarifa que el papel jamás reproduce.
+ */
+describe('PrintLayoutComposerService — renderTaxBreakdownSection (F-102)', () => {
+  const service = new PrintLayoutComposerService({
+    escapeHtml: (v: any) => String(v ?? ''),
+  } as any);
+
+  function render(data: any, mode: 'dummy' | 'tokenized' = 'dummy'): string {
+    return (service as any).renderTaxBreakdownSection(data, mode);
+  }
+
+  it('render real sin tributos descarta la sección completa (remisión, ticket de cocina, etc.)', () => {
+    const html = render({ taxes: [] });
+    expect(html).toBe('');
+  });
+
+  it('render real CON tributos sí la pinta, con los valores reales', () => {
+    const html = render({
+      taxes: [
+        {
+          name: 'IVA',
+          rate: 19,
+          base_amount: 549000,
+          tax_amount: 104310,
+          base_formatted: '$549.000',
+          tax_formatted: '$104.310',
+        },
+      ],
+    });
+    expect(html).toContain('DISCRIMINACIÓN DE IMPUESTOS');
+    expect(html).toContain('IVA (19%)');
+    expect(html).toContain('$104.310');
+  });
+
+  it('REGRESIÓN F-102: tokenized sin tributos ya NO fabrica un IVA del 19% que el papel nunca imprime', () => {
+    const html = render({ taxes: [] }, 'tokenized');
+    expect(html).not.toContain('19%');
+    expect(html).not.toContain('100000');
+    expect(html).not.toContain('19000');
+  });
+
+  it('tokenized sin tributos pinta una fila plantilla ligada a tokens, no un dato inventado', () => {
+    const html = render({ taxes: [] }, 'tokenized');
+    expect(html).toContain('DISCRIMINACIÓN DE IMPUESTOS');
+    expect(html).toContain('data-token="tax.name"');
+    expect(html).toContain('data-token="tax.rate"');
+    expect(html).toContain('data-token="tax.base_amount"');
+    expect(html).toContain('data-token="tax.tax_amount"');
+  });
+
+  it('tokenized con tributos reales (sample) también usa la fila plantilla, igual que la tabla de items', () => {
+    // Paridad con `renderItemsTableSection`: en tokenized SIEMPRE es una
+    // fila-plantilla con pills, sin importar cuántas filas reales existan.
+    const html = render(
+      { taxes: [{ name: 'IVA', rate: 19, base_amount: 549000, tax_amount: 104310 }] },
+      'tokenized',
+    );
+    expect(html).toContain('data-token="tax.rate"');
+    expect(html).not.toContain('104310');
   });
 });

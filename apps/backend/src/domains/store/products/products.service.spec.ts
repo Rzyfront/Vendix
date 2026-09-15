@@ -21,6 +21,7 @@ import { SettingsService } from '../settings/settings.service';
 import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service';
 import { InventoryAdjustmentsService } from '../inventory/adjustments/inventory-adjustments.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -334,6 +335,18 @@ describe('ProductsService', () => {
         {
           provide: GlobalPrismaService,
           useValue: mockGlobalPrisma,
+        },
+        // El ranking de más vendidos del POS se cachea 24h por tienda
+        // (products.service.ts:237); sin este doble, Nest no resuelve
+        // CACHE_MANAGER y el módulo de prueba muere antes de "should be
+        // defined". Mismo patrón que organizations.service.spec.ts.
+        {
+          provide: CACHE_MANAGER,
+          useValue: {
+            get: jest.fn().mockResolvedValue(null),
+            set: jest.fn(),
+            del: jest.fn(),
+          },
         },
       ],
     }).compile();

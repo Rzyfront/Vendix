@@ -1007,20 +1007,45 @@ export class PrintLayoutComposerService {
     `;
   }
 
+  /**
+   * F-102 — el modo `tokenized` (editor de formatos) no fabrica datos: cada
+   * campo pinta un `vendix-token-pill` ligado a un token real, y para filas
+   * repetidas la convención del archivo es UNA fila-plantilla con pills sin
+   * importar cuántas filas reales existan (ver `renderItemsTableSection`,
+   * que en tokenized ignora `data.items` por completo). Esta sección era la
+   * única excepción: inyectaba un tributo concreto —`IVA`, `19%`, base
+   * `$100.000`, cuota `$19.000`— como si fuera un dato real, sobre
+   * documentos (remisión, ticket de cocina, certificados de retención...)
+   * cuyo provider nunca puebla `taxes[]` y cuyo papel real JAMÁS imprime
+   * esta sección (el `return ''` de la línea de abajo se lo come siempre en
+   * modo real). El comerciante diseñaba el formato viendo una tarifa que el
+   * papel no reproduce nunca.
+   *
+   * El render real (`mode !== 'tokenized'`) no cambia: sigue descartando la
+   * sección completa cuando no hay tributos, que es lo correcto para un
+   * documento que estructuralmente no los declara. Lo que cambia es que el
+   * editor deja de afirmar una tarifa y un importe que nadie calculó.
+   */
   private renderTaxBreakdownSection(data: StandardPrintDataModel, mode: 'dummy' | 'tokenized' = 'dummy'): string {
     const taxes = data.taxes || [];
     if (mode !== 'tokenized' && taxes.length === 0) return '';
 
-    const rows = (taxes.length > 0 ? taxes : [{ name: 'IVA', rate: 19, base_amount: 100000, tax_amount: 19000 }])
-      .map(
-        (t) => `
+    const rows = mode === 'tokenized'
+      ? `<tr>
+        <td><span class="vendix-token-pill" data-token="tax.name">&#123;&#123; tax.name &#125;&#125;</span> (<span class="vendix-token-pill" data-token="tax.rate">&#123;&#123; tax.rate &#125;&#125;</span>%)</td>
+        <td style="text-align: right;"><span class="vendix-token-pill" data-token="tax.base_amount">&#123;&#123; money tax.base_amount &#125;&#125;</span></td>
+        <td style="text-align: right;"><span class="vendix-token-pill" data-token="tax.tax_amount">&#123;&#123; money tax.tax_amount &#125;&#125;</span></td>
+      </tr>`
+      : taxes
+          .map(
+            (t) => `
       <tr>
         <td>${this.compiler.escapeHtml(t.name)} (${t.rate}%)</td>
         <td style="text-align: right;">${this.compiler.escapeHtml(t.base_formatted || `$${Number(t.base_amount).toLocaleString('es-CO')}`)}</td>
         <td style="text-align: right;">${this.compiler.escapeHtml(t.tax_formatted || `$${Number(t.tax_amount).toLocaleString('es-CO')}`)}</td>
       </tr>`,
-      )
-      .join('');
+          )
+          .join('');
 
     return `
       <div class="print-section section-taxes" data-section-id="sec_taxes">

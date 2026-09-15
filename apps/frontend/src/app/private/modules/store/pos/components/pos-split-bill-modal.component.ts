@@ -170,7 +170,8 @@ interface ItemGroup {
                       ></app-input>
                     }
                   </div>
-                  <div class="preview-box preview-warn">
+                  <!-- F-134 (C.9, major): se recalcula con cada tecla en los montos. -->
+                  <div class="preview-box preview-warn" aria-live="polite" aria-atomic="true">
                     <span class="text-xs">Suma actual</span>
                     <span
                       class="text-sm font-bold"
@@ -201,17 +202,24 @@ interface ItemGroup {
                         </div>
                       </div>
                       <div class="item-actions">
+                        <!-- F-134 (C.9, major — revisión 2026-09-14): este
+                             select reasigna dinero entre cuentas y no
+                             tenía ninguna etiqueta accesible (aria-label). -->
                         <select
                           [value]="itemGroupSelection()[it.id] ?? 0"
                           (change)="onAssignItem(it.id, $event)"
                           class="group-select"
+                          [attr.aria-label]="'Asignar ' + it.product_name + ' a cuenta'"
                         >
                           <option [value]="0">Sin asignar</option>
                           @for (g of itemGroupsCount(); track g) {
                             <option [value]="g">Cuenta {{ g }}</option>
                           }
                         </select>
-                        <span class="item-total">
+                        <span
+                          class="item-total"
+                          [attr.aria-label]="'Total de ' + it.product_name + ': ' + formatCurrency(it.final_total_price ?? it.total_price)"
+                        >
                           {{ formatCurrency(it.final_total_price ?? it.total_price) }}
                         </span>
                       </div>
@@ -237,7 +245,8 @@ interface ItemGroup {
           </form>
 
           <!-- Summary -->
-          <div class="summary-box">
+          <!-- F-134 (C.9, major): se recalcula al reasignar ítems entre cuentas. -->
+          <div class="summary-box" aria-live="polite" aria-atomic="true">
             <div class="summary-row">
               <span class="text-xs text-text-secondary">Total actual</span>
               <span class="text-sm font-bold">

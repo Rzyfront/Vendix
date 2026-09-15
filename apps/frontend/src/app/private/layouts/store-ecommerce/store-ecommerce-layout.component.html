@@ -769,17 +769,29 @@
          de pantalla. Atributos estáticos sobre un bloque que ya re-renderiza
          por signal(): no requieren NgZone ni markForCheck (zoneless). -->
     <div class="bill-panel__summary" aria-live="polite" aria-atomic="true">
+      @if (bill_total_changed_notice()) {
+      <!-- F-133(b): aviso persistente — no un toast que desaparece solo —
+           cuando el `grand_total` que llega por SSE difiere del que el
+           comensal ya vio. Vive dentro de la misma región viva que el
+           resto del resumen para que un lector de pantalla lo anuncie
+           junto con la cifra nueva. -->
+      <div class="bill-panel__summary-row bill-panel__summary-row--notice">
+        <span aria-hidden="true"><app-icon name="info" [size]="16"></app-icon></span>
+        <span>Tu cuenta se actualizó: revisa el nuevo total antes de pagar.</span>
+      </div>
+      }
+      <!-- C.7 (§5.3, ADR-12): Subtotal e Impuestos van JUNTOS o NINGUNO —
+           `prints_vat_breakdown` (fail-closed, backend) es el gate fiscal;
+           un Subtotal sin su fila de IVA al lado es el huérfano F-077. Sin
+           el gate en `true` sólo se imprime el Total, que siempre va. -->
+      @if (bill.prints_vat_breakdown && (bill.tax_amount ?? 0) > 0) {
       <div class="bill-panel__summary-row">
         <span>Subtotal</span>
         <span>{{ bill.subtotal | currency }}</span>
       </div>
-      <!-- C.7 (§5.3): la fila de impuesto vuelve con respaldo (C.8/B2 extiende
-           el bill con `tax_amount` + `prints_vat_breakdown`). Sin dato no hay
-           fila: una diferencia sin explicar es el huérfano F-077. -->
-      @if ($any(bill).tax_amount > 0) {
       <div class="bill-panel__summary-row">
         <span>Impuestos</span>
-        <span>{{ $any(bill).tax_amount | currency }}</span>
+        <span>{{ bill.tax_amount | currency }}</span>
       </div>
       }
       @if (bill.total_paid != null) {

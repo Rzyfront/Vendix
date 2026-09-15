@@ -118,8 +118,11 @@ describe('pos-sale-ticket — C.6 base leída en aggregateTaxes', () => {
       ],
     }).fetchDocumentData(10, 9);
 
+    // `order_item_taxes.tax_rate` llega en fracción (0.19); `aggregateTaxes`
+    // lo pinta en porcentaje (19) porque el compositor lo concatena literal
+    // como `${rate}%` — sin esto salía "(0.19%)" en el papel real.
     expect(data.taxes).toEqual([
-      expect.objectContaining({ name: 'IVA', rate: 0.19, tax_amount: 1900, base_amount: 10000 }),
+      expect.objectContaining({ name: 'IVA', rate: 19, tax_amount: 1900, base_amount: 10000 }),
     ]);
   });
 

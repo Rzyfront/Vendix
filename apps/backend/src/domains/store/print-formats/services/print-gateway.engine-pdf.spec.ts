@@ -1,8 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrintGatewayService, RenderResult } from './print-gateway.service';
-import { FiscalInvoicePdfRenderService } from './fiscal-invoice-pdf-render.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { DocumentDataProviderRegistry } from '../providers/document-data-provider.registry';
+// ADR-15 §4 (unificación remisión-gateway) — el gateway ya no inyecta
+// `FiscalInvoicePdfRenderService` directo: consulta `DocumentPdfRendererRegistry`.
+// Este spec construye el registro REAL (no un stub) y registra en él un
+// renderizador de prueba, igual que `print-formats.module.ts` lo hace en
+// `onModuleInit` con la instancia real de `FiscalInvoicePdfRenderService`.
+import { DocumentPdfRendererRegistry } from '../providers/document-pdf-renderer.registry';
 import { PrintLayoutComposerService } from './print-layout-composer.service';
 import { PrintFiscalValidatorService } from './print-fiscal-validator.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -64,9 +69,15 @@ describe('PrintGatewayService — engine pdf llena RenderResult.pdf_buffer', () 
         { provide: DocumentDataProviderRegistry, useValue: { getProvider: getProviderSpy } },
         { provide: PrintLayoutComposerService, useValue: { compose: composeSpy } },
         { provide: PrintFiscalValidatorService, useValue: { assertFiscalCompliance: jest.fn() } },
-        { provide: FiscalInvoicePdfRenderService, useValue: { renderBuffer } },
+        DocumentPdfRendererRegistry,
       ],
     }).compile();
+
+    // Registro REAL con un único renderizador de prueba en `fiscal_electronic_invoice`
+    // — igual de lo que `print-formats.module.ts` hace con la instancia real de
+    // `FiscalInvoicePdfRenderService`, sólo que aquí es un mock de `renderBuffer`.
+    const pdfRendererRegistry = module.get(DocumentPdfRendererRegistry);
+    pdfRendererRegistry.register('fiscal_electronic_invoice', { renderBuffer });
 
     return { service: module.get(PrintGatewayService) as PrintGatewayService };
   }

@@ -473,6 +473,138 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     advance.advanceConsumo();
     expect(component.currentStep()).toBe(1);
   });
+
+  it(`Para llevar estampa is_takeaway al anexar a mesa`, () => {
+    restaurantMode.set(true);
+    const stub = TestBed.runInInjectionContext(() => new ConsumoStub());
+    stub.fulfillmentMode = 'entrega';
+    (stub as any).effectiveTableId = () => null;
+    Object.defineProperty(component, 'consumoStep', {
+      value: () => stub,
+      configurable: true,
+    });
+    fixture.detectChanges();
+    expect(component.isTakeawayOrder()).toBeTrue();
+
+    fixture.componentRef.setInput('cartState', {
+      items: [
+        {
+          itemType: 'product',
+          product: { id: 7, name: 'Pollo' },
+          quantity: 1,
+          unitPrice: 10000,
+          finalPrice: 10000,
+          totalPrice: 10000,
+          taxAmount: 0,
+        },
+      ],
+    } as any);
+    fixture.detectChanges();
+
+    const sent: unknown[] = [];
+    (integrationMock as any).addItemsToTableSession = (
+      _sessionId: number,
+      items: unknown[],
+    ) => {
+      sent.push(items);
+      return of({ order: { id: 11, order_items: [] } });
+    };
+    (integrationMock as any).maybeFireKitchen = () => of(null);
+    (component as any).toastService = {
+      success: () => {},
+      warning: () => {},
+      error: () => {},
+    };
+    (component as any).cartService = { clearCart: () => of({}) };
+
+    (
+      component as unknown as {
+        appendToTableAndFire: (state: any, session: any) => void;
+      }
+    ).appendToTableAndFire(component.cartState() as any, {
+      id: 3,
+      order_id: 11,
+    });
+
+    expect(sent.length).toBe(1);
+    expect((sent[0] as any[])[0]).toEqual(
+      jasmine.objectContaining({ product_id: 7, is_takeaway: true }),
+    );
+  });
+
+  it(`Consumo en mesa no marca takeaway salvo línea explícita`, () => {
+    restaurantMode.set(true);
+    const stub = TestBed.runInInjectionContext(() => new ConsumoStub());
+    stub.fulfillmentMode = 'consumo';
+    (stub as any).effectiveTableId = () => 5;
+    Object.defineProperty(component, 'consumoStep', {
+      value: () => stub,
+      configurable: true,
+    });
+    fixture.detectChanges();
+    expect(component.isTakeawayOrder()).toBeFalse();
+
+    fixture.componentRef.setInput('cartState', {
+      items: [
+        {
+          itemType: 'product',
+          product: { id: 9, name: 'Bandeja' },
+          quantity: 2,
+          unitPrice: 15000,
+          finalPrice: 15000,
+          totalPrice: 30000,
+          taxAmount: 0,
+        },
+        {
+          itemType: 'product',
+          product: { id: 10, name: 'Jugo' },
+          quantity: 1,
+          unitPrice: 5000,
+          finalPrice: 5000,
+          totalPrice: 5000,
+          taxAmount: 0,
+          isTakeaway: true,
+        },
+      ],
+    } as any);
+    fixture.detectChanges();
+
+    const sent: unknown[] = [];
+    (integrationMock as any).addItemsToTableSession = (
+      _sessionId: number,
+      items: unknown[],
+    ) => {
+      sent.push(items);
+      return of({ order: { id: 12, order_items: [] } });
+    };
+    (integrationMock as any).maybeFireKitchen = () => of(null);
+    (component as any).toastService = {
+      success: () => {},
+      warning: () => {},
+      error: () => {},
+    };
+    (component as any).cartService = { clearCart: () => of({}) };
+
+    (
+      component as unknown as {
+        appendToTableAndFire: (state: any, session: any) => void;
+      }
+    ).appendToTableAndFire(component.cartState() as any, {
+      id: 4,
+      order_id: 12,
+    });
+
+    expect(sent.length).toBe(1);
+    const lines = sent[0] as any[];
+    expect(lines[0]).toEqual({
+      product_id: 9,
+      quantity: 2,
+      product_variant_id: undefined,
+    });
+    expect(lines[1]).toEqual(
+      jasmine.objectContaining({ product_id: 10, is_takeaway: true }),
+    );
+  });
 });
 
 describe('PaymentCollectorComponent.handleEnter — CP-pos-checkout-enter-focus', () => {

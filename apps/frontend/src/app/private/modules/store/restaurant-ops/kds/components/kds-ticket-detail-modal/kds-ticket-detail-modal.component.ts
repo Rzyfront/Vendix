@@ -63,6 +63,10 @@ export class KdsTicketDetailModalComponent {
   readonly isOpen = input<boolean>(false);
   readonly ticket = input<KitchenTicket | null>(null);
   readonly isMutating = input<boolean>(false);
+  /** Ver `KdsTicketCardComponent.deliverDisabledReason`: entregar es accion
+   *  de mesero/cajero, no de cocina; el boton queda visible pero inerte. */
+  readonly deliverDisabledReason =
+    'La entrega la registra el mesero o el cajero, no la cocina';
 
   /** Re-emit actions back to the board so the SSE pipeline stays in charge. */
   readonly startClicked = output<KitchenTicket>();

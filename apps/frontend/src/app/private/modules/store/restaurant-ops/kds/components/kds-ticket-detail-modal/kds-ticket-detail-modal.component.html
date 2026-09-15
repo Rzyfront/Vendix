@@ -212,7 +212,11 @@
         <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating()">
           <app-icon slot="icon" name="x" [size]="14" /> Cancelar
         </app-button>
-        <app-button variant="primary" (clicked)="onDeliver()" [disabled]="isMutating()" [loading]="isMutating()">
+        <!--
+          Igual que en la tarjeta del board: entregar es accion de mesero/cajero,
+          no de cocina. Visible para señalizar el estado, deshabilitado siempre.
+        -->
+        <app-button variant="primary" [disabled]="true" [attr.title]="deliverDisabledReason">
           <app-icon slot="icon" name="check-circle" [size]="14" /> Entregar
         </app-button>
       } @else {

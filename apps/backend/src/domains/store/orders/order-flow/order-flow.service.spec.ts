@@ -894,6 +894,39 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
   });
 
+  // C.8/F-082 (blocker) — antes el recálculo escribía `grand_total` como
+  // `subtotal + tax` a secas: envío, propina y descuento vivos en la orden
+  // se perdían apenas se cancelaba UN ítem, aunque la orden siguiera
+  // teniendo ambos cargos. Ahora los conserva (`shipping_cost + tip_amount
+  // - discount_amount`), clampado a 0.
+  it('F-082: conserva envío, propina y descuento al recalcular grand_total', async () => {
+    const { service, txMock } = buildService({
+      order: {
+        id: ORDER_ID,
+        state: 'created',
+        shipping_cost: 12000,
+        tip_amount: 20000,
+        discount_amount: 5000,
+      },
+      activeItems: [
+        { total_price: 50000, order_item_taxes: [{ tax_amount: 9500 }] },
+        { total_price: 50000, order_item_taxes: [{ tax_amount: 9500 }] },
+      ],
+    });
+
+    await service.cancelOrderItem(
+      ORDER_ID,
+      ITEM_ID,
+      'cliente pidió una línea de menos',
+    );
+
+    const updateData = txMock.orders.update.mock.calls[0][0].data;
+    expect(Number(updateData.subtotal_amount)).toBe(100000);
+    expect(Number(updateData.tax_amount)).toBe(19000);
+    // 100000 + 19000 + 12000 (envío) + 20000 (propina) - 5000 (descuento)
+    expect(Number(updateData.grand_total)).toBe(146000);
+  });
+
   it('happy after_fire pending: cancela el ticket in-tx + SSE post-commit', async () => {
     const { service, txMock, kitchenFireService } = buildService({
       item: firedItemPending(),

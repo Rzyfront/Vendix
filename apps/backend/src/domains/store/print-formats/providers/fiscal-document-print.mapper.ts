@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { mapUserAddress } from '../lib/customer-address';
 import { RESOLUTION_PUBLIC_SELECT } from '../../invoicing/utils/technical-key.util';
+import { normalizeInvoiceTaxRateNumber } from '../../invoicing/utils/invoice-tax-rate.util';
 import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
 import { resolveFiscalIssuerForPrint } from '../services/fiscal-issuer-identity';
 
@@ -72,6 +73,10 @@ export const FISCAL_DOCUMENT_PRINT_INCLUDE = {
           tax_name: true,
           tax_rate: true,
           tax_amount: true,
+          // F-212 — el desambiguador de magnitud mira el TIPO antes que el
+          // valor: sin `tax_type` no se puede distinguir un IVA con fracción
+          // colada (0.19) de un ICA legítimo sub-1 %.
+          tax_type: true,
         },
       },
     },
@@ -268,16 +273,29 @@ export function mapFiscalDocumentToPrintData(
       it.product?.barcode ||
       (it.product_id ? String(it.product_id) : String(idx + 1));
 
+    // F-212 — las filas ya escritas con la FRACCIÓN colada (`0.19` en una
+    // columna cuyo contrato es PORCENTAJE) no se corrigen en la base: decisión
+    // del dueño del producto, «lo que se pudrió podrido queda» (ADR-15 §7). Por
+    // eso la tolerancia vive en el lector: sin ella la factura 67 y la nota 170
+    // seguirían imprimiendo «0.19 %» para siempre. El escritor ya no puede
+    // producir filas nuevas así (`normalizeInvoiceTaxRate` en
+    // `buildInvoiceTaxCreateInput` y en `credit-notes.service.ts`).
     let taxRate = Number(it.tax_rate || 0);
     if (!taxRate && it.invoice_taxes && it.invoice_taxes.length > 0) {
-      taxRate = Number(it.invoice_taxes[0].tax_rate || 0);
+      taxRate = normalizeInvoiceTaxRateNumber(
+        it.invoice_taxes[0].tax_rate,
+        it.invoice_taxes[0].tax_type,
+      );
     } else if (
       !taxRate &&
       invoice.invoice_taxes &&
       invoice.invoice_taxes.length === 1 &&
       Number(it.tax_amount) > 0
     ) {
-      taxRate = Number(invoice.invoice_taxes[0].tax_rate || 0);
+      taxRate = normalizeInvoiceTaxRateNumber(
+        invoice.invoice_taxes[0].tax_rate,
+        invoice.invoice_taxes[0].tax_type,
+      );
     }
 
     const discountAmt = Number(it.discount_amount || 0);
@@ -302,7 +320,9 @@ export function mapFiscalDocumentToPrintData(
   const taxesMap = new Map<string, { name: string; rate: number; base_amount: number; tax_amount: number }>();
   for (const t of invoice.invoice_taxes || []) {
     const name = t.tax_name || 'IVA';
-    const rate = Number(t.tax_rate || 0);
+    // F-212 — misma tolerancia que arriba: la fila vieja con `0.19` se lee
+    // como 19 % en el papel sin que nadie toque el dato persistido.
+    const rate = normalizeInvoiceTaxRateNumber(t.tax_rate, t.tax_type);
     const key = `${name}_${rate}`;
     const base = Number(t.taxable_amount || 0);
     const amt = Number(t.tax_amount || 0);

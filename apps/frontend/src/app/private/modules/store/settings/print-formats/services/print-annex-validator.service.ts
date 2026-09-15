@@ -181,17 +181,36 @@ export class PrintAnnexValidatorService {
       fixAction: { label: 'Activar columna cantidad', columnKey: 'col_qty' },
     });
 
-    rules.push({
-      id: 'line_unit_price',
-      category: 'lineas',
-      name: 'Precio Unitario',
-      description:
-        'Falta la columna de precio unitario en la tabla de líneas (se esperaba unit_price o col_price, valor comercial unitario antes de tributos según Art. 617 lit. g) E.T.). Sin ella el anexo no discrimina la base gravable por ítem.',
-      reference: 'Art. 617 lit. g) E.T. / Anexo 1.9 §8.1.5',
-      severity: 'warning',
-      passed: isColumnEnabled('unit_price') || isColumnEnabled('col_price'),
-      fixAction: { label: 'Activar columna precio unitario', columnKey: 'col_price' },
-    });
+    // F-149: la columna de precio unitario no significa lo mismo en un anexo
+    // DIAN (fiscal) que en un documento comercial. En el primero es siempre
+    // la base gravable (Art. 617 lit. g); en el segundo puede llevar el
+    // bruto tal como se cobra o cotiza. Una sola regla no puede afirmar las
+    // dos cosas a la vez sin contradecir ADR-07.
+    if (isFiscal) {
+      rules.push({
+        id: 'line_unit_price',
+        category: 'lineas',
+        name: 'Precio Unitario (Base Gravable)',
+        description:
+          'Falta la columna de precio unitario en la tabla de líneas (se esperaba unit_price o col_price). En un anexo fiscal esta columna es la base gravable unitaria antes de tributos, según Art. 617 lit. g) E.T. Sin ella el anexo no discrimina la base gravable por ítem.',
+        reference: 'Art. 617 lit. g) E.T. / Anexo 1.9 §8.1.5',
+        severity: 'warning',
+        passed: isColumnEnabled('unit_price') || isColumnEnabled('col_price'),
+        fixAction: { label: 'Activar columna precio unitario', columnKey: 'col_price' },
+      });
+    } else {
+      rules.push({
+        id: 'line_unit_price_comercial',
+        category: 'lineas',
+        name: 'Precio Unitario',
+        description:
+          'Falta la columna de precio unitario en la tabla de líneas (se esperaba unit_price o col_price). En un documento comercial esta columna lleva el valor unitario tal como se cobra o cotiza, que puede incluir tributos — no es la base gravable del Art. 617 lit. g) E.T., que sólo aplica a anexos fiscales. Sin ella el documento no muestra el precio por ítem.',
+        reference: 'Anexo Técnico 1.9 DIAN §8.1.5',
+        severity: 'warning',
+        passed: isColumnEnabled('unit_price') || isColumnEnabled('col_price'),
+        fixAction: { label: 'Activar columna precio unitario', columnKey: 'col_price' },
+      });
+    }
 
     rules.push({
       id: 'line_total',

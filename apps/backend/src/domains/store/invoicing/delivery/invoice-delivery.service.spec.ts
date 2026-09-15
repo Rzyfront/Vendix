@@ -162,11 +162,21 @@ describe('InvoiceDeliveryService', () => {
   });
 
   it('un fallo del proveedor de correo escribe la traza en error ANTES de lanzar 502', async () => {
+    // F-211/D.13 (2026-09-14): la factura por defecto no trae `pdf_url` ni
+    // `xml_document`, pero desde E.5 el servicio SIEMPRE intenta
+    // `renderBuffer` primero (casilla 4) — y el mock por defecto de
+    // `fiscalPdfRender` lo resuelve con éxito, así que el zip SÍ termina con
+    // contenido (el PDF re-renderizado) y el envío real pasa por
+    // `sendEmailWithAttachments`, no por `sendEmail`. Antes de E.5 el zip
+    // quedaba vacío y el camino era `sendEmail`; el test quedó desactualizado
+    // y nunca se movió. Se cubren ambos métodos para que la aserción no
+    // vuelva a divergir del camino real si el mock de `fiscalPdfRender`
+    // cambia de nuevo.
+    const failure = { success: false, error: 'SMTP timeout' };
     const { service, deliveryEventsCreate } = createService({
       emailService: {
-        sendEmail: jest
-          .fn()
-          .mockResolvedValue({ success: false, error: 'SMTP timeout' }),
+        sendEmail: jest.fn().mockResolvedValue(failure),
+        sendEmailWithAttachments: jest.fn().mockResolvedValue(failure),
       },
     });
 
@@ -201,7 +211,14 @@ describe('InvoiceDeliveryService', () => {
       invoice_number: 'FE100',
       recipient: 'otro-correo@test.com',
     });
-    expect(emailService.sendEmail).toHaveBeenCalledTimes(1);
+    // F-211/D.13 (2026-09-14): con la factura por defecto (sin `pdf_url` ni
+    // `xml_document`) el render fresco de casilla 4 SÍ produce un PDF (mock
+    // de `fiscalPdfRender.renderBuffer` resuelve éxito por defecto), así que
+    // el zip termina con contenido y el envío real usa
+    // `sendEmailWithAttachments`. `sendEmail` (sin adjuntos) sólo se usa
+    // cuando el zip queda completamente vacío — no es el caso aquí desde E.5.
+    expect(emailService.sendEmailWithAttachments).toHaveBeenCalledTimes(1);
+    expect(emailService.sendEmail).not.toHaveBeenCalled();
     expect(deliveryEventsCreate).toHaveBeenCalledTimes(1);
     expect(deliveryEventsCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -232,6 +249,18 @@ describe('InvoiceDeliveryService', () => {
             xml_document: '<xml>factura</xml>',
           }),
         },
+      },
+      // F-211/D.13 (2026-09-14): desde E.5 el render fresco (casilla 4) se
+      // intenta ANTES que el PDF persistido en S3; con el mock por defecto
+      // (éxito, pocos bytes) el zip nunca supera 2 MB y el descarte no se
+      // ejerce nunca — el mock de `s3Service.downloadFile` de abajo queda
+      // muerto. Forzar el fallo del render es lo que hace que el servicio
+      // caiga al PDF persistido de 3 MB y dispare el descarte que este test
+      // existe para probar.
+      fiscalPdfRender: {
+        renderBuffer: jest
+          .fn()
+          .mockRejectedValue(new Error('render no disponible')),
       },
       s3Service: {
         downloadFile: jest.fn().mockResolvedValue(big_pdf),
@@ -362,13 +391,20 @@ describe('InvoiceDeliveryService', () => {
 
   /**
    * Casilla 4 (camino de FALLO del render): si `renderBuffer` falla (por
-   * identidad fiscal incompleta, S3 sin logo, etc.), el servicio cae al
-   * PDF persistido en S3 — y el AttachedDocument sigue saliendo (sin
-   * `cbc:Note` de representación gráfica, porque `pdf_buffer` quedó
-   * undefined). Esta es la pieza de «degradación operativa» que comparte
-   * criterio con el resto del ZIP.
+   * identidad fiscal incompleta, S3 sin logo, etc.), el servicio cae al PDF
+   * persistido en S3 — y como esa descarga SÍ trae bytes, `pdf_buffer` NO
+   * queda undefined: el `AttachedDocument` incluye el `cbc:Note` de
+   * representación gráfica, pero con el PDF PERSISTIDO (S3), no con el que
+   * habría salido de `renderBuffer`. El caso "sin `cbc:Note`" es uno
+   * distinto — ambas fuentes fallando — y no es el que este test ejercita.
+   *
+   * F-211/D.13 (2026-09-14): el test original afirmaba las dos cosas a la
+   * vez ("cae al PDF persistido" y "sin cbc:Note porque pdf_buffer quedó
+   * undefined"), que son contradictorias cuando S3 sí responde — el mock por
+   * defecto de `s3Service.downloadFile` resuelve con bytes. Corregido para
+   * afirmar lo que el código realmente hace.
    */
-  it('E.5 — si renderBuffer falla, el ZIP usa el PDF persistido y el sobre se construye sin cbc:Note', async () => {
+  it('E.5 — si renderBuffer falla, el ZIP usa el PDF persistido y el sobre incluye su cbc:Note', async () => {
     const xml_document =
       '<Invoice><ID>FE100</ID><UUID schemeName="CUFE-SHA384">' +
       'a'.repeat(96) +
@@ -406,11 +442,14 @@ describe('InvoiceDeliveryService', () => {
       .getData()
       .toString('utf-8');
 
-    // Sin PDF embebido → el sobre NO incluye el `cbc:Note` de
-    // representación gráfica, sólo el XML firmado en `cac:Attachment`.
-    expect(attached_xml).not.toContain('<cbc:Note>');
+    // El PDF persistido en S3 (no el fallido de `renderBuffer`) es el que
+    // viaja embebido en el `cbc:Note` de representación gráfica.
+    const pdf_base64 = Buffer.from('pdf-bytes').toString('base64');
+    expect(attached_xml).toContain(
+      `<cbc:Note>Representación gráfica (PDF), base64: ${pdf_base64}</cbc:Note>`,
+    );
     expect(attached_xml).toContain('<cac:Attachment>');
-    // Pero el resto del sobre sigue presente y es válido.
+    // Y el resto del sobre sigue presente y es válido.
     expect(attached_xml).toContain('AttachedDocument');
   });
 

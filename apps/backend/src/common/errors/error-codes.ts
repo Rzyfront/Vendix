@@ -1379,6 +1379,34 @@ export const ErrorCodes = {
     devMessage:
       'Order cannot be paid: customer is required and pos.allow_anonymous_sales is disabled',
   },
+  // CP-pos-exclusive-tax-double-charge (QUI-832), C.8 — F-035 (major) /
+  // F-047 (blocker). `order_item_taxes` no tiene `onDelete` en su FK hacia
+  // `order_items` (requerida). `updateOrderItems`/`updateOrderFromEditor`
+  // reemplazan las líneas con un `deleteMany`; sobre una orden que ya
+  // persistió su desglose fiscal ese `deleteMany` violaría la FK (P2003).
+  // Este código se lanza ANTES de tocar una sola fila, así que ninguna
+  // transacción llega a intentar el `deleteMany`.
+  ORD_EDIT_TAX_BREAKDOWN_LOCKED_001: {
+    code: 'ORD_EDIT_TAX_BREAKDOWN_LOCKED_001',
+    httpStatus: 409,
+    devMessage:
+      'Order already has a persisted tax breakdown (order_item_taxes); replacing its items via this endpoint is not supported and would violate a database constraint',
+  },
+  // CP-pos-exclusive-tax-double-charge (QUI-832), C.8 — F-068 (major). El
+  // editor recalcula subtotal/impuesto/total server-side y los persiste
+  // dentro de la MISMA transacción; este código se lanza si la relectura
+  // (todavía dentro de la transacción, antes de comprometerla) no coincide
+  // con lo recién escrito — invariante interno que nunca debería violarse.
+  // A diferencia de `ORD_EDIT_RESPONSE_MISMATCH_001` (que se lanzaba
+  // DESPUÉS del commit, con la orden ya guardada), esta comprobación corre
+  // ANTES de que la transacción cierre: si lanza, Prisma revierte todo y la
+  // orden queda exactamente como estaba.
+  ORD_EDIT_TOTALS_ROLLBACK_001: {
+    code: 'ORD_EDIT_TOTALS_ROLLBACK_001',
+    httpStatus: 409,
+    devMessage:
+      'Order edit was not committed: recalculated totals did not match the row about to be persisted; the transaction was rolled back and nothing changed',
+  },
   INV_LOC_001: {
     code: 'INV_LOC_001',
     httpStatus: 404,
@@ -5352,6 +5380,25 @@ export const ErrorCodes = {
     devMessage:
       'La estación tiene una sesión abierta: ciérrala antes de desactivarla',
   },
+  // El borrado FÍSICO (`DELETE /store/kds/:id?hard=true`) no arrastra
+  // historial: `kitchen_tickets.kds_id` es NOT NULL con FK RESTRICT y las
+  // sesiones son auditoría de turnos. Con sesiones o tickets, 409 y vía
+  // normal (baja lógica). Sin historial sí se puede borrar la fila.
+  KDS_HAS_HISTORY: {
+    code: 'KDS_HAS_HISTORY',
+    httpStatus: 409,
+    devMessage:
+      'La estación tiene historial (sesiones o tickets de cocina): desactívala en lugar de eliminarla',
+  },
+  // `products.kds_id` es SET NULL, así que la DB dejaría borrar — pero
+  // dejaría platos huérfanos de tablero que caerían al default en el fire.
+  // 409 con conteo para que el operador reasigne antes de reintentar.
+  KDS_HAS_PRODUCTS: {
+    code: 'KDS_HAS_PRODUCTS',
+    httpStatus: 409,
+    devMessage:
+      'La estación tiene productos asignados: reasígnalos a otra estación antes de eliminarla',
+  },
   KDS_SESSION_NOT_FOUND: {
     code: 'KDS_SESSION_NOT_FOUND',
     httpStatus: 404,
@@ -5862,6 +5909,37 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage:
       'La landing de esta tienda no está disponible para recibir mensajes de contacto.',
+  },
+
+  // D.13 (plan CP-pos-exclusive-tax-double-charge, QUI-832) — compuerta G3,
+  // `order-arithmetic.guard.ts`. Registrado y NO cableado a ningún escritor
+  // todavía: la bandera `ORDER_ARITHMETIC_GUARD_ENABLED` nace en `false` (ver
+  // registry/err.md ERR-24 del bundle del plan). Sólo puede lanzarse si
+  // alguien enciende la bandera Y llama a `assertOrderLineTotalInvariant`
+  // explícitamente.
+  ORD_LINE_TOTAL_MISMATCH_001: {
+    code: 'ORD_LINE_TOTAL_MISMATCH_001',
+    httpStatus: 422,
+    devMessage:
+      'total_price de la línea no cuadra con unit_price × line_units fuera de tolerancia (I-1).',
+  },
+
+  // B.3 (plan CP-pos-exclusive-tax-double-charge, QUI-832) — F-065 / ERR-23
+  // del registro del plan. `TaxesService.calculateProductTaxes` ahora expone
+  // `has_tax_assignment` para que el llamador distinga «producto sin
+  // impuestos asignados» de «producto con impuestos resueltos a cero»; este
+  // código es lo que ese llamador debe lanzar cuando `has_tax_assignment ===
+  // false` en un contexto donde la línea ya tenía impuesto (p. ej. al cerrar
+  // una cuenta de mesa cuyo producto perdió su `product_tax_assignments`
+  // — caso real: purga de Roma Motos). Sitio de lanzamiento identificado
+  // (`payments.service.ts`, fuera del alcance de este cambio — ver BLOCKER
+  // REPORT del paso B.3 en evidence/B3-taxes-ejecucion.md): aún no está
+  // cableado.
+  POS_TABLE_LINE_TAX_UNRESOLVABLE_001: {
+    code: 'POS_TABLE_LINE_TAX_UNRESOLVABLE_001',
+    httpStatus: 422,
+    devMessage:
+      'El producto de esta línea perdió su asignación fiscal y el impuesto no se puede resolver; no se puede normalizar a IVA cero en silencio.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

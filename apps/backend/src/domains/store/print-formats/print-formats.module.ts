@@ -59,6 +59,13 @@ import { FormatAdapterRegistryService } from './services/format-adapter-registry
 // registro, el provider del controller lanzaría DI al primer hit.
 import { DocumentIndexService } from './services/document-index.service';
 import { DocumentDataProviderRegistry } from './providers/document-data-provider.registry';
+// ADR-15 §4 (CP-pos-exclusive-tax-double-charge, unificación
+// remisión-gateway) — registro de renderizadores del motor `engine:'pdf'` y
+// el renderizador delgado de `dispatch_note` que delega en
+// `DispatchNotePdfService` (ver comentario del import de `DispatchNotesModule`
+// más abajo para el ciclo que esto abre).
+import { DocumentPdfRendererRegistry } from './providers/document-pdf-renderer.registry';
+import { DispatchNotePdfRenderer } from './providers/dispatch-note-pdf.renderer';
 import { PosSaleTicketDataProvider } from './providers/pos-sale-ticket.provider';
 import { PosElectronicInvoiceDataProvider } from './providers/pos-electronic-invoice.provider';
 import { SalesOrderInvoiceDataProvider } from './providers/sales-order-invoice.provider';
@@ -85,6 +92,13 @@ import { WithholdingEmployeeCertificateDataProvider } from './providers/withhold
 // import, Nest no resuelve la inyección de `PrintFiscalGateService` en este
 // módulo y el booteo falla con `UnknownDependenciesException`.
 import { InvoiceProviderModule } from '../invoicing/providers/invoice-provider.module';
+// ADR-15 §4 — `DispatchNotePdfRenderer` necesita `DispatchNotePdfService`, y
+// lo toma del módulo HOJA que lo publica, NO de `DispatchNotesModule`.
+// Importar el módulo de dominio entero cerraba el grafo de `require` contra
+// `NotificationsModule` y el backend no arrancaba; `forwardRef` no lo salva
+// porque el ciclo es de carga, no de inyección. El porqué completo, con el
+// error medido, está en `dispatch-note-pdf.module.ts`.
+import { DispatchNotePdfModule } from '../dispatch-notes/pdf/dispatch-note-pdf.module';
 
 @Module({
   imports: [
@@ -95,6 +109,9 @@ import { InvoiceProviderModule } from '../invoicing/providers/invoice-provider.m
     // [print-fiscal-gate] — ver import arriba. Aporta
     // `FiscalProductionReadinessService` al grafo de DI del módulo de impresión.
     InvoiceProviderModule,
+    // ADR-15 §4 — hoja, sin `forwardRef`: no hay ciclo que romper porque
+    // este módulo no vuelve acá. Ver el import arriba.
+    DispatchNotePdfModule,
   ],
   // ORDEN DELIBERADO. `PrintTemplatesLibraryController` sirve
   // `store/print-formats/library`; `PrintFormatsController` sirve
@@ -126,6 +143,12 @@ import { InvoiceProviderModule } from '../invoicing/providers/invoice-provider.m
     // for region-allowlist validation on overrides / template definitions.
     FormatAdapterRegistryService,
     DocumentDataProviderRegistry,
+    // ADR-15 §4 — registro de renderizadores PDF + el renderizador delgado de
+    // `dispatch_note`. Se registran contra `DocumentPdfRendererRegistry` en
+    // `onModuleInit`, igual que los `IDocumentDataProvider` de arriba se
+    // registran contra `DocumentDataProviderRegistry`.
+    DocumentPdfRendererRegistry,
+    DispatchNotePdfRenderer,
     // [print-editor-dsk P3.1] — Servicio del picker de documentos
     // recientes. Sólo depende del registry (no de providers concretos),
     // así que basta con registrarlo una vez y los once providers pasan
@@ -170,6 +193,10 @@ import { InvoiceProviderModule } from '../invoicing/providers/invoice-provider.m
 export class PrintFormatsModule implements OnModuleInit {
   constructor(
     private readonly registry: DocumentDataProviderRegistry,
+    // ADR-15 §4 — registro/renderizadores del motor `engine:'pdf'`.
+    private readonly pdfRendererRegistry: DocumentPdfRendererRegistry,
+    private readonly fiscalInvoicePdfRenderService: FiscalInvoicePdfRenderService,
+    private readonly dispatchNotePdfRenderer: DispatchNotePdfRenderer,
     private readonly posSaleTicketProvider: PosSaleTicketDataProvider,
     private readonly posElectronicInvoiceProvider: PosElectronicInvoiceDataProvider,
     private readonly salesOrderInvoiceProvider: SalesOrderInvoiceDataProvider,
@@ -205,6 +232,17 @@ export class PrintFormatsModule implements OnModuleInit {
     this.registry.register(this.fiscalInvoiceProvider);
     this.registry.register(this.fiscalCreditNoteProvider);
     this.registry.register(this.kitchenTicketProvider);
+    // ADR-15 §4 — registro de renderizadores del motor `engine:'pdf'`. Los
+    // dos formatos fiscales comparten la MISMA instancia de
+    // `FiscalInvoicePdfRenderService` que el gateway inyectaba directo antes
+    // de esta unificación (ese archivo no se toca; su comportamiento no
+    // cambia). `dispatch_note` suma el renderizador delgado que delega en
+    // `DispatchNotePdfService`. Esta lista es ahora la ÚNICA fuente de
+    // verdad de qué formatos aceptan `engine:'pdf'` — antes vivía además,
+    // duplicada, en `PDF_ENGINE_SUPPORTED_FORMATS` dentro del gateway.
+    this.pdfRendererRegistry.register('fiscal_electronic_invoice', this.fiscalInvoicePdfRenderService);
+    this.pdfRendererRegistry.register('fiscal_credit_note', this.fiscalInvoicePdfRenderService);
+    this.pdfRendererRegistry.register('dispatch_note', this.dispatchNotePdfRenderer);
     // CP-DTLP-20260827 (Phase B.4.b): undécimo provider. Sin esta línea, el
     // gateway devuelve 500 (PRINT_DATA_PROVIDER_MISSING_001) al pedir
     // `format_type: 'dispatch_ticket'`.

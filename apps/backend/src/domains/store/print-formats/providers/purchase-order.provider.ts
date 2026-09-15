@@ -25,21 +25,24 @@ export class PurchaseOrderDataProvider implements IDocumentDataProvider {
       throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
     }
 
+    // C.3 (fix 2026-09-14): `purchase_orders` no tiene columna `store_id` ni
+    // relacion `stores` — es org-scoped (`organization_id`), enlazada a la
+    // tienda solo indirectamente vía `location.store_id`. El
+    // `StorePrismaService` ya aplica ese scope automaticamente
+    // (`store-prisma.service.ts:475`: `purchase_orders: { location: {
+    // store_id: context.store_id } }`), asi que el `where` explicito con
+    // `store_id` no solo era invalido para Prisma (rompia con
+    // PrismaClientValidationError, 500 en CADA render de OC) sino redundante.
     const po = await this.prisma.purchase_orders.findFirst({
-      where: { id, store_id: storeId },
+      where: { id },
       include: {
-        stores: {
+        organizations: {
           include: {
             addresses: { take: 1 },
             // C.1 — settings para el gate fiscal
             // `resolvePrintsVatBreakdownForPrint` (misma forma que
             // `FISCAL_DOCUMENT_PRINT_INCLUDE`).
-            store_settings: { select: { settings: true } },
-            organizations: {
-              include: {
-                organization_settings: { select: { settings: true } },
-              },
-            },
+            organization_settings: { select: { settings: true } },
           },
         },
         suppliers: true,
@@ -51,33 +54,57 @@ export class PurchaseOrderDataProvider implements IDocumentDataProvider {
       throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
     }
 
-    const store = po.stores || {};
-    const org = store.organizations || {};
+    const org = po.organizations || ({} as any);
     const supplier = po.suppliers || {};
-    const storeAddr = store.addresses?.[0] || {};
+    const orgAddr = org.addresses?.[0] || {};
 
-    const items = (po.purchase_order_items || []).map((it: any, idx: number) => ({
-      index: idx + 1,
-      product_name: it.product_name || 'Ítem de compra',
-      variant_sku: it.sku || undefined,
-      quantity: Number(it.quantity || 1),
-      unit_price: Number(it.unit_cost || 0),
-      unit_price_formatted: `$${Number(it.unit_cost || 0).toLocaleString('es-CO')}`,
-      total_price: Number(it.total_cost || (it.quantity * it.unit_cost) || 0),
-      total_price_formatted: `$${Number(it.total_cost || (it.quantity * it.unit_cost) || 0).toLocaleString('es-CO')}`,
-    }));
+    const items = (po.purchase_order_items || []).map((it: any, idx: number) => {
+      // C.3 (fix 2026-09-14): la columna real es `quantity_ordered`, no
+      // `quantity` — `it.quantity` era siempre `undefined`, así que el
+      // fallback `it.quantity * it.unit_cost` daba `NaN` (falsy) y colapsaba
+      // a `0` cada vez que `total_cost` viene nulo en BD (135/157 filas de
+      // `purchase_order_items` en este ambiente). Con el total de línea en
+      // `$0`, Σ(línea) nunca cuadraba contra `Subtotal` — la condición
+      // negativa de la invariante de C.3.
+      const qty = Number(it.quantity_ordered || 1);
+      const unitCost = Number(it.unit_cost || 0);
+      // `qty * unitCost` es siempre `number` (nunca nullish) — el `?? 0`
+      // final era código muerto que `tsc` marca como TS2881.
+      const lineTotal = Number(it.total_cost ?? (qty * unitCost));
+      return {
+        index: idx + 1,
+        product_name: it.product_name || 'Ítem de compra',
+        variant_sku: it.sku || undefined,
+        quantity: qty,
+        unit_price: unitCost,
+        unit_price_formatted: `$${unitCost.toLocaleString('es-CO')}`,
+        total_price: lineTotal,
+        total_price_formatted: `$${lineTotal.toLocaleString('es-CO')}`,
+      };
+    });
 
+    // C.3 (fix 2026-09-14): `totals` colapsaba TODO a `po.total_amount` —
+    // `subtotal` mentia el bruto como si fuera la base gravable (money_basis
+    // declara 'taxable_base' pero el numero impreso era el TOTAL, impuesto
+    // incluido) y `tax_total` estaba fijo en 0 sin mirar `po.tax_amount`.
+    // Con OC #214 real (subtotal_amount=1440.00, tax_amount=273.60,
+    // total_amount=2713.60) el papel imprimia "Subtotal: $2.713,6" en vez de
+    // "$1.440" — exactamente la clase de defecto que este plan ataca.
+    const subtotal = Number(po.subtotal_amount || 0);
+    const discount = Number(po.discount_amount || 0);
+    const shipping = Number(po.shipping_cost || 0);
+    const taxTotal = Number(po.tax_amount || 0);
     const total = Number(po.total_amount || 0);
 
     return {
       store: {
-        name: store.name || 'Vendix',
-        legal_name: store.legal_name,
-        tax_id: store.organizations?.tax_id,
-        phone: store.phone,
-        email: store.email,
-        address: storeAddr.address_line1,
-        city: storeAddr.city,
+        name: org.name || 'Vendix',
+        legal_name: org.legal_name,
+        tax_id: org.tax_id,
+        phone: org.phone,
+        email: org.email,
+        address: orgAddr.address_line1,
+        city: orgAddr.city,
       },
       supplier: {
         name: supplier.name || 'Proveedor General',
@@ -99,18 +126,23 @@ export class PurchaseOrderDataProvider implements IDocumentDataProvider {
       // siempre sobre base gravable; el gate de IVA se resuelve con org/store
       // ya en memoria por el include de C.1.
       money_basis: 'taxable_base',
-      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(org, store),
+      // Sin fila `store` propia (la OC es org-scoped), el resolvedor recibe
+      // `undefined` como store: si `org.fiscal_scope` no es explicitamente
+      // 'ORGANIZATION' el desempate cae a 'STORE' y no hay `store_settings`
+      // que leer → fail-closed (`false`), igual que cualquier otro estado
+      // fiscal indeterminado.
+      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(org, undefined),
       items,
       taxes: [],
       totals: {
-        subtotal: total,
-        subtotal_formatted: `$${total.toLocaleString('es-CO')}`,
-        discount_total: 0,
-        discount_total_formatted: '$0',
-        shipping_total: 0,
-        shipping_total_formatted: '$0',
-        tax_total: 0,
-        tax_total_formatted: '$0',
+        subtotal,
+        subtotal_formatted: `$${subtotal.toLocaleString('es-CO')}`,
+        discount_total: discount,
+        discount_total_formatted: `$${discount.toLocaleString('es-CO')}`,
+        shipping_total: shipping,
+        shipping_total_formatted: `$${shipping.toLocaleString('es-CO')}`,
+        tax_total: taxTotal,
+        tax_total_formatted: `$${taxTotal.toLocaleString('es-CO')}`,
         grand_total: total,
         grand_total_formatted: `$${total.toLocaleString('es-CO')}`,
       },
@@ -203,8 +235,10 @@ export class PurchaseOrderDataProvider implements IDocumentDataProvider {
     storeId: number,
     limit: number,
   ): Promise<RecentDocumentSummary[]> {
+    // C.3 (fix 2026-09-14): mismo defecto que `fetchDocumentData` — no existe
+    // columna `store_id` en `purchase_orders`; el scope por tienda ya lo
+    // aplica `StorePrismaService` via `location.store_id` (ver arriba).
     const rows = await this.prisma.purchase_orders.findMany({
-      where: { store_id: storeId },
       orderBy: { created_at: 'desc' },
       take: limit,
       select: {

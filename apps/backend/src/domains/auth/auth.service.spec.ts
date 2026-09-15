@@ -11,8 +11,24 @@ import { DefaultPanelUIService } from '../../common/services/default-panel-ui.se
 import { CustomersService } from '../store/customers/customers.service';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { UnauthorizedException } from '@nestjs/common';
+import { VendixHttpException } from 'src/common/errors';
 import * as bcrypt from 'bcrypt';
+
+/**
+ * F-194: el servicio migró de `UnauthorizedException` (Nest) a
+ * `VendixHttpException` en `144af5c2f` (2026-08-15, DIAN bus + Anexo 19) sin
+ * tocar este spec, que quedó comprobando la clase vieja — 4 de 5 tests caían
+ * desde entonces con "Expected constructor: UnauthorizedException / Received
+ * constructor: VendixHttpException". No es una regresión del contrato HTTP
+ * 401: `AUTH_CREDENTIALS_001.httpStatus === 401` (`error-codes.ts:438`), la
+ * respuesta al cliente sigue siendo 401 tal cual — sólo cambió la clase
+ * interna que la construye. El fix es este helper: valida clase nueva +
+ * status real en vez de la clase retirada.
+ */
+function expectUnauthorized(error: unknown): void {
+  expect(error).toBeInstanceOf(VendixHttpException);
+  expect((error as VendixHttpException).getStatus()).toBe(401);
+}
 
 describe('AuthService Login Flow', () => {
   let service: AuthService;
@@ -150,7 +166,7 @@ describe('AuthService Login Flow', () => {
       await service.login({ email: 'wrong@email.com', password: '123' });
       throw new Error('Should have thrown UnauthorizedException');
     } catch (error) {
-      expect(error).toBeInstanceOf(UnauthorizedException);
+      expectUnauthorized(error);
     }
   });
 
@@ -173,7 +189,7 @@ describe('AuthService Login Flow', () => {
       });
       throw new Error('Should have thrown UnauthorizedException');
     } catch (error) {
-      expect(error).toBeInstanceOf(UnauthorizedException);
+      expectUnauthorized(error);
     }
   });
 
@@ -205,7 +221,7 @@ describe('AuthService Login Flow', () => {
       });
       throw new Error('Should have thrown UnauthorizedException');
     } catch (error) {
-      expect(error).toBeInstanceOf(UnauthorizedException);
+      expectUnauthorized(error);
     }
   });
 
@@ -287,7 +303,7 @@ describe('AuthService Login Flow', () => {
       });
       throw new Error('Should have thrown UnauthorizedException');
     } catch (error) {
-      expect(error).toBeInstanceOf(UnauthorizedException);
+      expectUnauthorized(error);
     }
   });
 });

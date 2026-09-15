@@ -345,7 +345,14 @@ export const selectFiscalStatus = createSelector(
   selectOrganizationSettings,
   selectUserOrganization,
   (storeSettings: any, organizationSettings: any, organization: any) => {
-    const fiscalScope = organization?.fiscal_scope || organization?.operating_scope;
+    // F-198 (CP-pos-exclusive-tax-double-charge): desempate alineado al
+    // backend (`fiscal-issuer-identity.ts:83`, `print-vat-breakdown.resolver.ts`)
+    // — `fiscal_scope ?? 'STORE'`, NUNCA `|| operating_scope`. Con
+    // `fiscal_scope` nulo el `||` caía a `operating_scope` y podía leer
+    // `organization_settings` donde el backend lee `store_settings`,
+    // produciendo `prints_vat_breakdown` distinto en pantalla y en papel
+    // para la misma tienda.
+    const fiscalScope = organization?.fiscal_scope ?? 'STORE';
     if (fiscalScope === 'ORGANIZATION') {
       return (organizationSettings?.fiscal_status || null) as FiscalStatusBlock | null;
     }
@@ -409,8 +416,8 @@ export const selectFiscalData = createSelector(
   selectOrganizationSettings,
   selectUserOrganization,
   (storeSettings: any, organizationSettings: any, organization: any) => {
-    const fiscalScope =
-      organization?.fiscal_scope || organization?.operating_scope;
+    // F-198: mismo desempate que `selectFiscalStatus` — ver comentario ahí.
+    const fiscalScope = organization?.fiscal_scope ?? 'STORE';
     if (fiscalScope === 'ORGANIZATION') {
       return organizationSettings?.fiscal_data || null;
     }

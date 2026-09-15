@@ -42,7 +42,7 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
  *   - `comensal_joined` | `comensal_left`     (B1: comensales vía QR)
  *   - `item_added`                            (B2: items agregados)
  *   - `guest_count_changed`                   (B2: comensales declarados)
- *   - `bill.requested`                        (C2: pedido de cuenta)
+ *   - `bill.requested` | `table_call_waiter`  (C2: pedido de cuenta / llamado mesero)
  *   - `payment.pending` | `payment.confirmed` (C3/C4: payments dashboard)
  *   - `kitchen.*`                             (kitchen-fire.service push)
  *   - `table_payment_pending` |
@@ -54,6 +54,7 @@ const STAFF_EVENT_WHITELIST = (type: string): boolean => {
   if (type === 'item_added') return true;
   if (type === 'guest_count_changed') return true;
   if (type === 'bill.requested') return true;
+  if (type === 'table_call_waiter') return true;
   if (type === 'payment.pending') return true;
   if (type === 'payment.confirmed') return true;
   if (type === 'table_payment_pending') return true;

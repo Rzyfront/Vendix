@@ -95,6 +95,17 @@ export class KdsManagePageComponent implements OnInit {
   readonly editingId = signal<number | null>(null);
   readonly isSaving = signal(false);
 
+  /**
+   * Confirmaciones pendientes del CRUD completo. Guardan la estación para
+   * mostrar su nombre en el modal antes de mutar — nunca se muta sin pasar
+   * por acá en desactivar/borrar.
+   */
+  readonly pendingDeactivate = signal<KdsStation | null>(null);
+  readonly pendingActivate = signal<KdsStation | null>(null);
+  readonly pendingDelete = signal<KdsStation | null>(null);
+  /** Mutación de confirmación en curso: deshabilita los botones del modal. */
+  readonly confirmBusy = signal(false);
+
   readonly form = this.fb.nonNullable.group({
     name: ['', [Validators.required, Validators.maxLength(100)]],
     code: ['', [Validators.required, Validators.maxLength(50)]],
@@ -261,18 +272,140 @@ export class KdsManagePageComponent implements OnInit {
       });
   }
 
-  deactivate(station: KdsStation): void {
+  /**
+   * ¿Se puede borrar FÍSICAMENTE? Solo sin historial (0 turnos, 0 platos
+   * ruteados y 0 tickets) y sin ser la de por defecto. Con historial el botón Borrar no
+   * aparece y se ofrece Desactivar; el backend re-valida con
+   * `KDS_HAS_HISTORY`. Sin `_count` (lista sin conteos) se asume sin
+   * historial y el backend decide — su 409 accionable llega al toast.
+   */
+  canHardDelete(station: KdsStation): boolean {
+    if (station.is_default) return false;
+    const sessions = station._count?.sessions ?? 0;
+    const products = station._count?.products ?? 0;
+    const tickets = station._count?.tickets ?? 0;
+    return sessions === 0 && products === 0 && tickets === 0;
+  }
+
+  deactivate(station: KdsStation, after?: () => void): void {
     this.stationsService
       .deactivateStation(station.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.toastService.success('Estación desactivada');
+          this.toastService.success(`"${station.name}" desactivada`);
           this.reload();
+          after?.();
         },
         // El backend rechaza desactivar la de por defecto o una con turno
-        // abierto, y su mensaje dice cuál de las dos.
-        error: (e) => this.fail(e, 'No se pudo desactivar'),
+        // abierto, y su mensaje dice cuál de las dos
+        // (`KDS_DEFAULT_PROTECTED` / `KDS_HAS_OPEN_SESSION`).
+        error: (e) => {
+          this.fail(e, 'No se pudo desactivar');
+          after?.();
+        },
+      });
+  }
+
+  askDeactivate(station: KdsStation): void {
+    this.pendingDeactivate.set(station);
+  }
+
+  cancelDeactivate(): void {
+    if (this.confirmBusy()) return;
+    this.pendingDeactivate.set(null);
+  }
+
+  confirmDeactivate(): void {
+    const station = this.pendingDeactivate();
+    if (station == null || this.confirmBusy()) return;
+    this.confirmBusy.set(true);
+    this.deactivate(station, () => {
+      this.confirmBusy.set(false);
+      this.pendingDeactivate.set(null);
+    });
+  }
+
+  /**
+   * Reactiva una inactiva. El backend puede aún no exponer
+   * `POST /store/kds/:id/activate` (corre en paralelo): su 404 llega al
+   * toast como mensaje accionable hasta que exista.
+   */
+  activate(station: KdsStation, after?: () => void): void {
+    this.stationsService
+      .activateStation(station.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(`"${station.name}" activada`);
+          this.reload();
+          after?.();
+        },
+        error: (e) => {
+          this.fail(e, 'No se pudo activar');
+          after?.();
+        },
+      });
+  }
+
+  askActivate(station: KdsStation): void {
+    this.pendingActivate.set(station);
+  }
+
+  cancelActivate(): void {
+    if (this.confirmBusy()) return;
+    this.pendingActivate.set(null);
+  }
+
+  confirmActivate(): void {
+    const station = this.pendingActivate();
+    if (station == null || this.confirmBusy()) return;
+    this.confirmBusy.set(true);
+    this.activate(station, () => {
+      this.confirmBusy.set(false);
+      this.pendingActivate.set(null);
+    });
+  }
+
+  askDelete(station: KdsStation): void {
+    // Doble guarda en el cliente además del @if del botón: con historial
+    // o siendo default, el borrado físico ni se intenta.
+    if (!this.canHardDelete(station)) {
+      this.toastService.warning(
+        'Solo se puede borrar una estación sin turnos ni platos',
+      );
+      return;
+    }
+    this.pendingDelete.set(station);
+  }
+
+  cancelDelete(): void {
+    if (this.confirmBusy()) return;
+    this.pendingDelete.set(null);
+  }
+
+  confirmDelete(): void {
+    const station = this.pendingDelete();
+    if (station == null || this.confirmBusy()) return;
+    this.confirmBusy.set(true);
+    this.stationsService
+      .deleteStationHard(station.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.confirmBusy.set(false);
+          this.pendingDelete.set(null);
+          this.toastService.success(`"${station.name}" borrada`);
+          this.reload();
+        },
+        // 404 si ya no existe · 409 `KDS_DEFAULT_PROTECTED` /
+        // `KDS_HAS_OPEN_SESSION` / `KDS_HAS_HISTORY`: el mensaje del backend
+        // ya explica cuál y se muestra tal cual.
+        error: (e) => {
+          this.confirmBusy.set(false);
+          this.pendingDelete.set(null);
+          this.fail(e, 'No se pudo borrar');
+        },
       });
   }
 

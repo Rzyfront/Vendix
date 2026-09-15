@@ -427,3 +427,50 @@ describe('tax-inclusive-math — matriz A.6 (F-005 truncado DIAN)', () => {
     });
   });
 });
+
+/**
+ * F-019/F-099 — el tripwire viejo del kernel (`dian-money.util.ts`,
+ * `if (iterations > INCLUSIVE_SOLVER_MAX_STEPS)`) era inalcanzable por
+ * construcción: el propio `while (iterations < MAX)` garantiza
+ * `iterations <= MAX` siempre al salir. El modo de falla real —la cota se
+ * agota sin haber convergido— salía en SILENCIO con la base subestimada en
+ * 1¢ o más (sub-cobro mudo). El fix compara contra el predicado real de
+ * no-convergencia (`iterations === MAX && fOf(base+1¢) <= G`).
+ *
+ * Construcción analítica (no búsqueda a ciegas — verificada aparte con
+ * `Prisma.Decimal` fuera de jest, ver evidencia del plan
+ * CP-pos-exclusive-tax-double-charge/evidence/B-cobro-2026-09-14.md): con
+ * `rate = 0.000099` y `G = 100.00`, `trunc(B × rate)` da `0.00` para
+ * cualquier `B` en el tramo `[99.83, 100.01)` (`B × rate < 0.01` en todo ese
+ * rango) — así que en ese tramo `f(B) = B` EXACTO y ningún término de tasa
+ * frena el bump. Con `N=16` tasas la base parte de `100.00` y cierra en el
+ * primer intento (converge). Con `N=17` la base parte de `99.83` y necesita
+ * 17 pasos de 1¢ para llegar a `100.00` — uno más que la cota de 16: la
+ * cota se agota en `99.99` con el siguiente paso todavía viable.
+ */
+describe('resolveLineTotals — tripwire de no-convergencia (F-019/F-099)', () => {
+  it('17 tasas inclusivas agotan la cota de 16 pasos sin converger: lanza en vez de sub-cobrar en silencio', () => {
+    const rates: TaxRateForResolution[] = Array.from({ length: 17 }, () => ({
+      rate: 0.000099,
+      is_inclusive: true,
+    }));
+
+    expect(() => resolveLineTotals(100.0, rates)).toThrow(
+      /inclusive solver exceeded bound/,
+    );
+  });
+
+  it('16 tasas del mismo patrón SÍ convergen (cierre exacto, sin lanzar) — la cota tiene margen real', () => {
+    const rates: TaxRateForResolution[] = Array.from({ length: 16 }, () => ({
+      rate: 0.000099,
+      is_inclusive: true,
+    }));
+
+    let result!: ReturnType<typeof resolveLineTotals>;
+    expect(() => {
+      result = resolveLineTotals(100.0, rates);
+    }).not.toThrow();
+    expect(result.base).toBe(100);
+    expect(result.unclosed_residual_cents).toBe(0);
+  });
+});

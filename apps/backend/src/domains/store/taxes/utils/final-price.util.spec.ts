@@ -115,6 +115,52 @@ describe('final-price.util', () => {
         resolveVariantEffectivePrice({ price_override: null }, product),
       ).toBe(8000);
     });
+
+    // F-216: los cuatro casos que separaban este productor (display) del de
+    // cobro (`payments.service.ts:2436 resolveCatalogUnitBasePrice`). Cada
+    // expectativa es el numero que el cobro ya devolvia antes de este cambio.
+    describe('paridad con el productor de cobro (F-216)', () => {
+      const onSale = { base_price: 8000, is_on_sale: true, sale_price: 6000 };
+
+      it('hereda la oferta del producto cuando la variante no tiene precio propio', () => {
+        expect(
+          resolveVariantEffectivePrice({ price_override: null }, onSale),
+        ).toBe(6000);
+      });
+
+      it('el override de la variante sigue ganandole a la oferta del producto', () => {
+        expect(
+          resolveVariantEffectivePrice({ price_override: 9000 }, onSale),
+        ).toBe(9000);
+      });
+
+      it('un override en 0 no es un precio: cae al siguiente peldano', () => {
+        expect(
+          resolveVariantEffectivePrice({ price_override: 0 }, onSale),
+        ).toBe(6000);
+        expect(
+          resolveVariantEffectivePrice({ price_override: 0 }, product),
+        ).toBe(8000);
+      });
+
+      it('una oferta de variante en 0 tampoco lo es', () => {
+        expect(
+          resolveVariantEffectivePrice(
+            { is_on_sale: true, sale_price: 0, price_override: 9000 },
+            onSale,
+          ),
+        ).toBe(9000);
+      });
+
+      it('sin oferta activa en el producto la base sigue mandando', () => {
+        expect(
+          resolveVariantEffectivePrice(
+            { price_override: null },
+            { base_price: 8000, is_on_sale: false, sale_price: 6000 },
+          ),
+        ).toBe(8000);
+      });
+    });
   });
 
   describe('calculateVariantFinalPrice', () => {

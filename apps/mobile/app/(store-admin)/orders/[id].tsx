@@ -10,6 +10,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { OrderService } from '@/features/store/services/order.service';
+import { resolvePrintsVatBreakdown } from '@/features/pos/services/pos-ticket.service';
 import { apiClient, Endpoints } from '@/core/api';
 import {
   Order,
@@ -626,6 +627,11 @@ const OrderDetail = () => {
   const badgeVariant =
     STATE_VARIANT_MAP[ORDER_STATE_COLORS[order.state]] ?? 'default';
   const currency = order.currency || 'COP';
+  // F-204: Subtotal e Impuestos sólo se pintan juntos cuando la tienda
+  // desglosa IVA (sesión fiscal, no el payload de esta orden) y hay
+  // impuesto que desglosar. Ver comentario en "Resumen financiero".
+  const taxAmount = Number(order.tax_amount || 0);
+  const showTaxBreakdown = taxAmount > 0 && resolvePrintsVatBreakdown();
   const customer = order.users ?? order.customer;
   const customerName = customer
     ? [customer.first_name, customer.last_name].filter(Boolean).join(' ') || `Cliente #${customer.id}`
@@ -785,11 +791,17 @@ const OrderDetail = () => {
         </SectionCard>
 
         <SectionCard title="Resumen financiero" icon="wallet">
-          {/* C.7 (§5.3, base taxable, sin bandera fiscal en el payload
-              móvil): Subtotal sólo sin impuesto; la fila Impuestos vuelve
-              cuando el payload traiga respaldo (tren MO/C.11). */}
+          {/* F-204/C.11 (§5.3, ADR-07/ADR-12, regla anti-huérfana): el
+              payload de `GET /store/orders/:id` no trae `money_basis` ni
+              `prints_vat_breakdown` (esos campos sólo existen en
+              StandardPrintDataModel), pero el dato equivalente sí está en la
+              sesión fiscal ya cargada (mismo mirror que usa el tiquete POS,
+              `resolvePrintsVatBreakdown`). Subtotal e Impuestos se pintan
+              JUNTOS cuando la tienda desglosa IVA y hay impuesto > 0; si no
+              desglosa, ninguno de los dos sale (evita el Subtotal huérfano).
+              Con impuesto = 0 no hay nada que desglosar: Subtotal solo. */}
           <View style={styles.moneyRows}>
-            {Number(order.tax_amount || 0) === 0 && (
+            {(taxAmount === 0 || showTaxBreakdown) && (
               <View style={styles.moneyRow}>
                 <Text style={styles.moneyLabel}>Subtotal</Text>
                 <Text style={styles.moneyValue}>{money(order.subtotal_amount, currency)}</Text>
@@ -805,6 +817,12 @@ const OrderDetail = () => {
               <Text style={styles.moneyLabel}>Envío</Text>
               <Text style={styles.moneyValue}>{money(order.shipping_cost, currency)}</Text>
             </View>
+            {showTaxBreakdown && (
+              <View style={styles.moneyRow}>
+                <Text style={styles.moneyLabel}>Impuestos</Text>
+                <Text style={styles.moneyValue}>{money(order.tax_amount, currency)}</Text>
+              </View>
+            )}
             <View style={styles.grandTotalRow}>
               <Text style={styles.grandTotalLabel}>Total</Text>
               <Text style={styles.grandTotalValue}>{money(order.grand_total, currency)}</Text>
