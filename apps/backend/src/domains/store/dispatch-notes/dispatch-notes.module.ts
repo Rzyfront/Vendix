@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { DispatchNotesService } from './dispatch-notes.service';
 import { DispatchNotesController } from './dispatch-notes.controller';
@@ -26,6 +26,14 @@ import { PurchaseOrdersModule } from '../orders/purchase-orders/purchase-orders.
 // Acyclic: OrderFlowModule does NOT import DispatchNotesModule (nor transitively
 // via Prisma/Response/CashRegisters/Settings/Serials/OrderStockCommit).
 import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
+// ADR-15 §4 (CP-pos-exclusive-tax-double-charge, unificación
+// remisión-gateway) — `DispatchNotesController` llama `PrintGatewayService`
+// en `POST /:id/pdf` en vez de a `DispatchNotePdfService` directo.
+// `PrintFormatsModule`, a su vez, importa ESTE módulo para que su
+// `DispatchNotePdfRenderer` pueda inyectar `DispatchNotePdfService` — ciclo
+// de módulos genuino, resuelto con `forwardRef` en AMBOS lados (ver también
+// `print-formats.module.ts`).
+import { PrintFormatsModule } from '../print-formats/print-formats.module';
 
 @Module({
   imports: [
@@ -42,6 +50,8 @@ import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
     // queue. Producer: DispatchNotesService.enqueueReceiptScan; consumer:
     // ReceiptScanProcessor.
     BullModule.registerQueue({ name: 'receipt-scan' }),
+    // ADR-15 §4 — ver comentario del import de `PrintFormatsModule` arriba.
+    forwardRef(() => PrintFormatsModule),
   ],
   controllers: [DispatchNotesController],
   providers: [
@@ -58,6 +68,13 @@ import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
     // tenant RequestContext from the job payload before running the OCR.
     ReceiptScanProcessor,
   ],
-  exports: [DispatchNotesService],
+  exports: [
+    DispatchNotesService,
+    // ADR-15 §4 — `PrintFormatsModule` inyecta este servicio en
+    // `DispatchNotePdfRenderer` (ver comentario del import de
+    // `PrintFormatsModule` arriba). Sigue siendo el mismo builder pdfkit de
+    // siempre; sólo cambia quién lo llama.
+    DispatchNotePdfService,
+  ],
 })
 export class DispatchNotesModule {}

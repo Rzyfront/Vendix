@@ -7,6 +7,14 @@ import {
   DispatchNotePdfItem,
   DispatchNoteTransporter,
 } from './dispatch-note-pdf.builder';
+// F-101 (CP-pos-exclusive-tax-double-charge, unificación 2026-09-14) — este
+// PDF (riel B, `POST /store/dispatch-notes/:id/pdf`) imprimía la fila "IVA:"
+// sin ningún gate fiscal, mientras el otro riel de la remisión
+// (`print-formats/providers/dispatch-note.provider.ts`, riel A) SÍ la
+// gatea con `resolvePrintsVatBreakdownForPrint`. Se reutiliza la MISMA
+// función (no se duplica el predicado) para que ambos rieles coincidan en
+// si el papel muestra el desglose de IVA.
+import { resolvePrintsVatBreakdownForPrint } from '../../print-formats/services/print-vat-breakdown.resolver';
 
 /**
  * Dedicated include for the remisión PDF. It is intentionally separate from the
@@ -61,6 +69,9 @@ const DISPATCH_NOTE_PDF_INCLUDE = {
   store: {
     select: {
       id: true,
+      // F-101 — settings para `resolvePrintsVatBreakdownForPrint` (misma
+      // forma que usa `dispatch-note.provider.ts`, riel A).
+      store_settings: { select: { settings: true } },
       organizations: {
         select: {
           id: true,
@@ -70,6 +81,8 @@ const DISPATCH_NOTE_PDF_INCLUDE = {
           phone: true,
           email: true,
           logo_url: true,
+          fiscal_scope: true,
+          organization_settings: { select: { settings: true } },
           addresses: { take: 1 },
         },
       },
@@ -115,6 +128,15 @@ export class DispatchNotePdfService {
     }
 
     const org = note.store?.organizations;
+
+    // F-101 — mismo gate fiscal que usa el riel A del gateway
+    // (`dispatch-note.provider.ts`): sin él, esta fila de IVA se imprimía
+    // siempre que `tax_amount > 0`, sin mirar si la tienda tiene facturación
+    // fiscal activa/responsabilidad de IVA.
+    const prints_vat_breakdown = resolvePrintsVatBreakdownForPrint(
+      org,
+      note.store,
+    );
 
     // Emisor logo (best-effort; never block PDF generation on it).
     let logo_buffer: Buffer | undefined;
@@ -194,6 +216,7 @@ export class DispatchNotePdfService {
       subtotal_amount: Number(note.subtotal_amount) || 0,
       discount_amount: Number(note.discount_amount) || 0,
       tax_amount: Number(note.tax_amount) || 0,
+      prints_vat_breakdown,
       grand_total: Number(note.grand_total) || 0,
       currency: note.currency || 'COP',
 

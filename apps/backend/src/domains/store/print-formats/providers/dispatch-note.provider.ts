@@ -7,10 +7,27 @@ import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 // C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-08: la remisión
-// declara `money_basis: 'gross'` y propaga el gate fiscal de C.1. NOTA
-// (F-101): esto sólo toca el riel del GATEWAY (`print-formats/`); el PDF
-// legado (`dispatch-note-pdf.builder.ts`) y el fallback local del frontend
-// (`dispatch-note-print.service.ts`) son otro riel — C.7 y C.5.
+// declara `money_basis: 'gross'` y propaga el gate fiscal de C.1.
+//
+// F-101 (2026-09-14, unificación) — este provider era la mitad "sin dinero"
+// de los dos rieles de impresión de la remisión. La otra mitad
+// (`dispatch-notes/pdf/dispatch-note-pdf.builder.ts`, vivo vía
+// `POST /store/dispatch-notes/:id/pdf`) reutiliza AHORA el gate fiscal de
+// este mismo resolver (`resolvePrintsVatBreakdownForPrint`) en vez de
+// imprimir el IVA sin condición — ver comentario en
+// `dispatch-note-pdf.service.ts`. Ambos rieles siguen siendo dos motores de
+// render (HTML del gateway vs PDFKit binario: no hay motor html→pdf en el
+// stack, sólo pdfkit), pero ya NO pueden divergir en si el papel muestra el
+// desglose de IVA.
+//
+// Corregido en el mismo commit: este provider leía `order.order_items` /
+// `order.subtotal_amount` / `order.grand_total` — el snapshot de la ORDEN
+// completa, no el de ESTA remisión. Para remisiones parciales (una orden con
+// varias remisiones) o sin orden (traslados, recepciones de compra:
+// `order_id` es nullable) esto imprimía el total de la orden entera o una
+// tabla vacía. Ahora lee `dispatch_note_items` y los totales propios de
+// `dispatch_notes` — el mismo snapshot que ya usaba correctamente
+// `dispatch-note-pdf.service.ts`.
 import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
 
 @Injectable()
@@ -52,10 +69,22 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
             },
           },
         },
-        order: {
+        // F-101 — snapshot propio de la remisión (NO de la orden completa):
+        // cubre remisiones parciales y notas sin orden (traslado, recepción
+        // de compra). Mismo `include` que `dispatch-note-pdf.service.ts`.
+        dispatch_note_items: {
           include: {
-            order_items: true,
-            users: true,
+            product: { select: { id: true, name: true } },
+            product_variant: { select: { id: true, sku: true } },
+          },
+        },
+        customer: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            phone: true,
+            document_number: true,
           },
         },
       },
@@ -67,8 +96,7 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
 
     const store = note.store || {};
     const org = store.organizations || {};
-    const order = note.order || ({} as any);
-    const user = order.users || {};
+    const customer = note.customer || ({} as any);
     const storeAddr = store.addresses?.[0] || {};
 
     let customerAddress = '';
@@ -81,13 +109,22 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
       }
     }
 
-    const items = (order.order_items || []).map((it: any, idx: number) => ({
+    // F-101 — misma magnitud que ya usa `dispatch-note-pdf.service.ts`:
+    // `dispatch_note_items.unit_price`/`total_price` son el precio ya
+    // cobrado por línea (misma convención que `order_items`, que
+    // `pos-sale-ticket.provider.ts` ya trata como `money_basis: 'gross'`
+    // sin sumarle impuesto aparte) — no hace falta recomputar nada, sólo
+    // leer la columna correcta.
+    const items = (note.dispatch_note_items || []).map((it: any, idx: number) => ({
       index: idx + 1,
-      product_name: it.product_name,
-      variant_sku: it.variant_sku || undefined,
-      quantity: Number(it.quantity || 1),
+      product_name: it.product?.name || `Producto #${it.product_id}`,
+      variant_sku: it.product_variant?.sku || undefined,
+      quantity: Number(it.dispatched_quantity ?? it.ordered_quantity ?? 1) || 1,
+      dispatched_qty: Number(it.dispatched_quantity || 0),
       unit_price: Number(it.unit_price || 0),
       total_price: Number(it.total_price || 0),
+      discount_amount: it.discount_amount ? Number(it.discount_amount) : undefined,
+      tax_amount: it.tax_amount ? Number(it.tax_amount) : undefined,
     }));
 
     return {
@@ -101,8 +138,9 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
         city: storeAddr.city,
       },
       customer: {
-        name: (note as any).customer_name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Destinatario',
-        phone: (note as any).customer_phone || user.phone,
+        name: (note as any).customer_name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Destinatario',
+        tax_id: note.customer_tax_id || customer.document_number || undefined,
+        phone: (note as any).customer_phone || customer.phone,
         address: customerAddress,
       },
       document: {
@@ -121,17 +159,20 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
       prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(org, store),
       items,
       taxes: [],
+      // F-101 — totales propios de la remisión (`dispatch_notes.*`), no los
+      // de la orden completa: la única fuente correcta para una remisión
+      // parcial o sin orden.
       totals: {
-        subtotal: Number(order.subtotal_amount || 0),
-        subtotal_formatted: `$${Number(order.subtotal_amount || 0).toLocaleString('es-CO')}`,
-        discount_total: 0,
-        discount_total_formatted: '$0',
-        shipping_total: 0,
-        shipping_total_formatted: '$0',
-        tax_total: 0,
-        tax_total_formatted: '$0',
-        grand_total: Number(order.grand_total || 0),
-        grand_total_formatted: `$${Number(order.grand_total || 0).toLocaleString('es-CO')}`,
+        subtotal: Number(note.subtotal_amount || 0),
+        subtotal_formatted: `$${Number(note.subtotal_amount || 0).toLocaleString('es-CO')}`,
+        discount_total: Number(note.discount_amount || 0),
+        discount_total_formatted: `$${Number(note.discount_amount || 0).toLocaleString('es-CO')}`,
+        shipping_total: Number(note.shipping_cost || 0),
+        shipping_total_formatted: `$${Number(note.shipping_cost || 0).toLocaleString('es-CO')}`,
+        tax_total: Number(note.tax_amount || 0),
+        tax_total_formatted: `$${Number(note.tax_amount || 0).toLocaleString('es-CO')}`,
+        grand_total: Number(note.grand_total || 0),
+        grand_total_formatted: `$${Number(note.grand_total || 0).toLocaleString('es-CO')}`,
       },
     };
   }
