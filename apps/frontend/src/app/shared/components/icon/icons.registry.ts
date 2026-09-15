@@ -346,6 +346,8 @@ import {
   // Un nombre no registrado no rompe el build ni la consola — degrada en
   // silencio a un icono equivocado, que es por qué sobrevivió al deploy.
   Mic,
+  Video,
+  Clapperboard,
 } from 'lucide-angular';
 
 /**
@@ -356,6 +358,9 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   dumbbell: Dumbbell,
   'door-open': DoorOpen,
   'key-round': KeyRound,
+  // Video library icons
+  video: Video,
+  clapperboard: Clapperboard,
   // Basic UI icons
   'external-link': ExternalLink,
   menu: Menu,

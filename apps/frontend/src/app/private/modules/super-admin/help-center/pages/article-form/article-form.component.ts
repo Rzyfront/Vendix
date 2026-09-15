@@ -210,6 +210,16 @@ import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
                 placeholder="Ej: inventario, productos, tutorial"
                 [formControl]="$any(form.get('tags'))"
               ></app-input>
+              <div>
+                <app-input
+                  label="Palabras clave / Keywords de búsqueda (separadas por coma)"
+                  placeholder="Ej: cambiar cliente orden, transferir bodega, anular comprobante"
+                  [formControl]="$any(form.get('keywords'))"
+                ></app-input>
+                <span class="text-[11px] text-gray-500 mt-1 block">
+                  💡 <strong>Keywords de búsqueda:</strong> Agrega palabras o frases que los usuarios suelan buscar. Garantiza que preguntas en lenguaje natural coincidan directamente con este artículo con máxima relevancia.
+                </span>
+              </div>
               <div class="flex items-center gap-6">
                 <app-toggle
                   label="Artículo destacado"
@@ -340,6 +350,7 @@ export class ArticleFormComponent implements OnInit {
     status: ['DRAFT'],
     module: ['', [Validators.maxLength(50)]],
     tags: [''],
+    keywords: [''],
     is_featured: [false],
     sort_order: [0],
   });
@@ -394,6 +405,7 @@ export class ArticleFormComponent implements OnInit {
           status: article.status,
           module: article.module || '',
           tags: article.tags?.join(', ') || '',
+          keywords: (article as any).keywords?.join(', ') || '',
           is_featured: article.is_featured,
           sort_order: article.sort_order,
         });
@@ -470,6 +482,10 @@ export class ArticleFormComponent implements OnInit {
       ? formValue.tags.split(',').map((t: string) => t.trim()).filter((t: string) => t)
       : [];
 
+    const keywords = formValue.keywords
+      ? formValue.keywords.split(',').map((k: string) => k.trim()).filter((k: string) => k)
+      : [];
+
     const dto: any = {
       title: formValue.title,
       summary: formValue.summary,
@@ -479,6 +495,7 @@ export class ArticleFormComponent implements OnInit {
       category_id: formValue.category_id,
       module: formValue.module || undefined,
       tags,
+      keywords,
       cover_image_url: this.coverImageKey() || undefined,
       is_featured: formValue.is_featured,
       sort_order: formValue.sort_order || 0,

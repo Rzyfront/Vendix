@@ -752,6 +752,11 @@ export const APP_MODULES: {
           label: 'Centro de Ayuda',
           description: 'Art\u00edculos y gu\u00edas del centro de ayuda',
         },
+        {
+          key: 'help_videos',
+          label: 'Videos de Capacitación',
+          description: 'Videos tutoriales oficiales y capacitaciones',
+        },
       ],
     },
   ],

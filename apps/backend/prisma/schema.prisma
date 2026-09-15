@@ -98,6 +98,7 @@ model users {
   status_changes             support_status_history[]     @relation("status_changed_by")
   support_notifications      support_notifications[]      @relation("notification_user")
   help_articles_authored     help_articles[]              @relation("help_article_author")
+  videos_authored            videos[]                     @relation("video_author")
 
   // Quotation relations
   quotations_as_customer quotations[] @relation("quotations_customer")
@@ -5505,6 +5506,7 @@ model help_articles {
   category_id     Int
   module          String?                  @db.VarChar(50)
   tags            String[]
+  keywords        String[]                 @default([])
   cover_image_url String?                  @db.Text
   view_count      Int                      @default(0)
   created_by_id   Int?
@@ -5522,6 +5524,72 @@ model help_articles {
   @@index([module])
   @@index([is_featured])
   @@index([created_by_id])
+}
+
+// ── Video Library ────────────────────────────────────────────────
+
+enum video_source_type_enum {
+  YOUTUBE
+  VIMEO
+  LOOM
+  DIRECT_S3
+}
+
+enum video_status_enum {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model video_categories {
+  id          Int       @id @default(autoincrement())
+  name        String    @db.VarChar(100)
+  slug        String    @unique @db.VarChar(120)
+  description String?   @db.VarChar(500)
+  icon        String?   @db.VarChar(50)
+  sort_order  Int       @default(0)
+  is_active   Boolean   @default(true)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  videos videos[]
+}
+
+model videos {
+  id               Int                    @id @default(autoincrement())
+  title            String                 @db.VarChar(255)
+  slug             String                 @unique @db.VarChar(280)
+  summary          String                 @db.VarChar(500)
+  description      String?                @db.Text
+  video_url        String                 @db.Text
+  video_source     video_source_type_enum @default(YOUTUBE)
+  external_id      String?                @db.VarChar(100)
+  duration_seconds Int                    @default(0)
+  thumbnail_url    String?                @db.Text
+  status           video_status_enum      @default(DRAFT)
+  category_id      Int
+  module           String?                @db.VarChar(50)
+  tags             String[]
+  keywords         String[]               @default([])
+  view_count       Int                    @default(0)
+  like_count       Int                    @default(0)
+  created_by_id    Int?
+  store_id         Int?
+  is_featured      Boolean                @default(false)
+  sort_order       Int                    @default(0)
+  created_at       DateTime?              @default(now()) @db.Timestamp(6)
+  updated_at       DateTime?              @default(now()) @db.Timestamp(6)
+
+  category   video_categories @relation(fields: [category_id], references: [id])
+  created_by users?           @relation("video_author", fields: [created_by_id], references: [id], onDelete: SetNull)
+
+  @@index([category_id])
+  @@index([status])
+  @@index([video_source])
+  @@index([module])
+  @@index([is_featured])
+  @@index([created_by_id])
+  @@index([store_id])
 }
 
 // ===== ELECTRONIC INVOICING DOMAIN =====

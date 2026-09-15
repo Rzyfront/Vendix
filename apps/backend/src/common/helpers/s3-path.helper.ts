@@ -169,6 +169,14 @@ export class S3PathHelper {
   }
 
   /**
+   * Builds the path for global video library assets (no org/store scope).
+   * @returns global/video-library/videos
+   */
+  buildVideoLibraryPath(): string {
+    return 'global/video-library/videos';
+  }
+
+  /**
    * Builds the path for global notification sound assets (no org/store scope).
    * @returns global/notification-sounds
    */

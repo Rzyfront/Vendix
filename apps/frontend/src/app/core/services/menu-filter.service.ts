@@ -320,6 +320,8 @@ export class MenuFilterService {
     // filter's Case 3 (no key) hides the entire parent group because
     // the child never gets included.
     PQRs: 'help_pqrs',
+    'Videos de Capacitación': 'help_videos',
+    Videos: 'help_videos',
   };
 
   /**

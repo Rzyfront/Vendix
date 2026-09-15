@@ -228,6 +228,8 @@ export class SuperAdminLayoutComponent {
     '/super-admin/domains': 'Dominios',
     '/super-admin/legal-documents': 'Documentos Legales',
     '/super-admin/help-center': 'Centro de Ayuda',
+    '/super-admin/video-library': 'Biblioteca de Videos',
+    '/super-admin/video-library/new': 'Publicar Video',
     '/super-admin/currencies': 'Monedas',
     '/super-admin/settings/shipping': 'Envíos del Sistema',
     '/super-admin/audit': 'Auditoría',
@@ -380,6 +382,11 @@ export class SuperAdminLayoutComponent {
             label: 'Centro de Ayuda',
             icon: 'circle',
             route: '/super-admin/help-center',
+          },
+          {
+            label: 'Biblioteca de Videos',
+            icon: 'video',
+            route: '/super-admin/video-library',
           },
         ],
       },
@@ -535,7 +542,10 @@ export class SuperAdminLayoutComponent {
 
   private updateBreadcrumb(url: string): void {
     const path = url.split('?')[0];
-    const title = this.routeTitles[path];
+    let title = this.routeTitles[path];
+    if (!title && path.startsWith('/super-admin/video-library/') && path.endsWith('/edit')) {
+      title = 'Editar Video';
+    }
     if (title) {
       this.breadcrumb.set({ parent: 'Super Administrador', current: title });
     }
