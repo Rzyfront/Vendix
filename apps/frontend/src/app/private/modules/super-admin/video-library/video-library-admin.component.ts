@@ -169,13 +169,13 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
 
       <!-- Confirmation Modal -->
       <app-confirmation-modal
-        [isOpen]="isDeleteModalOpen()"
+        [(isOpen)]="isDeleteModalOpen"
         title="Eliminar Video"
-        [message]="'¿Estás seguro de eliminar el video \\'' + videoToDelete()?.title + '\\'?'"
+        [message]="'¿Estás seguro de eliminar el video \\'' + (videoToDelete()?.title || '') + '\\'?'"
         confirmText="Eliminar"
-        variant="danger"
-        (confirmed)="deleteVideo()"
-        (closed)="isDeleteModalOpen.set(false)"
+        confirmVariant="danger"
+        (confirm)="deleteVideo()"
+        (cancel)="isDeleteModalOpen.set(false)"
       ></app-confirmation-modal>
     </div>
   `,

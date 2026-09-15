@@ -191,13 +191,13 @@ import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 
       <!-- Confirmation Modal -->
       <app-confirmation-modal
-        [isOpen]="isDeleteModalOpen()"
+        [(isOpen)]="isDeleteModalOpen"
         title="Eliminar Categoría"
-        [message]="'¿Estás seguro de eliminar la categoría ' + categoryToDelete()?.name + '?'"
+        [message]="'¿Estás seguro de eliminar la categoría \\'' + (categoryToDelete()?.name || '') + '\\'?'"
         confirmText="Eliminar"
-        variant="danger"
-        (confirmed)="deleteCategory()"
-        (closed)="isDeleteModalOpen.set(false)"
+        confirmVariant="danger"
+        (confirm)="deleteCategory()"
+        (cancel)="isDeleteModalOpen.set(false)"
       ></app-confirmation-modal>
     </div>
   `,
