@@ -71,6 +71,12 @@ describe('OrderFlowService — carril forzado (QUI-557)', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       payments: { update: jest.fn() },
+      // `cancelOrder` pre-clasifica los ítems del KDS antes del claim
+      // (`d741eab7f`). Sin esta entrada el mock devolvía `undefined` y los dos
+      // tests de cancelación forzada morían en `order_items.findMany`. Lista
+      // vacía = ninguna línea disparada, que es el escenario que estos tests
+      // miden (liberación de reservas + claim atómico), no la rama KDS.
+      order_items: { findMany: jest.fn().mockResolvedValue([]) },
       $transaction: jest.fn((cb: any) => cb(prismaMock)),
     };
 

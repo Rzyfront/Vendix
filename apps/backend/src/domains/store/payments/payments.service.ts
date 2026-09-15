@@ -3268,13 +3268,16 @@ export class PaymentsService {
     const grossMismatchDelta = this.roundMoney(
       computedGrossUnitPrice - orderItem.final_unit_price,
     );
-    // F-222: umbral de 2 centavos en enteros (el `> 0.02` en floats fallaba en el
-    // borde exacto según la magnitud). Solo registra, no lanza (ADR-11/B.4).
+    // F-222: MISMO umbral que el `> 0.02` original (tolera 2 centavos), pero
+    // medido en centavos enteros: `>= 3` ¢. El `> 0.02` en floats fallaba en el
+    // borde exacto según la magnitud (13603.14 − 13603.12 = 0.0199999999986, no
+    // disparaba; 551.07 − 551.05 = 0.0200000000001, sí). Solo registra, no
+    // lanza (ADR-11/B.4).
     if (
       differsByAtLeastCents(
         computedGrossUnitPrice,
         orderItem.final_unit_price,
-        2,
+        3,
       )
     ) {
       this.logger.error({

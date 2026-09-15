@@ -203,16 +203,37 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
     });
 
-    it('F-222: 1¢ real visto de más (127000.01 vs 127000) SÍ rechaza aunque el float diga que no', async () => {
-      // Math.abs(127000.01-127000) = 0.00999999999476..., así que el `> 0.01`
-      // viejo dejaba cerrar contra una cifra rancia. En centavos enteros es 1¢.
+    // F-222 — el umbral es el MISMO que el `> 0.01` original (tolera 1 centavo),
+    // sólo que medido en centavos enteros (`>= 2` ¢). Los dos casos de abajo
+    // fijan los dos lados del borde para que nadie lo mueva sin querer: con
+    // `Math.abs` sobre floats el veredicto del centavo dependía de la MAGNITUD
+    // (2425.00 − 2424.99 = 0.0100000000002 rechazaba; 13603.13 − 13603.12 =
+    // 0.0099999999984 no), y eso es lo que desaparece.
+    it('F-222: 1¢ de diferencia se TOLERA (el umbral original no cambia)', async () => {
+      stubCloseFlow({
+        expected_closing_amount: EXPECTED_FRESH,
+        actual_closing_amount: EXPECTED_FRESH,
+        difference: 0,
+      });
+
+      await expect(
+        service.closeSession(SESSION_ID, {
+          actual_closing_amount: EXPECTED_FRESH,
+          expected_closing_amount_seen: EXPECTED_FRESH + 0.01,
+        } as any),
+      ).resolves.toBeDefined();
+
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('F-222: 2¢ de diferencia SÍ rechaza por cifra rancia', async () => {
       prismaMock.cash_register_sessions.findFirst.mockResolvedValue(
         OPEN_SESSION,
       );
 
       const promise = service.closeSession(SESSION_ID, {
         actual_closing_amount: OPENING_AMOUNT,
-        expected_closing_amount_seen: EXPECTED_FRESH + 0.01,
+        expected_closing_amount_seen: EXPECTED_FRESH + 0.02,
       } as any);
 
       await expect(promise).rejects.toMatchObject({

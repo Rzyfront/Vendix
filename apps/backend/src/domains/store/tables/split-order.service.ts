@@ -176,8 +176,9 @@ export class SplitOrderService {
             const sum = dto.amounts.reduce((acc, v) => acc + v, 0);
             // Compare to 1 cent tolerance — money rounding can produce
             // a 0.01 diff.
-            // F-222: tolerancia de 1 centavo en enteros (no `Math.abs` en floats).
-            if (differsByAtLeastCents(sum, orderTotal)) {
+            // F-222: MISMO umbral que el `> 0.01` original (tolera 1 centavo), pero
+            // medido en centavos enteros: `>= 2` ¢. Ver ADR-16.
+            if (differsByAtLeastCents(sum, orderTotal, 2)) {
               throw new VendixHttpException(
                 ErrorCodes.SPLIT_ORDER_ITEMS_MISSING,
                 `La suma de los montos (${sum}) no coincide con el total de la orden (${orderTotal})`,

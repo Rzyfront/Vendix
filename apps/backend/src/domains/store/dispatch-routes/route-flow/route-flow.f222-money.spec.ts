@@ -1,23 +1,50 @@
 import { differsByAtLeastCents } from '@common/money-kernel';
 
 /**
- * F-222 — la tolerancia del desglose de retención
- * (`route-flow.service.ts`, settle de parada con agente retenedor) vive en
- * centavos enteros, no en `Math.abs(...) > 0.01` sobre floats.
+ * F-222 — CONTRATO DE UMBRAL de route-flow (desglose de retención).
+ *
+ * `settleStop` compara la suma del desglose retefuente/reteiva/reteica
+ * —tres cifras redondeadas por separado— contra el `withholding_amount`
+ * declarado. El comentario del sitio promete "a 1-cent rounding tolerance":
+ * esa promesa es el contrato.
+ *
+ * El umbral NO cambió con la migración: el original `> 0.01` tolera
+ * 1 centavo y el migrado también, sólo que medido en centavos enteros
+ * (`differsByAtLeastCents(a, b, 2)`). Lo que desaparece es que el veredicto
+ * dependiera de la MAGNITUD de los operandos.
+ *
+ * Esta spec fija el CONTRATO del umbral, no el camino del servicio: mide los
+ * dos bordes y la independencia de magnitud. La ruta real del servicio se
+ * cubre en `route-flow.service.spec.ts`.
  */
-describe('route-flow — tolerancia del desglose de retención (F-222)', () => {
-  it('1¢ real (13603.13 vs 13603.12) SÍ difiere aunque el float diga que no', () => {
-    // El par canónico: Math.abs da 0.00999999999839... < 0.01 (el `> 0.01`
-    // viejo aceptaba el desglose descuadrado en silencio).
-    expect(Math.abs(13603.13 - 13603.12) > 0.01).toBe(false);
-    expect(differsByAtLeastCents(13603.13, 13603.12)).toBe(true);
+describe('route-flow (desglose de retención) — umbral en centavos enteros (F-222)', () => {
+  // Los cuatro pares de abajo son EL MISMO centavo de diferencia. Con
+  // `Math.abs` sobre floats dos disparan y dos no.
+  const UN_CENTAVO: Array<[number, number]> = [
+    [13603.13, 13603.12],
+    [551.06, 551.05],
+    [2425.0, 2424.99],
+    [2223.09, 2223.08],
+  ];
+
+  it('el mismo centavo daba veredictos opuestos según la magnitud (el defecto)', () => {
+    const veredictos = UN_CENTAVO.map(([a, b]) => Math.abs(a - b) > 0.01);
+    expect(veredictos).toEqual([false, false, true, true]);
   });
 
-  it('desglose exacto no difiere', () => {
-    expect(differsByAtLeastCents(50000, 50000)).toBe(false);
+  it('1¢ se TOLERA en las cuatro magnitudes (umbral original preservado)', () => {
+    for (const [a, b] of UN_CENTAVO) {
+      expect(differsByAtLeastCents(a, b, 2)).toBe(false);
+    }
   });
 
-  it('descuadre mayor a 1¢ difiere', () => {
-    expect(differsByAtLeastCents(50000.05, 50000)).toBe(true);
+  it('2¢ SÍ rechaza en las cuatro magnitudes', () => {
+    for (const [a, b] of UN_CENTAVO) {
+      expect(differsByAtLeastCents(a + 0.01, b, 2)).toBe(true);
+    }
+  });
+
+  it('cifras idénticas nunca rechazan', () => {
+    expect(differsByAtLeastCents(250000.5, 250000.5, 2)).toBe(false);
   });
 });

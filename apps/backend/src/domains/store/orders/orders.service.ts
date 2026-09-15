@@ -2021,7 +2021,7 @@ export class OrdersService {
 
     if (
       dto.shipping_cost !== undefined &&
-      differsByAtLeastCents(dto.shipping_cost, shippingCost)
+      differsByAtLeastCents(dto.shipping_cost, shippingCost, 2)
     ) {
       throw new VendixHttpException(
         ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,

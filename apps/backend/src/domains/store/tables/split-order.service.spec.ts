@@ -261,20 +261,48 @@ service = new SplitOrderService(prismaMock as any, {
       ).rejects.toBeInstanceOf(VendixHttpException);
     });
 
-    it('F-222: 1¢ real (montos 13603.13 vs total 13603.12) SÍ rechaza aunque el float diga que no', async () => {
-      // El par canónico: Math.abs(13603.13-13603.12) = 0.00999999999839...,
-      // así que el `> 0.01` viejo NO rechazaba y la cuenta se partía con un
-      // centavo de más en silencio. En centavos enteros difieren en 1¢.
+    // F-222 — la tolerancia declarada arriba ("1 cent tolerance") es la que
+    // manda: el umbral no se movió, sólo dejó de medirse con `Math.abs` sobre
+    // floats. El par 2425.00 / 2424.99 es UN centavo real y el `> 0.01` viejo
+    // lo RECHAZABA (0.01000000000021 > 0.01) mientras que 13603.13 / 13603.12
+    // —el mismo centavo— lo aceptaba: la cuenta se partía o no según cuánto
+    // costaba la mesa.
+    it('F-222: 1¢ real (2425.00 vs total 2424.99) se TOLERA — el float lo rechazaba', async () => {
+      expect(Math.abs(2425.0 - 2424.99) > 0.01).toBe(true); // el defecto viejo
+      prismaMock.orders.findFirst.mockResolvedValueOnce(
+        buildSourceOrder({ grand_total: new Prisma.Decimal(2424.99) }),
+      );
+      prismaMock.orders.create
+        .mockResolvedValueOnce({ id: 10001 })
+        .mockResolvedValueOnce({ id: 10002 });
+      prismaMock.order_items.create.mockResolvedValue({});
+      prismaMock.orders.update.mockResolvedValue({});
+
+      const result = await service.splitByAmount(9001, {
+        mode: 'custom',
+        n_splits: 2,
+        amounts: [1212.5, 1212.5], // suma 2425.00 — 1 centavo sobre el total
+      } as any);
+
+      expect(result.sub_orders).toHaveLength(2);
+    });
+
+    it('F-222: 2¢ reales (13603.14 vs total 13603.12) SÍ rechaza — el float los dejaba pasar', async () => {
+      // El `> 0.02` no aplica acá, pero el par sirve igual: el float de la
+      // resta (0.0199999999986) muestra por qué la comparación no puede vivir
+      // en dobles. `n_splits` válido a propósito: con `1` el servicio lanza
+      // antes por "partes >= 2" y el test pasaría sin tocar la suma.
+      expect(Math.abs(13603.14 - 13603.12) > 0.01).toBe(true);
       prismaMock.orders.findFirst.mockResolvedValueOnce(
         buildSourceOrder({ grand_total: new Prisma.Decimal(13603.12) }),
       );
       await expect(
         service.splitByAmount(9001, {
           mode: 'custom',
-          n_splits: 1,
-          amounts: [13603.13],
+          n_splits: 2,
+          amounts: [6801.57, 6801.57], // suma 13603.14 — 2 centavos sobre
         } as any),
-      ).rejects.toBeInstanceOf(VendixHttpException);
+      ).rejects.toMatchObject({ errorCode: 'SPLIT_ORDER_ITEMS_MISSING' });
     });
   });
 });

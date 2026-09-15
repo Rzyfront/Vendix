@@ -257,8 +257,9 @@ export class SessionsService {
     // inexistente en silencio. Va ANTES de la $transaction: rechazar es más
     // barato que abrir una transacción para abortarla.
     const seen = dto.expected_closing_amount_seen;
-    // F-222: tolerancia de 1 centavo en enteros (no `Math.abs` en floats).
-    if (seen != null && differsByAtLeastCents(Number(seen), expected)) {
+    // F-222: MISMO umbral que el `> 0.01` original (tolera 1 centavo), pero
+    // medido en centavos enteros: `>= 2` ¢. Ver ADR-16.
+    if (seen != null && differsByAtLeastCents(Number(seen), expected, 2)) {
       throw new VendixHttpException(
         ErrorCodes.CASH_SESSION_EXPECTED_STALE_001,
         `El efectivo esperado cambió mientras contabas: la pantalla mostraba $${Number(seen).toLocaleString('es-CO')} y ahora son $${expected.toLocaleString('es-CO')}. Revisa el resumen actualizado antes de cerrar.`,

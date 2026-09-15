@@ -692,8 +692,9 @@ export class RouteFlowService {
       }
       // Allow a 1-cent rounding tolerance on the breakdown sum vs the
       // declared withholding_amount.
-      // F-222: tolerancia de 1 centavo en enteros (no `Math.abs` en floats).
-      if (differsByAtLeastCents(breakdownSum, withholdingAmount)) {
+      // F-222: MISMO umbral que el `> 0.01` original (tolera 1 centavo), pero
+      // medido en centavos enteros: `>= 2` ¢. Ver ADR-16.
+      if (differsByAtLeastCents(breakdownSum, withholdingAmount, 2)) {
         throw new BadRequestException(
           `El desglose de retención (${breakdownSum}) no coincide con el monto retenido (${withholdingAmount}).`,
         );

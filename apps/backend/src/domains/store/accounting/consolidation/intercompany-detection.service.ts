@@ -113,8 +113,9 @@ export class IntercompanyDetectionService {
 
         const other_amount =
           Number(other.debit_amount) || Number(other.credit_amount);
-        // F-222: tolerancia de 1 centavo en enteros (no `Math.abs` en floats).
-        if (differsByAtLeastCents(other_amount, line_amount)) return false;
+        // F-222: MISMO umbral que el `> 0.01` original (tolera 1 centavo), pero
+        // medido en centavos enteros: `>= 2` ¢. Ver ADR-16.
+        if (differsByAtLeastCents(other_amount, line_amount, 2)) return false;
 
         const other_date = new Date(other.entry.entry_date);
         const day_diff =
@@ -357,8 +358,9 @@ export class IntercompanyDetectionService {
         if (matched_ids.has(other.id)) return false;
 
         const other_amount = Number(other.amount);
-        // F-222: tolerancia de 1 centavo en enteros (no `Math.abs` en floats).
-        if (differsByAtLeastCents(other_amount, amount)) return false;
+        // F-222: MISMO umbral que el `> 0.01` original (tolera 1 centavo), pero
+        // medido en centavos enteros: `>= 2` ¢. Ver ADR-16.
+        if (differsByAtLeastCents(other_amount, amount, 2)) return false;
         if (other.account_id !== txn.account_id) return false;
 
         // Opposite stores: txn.from = other.to AND txn.to = other.from
