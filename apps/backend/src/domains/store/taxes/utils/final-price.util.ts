@@ -234,3 +234,103 @@ export function resolveOrderLineFinals(
     final_total_price: roundMoney2(final_unit_price * resolveLineUnits(line)),
   };
 }
+
+/**
+ * Línea de orden con su desglose de impuesto PERSISTIDO. Las dos magnitudes
+ * tienen unidades distintas y confundirlas es el defecto F-050:
+ * `order_item_taxes[].tax_amount` es el impuesto TOTAL de la línea;
+ * `order_items.tax_amount_item` es el impuesto POR UNIDAD de precio (ADR-10).
+ */
+export interface OrderLineTaxSnapshotInput extends OrderLineUnitsInput {
+  tax_amount_item?: unknown;
+  order_item_taxes?: Array<{ tax_amount?: unknown } | null> | null;
+}
+
+function toFiniteNumber(value: unknown): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Impuesto TOTAL de una línea de orden, leído del snapshot persistido.
+ *
+ * UNA definición para lo que hoy está copiado en tres sitios con la misma
+ * prioridad: `table-sessions.service.ts:appendItems` (F-050),
+ * `payments.service.ts:applyPosPaymentToTableSession` y
+ * `payments.service.ts:createOrUpdateOrderFromPos`. La prioridad es la que ya
+ * fijó F-050 y no cambia acá:
+ *
+ *   1. `order_item_taxes` si la línea tiene filas — YA es el total de línea,
+ *      es el snapshot de lo que se cobró y soporta desglose mixto (N tasas).
+ *   2. Si no hay filas, el escalar histórico `tax_amount_item` × `line_units`.
+ *      Para una línea pre-ADR-08 (`tax_amount_item` NULL) eso da 0, que es
+ *      exactamente lo que vale hoy: no se finge un impuesto que nadie calculó.
+ *
+ * No recalcula desde tasas a propósito. Recalcular exige conocer
+ * `is_inclusive` por tasa, y post-ADR-08 `unit_price` es la base NETA también
+ * para las tasas INCLUSIVAS (`checkout.service.ts:1472` persiste `netPrice`):
+ * volver a resolver con `resolveLineTotals` devolvería el precio intacto para
+ * esas líneas y perdería el impuesto entero. El snapshot no tiene esa
+ * ambigüedad.
+ */
+export function resolveOrderLineTaxTotal(
+  line: OrderLineTaxSnapshotInput | null | undefined,
+): number {
+  const rows = line?.order_item_taxes;
+  if (Array.isArray(rows) && rows.length > 0) {
+    return roundMoney2(
+      rows.reduce((sum, row) => sum + toFiniteNumber(row?.tax_amount), 0),
+    );
+  }
+  const perUnit = toFiniteNumber(line?.tax_amount_item);
+  if (perUnit === 0) return 0;
+  return roundMoney2(perUnit * resolveLineUnits(line));
+}
+
+/**
+ * Columnas BRUTAS de una línea para un documento que declara
+ * `money_basis: 'gross'` (ADR-12 / G-01: el tiquete del mostrador es papel
+ * comercial, sus columnas van en bruto y el IVA va como nota no sumada).
+ *
+ * Post-ADR-08 `order_items.unit_price`/`total_price` son la BASE gravable: un
+ * documento que los imprime tal cual bajo `money_basis: 'gross'` publica
+ * columnas que no suman su propio TOTAL, y la regla anti-huérfana del
+ * compositor —correcta— suprime `Subtotal:` e `Impuestos:` justamente porque
+ * se le declaró bruto, así que nada en el papel explica la diferencia.
+ *
+ * `gross_total_price` se deriva del impuesto de LÍNEA (no de
+ * `gross_unit_price × unidades`) para que Σ líneas cierre contra
+ * `grand_total` al centavo: el unitario es presentación, el total es la
+ * magnitud que el invariante de suma verifica.
+ *
+ * Marcador ADR-08: con `tax_amount_item` explícitamente `null` la línea es
+ * pre-ADR-08 y `unit_price`/`total_price` YA son el bruto publicado — se
+ * devuelven intactos, sin sumar nada encima.
+ */
+export function resolveOrderLinePrintedGross(
+  line: OrderLineTaxSnapshotInput & {
+    unit_price?: unknown;
+    total_price?: unknown;
+  },
+): { gross_unit_price: number; gross_total_price: number } {
+  const units = resolveLineUnits(line);
+  const baseUnit = toFiniteNumber(line?.unit_price);
+  const baseTotal =
+    line?.total_price === null || line?.total_price === undefined
+      ? roundMoney2(baseUnit * units)
+      : toFiniteNumber(line.total_price);
+
+  if (line?.tax_amount_item === null) {
+    return { gross_unit_price: baseUnit, gross_total_price: baseTotal };
+  }
+
+  const lineTax = resolveOrderLineTaxTotal(line);
+  if (lineTax === 0) {
+    return { gross_unit_price: baseUnit, gross_total_price: baseTotal };
+  }
+
+  return {
+    gross_unit_price: roundMoney2(baseUnit + (units > 0 ? lineTax / units : 0)),
+    gross_total_price: roundMoney2(baseTotal + lineTax),
+  };
+}

@@ -77,14 +77,26 @@ describe('pos-sale-ticket: pipeline real provider→composer (F-100/F-148)', () 
     expect(POS_SALE_TICKET_DEFINITION.columns!.some((c) => c.key === 'tax_rate')).toBe(false);
   });
 
-  /** Orden con dos líneas: una gravada al 19 %, una exenta. */
+  /**
+   * Orden con dos líneas: una gravada al 19 % EXCLUSIVO, una exenta.
+   *
+   * C.7 — la versión anterior de esta fixture declaraba
+   * `subtotal_amount: 169000` Y `tax_amount: 19000` Y `grand_total: 169000`:
+   * violaba I-6 (`grand_total = subtotal + impuesto`) y ponía la orden en el
+   * ÚNICO punto donde la base y el bruto coinciden, así que el invariante
+   * §8.3 pasaba bajo las DOS convenciones y no discriminaba nada — la misma
+   * ceguera de F-129. Post-ADR-08 `unit_price`/`total_price` son la BASE:
+   * 100.000 + 50.000 = 150.000 de subtotal, 19.000 de IVA, 169.000 de total.
+   * Ahora Σ(columnas de línea) sólo cierra contra el total si esas columnas
+   * salen en BRUTO, que es lo que G-01 exige del papel del mostrador.
+   */
   const buildOrder = (storeSettings: any) => ({
     id: 501,
     order_number: 'POS-00501',
     created_at: new Date('2026-09-10T15:00:00.000Z'),
     state: 'finished',
     channel: 'pos',
-    subtotal_amount: 169000,
+    subtotal_amount: 150000,
     discount_amount: 0,
     tax_amount: 19000,
     shipping_cost: 0,
@@ -95,9 +107,9 @@ describe('pos-sale-ticket: pipeline real provider→composer (F-100/F-148)', () 
         product_name: 'Camisa Oxford',
         variant_sku: 'CAM-01',
         quantity: 1,
-        unit_price: 119000,
+        unit_price: 100000,
         discount_amount: 0,
-        total_price: 119000,
+        total_price: 100000,
         // `order_items.tax_rate` es `Decimal(6,5)`: 0.19 == 19 %.
         tax_rate: 0.19,
         tax_amount_item: 19000,
@@ -165,7 +177,7 @@ describe('pos-sale-ticket: pipeline real provider→composer (F-100/F-148)', () 
         prints_vat_breakdown: true,
         items: [],
         totals: {
-          subtotal: 169000,
+          subtotal: 150000,
           discount_total: 0,
           tax_total: 19000,
           shipping_total: 0,
@@ -197,6 +209,85 @@ describe('pos-sale-ticket: pipeline real provider→composer (F-100/F-148)', () 
 
       expect(html).toContain(data.totals.grand_total_formatted || '');
       expect(data.totals.grand_total_formatted).toBe('$169.000');
+    });
+
+    it('las columnas de línea salen en BRUTO, no en la base gravable (C.7)', async () => {
+      const data = await makeProvider(order).fetchDocumentData(10, 501);
+      const html = composer.compose(POS_SALE_TICKET_DEFINITION, data);
+
+      // Gravada: base 100.000 + IVA 19.000 = 119.000 en AMBAS columnas.
+      expect(data.items[0].unit_price).toBe(119000);
+      expect(data.items[0].total_price).toBe(119000);
+      // Exenta: sin impuesto, la columna no se mueve.
+      expect(data.items[1].unit_price).toBe(50000);
+      expect(data.items[1].total_price).toBe(50000);
+
+      expect(html).toContain('$119.000');
+      // La base gravable NO puede aparecer como precio de mostrador.
+      expect(html).not.toContain('$100.000');
+    });
+  });
+
+  /**
+   * C.7 — el multiplicador y el marcador ADR-08, los dos casos donde componer
+   * el bruto «a ojo» se rompe:
+   *  - `tax_amount_item` es por UNIDAD de precio (ADR-10): con cantidad 3 el
+   *    bruto de línea suma el impuesto de LÍNEA, no el escalar crudo.
+   *  - `tax_amount_item IS NULL` marca la línea pre-ADR-08, cuyo `unit_price`
+   *    YA es el bruto publicado: sumarle impuesto encima es el doble cobro
+   *    que este plan existe para impedir.
+   */
+  describe('multiplicador de línea y marcador ADR-08 (C.7)', () => {
+    const settings = {
+      settings: {
+        fiscal_status: { invoicing: { state: 'ACTIVE' } },
+        fiscal_data: { tax_responsibilities: ['O-48'] },
+      },
+    };
+
+    const buildMixed = () => ({
+      ...buildOrder(settings),
+      subtotal_amount: 90000,
+      tax_amount: 5700,
+      grand_total: 95700,
+      order_items: [
+        {
+          // Cantidad 3: base 10.000/u, IVA 1.900/u, línea 30.000 + 5.700.
+          product_name: 'Vino de mesa',
+          variant_sku: 'VIN-01',
+          quantity: 3,
+          unit_price: 10000,
+          discount_amount: 0,
+          total_price: 30000,
+          tax_rate: 0.19,
+          tax_amount_item: 1900,
+          order_item_taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_amount: 5700 }],
+        },
+        {
+          // Línea pre-ADR-08: el bruto ya está en `unit_price`.
+          product_name: 'Bolso legado',
+          variant_sku: 'BOL-99',
+          quantity: 1,
+          unit_price: 60000,
+          discount_amount: 0,
+          total_price: 60000,
+          tax_rate: null,
+          tax_amount_item: null,
+          order_item_taxes: [],
+        },
+      ],
+    });
+
+    it('cantidad 3 suma el impuesto de LÍNEA y la línea legacy queda intacta', async () => {
+      const data = await makeProvider(buildMixed()).fetchDocumentData(10, 501);
+
+      expect(data.items[0].unit_price).toBe(11900);
+      expect(data.items[0].total_price).toBe(35700);
+      expect(data.items[1].unit_price).toBe(60000);
+      expect(data.items[1].total_price).toBe(60000);
+
+      const sumLineTotals = data.items.reduce((s, it) => s + Number(it.total_price || 0), 0);
+      expect(Math.abs(sumLineTotals - Number(data.totals.grand_total || 0))).toBeLessThanOrEqual(1);
     });
   });
 

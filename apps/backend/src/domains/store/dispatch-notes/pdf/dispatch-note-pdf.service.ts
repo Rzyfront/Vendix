@@ -168,16 +168,34 @@ export class DispatchNotePdfService {
       this.formatJsonAddress(note.customer_address) ??
       undefined;
 
+    // C.7 — la columna "P. Unit." tiene que ser de la MISMA magnitud que la
+    // columna "Total", o la fila no cuadra consigo misma. El escritor
+    // (`dispatch-notes.service.ts:1247/1749`) persiste
+    // `total_price = unit_price × cantidad − descuento + tax_amount`: el total
+    // es BRUTO y el unitario es BASE. Se prorratea el impuesto de LÍNEA
+    // (`dispatch_note_items.tax_amount` es por línea) sobre la cantidad
+    // despachada; el total NO se recalcula — es el persistido. Mismo arreglo
+    // y misma aritmética que el riel A (`dispatch-note.provider.ts`), para que
+    // los dos motores detrás del gateway no vuelvan a divergir.
     const items: DispatchNotePdfItem[] = (note.dispatch_note_items || []).map(
-      (item) => ({
-        product_name: item.product?.name || `Producto #${item.product_id}`,
-        variant_sku: item.product_variant?.sku ?? null,
-        lot_serial: item.lot_serial ?? null,
-        ordered_quantity: Number(item.ordered_quantity) || 0,
-        dispatched_quantity: Number(item.dispatched_quantity) || 0,
-        unit_price: Number(item.unit_price) || 0,
-        total_price: Number(item.total_price) || 0,
-      }),
+      (item) => {
+        const dispatched_quantity = Number(item.dispatched_quantity) || 0;
+        const line_tax = Number(item.tax_amount) || 0;
+        const base_unit = Number(item.unit_price) || 0;
+        const gross_unit =
+          line_tax !== 0 && dispatched_quantity > 0
+            ? Math.round((base_unit + line_tax / dispatched_quantity) * 100) / 100
+            : base_unit;
+        return {
+          product_name: item.product?.name || `Producto #${item.product_id}`,
+          variant_sku: item.product_variant?.sku ?? null,
+          lot_serial: item.lot_serial ?? null,
+          ordered_quantity: Number(item.ordered_quantity) || 0,
+          dispatched_quantity,
+          unit_price: gross_unit,
+          total_price: Number(item.total_price) || 0,
+        };
+      },
     );
 
     const transporter = this.resolveTransporter(note.dispatch_route_stops);
