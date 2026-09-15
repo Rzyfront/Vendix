@@ -121,18 +121,22 @@ import {
         </div>
 
         <!-- Totals Row (High Contrast) -->
-        <div class="px-3 py-3 bg-muted/20">
+        <!-- F-134 (C.9, major — revisión 2026-09-14): Subtotal/Impuestos/Total
+             se recalculan por acción del cajero (cambio de cantidad, cupón,
+             etc.) y no se anunciaban a lectores de pantalla. 'aria-live' +
+             'aria-atomic' sin cambiar el layout ni el copy existente. -->
+        <div class="px-3 py-3 bg-muted/20" aria-live="polite" aria-atomic="true">
           <div class="space-y-1.5 mb-4">
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Subtotal</span>
               <span class="font-medium">{{
-                formatCurrency(summary()?.subtotal || 0)
+                formatCurrency(summary().subtotal || 0)
               }}</span>
             </div>
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Impuestos</span>
               <span class="font-medium">{{
-                formatCurrency(summary()?.taxAmount || 0)
+                formatCurrency(summary().taxAmount || 0)
               }}</span>
             </div>
 
@@ -656,7 +660,13 @@ import {
                     </p>
                   }
                   <div class="flex items-center gap-2 mt-0.5">
-                    <span class="text-[10px] text-text-muted">
+                    <!-- F-137 (C.9, major — revisión 2026-09-14): 'text-text-muted'
+                         (10px) rinde 3,27:1, bajo el mínimo AA (4,5:1) que el
+                         propio repo se exige (skills/vendix-ui-ux/SKILL.md:51)
+                         para una cifra que decide un cobro (la base gravable).
+                         '#5C6672' es el mismo tono que theme.service.ts:437 ya
+                         valida en ~4,6:1; se sube además a 12px. -->
+                    <span class="text-xs text-[#5C6672]">
                       Base: {{ formatCurrency(item.unitPrice)
                       }}{{ unitPriceSuffix(item) }}
                     </span>
@@ -668,10 +678,17 @@ import {
                       </span>
                     }
                     @if (getItemTaxAmount(item) > 0) {
+                      <!-- F-139: el diseño y el guion E2E-1 paso 3 piden ver
+                           "+IVA $988.000" en pantalla; el badge sólo pintaba
+                           el signo y el importe, sin la palabra "IVA" — un
+                           lector de pantalla lo anunciaba como "más 988.000
+                           pesos" sin decir de qué. Rótulo visible + aria-label
+                           explícito, y tamaño por encima de 9px. -->
                       <span
-                        class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-orange-100 text-orange-800"
+                        class="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800"
+                        [attr.aria-label]="'IVA de la línea: ' + formatCurrency(getItemTaxAmount(item))"
                       >
-                        +{{ formatCurrency(getItemTaxAmount(item)) }}
+                        +IVA {{ formatCurrency(getItemTaxAmount(item)) }}
                       </span>
                     }
                     @if (item.isPriceOverridden) {
@@ -835,6 +852,13 @@ import {
                       </button>
                     } @else {
                       <div class="flex flex-col gap-0.5">
+                        <!-- F-141 (C.9, minor — revisión 2026-09-14): 'sm' mide
+                             28px (bajo los 44px que skills/vendix-ui-ux/SKILL.md:25
+                             exige para blancos táctiles). 'md' sólo llega a 36px;
+                             'lg' es el único tamaño del propio componente que
+                             cumple 44px, así que es el que se usa acá — sin
+                             tocar el default compartido 'sm' que usan otros
+                             consumidores. -->
                         <app-quantity-control
                           [value]="item.quantity"
                           [min]="1"
@@ -843,7 +867,7 @@ import {
                           "
                           [unitsPerPackage]="getRequiredStockPerUnit(item)"
                           [editable]="true"
-                          [size]="'sm'"
+                          [size]="'lg'"
                           (valueChange)="updateQuantity(item.id, $event)"
                           (valueClamped)="onQuantityClamped(item, $event)"
                         ></app-quantity-control>
@@ -856,7 +880,13 @@ import {
                     }
                   </div>
                   <div class="flex shrink-0 items-center justify-end gap-2">
-                    <span class="text-sm font-extrabold leading-none text-primary">
+                    <!-- F-134 (C.9, major): cifra de línea sin nombre; el
+                         'aria-label' da el mismo contexto que un lector de
+                         pantalla necesita, sin agregar texto visible nuevo. -->
+                    <span
+                      class="text-sm font-extrabold leading-none text-primary"
+                      [attr.aria-label]="'Total de línea: ' + formatCurrency(item.totalPrice)"
+                    >
                       {{ formatCurrency(item.totalPrice) }}
                     </span>
                     @if (item.itemType !== 'custom' && canEditItemPrice(item)) {
@@ -1214,7 +1244,14 @@ private cartService = inject(PosCartService);
   /** Per-product (number key) override cache so the selector resolves instantly. */
   readonly productOverrides = signal<Record<number, ProductPriceTierOverride[]>>({});
   readonly isEmpty = toSignal(this.cartService.isEmpty, { initialValue: false });
-  readonly summary = toSignal(this.cartService.summary, { initialValue: null! });
+  // F-140 — el puente `toSignal(cartService.summary, { initialValue: null! })`
+  // mentia al tipo (CartSummary declarado, null real) y abria una ventana de
+  // un ciclo de CD con Subtotal/Impuestos/Total en $0 en cada montaje, porque
+  // `toObservable` emite via effect y no de forma sincrona al suscribirse.
+  // `cartService.cartSummary` (pos-cart.service.ts) ya es el `computed`
+  // fuente que ese puente envolvia — usarlo directo, igual que `cartState`
+  // arriba, elimina el puente y con el la ventana en null.
+  readonly summary = this.cartService.cartSummary;
   /**
    * Net withholding the customer practices on this sale (role='suffered'),
    * resolved server-side via the preview endpoint. Reduces the amount to

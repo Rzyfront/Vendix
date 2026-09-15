@@ -68,7 +68,28 @@ export class CreateTaxCategoryDto {
   @IsOptional()
   tax_type?: TaxFiscalType;
 
-  @IsNumber({ maxDecimalPlaces: 4 })
+  /**
+   * F-084 (CP-pos-exclusive-tax-double-charge, QUI-832): este campo es
+   * PORCENTAJE (0-100, ej. `19` = 19 %), NO la fracción que se persiste.
+   * `TaxesService.create`/`OrgTaxesService.create`/`.update` hacen
+   * `Number(rate) / 100` antes de escribir en `tax_rates.rate`
+   * (`Decimal(6,5)`, contrato fracción, tope real 9,99999). Verificado contra
+   * el formulario (`tax-form-modal.component.ts`: "Tasa (%)", helper text
+   * "Se guarda como fracción (19% → 0.19)") y ambos servicios de creación.
+   * Por eso `@Max(100)` es CORRECTO para este campo — bajarlo a `0.99999`
+   * (la cota de la columna) rompería toda tasa real: 19 > 0.99999 haría
+   * fallar la validación del IVA general. `@Min(0)`/`@Max(100)` acotan el
+   * porcentaje; tras `/100` el máximo posible es 1.0, siempre dentro del
+   * tope de la columna.
+   *
+   * `maxDecimalPlaces` SÍ estaba desalineado: 4 decimales de porcentaje
+   * producen 6 decimales de fracción tras `/100` (ej. `19.1234` → `0.191234`),
+   * uno más de lo que la columna admite (`Decimal(6,5)` = 5 decimales) —
+   * Postgres redondea el sexto dígito en silencio. Con 3 decimales de
+   * porcentaje el resultado tiene como máximo 5 decimales de fracción,
+   * calzando exacto con la columna.
+   */
+  @IsNumber({ maxDecimalPlaces: 3 })
   @Min(0)
   @Max(100)
   @Type(() => Number)

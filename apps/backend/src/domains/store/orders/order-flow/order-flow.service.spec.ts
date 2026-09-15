@@ -714,7 +714,13 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     // `undefined` → ítem base sin disparar; `null` → ítem inexistente (404).
     item?: Record<string, unknown> | null;
     freshTicketStatus?: string | null;
-    activeItems?: Array<{ total_price: number; tax_amount_item: number | null }>;
+    // C.8/F-082 — `order_item_taxes` (fila autoritativa persistida por
+    // línea), no `tax_amount_item` (ambiguo en unidad, F-003): el `select`
+    // real de `cancelOrderItem` pide la relación, no el campo suelto.
+    activeItems?: Array<{
+      total_price: number;
+      order_item_taxes?: Array<{ tax_amount: number | null }>;
+    }>;
     withKds?: boolean;
   }) => {
     const txMock: any = {
@@ -729,7 +735,7 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
       order_items: {
         update: jest.fn().mockResolvedValue({}),
         findMany: jest.fn().mockResolvedValue(
-          opts.activeItems ?? [{ total_price: 50000, tax_amount_item: 0 }],
+          opts.activeItems ?? [{ total_price: 50000, order_item_taxes: [] }],
         ),
       },
       orders: { update: jest.fn().mockResolvedValue({}) },
@@ -861,8 +867,8 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
   it('happy before_fire: soft cancel + recálculo excluyendo cancelados', async () => {
     const { service, txMock, kitchenFireService } = buildService({
       activeItems: [
-        { total_price: 50000, tax_amount_item: 8000 },
-        { total_price: 20000, tax_amount_item: 0 },
+        { total_price: 50000, order_item_taxes: [{ tax_amount: 8000 }] },
+        { total_price: 20000, order_item_taxes: [{ tax_amount: 0 }] },
       ],
     });
 
@@ -886,6 +892,39 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     expect(Number(updateData.grand_total)).toBe(78000);
     expect(kitchenFireService.cancelTicketInTx).not.toHaveBeenCalled();
     expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
+  });
+
+  // C.8/F-082 (blocker) — antes el recálculo escribía `grand_total` como
+  // `subtotal + tax` a secas: envío, propina y descuento vivos en la orden
+  // se perdían apenas se cancelaba UN ítem, aunque la orden siguiera
+  // teniendo ambos cargos. Ahora los conserva (`shipping_cost + tip_amount
+  // - discount_amount`), clampado a 0.
+  it('F-082: conserva envío, propina y descuento al recalcular grand_total', async () => {
+    const { service, txMock } = buildService({
+      order: {
+        id: ORDER_ID,
+        state: 'created',
+        shipping_cost: 12000,
+        tip_amount: 20000,
+        discount_amount: 5000,
+      },
+      activeItems: [
+        { total_price: 50000, order_item_taxes: [{ tax_amount: 9500 }] },
+        { total_price: 50000, order_item_taxes: [{ tax_amount: 9500 }] },
+      ],
+    });
+
+    await service.cancelOrderItem(
+      ORDER_ID,
+      ITEM_ID,
+      'cliente pidió una línea de menos',
+    );
+
+    const updateData = txMock.orders.update.mock.calls[0][0].data;
+    expect(Number(updateData.subtotal_amount)).toBe(100000);
+    expect(Number(updateData.tax_amount)).toBe(19000);
+    // 100000 + 19000 + 12000 (envío) + 20000 (propina) - 5000 (descuento)
+    expect(Number(updateData.grand_total)).toBe(146000);
   });
 
   it('happy after_fire pending: cancela el ticket in-tx + SSE post-commit', async () => {

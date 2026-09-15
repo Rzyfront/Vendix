@@ -62,20 +62,19 @@
                    impuesto ni descuento, "Subtotal" e "Impuestos $0" repiten
                    el total y le quitan protagonismo a la única cifra que el
                    mesero necesita leer de un vistazo. -->
+              <!-- C.7 (§5.3, base gross): sin fila Subtotal — las líneas ya
+                   van en bruto; sin fila de impuesto que sume — con desglose
+                   respaldado, nota informativa fuera de la aritmética. -->
               @if (hasTotalsBreakdown()) {
-                <div class="totals-row">
-                  <span class="totals-label">Subtotal</span>
-                  <span class="totals-value">{{ orderSubtotal() | currency }}</span>
-                </div>
                 @if (orderDiscount() > 0) {
                   <div class="totals-row totals-row--discount">
                     <span class="totals-label">Descuento</span>
                     <span class="totals-value">-{{ orderDiscount() | currency }}</span>
                   </div>
                 }
-                @if (orderTax() > 0) {
+                @if (showTableVatNote()) {
                   <div class="totals-row">
-                    <span class="totals-label">Impuestos</span>
+                    <span class="totals-label">IVA incluido</span>
                     <span class="totals-value">{{ orderTax() | currency }}</span>
                   </div>
                 }

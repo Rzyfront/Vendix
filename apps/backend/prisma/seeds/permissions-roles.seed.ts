@@ -548,6 +548,24 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/kitchen-fire/tickets/:id',
       method: 'PATCH',
     },
+    // Permisos finos de cancelación y reenvío de comandas/tickets KDS —
+    // owner/admin (/manager por catch-all `store:`) los heredan
+    // automáticamente; waiter/kitchen/cashier/carrier usan listas explícitas
+    // y quedan en deny-by-default (no se agregan ahí).
+    {
+      name: 'store:kitchen_fire:cancel',
+      description:
+        'Cancelar ticket de cocina (comanda) — solo owner/admin (revierte sin re-consumir inventario)',
+      path: '/api/store/kitchen-fire/tickets/:id/cancel',
+      method: 'POST',
+    },
+    {
+      name: 'store:kitchen_fire:resend',
+      description:
+        'Rehacer/reenviar comanda a cocina (respeta decision reuse/waste) — solo owner/admin',
+      path: '/api/store/kitchen-fire/resend',
+      method: 'POST',
+    },
 
     // Tables (mesas) + Table Sessions (cuenta abierta) — Restaurant Suite — Fase E
     {

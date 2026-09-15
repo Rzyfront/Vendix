@@ -14,6 +14,7 @@ import {
   CommitResult,
 } from '../inventory/shared/services/order-stock-commit.service';
 import { TaxesService } from '../taxes/taxes.service';
+import { truncMoney } from '../taxes/utils/tax-inclusive-math.util';
 import { LocationsService } from '../inventory/locations/locations.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
 import { sellableStockLevelsWhere } from '../inventory/shared/helpers/pos-stock-scope.helper';
@@ -82,6 +83,8 @@ import {
   AuditService,
   AuditResource,
 } from '@common/audit/audit.service';
+// F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
+import { differsByAtLeastCents } from '@common/money-kernel';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -805,13 +808,46 @@ export class PaymentsService {
         checkoutSettings?.require_customer_data !== false;
 
       const posSettings = (settings as any)?.pos as
-        | { allow_anonymous_sales?: boolean; allow_alias_sales?: boolean }
+        | {
+            allow_anonymous_sales?: boolean;
+            allow_alias_sales?: boolean;
+            tax_line_gate?: 'block' | 'warn' | 'off';
+          }
         | undefined;
       const allowAnonymousSales = posSettings?.allow_anonymous_sales === true;
       // QUI-737 (B.4) — el alias es otra vía legítima de "sin cliente formal":
       // requiere el flag POS y un alias no vacío.
       const allowAliasSales = posSettings?.allow_alias_sales === true;
       const hasAlias = !!createPosPaymentDto.customer_alias;
+
+      // ----------------------------------------------------------------
+      // F-127 — severidad de la compuerta fiscal bloqueante del carril POS.
+      //
+      // Hoy, si `POS_TABLE_LINE_TAX_UNRESOLVABLE_001` dispara en una tienda
+      // por una combinación de catálogo no contemplada, esa tienda NO PUEDE
+      // COBRAR hasta que se abra un revert, se mergee y corra la tubería de
+      // despliegue completa (`deploy-backend-ec2.yml`: docker stop, sleep
+      // 40, espera de worker hasta 90s, seeds) con la caja parada.
+      // `settings.pos.tax_line_gate` es la válvula de escape: baja la
+      // severidad de esa compuerta SIN redeploy, por tienda, con un simple
+      // cambio de settings.
+      //
+      // Se resuelve UNA sola vez acá (settings ya está en memoria por
+      // `require_session_for_sales`, línea ~727) y se encadena por
+      // parámetro hasta `buildPosOrderItem` — releerla ahí adentro
+      // multiplicaría `SettingsService.getSettings()` (dos `findUnique` sin
+      // caché) por cada línea del carrito, dentro del `Promise.all` que ya
+      // sostiene locks de la transacción (mismo patrón de N+1 que P2028).
+      //
+      // Default `'block'` = comportamiento de HOY sin configurar: ninguna
+      // tienda cambia de comportamiento por default. Bajar a 'warn'/'off'
+      // es una MEDIDA TEMPORAL DE EMERGENCIA, no un ajuste permanente — ver
+      // el comentario junto al throw en `buildPosOrderItem`.
+      const taxLineGateSeverity: 'block' | 'warn' | 'off' =
+        posSettings?.tax_line_gate === 'warn' ||
+        posSettings?.tax_line_gate === 'off'
+          ? posSettings.tax_line_gate
+          : 'block';
 
       if (
         requireCustomerData &&
@@ -861,6 +897,7 @@ export class PaymentsService {
           tx,
           createPosPaymentDto,
           user,
+          taxLineGateSeverity,
         ))!;
         const order = orderCreation.order;
         // QUI-431 — ¿la venta tiene productos serializados? Calculado UNA vez
@@ -1395,6 +1432,15 @@ export class PaymentsService {
           // Typed tax breakdown so accounting posts one journal line per fiscal
           // type (IVA → 2408, INC → 2436, ICA → 241205) instead of collapsing to
           // 2408. Read from the persisted, typed order_item_taxes rows.
+          //
+          // F-111 (CP-pos-exclusive-tax-double-charge) — además del tipo y el
+          // monto, se trae `total_price` de la línea y `tax_rate` (ya
+          // fracción) de cada impuesto, para que `buildTaxBreakdown` pueda
+          // armar la compuerta de detección de `AutoEntryService.
+          // resolveTaxLines`: compara el impuesto declarado acá contra
+          // `tax_rate × total_price` calculado independientemente. `NO`
+          // dividir `tax_rate` — `order_item_taxes.tax_rate` es
+          // `Decimal(6,5)` y ya guarda la fracción (19 % = 0.19000).
           const orderItemsWithTaxes = await tx.order_items.findMany({
             where: {
               order_id: order.id,
@@ -1407,11 +1453,44 @@ export class PaymentsService {
               cancelled_at: null,
             },
             select: {
-              order_item_taxes: { select: { tax_type: true, tax_amount: true } },
+              // F-111 — NETO (`buildOrderItemSnapshot`: `total_price =
+              // unitBasePrice * lineUnits`), ya neto del descuento de tarifa
+              // multi-tarifa/sale/override (esos reducen `unitBasePrice`
+              // ANTES de persistir). El descuento promocional/cupón de
+              // orden (`orders.discount_amount`) es aparte: se calcula
+              // DESPUÉS, a nivel de orden, y NUNCA resta de
+              // `order_items.total_price` ni de `order_item_taxes.tax_amount`
+              // (ver `createOrUpdateOrderFromPos`/cierre de mesa, que suman
+              // `total_price` para el subtotal y restan el descuento sólo del
+              // `grand_total`). Como el impuesto de cada línea también se
+              // calculó sobre esa misma base ANTES del descuento de orden,
+              // `tax_rate × total_price` sigue siendo la comparación correcta
+              // con o sin promoción/cupón — no hace falta restar nada acá.
+              total_price: true,
+              // `is_inclusive` NO se lee acá, a propósito: `total_price` sale
+              // de `unitBasePrice`, que es el NETO en las dos ramas
+              // (`finalUnitPrice / (1 + total_rate)` en la rama custom,
+              // `taxInfo.base` en la de catálogo), así que un impuesto
+              // INCLUIDO ya viene absorbido y `tarifa × total_price` es la
+              // comparación correcta sin mirar el flag. Traerlo sugeriría una
+              // corrección que no hay que hacer.
+              order_item_taxes: {
+                select: { tax_type: true, tax_amount: true, tax_rate: true },
+              },
             },
           });
           const tax_breakdown = buildTaxBreakdown(
-            orderItemsWithTaxes.flatMap((i) => i.order_item_taxes || []),
+            orderItemsWithTaxes.flatMap((item) =>
+              (item.order_item_taxes || []).map((tax) => ({
+                ...tax,
+                // F-111 — la base de CADA impuesto de la línea es el
+                // `total_price` COMPLETO de esa línea. Una línea con más de
+                // un tipo de impuesto (p.ej. IVA + ICA) usa la misma base
+                // para ambos, y eso NO es una aproximación: ambos gravan el
+                // mismo neto y no se componen entre sí.
+                taxable_amount: Number(item.total_price || 0),
+              })),
+            ),
           );
 
           // CASO 2 (suffered): a customer who is a withholding agent retains
@@ -2294,7 +2373,19 @@ export class PaymentsService {
    */
   private async calculatePosCouponDiscount(
     dto: CreatePosPaymentDto,
-    productsSubtotal: number,
+    /**
+     * F-017 — subtotal **BRUTO** (base + impuesto), no la base gravable.
+     *
+     * Decisión de negocio, registrada: el cupón se evalúa sobre la cifra que
+     * el cliente ve. `minimum_purchase_amount` es un umbral discreto, así que
+     * pasarle el neto haría desaparecer cupones que hoy aplican —un cupón de
+     * «10 % en compras > $6.000.000» sobre la orden canónica deja de aplicar
+     * con 5.200.000 neto y el cliente paga más de lo que la pantalla le
+     * prometió, sin error ni log. Además `cartItems[].line_total` es bruto:
+     * mezclar las dos magnitudes en la misma llamada era el defecto que este
+     * parámetro cierra.
+     */
+    productsSubtotalGross: number,
     promotionsDiscount: number,
   ): Promise<{
     coupon_id: number | null;
@@ -2330,17 +2421,34 @@ export class PaymentsService {
     try {
       const remainingSubtotal = Math.max(
         0,
-        this.roundMoney(productsSubtotal - promotionsDiscount),
+        this.roundMoney(productsSubtotalGross - promotionsDiscount),
       );
       const cartItems = (dto.items || [])
         .filter((item) => item.product_id)
         .map((item) => {
-          const unitPrice = Number(item.final_unit_price ?? item.unit_price ?? 0);
+          // F-017 — el cupón se evalúa contra el BRUTO, la cifra que el
+          // cliente ve en pantalla y sobre la que se le prometió el
+          // descuento. `final_unit_price` YA es bruto; el fallback tenía que
+          // dejar de serlo cuando `unit_price` pasó de bruto a neto en la
+          // línea exclusiva, así que le devuelve su impuesto.
+          const declaredGross =
+            item.final_unit_price != null
+              ? Number(item.final_unit_price)
+              : null;
+          const unitGross =
+            declaredGross ??
+            Number(item.unit_price || 0) + Number(item.tax_amount_item || 0);
+          // El multiplicador se deja EXACTAMENTE como estaba (`quantity`), a
+          // propósito: que aquí no sea `resolvePriceUnits` como en el total
+          // de la línea es un defecto anterior y de otra familia (QUI-648,
+          // escala de unidad de precio). Arreglarlo de paso movería el umbral
+          // del cupón para los productos con escala sin que nadie lo haya
+          // revisado, y F-017 sólo decide bruto-contra-neto.
           return {
             product_id: item.product_id as number,
             category_id: item.category_id,
             category_ids: item.category_ids,
-            line_total: this.roundMoney(unitPrice * Number(item.quantity || 0)),
+            line_total: this.roundMoney(unitGross * Number(item.quantity || 0)),
           };
         });
 
@@ -2398,7 +2506,13 @@ export class PaymentsService {
 
   private getPosLineUnits(item: any): number {
     const weight = Number(item.weight || 0);
-    if (weight > 0) return weight;
+    // F-085: el peso se redondea a 3 decimales ANTES de usarse como
+    // multiplicador, para que el total calculado coincida con el peso que
+    // Postgres realmente guarda (`numeric(10,3)` redondea al persistir; una
+    // 4ª cifra sólo vive en memoria y la relectura de I-1 deriva). Se REDONDEA
+    // (no trunca): la columna redondea, y truncar divergería del valor
+    // almacenado en el mismo sentido que el hallazgo quiere eliminar.
+    if (weight > 0) return Math.round(weight * 1000) / 1000;
     return Number(item.quantity || 0);
   }
 
@@ -2411,12 +2525,19 @@ export class PaymentsService {
    * IVA exclusivo una segunda vez sobre él. Esa rama murió; sin
    * `final_unit_price` no hay bruto declarado, `null`.
    */
+  /**
+   * B.1/F-088 — el bruto declarado manda; ausente es `null`, nunca 0. Una
+   * cadena vacía (formulario con campo vacío) es AUSENCIA, no precio 0: con
+   * la conversión vieja (`Number("") = 0`) la línea se cobraba 0 con permiso
+   * de override. El 0 numérico explícito se honra (decidido por escrito en
+   * `payments.service.spec.ts`, bloque B.1/F-088).
+   */
   private resolveDeclaredGrossUnitPrice(item: any): number | null {
-    if (item.final_unit_price !== undefined && item.final_unit_price !== null) {
-      return this.roundMoney(Number(item.final_unit_price));
-    }
+    const raw = item?.final_unit_price;
+    if (raw === undefined || raw === null) return null;
+    if (typeof raw === 'string' && raw.trim() === '') return null;
 
-    return null;
+    return this.roundMoney(Number(raw));
   }
 
   private resolveCatalogUnitBasePrice(product: any, variant?: any): number {
@@ -2453,7 +2574,13 @@ export class PaymentsService {
   ): Promise<{
     total_rate: number;
     total_tax_amount: number;
-    taxes: { tax_rate_id: number; name: string; rate: number; amount: number }[];
+    taxes: {
+      tax_rate_id: number;
+      name: string;
+      rate: number;
+      amount: number;
+      is_inclusive: boolean;
+    }[];
   }> {
     if (!taxCategoryId) {
       return { total_rate: 0, total_tax_amount: 0, taxes: [] };
@@ -2486,20 +2613,42 @@ export class PaymentsService {
       );
     }
 
+    // F-018: la rama custom calculaba la cuota en float (`base × rate`) sin
+    // truncado DIAN, y ADR-04 asciende justo esas filas a autoritativas. Se
+    // trunca cada cuota con el mismo `truncMoney` del kernel (Anexo 1.9
+    // §11.2, hacia cero) y el total es la suma de cuotas truncadas — no el
+    // float re-redondeado. No se enruta por `resolveLineTotals`: ese solver
+    // interpreta el input como bruto-respecto-de-lo-inclusivo y apilaría el
+    // markup exclusivo encima de un total que ya lo contiene.
+    // F-052: el ítem custom no tiene `product_tax_assignments` (no hay
+    // producto), así que el ÚNICO lugar donde vive el flag INCLUIDO/AGREGADO
+    // para su categoría es `tax_categories.is_inclusive` — ya viene cargado
+    // en `taxCategory` (el `findFirst` de arriba no usa `select`, trae todos
+    // los escalares). Antes se hardcodeaba `false` en el snapshot
+    // (`buildOrderItemSnapshot`, `tax.is_inclusive ?? false`): una categoría
+    // inclusiva usada en un ítem custom persistía `is_inclusive: false` en
+    // `order_item_taxes`, y `needsOrderLineTaxSplit` (invoicing) partía el
+    // XML DIAN al revés con los importes cuadrando igual — el modo de falla
+    // que ADR-03 llama "el único real" del diseño, vivo justo en la rama que
+    // ADR-01 citaba como prueba de que la semántica funciona.
+    const categoryIsInclusive = taxCategory.is_inclusive ?? false;
     const taxes = (taxCategory.tax_rates || []).map((rate: any) => {
       const rateValue = Number(rate.rate || 0);
       return {
         tax_rate_id: rate.id,
         name: rate.name,
         rate: rateValue,
-        amount: basePrice * rateValue,
+        amount: truncMoney(basePrice * rateValue),
+        is_inclusive: categoryIsInclusive,
       };
     });
     const totalRate = taxes.reduce((sum, tax) => sum + tax.rate, 0);
 
     return {
       total_rate: totalRate,
-      total_tax_amount: basePrice * totalRate,
+      total_tax_amount: this.roundMoney(
+        taxes.reduce((sum, tax) => sum + tax.amount, 0),
+      ),
       taxes,
     };
   }
@@ -2517,6 +2666,24 @@ export class PaymentsService {
     // `session.order_id` (cierre de mesa, orden ya existe) u `orderNumber`
     // (venta nueva, recién generado antes de mapear los ítems).
     orderRef?: string | number | null,
+    // F-065 (B.3→B.4): distingue el cierre de cuenta de mesa —líneas que
+    // pueden llevar tiempo abiertas y perder su asignación fiscal entre la
+    // apertura y el cierre (población real: purga de Roma Motos)— de la
+    // venta fresca (POS directo/checkout), que F-065 deja fuera a propósito:
+    // ese carril puede depender de productos legítimamente sin categoría
+    // asignada y auditarlo es un cambio aparte (evidence/B3-taxes-ejecucion.md).
+    isTableSessionLine = false,
+    // F-127: severidad de la compuerta `POS_TABLE_LINE_TAX_UNRESOLVABLE_001`,
+    // resuelta UNA sola vez en `processPosPayment` (settings ya está en
+    // memoria ahí, `payments.service.ts:726`) y encadenada por los dos
+    // llamadores (`createOrUpdateOrderFromPos` / `applyPosPaymentToTableSession`)
+    // en vez de releerse por ítem: `SettingsService.getSettings()` hace dos
+    // `findUnique` sin caché y este método corre dentro de un
+    // `Promise.all` por línea — releerla aquí multiplicaría consultas
+    // exactamente en el punto que P2028 (memoria del equipo) ya señaló
+    // como el cuello de botella del carril de cobro. Default `'block'`
+    // para que un llamador nuevo que no la pase se comporte como hoy.
+    taxLineGateSeverity: 'block' | 'warn' | 'off' = 'block',
   ): Promise<any> {
     const isCustomItem = item.item_type === 'custom' || !item.product_id;
     const lineUnits = this.getPosLineUnits(item);
@@ -2720,6 +2887,59 @@ export class PaymentsService {
       )),
       resolved_from: 'catalog',
     };
+    // F-065 (B.3→B.4): al cerrar una cuenta de mesa, un producto que perdió
+    // su `product_tax_assignments` entre la apertura y el cierre resolvía en
+    // silencio a IVA cero sobre base inflada — sub-declaración a la DIAN sin
+    // ninguna señal. `has_tax_assignment` (TaxesService, F-065) discrimina:
+    // `false` es "nunca tuvo asignación o la perdió", nunca "tasa 0%
+    // explícita" (una asignación viva a categoría 0% sigue siendo `true`).
+    // Acotado a `isTableSessionLine` a propósito: el carril de venta
+    // fresca/checkout puede depender de productos legítimamente sin
+    // categoría asignada y auditarlo es un cambio aparte, no éste.
+    //
+    // F-127 — válvula de escape por tienda para esta compuerta.
+    //
+    // Sin esta rama, una tienda que dispara esta excepción por una
+    // combinación de catálogo no contemplada queda SIN PODER COBRAR hasta
+    // abrir un revert, mergearlo y esperar `deploy-backend-ec2.yml`
+    // completo (docker stop, sleep 40, espera de worker hasta 90s, seeds)
+    // con la caja parada. `settings.pos.tax_line_gate` (`'block' | 'warn' |
+    // 'off'`, default `'block'`) permite bajarla en caliente, por tienda,
+    // sin tocar código ni desplegar:
+    //   - 'block' (default = comportamiento de HOY): lanza y revierte la
+    //     transacción, exactamente como antes de F-127.
+    //   - 'warn': NO lanza — registra el mismo detalle (tienda, orden,
+    //     usuario, producto) que hoy sólo viaja en el mensaje de la
+    //     excepción, vía `this.logger.warn` con el mismo shape de evento
+    //     estructurado que usa `invertDeclaredGross` más abajo
+    //     (`payments.unclosed_residual_cents`), y deja pasar la línea
+    //     normalizando el impuesto a cero.
+    //   - 'off': ni lanza ni registra — silencio total.
+    // Bajar a 'warn'/'off' es una MEDIDA TEMPORAL DE EMERGENCIA para poder
+    // seguir cobrando mientras se corrige el catálogo, no un ajuste
+    // permanente: toda venta que pasa por 'warn'/'off' sigue siendo una
+    // venta con IVA potencialmente sub-declarado a la DIAN (F-065).
+    if (isTableSessionLine && catalogTaxInfo.has_tax_assignment === false) {
+      if (taxLineGateSeverity === 'block') {
+        throw new VendixHttpException(
+          ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001,
+          `El producto "${product.name}" perdió su asignación fiscal; no se puede cerrar la cuenta normalizando el impuesto a cero.`,
+        );
+      }
+      if (taxLineGateSeverity === 'warn') {
+        this.logger.warn({
+          event: 'payments.pos_table_line_tax_unresolvable',
+          code: ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001.code,
+          severity: 'warn',
+          store_id: dtoStoreId,
+          user_id: user?.id ?? null,
+          order_ref: orderRef ?? null,
+          product_id: product.id,
+          product_name: product.name,
+        });
+      }
+      // 'off': ni lanza ni registra, a propósito.
+    }
     // F-001: el precio publicado YA contiene lo inclusivo — el total NO crece.
     // Con todo inclusivo, `total === catalogUnitPrice` (119000, no 141610); lo
     // agregado sí suma encima vía el resolver.
@@ -2769,13 +2989,18 @@ export class PaymentsService {
 
     const declaredGross = this.resolveDeclaredGrossUnitPrice(item);
     const finalUnitPrice = declaredGross ?? catalogFinalPrice;
+    // F-222: en centavos enteros — `Math.abs` en floats decide el mismo centavo
+    // según la magnitud (13603.13/13603.12 no disparaba, 2425.00/2424.99 sí).
     const isPriceOverridden =
       declaredGross !== null &&
-      Math.abs(declaredGross - catalogFinalPrice) >= 0.01;
+      differsByAtLeastCents(declaredGross, catalogFinalPrice);
 
     if (isPriceOverridden) {
       if (!product.allow_pos_price_override) {
-        throw new BadRequestException(
+        // F-070: tipado para que el móvil distinga esta causa (neto
+        // confundido con edición, F-001) de cualquier otro 400.
+        throw new VendixHttpException(
+          ErrorCodes.POS_PRICE_OVERRIDE_NOT_ALLOWED_001,
           `El producto "${product.name}" no permite editar el precio en POS.`,
         );
       }
@@ -2890,6 +3115,30 @@ export class PaymentsService {
     // warn reportaba `tax.is_inclusive` (el flag del catálogo), así que el
     // diagnóstico describía una llamada que nunca ocurrió. Con una sola
     // constante ya no pueden volver a separarse.
+    // F-051 — la entrada nombrada de ADR-01 RECHAZA `fixed_base` en vez de
+    // dejar que se pierda. `resolveLineTotals` fuerza `fixed_base: undefined`
+    // en esta ruta (F-021, `money-kernel/tax-inclusive-math.ts:133`), así que
+    // una tasa con base propia (el carve-out de AIU) que llegara hasta acá
+    // no fallaría: se repartiría como una tasa ordinaria y la base declarada
+    // a la DIAN saldría mal, EN SILENCIO y sin compuerta que lo note — el
+    // eje (a) del hallazgo. Hoy ninguna tasa AIU alcanza el carril de línea
+    // POS, así que el radio de explosión es cero; el día que alguna llegue,
+    // esto corta en vez de sub-declarar. NO va bajo `settings.pos.
+    // tax_line_gate` (F-127) a propósito: aquella válvula existe para no
+    // dejar la caja parada por un dato de catálogo, y nunca debe poder
+    // apagar una compuerta de aritmética fiscal.
+    const fixedBaseTax = source.taxes.find(
+      (tax) =>
+        (tax as { fixed_base?: unknown }).fixed_base !== undefined &&
+        (tax as { fixed_base?: unknown }).fixed_base !== null,
+    );
+    if (fixedBaseTax) {
+      throw new VendixHttpException(
+        ErrorCodes.POS_DECLARED_GROSS_FIXED_BASE_001,
+        `La tasa "${(fixedBaseTax as { name?: string }).name ?? fixedBaseTax.rate}" tiene base propia y esta línea declara un precio bruto; corrige el precio o quita la base propia antes de cobrar.`,
+      );
+    }
+
     const inclusiveRates = source.taxes.map((tax) => ({
       rate: tax.rate,
       // ADR-01: un bruto declarado contiene TODAS las tasas — el flag que
@@ -3063,6 +3312,11 @@ export class PaymentsService {
       // Solo aplica a líneas `product_type='prepared'`; para el resto se
       // ignora. Default false para preservar el comportamiento retail.
       skip_kds: !!params.item.skip_kds,
+      // QUI-653 — "Para llevar" del POS (cobro directo). El flag viaja en el
+      // DTO (`PosOrderItemDto.is_takeaway`, estampado por el checkout-shell
+      // cuando el paso Consumo está en 'entrega'). El fire a cocina ya lo
+      // propaga al ticket; aquí solo se persiste. Default false.
+      is_takeaway: !!params.item.is_takeaway,
     };
 
     if (params.tierSnap?.tier_id != null) {
@@ -3121,7 +3375,18 @@ export class PaymentsService {
     const grossMismatchDelta = this.roundMoney(
       computedGrossUnitPrice - orderItem.final_unit_price,
     );
-    if (Math.abs(grossMismatchDelta) > 0.02) {
+    // F-222: MISMO umbral que el `> 0.02` original (tolera 2 centavos), pero
+    // medido en centavos enteros: `>= 3` ¢. El `> 0.02` en floats fallaba en el
+    // borde exacto según la magnitud (13603.14 − 13603.12 = 0.0199999999986, no
+    // disparaba; 551.07 − 551.05 = 0.0200000000001, sí). Solo registra, no
+    // lanza (ADR-11/B.4).
+    if (
+      differsByAtLeastCents(
+        computedGrossUnitPrice,
+        orderItem.final_unit_price,
+        3,
+      )
+    ) {
       this.logger.error({
         event: 'pos.line_gross_mismatch',
         store_id: params.storeId ?? null,
@@ -3186,6 +3451,9 @@ export class PaymentsService {
     dto: CreatePosPaymentDto,
     user: any,
     dtoStoreId: number,
+    // F-127: encadenada desde `processPosPayment` hasta `buildPosOrderItem`
+    // — ver comentario de la firma de ese método.
+    taxLineGateSeverity: 'block' | 'warn' | 'off' = 'block',
   ): Promise<{
     order: any;
     // QUI-431 — alineado con la rama de venta fresca (`createOrUpdateOrderFromPos`)
@@ -3311,6 +3579,9 @@ export class PaymentsService {
                 user,
                 tierSnapshots[index],
                 session.order_id,
+                // F-065: esta rama SÍ es cierre de cuenta de mesa.
+                true,
+                taxLineGateSeverity,
               ),
             ),
           )
@@ -3354,6 +3625,12 @@ export class PaymentsService {
         return sum + Number(item.tax_amount_item || 0) * multiplier;
       }, 0),
     );
+    // F-017 — subtotal BRUTO (base + impuesto). Es la base comercial: sobre
+    // ella se evalúan el umbral y el porcentaje del cupón, y el porcentaje de
+    // la propina. Con la base gravable a secas, la línea exclusiva arrastraba
+    // los dos 19 % abajo: cupones que dejan de aplicar y propina del mesero
+    // recortada. Ver ADR-07 — lo comercial se expresa en bruto.
+    const newSubtotalGross = this.roundMoney(newSubtotal + newTax);
     const shippingCost = this.roundMoney(dto.shipping_cost || 0);
     // GAP-6 — Propina del cierre de mesa. Aditiva al grand_total, SIN IVA:
     // NO se suma a subtotal_amount ni tax_amount (no es ingreso ni base
@@ -3381,7 +3658,7 @@ export class PaymentsService {
     // mismas: dos implementaciones de la misma regla divergen, y una propina
     // que se calcula distinto según por dónde cobró el operador es un
     // descuadre que nadie ve hasta la conciliación.
-    const resolvedTip = resolveTip(dto, newSubtotal, (v) =>
+    const resolvedTip = resolveTip(dto, newSubtotalGross, (v) =>
       this.roundMoney(v),
     );
     const tip = resolvedTip.amount;
@@ -3392,7 +3669,7 @@ export class PaymentsService {
     const promotionQuote = await this.calculatePosPromotionQuote(dto);
     const couponInfo = await this.calculatePosCouponDiscount(
       dto,
-      newSubtotal,
+      newSubtotalGross,
       promotionQuote.total_discount,
     );
     const totalDiscount = this.roundMoney(
@@ -3687,6 +3964,9 @@ export class PaymentsService {
     tx: any,
     dto: CreatePosPaymentDto,
     user: any,
+    // F-127: encadenada desde `processPosPayment` hasta `buildPosOrderItem`
+    // — ver comentario de la firma de ese método.
+    taxLineGateSeverity: 'block' | 'warn' | 'off' = 'block',
   ) {
     // store_id is guaranteed by processPosPayment (line ~612) which copies it
     // from RequestContext. Re-assert here so downstream typing is non-null and
@@ -3708,6 +3988,7 @@ export class PaymentsService {
         dto,
         user,
         dtoStoreId,
+        taxLineGateSeverity,
       );
     }
 
@@ -3740,6 +4021,7 @@ export class PaymentsService {
         { ...dto, table_session_id: resolvedSessionId },
         user,
         dtoStoreId,
+        taxLineGateSeverity,
       );
     }
 
@@ -3790,6 +4072,10 @@ export class PaymentsService {
               user,
               tierSnapshots[index],
               orderNumber,
+              // F-065: venta fresca, no es cierre de cuenta de mesa — la
+              // compuerta de abajo no aplica en este carril a propósito.
+              false,
+              taxLineGateSeverity,
             ),
           ),
         );
@@ -3834,10 +4120,20 @@ export class PaymentsService {
         // ignored for final totals — it is only kept by the frontend as a
         // local estimate and is recalculated here via `quoteDiscounts` +
         // CouponsService.
+        // F-017 — subtotal BRUTO (base + impuesto). Es la base comercial:
+        // sobre ella se evalúan el umbral y el porcentaje del cupón, y el
+        // porcentaje de la propina. Con la base gravable a secas, la línea
+        // exclusiva arrastraba los dos 19 % abajo: cupones que dejan de
+        // aplicar y propina del mesero recortada. Ver ADR-07 — lo comercial
+        // se expresa en bruto.
+        const calculatedSubtotalGross = this.roundMoney(
+          calculatedSubtotal + calculatedTaxAmount,
+        );
+
         const promotionQuote = await this.calculatePosPromotionQuote(dto);
         const couponInfo = await this.calculatePosCouponDiscount(
           dto,
-          calculatedSubtotal,
+          calculatedSubtotalGross,
           promotionQuote.total_discount,
         );
 
@@ -3861,7 +4157,13 @@ export class PaymentsService {
           resolvedTipValue != null &&
           resolvedTipValue > 0
         ) {
-          tip = this.roundMoney((calculatedSubtotal * resolvedTipValue) / 100);
+          // F-017 — el porcentaje va sobre el BRUTO, igual que en el cierre
+          // de mesa (`resolveTip(dto, newSubtotalGross, …)`). Dos carriles
+          // que calculan distinto la misma propina es un descuadre que no se
+          // ve hasta la conciliación.
+          tip = this.roundMoney(
+            (calculatedSubtotalGross * resolvedTipValue) / 100,
+          );
           resolvedTipType = 'fixed';
           resolvedTipValue = tip;
         }

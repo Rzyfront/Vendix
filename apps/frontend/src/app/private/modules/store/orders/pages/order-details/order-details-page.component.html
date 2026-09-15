@@ -1,20 +1,53 @@
 <div>
-  <!-- A.3 CP-facturacion-fixes — banner de alerta fiscal. `fiscal_alert_code` lo
-       fija el auto-envío del webhook cuando la emisión falla (nunca bloquea el
-       pago); null = sin alerta. Lleva al operador a emitir manualmente. -->
-  @if (order()?.fiscal_alert_code) {
+  <!-- C.9 CP-pos-exclusive-tax-double-charge — banner de alerta fiscal derivado
+       del diccionario (`orders/utils/fiscal-alert-dictionary.ts`), nunca copy
+       fijo: `fiscal_alert_code` lo fija el auto-envío del webhook cuando la
+       emisión falla (nunca bloquea el pago); null = sin alerta. El código sale
+       del título y va en línea secundaria rotulada; el cuerpo usa
+       text-text-primary (el secondary no llega a 4,5:1). -->
+  @if (fiscalAlert(); as alert) {
     <div
+      role="alert"
       class="bg-warning-light border border-warning/30 rounded-lg p-4 mb-6 flex items-start gap-3"
     >
-      <div class="text-warning shrink-0 mt-0.5">⚠️</div>
+      <div class="text-warning shrink-0 mt-0.5" aria-hidden="true">⚠️</div>
       <div class="flex-1">
         <p class="font-semibold text-text-primary text-sm">
-          Alerta fiscal: factura sin emitir ({{ order()?.fiscal_alert_code }})
+          {{ alert.title }}
         </p>
-        <p class="text-xs text-text-secondary mt-1">
-          El envío automático a la DIAN falló para esta orden. Revísala en el
-          módulo de facturación y emite el documento manualmente.
+        <p class="text-xs text-text-primary mt-0.5">
+          Código: {{ order()?.fiscal_alert_code }}
         </p>
+        <p class="text-xs text-text-primary mt-1">
+          {{ alert.body }}
+        </p>
+        <div class="flex gap-2 mt-3">
+          @if (alert.action.kind === 'emit-invoice') {
+            <button
+              type="button"
+              class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white"
+              (click)="createInvoiceFromOrder()"
+            >
+              {{ alert.action.label }}
+            </button>
+          } @else if (alert.action.kind === 'open-refund') {
+            <button
+              type="button"
+              class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white"
+              (click)="openRefundModal()"
+            >
+              {{ alert.action.label }}
+            </button>
+          } @else {
+            <button
+              type="button"
+              class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white"
+              (click)="goToSupport()"
+            >
+              {{ alert.action.label }}
+            </button>
+          }
+        </div>
       </div>
     </div>
   }
@@ -834,7 +867,15 @@
 	                    </div>
 
                     <!-- Price -->
+                    <!-- F-136 (C.9, major — revisión 2026-09-14): antes eran
+                         dos cifras sin una sola palabra que las distinguiera
+                         (sólo tamaño y color). Se agrega un rótulo visible
+                         para la cifra ambigua y uno para lector de pantalla
+                         en la segunda, sin tocar el layout existente. -->
                     <div class="text-right flex-shrink-0">
+                      <p class="text-[10px] font-medium uppercase tracking-wide text-gray-400 leading-none">
+                        Total línea
+                      </p>
                       <p class="font-bold text-gray-900 text-sm sm:text-lg">
                         {{
                           (item.final_total_price ?? item.total_price) || 0
@@ -842,7 +883,7 @@
                         }}
                       </p>
                       <p class="text-xs text-gray-500">
-                        {{ item.quantity }} x
+                        <span class="sr-only">Precio unitario: </span>{{ item.quantity }} x
                         {{
                           (item.final_unit_price ?? item.unit_price) || 0
                             | currency
@@ -2098,12 +2139,8 @@
             </h2>
 
             <div class="space-y-2.5">
-              <div class="flex justify-between items-center text-sm">
-                <span class="text-text-secondary">Subtotal</span>
-                <span class="font-semibold text-gray-900">{{
-                  orderData.subtotal_amount || 0 | currency
-                }}</span>
-              </div>
+              <!-- C.7 (§5.3, base gross): sin fila Subtotal — las líneas ya
+                   van en bruto y un Subtotal en base quedaría huérfano. -->
 
               <!-- Applied promotions (persisted snapshot) -->
               @if (appliedPromotions().length > 0) {
@@ -2183,12 +2220,16 @@
                   orderData.shipping_cost || 0 | currency
                 }}</span>
               </div>
-              <div class="flex justify-between items-center text-sm">
-                <span class="text-text-secondary">Impuestos</span>
-                <span class="font-semibold text-gray-900">{{
-                  orderData.tax_amount || 0 | currency
-                }}</span>
-              </div>
+              <!-- C.7 (§5.3, base gross): sin fila de impuesto que sume; con
+                   desglose respaldado, nota informativa fuera de la aritmética. -->
+              @if (showDetailVatNote()) {
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">IVA incluido</span>
+                  <span class="font-semibold text-gray-900">{{
+                    orderData.tax_amount || 0 | currency
+                  }}</span>
+                </div>
+              }
               <div
                 class="pt-3 mt-1 border-t border-border flex justify-between items-center"
               >
@@ -2883,6 +2924,142 @@
           </div>
         </div>
 
+        <!-- Estado KDS: con ≥1 plato avanzado (en preparación / listo /
+             entregado) la cancelación exige la decisión reuse/waste; con
+             solo pendientes se informa el auto-cancel, sin decisión. Sin
+             fired este bloque no se pinta y el modal queda intacto. -->
+        @if (cancelAdvancedKdsItems().length > 0) {
+          <div
+            class="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-3"
+          >
+            <div class="flex items-start gap-3">
+              <app-icon
+                name="flame"
+                size="18"
+                class="text-amber-600 mt-0.5"
+              ></app-icon>
+              <div>
+                <p class="text-sm font-bold text-amber-800">
+                  Hay platos ya avanzados en cocina
+                </p>
+                <p class="text-xs text-amber-700 mt-0.5">
+                  Elegí qué hacer con los insumos antes de confirmar. Sin
+                  esta decisión la cancelación se rechaza.
+                </p>
+              </div>
+            </div>
+
+            <ul class="space-y-1.5">
+              @for (entry of cancelAdvancedKdsItems(); track entry.id) {
+                @if (kitchenStateFor(entry); as ks) {
+                  <li
+                    class="flex items-center justify-between gap-2 text-xs bg-white/70 border border-amber-100 rounded-lg px-2.5 py-1.5"
+                  >
+                    <span class="font-semibold text-gray-800 truncate">
+                      {{ entry.product_name }} × {{ entry.quantity }}
+                    </span>
+                    <span class="shrink-0 font-medium text-amber-700">
+                      Cocina: {{ kitchenStateLabel(ks) }}
+                    </span>
+                  </li>
+                }
+              }
+            </ul>
+
+            <div
+              class="flex flex-col gap-2"
+              role="radiogroup"
+              aria-label="Decisión de insumos de cocina"
+            >
+              <button
+                type="button"
+                role="radio"
+                [attr.aria-checked]="cancelKitchenDisposition() === 'reuse'"
+                (click)="selectCancelDisposition('reuse')"
+                class="text-left rounded-lg border p-3 transition-colors"
+                [class.border-primary]="cancelKitchenDisposition() === 'reuse'"
+                [class.bg-primary]="cancelKitchenDisposition() === 'reuse'"
+                [class.bg-opacity-5]="cancelKitchenDisposition() === 'reuse'"
+                [class.border-border]="cancelKitchenDisposition() !== 'reuse'"
+                [class.hover:border-primary]="cancelKitchenDisposition() !== 'reuse'"
+                [disabled]="isProcessingAction()"
+              >
+                <div class="flex items-start gap-2">
+                  <span
+                    class="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2"
+                    [class.border-primary]="cancelKitchenDisposition() === 'reuse'"
+                    [class.border-border]="cancelKitchenDisposition() !== 'reuse'"
+                    aria-hidden="true"
+                  >
+                    @if (cancelKitchenDisposition() === 'reuse') {
+                      <span class="h-2 w-2 rounded-full bg-primary"></span>
+                    }
+                  </span>
+                  <div class="flex-1">
+                    <p class="text-sm font-semibold text-text-primary">
+                      Reutilizar insumos
+                    </p>
+                    <p class="text-xs text-text-secondary mt-1">
+                      revierte el insumo al stock con movimiento marcado
+                      REUSO-INSUMO; rehacer NO consume de nuevo
+                    </p>
+                  </div>
+                </div>
+              </button>
+              <button
+                type="button"
+                role="radio"
+                [attr.aria-checked]="cancelKitchenDisposition() === 'waste'"
+                (click)="selectCancelDisposition('waste')"
+                class="text-left rounded-lg border p-3 transition-colors"
+                [class.border-primary]="cancelKitchenDisposition() === 'waste'"
+                [class.bg-primary]="cancelKitchenDisposition() === 'waste'"
+                [class.bg-opacity-5]="cancelKitchenDisposition() === 'waste'"
+                [class.border-border]="cancelKitchenDisposition() !== 'waste'"
+                [class.hover:border-primary]="cancelKitchenDisposition() !== 'waste'"
+                [disabled]="isProcessingAction()"
+              >
+                <div class="flex items-start gap-2">
+                  <span
+                    class="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border-2"
+                    [class.border-primary]="cancelKitchenDisposition() === 'waste'"
+                    [class.border-border]="cancelKitchenDisposition() !== 'waste'"
+                    aria-hidden="true"
+                  >
+                    @if (cancelKitchenDisposition() === 'waste') {
+                      <span class="h-2 w-2 rounded-full bg-primary"></span>
+                    }
+                  </span>
+                  <div class="flex-1">
+                    <p class="text-sm font-semibold text-text-primary">
+                      Desechar como merma
+                    </p>
+                    <p class="text-xs text-text-secondary mt-1">
+                      el insumo queda consumido como merma y el ticket se
+                      cancela; rehacer SÍ consume insumos nuevos
+                    </p>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        } @else if (cancelPendingKdsItems().length > 0) {
+          <div
+            class="bg-sky-50 border border-sky-200 rounded-xl p-3 flex items-start gap-3"
+          >
+            <app-icon
+              name="info"
+              size="18"
+              class="text-sky-600 mt-0.5"
+            ></app-icon>
+            <p class="text-xs text-sky-800">
+              Al confirmar se auto-cancelarán
+              {{ cancelPendingKdsItems().length }} comandas pendientes en
+              cocina. No hace falta elegir ninguna decisión de insumos.
+            </p>
+          </div>
+        }
+
         <div>
           <label class="block text-sm font-bold text-gray-700 mb-1.5"
             >Razon de cancelacion *</label
@@ -2906,7 +3083,7 @@
         <app-button
           variant="danger"
           (clicked)="submitCancellation()"
-          [disabled]="cancelForm.invalid || isProcessingAction()"
+          [disabled]="cancelForm.invalid || cancelConfirmBlocked()"
         >
           {{ isProcessingAction() ? "Cancelando..." : "Cancelar Orden" }}
         </app-button>
@@ -3039,6 +3216,7 @@
     [isOpen]="showResendModal()"
     [orderId]="order()?.id ?? null"
     [orderItemIds]="resendItemId() != null ? [resendItemId()!] : []"
+    [cancellationType]="resendItemCancellationType()"
     (cancel)="closeResendModal()"
     (confirmed)="onResendConfirmed($event)"
   />

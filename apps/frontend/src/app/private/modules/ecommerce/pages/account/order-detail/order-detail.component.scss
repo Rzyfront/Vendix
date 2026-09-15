@@ -431,8 +431,13 @@
 }
 
 .item-meta {
+  // F-137 (C.9, major — revisión 2026-09-14): `--color-text-secondary`
+  // (#94a3b8) rinde 2,56:1 sobre blanco, bajo el mínimo AA (4,5:1) que el
+  // repo se exige (skills/vendix-ui-ux/SKILL.md:51) para el precio unitario
+  // del comprador. `#5C6672` es el mismo tono que theme.service.ts:437 ya
+  // valida en ~4,6:1; `--fs-xs` ya cumple los 12px mínimos.
   font-size: var(--fs-xs);
-  color: var(--color-text-secondary);
+  color: #5c6672;
 }
 
 .item-total {

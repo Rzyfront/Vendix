@@ -52,7 +52,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import { forkJoin } from 'rxjs';
+import { catchError, forkJoin, of } from 'rxjs';
 
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
@@ -628,12 +628,25 @@ export class OrdersBulkPageComponent {
           ];
           if (customerIds.length > 0) {
             forkJoin(
-              customerIds.map((id) => this.customersService.getCustomer(id)),
+              // F-210: un `customer_id` irresoluble — cliente borrado, fuera
+              // del alcance de la tienda, o usuario sin fila en `store_users`
+              // (404 `CUST_FIND_001`) — tumbaba el `forkJoin` COMPLETO y
+              // dejaba todas las filas en 'N/A', no sólo la suya. Aislado por
+              // id, un huérfano degrada únicamente su propia fila.
+              customerIds.map((id) =>
+                this.customersService
+                  .getCustomer(id)
+                  .pipe(catchError(() => of(null))),
+              ),
             )
               .pipe(takeUntilDestroyed(this.destroyRef))
               .subscribe({
                 next: (customers) => {
-                  const customerMap = new Map(customers.map((c) => [c.id, c]));
+                  const customerMap = new Map(
+                    customers
+                      .filter((c): c is NonNullable<typeof c> => !!c)
+                      .map((c) => [c.id, c]),
+                  );
                   this.orders.set(
                     normalizedOrders.map((order: any) => ({
                       ...order,

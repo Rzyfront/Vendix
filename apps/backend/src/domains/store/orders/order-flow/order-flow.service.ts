@@ -2006,24 +2006,57 @@ export class OrderFlowService {
       });
 
       // Recálculo excluyendo cancelados (`cancelled_at IS NULL`).
+      //
+      // F-082 (blocker, C.8): antes sumaba `tax_amount_item` SIN
+      // multiplicador — ese campo no tiene una sola unidad (F-003: unos
+      // escritores lo mandan por unidad, otros por línea), así que sumarlo
+      // crudo subestima el impuesto bajo una convención y lo deja correcto
+      // sólo por casualidad bajo la otra. `order_item_taxes.tax_amount` SÍ es
+      // fiable: cada fila ya es el total de impuesto de esa línea tal como
+      // se persistió al crear/cobrar la orden (`checkout.service.ts:1653`,
+      // el carril POS), así que sumarla no requiere adivinar unidad.
       const activeItems = await tx.order_items.findMany({
         where: { order_id: orderId, cancelled_at: null },
-        select: { total_price: true, tax_amount_item: true },
+        select: {
+          total_price: true,
+          order_item_taxes: { select: { tax_amount: true } },
+        },
       });
       const subtotal = activeItems.reduce(
         (acc, it) => acc + Number(it.total_price),
         0,
       );
       const tax = activeItems.reduce(
-        (acc, it) => acc + Number(it.tax_amount_item ?? 0),
+        (acc, it) =>
+          acc +
+          // ADR-06 — nunca asumir la relación poblada: una fila sin
+          // desglose fiscal persistido (`order_item_taxes` vacío) no debe
+          // tronar el recálculo, sólo aportar cero impuesto.
+          (it.order_item_taxes ?? []).reduce(
+            (s, t) => s + Number(t.tax_amount ?? 0),
+            0,
+          ),
         0,
+      );
+      // F-082 (blocker, C.8): el recálculo anterior descartaba envío,
+      // propina y descuento del `grand_total` — una orden con domicilio y
+      // propina quedaba SIN esos montos apenas se cancelaba un ítem, aunque
+      // la orden siguiera teniendo ambos cargos. Esta cancelación no los
+      // recalcula (no hay línea de envío/propina que tocar aquí), sólo deja
+      // de perderlos. Clamp a 0 por paridad con el resto de carriles.
+      const shippingCost = Number((order as any).shipping_cost ?? 0);
+      const tipAmount = Number((order as any).tip_amount ?? 0);
+      const discountAmount = Number((order as any).discount_amount ?? 0);
+      const grandTotal = Math.max(
+        0,
+        subtotal + tax + shippingCost + tipAmount - discountAmount,
       );
       await tx.orders.update({
         where: { id: orderId },
         data: {
           subtotal_amount: new Prisma.Decimal(subtotal),
           tax_amount: new Prisma.Decimal(tax),
-          grand_total: new Prisma.Decimal(subtotal + tax),
+          grand_total: new Prisma.Decimal(grandTotal),
           updated_at: new Date(),
         },
       });
@@ -2515,6 +2548,15 @@ export class OrderFlowService {
    * canónica, así que dos cancelaciones concurrentes siguen resolviéndose con
    * un único ganador y la cadena de efectos (cancelar pagos, liberar reservas,
    * emitir `order.status_changed`) sigue corriendo exactamente una vez.
+   *
+   * Ramificación KDS (platos preparados, espejo de {@link cancelOrderItem}):
+   * los ítems `prepared` + disparados se clasifican por el estado latest del
+   * ticket — `pending` se auto-cancela in-tx (con relectura TOCTOU) y
+   * `in_preparation`/`ready`/`delivered` (o fired sin ticket pendiente)
+   * exigen `dto.kitchenDisposition` (422 si falta): `reuse` revierte los
+   * insumos consumidos al fire y `waste` los deja como merma. La decisión se
+   * valida ANTES del claim para no dejar la orden en `cancelled` sin
+   * decisión registrada. `force` aplica la misma ramificación.
    */
   async cancelOrder(orderId: number, dto: CancelOrderDto, force = false) {
     const order = await this.getOrder(orderId);
@@ -2545,6 +2587,76 @@ export class OrderFlowService {
       this.validateTransition(previousState, 'cancelled');
     }
 
+    // KDS pre-clasificación (ANTES del claim): un 422 por decisión faltante
+    // no debe dejar la orden en 'cancelled' sin decisión registrada. Espejo
+    // de `cancelOrderItem` §§4-5, pero a nivel orden: solo los ítems
+    // `prepared` + disparados ramifican; los no disparados no se tocan y los
+    // ya cancelados conservan su primera cancelación (idempotencia).
+    const kitchenItems = await this.prisma.order_items.findMany({
+      where: { order_id: orderId },
+      select: {
+        id: true,
+        inventory_consumed_at_fire: true,
+        cancelled_at: true,
+        products: { select: { product_type: true } },
+        kitchen_ticket_items: {
+          orderBy: { id: 'desc' },
+          select: {
+            kitchen_ticket_id: true,
+            kitchen_ticket: { select: { id: true, status: true } },
+          },
+        },
+      },
+    });
+    const kitchenBranch = new Map<
+      number,
+      { branch: 'ignore' | 'pending' | 'advanced'; ticketId: number | null }
+    >();
+    let needsDisposition = false;
+    let needsKds = false;
+    for (const item of kitchenItems) {
+      const isPreparedFired =
+        item.cancelled_at == null &&
+        item.inventory_consumed_at_fire === true &&
+        item.products?.product_type === 'prepared';
+      if (!isPreparedFired) {
+        kitchenBranch.set(item.id, { branch: 'ignore', ticketId: null });
+        continue;
+      }
+      const latest = item.kitchen_ticket_items[0] ?? null;
+      const ticketStatus = latest?.kitchen_ticket?.status ?? null;
+      const ticketId =
+        latest?.kitchen_ticket?.id ?? latest?.kitchen_ticket_id ?? null;
+      if (ticketStatus === 'pending' && ticketId != null) {
+        kitchenBranch.set(item.id, { branch: 'pending', ticketId });
+        needsKds = true;
+      } else {
+        kitchenBranch.set(item.id, { branch: 'advanced', ticketId });
+        needsDisposition = true;
+      }
+    }
+
+    if (
+      needsDisposition &&
+      dto.kitchenDisposition !== 'reuse' &&
+      dto.kitchenDisposition !== 'waste'
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'La orden tiene platos ya avanzados en cocina: indica kitchenDisposition (reuse o waste) para cancelar',
+      );
+    }
+
+    // El KDS es obligatorio solo si hay tickets `pending` que auto-cancelar
+    // (un huérfano dejaría al cocinero cocinando un plato cancelado). Falla
+    // fuerte si el DI no lo cableó — nunca se salta en silencio.
+    const kds = this.kitchenFireService;
+    if (needsKds && !kds) {
+      throw new InternalServerErrorException(
+        'KitchenFireService no disponible en OrderFlowService (revisar imports de OrderFlowModule)',
+      );
+    }
+
     // Build cancel metadata exactly as updateOrderState would: `orders` has no
     // cancelled_at/cancellation_reason columns, so these + previous_state live
     // in internal_notes._flow_metadata (reactivateOrder reads previous_state
@@ -2571,8 +2683,9 @@ export class OrderFlowService {
       notes: existingMetadata.original_notes || '',
     });
 
-    // CLAIM + payment-cancel + metadata write share ONE transaction so they
-    // commit atomically (pattern of reactivateOrder).
+    // CLAIM + payment-cancel + KDS/item branch + metadata write share ONE
+    // transaction so they commit atomically (pattern of reactivateOrder).
+    const cancelledTicketIds: number[] = [];
     const updatedOrder = await this.prisma.$transaction(async (tx) => {
       // ATOMIC CLAIM — the conditional UPDATE is the source of truth that
       // serializes concurrent cancellations (double-click / retry). Only ONE
@@ -2599,6 +2712,109 @@ export class OrderFlowService {
         });
       }
 
+      // Ramificación KDS por ítem (espejo de `cancelOrderItem` in-tx):
+      // - `pending` → cancela el ticket con relectura TOCTOU dentro del tx
+      //   y marca el ítem como merma (el insumo ya se consumió al fire).
+      // - `advanced` → exige la decisión (422 aborta el tx y el claim hace
+      //   rollback); `reuse` revierte cada consumo del ítem, `waste` no.
+      for (const item of kitchenItems) {
+        const meta = kitchenBranch.get(item.id);
+        if (!meta || meta.branch === 'ignore') {
+          continue;
+        }
+
+        if (meta.branch === 'pending' && meta.ticketId != null) {
+          // TOCTOU guard: el cocinero pudo avanzar el ticket entre la
+          // pre-lectura y este tx. Releer y revalidar dentro del tx.
+          const freshTicket = await tx.kitchen_tickets.findFirst({
+            where: { id: meta.ticketId },
+            select: { status: true },
+          });
+          if (freshTicket && freshTicket.status === 'pending') {
+            if (!kds) {
+              throw new InternalServerErrorException(
+                'KitchenFireService no disponible en OrderFlowService (revisar imports de OrderFlowModule)',
+              );
+            }
+            await kds.cancelTicketInTx(tx, meta.ticketId);
+            cancelledTicketIds.push(meta.ticketId);
+            await tx.order_items.update({
+              where: { id: item.id },
+              data: {
+                cancelled_at: new Date(),
+                cancellation_reason: dto.reason.trim(),
+                cancellation_type: 'after_fire_waste',
+                updated_at: new Date(),
+              },
+            });
+            continue;
+          }
+          // El ticket ya no está pending: cae a la rama avanzada (la
+          // decisión ya se validó pre-claim; si falta, el 422 de abajo
+          // aborta el tx y el claim hace rollback).
+        }
+
+        const disposition = dto.kitchenDisposition;
+        if (disposition !== 'reuse' && disposition !== 'waste') {
+          throw new VendixHttpException(
+            ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+            'La orden tiene platos ya avanzados en cocina: indica kitchenDisposition (reuse o waste) para cancelar',
+          );
+        }
+        const cancellationType =
+          disposition === 'reuse' ? 'after_fire_reused' : 'after_fire_waste';
+
+        if (disposition === 'reuse') {
+          const consumptionTxns =
+            await tx.inventory_transactions.findMany({
+              where: {
+                order_item_id: item.id,
+                quantity_change: { lt: 0 },
+              },
+              select: {
+                product_id: true,
+                product_variant_id: true,
+                quantity_change: true,
+              },
+            });
+          for (const ct of consumptionTxns) {
+            const locationId =
+              await this.stockLevelManager.getDefaultLocationForProduct(
+                ct.product_id,
+                ct.product_variant_id ?? undefined,
+              );
+            await this.stockLevelManager.updateStock(
+              {
+                product_id: ct.product_id,
+                variant_id: ct.product_variant_id ?? undefined,
+                location_id: locationId,
+                quantity_change: Math.abs(ct.quantity_change),
+                movement_type: 'return',
+                reason:
+                  `REUSO-INSUMO: orden #${orderId} ítem #${item.id} ` +
+                  `ticket #${meta.ticketId ?? 's/t'} — revierte consumo fire`,
+                source_module: 'order_item_cancellation',
+                // SIN order_item_id: la reversa no debe crear un hijo que
+                // apunte al order_item cancelado (FK onDelete: Restrict).
+                create_movement: true,
+                validate_availability: false,
+              },
+              tx,
+            );
+          }
+        }
+
+        await tx.order_items.update({
+          where: { id: item.id },
+          data: {
+            cancelled_at: new Date(),
+            cancellation_reason: dto.reason.trim(),
+            cancellation_type: cancellationType,
+            updated_at: new Date(),
+          },
+        });
+      }
+
       // Persist cancel metadata (state/updated_at were already set by the
       // claim) and return the fully-included order (same shape updateOrderState
       // returned).
@@ -2612,6 +2828,23 @@ export class OrderFlowService {
         },
       });
     });
+
+    // Post-commit best-effort: `ticket.cancelled` por cada ticket KDS
+    // auto-cancelado in-tx (espejo de `cancelOrderItem`; el helper ya es
+    // best-effort interno, se envuelve igual por simetría).
+    if (kds) {
+      for (const ticketId of cancelledTicketIds) {
+        try {
+          await kds.emitTicketCancelledEvent(ticketId);
+        } catch (err) {
+          this.logger.warn(
+            `Failed to emit ticket.cancelled for ticket #${ticketId}: ${
+              (err as Error).message
+            }`,
+          );
+        }
+      }
+    }
 
     // Release reserved stock by reference — kept OUTSIDE the transaction and
     // best-effort (exactly as before): a release failure must never abort a
@@ -2640,7 +2873,10 @@ export class OrderFlowService {
       new_state: 'cancelled',
     });
 
-    this.logger.log(`Order #${orderId} cancelled: ${dto.reason}`);
+    this.logger.log(
+      `Order #${orderId} cancelled: ${dto.reason} ` +
+        `(kitchenDisposition=${dto.kitchenDisposition ?? 'n/a'} ticketsCancelled=${cancelledTicketIds.length})`,
+    );
     return updatedOrder;
   }
 

@@ -10,6 +10,8 @@ import {
   StoreOrdersService,
   CreateAddressPayload,
   UpdateAddressPayload,
+  FlowCancelOrderDto,
+  KitchenDisposition,
 } from '../../services/store-orders.service';
 // Plan refund-gateway-dispatch-fix (Step C.1): `resolveRefund` lives on
 // `OrdersService` (W1-C), not on `StoreOrdersService`. Aliased to
@@ -112,6 +114,10 @@ import {
   RepartosApiError,
 } from '../../../../store-delivery/services/repartos.service';
 import { STATUS_LABELS as DISPATCH_NOTE_STATUS_LABELS } from '../../../dispatch-notes/constants/dispatch-note.constants';
+import {
+  resolveFiscalAlert,
+  type FiscalAlertEntry,
+} from '../../utils/fiscal-alert-dictionary';
 
 export interface LifecycleStep {
   key: string;
@@ -180,6 +186,16 @@ export class OrderDetailsPageComponent {
   private destroyRef = inject(DestroyRef);
   orderId: string | null = null;
   order = signal<Order | null>(null);
+  /**
+   * C.9 CP-pos-exclusive-tax-double-charge — entrada del diccionario de alerta
+   * fiscal para el `fiscal_alert_code` de la orden; `null` = sin banner. El
+   * copy del banner se deriva de aquí, nunca de texto fijo en la plantilla.
+   */
+  readonly fiscalAlert = computed<FiscalAlertEntry | null>(() => {
+    const code = this.order()?.fiscal_alert_code;
+    if (!code) return null;
+    return resolveFiscalAlert(code);
+  });
   readonly appliedTierSummary = computed(() => {
     const order = this.order();
     const groups = new Map<string, { name: string; total: number; count: number }>();
@@ -325,6 +341,19 @@ export class OrderDetailsPageComponent {
   /** True if the active store is a restaurant (industries cascade). */
   readonly isRestaurant = computed<boolean>(() => this.authFacade.isRestaurant());
   /**
+   * C.7 (§5.3, base gross) — esta superficie pinta líneas en BRUTO
+   * (`final_total_price ?? total_price`): el pie no lleva Subtotal ni fila
+   * de impuesto que sume; sólo TOTAL y, con desglose respaldado, la nota
+   * informativa fuera de la aritmética.
+   */
+  readonly showDetailVatNote = computed(() => {
+    const order = this.order();
+    const tax = Number(
+      (order as unknown as { tax_amount?: unknown } | null)?.tax_amount ?? 0,
+    );
+    return this.authFacade.printsVatBreakdown() && tax > 0;
+  });
+  /**
    * Plan KDS fire-flows (F3): show the per-plate kitchen dispatch UI only
    * for restaurant stores, when there is at least one pending prepared
    * item, and the order is not in a terminal state (cancelled/refunded).
@@ -357,6 +386,24 @@ export class OrderDetailsPageComponent {
    */
   resendItemId = signal<number | null>(null);
   readonly showResendModal = computed<boolean>(() => this.resendItemId() !== null);
+  /**
+   * Ítem actualmente elegido para reenvío (`null` = modal cerrado).
+   * Alimenta `[cancellationType]` del modal para el texto de remake
+   * post-cancelación ("con/sin nuevos insumos" según la decisión).
+   */
+  readonly resendItem = computed<OrderItem | null>(() => {
+    const id = this.resendItemId();
+    if (id == null) return null;
+    return this.order()?.order_items?.find((it) => it.id === id) ?? null;
+  });
+  /**
+   * Decisión de cocina persistida del ítem en reenvío
+   * (`after_fire_reused` | `after_fire_waste` | null). `null` = flujo
+   * clásico sin decisión (textos por defecto del modal).
+   */
+  readonly resendItemCancellationType = computed<string | null>(
+    () => this.resendItem()?.cancellation_type ?? null,
+  );
 
   // Payment methods for pay modal
   paymentMethods = signal<StorePaymentMethod[]>([]);
@@ -2460,28 +2507,130 @@ export class OrderDetailsPageComponent {
       });
   }
 
+  // ── Cancelación de orden con estado KDS (decisión reuse/waste) ──
+  //
+  // Contrato backend (`POST /store/orders/:id/flow/cancel`): acepta
+  // `{ reason, kitchenDisposition?: 'reuse' | 'waste' }`, requerido solo
+  // con ítems avanzados. Por ítem persiste `cancellation_type`
+  // (`after_fire_reused` | `after_fire_waste`) y el resend acepta el
+  // remake post-cancelación con esa decisión (ver `can-resend.ts`).
+  // Si el backend aún no está, la UI es tolerante: 422/403 → toast,
+  // sin romper la vista (el modal queda abierto).
+
+  /**
+   * Ítems disparados a cocina con presencia en KDS. Sin fired, el modal
+   * de cancelación queda intacto (solo motivo).
+   */
+  readonly cancelKdsItems = computed<OrderItem[]>(() =>
+    (this.order()?.order_items ?? []).filter(
+      (it) =>
+        it.inventory_consumed_at_fire === true &&
+        it.cancelled_at == null &&
+        this.kitchenStateFor(it) != null,
+    ),
+  );
+
+  /** Disparados aún en `pending`: se auto-cancelan, sin decisión. */
+  readonly cancelPendingKdsItems = computed<OrderItem[]>(() =>
+    this.cancelKdsItems().filter(
+      (it) => this.kitchenStateFor(it)?.status === 'pending',
+    ),
+  );
+
+  /** Disparados ya avanzados: exigen decisión reuse/waste obligatoria. */
+  readonly cancelAdvancedKdsItems = computed<OrderItem[]>(() => {
+    const advanced = new Set(['in_preparation', 'ready', 'delivered']);
+    return this.cancelKdsItems().filter((it) =>
+      advanced.has(this.kitchenStateFor(it)?.status ?? ''),
+    );
+  });
+
+  /** True con ≥1 avanzado: la decisión reuse/waste es obligatoria. */
+  readonly cancelRequiresDisposition = computed<boolean>(
+    () => this.cancelAdvancedKdsItems().length > 0,
+  );
+
+  /**
+   * Decisión de cocina elegida en el modal. Vive en un signal —no en el
+   * `cancelForm`— para que el gate del botón sea reactivo en zoneless
+   * (leer `form.value` dentro de un `computed` no se recomputa: no es
+   * un signal). `null` hasta que el operador elige.
+   */
+  readonly cancelKitchenDisposition = signal<KitchenDisposition | null>(null);
+
+  /**
+   * Gate del botón confirmar (además de `cancelForm.invalid`, que el
+   * template sigue leyendo directo como hoy): procesamiento en vuelo
+   * o decisión obligatoria sin elegir.
+   */
+  readonly cancelConfirmBlocked = computed<boolean>(
+    () =>
+      this.isProcessingAction() ||
+      (this.cancelRequiresDisposition() &&
+        this.cancelKitchenDisposition() === null),
+  );
+
+  /** Elige la decisión de cocina (radio reuse/waste del modal). */
+  selectCancelDisposition(value: KitchenDisposition): void {
+    if (this.isProcessingAction()) return;
+    this.cancelKitchenDisposition.set(value);
+  }
+
   openCancelModal(): void {
     this.cancelForm.reset();
+    this.cancelKitchenDisposition.set(null);
     this.showCancelModal.set(true);
   }
 
   submitCancellation(): void {
     if (this.cancelForm.invalid || !this.orderId) return;
+    if (
+      this.cancelRequiresDisposition() &&
+      this.cancelKitchenDisposition() == null
+    )
+      return;
+
+    // La decisión solo viaja cuando el operador la eligió (única forma
+    // de elegirla es con ≥1 avanzado): sin fired o solo pendientes el
+    // body queda `{ reason }`, idéntico al contrato anterior.
+    const disposition = this.cancelKitchenDisposition();
+    const payload: FlowCancelOrderDto = {
+      ...this.cancelForm.value,
+      ...(disposition != null ? { kitchenDisposition: disposition } : {}),
+    };
 
     this.isProcessingAction.set(true);
     this.ordersService
-      .flowCancelOrder(this.orderId, this.cancelForm.value)
+      .flowCancelOrder(this.orderId, payload)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.showCancelModal.set(false);
           this.isProcessingAction.set(false);
+          this.cancelKitchenDisposition.set(null);
           this.toastService.success('Orden cancelada');
           this.loadData();
         },
-        error: (err) => {
+        error: (err: unknown) => {
           this.isProcessingAction.set(false);
-          this.toastService.error(err.message || 'Error al cancelar la orden');
+          // 403 (permiso de cancelar comandas) → copy fijo, sin romper
+          // la vista: el modal queda abierto para reintentar o salir.
+          // 422 (p. ej. decisión requerida) u otro → mensaje del backend
+          // tal cual llega vía `parseApiError`.
+          const wrapped = err as {
+            errorCode?: string | null;
+            cause?: { status?: number } | null;
+          };
+          const parsed = parseApiError(err);
+          const code = wrapped?.errorCode ?? parsed.errorCode ?? '';
+          const forbidden =
+            wrapped?.cause?.status === 403 ||
+            /forbid|permission|denied/i.test(code);
+          this.toastService.error(
+            forbidden
+              ? 'Requiere permiso de cancelar comandas (owner/admin)'
+              : parsed.userMessage || 'Error al cancelar la orden',
+          );
         },
       });
   }
@@ -2716,6 +2865,15 @@ export class OrderDetailsPageComponent {
 
   openRefundModal(): void {
     this.showRefundModal.set(true);
+  }
+
+  /**
+   * C.9 — CTA de soporte de la fila *default* del diccionario de alerta
+   * fiscal: un código que este panel no reconoce nunca ofrece emitir; lleva
+   * al centro de ayuda y soporte de la tienda (`/admin/help/support`).
+   */
+  goToSupport(): void {
+    void this.router.navigate(['/admin/help/support']);
   }
 
   onRefundSubmitted(): void {
@@ -3541,8 +3699,8 @@ export class OrderDetailsPageComponent {
    * no ofrezco acciones que el backend rechazaría con 422.
    */
   canResend(item: OrderItem): boolean {
-    // Fila cancelada: excluida de acciones posteriores (badge + motivo).
-    if (item.cancelled_at) return false;
+    // La regla de fila cancelada vive en `canResendOrderItem` (testeable):
+    // veta SALVO decisión reuse/waste, que es el remake post-cancelación.
     return canResendOrderItem(item, this.order()?.state);
   }
 
@@ -3952,13 +4110,18 @@ export class OrderDetailsPageComponent {
 
   /**
    * Visibilidad del botón «Emitir factura electrónica»: la orden admite
-   * factura Y la tienda está emitiendo en producción. Las dos condiciones,
-   * porque ofrecer el botón a una tienda que el backend va a rechazar
-   * (`INVOICING_ENABLEMENT_001`) es prometer lo que no se puede cumplir.
+   * factura Y la tienda está emitiendo en producción Y el diccionario de
+   * alerta fiscal lo permite. Las tres condiciones, porque ofrecer el botón
+   * a una tienda que el backend va a rechazar (`INVOICING_ENABLEMENT_001`)
+   * es prometer lo que no se puede cumplir — y ofrecerlo bajo
+   * `POS_EXCLUSIVE_TAX_DOUBLE` o un código desconocido quema un consecutivo
+   * con base inflada (C.9 CP-pos-exclusive-tax-double-charge).
    */
-  readonly canEmitInvoice = computed(
-    () => this.reinvoiceable() && this.electronicEmissionLive(),
-  );
+  readonly canEmitInvoice = computed(() => {
+    const code = this.order()?.fiscal_alert_code;
+    const emitAllowed = !code || resolveFiscalAlert(code).allowEmitInvoiceCta;
+    return this.reinvoiceable() && this.electronicEmissionLive() && emitAllowed;
+  });
 
   /**
    * ¿Esta tienda está habilitada para emitir facturación electrónica EN

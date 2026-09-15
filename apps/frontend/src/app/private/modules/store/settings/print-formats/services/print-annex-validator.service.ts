@@ -161,10 +161,11 @@ export class PrintAnnexValidatorService {
       id: 'line_description',
       category: 'lineas',
       name: 'Descripción de Artículos o Servicios',
-      description: 'Descripción específica de los bienes vendidos o servicios prestados.',
+      description:
+        'Falta la columna de descripción en la tabla de líneas (se esperaba product_name, description o col_desc). Sin ella el anexo no identifica los bienes vendidos o servicios prestados.',
       reference: 'Art. 617 lit. f) E.T. / Anexo 1.9 §8.1.5',
       severity: 'error',
-      passed: isColumnEnabled('product_name') || isColumnEnabled('description') || isColumnEnabled('col_desc') || columns.length > 0,
+      passed: isColumnEnabled('product_name') || isColumnEnabled('description') || isColumnEnabled('col_desc'),
       fixAction: { label: 'Activar columna descripción', columnKey: 'col_desc' },
     });
 
@@ -172,32 +173,54 @@ export class PrintAnnexValidatorService {
       id: 'line_quantity',
       category: 'lineas',
       name: 'Cantidad de Bienes / Servicios',
-      description: 'Cantidad de unidades despachadas de cada artículo o servicio.',
+      description:
+        'Falta la columna de cantidad en la tabla de líneas (se esperaba quantity o col_qty). Sin ella el anexo no indica las unidades despachadas de cada artículo o servicio.',
       reference: 'Art. 617 lit. f) E.T. / Anexo 1.9 §8.1.5',
       severity: 'error',
-      passed: isColumnEnabled('quantity') || isColumnEnabled('col_qty') || columns.length > 0,
+      passed: isColumnEnabled('quantity') || isColumnEnabled('col_qty'),
       fixAction: { label: 'Activar columna cantidad', columnKey: 'col_qty' },
     });
 
-    rules.push({
-      id: 'line_unit_price',
-      category: 'lineas',
-      name: 'Precio Unitario',
-      description: 'Valor comercial unitario antes de tributos de cada ítem.',
-      reference: 'Art. 617 lit. g) E.T. / Anexo 1.9 §8.1.5',
-      severity: 'warning',
-      passed: isColumnEnabled('unit_price') || isColumnEnabled('col_price') || columns.length > 0,
-      fixAction: { label: 'Activar columna precio unitario', columnKey: 'col_price' },
-    });
+    // F-149: la columna de precio unitario no significa lo mismo en un anexo
+    // DIAN (fiscal) que en un documento comercial. En el primero es siempre
+    // la base gravable (Art. 617 lit. g); en el segundo puede llevar el
+    // bruto tal como se cobra o cotiza. Una sola regla no puede afirmar las
+    // dos cosas a la vez sin contradecir ADR-07.
+    if (isFiscal) {
+      rules.push({
+        id: 'line_unit_price',
+        category: 'lineas',
+        name: 'Precio Unitario (Base Gravable)',
+        description:
+          'Falta la columna de precio unitario en la tabla de líneas (se esperaba unit_price o col_price). En un anexo fiscal esta columna es la base gravable unitaria antes de tributos, según Art. 617 lit. g) E.T. Sin ella el anexo no discrimina la base gravable por ítem.',
+        reference: 'Art. 617 lit. g) E.T. / Anexo 1.9 §8.1.5',
+        severity: 'warning',
+        passed: isColumnEnabled('unit_price') || isColumnEnabled('col_price'),
+        fixAction: { label: 'Activar columna precio unitario', columnKey: 'col_price' },
+      });
+    } else {
+      rules.push({
+        id: 'line_unit_price_comercial',
+        category: 'lineas',
+        name: 'Precio Unitario',
+        description:
+          'Falta la columna de precio unitario en la tabla de líneas (se esperaba unit_price o col_price). En un documento comercial esta columna lleva el valor unitario tal como se cobra o cotiza, que puede incluir tributos — no es la base gravable del Art. 617 lit. g) E.T., que sólo aplica a anexos fiscales. Sin ella el documento no muestra el precio por ítem.',
+        reference: 'Anexo Técnico 1.9 DIAN §8.1.5',
+        severity: 'warning',
+        passed: isColumnEnabled('unit_price') || isColumnEnabled('col_price'),
+        fixAction: { label: 'Activar columna precio unitario', columnKey: 'col_price' },
+      });
+    }
 
     rules.push({
       id: 'line_total',
       category: 'lineas',
       name: 'Valor Total por Línea',
-      description: 'Importe total liquidado para cada artículo de la tabla.',
+      description:
+        'Falta la columna de total por línea en la tabla de líneas (se esperaba total_price o col_total). Sin ella el anexo no muestra el importe total liquidado de cada artículo.',
       reference: 'Anexo Técnico 1.9 DIAN §8.1.5',
       severity: 'error',
-      passed: isColumnEnabled('total_price') || isColumnEnabled('col_total') || columns.length > 0,
+      passed: isColumnEnabled('total_price') || isColumnEnabled('col_total'),
       fixAction: { label: 'Activar columna total línea', columnKey: 'col_total' },
     });
 
@@ -208,10 +231,11 @@ export class PrintAnnexValidatorService {
       id: 'totals_taxes_breakdown',
       category: 'impuestos',
       name: 'Discriminación del IVA e Impuestos',
-      description: 'Desglose de bases gravables y valor liquidado de impuestos (IVA, INC, etc.).',
+      description:
+        'Falta la sección de desglose de impuestos en el pie del documento (se esperaba taxes_breakdown o fiscal_tax_breakdown, sección sec_taxes). Tener activa sólo la sección de totales no discrimina bases gravables ni el valor liquidado de IVA/INC.',
       reference: 'Art. 617 lit. e) E.T. / Anexo 1.9 §8.1.5 (FAU04, FAU06)',
       severity: isFiscal ? 'error' : 'warning',
-      passed: isSectionTypeEnabled('taxes_breakdown') || isSectionTypeEnabled('fiscal_tax_breakdown') || isSectionTypeEnabled('totals'),
+      passed: isSectionTypeEnabled('taxes_breakdown') || isSectionTypeEnabled('fiscal_tax_breakdown'),
       fixAction: { label: 'Activar desglose de impuestos', sectionId: 'sec_taxes' },
     });
 

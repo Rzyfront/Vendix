@@ -115,8 +115,13 @@ export class PosPaymentService {
     return this.cashRegisterService.getRegisterId();
   }
 
-  private mapCartItemsForPos(cartState: CartState): any[] {
-    return cartState.items.map((item) => this.mapCartItemForPos(item));
+  private mapCartItemsForPos(
+    cartState: CartState,
+    forceTakeaway = false,
+  ): any[] {
+    return cartState.items.map((item) =>
+      this.mapCartItemForPos(item, forceTakeaway),
+    );
   }
 
   private getAppliedPromotionIds(cartState: CartState): number[] {
@@ -126,7 +131,7 @@ export class PosPaymentService {
       .filter((promotionId) => Number.isFinite(promotionId));
   }
 
-  private mapCartItemForPos(item: CartItem): any {
+  private mapCartItemForPos(item: CartItem, forceTakeaway = false): any {
     // CP-POS-SVC-PERF-001 / Bugfix — `item.product.id` can be a number
     // (DB ids) or a string (synthetic ids for custom lines like
     // `custom-<uuid>`). Calling `.startsWith` on a number throws
@@ -174,7 +179,14 @@ export class PosPaymentService {
       product_sku: isCustomItem ? undefined : item.product.sku,
       quantity: item.quantity,
       unit_price: Number(item.unitPrice.toFixed(2)),
-      final_unit_price: Number(item.finalPrice.toFixed(2)),
+      // F-218 — `final_unit_price` es el único portador del bruto declarado y
+      // declararlo arma el guard `store:pos:price_override` en el backend. Viaja
+      // SOLO con edición real del cajero (`isPriceOverridden`) o ítem custom
+      // (precio digitado, sin catálogo contra el cual caer). En la línea normal
+      // se omite (no `null`): el backend cae a `catalogFinalPrice`.
+      ...((item.isPriceOverridden === true || isCustomItem) && {
+        final_unit_price: Number(item.finalPrice.toFixed(2)),
+      }),
       total_price: Number((item.finalPrice * lineUnits).toFixed(2)),
       tax_rate: taxRate,
       tax_amount_item:
@@ -210,6 +222,13 @@ export class PosPaymentService {
       // instead of the kitchen fire. Only meaningful for `prepared`
       // products; ignored for everything else.
       skip_kds: item.skipKds === true,
+      // QUI-653 — "Para llevar" a nivel de orden (paso Consumo en 'entrega',
+      // ver `isTakeawayOrder` del checkout-shell, que llega como
+      // `forceTakeaway`) o marca per-línea del carrito. Solo se envía cuando
+      // aplica: el backend ya tiene default false.
+      ...((item.isTakeaway === true || forceTakeaway === true) && {
+        is_takeaway: true,
+      }),
     };
   }
 
@@ -358,6 +377,9 @@ export class PosPaymentService {
     createdBy: string,
     tableSessionId?: number | null,
     tableId?: number | null,
+    // QUI-653 — decisión "Para llevar" de la orden (el shell la computa como
+    // `isTakeawayOrder`). Se estampa en las líneas sin mutar el carrito.
+    takeawayOrder?: boolean | null,
   ): Observable<any> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
@@ -407,7 +429,8 @@ export class PosPaymentService {
     //   calculation.
     const sale_data: any = {
       store_id: this.getStoreId(),
-      items: this.mapCartItemsForPos(cartState),
+      // QUI-653 — 'Para llevar' de la orden estampado por línea.
+      items: this.mapCartItemsForPos(cartState, takeawayOrder === true),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
       ),
@@ -555,7 +578,10 @@ export class PosPaymentService {
       customer_email: cartState.customer.email,
       customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
-      items: this.mapCartItemsForPos(cartState),
+      // QUI-653 — el envío (recoger en tienda o domicilio) siempre se empaca
+      // para llevar: estampa `is_takeaway` en todas las líneas para que el
+      // ticket KDS lo muestre. Esta función solo sirve al flujo de envío.
+      items: this.mapCartItemsForPos(cartState, true),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
       ),

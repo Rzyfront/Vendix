@@ -267,23 +267,43 @@ export function isVatResponsible(fiscal: Record<string, any>): boolean {
 }
 
 /**
+ * Whether this store's papers may carry a VAT breakdown line — mirror of the
+ * desktop's `printsVatBreakdown` selector (`auth.selectors.ts:
+ * selectPrintsVatBreakdown`). It requires the merchant to have ACTIVATED the
+ * `invoicing` fiscal area AND to be VAT-responsible; a merchant that never
+ * started the fiscal wizard prints no breakdown, because a printed breakdown
+ * it cannot back leaves with the customer and cannot be retracted.
+ */
+function computePrintsVatBreakdown(session: SessionSnapshot): boolean {
+  const invoicingState = session.fiscalStatus?.['invoicing']?.state;
+  const invoicingActive =
+    invoicingState === 'ACTIVE' || invoicingState === 'LOCKED';
+  return invoicingActive && isVatResponsible(session.fiscal);
+}
+
+/**
  * Whether the tax breakdown belongs on this ticket — mirror of the desktop's
  * `shouldShowTaxes` + `printsVatBreakdown`.
- *
- * It requires the merchant to have ACTIVATED the `invoicing` fiscal area and to
- * be VAT-responsible. A merchant that never started the fiscal wizard prints no
- * breakdown, because a printed breakdown it cannot back leaves with the
- * customer and cannot be retracted.
  */
 function shouldShowTaxes(
   ticket: PosTicketData,
   session: SessionSnapshot,
 ): boolean {
   if (ticket.electronicInvoice) return false;
-  const invoicingState = session.fiscalStatus?.['invoicing']?.state;
-  const invoicingActive =
-    invoicingState === 'ACTIVE' || invoicingState === 'LOCKED';
-  return invoicingActive && isVatResponsible(session.fiscal);
+  return computePrintsVatBreakdown(session);
+}
+
+/**
+ * F-204 — el equivalente móvil de `authFacade.printsVatBreakdown()` (web) para
+ * pantallas que NO son un ticket: `GET /store/orders/:id` no trae
+ * `money_basis`/`prints_vat_breakdown` en el payload (esos campos sólo existen
+ * en `StandardPrintDataModel`, ADR-12), pero la misma sesión que ya resuelve
+ * el ticket POS trae `fiscal_data`/`fiscal_status`, así que el dato real
+ * existe y no hace falta inventar un default. Lee la sesión en el momento de
+ * la llamada (no memoiza) para reflejar el estado fiscal vigente.
+ */
+export function resolvePrintsVatBreakdown(): boolean {
+  return computePrintsVatBreakdown(readSession());
 }
 
 /**
@@ -470,9 +490,11 @@ export function renderPosTicketBody(
 
     taxedItems.forEach((item, index) => {
       const taxAmount = item.tax ?? 0;
-      const taxPercent = item.totalPrice
-        ? ((taxAmount / item.totalPrice) * 100).toFixed(2)
-        : '0.00';
+      // C.11/F-203 — la tasa se rotula sobre la BASE, no sobre el total:
+      // `19 / 1,19 = 15,97 %` era una tasa exclusiva presentada como
+      // participación inclusiva (familia QUI-832 en impresión).
+      const base = item.totalPrice - taxAmount;
+      const taxPercent = base > 0 ? ((taxAmount / base) * 100).toFixed(2) : '0.00';
       html += `<p style="margin: 2px 0; font-size: 11px;">A${index + 1}. ${esc(item.name)} - Imp: ${taxPercent}% - ${money(taxAmount)}</p>`;
     });
 

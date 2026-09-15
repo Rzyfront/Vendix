@@ -7,7 +7,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 /**
  * DTOs de estaciones de preparación (KDS) — QUI-651.
@@ -101,4 +101,17 @@ export class CloseKdsSessionDto {
   @IsString()
   @MaxLength(1000)
   closing_notes?: string;
+}
+
+/**
+ * Query de `DELETE /store/kds/:id`. Sin `hard` (o `hard=false`) es baja
+ * lógica; con `hard=true` es borrado físico con guardas de historial.
+ * El `@Transform` es obligatorio: los query params llegan como string y la
+ * conversión implícita de `ValidationPipe` haría `Boolean('false') === true`.
+ */
+export class DeleteKdsQueryDto {
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  hard?: boolean;
 }

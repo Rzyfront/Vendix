@@ -42,6 +42,11 @@ import { PosCustomer } from '../../models/customer.model';
 import { PosShippingSaleData } from '../../models/shipping.model';
 import { FulfillmentType } from '../pos-fulfillment-selector.component';
 import { PosOrderCreateResult } from '../../models/order.model';
+// F-003 (C.8) — `it.taxAmount` es el total DE LÍNEA; el editor
+// (`orders.service.ts` `updateOrderFromEditor`) trata `tax_amount_item` como
+// POR-UNIDAD para líneas sin `product_id`. Mismo `resolveLineUnits` +
+// división que `pos-payment.service.ts`/`pos-order.service.ts` ya usan.
+import { resolveLineUnits } from '../../utils/line-units.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
@@ -327,6 +332,19 @@ export class PosCheckoutShellComponent {
     if (!session || session.table_id !== tableId) return null;
     return session.id ?? null;
   });
+
+  /**
+   * POS 'Para llevar' a nivel de orden. El paso Consumo posee el fulfillment;
+   * en 'entrega' TODA la orden se empaca aunque ninguna línea del carrito
+   * traiga la marca per-línea (el carrito POS no tiene toggle por línea: la
+   * elección es del pedido). Los caminos que empujan ítems a una mesa leen
+   * esto para estampar `is_takeaway` sin mutar el carrito.
+   */
+  readonly isTakeawayOrder = computed<boolean>(
+    () =>
+      this.showConsumoStep() &&
+      this.consumoStep()?.fulfillment() === 'entrega',
+  );
 
   /**
    * Orden dinámico de pasos. `delivery` es fijo — [Cliente, Envío, Cobro], Cobro
@@ -1265,7 +1283,17 @@ export class PosCheckoutShellComponent {
           (it.finalPrice ?? it.unitPrice ?? 0).toFixed(2),
         ),
         total_price: Number((it.totalPrice ?? 0).toFixed(2)),
-        tax_amount_item: Number((it.taxAmount ?? 0).toFixed(2)),
+        // F-003 (C.8, blocker) — dividir por el multiplicador de línea antes
+        // de mandarlo: sin esto el editor lo vuelve a multiplicar por
+        // `priceUnitsQty` en las líneas sin `product_id` (custom/servicio) y
+        // dobla el IVA (mismo defecto que atacaba F-003 en `pos.component.ts`).
+        tax_amount_item: (() => {
+          const lineUnits = resolveLineUnits(it);
+          const taxAmount = Number(it.taxAmount ?? 0);
+          return taxAmount > 0 && lineUnits > 0
+            ? Number((taxAmount / lineUnits).toFixed(2))
+            : 0;
+        })(),
         tax_rate: typeof it.taxRate === 'number' ? it.taxRate : undefined,
         tax_category_id: it.taxCategoryId ?? undefined,
         applied_price_tier_id: it.appliedPriceTierId ?? undefined,
@@ -1900,7 +1928,11 @@ export class PosCheckoutShellComponent {
         // `pos.component.ts`: son los DOS caminos por los que el POS empuja
         // items a una mesa, y si solo uno lo llevara la marca dependería de qué
         // botón usó el cajero.
-        ...(it.isTakeaway && { is_takeaway: true }),
+        // Orden 'Para llevar' (paso Consumo en 'entrega'): estampa TODAS las
+        // líneas aunque el carrito no traiga la marca per-línea.
+        ...((it.isTakeaway || this.isTakeawayOrder()) && {
+          is_takeaway: true,
+        }),
       }));
     if (items.length === 0) {
       this.submittingDraft.set(false);
@@ -2086,6 +2118,10 @@ export class PosCheckoutShellComponent {
     total_price: number;
     tax_rate?: number;
   }> {
+    // NOTA takeaway: NO se envía `is_takeaway` aunque la orden sea 'Para
+    // llevar' — POST /store/orders (`CreateOrderItemDto`) no declara el campo
+    // y el ValidationPipe global (`forbidNonWhitelisted`) lo rechazaría con
+    // 400. El cobro por /store/payments/pos es el carril que persiste la marca.
     return items
       .filter((it) => it.itemType !== 'custom')
       .map((it) => ({

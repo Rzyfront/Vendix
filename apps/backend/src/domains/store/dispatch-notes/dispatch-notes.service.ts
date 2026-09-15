@@ -2895,6 +2895,36 @@ export class DispatchNotesService {
     return dispatch_note;
   }
 
+  /**
+   * ADR-15 §4 — la tienda DUEÑA de la remisión, para que el gateway de
+   * impresión resuelva el formato correcto.
+   *
+   * No sale del `RequestContext`: ahí el `store_id` puede venir vacío (un
+   * usuario de alcance ORGANIZACIÓN corre con `store_id: null`, ver
+   * `tenant-context-runner.service.ts`) y, peor, puede apuntar a OTRA tienda
+   * que la que emitió la remisión — el papel saldría con el formato de la
+   * tienda del contexto en vez del de la tienda del documento. El riel viejo
+   * (`DispatchNotePdfService.generatePdf`) nunca miró el contexto para esto,
+   * así que tomarlo de ahí habría sido una regresión doble: un 403 nuevo y un
+   * formato ajeno.
+   *
+   * El `findFirst` va por el cliente con alcance, igual que `findOne`: quien
+   * no pueda ver la remisión sigue sin poder imprimirla. `select` mínimo
+   * porque el renderizador vuelve a cargar el documento completo.
+   */
+  async resolveStoreIdForPrint(id: number): Promise<number> {
+    const dispatch_note = await this.prisma.dispatch_notes.findFirst({
+      where: { id },
+      select: { store_id: true },
+    });
+
+    if (!dispatch_note?.store_id) {
+      throw new NotFoundException('Remisión no encontrada');
+    }
+
+    return dispatch_note.store_id;
+  }
+
   async update(id: number, dto: UpdateDispatchNoteDto) {
     const dispatch_note = await this.findOne(id);
 

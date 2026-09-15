@@ -37,6 +37,11 @@ describe('OrdersService', () => {
       deleteMany: jest.fn(),
       findMany: jest.fn(),
     },
+    // C.8 — F-035/F-047: `assertNoPersistedTaxBreakdown` consulta esto ANTES
+    // del `deleteMany` de `order_items` en `updateOrderItems` /
+    // `updateOrderFromEditor`. Default `null` en el beforeEach (ninguna
+    // orden de prueba tiene desglose fiscal salvo que un spec lo sobrescriba).
+    order_item_taxes: { findFirst: jest.fn() },
     order_promotions: {
       createMany: jest.fn(),
       deleteMany: jest.fn(),
@@ -60,6 +65,11 @@ describe('OrdersService', () => {
       findUnique: jest.fn(),
     },
     product_variants: { findMany: jest.fn() },
+    // C.8 — el editor ahora resuelve la tarifa de catálogo server-side
+    // (ADR-05) en vez de confiar en `tax_amount_item` del DTO. Mock
+    // explícito con default `[]` en el beforeEach para que las specs de
+    // gates que no ejercitan impuestos no truenen por relación no mockeada.
+    product_tax_assignments: { findMany: jest.fn() },
     store_users: { findFirst: jest.fn() },
     shipping_methods: { findFirst: jest.fn() },
     shipping_rates: { findFirst: jest.fn() },
@@ -215,6 +225,15 @@ describe('OrdersService', () => {
     // no el mismo mock. Ver comentario en la declaración de
     // `mockUnscopedPrismaService` más arriba.
     mockPrismaService.withoutScope.mockReturnValue(mockUnscopedPrismaService);
+    // Default: sin tarifas de catálogo mockeadas explícitamente, el editor
+    // resuelve la línea con cero tasas (impuesto 0), no truena. Las specs
+    // que sí necesitan una tasa concreta sobrescriben esto en su propio
+    // cuerpo con `.mockResolvedValue([...])`.
+    mockPrismaService.product_tax_assignments.findMany.mockResolvedValue([]);
+    // C.8 — F-035/F-047: default sin desglose fiscal persistido, así que el
+    // guard nuevo no bloquea ninguna spec existente. El spec dedicado abajo
+    // sobrescribe esto con una fila para probar el 409.
+    mockPrismaService.order_item_taxes.findFirst.mockResolvedValue(null);
     mockRequestContextService.getContext.mockReturnValue({
       store_id: 1,
       organization_id: 1,
@@ -488,6 +507,85 @@ describe('OrdersService', () => {
         VendixHttpException,
       );
     });
+
+    // ----------------------------------------------------------------
+    // C.8 — R-1: el payload de FB-04 (`GET /store/orders/:id`) gana
+    // `unit_price_gross`/`line_total_gross` como campos ADITIVOS; la
+    // sombra `final_*` (:1086-1092) sigue viva y `unit_price`/
+    // `total_price` NUNCA cambian de magnitud para un lector que no pidió
+    // el campo nuevo. Prueba de regresión permanente.
+    // ----------------------------------------------------------------
+    it('F-004/F-049 — unit_price_gross y line_total_gross son aditivos: unit_price/total_price conservan la base', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 7,
+        order_number: 'ORD007',
+        order_items: [
+          {
+            id: 70,
+            product_id: 3,
+            unit_price: 100,
+            quantity: 2,
+            total_price: 200,
+            products: {},
+          },
+        ],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+      mockPrismaService.product_tax_assignments.findMany.mockResolvedValue([
+        {
+          product_id: 3,
+          tax_categories: {
+            is_inclusive: false,
+            tax_rates: [{ rate: 0.19, is_inclusive: false }],
+          },
+        },
+      ] as any);
+
+      const result = await service.findOne(7);
+      const item = (result as any).order_items[0];
+
+      // Campos aditivos nuevos: bruto resuelto server-side desde el
+      // catálogo (100 × 1,19 = 119 por unidad; × 2 = 238 la línea).
+      expect(item.unit_price_gross).toBe(119);
+      expect(item.line_total_gross).toBe(238);
+      // R-1 — el lector viejo (uno que sólo conoce `unit_price`/
+      // `total_price`) sigue viendo EXACTAMENTE lo mismo que antes: la
+      // base, no el bruto.
+      expect(item.unit_price).toBe(100);
+      expect(item.total_price).toBe(200);
+      // La sombra histórica (`final_*`) sobrevive intacta — matarla
+      // dejaría el bruto en NULL (F-049).
+      expect(item.final_unit_price).toBe(119);
+      expect(item.final_total_price).toBe(238);
+    });
+
+    it('F-008 (contraste) — sin tasas de catálogo resueltas, el bruto aditivo colapsa a la base (cero regresión histórica)', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        id: 8,
+        order_number: 'ORD008',
+        order_items: [
+          {
+            id: 80,
+            product_id: null, // línea custom/servicio: sin catálogo que resolver
+            unit_price: 50,
+            quantity: 1,
+            total_price: 50,
+            products: {},
+          },
+        ],
+        order_promotions: [],
+        coupon_uses: [],
+      });
+
+      const result = await service.findOne(8);
+      const item = (result as any).order_items[0];
+
+      expect(item.unit_price_gross).toBe(50);
+      expect(item.line_total_gross).toBe(50);
+      expect(item.unit_price).toBe(50);
+      expect(item.total_price).toBe(50);
+    });
   });
 
   /**
@@ -505,6 +603,183 @@ describe('OrdersService', () => {
    * `forceOrderState`. La invariante que fijan estos tests: `state` no llega
    * jamás al `prisma.orders.update` de este método.
    */
+  /**
+   * C.8 — F-006 (major): 1º de los 3 sitios que el hallazgo nombra
+   * (`create` `:509`, editor, `updateOrderItems`). Antes, `create` escribía
+   * `final_unit_price: item.final_unit_price ?? item.unit_price` — sin
+   * override explícito del cliente, el bruto quedaba degradado al NETO.
+   * Ahora deriva el bruto server-side con `resolveFinalUnitPriceServerSide`
+   * (mismas tasas de catálogo que ya resuelve para `order_item_taxes`).
+   */
+  describe('create — F-006 final_unit_price server-side (C.8)', () => {
+    const contextSpy = () =>
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        is_super_admin: false,
+        is_owner: false,
+        user_id: 99,
+        request_id: 'req-test-create-001',
+      } as any);
+
+    it('deriva final_unit_price del catálogo (19%) cuando el DTO NO manda override', async () => {
+      const spy = contextSpy();
+      try {
+        // Un solo mock de `products.findUnique` sirve tanto para
+        // `assertVariantRequiredForPrepared` (id/name/product_type/variants)
+        // como para `resolveCostPrice` (cost_price): mismo objeto, más
+        // campos de los que cada caller lee.
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+          cost_price: 50,
+        } as any);
+        // Igual que arriba: sirve para `normalizePriceUnitLines`
+        // (price_unit_quantity) y para `resolveLineTaxesForOrder`
+        // (product_tax_assignments) — misma tasa 19% exclusiva que el resto
+        // de las specs de C.8 usan como canon.
+        mockPrismaService.products.findMany.mockResolvedValue([
+          {
+            id: 1,
+            price_unit_quantity: 1,
+            product_tax_assignments: [
+              {
+                is_inclusive: false,
+                tax_categories: {
+                  tax_type: 'iva',
+                  tax_rates: [
+                    {
+                      id: 10,
+                      name: 'IVA 19%',
+                      rate: 0.19,
+                      is_compound: false,
+                      is_inclusive: false,
+                      priority: 1,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ] as any);
+        const createdOrder = {
+          id: 900,
+          store_id: 1,
+          order_number: 'ORD-TEST-0001',
+          grand_total: 119,
+          currency: 'COP',
+          order_items: [
+            {
+              product_id: 1,
+              product_variant_id: null,
+              quantity: 1,
+              stock_units_consumed: null,
+              products: { track_inventory: false },
+            },
+          ],
+        };
+        mockPrismaService.orders.create.mockResolvedValue(createdOrder as any);
+
+        const dto = {
+          order_number: 'ORD-TEST-0001',
+          subtotal: 100,
+          tax_amount: 19,
+          total_amount: 119,
+          skip_schedule_validation: true,
+          items: [
+            {
+              product_id: 1,
+              product_name: 'Test product',
+              quantity: 1,
+              unit_price: 100,
+              total_price: 100,
+              tax_amount_item: 19,
+              tax_rate: 0.19,
+              // Sin `final_unit_price`: es justo el caso que F-006 cierra.
+            },
+          ],
+        } as any;
+
+        await service.create(dto, { id: 99 });
+
+        expect(mockPrismaService.orders.create).toHaveBeenCalledTimes(1);
+        const writtenItems = (
+          mockPrismaService.orders.create.mock.calls[0][0] as any
+        ).data.order_items.create;
+        expect(writtenItems).toHaveLength(1);
+        // 100 NETO × 1.19 = 119 BRUTO — antes de este fix, quedaba en 100
+        // (degradado al NETO por `?? item.unit_price`).
+        expect(Number(writtenItems[0].final_unit_price)).toBeCloseTo(119, 2);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('honra el override explícito del carril de órdenes cuando el DTO SÍ manda final_unit_price', async () => {
+      const spy = contextSpy();
+      try {
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+          cost_price: 50,
+        } as any);
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 1, price_unit_quantity: 1, product_tax_assignments: [] },
+        ] as any);
+        const createdOrder = {
+          id: 901,
+          store_id: 1,
+          order_number: 'ORD-TEST-0002',
+          grand_total: 150,
+          currency: 'COP',
+          order_items: [
+            {
+              product_id: 1,
+              product_variant_id: null,
+              quantity: 1,
+              stock_units_consumed: null,
+              products: { track_inventory: false },
+            },
+          ],
+        };
+        mockPrismaService.orders.create.mockResolvedValue(createdOrder as any);
+
+        const dto = {
+          order_number: 'ORD-TEST-0002',
+          subtotal: 100,
+          tax_amount: 0,
+          total_amount: 150,
+          skip_schedule_validation: true,
+          items: [
+            {
+              product_id: 1,
+              product_name: 'Test product',
+              quantity: 1,
+              unit_price: 100,
+              total_price: 100,
+              tax_amount_item: 0,
+              tax_rate: 0,
+              final_unit_price: 150, // Override explícito del carril de órdenes.
+            },
+          ],
+        } as any;
+
+        await service.create(dto, { id: 99 });
+
+        const writtenItems = (
+          mockPrismaService.orders.create.mock.calls[0][0] as any
+        ).data.order_items.create;
+        expect(Number(writtenItems[0].final_unit_price)).toBe(150);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
   describe('update — todo cambio de estado pasa por el seam de OrderFlowService', () => {
     const processingOrder = {
       id: 590,
@@ -624,6 +899,54 @@ describe('OrdersService', () => {
       );
       const writtenData = mockPrismaService.orders.update.mock.calls[0][0].data;
       expect(writtenData.state).toBeUndefined();
+    });
+
+    /**
+     * F-086 punto (b) — el recálculo de `grand_total` al cambiar
+     * `shipping_cost` ignoraba la propina persistida y no acotaba en cero.
+     * Ver el comentario junto al cálculo en `orders.service.ts` para el
+     * detalle del bug y la invariante I-6.
+     */
+    it('F-086 (b): incluye la propina persistida al recalcular grand_total por shipping_cost', async () => {
+      const orderWithTip = {
+        ...processingOrder,
+        subtotal_amount: '100000.00',
+        tax_amount: '19000.00',
+        discount_amount: '0.00',
+        tip_amount: '20000.00',
+      };
+      mockPrismaService.orders.findFirst.mockResolvedValue(orderWithTip);
+      mockPrismaService.orders.update.mockResolvedValue(orderWithTip);
+
+      await service.update(590, { shipping_cost: 5000 } as any);
+
+      const writtenData = mockPrismaService.orders.update.mock.calls[0][0].data;
+      // 100000 + 19000 - 0 + 5000 + 20000 = 144000. Antes del fix la
+      // propina se perdía y el resultado quedaba en 124000.
+      expect(writtenData.grand_total).toBe(144000);
+    });
+
+    it('F-086 (b) / I-6: acota grand_total en 0 cuando el paréntesis daría negativo', async () => {
+      const heavilyDiscountedOrder = {
+        ...processingOrder,
+        subtotal_amount: '10000.00',
+        tax_amount: '1900.00',
+        discount_amount: '15000.00',
+        tip_amount: '0.00',
+      };
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        heavilyDiscountedOrder,
+      );
+      mockPrismaService.orders.update.mockResolvedValue(
+        heavilyDiscountedOrder,
+      );
+
+      await service.update(590, { shipping_cost: 0 } as any);
+
+      const writtenData = mockPrismaService.orders.update.mock.calls[0][0].data;
+      // 10000 + 1900 - 15000 + 0 + 0 = -3100. Sin el clamp, ese negativo
+      // habría llegado crudo a `grand_total`.
+      expect(writtenData.grand_total).toBe(0);
     });
   });
 
@@ -944,6 +1267,20 @@ describe('OrdersService', () => {
       mockPrismaService.order_promotions.deleteMany.mockResolvedValue({
         count: 0,
       });
+      // C.8 — el editor ahora resuelve el IVA de la línea del catálogo
+      // (ADR-05) en vez de confiar en `tax_amount_item` del DTO. `fullDto`
+      // trae `product_id: 1, unit_price: 100, tax_rate: 0.19`; esta tasa
+      // hace que el servidor resuelva el mismo 19 (`tax_amount: 19`) que
+      // `persistedOrder` ya declaraba, pero por el camino correcto.
+      mockPrismaService.product_tax_assignments.findMany.mockResolvedValue([
+        {
+          product_id: 1,
+          tax_categories: {
+            is_inclusive: false,
+            tax_rates: [{ rate: 0.19, is_inclusive: false }],
+          },
+        },
+      ] as any);
     };
 
     it('actualiza un draft con items + cliente + envío y devuelve la orden completa', async () => {
@@ -986,6 +1323,133 @@ describe('OrdersService', () => {
         expect(
           mockStockLevelManager.releaseReservationsByReference,
         ).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // C.8 — F-012/F-037 (blocker/major): el subtotal usaba `priceUnitsQty`
+    // (la ESCALA `price_unit_quantity` del producto) pero el impuesto
+    // multiplicaba por `quantity` (el multiplicador de línea que manda el
+    // cliente) — dos números DISTINTOS que hasta este fix desincronizaban
+    // el IVA hasta 1.000× en una línea con escala (cable por metro, etc.).
+    // Prueba de regresión permanente: ambos deben usar el MISMO
+    // multiplicador.
+    // ----------------------------------------------------------------
+    it('F-012/F-037 — impuesto y subtotal usan el MISMO multiplicador en una línea con escala (price_unit_quantity ≠ quantity)', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        const scaledDraftOrder = {
+          id: 501,
+          store_id: 1,
+          state: 'draft',
+          customer_id: 99,
+          coupon_id: null,
+          coupon_code: null,
+          subtotal_amount: '0.00',
+          tax_amount: '0.00',
+          shipping_cost: '0.00',
+          discount_amount: '0.00',
+          grand_total: '0.00',
+          notes: null,
+          internal_notes: null,
+          delivery_type: 'pickup',
+          billing_address_id: null,
+          shipping_address_id: null,
+          shipping_method_id: null,
+          shipping_rate_id: null,
+        };
+        // Lo que el commit debe escribir/leer si el multiplicador es
+        // ÚNICO: subtotal = unit_price(10) × escala(1000) = 10.000; tax =
+        // (10 × 0,19) × escala(1000) = 1.900. Si el impuesto usara
+        // `quantity` (2000) en vez de la escala, daría 3.800 — el doble —
+        // y este test fallaría.
+        const scaledPersistedOrder = {
+          ...scaledDraftOrder,
+          subtotal_amount: 10000,
+          tax_amount: 1900,
+          discount_amount: 0,
+          shipping_cost: 0,
+          grand_total: 11900,
+          order_items: [],
+          users: { id: 99, first_name: 'Juan' },
+          order_promotions: [],
+          coupon_uses: [],
+          order_installments: [],
+        };
+        mockPrismaService.orders.findFirst
+          .mockResolvedValueOnce(scaledDraftOrder as any)
+          .mockResolvedValue(scaledPersistedOrder as any);
+        mockPrismaService.store_users.findFirst.mockResolvedValue({ id: 1 });
+        // El producto declara `price_unit_quantity: 1000` (la ESCALA) —
+        // resuelta vía el mismo `products.findMany` que ya usa el paso 4
+        // (validación de existencia).
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 1, price_unit_quantity: 1000 },
+        ] as any);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Cable por metro',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
+        mockPrismaService.product_variants.findMany.mockResolvedValue([]);
+        mockPrismaService.product_tax_assignments.findMany.mockResolvedValue([
+          {
+            product_id: 1,
+            tax_categories: {
+              is_inclusive: false,
+              tax_rates: [{ rate: 0.19, is_inclusive: false }],
+            },
+          },
+        ] as any);
+        mockPrismaService.orders.updateMany.mockResolvedValue({ count: 1 } as any);
+        mockPrismaService.orders.update.mockResolvedValue({} as any);
+        mockPrismaService.order_items.deleteMany.mockResolvedValue({ count: 0 });
+        mockPrismaService.order_items.createMany.mockResolvedValue({ count: 1 });
+        mockPrismaService.order_items.findMany.mockResolvedValue([]);
+        mockPrismaService.order_promotions.deleteMany.mockResolvedValue({
+          count: 0,
+        });
+
+        const scaledDto = {
+          customer_id: 99,
+          items: [
+            {
+              product_id: 1,
+              product_name: 'Cable por metro',
+              // Multiplicador de línea que manda el cliente — a propósito
+              // DISTINTO de la escala (1000) del producto.
+              quantity: 2000,
+              unit_price: 10,
+              // Case 1 de `normalizePriceUnitLines`: el cliente ya manda el
+              // neto escalado correcto (10 × 2000/1000 = 20), así la
+              // cabecera no recibe un delta adicional por esa vía y el
+              // único efecto medible es el del propio bucle de totales.
+              total_price: 20,
+              tax_amount_item: 3.8,
+              tax_rate: 0.19,
+            },
+          ],
+        } as any;
+
+        const result = await service.updateOrderFromEditor(501, scaledDto);
+
+        expect(result).toBeDefined();
+        const writtenData = mockPrismaService.orders.update.mock.calls[0][0]
+          .data;
+        expect(Number(writtenData.subtotal_amount)).toBe(10000);
+        expect(Number(writtenData.tax_amount)).toBe(1900);
+        // Invariante fuerte e independiente de la escala elegida: la
+        // proporción impuesto/subtotal debe ser EXACTAMENTE la tasa del
+        // catálogo (19 %). Un multiplicador distinto entre subtotal e
+        // impuesto rompe esta proporción sin importar la magnitud.
+        expect(
+          Number(writtenData.tax_amount) /
+            Number(writtenData.subtotal_amount),
+        ).toBeCloseTo(0.19, 6);
       } finally {
         contextSpy.mockRestore();
       }
@@ -1336,15 +1800,16 @@ describe('OrdersService', () => {
 
     // ----------------------------------------------------------------
     // CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 · ERR-11 spec.
-    //
-    // `ORD_EDIT_RESPONSE_MISMATCH_001` se dispara cuando la fila
-    // persistida dentro de la transacción difiere de los totales
-    // recalculados. Forzamos que el `findFirst` post-commit devuelva
-    // un row TAMPERED (subtotal_amount distinto del recalculado) y
-    // verificamos que el editor NUNCA devuelve éxito falso.
+    // C.8 — F-068: el chequeo se movió de DESPUÉS del commit (500,
+    // `ORD_EDIT_RESPONSE_MISMATCH_001`, orden ya guardada) a ANTES de que
+    // el callback de `$transaction` retorne (409,
+    // `ORD_EDIT_TOTALS_ROLLBACK_001`, Prisma revierte todo). Forzamos que
+    // el `findFirst` leído DENTRO de la transacción devuelva un row
+    // TAMPERED (subtotal_amount distinto del recalculado) y verificamos
+    // que el editor NUNCA devuelve éxito falso ni dice "se guardó".
     // ----------------------------------------------------------------
 
-    it('lanza 500 ORD_EDIT_RESPONSE_MISMATCH_001 cuando la fila persistida difiere del cálculo', async () => {
+    it('lanza 409 ORD_EDIT_TOTALS_ROLLBACK_001 (no compromete la fila) cuando la fila a persistir difiere del cálculo', async () => {
       setupContext();
       const contextSpy = spyContext();
       try {
@@ -1376,12 +1841,56 @@ describe('OrdersService', () => {
 
         expect(caught).toBeInstanceOf(VendixHttpException);
         expect(caught!.errorCode).toBe(
-          ErrorCodes.ORD_EDIT_RESPONSE_MISMATCH_001.code,
+          ErrorCodes.ORD_EDIT_TOTALS_ROLLBACK_001.code,
         );
         const responseBody = (caught as any).getResponse?.() ?? {};
         const details = (responseBody as any).details ?? {};
         expect(details?.expected?.subtotal).toBeDefined();
         expect(details?.actual?.subtotal).toBe(999);
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    // ----------------------------------------------------------------
+    // C.8 — F-035 (major) / F-047 (blocker): `updateOrderFromEditor`
+    // reemplaza las líneas con `order_items.deleteMany` + recreación; si
+    // la orden ya tiene desglose fiscal persistido (`order_item_taxes`),
+    // ese `deleteMany` choca contra la FK `order_item_taxes_order_item_id_fkey`
+    // (sin `onDelete`, RESTRICT por default) y Prisma lanza P2003 crudo —
+    // un 500 sin código de negocio. `assertNoPersistedTaxBreakdown` corta
+    // ANTES, con 409 `ORD_EDIT_TAX_BREAKDOWN_LOCKED_001`, sin tocar una
+    // sola fila.
+    // ----------------------------------------------------------------
+    it('lanza 409 ORD_EDIT_TAX_BREAKDOWN_LOCKED_001 si la orden ya tiene order_item_taxes persistidos', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        arrangeEditableDraft();
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
+        // La orden ya tiene al menos un renglón de desglose fiscal.
+        mockPrismaService.order_item_taxes.findFirst.mockResolvedValueOnce({
+          id: 77,
+        } as any);
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderFromEditor(500, fullDto);
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_TAX_BREAKDOWN_LOCKED_001.code,
+        );
+        // La guarda corre ANTES del deleteMany: ninguna línea se toca.
+        expect(mockPrismaService.order_items.deleteMany).not.toHaveBeenCalled();
       } finally {
         contextSpy.mockRestore();
       }
@@ -1626,6 +2135,88 @@ describe('OrdersService', () => {
   });
 
   /**
+   * C.8 — F-035 (major) / F-047 (blocker): `updateOrderItems` es el OTRO
+   * escritor (además de `updateOrderFromEditor`) que reemplaza líneas con
+   * `order_items.deleteMany` + recreación. Misma FK, mismo P2003 crudo, y
+   * `assertNoPersistedTaxBreakdown` es el MISMO guard compartido — esta
+   * prueba cubre el sitio propio de `updateOrderItems` (orders.service.ts,
+   * dentro del `$transaction`, justo después de `assertVariantRequiredForPrepared`).
+   */
+  describe('updateOrderItems — F-035/F-047 guard (C.8)', () => {
+    it('lanza 409 ORD_EDIT_TAX_BREAKDOWN_LOCKED_001 si la orden ya tiene order_item_taxes persistidos', async () => {
+      mockRequestContextService.getContext.mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        is_super_admin: false,
+        user_id: 99,
+        request_id: 'req-test-002',
+      });
+      const contextSpy = jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({
+          store_id: 1,
+          organization_id: 1,
+          is_super_admin: false,
+          is_owner: false,
+          user_id: 99,
+          request_id: 'req-test-002',
+        });
+      try {
+        mockPrismaService.orders.findFirst.mockResolvedValue({
+          id: 700,
+          store_id: 1,
+          state: 'draft',
+        } as any);
+        mockPrismaService.products.findMany.mockResolvedValue([
+          { id: 1 },
+        ] as any);
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1,
+          name: 'Test product',
+          product_type: 'simple',
+          product_variants: [],
+        } as any);
+        // La orden ya tiene desglose fiscal persistido.
+        mockPrismaService.order_item_taxes.findFirst.mockResolvedValueOnce({
+          id: 55,
+        } as any);
+
+        const dto = {
+          items: [
+            {
+              product_id: 1,
+              product_name: 'Test product',
+              quantity: 1,
+              unit_price: 100,
+              total_price: 100,
+              tax_amount_item: 0,
+              tax_rate: 0,
+            },
+          ],
+        } as any;
+
+        let caught: VendixHttpException | null = null;
+        try {
+          await service.updateOrderItems(700, dto);
+        } catch (err) {
+          caught = err as VendixHttpException;
+        }
+
+        expect(caught).toBeInstanceOf(VendixHttpException);
+        expect(caught!.errorCode).toBe(
+          ErrorCodes.ORD_EDIT_TAX_BREAKDOWN_LOCKED_001.code,
+        );
+        // La guarda corre ANTES del deleteMany: ninguna línea se toca.
+        expect(
+          mockPrismaService.order_items.deleteMany,
+        ).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+  });
+
+  /**
    * H1 (Round 3, lote 3) · QUI-832 — seam de detección.
    *
    * Antes: `mockPrismaService.withoutScope.mockReturnValue(mockPrismaService)`
@@ -1643,6 +2234,123 @@ describe('OrdersService', () => {
 
       expect(unscoped).not.toBe(mockPrismaService);
       expect(unscoped).toBe(mockUnscopedPrismaService);
+    });
+  });
+
+  /**
+   * F-044/F-046 (B.2) — la fila OIT respalda la LÍNEA, no la unidad.
+   *
+   * `tax_amount_item` viaja por unidad de precio (canon C-2), pero
+   * `buildOrderItemTaxesCreate` persistía el escalar tal cual: una línea con
+   * `quantity > 1` dejaba `Σ OIT = impuesto unitario` y todo lector por suma
+   * la leía corta (factura corta + `TAX_SUBTOTAL_MISMATCH` post-consecutivo).
+   * Estos tests fijan el escalado por unidades de precio en las dos ramas.
+   */
+  describe('buildOrderItemTaxesCreate — escalado F-044/F-046', () => {
+    const call = (item: any, resolved: any) =>
+      (service as any).buildOrderItemTaxesCreate(item, resolved);
+
+    const singleRate = [
+      {
+        id: 7,
+        name: 'IVA 19%',
+        rate: 0.19,
+        tax_type: 'iva',
+        is_compound: false,
+        is_inclusive: false,
+      },
+    ];
+
+    it('rama resuelta: qty 3 × 1.900/u ⇒ OIT = 5.700', () => {
+      const out = call(
+        { quantity: 3, tax_amount_item: 1900, tax_rate: 0.19 },
+        singleRate,
+      );
+
+      expect(out.create).toHaveLength(1);
+      expect(Number(out.create[0].tax_amount)).toBe(5700);
+      expect(out.create[0].tax_rate_id).toBe(7);
+    });
+
+    it('fallback: qty 3 × 1.900/u ⇒ OIT = 5.700 con tax_rate_id null', () => {
+      const out = call(
+        { quantity: 3, tax_amount_item: 1900, tax_rate: 0.19 },
+        null,
+      );
+
+      expect(out.create).toHaveLength(1);
+      expect(Number(out.create[0].tax_amount)).toBe(5700);
+      expect(out.create[0].tax_rate_id).toBeNull();
+    });
+
+    /**
+     * F-207 (cerrado) — el multiplicador de línea por peso es el PESO, no 1.
+     *
+     * `tax_amount_item` viaja por unidad de precio (canon C-2): para una
+     * línea de 1,35 kg, `1900` es el impuesto de 1 kg, y el OIT debe
+     * respaldar la línea completa: `1900 × 1,35 = 2565`. Con ×1 (defecto
+     * previo) el OIT quedaba en `1900` — corto por el factor del peso frente
+     * a lo que el carril de cobro (`payments.service.ts:getPosLineUnits`)
+     * cobra de verdad, y corto frente a la cabecera de la propia orden
+     * (`pos-cart.service.ts:calculateSummary` suma el impuesto YA
+     * multiplicado por peso). Éste es el caso que fija el canon.
+     */
+    it('línea por peso: el multiplicador es el peso, igual que getPosLineUnits', () => {
+      const out = call(
+        { quantity: 1, weight: 1.35, tax_amount_item: 1900, tax_rate: 0.19 },
+        singleRate,
+      );
+
+      // Réplica de `payments.service.ts:getPosLineUnits` — misma cascada
+      // peso⇒escala⇒cantidad, mismo redondeo a 3 decimales (F-085) — para que
+      // este spec falle si los dos carriles vuelven a divergir.
+      const getPosLineUnits = (i: { weight?: number; quantity?: number }) => {
+        const weight = Number(i.weight || 0);
+        if (weight > 0) return Math.round(weight * 1000) / 1000;
+        return Number(i.quantity || 0);
+      };
+
+      expect(Number(out.create[0].tax_amount)).toBe(
+        1900 * getPosLineUnits({ weight: 1.35, quantity: 1 }),
+      );
+      expect(Number(out.create[0].tax_amount)).toBe(2565);
+    });
+
+    it('línea por peso: peso fraccionario no entero también escala (2,5 kg)', () => {
+      const out = call(
+        { quantity: 1, weight: 2.5, tax_amount_item: 1000, tax_rate: 0.19 },
+        singleRate,
+      );
+
+      expect(Number(out.create[0].tax_amount)).toBe(2500);
+    });
+
+    it('escala QUI-648: quantity 4 con price_unit_quantity 2 ⇒ ×2', () => {
+      const out = call(
+        {
+          quantity: 4,
+          price_unit_quantity: 2,
+          tax_amount_item: 1900,
+          tax_rate: 0.19,
+        },
+        singleRate,
+      );
+
+      expect(Number(out.create[0].tax_amount)).toBe(3800);
+    });
+
+    it('qty 1 no cambia ningún número (régimen histórico intacto)', () => {
+      const out = call(
+        { quantity: 1, tax_amount_item: 1900, tax_rate: 0.19 },
+        singleRate,
+      );
+
+      expect(Number(out.create[0].tax_amount)).toBe(1900);
+    });
+
+    it('impuesto 0 o ausente ⇒ sin filas', () => {
+      expect(call({ quantity: 3, tax_amount_item: 0 }, singleRate)).toBeUndefined();
+      expect(call({ quantity: 3 }, singleRate)).toBeUndefined();
     });
   });
 });
