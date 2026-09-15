@@ -2163,10 +2163,13 @@ describe('PaymentsService', () => {
         expect(mismatchCalls).toHaveLength(0);
       });
 
-      it('F-222: delta exacto de 2¢ (13603.14 vs 13603.12) SÍ registra — el borde es determinista', () => {
-        // En floats, Math.abs(roundMoney(13603.14-13603.12)) > 0.02 es falso
-        // (el doble de 0.02 no es mayor que sí mismo); en centavos enteros la
-        // diferencia es exactamente 2¢ y el umbral de 2¢ la registra.
+      // F-222/F-223 — el umbral de esta compuerta NO cambió con la migración.
+      // El original era `Math.abs(grossMismatchDelta) > 0.02` sobre un delta
+      // que YA venía redondeado a centavos por `roundMoney`, así que 2¢
+      // exactos no disparaban (`0.02 > 0.02` es falso): tolera 2¢ y registra
+      // desde 3¢. En centavos enteros eso es `differsByAtLeastCents(..., 3)`.
+      // Los dos tests de abajo fijan los dos lados del borde.
+      it('F-222: delta exacto de 2¢ (13603.14 vs 13603.12) NO registra — sigue tolerado', () => {
         const errorSpy = jest.spyOn((service as any).logger, 'error');
 
         (service as any).buildOrderItemSnapshot({
@@ -2184,8 +2187,29 @@ describe('PaymentsService', () => {
           ([payload]) =>
             (payload as any)?.event === 'pos.line_gross_mismatch',
         );
+        expect(mismatchCalls).toHaveLength(0);
+      });
+
+      it('F-222: delta de 3¢ (13603.15 vs 13603.12) SÍ registra — el borde es determinista', () => {
+        const errorSpy = jest.spyOn((service as any).logger, 'error');
+
+        (service as any).buildOrderItemSnapshot({
+          ...baseParams,
+          unitBasePrice: 13603.15,
+          finalUnitPrice: 13603.12,
+          isPriceOverridden: false,
+          productId: 10,
+          storeId: 3,
+          userId: 42,
+          taxInfo: { total_rate: 0, total_tax_amount: 0, taxes: [] },
+        });
+
+        const mismatchCalls = errorSpy.mock.calls.filter(
+          ([payload]) =>
+            (payload as any)?.event === 'pos.line_gross_mismatch',
+        );
         expect(mismatchCalls).toHaveLength(1);
-        expect(mismatchCalls[0][0]).toMatchObject({ delta: 0.02 });
+        expect(mismatchCalls[0][0]).toMatchObject({ delta: 0.03 });
       });
     });
   });
