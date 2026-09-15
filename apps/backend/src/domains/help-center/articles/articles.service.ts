@@ -55,7 +55,7 @@ export class ArticlesService {
   ) {}
 
   async findAll(query: ArticleQueryDto) {
-    const { page = 1, limit = 10, category, type, module } = query;
+    const { page = 1, limit = 10, category, type, module, search } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.help_articlesWhereInput = {
@@ -114,6 +114,13 @@ export class ArticlesService {
         content: await this.s3Service.signMarkdownContent(article.content),
       })),
     );
+
+    if (search) {
+      const tokens = tokenizeQuery(search);
+      signedData.sort(
+        (a, b) => calculateRelevance(b, tokens) - calculateRelevance(a, tokens),
+      );
+    }
 
     return {
       data: signedData,
