@@ -870,3 +870,128 @@ describe('PosCartService — tarifa de cliente con impuesto incluido (C.8, terce
     });
   });
 });
+
+/**
+ * F-225 (ADR-16, CP-pos-exclusive-tax-double-charge) — `isPriceOverridden`
+ * decide en CENTAVOS ENTEROS, no en punto flotante.
+ *
+ * El gate viejo (`Math.abs(finalPrice - originalFinalPrice) >= 0.01`) resta
+ * dos `number` en punto flotante: el MISMO centavo de diferencia cruza o no
+ * el umbral según la magnitud de los dos precios. Medido en Node
+ * (`money-compare.ts`, docblock de `differsByAtLeastCents`):
+ *
+ *   13603.13 − 13603.12 = 0.00999999999839...  ≥ 0.01 ? false  (NO dispara)
+ *     551.06 −   551.05 = 0.00999999999999...  ≥ 0.01 ? false  (NO dispara)
+ *       2425 −  2424.99 = 0.01000000000021...  ≥ 0.01 ? true   (dispara)
+ *    2223.09 −  2223.08 = 0.01000000000021...  ≥ 0.01 ? true   (dispara)
+ *
+ * Los cuatro pares son el MISMO centavo real de diferencia. Con el gate
+ * viejo, editar 13.603,13 → 13.603,12 (o 551,06 → 551,05) NO marcaba
+ * `isPriceOverridden`, así que `final_unit_price` se omitía del payload de
+ * cobro y el backend caía al precio de catálogo: la edición del cajero se
+ * descartaba en silencio. Los cuatro casos deben dar el MISMO veredicto
+ * (`true`): difieren en 1 centavo real, sin importar la magnitud.
+ */
+describe('PosCartService — isPriceOverridden en centavos enteros (F-225)', () => {
+  let service: PosCartService;
+
+  /** Producto simple sin impuesto: la aritmética de la línea no interfiere. */
+  const flatProduct = (finalPrice: number) =>
+    ({
+      id: 'F225',
+      name: 'Producto F-225',
+      sku: 'F225',
+      price: finalPrice,
+      final_price: finalPrice,
+      stock: 0,
+      track_inventory: false,
+      isActive: true,
+      has_variants: false,
+      product_variants: [],
+      tax_assignments: [],
+    }) as any;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        PosCartService,
+        { provide: PosProductService, useValue: { getProductById: () => of(null) } },
+        { provide: PosApiService, useValue: {} },
+        {
+          provide: PosSaleUnitService,
+          useValue: {
+            configFor: () => ({
+              priceUnitQuantity: 1,
+              unitsPerCapture: 1,
+              captureUnit: null,
+            }),
+          },
+        },
+        {
+          provide: PriceResolverService,
+          useValue: {
+            resolve: (product: any, variant?: any) => ({
+              unitPrice: Number(
+                variant?.price_override ?? product?.base_price ?? 0,
+              ),
+            }),
+          },
+        },
+        { provide: PriceTierCacheService, useValue: {} },
+        {
+          provide: WithholdingTaxService,
+          useValue: {
+            previewWithholding: () => of({ lines: [], total_withholding: 0 }),
+          },
+        },
+        { provide: CurrencyFormatService, useValue: {} },
+        {
+          provide: InvoicingService,
+          useValue: { getPosUvtThreshold: () => of({ data: null }) },
+        },
+        { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+      ],
+    });
+    service = TestBed.inject(PosCartService);
+  });
+
+  const casosUnCentavoReal: Array<[number, number]> = [
+    [13603.13, 13603.12],
+    [551.06, 551.05],
+    [2425.0, 2424.99],
+    [2223.09, 2223.08],
+  ];
+
+  for (const [catalogo, editado] of casosUnCentavoReal) {
+    it(`marca override con 1 centavo real de diferencia (${catalogo} → ${editado})`, (done) => {
+      const product = flatProduct(catalogo);
+
+      service.addToCart({ product, quantity: 1 }).subscribe((added) => {
+        const itemId = added.items[0].id;
+        expect(added.items[0].finalPrice).toBe(catalogo);
+
+        service
+          .updateCartItemPrice({ itemId, finalPrice: editado })
+          .subscribe((state) => {
+            expect(state.items[0].isPriceOverridden).toBe(true);
+            done();
+          });
+      });
+    });
+  }
+
+  it('NO marca override cuando el precio editado es idéntico al de catálogo', (done) => {
+    const product = flatProduct(13603.13);
+
+    service.addToCart({ product, quantity: 1 }).subscribe((added) => {
+      const itemId = added.items[0].id;
+
+      service
+        .updateCartItemPrice({ itemId, finalPrice: 13603.13 })
+        .subscribe((state) => {
+          expect(state.items[0].isPriceOverridden).toBe(false);
+          done();
+        });
+    });
+  });
+});

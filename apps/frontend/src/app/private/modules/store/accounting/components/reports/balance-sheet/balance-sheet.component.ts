@@ -19,6 +19,11 @@ import {
   IconComponent,
   SelectorComponent,
 } from '../../../../../../../shared/components/index';
+// F-225 (ADR-16): mismo kernel de dinero que `pos-cart.service.ts` — ver
+// `apps/frontend/tsconfig.app.json` (`paths`). `Math.abs(a - b) < 0.01`
+// exige diferencia CERO centavos (no tolera ni 1); la traducción fiel es
+// `!differsByAtLeastCents(a, b, 1)` (umbral por defecto), no `2`.
+import { differsByAtLeastCents } from '@money-kernel/money-compare';
 
 @Component({
   selector: 'vendix-balance-sheet',
@@ -310,8 +315,10 @@ export class BalanceSheetComponent {
   }
 
   isBalanced(report: BalanceSheetReport): boolean {
-    return (
-      Math.abs(report.total_assets - report.total_liabilities_equity) < 0.01
+    return !differsByAtLeastCents(
+      report.total_assets,
+      report.total_liabilities_equity,
+      1,
     );
   }
 }

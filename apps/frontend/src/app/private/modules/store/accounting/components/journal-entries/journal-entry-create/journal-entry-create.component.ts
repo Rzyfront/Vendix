@@ -21,6 +21,11 @@ import {
   IconComponent,
 } from '../../../../../../../shared/components/index';
 import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
+// F-225 (ADR-16): mismo kernel de dinero que `pos-cart.service.ts` — ver
+// `apps/frontend/tsconfig.app.json` (`paths`). `Math.abs(a - b) < 0.01`
+// exige diferencia CERO centavos (no tolera ni 1); la traducción fiel es
+// `!differsByAtLeastCents(a, b, 1)` (umbral por defecto), no `2`.
+import { differsByAtLeastCents } from '@money-kernel/money-compare';
 
 @Component({
   selector: 'vendix-journal-entry-create',
@@ -273,7 +278,10 @@ export class JournalEntryCreateComponent {
   }
 
   get is_balanced(): boolean {
-    return Math.abs(this.total_debit - this.total_credit) < 0.01 && this.total_debit > 0;
+    return (
+      !differsByAtLeastCents(this.total_debit, this.total_credit, 1) &&
+      this.total_debit > 0
+    );
   }
 
   constructor() {
