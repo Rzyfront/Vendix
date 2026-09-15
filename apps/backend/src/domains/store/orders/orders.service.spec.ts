@@ -900,6 +900,54 @@ describe('OrdersService', () => {
       const writtenData = mockPrismaService.orders.update.mock.calls[0][0].data;
       expect(writtenData.state).toBeUndefined();
     });
+
+    /**
+     * F-086 punto (b) — el recálculo de `grand_total` al cambiar
+     * `shipping_cost` ignoraba la propina persistida y no acotaba en cero.
+     * Ver el comentario junto al cálculo en `orders.service.ts` para el
+     * detalle del bug y la invariante I-6.
+     */
+    it('F-086 (b): incluye la propina persistida al recalcular grand_total por shipping_cost', async () => {
+      const orderWithTip = {
+        ...processingOrder,
+        subtotal_amount: '100000.00',
+        tax_amount: '19000.00',
+        discount_amount: '0.00',
+        tip_amount: '20000.00',
+      };
+      mockPrismaService.orders.findFirst.mockResolvedValue(orderWithTip);
+      mockPrismaService.orders.update.mockResolvedValue(orderWithTip);
+
+      await service.update(590, { shipping_cost: 5000 } as any);
+
+      const writtenData = mockPrismaService.orders.update.mock.calls[0][0].data;
+      // 100000 + 19000 - 0 + 5000 + 20000 = 144000. Antes del fix la
+      // propina se perdía y el resultado quedaba en 124000.
+      expect(writtenData.grand_total).toBe(144000);
+    });
+
+    it('F-086 (b) / I-6: acota grand_total en 0 cuando el paréntesis daría negativo', async () => {
+      const heavilyDiscountedOrder = {
+        ...processingOrder,
+        subtotal_amount: '10000.00',
+        tax_amount: '1900.00',
+        discount_amount: '15000.00',
+        tip_amount: '0.00',
+      };
+      mockPrismaService.orders.findFirst.mockResolvedValue(
+        heavilyDiscountedOrder,
+      );
+      mockPrismaService.orders.update.mockResolvedValue(
+        heavilyDiscountedOrder,
+      );
+
+      await service.update(590, { shipping_cost: 0 } as any);
+
+      const writtenData = mockPrismaService.orders.update.mock.calls[0][0].data;
+      // 10000 + 1900 - 15000 + 0 + 0 = -3100. Sin el clamp, ese negativo
+      // habría llegado crudo a `grand_total`.
+      expect(writtenData.grand_total).toBe(0);
+    });
   });
 
   /**

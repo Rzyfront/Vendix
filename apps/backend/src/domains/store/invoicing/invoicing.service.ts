@@ -311,9 +311,19 @@ export { normalizeInvoiceTaxRate } from './utils/invoice-tax-rate.util';
  * Estructural a propósito: la fila real de Prisma satisface esta forma y
  * entra tal cual, pero la agregación se ejercita en la matriz fiscal con
  * literales, sin DB.
+ *
+ * `tax_amount_item` (F-090/F-053): el escalar de impuesto POR LÍNEA que
+ * persiste `order_items.tax_amount_item` — el mismo campo que
+ * `createFromOrder` ya lee para armar `invoice_items[].tax_amount`
+ * (`Number(item.tax_amount_item || 0) * quantity`, ver más abajo en este
+ * archivo). Opcional a propósito: un llamador que no lo pase (p. ej. la
+ * matriz fiscal, que construye literales sin este campo) se comporta
+ * EXACTAMENTE igual que hoy — `undefined` se lee como `0` y nunca dispara
+ * la población 3 de `aggregateOrderTaxes`.
  */
 export interface OrderLineTaxSource {
   total_price?: unknown;
+  tax_amount_item?: unknown;
   order_item_taxes?: Array<{
     tax_rate_id?: unknown;
     tax_name: string;
@@ -340,6 +350,37 @@ export interface OrderLineTaxSource {
  * persisten despejada (A.3): NO se re-deriva por 1+r acá, para no
  * introducir una segunda verdad que difiera un centavo de la persistida
  * (A.4/ADR-02). Sin tasas la línea aporta su neto tal cual (ERR-03).
+ *
+ * ## LAS TRES POBLACIONES (F-090, eje de código de F-053)
+ *
+ * El bucle de arriba recorre `item.order_item_taxes || []`: por construcción,
+ * una línea SIN filas no le aporta nada a `taxGroups` ni a `lineTaxes`. Eso
+ * agrupa en un solo veredicto —"cero filas"— a DOS poblaciones que son
+ * fiscalmente opuestas, más una tercera que sí tiene filas:
+ *
+ *   1. LÍNEA EXENTA CORRECTA — `tax_amount_item` (el escalar persistido en
+ *      `order_items.tax_amount_item`, el mismo que `createFromOrder` usa
+ *      para `invoice_items[].tax_amount`) es `0` y no hay filas
+ *      `order_item_taxes`. Documento correcto: la línea de verdad no paga
+ *      impuesto.
+ *   2. LÍNEA CON DESGLOSE — hay filas `order_item_taxes` (con o sin escalar
+ *      coincidente). Este es el camino que el resto de la función agrega.
+ *   3. LÍNEA CON ESCALAR > 0 Y CERO FILAS — `tax_amount_item > 0` pero
+ *      `order_item_taxes` vacío. Nace de carriles de escritura que el
+ *      inventario del plan (`canonical-line-semantics`) no contó: orden
+ *      creada por pasarela de pago, split de cuenta, kitchen-fire. HOY cae
+ *      al mismo veredicto que la población 1 — `invoiceTaxRows` sale vacío
+ *      y la factura resultante tiene `invoice_items` con impuesto en su
+ *      escalar pero `invoice_taxes` vacío: internamente incoherente, y nada
+ *      lo señalaba (F-053). `canonical-line-semantics §9` midió 188 filas
+ *      así en dev — el plan nunca las contó al afirmar "elimina las 55+83
+ *      órdenes no facturables".
+ *
+ * Esta función AHORA discrimina la población 3 y la devuelve en
+ * `tax_scalar_without_breakdown` (conteo + índices de línea), pero
+ * DELIBERADAMENTE no le agrega nada a `header_rows` / `order_line_taxes` /
+ * `distinct_group_count` — ver el porqué en el comentario de esa sección
+ * más abajo. Es una señal para el llamador, no un recálculo.
  */
 export function aggregateOrderTaxes(
   order_items: OrderLineTaxSource[] | null | undefined,
@@ -347,6 +388,15 @@ export function aggregateOrderTaxes(
   order_line_taxes: DocumentLineTaxes;
   header_rows: InvoiceTaxRowInput[];
   distinct_group_count: number;
+  /**
+   * Población 3 (ver docblock arriba): líneas con `tax_amount_item` > 0 y
+   * CERO filas `order_item_taxes`. `count` y `line_indexes` son lo mínimo
+   * para que el llamador pueda loguearlas y localizarlas — NUNCA para
+   * sintetizar la fila que falta (ver el comentario junto al `push` de
+   * abajo: eso es "el documento soporte inventa la tarifa", ya sufrido en
+   * este repo).
+   */
+  tax_scalar_without_breakdown: { count: number; line_indexes: number[] };
 } {
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const taxGroups = new Map<
@@ -368,10 +418,27 @@ export function aggregateOrderTaxes(
    * justamente por acá, desde `order_item_taxes`.
    */
   const orderLineTaxes: DocumentLineTaxes = [];
+  // Población 3 (F-090/F-053, ver docblock de la función): índices de línea
+  // con `tax_amount_item` > 0 y CERO filas `order_item_taxes`. Se recolecta
+  // en el MISMO recorrido, sin alterar `taxGroups`/`orderLineTaxes` — es
+  // lectura pura, nunca escribe en las estructuras que arman el resultado
+  // aritmético.
+  const taxScalarWithoutBreakdownIndexes: number[] = [];
+  let lineIndex = 0;
   for (const item of order_items || []) {
     const lineNet = Number(item.total_price || 0);
     const lineBase = lineNet;
     const lineTaxes: InvoiceTaxRowInput[] = [];
+    const itemTaxRows = item.order_item_taxes || [];
+    // NO se sintetiza la fila que falta: derivar `tax_name`/`tax_type`/
+    // `tax_rate_id` a partir de este escalar sería exactamente "el
+    // documento soporte inventa la tarifa" (ver
+    // `project_support_document_invents_tax_rate` en la memoria del
+    // proyecto) — produciría una tarifa que no existe en ningún catálogo
+    // DIAN. Se reporta el índice; no se rellena el hueco.
+    if (Number(item.tax_amount_item ?? 0) > 0 && itemTaxRows.length === 0) {
+      taxScalarWithoutBreakdownIndexes.push(lineIndex);
+    }
     for (const t of item.order_item_taxes || []) {
       const type = (t.tax_type as string) || 'iva';
       const ratePct = orderTaxFractionToInvoiceRate(
@@ -410,6 +477,7 @@ export function aggregateOrderTaxes(
       });
     }
     orderLineTaxes.push(lineTaxes);
+    lineIndex++;
   }
 
   const invoiceTaxRows: InvoiceTaxRowInput[] = Array.from(
@@ -428,7 +496,39 @@ export function aggregateOrderTaxes(
     order_line_taxes: orderLineTaxes,
     header_rows: invoiceTaxRows,
     distinct_group_count: taxGroups.size,
+    tax_scalar_without_breakdown: {
+      count: taxScalarWithoutBreakdownIndexes.length,
+      line_indexes: taxScalarWithoutBreakdownIndexes,
+    },
   };
+}
+
+/**
+ * F-056 (`createFromOrder`): subtotal de cabecera de la factura generada
+ * desde una orden. La lectura literal de ADR-04 (":2293 usa Σ total_price")
+ * tiene tres lecturas y las tres fallan: sobre el arreglo local `items` de
+ * `createFromOrder` no compila —no tiene campo `total_price`, sólo
+ * `total_amount`—; sobre `total_amount` duplica el impuesto en el
+ * subtotal —ese campo YA suma `+ tax`—; y sobre
+ * `order.order_items[].total_price` a secas PIERDE el flete —la línea
+ * "Envio" es sintética y nunca es un `order_item` real—.
+ *
+ * La lectura correcta: Σ de la base ya persistida por línea de orden
+ * (`order_items.total_price`, que respeta `price_unit_quantity`/peso vía
+ * `resolveLineUnits` — recomputar `quantity × unit_price` los ignora y
+ * descuadra en líneas por peso o con tarifa por empaque) MÁS el flete, que
+ * nunca es un `order_item`. Exportada para fijarla sin Prisma/contexto (ver
+ * `invoicing.service.subtotal-shipping.spec.ts`).
+ */
+export function computeOrderInvoiceSubtotal(
+  order_items: Array<{ total_price?: unknown }> | null | undefined,
+  shipping_cost: number,
+): number {
+  const items_subtotal = (order_items || []).reduce(
+    (acc: number, item) => acc + Number((item as any)?.total_price || 0),
+    0,
+  );
+  return items_subtotal + Number(shipping_cost || 0);
 }
 
 /**
@@ -2298,10 +2398,13 @@ export class InvoicingService {
     // los canales (POS y checkout persisten la base en `unit_price`): no se
     // resta nada acá. Con líneas agregadas, idéntico a hoy; con inclusivas,
     // el total == precio porque la base + la cuota suman el publicado.
-    const subtotal = items.reduce(
-      (acc: number, item: any) =>
-        acc + Number(item.quantity) * Number(item.unit_price),
-      0,
+    //
+    // F-056: fórmula fijada y documentada en `computeOrderInvoiceSubtotal`
+    // (arriba del todo en este archivo) — ahí está el porqué de las tres
+    // lecturas descartadas de ADR-04.
+    const subtotal = computeOrderInvoiceSubtotal(
+      order.order_items || [],
+      shippingCost,
     );
     const discount = items.reduce(
       (acc: number, item: any) => acc + Number(item.discount_amount),
@@ -2324,7 +2427,32 @@ export class InvoicingService {
       order_line_taxes: orderLineTaxes,
       header_rows: invoiceTaxRows,
       distinct_group_count: distinctGroupCount,
+      tax_scalar_without_breakdown: taxScalarWithoutBreakdown,
     } = aggregateOrderTaxes(order.order_items || []);
+    // F-090 (eje de código de F-053) — población 3 de `aggregateOrderTaxes`
+    // (ver su docblock): líneas con `tax_amount_item` > 0 pero SIN filas
+    // `order_item_taxes` no aportan nada a `invoiceTaxRows` y hoy se ven
+    // IDÉNTICAS a una línea exenta correcta — la factura resultante puede
+    // quedar con `invoice_items` cargando impuesto en su escalar e
+    // `invoice_taxes` vacío, y nada lo señalaba. Este warn —mismo shape que
+    // los demás del dominio (`[label]${formatGateCorrelation(...)} mensaje`,
+    // ver `recalculateDocument`/`invoice:create-from-contract`)— es lo único
+    // que hace contable en producción esta población, que es justo lo que
+    // F-090 dice que hoy no se puede. No se sintetiza la fila que falta
+    // (ver docblock de `aggregateOrderTaxes`): se reporta el conteo y los
+    // índices para que quien investigue pueda ir directo a la línea.
+    if (taxScalarWithoutBreakdown.count > 0) {
+      this.logger.warn(
+        `[invoice:create-from-order]${formatGateCorrelation({
+          store_id: context.store_id ?? null,
+          organization_id: context.organization_id ?? null,
+          order_id: order.id,
+        })} F-090: ${taxScalarWithoutBreakdown.count} línea(s) con ` +
+          `tax_amount_item > 0 y sin desglose order_item_taxes (índices: ` +
+          `${taxScalarWithoutBreakdown.line_indexes.join(', ')}); quedan ` +
+          `fuera de invoice_taxes — no se sintetiza la fila faltante`,
+      );
+    }
     // La línea de ENVÍO, cuando existe, se añade al final de `items` y no
     // lleva tributos: se representa como un arreglo vacío para que el
     // alineamiento por posición contra `invoice_items` siga siendo cierto.

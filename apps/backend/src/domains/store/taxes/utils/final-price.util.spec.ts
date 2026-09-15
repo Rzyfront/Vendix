@@ -293,6 +293,46 @@ describe('final-price.util', () => {
       // Peso 0 no anula la línea: cae a la rama de cantidad.
       expect(resolveLineUnits({ quantity: 2, weight: 0 })).toBe(2);
     });
+
+    // F-151 (major, CP-pos-exclusive-tax-double-charge) — el marcador ADR-08
+    // (`tax_amount_item IS NULL` = línea pre-ADR-08 con `unit_price` ya
+    // bruto) evita que una tasa EXCLUSIVA se vuelva a sumar sobre un bruto
+    // que ya la trae adentro. Base 8403 / bruto exclusivo 9999,57 hace la
+    // diferencia (inflar vs. no inflar) visible a simple vista.
+    describe('F-151 — marcador ADR-08 (tax_amount_item)', () => {
+      const exc19 = [{ rate: 0.19, is_inclusive: false }];
+
+      it('con desglose (tax_amount_item con valor): deriva el bruto desde la BASE', () => {
+        expect(
+          resolveOrderLineFinals(
+            { unit_price: 8403, quantity: 1, tax_amount_item: 1596.57 },
+            exc19,
+          ),
+        ).toEqual({ final_unit_price: 9999.57, final_total_price: 9999.57 });
+      });
+
+      it('sin desglose (tax_amount_item: null, línea pre-ADR-08): unit_price YA es el bruto, no se re-aplica la tasa', () => {
+        // Misma tasa exclusiva 19% que el caso anterior, pero acá
+        // `unit_price` ya es el publicado (9999.57) — sin el fix esto
+        // hubiera dado 11899,49 (9999.57 × 1.19), un segundo IVA inventado.
+        expect(
+          resolveOrderLineFinals(
+            { unit_price: 9999.57, quantity: 1, tax_amount_item: null },
+            exc19,
+          ),
+        ).toEqual({ final_unit_price: 9999.57, final_total_price: 9999.57 });
+      });
+
+      it('sin el campo (undefined): idéntico al comportamiento de hoy — deriva siempre', () => {
+        // Un llamador que no fue migrado a pasar `tax_amount_item`
+        // (`orders.service.ts`, fuera de este carril) no puede cambiar de
+        // semántica sin revisión: `undefined` cae en la misma rama que el
+        // caso "con desglose".
+        expect(
+          resolveOrderLineFinals({ unit_price: 8403, quantity: 1 }, exc19),
+        ).toEqual({ final_unit_price: 9999.57, final_total_price: 9999.57 });
+      });
+    });
   });
 
   describe('groupRatesByProductId', () => {

@@ -361,6 +361,73 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         }),
       );
     });
+
+    // F-129 (major, CP-pos-exclusive-tax-double-charge) — el único spec vivo
+    // de este archivo para `addItems` (el de arriba, "prices the line with
+    // the VARIANT value") prueba un producto SIN filas de impuesto: con cero
+    // tasas base == bruto, así que sus asserts pasan bajo las DOS
+    // convenciones (pre y post ADR-08) y el spec queda ciego al cambio que
+    // ADR-08 introdujo. Este caso fija la convención NUEVA con una tasa
+    // EXCLUSIVA 19% real: `unit_price` es la BASE despejada (no el
+    // publicado), `tax_amount_item` es el impuesto POR UNIDAD DE PRECIO
+    // (:824-831 — NUNCA por línea, ambos lectores ya multiplican por
+    // `resolveLineUnits`/`resolvePriceUnits`), y `final_unit_price` es el
+    // bruto. `quantity: 2` deja ver que `total_price` SÍ escala con las
+    // unidades de línea mientras `tax_amount_item` NO (queda por-unidad).
+    it('con impuesto: persiste unit_price=BASE, tax_amount_item POR UNIDAD y final_unit_price=BRUTO (ADR-08)', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue({
+        id: 1,
+        order_id: 100,
+        closed_at: null,
+        table_id: 5,
+        order: { state: 'draft', order_items: [] },
+        table: { id: 5, name: 'Mesa 5', zone: null, status: 'occupied' },
+      });
+      prismaMock.products.findMany.mockResolvedValue([
+        {
+          id: 70,
+          name: 'Pizza',
+          base_price: 8403,
+          is_sellable: true,
+          product_type: 'prepared',
+          track_inventory: false,
+        },
+      ]);
+      // Mismo shape que consume `resolveFullTaxRowsByProductId` (:2637):
+      // UN batch de `product_tax_assignments` con `tax_categories.tax_rates`
+      // incluido, resuelto ANTES de abrir la transacción (:695-703).
+      prismaMock.product_tax_assignments.findMany.mockResolvedValue([
+        {
+          product_id: 70,
+          is_inclusive: false,
+          tax_categories: {
+            tax_type: 'iva',
+            tax_rates: [{ id: 1, name: 'IVA', rate: 0.19, is_inclusive: false }],
+          },
+        },
+      ]);
+      prismaMock.order_items.findMany.mockResolvedValue([]);
+      prismaMock.order_items.create.mockResolvedValue({});
+      prismaMock.orders.update.mockResolvedValue({});
+
+      await service.addItems(1, {
+        items: [{ product_id: 70, quantity: 2 }],
+      } as any);
+
+      // Base 8403 + EXC 19% → cuota 1596,57 → bruto 9999,57 (mismos
+      // importes que `final-price.util.spec.ts` F-151, para que la
+      // diferencia base/bruto sea visible a simple vista).
+      expect(prismaMock.order_items.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            unit_price: new Prisma.Decimal(8403),
+            total_price: new Prisma.Decimal(16806),
+            tax_amount_item: new Prisma.Decimal(1596.57),
+            final_unit_price: new Prisma.Decimal(9999.57),
+          }),
+        }),
+      );
+    });
   });
 
   describe('openTableSessionPublic (QR-por-mesa, Fase 7)', () => {

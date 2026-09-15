@@ -190,15 +190,45 @@ export function resolveLineUnits(
  * tasas del producto, y ese valor × `line_units` redondeado a 2.
  * `final_unit_price` no depende del multiplicador: sólo el total de línea
  * cambia (C.12, cierra F-202).
+ *
+ * F-151 (major, CP-pos-exclusive-tax-double-charge) — ADR-08 declara
+ * `tax_amount_item IS NULL` el marcador permanente y gratuito que distingue
+ * las DOS convenciones que conviven hoy en `order_items`: las líneas VIEJAS
+ * (pre-ADR-08) persisten el PRECIO PUBLICADO (bruto) en `unit_price` y dejan
+ * `tax_amount_item` en NULL; las líneas NUEVAS (post-ADR-08,
+ * `table-sessions.service.ts:addItems` ~:800-870) persisten la BASE en
+ * `unit_price` y el impuesto POR UNIDAD de precio en `tax_amount_item`. Antes
+ * de este fix esta función le aplicaba las tasas a `unit_price`
+ * incondicionalmente: para una línea vieja con una tasa EXCLUSIVA eso volvía
+ * a sumar el impuesto sobre un valor que YA era bruto (`bruto × 1,19`),
+ * inflando la pantalla. Ahora honra el marcador: si la línea NO trae
+ * desglose (`tax_amount_item` explícitamente `null`, el caso real de una fila
+ * pre-ADR-08 leída con el campo proyectado) el `unit_price` persistido YA es
+ * el final publicado — se expone tal cual, sin volver a aplicar tasas. Con
+ * desglose presente (`tax_amount_item` con un valor) se deriva como siempre,
+ * porque ahí `unit_price` es la base.
+ *
+ * `tax_amount_item` es OPCIONAL a propósito: un llamador que no lo pase
+ * (queda `undefined`, no `null`) cae en la rama "con desglose" y conserva
+ * EXACTAMENTE el comportamiento de hoy (deriva siempre) — así ningún
+ * llamador ajeno a este fix cambia de semántica sin que nadie lo revise.
  */
 export function resolveOrderLineFinals(
-  line: OrderLineUnitsInput & { unit_price: unknown },
+  line: OrderLineUnitsInput & {
+    unit_price: unknown;
+    tax_amount_item?: unknown;
+  },
   rates: TypedTaxRate[] | null | undefined,
 ): { final_unit_price: number; final_total_price: number } {
-  const final_unit_price = resolveLineTotals(
-    Number(line?.unit_price),
-    rates ?? [],
-  ).total;
+  const unitPrice = Number(line?.unit_price);
+  // Marcador ADR-08: SOLO `null` explícito (línea vieja proyectada sin
+  // desglose) desactiva el re-cálculo. `undefined` (campo ni siquiera
+  // pasado por el llamador) NO cuenta como marcador — preserva el
+  // comportamiento histórico para quien todavía no fue migrado.
+  const hasNoTaxBreakdown = line?.tax_amount_item === null;
+  const final_unit_price = hasNoTaxBreakdown
+    ? unitPrice
+    : resolveLineTotals(unitPrice, rates ?? []).total;
   return {
     final_unit_price,
     final_total_price: roundMoney2(final_unit_price * resolveLineUnits(line)),

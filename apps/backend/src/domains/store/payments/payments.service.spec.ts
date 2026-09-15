@@ -1917,6 +1917,104 @@ describe('PaymentsService', () => {
     });
 
     /**
+     * F-127 — hoy, si la compuerta de arriba (`POS_TABLE_LINE_TAX_UNRESOLVABLE_001`)
+     * dispara en una tienda por una combinación de catálogo no contemplada, esa
+     * tienda no puede cobrar hasta un revert + deploy completo con la caja
+     * parada. `taxLineGateSeverity` (resuelto en `processPosPayment` desde
+     * `settings.pos.tax_line_gate`, default `'block'`) permite bajarla por
+     * tienda sin redeploy. Estos tres casos prueban el parámetro aislado, con
+     * el mismo fixture (`lostAssignment`) que ya prueba el 'block' de arriba.
+     */
+    describe('buildPosOrderItem — F-127: severidad configurable de la compuerta fiscal (pos.tax_line_gate)', () => {
+      const tx = {
+        products: { findFirst: jest.fn().mockResolvedValue(product) },
+      };
+      const item = { product_id: product.id, quantity: 1, unit_price: 0 };
+
+      const lostAssignment: CalcProductTaxesResult = {
+        total_rate: 0,
+        total_tax_amount: 0,
+        base: 10000,
+        total: 10000,
+        taxes: [],
+        unclosed_residual_cents: 0,
+        invalid_inputs: [],
+        resolved_from: 'catalog',
+        has_tax_assignment: false,
+      };
+
+      afterEach(() => {
+        jest.restoreAllMocks();
+      });
+
+      it("'block' explícito en cierre de mesa lanza POS_TABLE_LINE_TAX_UNRESOLVABLE_001 — mismo comportamiento que sin configurar la clave", async () => {
+        calculateProductTaxesMock.mockResolvedValue(lostAssignment);
+
+        await expect(
+          (service as any).buildPosOrderItem(
+            tx,
+            item,
+            dtoStoreId,
+            posUser,
+            undefined,
+            123,
+            true,
+            'block',
+          ),
+        ).rejects.toMatchObject({
+          errorCode: ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001.code,
+        });
+      });
+
+      it("'warn' NO lanza — deja pasar la línea normalizando el impuesto a cero y registra el mismo detalle (tienda/orden/producto) por logger.warn", async () => {
+        calculateProductTaxesMock.mockResolvedValue(lostAssignment);
+        const warnSpy = jest.spyOn((service as any).logger, 'warn');
+
+        const result = await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+          123,
+          true,
+          'warn',
+        );
+
+        expect(result.tax_amount_item).toBe(0);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event: 'payments.pos_table_line_tax_unresolvable',
+            code: ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001.code,
+            severity: 'warn',
+            store_id: dtoStoreId,
+            order_ref: 123,
+            product_id: product.id,
+          }),
+        );
+      });
+
+      it("'off' NO lanza y NO registra — silencio total, deja pasar la línea igual que 'warn' pero sin dejar rastro", async () => {
+        calculateProductTaxesMock.mockResolvedValue(lostAssignment);
+        const warnSpy = jest.spyOn((service as any).logger, 'warn');
+
+        const result = await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+          123,
+          true,
+          'off',
+        );
+
+        expect(result.tax_amount_item).toBe(0);
+        expect(warnSpy).not.toHaveBeenCalled();
+      });
+    });
+
+    /**
      * F-013 — el espejo de la compuerta G-1 en la rama custom usaba
      * `taxInfo.base`, un campo que `calculateTaxCategoryTaxes` nunca
      * devuelve (`undefined + monto = NaN`, y `roundMoney` colapsa `NaN` a
