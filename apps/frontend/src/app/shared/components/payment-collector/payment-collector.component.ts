@@ -358,9 +358,10 @@ export class PaymentCollectorComponent implements OnInit {
   readonly installmentOptions = computed(() =>
     (this.installments() ?? []).map((inst: any, index: number) => {
       const id = Number(inst?.id ?? inst?.installment_id ?? 0);
-      const isPaid = inst?.state === 'paid';
-      const isForgiven = inst?.state === 'forgiven';
-      const isPartial = inst?.state === 'partial';
+      const st = String(inst?.state ?? inst?.status ?? '').toLowerCase();
+      const isPaid = st === 'paid' || Boolean(inst?.paid_at);
+      const isForgiven = st === 'forgiven';
+      const isPartial = st === 'partial';
       const disabled = isPaid || isForgiven;
 
       let label = inst?.label;
