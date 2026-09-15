@@ -16,6 +16,7 @@ import { canResendOrderItem } from './can-resend';
 
 type ItemShape = {
   inventory_consumed_at_fire?: boolean;
+  cancellation_type?: string | null;
   kitchen_ticket_items?: Array<{
     id: number;
     status: 'pending' | 'in_preparation' | 'ready' | 'delivered' | 'cancelled';
@@ -26,6 +27,7 @@ type ItemShape = {
 function item(
   inventory_consumed_at_fire: boolean,
   deliveredCount: number,
+  cancellation_type?: string | null,
 ): ItemShape {
   const kitchen_ticket_items =
     deliveredCount > 0
@@ -41,7 +43,7 @@ function item(
             kitchen_ticket_id: 1,
           },
         ];
-  return { inventory_consumed_at_fire, kitchen_ticket_items };
+  return { inventory_consumed_at_fire, cancellation_type, kitchen_ticket_items };
 }
 
 describe('canResendOrderItem (QUI-762)', () => {
@@ -120,5 +122,67 @@ describe('canResendOrderItem (QUI-762)', () => {
       ],
     };
     expect(canResendOrderItem(i, 'processing')).toBe(false);
+  });
+});
+
+describe('canResendOrderItem — remake post-cancelación con decisión', () => {
+  // Contrato backend: POST flow/cancel persiste por ítem
+  // `cancellation_type` = 'after_fire_reused' | 'after_fire_waste' y el
+  // resend acepta el remake post-cancelación SOLO con esa decisión.
+  // Sin decisión, el veto actual queda intacto.
+
+  it("order 'cancelled' + cancellation_type 'after_fire_waste' → true (rehacer con nuevos insumos)", () => {
+    expect(
+      canResendOrderItem(item(true, 0, 'after_fire_waste'), 'cancelled'),
+    ).toBe(true);
+  });
+
+  it("order 'cancelled' + cancellation_type 'after_fire_reused' → true (rehacer sin consumir)", () => {
+    expect(
+      canResendOrderItem(item(true, 0, 'after_fire_reused'), 'cancelled'),
+    ).toBe(true);
+  });
+
+  it("order 'cancelled' + ítem delivered + decisión → true (el veto delivered también se levanta)", () => {
+    expect(
+      canResendOrderItem(item(true, 1, 'after_fire_waste'), 'cancelled'),
+    ).toBe(true);
+    expect(
+      canResendOrderItem(item(true, 1, 'after_fire_reused'), 'cancelled'),
+    ).toBe(true);
+  });
+
+  it("order 'cancelled' sin decisión → false (veto intacto)", () => {
+    expect(canResendOrderItem(item(true, 0), 'cancelled')).toBe(false);
+    expect(
+      canResendOrderItem(item(true, 0, null), 'cancelled'),
+    ).toBe(false);
+    expect(
+      canResendOrderItem(item(true, 1), 'cancelled'),
+    ).toBe(false);
+  });
+
+  it("order 'cancelled' + cancellation_type desconocido → false", () => {
+    expect(
+      canResendOrderItem(item(true, 0, 'before_fire'), 'cancelled'),
+    ).toBe(false);
+  });
+
+  it("order 'refunded' + decisión → false (el veto refunded es absoluto)", () => {
+    expect(
+      canResendOrderItem(item(true, 0, 'after_fire_waste'), 'refunded'),
+    ).toBe(false);
+  });
+
+  it("order no-cancelada + ítem delivered + decisión → true (solo la decisión levanta el veto delivered)", () => {
+    expect(
+      canResendOrderItem(item(true, 1, 'after_fire_waste'), 'processing'),
+    ).toBe(true);
+  });
+
+  it('sin fired no hay remake aunque haya decisión → false', () => {
+    expect(
+      canResendOrderItem(item(false, 0, 'after_fire_waste'), 'cancelled'),
+    ).toBe(false);
   });
 });
