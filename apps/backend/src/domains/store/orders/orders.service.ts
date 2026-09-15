@@ -47,6 +47,8 @@ import { OrderFlowService } from './order-flow/order-flow.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { AuditService, AuditAction, AuditResource } from '@common/audit/audit.service';
+// F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
+import { differsByAtLeastCents } from '@common/money-kernel';
 
 /**
  * Tasas de un producto con impuesto, resueltas en batch desde
@@ -2019,7 +2021,7 @@ export class OrdersService {
 
     if (
       dto.shipping_cost !== undefined &&
-      Math.abs(dto.shipping_cost - shippingCost) > 0.01
+      differsByAtLeastCents(dto.shipping_cost, shippingCost)
     ) {
       throw new VendixHttpException(
         ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,

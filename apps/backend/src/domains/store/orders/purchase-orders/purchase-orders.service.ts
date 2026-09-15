@@ -33,6 +33,8 @@ import {
   DEFAULT_STORE_TIMEZONE,
 } from '@common/utils/store-timezone.util';
 import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
+// F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
+import { differsByAtLeastCents } from '@common/money-kernel';
 import { toTitleCase } from '@common/utils/format.util';
 import { generateSlug } from '@common/utils/slug.util';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
@@ -5799,7 +5801,8 @@ export class PurchaseOrdersService {
         );
       }
       const sum = installments.reduce((s, i) => s + Number(i.amount), 0);
-      if (Math.abs(sum - totalAmount) > 0.01) {
+      // F-222: tolerancia de 1 centavo en enteros (no `Math.abs` en floats).
+      if (differsByAtLeastCents(sum, totalAmount)) {
         throw new VendixHttpException(
           ErrorCodes.PO_PAYMENT_005,
           `La suma de cuotas ${sum} no coincide con el total ${totalAmount}.`,

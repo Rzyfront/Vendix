@@ -203,6 +203,24 @@ describe('SessionsService — cierre de caja y resumen autoritativo (QUI-572)', 
       expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
     });
 
+    it('F-222: 1¢ real visto de más (127000.01 vs 127000) SÍ rechaza aunque el float diga que no', async () => {
+      // Math.abs(127000.01-127000) = 0.00999999999476..., así que el `> 0.01`
+      // viejo dejaba cerrar contra una cifra rancia. En centavos enteros es 1¢.
+      prismaMock.cash_register_sessions.findFirst.mockResolvedValue(
+        OPEN_SESSION,
+      );
+
+      const promise = service.closeSession(SESSION_ID, {
+        actual_closing_amount: OPENING_AMOUNT,
+        expected_closing_amount_seen: EXPECTED_FRESH + 0.01,
+      } as any);
+
+      await expect(promise).rejects.toMatchObject({
+        errorCode: 'CASH_SESSION_EXPECTED_STALE_001',
+      });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    });
+
     it('cierra igual que antes cuando el campo no llega (compatibilidad con apps/mobile)', async () => {
       const actual = OPENING_AMOUNT;
       stubCloseFlow({

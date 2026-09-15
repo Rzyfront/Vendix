@@ -179,7 +179,14 @@ export class PosPaymentService {
       product_sku: isCustomItem ? undefined : item.product.sku,
       quantity: item.quantity,
       unit_price: Number(item.unitPrice.toFixed(2)),
-      final_unit_price: Number(item.finalPrice.toFixed(2)),
+      // F-218 — `final_unit_price` es el único portador del bruto declarado y
+      // declararlo arma el guard `store:pos:price_override` en el backend. Viaja
+      // SOLO con edición real del cajero (`isPriceOverridden`) o ítem custom
+      // (precio digitado, sin catálogo contra el cual caer). En la línea normal
+      // se omite (no `null`): el backend cae a `catalogFinalPrice`.
+      ...((item.isPriceOverridden === true || isCustomItem) && {
+        final_unit_price: Number(item.finalPrice.toFixed(2)),
+      }),
       total_price: Number((item.finalPrice * lineUnits).toFixed(2)),
       tax_rate: taxRate,
       tax_amount_item:

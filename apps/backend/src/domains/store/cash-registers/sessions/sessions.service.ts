@@ -16,6 +16,8 @@ import { OpenSessionDto } from '../dto/open-session.dto';
 import { CloseSessionDto } from '../dto/close-session.dto';
 import { QuerySessionDto } from '../dto/query-session.dto';
 import { MovementsService } from '../movements/movements.service';
+// F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
+import { differsByAtLeastCents } from '@common/money-kernel';
 import type { SettingsService } from '../../settings/settings.service';
 
 /**
@@ -255,7 +257,8 @@ export class SessionsService {
     // inexistente en silencio. Va ANTES de la $transaction: rechazar es más
     // barato que abrir una transacción para abortarla.
     const seen = dto.expected_closing_amount_seen;
-    if (seen != null && Math.abs(Number(seen) - expected) > 0.01) {
+    // F-222: tolerancia de 1 centavo en enteros (no `Math.abs` en floats).
+    if (seen != null && differsByAtLeastCents(Number(seen), expected)) {
       throw new VendixHttpException(
         ErrorCodes.CASH_SESSION_EXPECTED_STALE_001,
         `El efectivo esperado cambió mientras contabas: la pantalla mostraba $${Number(seen).toLocaleString('es-CO')} y ahora son $${expected.toLocaleString('es-CO')}. Revisa el resumen actualizado antes de cerrar.`,

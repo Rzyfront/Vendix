@@ -2162,6 +2162,31 @@ describe('PaymentsService', () => {
         );
         expect(mismatchCalls).toHaveLength(0);
       });
+
+      it('F-222: delta exacto de 2¢ (13603.14 vs 13603.12) SÍ registra — el borde es determinista', () => {
+        // En floats, Math.abs(roundMoney(13603.14-13603.12)) > 0.02 es falso
+        // (el doble de 0.02 no es mayor que sí mismo); en centavos enteros la
+        // diferencia es exactamente 2¢ y el umbral de 2¢ la registra.
+        const errorSpy = jest.spyOn((service as any).logger, 'error');
+
+        (service as any).buildOrderItemSnapshot({
+          ...baseParams,
+          unitBasePrice: 13603.14,
+          finalUnitPrice: 13603.12,
+          isPriceOverridden: false,
+          productId: 10,
+          storeId: 3,
+          userId: 42,
+          taxInfo: { total_rate: 0, total_tax_amount: 0, taxes: [] },
+        });
+
+        const mismatchCalls = errorSpy.mock.calls.filter(
+          ([payload]) =>
+            (payload as any)?.event === 'pos.line_gross_mismatch',
+        );
+        expect(mismatchCalls).toHaveLength(1);
+        expect(mismatchCalls[0][0]).toMatchObject({ delta: 0.02 });
+      });
     });
   });
 
@@ -2313,6 +2338,38 @@ describe('PaymentsService', () => {
         product_id: product.id,
         quantity: 1,
         final_unit_price: 13000,
+      };
+      const tx = txFor({ ...product, allow_pos_price_override: false });
+
+      let caught: any;
+      try {
+        await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+        );
+      } catch (e) {
+        caught = e;
+      }
+
+      expect(caught).toBeDefined();
+      expect(caught.errorCode).toBe('POS_PRICE_OVERRIDE_NOT_ALLOWED_001');
+    });
+
+    it('F-222: 1¢ real (declarado 13603.13 vs catálogo 13603.12) SÍ es override aunque el float diga que no', async () => {
+      // El par canónico: Math.abs(13603.13-13603.12) = 0.00999999999839...,
+      // así que el `>= 0.01` viejo NO armaba el guard y la venta pasaba como
+      // precio de catálogo. En centavos enteros difieren en 1¢: es override.
+      calculateProductTaxesMock.mockResolvedValue({
+        ...catalogExclusive(),
+        total: 13603.12,
+      });
+      const item = {
+        product_id: product.id,
+        quantity: 1,
+        final_unit_price: 13603.13,
       };
       const tx = txFor({ ...product, allow_pos_price_override: false });
 

@@ -260,5 +260,21 @@ service = new SplitOrderService(prismaMock as any, {
         } as any),
       ).rejects.toBeInstanceOf(VendixHttpException);
     });
+
+    it('F-222: 1¢ real (montos 13603.13 vs total 13603.12) SÍ rechaza aunque el float diga que no', async () => {
+      // El par canónico: Math.abs(13603.13-13603.12) = 0.00999999999839...,
+      // así que el `> 0.01` viejo NO rechazaba y la cuenta se partía con un
+      // centavo de más en silencio. En centavos enteros difieren en 1¢.
+      prismaMock.orders.findFirst.mockResolvedValueOnce(
+        buildSourceOrder({ grand_total: new Prisma.Decimal(13603.12) }),
+      );
+      await expect(
+        service.splitByAmount(9001, {
+          mode: 'custom',
+          n_splits: 1,
+          amounts: [13603.13],
+        } as any),
+      ).rejects.toBeInstanceOf(VendixHttpException);
+    });
   });
 });
