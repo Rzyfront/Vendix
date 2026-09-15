@@ -273,8 +273,8 @@ export class KdsManagePageComponent implements OnInit {
   }
 
   /**
-   * ¿Se puede borrar FÍSICAMENTE? Solo sin historial (0 turnos y 0 platos
-   * ruteados) y sin ser la de por defecto. Con historial el botón Borrar no
+   * ¿Se puede borrar FÍSICAMENTE? Solo sin historial (0 turnos, 0 platos
+   * ruteados y 0 tickets) y sin ser la de por defecto. Con historial el botón Borrar no
    * aparece y se ofrece Desactivar; el backend re-valida con
    * `KDS_HAS_HISTORY`. Sin `_count` (lista sin conteos) se asume sin
    * historial y el backend decide — su 409 accionable llega al toast.
@@ -283,7 +283,8 @@ export class KdsManagePageComponent implements OnInit {
     if (station.is_default) return false;
     const sessions = station._count?.sessions ?? 0;
     const products = station._count?.products ?? 0;
-    return sessions === 0 && products === 0;
+    const tickets = station._count?.tickets ?? 0;
+    return sessions === 0 && products === 0 && tickets === 0;
   }
 
   deactivate(station: KdsStation, after?: () => void): void {
