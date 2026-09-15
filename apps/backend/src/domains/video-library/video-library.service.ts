@@ -262,7 +262,7 @@ export class VideoLibraryService {
       return url;
     }
     try {
-      return await this.s3Service.signUrl(url);
+      return (await this.s3Service.signUrl(url)) || url;
     } catch {
       return url;
     }

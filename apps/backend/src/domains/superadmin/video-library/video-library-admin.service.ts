@@ -376,7 +376,7 @@ export class VideoLibraryAdminService {
     const cleanName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
     const key = `${path}/${Date.now()}-${cleanName}`;
     const result = await this.s3Service.uploadImage(file.buffer, key, {
-      context: ImageContext.ARTICLE,
+      context: ImageContext.HELP_CENTER,
     });
     const signedUrl = await this.s3Service.signUrl(result.key);
 
@@ -452,7 +452,7 @@ export class VideoLibraryAdminService {
     }
     // Assume S3 key
     try {
-      return await this.s3Service.signUrl(url);
+      return (await this.s3Service.signUrl(url)) || url;
     } catch {
       return url;
     }
