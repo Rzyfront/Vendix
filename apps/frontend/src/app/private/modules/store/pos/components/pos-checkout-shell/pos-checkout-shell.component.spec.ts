@@ -1,5 +1,5 @@
 import { Component, Directive, Pipe, PipeTransform, WritableSignal, input, output, runInInjectionContext, signal } from '@angular/core';
-import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ReactiveFormsModule } from '@angular/forms';
 import { of } from 'rxjs';
@@ -94,6 +94,9 @@ class PaymentStub {
   readonly editingOrderId = input<number | null>(null);
   readonly autoExecute = input(true);
   readonly amountOverride = input<number | null>(null);
+  // La plantilla del shell enlaza `[takeawayOrder]` (`:79`) y el doble no lo
+  // declaraba: NG0303 al primer `detectChanges()`, que tumbaba las 20 pruebas.
+  readonly takeawayOrder = input(false);
   readonly paymentCompleted = output<unknown>();
   readonly paymentReady = output<unknown>();
   readonly amountConfirmed = output<void>();
@@ -372,16 +375,21 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     expect(prevented).toBeFalse();
   });
 
-  it('apertura (false→true) enfoca el panel del paso activo', fakeAsync(() => {
+  // La app es ZONELESS: `zone.js/testing` no se carga, asi que `fakeAsync()`
+  // lanza «zone-testing.js is needed for the fakeAsync() test helper» — y como
+  // `fakeAsync(...)` se evalua al CARGAR el archivo (es el argumento de `it`),
+  // ese throw tumbaba las diez pruebas del archivo, no solo esta. El
+  // equivalente zoneless de `tick()` es `await fixture.whenStable()`.
+  it('apertura (false→true) enfoca el panel del paso activo', async () => {
     fixture.componentRef.setInput('isOpen', false);
     fixture.detectChanges();
-    tick();
+    await fixture.whenStable();
     const focus = spyOn(component as unknown as { focusActiveStepSoon: () => void }, 'focusActiveStepSoon');
     fixture.componentRef.setInput('isOpen', true);
     fixture.detectChanges();
-    tick();
+    await fixture.whenStable();
     expect(focus).toHaveBeenCalledTimes(1);
-  }));
+  });
 
   it('evento ya consumido (radiogroup Tipo) no navega doble', () => {
     const next = spyOn(component, 'attemptNextStep');

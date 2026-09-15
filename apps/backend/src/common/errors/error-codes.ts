@@ -5941,6 +5941,25 @@ export const ErrorCodes = {
     devMessage:
       'El producto de esta línea perdió su asignación fiscal y el impuesto no se puede resolver; no se puede normalizar a IVA cero en silencio.',
   },
+
+  // F-051 (CP-pos-exclusive-tax-double-charge) — `invertDeclaredGross` invierte
+  // un bruto DECLARADO tratando TODAS las tasas como inclusivas (ADR-01: el
+  // flag describe el INPUT, no el catálogo). Ese despeje NO sabe repartir una
+  // tasa con base propia (`fixed_base`, el carve-out de AIU): el kernel fuerza
+  // `fixed_base: undefined` en esta ruta (F-021, `tax-inclusive-math.ts:133`),
+  // así que una tasa AIU que llegara acá perdería su carve-out EN SILENCIO y
+  // la base declarada a la DIAN saldría mal, sin compuerta que lo note. Se
+  // rechaza en vez de resolver mal. No entra bajo la válvula
+  // `settings.pos.tax_line_gate` (F-127) a propósito: aquella baja una
+  // compuerta de DATOS del catálogo para no dejar la caja parada; ésta
+  // protege de una aritmética fiscal incorrecta, que es lo que la válvula
+  // nunca debe poder apagar.
+  POS_DECLARED_GROSS_FIXED_BASE_001: {
+    code: 'POS_DECLARED_GROSS_FIXED_BASE_001',
+    httpStatus: 422,
+    devMessage:
+      'Esta línea declara un precio bruto y su impuesto tiene base propia (fixed_base): el despeje de bruto declarado no puede repartirla y la base resultante sería incorrecta.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

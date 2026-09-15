@@ -109,23 +109,38 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
       }
     }
 
-    // F-101 — misma magnitud que ya usa `dispatch-note-pdf.service.ts`:
-    // `dispatch_note_items.unit_price`/`total_price` son el precio ya
-    // cobrado por línea (misma convención que `order_items`, que
-    // `pos-sale-ticket.provider.ts` ya trata como `money_basis: 'gross'`
-    // sin sumarle impuesto aparte) — no hace falta recomputar nada, sólo
-    // leer la columna correcta.
-    const items = (note.dispatch_note_items || []).map((it: any, idx: number) => ({
-      index: idx + 1,
-      product_name: it.product?.name || `Producto #${it.product_id}`,
-      variant_sku: it.product_variant?.sku || undefined,
-      quantity: Number(it.dispatched_quantity ?? it.ordered_quantity ?? 1) || 1,
-      dispatched_qty: Number(it.dispatched_quantity || 0),
-      unit_price: Number(it.unit_price || 0),
-      total_price: Number(it.total_price || 0),
-      discount_amount: it.discount_amount ? Number(it.discount_amount) : undefined,
-      tax_amount: it.tax_amount ? Number(it.tax_amount) : undefined,
-    }));
+    // C.7 — corrige la premisa de F-101, que daba las dos columnas por
+    // equivalentes. No lo son: el escritor
+    // (`dispatch-notes.service.ts:1247/1749`) persiste
+    // `total_price = unit_price × cantidad − descuento + tax_amount`, así que
+    // `total_price` ya es BRUTO de línea mientras `unit_price` sigue siendo la
+    // BASE por unidad. Bajo `money_basis: 'gross'` eso imprimía una fila que
+    // no cuadra consigo misma (Precio × Cant. ≠ Total) aunque Σ filas sí
+    // cerrara contra el total del documento. El unitario se lleva a bruto
+    // prorrateando el impuesto de LÍNEA (`dispatch_note_items.tax_amount` es
+    // por línea, igual que `order_item_taxes.tax_amount`); el total NO se
+    // recalcula — es el persistido, y es la magnitud que el invariante de
+    // suma verifica.
+    const items = (note.dispatch_note_items || []).map((it: any, idx: number) => {
+      const quantity = Number(it.dispatched_quantity ?? it.ordered_quantity ?? 1) || 1;
+      const lineTax = Number(it.tax_amount || 0);
+      const baseUnit = Number(it.unit_price || 0);
+      const grossUnit =
+        Number.isFinite(lineTax) && lineTax !== 0 && quantity > 0
+          ? Math.round((baseUnit + lineTax / quantity) * 100) / 100
+          : baseUnit;
+      return {
+        index: idx + 1,
+        product_name: it.product?.name || `Producto #${it.product_id}`,
+        variant_sku: it.product_variant?.sku || undefined,
+        quantity,
+        dispatched_qty: Number(it.dispatched_quantity || 0),
+        unit_price: grossUnit,
+        total_price: Number(it.total_price || 0),
+        discount_amount: it.discount_amount ? Number(it.discount_amount) : undefined,
+        tax_amount: it.tax_amount ? Number(it.tax_amount) : undefined,
+      };
+    });
 
     return {
       store: {

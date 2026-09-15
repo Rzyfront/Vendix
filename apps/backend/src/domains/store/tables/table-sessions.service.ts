@@ -1855,6 +1855,11 @@ export class TableSessionsService {
                 // cuenta QR-mesa hereda el multiplicador viejo (F-202).
                 weight: true,
                 price_unit_quantity: true,
+                // F-151 — marcador ADR-08 (`null` = línea pre-ADR-08 con
+                // `unit_price` ya bruto). Sin proyectarlo,
+                // `resolveOrderLineFinals` no puede distinguir la línea vieja
+                // de la nueva y re-aplica tasas sobre un bruto ya resuelto.
+                tax_amount_item: true,
                 inventory_consumed_at_fire: true,
                 // CP-POLLO-ARABE-727 F.1 Round 4 (C.4) — insumos para derivar
                 // `variant_label` con el mismo criterio de
@@ -1966,6 +1971,9 @@ export class TableSessionsService {
               quantity: it.quantity,
               weight: it.weight,
               price_unit_quantity: it.price_unit_quantity,
+              // F-151 — con esto pasado, `null` (línea pre-ADR-08) desactiva
+              // el re-cálculo y evita el bruto × 1,19 en tasas exclusivas.
+              tax_amount_item: it.tax_amount_item,
             },
             rates,
           ),

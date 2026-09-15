@@ -18,6 +18,9 @@ import {
 // `money_basis: 'gross'` (G-01) y propaga el gate fiscal que C.1 resolvió,
 // usando las filas `org`/`store` que el `include` de C.1 ya trae en memoria.
 import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
+// C.7 / V-5 (ADR-12 G-01) — el bruto por línea sale de UNA definición
+// compartida que lee el desglose persistido; no se recalcula acá.
+import { resolveOrderLinePrintedGross } from '../../taxes/utils/final-price.util';
 
 @Injectable()
 export class PosSaleTicketDataProvider implements IDocumentDataProvider {
@@ -498,7 +501,20 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         : '';
     const tableName = table?.name ? `Mesa ${table.name}` : '';
 
-    const items = (order.order_items || []).map((it: any, i: number) => ({
+    // C.7 / V-5 (CP-pos-exclusive-tax-double-charge, ADR-12 G-01) — el tiquete
+    // declara `money_basis: 'gross'` más abajo y hasta acá mapeaba
+    // `unit_price`/`total_price` directo desde `order_items`, que post-ADR-08
+    // son la BASE gravable. Con una tasa EXCLUSIVA el papel real del mostrador
+    // salía con «Precio $22.000 / Total $22.000» contra «TOTAL A PAGAR
+    // $26.180», y sin filas `Subtotal:`/`Impuestos:` —las suprime la regla
+    // anti-huérfana del compositor, precisamente porque se le declaró bruto—,
+    // así que nada en el papel explicaba los $4.180. El bruto se compone del
+    // desglose PERSISTIDO (`order_item_taxes`, que el `include` de arriba ya
+    // trae), no de un recálculo por tasas: ver `resolveOrderLinePrintedGross`.
+    const items = (order.order_items || []).map((it: any, i: number) => {
+      const { gross_unit_price, gross_total_price } =
+        resolveOrderLinePrintedGross(it);
+      return {
       index: i + 1,
       product_name: it.product_name,
       variant_sku: it.variant_sku || undefined,
@@ -507,8 +523,8 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       // snapshot al crear la línea), no por un campo nuevo del modelo.
       variant_attributes: it.variant_attributes || undefined,
       quantity: Number(it.quantity || 1),
-      unit_price: Number(it.unit_price || 0),
-      unit_price_formatted: `$${Number(it.unit_price || 0).toLocaleString('es-CO')}`,
+      unit_price: gross_unit_price,
+      unit_price_formatted: `$${gross_unit_price.toLocaleString('es-CO')}`,
       discount_amount: Number(it.discount_amount || 0),
       discount_formatted: it.discount_amount ? `-$${Number(it.discount_amount).toLocaleString('es-CO')}` : undefined,
       // C.2 (ADR-12) — mismo mapeo que `quotation.provider.ts:101-104`: la
@@ -529,9 +545,10 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       tax_amount: it.tax_amount_item !== null && it.tax_amount_item !== undefined
         ? Number(it.tax_amount_item)
         : undefined,
-      total_price: Number(it.total_price || 0),
-      total_price_formatted: `$${Number(it.total_price || 0).toLocaleString('es-CO')}`,
-    }));
+      total_price: gross_total_price,
+      total_price_formatted: `$${gross_total_price.toLocaleString('es-CO')}`,
+      };
+    });
 
     const taxes = this.aggregateTaxes(order.order_items);
 
