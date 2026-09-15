@@ -562,7 +562,7 @@ export async function seedPermissionsAndRoles(
     {
       name: 'store:kitchen_fire:resend',
       description:
-        'Rehacer/reenviar comanda a cocina (nuevo ticket sin consumo nuevo) — solo owner/admin',
+        'Rehacer/reenviar comanda a cocina (respeta decision reuse/waste) — solo owner/admin',
       path: '/api/store/kitchen-fire/resend',
       method: 'POST',
     },
