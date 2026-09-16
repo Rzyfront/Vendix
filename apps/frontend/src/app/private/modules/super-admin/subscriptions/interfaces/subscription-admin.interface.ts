@@ -51,6 +51,15 @@ export interface AIFeatureConfig {
   daily_messages_cap?: number | null;
   retention_days?: number | null;
   tools_allowed?: string[];
+  /**
+   * F6 — agentes del catálogo vivo (`ai_agents.key`) que pueden operar bajo
+   * esta feature. Viaja anidado en la config (p. ej.
+   * `tool_agents.agents_allowed`) para sobrevivir a
+   * `normalizeAIFeatureFlags`, que solo preserva keys de objeto y soltaría un
+   * arreglo superior en el round-trip load/save. El backend valida cada key
+   * contra `ai_agents` y rechaza rotas con 400.
+   */
+  agents_allowed?: string[];
   indexed_docs_cap?: number | null;
   monthly_jobs_cap?: number | null;
   /**
@@ -64,6 +73,33 @@ export interface AIFeatureConfig {
 }
 
 export type AIFeatureFlags = Partial<Record<AIFeatureKey, AIFeatureConfig>>;
+
+/** Opción viva para los pickers del plan (apps por categoría, agentes por key, tools por nombre). */
+export interface EngineCatalogOption {
+  value: string;
+  label: string;
+  description?: string;
+  inactive?: boolean;
+}
+
+/** App viva que resuelve una categoría, con el modelo activo que la atiende. */
+export interface EngineAppLineage {
+  key: string;
+  name: string;
+  isActive: boolean;
+  /** Etiqueta del modelo que resolverá la feature (`label · model_id` o similar). */
+  modelLabel: string | null;
+}
+
+/** Linaje visible plan→app→modelo por feature habilitada (F6, plan-detail). */
+export interface PlanFeatureLineage {
+  feature: AIFeatureKey;
+  enabled: boolean;
+  capLabel: string;
+  apps: EngineAppLineage[];
+  agents: { key: string; name: string | null; missing: boolean }[];
+  tools: { name: string; missing: boolean }[];
+}
 
 export interface SubscriptionPlan {
   // Identity
