@@ -44,14 +44,25 @@ services:
     restart: unless-stopped
     # Sin límite, el backend crecía libre (~2.3 GB observados) y empujaba a la
     # VM al OOM global, cuya víctima siempre acababa siendo `ng serve` por RSS.
-    mem_limit: 4096m
-    memswap_limit: 5g
+    mem_limit: 2560m
+    memswap_limit: 3g
     env_file:
       - ./apps/backend/.env
     environment:
       DATABASE_URL: postgres://username:password@db:5432/vendix_db?schema=public
       NODE_ENV: development
-      NODE_OPTIONS: "--max-old-space-size=3072"
+      # node:24-alpine (subido desde node:20-alpine por EOL de Node 20, 2026-04-30):
+      # el mismo grafo de rutas/DI necesita más heap para bootear sin OOM que en
+      # Node 20 — 1536 chocaba justo al terminar RouterExplorer.
+      # nancy 2026-09-01: bajado 2048 -> 1792. El techo del contenedor es
+      # 2560m y el RSS total = heap + nativo + compilador swc + source maps.
+      # Con heap 2048 el proceso llegaba a 2.44 GiB (97,9% del cgroup) y el
+      # kernel lo mataba con SIGKILL en la segunda peticion; en el log se lee
+      # como "npm error signal SIGKILL", que NO parece un problema de memoria.
+      # Con 1792 V8 recolecta antes en vez de morir: una pausa de GC es
+      # preferible a un bucle de reinicios. No se toca `mem_limit` porque
+      # subirlo agranda la huella de la VM en el host, y el host va justo.
+      NODE_OPTIONS: "--max-old-space-size=1792"
       CHOKIDAR_USEPOLLING: "true"
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -156,8 +167,13 @@ services:
   frontend:
     profiles: ["docker-fe"]
     build:
-      context: ./apps/frontend
-      dockerfile: Dockerfile.dev
+      # QUI-832 (hallazgo 2, opción A): contexto a la RAÍZ del repo para que
+      # `@money-kernel` resuelva. `apps/frontend/tsconfig.json` mapea el alias
+      # a `../backend/src/common/money-kernel/` y con contexto de workspace ese
+      # `../backend` no existe en la imagen (TS2307). Sólo afecta al build: los
+      # volúmenes siguen montando `./apps/frontend` en `/app`.
+      context: .
+      dockerfile: apps/frontend/Dockerfile.dev
     container_name: vendix_frontend
     restart: unless-stopped
     # Presupuesto del contenedor en build en frío, medido en dmesg:
