@@ -1728,6 +1728,11 @@ export class OrderFlowService {
    * existe pero es de otra orden, el `updateMany` no toca filas y la
    * respuesta es 404 sin filtrar nada del otro tenant.
    *
+   * Paso 2 sync cocina↔orden: DESPUÉS del stamp (incluido el caso
+   * idempotente) propaga orden→cocina vía `syncKitchenOnOrderItemDelivered`
+   * (última fila ready → delivered, cierre de ticket, puente
+   * `kitchen.order_all_delivered`). Best-effort: nunca revierte el stamp.
+   *
    * Devuelve la vista básica de la orden (misma forma que `getOrder`,
    * `shipOrder`, `markKitchenOrderDelivered`) para que el frontend
    * reemplace su estado sin una segunda llamada al detalle.
@@ -1735,7 +1740,7 @@ export class OrderFlowService {
   async deliverOrderItem(orderId: number, orderItemId: number) {
     // 1. Orden debe existir en la tienda del contexto. `getOrder` lanza 404
     //    si no la encuentra o no pertenece al scope.
-    await this.getOrder(orderId);
+    const order = await this.getOrder(orderId);
 
     const item = await this.prisma.order_items.findFirst({
       where: { id: orderItemId, order_id: orderId },
@@ -1759,44 +1764,152 @@ export class OrderFlowService {
       );
     }
 
-    // 2. Idempotencia: la primera entrega es la que ocurrió.
-    if (item.delivered_at) {
-      return this.getOrder(orderId);
-    }
+    // 2. Idempotencia del stamp: la primera entrega es la que ocurrió. El
+    //    caso idempotente NO retorna antes de sincronizar — `delivered_at`
+    //    se usa como punto de sincronización (reconcilia cocina abajo).
+    const alreadyDelivered = item.delivered_at != null;
 
-    // 3. Compuerta de cocina para items preparados.
-    if (item.item_type === 'prepared') {
-      const kitchenStatus = item.kitchen_ticket_items[0]?.status ?? null;
-      if (kitchenStatus !== 'ready') {
-        throw new VendixHttpException(
-          ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE,
-          `El plato "${item.product_name}" todavia no esta listo en cocina (estado: ${kitchenStatus ?? 'sin enviar'})`,
-        );
+    if (!alreadyDelivered) {
+      // 3. Compuerta de cocina para items preparados.
+      if (item.item_type === 'prepared') {
+        const kitchenStatus = item.kitchen_ticket_items[0]?.status ?? null;
+        if (kitchenStatus !== 'ready') {
+          throw new VendixHttpException(
+            ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE,
+            `El plato "${item.product_name}" todavia no esta listo en cocina (estado: ${kitchenStatus ?? 'sin enviar'})`,
+          );
+        }
       }
+
+      // 4. Stamp de entrega — la `where` con `order_id: orderId` es la barrera
+      //    de scope: si alguien intenta entregar el item de otra orden, el
+      //    updateMany no toca filas.
+      const now = new Date();
+      const userId = RequestContextService.getUserId() ?? null;
+
+      await this.prisma.order_items.updateMany({
+        where: { id: orderItemId, order_id: orderId },
+        data: {
+          delivered_at: now,
+          delivered_by_user_id: userId,
+          updated_at: now,
+        },
+      });
+
+      this.logger.log(
+        `Order item #${orderItemId} of order #${orderId} delivered by user #${userId}`,
+      );
+    } else {
+      this.logger.debug(
+        `Order item #${orderItemId} of order #${orderId} already delivered — reconciling kitchen state`,
+      );
     }
 
-    // 4. Stamp de entrega — la `where` con `order_id: orderId` es la barrera
-    //    de scope: si alguien intenta entregar el item de otra orden, el
-    //    updateMany no toca filas.
-    const now = new Date();
-    const userId = RequestContextService.getUserId() ?? null;
-
-    await this.prisma.order_items.updateMany({
-      where: { id: orderItemId, order_id: orderId },
-      data: {
-        delivered_at: now,
-        delivered_by_user_id: userId,
-        updated_at: now,
-      },
-    });
-
-    this.logger.log(
-      `Order item #${orderItemId} of order #${orderId} delivered by user #${userId}`,
+    // 5. Propagación orden→cocina (paso 2 sync cocina↔orden), best-effort
+    //    post-commit: el stamp ya quedó, un fallo de cocina nunca lo revierte.
+    await this.syncKitchenOnOrderItemDelivered(
+      orderId,
+      orderItemId,
+      (order as any)?.store_id ?? null,
     );
 
-    // 5. Devolver la vista de la orden actualizada (forma `getOrder`,
+    // 6. Devolver la vista de la orden actualizada (forma `getOrder`,
     //    igual que `shipOrder` / `markKitchenOrderDelivered`).
     return this.getOrder(orderId);
+  }
+
+  /**
+   * Paso 2 sync cocina↔orden — propagación orden→cocina. Contrapartida de
+   * `KitchenFireService.markDelivered` (cocina→orden): cuando el mesero
+   * entrega el plato desde la orden, la fila de cocina debe reflejarlo.
+   *
+   *   - Última fila `kitchen_ticket_items` del ítem en `ready` → `delivered`
+   *     (SOLO esa fila por PK; jamás filas de otros ítems).
+   *   - Si con eso TODAS las filas del ticket quedan terminales
+   *     (`delivered`/`cancelled`), cierra el ticket (`delivered` si hay ≥1
+   *     delivered) y evalúa el puente all-terminal con el mismo criterio que
+   *     `markDelivered`: emite `kitchen.order_all_delivered` si todo-terminal
+   *     + ≥1 delivered. El listener mueve la orden `processing -> delivered`.
+   *   - Última fila en `pending`/`in_preparation` (re-disparo en cocina) o ya
+   *     terminal → NO tocar. Sin filas → nada que hacer.
+   */
+  private async syncKitchenOnOrderItemDelivered(
+    orderId: number,
+    orderItemId: number,
+    storeId: number | null,
+  ): Promise<void> {
+    try {
+      // La última fila manda (los re-disparos crean filas nuevas con mayor id).
+      const latest = await this.prisma.kitchen_ticket_items.findFirst({
+        where: { order_item_id: orderItemId },
+        orderBy: { id: 'desc' },
+        select: { id: true, status: true, kitchen_ticket_id: true },
+      });
+      if (!latest) {
+        return;
+      }
+      if (latest.status !== 'ready') {
+        return;
+      }
+
+      await this.prisma.kitchen_ticket_items.update({
+        where: { id: latest.id },
+        data: { status: 'delivered', updated_at: new Date() },
+      });
+
+      const rows = await this.prisma.kitchen_ticket_items.findMany({
+        where: { kitchen_ticket_id: latest.kitchen_ticket_id },
+        select: { status: true },
+      });
+      const allTerminal =
+        rows.length > 0 &&
+        rows.every(
+          (r) => r.status === 'delivered' || r.status === 'cancelled',
+        );
+      if (!allTerminal) {
+        return;
+      }
+
+      const anyDelivered = rows.some((r) => r.status === 'delivered');
+      await this.prisma.kitchen_tickets.update({
+        where: { id: latest.kitchen_ticket_id },
+        data: {
+          status: anyDelivered ? 'delivered' : 'cancelled',
+          updated_at: new Date(),
+        },
+      });
+
+      const orderTickets = await this.prisma.kitchen_tickets.findMany({
+        where: {
+          order_id: orderId,
+          ...(storeId != null ? { store_id: storeId } : {}),
+        },
+        select: { status: true },
+      });
+      const allOrderTerminal =
+        orderTickets.length > 0 &&
+        orderTickets.every(
+          (t) => t.status === 'delivered' || t.status === 'cancelled',
+        );
+      const anyOrderDelivered = orderTickets.some(
+        (t) => t.status === 'delivered',
+      );
+      if (allOrderTerminal && anyOrderDelivered) {
+        this.eventEmitter.emit('kitchen.order_all_delivered', {
+          orderId,
+          storeId,
+        });
+      }
+    } catch (e) {
+      // Best-effort (mismo patrón que `markDelivered`): el stamp de
+      // `delivered_at` ya hizo commit — se observa por logs, nunca revierte
+      // la entrega ni rompe el contrato del endpoint.
+      this.logger.warn(
+        `Failed to sync kitchen on delivery of order item #${orderItemId} (order #${orderId}): ${
+          (e as Error).message
+        }`,
+      );
+    }
   }
 
   /**
