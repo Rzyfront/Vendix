@@ -1141,17 +1141,15 @@
                           Cambiar
                         </app-button>
                       }
-                      @if (canPrintDispatchNote()) {
-                        <app-button
-                          variant="outline-secondary"
-                          size="xsm"
-                          (clicked)="printDispatchNote()"
-                          ariaLabel="Imprimir despacho"
-                        >
-                          <app-icon slot="icon" name="file-text" size="12"></app-icon>
-                          Imprimir despacho
-                        </app-button>
-                      }
+                      <app-button
+                        variant="outline-secondary"
+                        size="xsm"
+                        (clicked)="printDispatchTicket()"
+                        ariaLabel="Imprimir despacho"
+                      >
+                        <app-icon slot="icon" name="package" size="12"></app-icon>
+                        Imprimir despacho
+                      </app-button>
                     </div>
                   </div>
                   <div class="space-y-1.5 text-sm">
@@ -2442,21 +2440,18 @@
                 Imprimir Ticket
               </app-button>
             </div>
-            <!-- Agente C — Imprimir despacho (remisión vía gateway,
-                 `formatType: 'dispatch_note'`). Solo con remisión: la card
-                 "Despacho / Remisiones" se pinta con `dispatchNotes()`. -->
-            @if (canPrintDispatchNote()) {
-              <div class="pt-2">
-                <app-button
-                  variant="secondary"
-                  [fullWidth]="true"
-                  (clicked)="printDispatchNote()"
-                >
-                  <app-icon slot="icon" name="file-text" size="16"></app-icon>
-                  Imprimir despacho
-                </app-button>
-              </div>
-            }
+            <!-- Imprimir despacho: tiquete del gate (`dispatch_ticket`).
+                 Siempre habilitado. -->
+            <div class="pt-2">
+              <app-button
+                variant="secondary"
+                [fullWidth]="true"
+                (clicked)="printDispatchTicket()"
+              >
+                <app-icon slot="icon" name="package" size="16"></app-icon>
+                Imprimir despacho
+              </app-button>
+            </div>
           </app-card>
         </div>
       </div>

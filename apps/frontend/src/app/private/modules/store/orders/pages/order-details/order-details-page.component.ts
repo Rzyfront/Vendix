@@ -109,7 +109,6 @@ import {
 } from '../../../../../../shared/services/print/dispatch-ticket-autoprint';
 import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
-import { DispatchNotePrintService } from '../../../dispatch-notes/services/dispatch-note-print.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
 import {
   RepartosService,
@@ -1293,22 +1292,19 @@ export class OrderDetailsPageComponent {
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     { id: 'print', label: 'Imprimir ticket', variant: 'outline', icon: 'printer' },
-    // Agente C — remisión del despacho (`formatType: 'dispatch_note'`).
-    // `disabled` sigue a `canPrintDispatchNote` (hay remisión): sin
-    // remisión no hay `documentId` para el gateway. Se renderiza vía las
-    // `actions()` del sticky-header, igual que `print` y el e-ticket.
+    // Tiquete de despacho del gate (`formatType: 'dispatch_ticket'` desde
+    // los datos de la orden). Siempre habilitado.
     {
-      id: 'print-dispatch-note',
+      id: 'print-dispatch-ticket',
       label: 'Imprimir despacho',
       variant: 'outline',
-      icon: 'file-text',
-      disabled: !this.canPrintDispatchNote(),
+      icon: 'package',
     },
   ]);
 
   /**
    * QUI-764b — predicado MANUAL del tiquete de despacho. Decide si el
-   * botón `e-ticket de envío` debe estar habilitado y si el handler
+   * botón `Imprimir despacho` debe estar habilitado y si el handler
    * `printDispatchTicket` debe imprimir. Una sola fuente de verdad:
    * `headerActions.disabled` y el handler consultan este computed.
    *
@@ -1347,17 +1343,6 @@ export class OrderDetailsPageComponent {
     }
     return true;
   });
-
-  /**
-   * Agente C — predicado del botón "Imprimir despacho" (remisión). La única
-   * guarda es la existencia de remisiones: la card "Despacho / Remisiones"
-   * se pinta con `dispatchNotes().length > 0` y el headerActions, el botón
-   * del sidebar y el handler consultan este computed. Sin remisión no hay
-   * `documentId` que mandar al gateway (`formatType: 'dispatch_note'`).
-   */
-  readonly canPrintDispatchNote = computed<boolean>(
-    () => this.dispatchNotes().length > 0,
-  );
 
   /**
    * Agente C — badge pre-despacho clickeable. `true` cuando la orden exige
@@ -1453,11 +1438,6 @@ export class OrderDetailsPageComponent {
   // desde acá sólo lanzamos el manual al pulsar el botón del header o de
   // la card "Gestión de Envío".
   private readonly dispatchTicketPrint = inject(DispatchTicketPrintService);
-  // Agente C — impresión de la remisión (`formatType: 'dispatch_note'`).
-  // Tercer carril de impresión del detalle, junto a `ticketService`
-  // (`pos_order` vía `resolveAndPrint`) y `dispatchTicketPrint`
-  // (`formatType: 'dispatch_ticket'`): cada formato sale por su servicio.
-  private readonly dispatchNotePrint = inject(DispatchNotePrintService);
   private readonly countryService = inject(CountryService);
   // CP-DTLP Phase E.3 — guard del disparador manual (default true ADR-7).
   private readonly settingsFacade = inject(StoreSettingsFacade);
@@ -2937,9 +2917,8 @@ export class OrderDetailsPageComponent {
       this.printOrder();
     } else if (actionId === 'credit-payment') {
       this.openPayModal();
-    } else if (actionId === 'print-dispatch-note') {
-      // Agente C — remisión del despacho desde header.
-      void this.printDispatchNote();
+    } else if (actionId === 'print-dispatch-ticket') {
+      void this.printDispatchTicket();
     }
   }
 
@@ -3059,27 +3038,6 @@ export class OrderDetailsPageComponent {
         err,
       );
       this.toastService.error('No se pudo imprimir el tiquete de despacho');
-    }
-  }
-
-  /**
-   * Agente C — imprime la remisión (despacho) más reciente de la orden vía
-   * `DispatchNotePrintService` (gateway, `formatType: 'dispatch_note'` —
-   * distinto de `dispatch_ticket` del e-ticket y de `pos_order` del ticket).
-   * La guarda es `canPrintDispatchNote` (hay remisión), el MISMO computed
-   * que deshabilita el headerActions y oculta el botón del sidebar. El
-   * manejo de error replica `printOrder`: rastro en consola + toast.
-   */
-  async printDispatchNote(): Promise<void> {
-    if (!this.canPrintDispatchNote()) return;
-    const note = this.dispatchNotes()[0];
-    if (!note) return;
-
-    try {
-      await this.dispatchNotePrint.printDispatchNote(note);
-    } catch (err) {
-      console.error('Error generating dispatch note:', err);
-      this.toastService.error('Error al generar la remisión');
     }
   }
 
