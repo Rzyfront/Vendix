@@ -35,6 +35,12 @@ import type {
   SplitMode,
   TableSessionOrderItem,
 } from '../../restaurant-ops/tables/interfaces';
+// F-225 (ADR-16): mismo kernel de dinero que `pos-cart.service.ts` — ver
+// `apps/frontend/tsconfig.app.json` (`paths`). `Math.abs(a - b) > 0.01`
+// tolera EXACTAMENTE 1 centavo (marca descuadre desde el 2do centavo); la
+// traducción fiel es `differsByAtLeastCents(a, b, 2)`, no el umbral por
+// defecto (1). Cambiar este umbral rompe el split de cuenta en producción.
+import { differsByAtLeastCents } from '@money-kernel/money-compare';
 
 type SplitMethod = 'items' | 'amount';
 
@@ -511,7 +517,7 @@ export class PosSplitBillModalComponent {
 
   readonly customSumMismatch = computed(() => {
     if (this.splitMode() !== 'custom') return false;
-    return Math.abs(this.customSum() - this.grandTotal()) > 0.01;
+    return differsByAtLeastCents(this.customSum(), this.grandTotal(), 2);
   });
 
   readonly assignedCount = computed(

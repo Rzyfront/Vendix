@@ -2716,6 +2716,17 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/orders/:orderId/flow/reactivate',
       method: 'POST',
     },
+    // 1060 paso 2 — reversa de entrega de ítem (restock/merma). Permiso
+    // propio (no hereda `order_flow:create`): reversar mueve inventario o
+    // declara merma, así que solo cashier/admin/owner. waiter/employee usan
+    // listas explícitas y quedan en deny-by-default (no se agregan ahí).
+    {
+      name: 'store:orders:order_flow:cancel_delivered',
+      description:
+        'Reversar entrega de ítem entregado (restock a inventario o merma auditada) — solo cashier/admin/owner',
+      path: '/api/store/orders/:orderId/flow/items/:orderItemId/cancel-delivered',
+      method: 'POST',
+    },
     {
       name: 'store:orders:purchase_orders:approve',
       description: 'Approve orders purchase orders',
@@ -4962,6 +4973,9 @@ export async function seedPermissionsAndRoles(
       // 'store:orders:order_flow:create', so list these explicitly.
       p.name === 'store:orders:order_flow:create' ||
       p.name === 'store:orders:order_flow:read' ||
+      // 1060 paso 2 — reversa de entrega (restock/merma): el cajero la
+      // necesita para corregir entregas; waiter/employee quedan fuera.
+      p.name === 'store:orders:order_flow:cancel_delivered' ||
       // Cupones - leer y validar
       p.name.includes('store:coupons:read') ||
       p.name.includes('store:coupons:read:one') ||

@@ -1101,6 +1101,14 @@ export class OrdersService {
             quantity: item.quantity,
             weight: item.weight,
             price_unit_quantity: item.price_unit_quantity,
+            // F-151 — el marcador de procedencia de ADR-08. Una línea
+            // anterior a la normalización tiene `tax_amount_item` NULL y
+            // guarda el precio PUBLICADO en `unit_price`; volver a aplicarle
+            // una tasa exclusiva la mostraría inflada un 19%. El helper lo
+            // detecta y devuelve el `unit_price` tal cual. El `include` de
+            // arriba trae todos los escalares de `order_items`, así que el
+            // campo ya viene: no hace falta ampliar ninguna proyección.
+            tax_amount_item: item.tax_amount_item,
           },
           rates,
         );
@@ -1254,14 +1262,39 @@ export class OrdersService {
           : order_delivery_type_enum.home_delivery;
     }
 
-    // Recalculate grand_total if shipping_cost changes
+    // Recalculate grand_total if shipping_cost changes.
+    //
+    // F-086 punto (b) — a esta fórmula le faltaban DOS términos frente a los
+    // dos carriles POS que ya la calculan bien (venta directa
+    // `payments.service.ts` y cierre de mesa, ambos:
+    // `Math.max(0, subtotal + tax − descuento + envío + propina)`):
+    //
+    //  1. La propina (`tip_amount`). Sin ella, reabrir el editor y guardar
+    //     sólo un cambio de envío sobre una orden POS con propina le borraba
+    //     la propina del `grand_total` mientras `orders.tip_amount` seguía
+    //     intacta: el pago ya cobrado queda por encima del nuevo total y el
+    //     asiento contable pierde el CR del pasivo custodio de la propina.
+    //     `UpdateOrderDto` no declara `tip_amount` hoy (el `whitelist` del
+    //     ValidationPipe rechazaría el campo si llegara), así que el término
+    //     sale SIEMPRE de la orden persistida; el `(updateOrderDto as
+    //     any).tip_amount ?? …` deja el cálculo listo para el día en que el
+    //     DTO sí la exponga, sin que nadie tenga que volver a tocar esta
+    //     fórmula.
+    //  2. El clamp `Math.max(0, …)`. Sin él, un cupón del 100% puede dejar
+    //     el paréntesis en negativo y romper la invariante de cabecera I-6
+    //     (`grand_total = max(0, subtotal + tax − descuento + envío +
+    //     propina)`).
     if (updateOrderDto.shipping_cost !== undefined) {
       const subtotal = Number(order.subtotal_amount);
       const tax = Number(order.tax_amount);
       const discount = Number(order.discount_amount);
       const shipping = Number(updateOrderDto.shipping_cost);
-      (updateOrderDto as any).grand_total =
-        subtotal + tax - discount + shipping;
+      const tip = Number(
+        (updateOrderDto as any).tip_amount ?? order.tip_amount ?? 0,
+      );
+      (updateOrderDto as any).grand_total = roundMoney(
+        Math.max(0, subtotal + tax - discount + shipping + tip),
+      );
     }
 
     const updatedOrder = await this.prisma.orders.update({

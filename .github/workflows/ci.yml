@@ -335,6 +335,15 @@ jobs:
         # real: 16 de 16 en verde. Toda spec nueva que deba GATEAR necesita su
         # propia linea aca; escribirla y no agregarla es escribir un test que
         # CI nunca corre.
+        #
+        # Cierre de QUI-832 (2026-09-15): las otras cinco specs que el plan
+        # escribio o migro entran aca por el mismo motivo. La del shell de
+        # cobro estaba ademas ROJA de nacimiento y nadie lo vio porque nunca
+        # corrio: `fakeAsync()` no existe sin `zone.js/testing` —la app es
+        # zoneless— y al evaluarse como argumento de `it()` tumbaba el archivo
+        # entero; y el doble de `app-pos-payment-step` no declaraba el input
+        # `takeawayOrder` que la plantilla enlaza (NG0303). Con las dos
+        # reparaciones: 139 de 139 en verde con la lista completa.
         run: >-
           npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox
           --progress=false
@@ -342,6 +351,11 @@ jobs:
           --include='**/pos/utils/document-format-hint.util.spec.ts'
           --include='**/pos/utils/phone-format-hint.util.spec.ts'
           --include='**/pos/services/pos-cart.service.spec.ts'
+          --include='**/analytics/config/analytics-registry.spec.ts'
+          --include='**/orders/pages/order-details/can-resend.spec.ts'
+          --include='**/orders/utils/fiscal-alert-dictionary.spec.ts'
+          --include='**/pos/components/pos-checkout-shell/pos-checkout-shell.component.spec.ts'
+          --include='**/print-formats/services/print-annex-validator.service.spec.ts'
 
   backend-build:
     name: Backend Build (prisma + nest)

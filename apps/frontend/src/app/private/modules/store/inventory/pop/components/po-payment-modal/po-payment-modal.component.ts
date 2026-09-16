@@ -47,6 +47,11 @@ import {
 } from '../pop-checkout-shell/steps/payment-validators';
 import { POP_PAYMENT_MODE_OPTIONS } from '../pop-checkout-shell/steps/pop-payment-step.component';
 import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
+// F-225 (ADR-16): mismo kernel de dinero que `pos-cart.service.ts` — ver
+// `apps/frontend/tsconfig.app.json` (`paths`). `Math.abs(a - b) <= 0.01`
+// tolera EXACTAMENTE 1 centavo; la traducción fiel es
+// `!differsByAtLeastCents(a, b, 2)`, no el umbral por defecto (1).
+import { differsByAtLeastCents } from '@money-kernel/money-compare';
 
 /**
  * Forma de la orden que consume este modal. NO redefinir localmente los DTOs:
@@ -842,7 +847,7 @@ export class PoPaymentModalComponent {
 
   readonly installmentsBalanced = computed<boolean>(
     () =>
-      Math.abs(this.installmentsTotal() - this.pendingBalance()) <= 0.01 &&
+      !differsByAtLeastCents(this.installmentsTotal(), this.pendingBalance(), 2) &&
       this.installmentsArray.controls.length > 0,
   );
 

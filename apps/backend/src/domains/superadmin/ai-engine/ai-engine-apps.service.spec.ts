@@ -244,6 +244,54 @@ describe('AIEngineAppsService', () => {
       );
     });
 
+    it('create: persists the required ai_feature_category (F1)', async () => {
+      prismaFull.ai_engine_applications.findUnique.mockResolvedValueOnce(null);
+      prismaFull.ai_engine_applications.create.mockResolvedValueOnce({
+        id: 102,
+        key: 'ocr_app',
+        ai_feature_category: 'async_queue',
+      });
+
+      await serviceFull.create({
+        key: 'ocr_app',
+        name: 'OCR App',
+        ai_feature_category: 'async_queue',
+      } as any);
+
+      expect(prismaFull.ai_engine_applications.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            ai_feature_category: 'async_queue',
+          }),
+        }),
+      );
+    });
+
+    it('update: explicit null category leaves the stored value unchanged (F1)', async () => {
+      prismaFull.ai_engine_applications.findUnique.mockResolvedValueOnce({
+        id: 51,
+        key: 'ocr_app',
+        ai_feature_category: 'async_queue',
+      });
+      prismaFull.ai_engine_applications.update.mockResolvedValueOnce({
+        id: 51,
+        key: 'ocr_app',
+        ai_feature_category: 'async_queue',
+      });
+
+      await serviceFull.update(51, {
+        ai_feature_category: null,
+      } as any);
+
+      expect(prismaFull.ai_engine_applications.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            ai_feature_category: undefined,
+          }),
+        }),
+      );
+    });
+
     it('create: defaults to text when neither DTO nor config declare a model_type', async () => {
       prismaFull.ai_engine_applications.findUnique.mockResolvedValueOnce(null);
       prismaFull.ai_engine_applications.create.mockResolvedValueOnce({

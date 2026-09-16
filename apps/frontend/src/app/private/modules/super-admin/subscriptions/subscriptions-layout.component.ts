@@ -31,7 +31,6 @@ export class SubscriptionsLayoutComponent {
     { id: 'active', route: 'active', label: 'Suscripciones', shortLabel: 'Activas', icon: 'credit-card' },
     { id: 'dunning', route: 'dunning', label: 'Cobranza', shortLabel: 'Cobro', icon: 'alert-triangle' },
     { id: 'payouts', route: 'payouts', label: 'Pagos', icon: 'banknote' },
-    { id: 'events', route: 'events', label: 'Eventos', icon: 'activity' },
     { id: 'gateway', route: 'gateway', label: 'Pasarela', shortLabel: 'Pasarela', icon: 'shield-check' },
     // 'fiscal-billing' se movió al módulo Fiscal
     // (/super-admin/fiscal/invoicing). La ruta vieja sigue redirigiendo, pero

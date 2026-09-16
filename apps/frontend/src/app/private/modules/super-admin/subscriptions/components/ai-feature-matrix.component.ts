@@ -1,9 +1,10 @@
-import { Component, effect, input, output, signal } from '@angular/core';
+import { Component, computed, effect, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
   AIFeatureConfig,
   AIFeatureFlags,
   AIFeatureKey,
+  EngineAppLineage,
 } from '../interfaces/subscription-admin.interface';
 import {
   defaultAIFeatureFlags,
@@ -80,15 +81,61 @@ interface FeatureDefinition {
               ></app-input>
             }
 
+            @if (liveApps(feature.key).length > 0) {
+              <div class="space-y-1.5">
+                <p class="text-xs font-medium text-text-secondary uppercase tracking-wide">
+                  Resuelven esta categoría (catálogo vivo)
+                </p>
+                <div class="flex flex-wrap gap-1.5">
+                  @for (app of liveApps(feature.key); track app.key) {
+                    <span
+                      class="px-2 py-1 text-xs rounded-md border border-border bg-background text-text-secondary"
+                      [title]="app.key"
+                    >
+                      {{ app.name }} → {{ app.modelLabel ?? 'sin modelo enlazado' }}
+                    </span>
+                  }
+                </div>
+              </div>
+            } @else if (config(feature.key).enabled) {
+              <p class="text-xs text-amber-600">
+                Ninguna aplicación del catálogo declara esta categoría: el switch queda
+                habilitado pero hoy ningún app la resuelve.
+              </p>
+            }
+
             @if (feature.key === 'tool_agents') {
-              <app-multi-selector
-                label="Herramientas permitidas"
-                [options]="toolOptions"
-                [ngModel]="config('tool_agents').tools_allowed ?? []"
-                (ngModelChange)="updateFeature('tool_agents', { tools_allowed: toStringArray($event) })"
-                placeholder="Seleccionar herramientas"
-                helpText="Si el feature esta apagado, estas herramientas no se habilitan aunque esten listadas."
-              ></app-multi-selector>
+              @if (toolOptions().length > 0) {
+                <app-multi-selector
+                  label="Herramientas permitidas"
+                  [options]="toolOptions()"
+                  [ngModel]="config('tool_agents').tools_allowed ?? []"
+                  (ngModelChange)="updateFeature('tool_agents', { tools_allowed: toStringArray($event) })"
+                  placeholder="Seleccionar herramientas"
+                  helpText="Nombres vivos del AIToolRegistry. Si el feature esta apagado, estas herramientas no se habilitan aunque esten listadas."
+                ></app-multi-selector>
+              } @else {
+                <p class="text-xs text-text-secondary">
+                  Catálogo de herramientas sin cargar: abre el plan con el Engine
+                  disponible para enlazar tools vivas.
+                </p>
+              }
+
+              @if (agentOptions().length > 0) {
+                <app-multi-selector
+                  label="Agentes permitidos"
+                  [options]="agentOptions()"
+                  [ngModel]="config('tool_agents').agents_allowed ?? []"
+                  (ngModelChange)="updateFeature('tool_agents', { agents_allowed: toStringArray($event) })"
+                  placeholder="Seleccionar agentes"
+                  helpText="Keys vivas de ai_agents. Guardar con una key inexistente es imposible: el backend responde 400."
+                ></app-multi-selector>
+              } @else {
+                <p class="text-xs text-text-secondary">
+                  Catálogo de agentes sin cargar: abre el plan con el Engine
+                  disponible para enlazar agentes vivos.
+                </p>
+              }
             }
 
             <app-selector
@@ -107,7 +154,19 @@ interface FeatureDefinition {
 export class AiFeatureMatrixComponent {
   readonly initialValue = input<AIFeatureFlags | undefined>(undefined);
   readonly systemModels = input<string[]>([]);
+  /**
+   * F6 — catálogo vivo provisto por el plan-form (servicio del Engine). Sin
+   * fallback hardcodeado: la lista fija anterior (`products.search`, …) no
+   * existe en el `AIToolRegistry` real y el backend ahora rechaza esas refs
+   * con 400, así que mostrarlas sería ofrecer un guardado imposible.
+   */
+  readonly availableTools = input<{ value: string; label: string; description?: string }[]>([]);
+  readonly availableAgents = input<{ value: string; label: string; description?: string }[]>([]);
+  readonly appsByCategory = input<Partial<Record<AIFeatureKey, EngineAppLineage[]>>>({});
   readonly valueChange = output<AIFeatureFlags>();
+
+  readonly toolOptions = computed(() => this.availableTools());
+  readonly agentOptions = computed(() => this.availableAgents());
 
   private lastInitialSnapshot = '';
   readonly flags = signal<AIFeatureFlags>(this.defaultFlags());
@@ -181,13 +240,9 @@ export class AiFeatureMatrixComponent {
     { value: 'warn', label: 'Permitir con aviso' },
   ];
 
-  readonly toolOptions = [
-    { value: 'products.search', label: 'Productos', description: 'Busqueda y lectura de catalogo' },
-    { value: 'inventory.read', label: 'Inventario', description: 'Consulta de existencias y movimientos' },
-    { value: 'orders.read', label: 'Ordenes', description: 'Consulta de pedidos y estados' },
-    { value: 'customers.read', label: 'Clientes', description: 'Consulta de perfiles y actividad' },
-    { value: 'accounting.read', label: 'Contabilidad', description: 'Lectura de resumenes contables' },
-  ];
+  liveApps(key: AIFeatureKey): EngineAppLineage[] {
+    return this.appsByCategory()[key] ?? [];
+  }
 
   constructor() {
     effect(() => {

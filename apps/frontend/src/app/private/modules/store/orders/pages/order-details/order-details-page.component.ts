@@ -1,5 +1,7 @@
 import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { NgClass, DatePipe } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
+import { environment } from '../../../../../../../environments/environment';
 import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
@@ -97,6 +99,7 @@ import {
   invoiceStatusTone,
   toneClasses,
 } from '../../../invoicing/components/invoice-detail/invoice-fiscal-status.util';
+import { CountryService } from '../../../../../../services/country.service';
 import { DocumentPrintService } from '../../../../../../shared/services/print/document-print.service';
 import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { DispatchTicketPrintService } from '../../../dispatch-ticket/services/dispatch-ticket-print.service';
@@ -801,6 +804,16 @@ export class OrderDetailsPageComponent {
   );
 
   /**
+   * Plan 1060 (paso 5) — "Despachar Orden" solo existe cuando hay
+   * fulfillment: domicilio (`requiresDispatchFlow`) o platos presentes en
+   * cocina (`isKitchenOrder`). Una mesa `direct_delivery` sin cocina no
+   * ofrece despacho. Solo visibilidad: no toca `shipOrder` ni el backend.
+   */
+  readonly canOfferDispatch = computed<boolean>(
+    () => this.requiresDispatchFlow() || this.isKitchenOrder(),
+  );
+
+  /**
    * Platos ya disparados a cocina que aún no están entregados (ticket ni
    * `delivered` ni `cancelled`). Solo informa: despachar un domicilio con
    * cocina pendiente se advierte, nunca se bloquea — el operador puede estar
@@ -921,7 +934,7 @@ export class OrderDetailsPageComponent {
 
         // Dispatching is allowed BEFORE the payment is confirmed so the route
         // can carry the order (COD collects on delivery; online still uncaptured).
-        if (this.canGenerateRemision()) {
+        if (this.canOfferDispatch() && this.canGenerateRemision()) {
           // Unified entry: one button → con/sin-remisión chooser.
           actions.push({
             id: 'dispatch-order',
@@ -929,7 +942,7 @@ export class OrderDetailsPageComponent {
             icon: 'truck',
             variant: dispatchVariant,
           });
-        } else if (isShipping) {
+        } else if (this.canOfferDispatch() && isShipping) {
           // direct_delivery: no remisión; manual ship.
           actions.push({
             id: 'manual-ship',
@@ -970,7 +983,7 @@ export class OrderDetailsPageComponent {
           // `processing → finished`). Un domicilio NO entra aquí: su entrega
           // la estampa el flujo de despacho (ver `requiresDispatchFlow`).
           actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
-        } else if (this.canGenerateRemision()) {
+        } else if (this.canOfferDispatch() && this.canGenerateRemision()) {
           // Domicilio de restaurante con platos aún en cocina: se avisa, no se
           // bloquea. El despacho sigue siendo la única vía de entrega.
           if (this.requiresDispatchFlow() && this.undeliveredKitchenItems().length > 0) {
@@ -998,9 +1011,16 @@ export class OrderDetailsPageComponent {
               variant: 'warning',
             });
           }
+        } else if (!hasPaid) {
+          // Re-auditoría 1060: sin fulfillment no hay nada que despachar,
+          // pero el paso por `shipped` es la ÚNICA vía de cobro (ofrece
+          // Registrar Pago y en `processing` no hay `pay`). Se etiqueta
+          // como cobro, nunca como despacho.
+          actions.push({ id: 'ship', label: 'Pasar a Cobro', icon: 'credit-card', variant: 'primary' });
         } else {
-          // direct_delivery: counter handover, no remisión cycle. Ship directly.
-          actions.push({ id: 'ship', label: 'Despachar Orden', icon: 'package', variant: 'primary' });
+          // Pagada y sin fulfillment: finalizar directo (el backend permite
+          // processing → finished; sin filas de cocina el F2-guard pasa).
+          actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
         }
         if (this.isPrivilegedUser()) {
           actions.push({ id: 'cancel-payment', label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning' });
@@ -1290,27 +1310,20 @@ export class OrderDetailsPageComponent {
   });
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
-    { id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer' },
-    // CP-DTLP Phase E.3 / QUI-764b — disparador 2 manual del tiquete de
-    // despacho desde la pantalla de la orden. El `disabled` SIGUE al mismo
-    // predicado compartido (`shouldAutoPrintDispatchTicket`) que el handler
-    // `printDispatchTicket` — si vuelven a divergir estaríamos en el mismo
-    // lugar dentro de un mes. `trigger: 'explicit'` ignora `printDispatchTicketAuto`
-    // (solo el auto origin lo exige) y respeta `print_dispatch_ticket_on_counter`
-    // para que el botón salga habilitado cuando la tienda eligió imprimir el
-    // tiquete como comprobante de mostrador/para-llevar.
+    { id: 'print', label: 'Imprimir ticket', variant: 'outline', icon: 'printer' },
+    // Tiquete de despacho del gate (`formatType: 'dispatch_ticket'` desde
+    // los datos de la orden). Siempre habilitado.
     {
       id: 'print-dispatch-ticket',
-      label: 'e-ticket de envío',
+      label: 'Imprimir despacho',
       variant: 'outline',
       icon: 'package',
-      disabled: !this.canPrintDispatchTicketExplicit(),
     },
   ]);
 
   /**
    * QUI-764b — predicado MANUAL del tiquete de despacho. Decide si el
-   * botón `e-ticket de envío` debe estar habilitado y si el handler
+   * botón `Imprimir despacho` debe estar habilitado y si el handler
    * `printDispatchTicket` debe imprimir. Una sola fuente de verdad:
    * `headerActions.disabled` y el handler consultan este computed.
    *
@@ -1363,6 +1376,7 @@ export class OrderDetailsPageComponent {
   private fb = inject(FormBuilder);
   private ordersService = inject(StoreOrdersService);
   private ordersFlowService = inject(OrdersService);
+  private http = inject(HttpClient);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
   private paymentMethodsService = inject(PaymentMethodsService);
@@ -1420,6 +1434,7 @@ export class OrderDetailsPageComponent {
   // desde acá sólo lanzamos el manual al pulsar el botón del header o de
   // la card "Gestión de Envío".
   private readonly dispatchTicketPrint = inject(DispatchTicketPrintService);
+  private readonly countryService = inject(CountryService);
   // CP-DTLP Phase E.3 — guard del disparador manual (default true ADR-7).
   private readonly settingsFacade = inject(StoreSettingsFacade);
 
@@ -2899,7 +2914,6 @@ export class OrderDetailsPageComponent {
     } else if (actionId === 'credit-payment') {
       this.openPayModal();
     } else if (actionId === 'print-dispatch-ticket') {
-      // CP-DTLP Phase E.3 — disparador manual desde header.
       void this.printDispatchTicket();
     }
   }
@@ -2997,21 +3011,12 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * CP-DTLP Phase E.3 / QUI-764b — disparador 2 manual del tiquete de
-   * despacho desde la pantalla de la orden. Lo invocan el botón del
-   * headerActions (`e-ticket de envío`) y el botón secundario de la card
-   * "Gestión de Envío".
-   *
-   * La guarda se delega a `canPrintDispatchTicketExplicit` — el MISMO
-   * computed que el `disabled` del headerActions. Una sola fuente de
-   * verdad, sin condición paralela que pueda divergir. Política MANUAL:
-   * `print_dispatch_ticket_enabled` apagado mata todo; `direct_delivery`
-   * requiere `print_dispatch_ticket_on_counter` prendido; cualquier otro
-   * `delivery_type` imprime cuando el formato está habilitado. Ver
-   * docblock de `canPrintDispatchTicketExplicit` para la tabla completa.
-   * La copia se resuelve en `DispatchTicketPrintService` desde
-   * `receipts.printing.dispatch_ticket`; con `trigger: 'explicit'` y
-   * `copies: 0` el servicio imprime 0 copias.
+   * CP-DTLP Phase E.3 / QUI-764b — disparador manual del tiquete de
+   * despacho (`formatType: 'dispatch_ticket'`, distinto de `dispatch_note`
+   * y de `pos_order`). Lo invocan el headerActions y el botón de la card
+   * "Gestión de Envío". Guarda: `canPrintDispatchTicketExplicit` (la misma
+   * del `disabled`; ver su docblock para la política MANUAL). Datos:
+   * `buildDispatchTicketData` (no cambiar su mapeo).
    */
   async printDispatchTicket(): Promise<void> {
     const order = this.order();
@@ -3030,6 +3035,38 @@ export class OrderDetailsPageComponent {
       );
       this.toastService.error('No se pudo imprimir el tiquete de despacho');
     }
+  }
+
+  /**
+   * Lleva al operador a la card "Gestión de Envío"
+   * (`#gestionEnvioAnchor`): scroll suave + foco para teclado/lector de
+   * pantalla. Respeta `prefers-reduced-motion`. Lo invoca el indicador
+   * de entrega del strip de resumen.
+   */
+  /**
+   * Nombre del país para mostrar en las mini-cards de dirección.
+   * Solo presentación: persiste el `country_code` (`CO`) y resuelve el
+   * nombre vía `CountryService` (fallback al código si no lo conoce).
+   */
+  countryName(code?: string | null): string {
+    if (!code) return '';
+    return this.countryService.getCountryName(code);
+  }
+
+  focusGestionEnvio(): void {
+    const el = document.getElementById('gestionEnvioAnchor');
+    if (!el) return;
+    const reduceMotion =
+      window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ??
+      false;
+    el.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'start',
+    });
+    window.setTimeout(
+      () => el.focus({ preventScroll: true }),
+      reduceMotion ? 0 : 350,
+    );
   }
 
   /**
@@ -3479,6 +3516,31 @@ export class OrderDetailsPageComponent {
     return labels[state] || state;
   }
 
+  /**
+   * Plan 1060 (paso 4) — motivo humanizado de un pago `cancelled`, leído de
+   * `gateway_response.cancellation_reason` (lo escribe el backend al
+   * compensar: `finish_blocked_insufficient_stock` en
+   * `order-flow.service.ts` finish, `kitchen_items_pending` en el guard
+   * F2 de cocina). Solo presentación. Sin motivo (o código desconocido)
+   * devuelve `null` y el template deja el badge actual intacto.
+   */
+  paymentCancellationLabel(payment: Payment): string | null {
+    if (payment?.state !== 'cancelled') return null;
+    const code = (
+      payment.gateway_response as
+        | { cancellation_reason?: unknown }
+        | undefined
+    )?.cancellation_reason;
+    switch (code) {
+      case 'finish_blocked_insufficient_stock':
+        return 'Sin stock para finalizar';
+      case 'kitchen_items_pending':
+        return 'Cocina pendiente';
+      default:
+        return null;
+    }
+  }
+
   getStatusColor(status: string | undefined): string {
     const colors: Record<string, string> = {
       created: 'bg-gray-100 text-gray-800',
@@ -3906,6 +3968,108 @@ export class OrderDetailsPageComponent {
                     typeof err === 'string' ? err : 'Error al cancelar el plato',
                   );
                   console.error('Cancel item failed', err);
+                },
+              });
+          });
+      });
+  }
+
+  // ─── Plan 1060 (reversa) — reversar un ítem entregado ──────────
+  /**
+   * Ítem actualmente en tránsito de reversión (POST en vuelo). `null`
+   * cuando ninguna reversión está pendiente. Misma forma que
+   * `deliveringItemId` / `cancellingItemId`: un solo ítem a la vez;
+   * alimenta el `[loading]` del botón Reversar mientras corre el backend.
+   */
+  readonly reversingItemId = signal<number | null>(null);
+
+  /**
+   * Ofrece "Reversar" a TODO ítem entregado no cancelado. Sin gate de
+   * permiso en el frontend: si el rol no tiene el permiso, el backend
+   * responde 403 y se muestra el toast correspondiente.
+   */
+  canReverseDeliveredItem(item: OrderItem): boolean {
+    return !!item.delivered_at && !item.cancelled_at;
+  }
+
+  /**
+   * Acción: reversa la entrega vía
+   * POST /store/orders/:orderId/flow/items/:orderItemId/cancel-delivered
+   * con body `{ reason, destination: 'restock' | 'waste' }`.
+   * Reutiliza el patrón de motivo de `cancelItem` (`dialogService.confirm`
+   * + `dialogService.prompt`, motivo mín 3 chars). `DialogService` no
+   * tiene selector (solo confirm/prompt), así que el destino se elige con
+   * `confirm()` nativo: Aceptar = restock, Cancelar = waste.
+   * Tras éxito, toast + refreshOrder() (patrón de `deliverItem`).
+   */
+  reverseDeliveredItem(item: OrderItem): void {
+    if (!this.canReverseDeliveredItem(item)) return;
+    const orderId = this.order()?.id;
+    if (!orderId) return;
+    this.dialogService
+      .confirm({
+        title: 'Reversar entrega',
+        message: `¿Reversar la entrega de "${item.product_name}"? El ítem quedará cancelado, se ajustará el total y se registrará el motivo.`,
+        confirmText: 'Continuar',
+        cancelText: 'Atrás',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (!confirmed) return;
+        this.dialogService
+          .prompt({
+            title: 'Motivo de reversión',
+            message: 'Quedará registrado en el pedido.',
+            placeholder: 'Describe el motivo (mínimo 3 caracteres)',
+            confirmText: 'Reversar entrega',
+            cancelText: 'Atrás',
+          })
+          .then((reasonInput) => {
+            if (reasonInput === undefined) {
+              this.toastService.error('Reversión abortada');
+              return;
+            }
+            const reason = reasonInput.trim();
+            if (reason.length < 3) {
+              this.toastService.error(
+                'El motivo debe tener al menos 3 caracteres',
+              );
+              return;
+            }
+            const destination = confirm(
+              'Destino del ítem reversado:\n\nAceptar = reingresar al stock (restock).\nCancelar = registrar como merma (waste).',
+            )
+              ? 'restock'
+              : 'waste';
+            this.reversingItemId.set(item.id);
+            this.http
+              .post(
+                `${environment.apiUrl}/store/orders/${orderId}/flow/items/${item.id}/cancel-delivered`,
+                { reason, destination },
+              )
+              .pipe(takeUntilDestroyed(this.destroyRef))
+              .subscribe({
+                next: () => {
+                  this.reversingItemId.set(null);
+                  this.toastService.success('Entrega reversada');
+                  this.refreshOrder();
+                },
+                error: (err: unknown) => {
+                  this.reversingItemId.set(null);
+                  const wrapped = err as {
+                    status?: number;
+                    cause?: { status?: number } | null;
+                  };
+                  const forbidden =
+                    wrapped?.status === 403 ||
+                    wrapped?.cause?.status === 403;
+                  this.toastService.error(
+                    forbidden
+                      ? 'No tienes permiso para reversar entregas'
+                      : parseApiError(err).userMessage ||
+                          'Error al reversar la entrega',
+                  );
+                  console.error('Reverse delivered item failed', err);
                 },
               });
           });

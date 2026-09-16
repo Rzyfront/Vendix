@@ -40,3 +40,19 @@ export class CancelOrderItemDto {
   @IsEnum(['before_fire', 'after_fire_waste'])
   cancellation_type?: CancellationType;
 }
+
+/**
+ * 1060 paso 2 — body de la reversa de entrega
+ * (`POST /store/orders/:orderId/flow/items/:orderItemId/cancel-delivered`).
+ *
+ * Extiende `CancelOrderItemDto` (hereda `reason` 3–500 obligatorio) y exige
+ * `destination`: `restock` devuelve las unidades al stock vía
+ * `StockLevelManager`, `waste` deja la merma auditada sin tocar stock.
+ * Ambas variantes escriben `audit_logs` (`order_item.cancel_delivered`).
+ */
+export type CancelDeliveredDestination = 'restock' | 'waste';
+
+export class CancelDeliveredOrderItemDto extends CancelOrderItemDto {
+  @IsEnum(['restock', 'waste'])
+  destination!: CancelDeliveredDestination;
+}

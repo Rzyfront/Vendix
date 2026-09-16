@@ -17,6 +17,15 @@ export const STORES_ROUTES: Routes = [
     loadComponent: () =>
       import('./stores.component').then((c) => c.StoresComponent),
   },
+  // Ranking de actividad (`Cuentas > Actividad`). Va ANTES de `:storeId`
+  // para que el param no capture el literal `activity`.
+  {
+    path: 'activity',
+    loadComponent: () =>
+      import('./activity/store-activity-page.component').then(
+        (c) => c.StoreActivityPageComponent,
+      ),
+  },
   {
     path: ':storeId',
     loadChildren: () =>

@@ -29,6 +29,9 @@ import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 // `dispatch_notes` — el mismo snapshot que ya usaba correctamente
 // `dispatch-note-pdf.service.ts`.
 import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
+// Hallazgo 1b — discriminante bruto-vs-base compartido (misma función que el
+// riel B): sin aritmética propia para que los dos motores no diverjan.
+import { resolveDispatchNoteLinePrintedGross } from '../../taxes/utils/final-price.util';
 
 @Injectable()
 export class DispatchNoteDataProvider implements IDocumentDataProvider {
@@ -109,23 +112,34 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
       }
     }
 
-    // F-101 — misma magnitud que ya usa `dispatch-note-pdf.service.ts`:
-    // `dispatch_note_items.unit_price`/`total_price` son el precio ya
-    // cobrado por línea (misma convención que `order_items`, que
-    // `pos-sale-ticket.provider.ts` ya trata como `money_basis: 'gross'`
-    // sin sumarle impuesto aparte) — no hace falta recomputar nada, sólo
-    // leer la columna correcta.
-    const items = (note.dispatch_note_items || []).map((it: any, idx: number) => ({
-      index: idx + 1,
-      product_name: it.product?.name || `Producto #${it.product_id}`,
-      variant_sku: it.product_variant?.sku || undefined,
-      quantity: Number(it.dispatched_quantity ?? it.ordered_quantity ?? 1) || 1,
-      dispatched_qty: Number(it.dispatched_quantity || 0),
-      unit_price: Number(it.unit_price || 0),
-      total_price: Number(it.total_price || 0),
-      discount_amount: it.discount_amount ? Number(it.discount_amount) : undefined,
-      tax_amount: it.tax_amount ? Number(it.tax_amount) : undefined,
-    }));
+    // C.7 + hallazgo 1b — las dos columnas van en BRUTO bajo
+    // `money_basis: 'gross'`, y el total persistido NO siempre es bruto: las
+    // filas nuevas lo traen en bruto
+    // (`total_price = unit_price × cantidad − descuento + tax_amount`) pero
+    // las históricas B lo guardan en base. El discriminante vive en
+    // `resolveDispatchNoteLinePrintedGross` (definición única compartida con
+    // el riel B): acá sólo se consume, sin aritmética duplicada.
+    const items = (note.dispatch_note_items || []).map((it: any, idx: number) => {
+      const quantity = Number(it.dispatched_quantity ?? it.ordered_quantity ?? 1) || 1;
+      const gross = resolveDispatchNoteLinePrintedGross({
+        unit_price: it.unit_price,
+        total_price: it.total_price,
+        tax_amount: it.tax_amount,
+        discount_amount: it.discount_amount,
+        quantity,
+      });
+      return {
+        index: idx + 1,
+        product_name: it.product?.name || `Producto #${it.product_id}`,
+        variant_sku: it.product_variant?.sku || undefined,
+        quantity,
+        dispatched_qty: Number(it.dispatched_quantity || 0),
+        unit_price: gross.gross_unit_price,
+        total_price: gross.gross_total_price,
+        discount_amount: it.discount_amount ? Number(it.discount_amount) : undefined,
+        tax_amount: it.tax_amount ? Number(it.tax_amount) : undefined,
+      };
+    });
 
     return {
       store: {

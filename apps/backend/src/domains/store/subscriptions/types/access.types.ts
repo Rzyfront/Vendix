@@ -41,6 +41,13 @@ export interface FeatureConfig {
   indexed_docs_cap?: number;
   monthly_jobs_cap?: number;
   /**
+   * F3 — presupuesto mensual de ejecuciones de tools del agente
+   * (`tool_agents`). Se consume 1 unidad por `tool_result` exitoso desde el
+   * loop del agente, nunca pre-consumo. Vive en el JSON `ai_feature_flags`,
+   * no requiere migración.
+   */
+  monthly_tool_calls_cap?: number;
+  /**
    * Realtime voice budget, metered in seconds of open session rather than
    * sessions. Push-to-talk turns run 5-20s, so a per-session cap would burn
    * the budget several times faster than actual provider cost.
@@ -85,6 +92,7 @@ export interface AccessCheckResult {
     messages?: number;
     jobs?: number;
     voice_seconds?: number;
+    tool_calls?: number;
   };
 }
 
@@ -98,7 +106,11 @@ export const FEATURE_QUOTA_CONFIG: Record<
   text_generation: { capField: 'monthly_tokens_cap', period: 'monthly' },
   streaming_chat: { capField: 'daily_messages_cap', period: 'daily' },
   conversations: null, // not quota-gated per call (retention_days is housekeeping)
-  tool_agents: null, // gated by tools_allowed list, not numeric cap
+  // F3 — doble gate: la lista `tools_allowed` filtra el catálogo del turno
+  // (ver AIAgentService) y `monthly_tool_calls_cap` limita las ejecuciones
+  // del periodo. Sin cap declarado el contador sigue escribiéndose pero el
+  // gate nunca bloquea por cuota (cap ausente = ilimitado).
+  tool_agents: { capField: 'monthly_tool_calls_cap', period: 'monthly' },
   rag_embeddings: { capField: 'indexed_docs_cap', period: 'monthly' },
   async_queue: { capField: 'monthly_jobs_cap', period: 'monthly' },
   realtime_voice: {

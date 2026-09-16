@@ -167,8 +167,13 @@ services:
   frontend:
     profiles: ["docker-fe"]
     build:
-      context: ./apps/frontend
-      dockerfile: Dockerfile.dev
+      # QUI-832 (hallazgo 2, opción A): contexto a la RAÍZ del repo para que
+      # `@money-kernel` resuelva. `apps/frontend/tsconfig.json` mapea el alias
+      # a `../backend/src/common/money-kernel/` y con contexto de workspace ese
+      # `../backend` no existe en la imagen (TS2307). Sólo afecta al build: los
+      # volúmenes siguen montando `./apps/frontend` en `/app`.
+      context: .
+      dockerfile: apps/frontend/Dockerfile.dev
     container_name: vendix_frontend
     restart: unless-stopped
     # Presupuesto del contenedor en build en frío, medido en dmesg:

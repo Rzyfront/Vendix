@@ -215,17 +215,20 @@
       </app-button>
     } @else if (ticket().status === 'ready') {
       <!--
-        La entrega NO la registra el cocinero: la marca el mesero o el cajero
-        (POS / cuenta de mesa). El boton se deja VISIBLE para que la cocina vea
-        que el ticket quedo listo y a la espera, pero DESHABILITADO: la
-        transicion ready -> delivered no vive en el KDS.
+        Takeaway-only KDS: "Entregar" se habilita solo para tickets
+        todo-para-llevar (ver `allTakeaway`); el resto lo sigue registrando
+        el mesero o el cajero (POS / cuenta de mesa). El boton se deja
+        VISIBLE para que la cocina vea que el ticket quedo listo y a la
+        espera. El backend valida con su propia guarda.
       -->
       <app-button
         variant="primary"
         size="xsm"
         [fullWidth]="true"
-        [disabled]="true"
-        [attr.title]="deliverDisabledReason"
+        (clicked)="onDeliver()"
+        [disabled]="isMutating() || !allTakeaway()"
+        [loading]="isMutating()"
+        [attr.title]="deliverDisabledReason()"
       >
         <app-icon slot="icon" name="check-circle" [size]="14" />
         Entregar
