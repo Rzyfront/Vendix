@@ -5278,7 +5278,7 @@ model ai_engine_applications {
   retry_config        Json?
   is_active           Boolean            @default(true)
   metadata            Json?
-  ai_feature_category String?            @db.VarChar(32)
+  ai_feature_category String             @default("text_generation") @db.VarChar(32)
   created_at          DateTime?          @default(now()) @db.Timestamp(6)
   updated_at          DateTime?          @default(now()) @db.Timestamp(6)
 

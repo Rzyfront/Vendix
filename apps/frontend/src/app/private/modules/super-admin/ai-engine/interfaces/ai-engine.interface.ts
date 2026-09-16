@@ -194,6 +194,40 @@ export type OutputFormat =
   | 'speech'
   | 'transcription';
 
+/**
+ * Canonical AI feature keys (F1). Keep in sync with `AI_FEATURE_KEYS` in
+ * `apps/backend/src/domains/store/subscriptions/types/access.types.ts` and
+ * `AI_APP_FEATURE_CATEGORIES` in `create-ai-app.dto.ts`.
+ */
+export type AIFeatureCategory =
+  | 'text_generation'
+  | 'streaming_chat'
+  | 'conversations'
+  | 'tool_agents'
+  | 'rag_embeddings'
+  | 'async_queue'
+  | 'realtime_voice';
+
+export const AI_FEATURE_CATEGORIES: AIFeatureCategory[] = [
+  'text_generation',
+  'streaming_chat',
+  'conversations',
+  'tool_agents',
+  'rag_embeddings',
+  'async_queue',
+  'realtime_voice',
+];
+
+export const AI_FEATURE_CATEGORY_LABELS: Record<AIFeatureCategory, string> = {
+  text_generation: 'Generacion de texto',
+  streaming_chat: 'Chat en streaming',
+  conversations: 'Conversaciones',
+  tool_agents: 'Agentes con herramientas',
+  rag_embeddings: 'RAG / Embeddings',
+  async_queue: 'Cola asincrona',
+  realtime_voice: 'Voz en tiempo real',
+};
+
 export interface AIEngineApp {
   id: number;
   key: string;
@@ -218,6 +252,7 @@ export interface AIEngineApp {
   retry_config?: { maxRetries: number; delayMs: number };
   is_active: boolean;
   metadata?: Record<string, any>;
+  ai_feature_category?: AIFeatureCategory;
   created_at?: string;
   updated_at?: string;
 }
@@ -237,6 +272,7 @@ export interface CreateAIAppDto {
   retry_config?: { maxRetries: number; delayMs: number };
   is_active?: boolean;
   metadata?: Record<string, any>;
+  ai_feature_category: AIFeatureCategory;
 }
 
 export interface UpdateAIAppDto extends Partial<CreateAIAppDto> {}
