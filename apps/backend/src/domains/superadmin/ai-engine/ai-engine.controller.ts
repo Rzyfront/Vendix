@@ -143,7 +143,7 @@ export class AIEngineController {
     return this.responseService.success(job, 'AI job status retrieved');
   }
 
-  @Get(':id(\\d+)')
+  @Get(':id')
   @ApiOperation({ summary: 'Get an AI engine configuration by ID' })
   @ApiResponse({ status: 200, description: 'Configuration retrieved' })
   @ApiResponse({ status: 404, description: 'Configuration not found' })
@@ -155,7 +155,7 @@ export class AIEngineController {
     );
   }
 
-  @Patch(':id(\\d+)')
+  @Patch(':id')
   @ApiOperation({ summary: 'Update an AI engine configuration' })
   @ApiResponse({ status: 200, description: 'Configuration updated' })
   @ApiResponse({ status: 404, description: 'Configuration not found' })
@@ -170,7 +170,7 @@ export class AIEngineController {
     );
   }
 
-  @Delete(':id(\\d+)')
+  @Delete(':id')
   @ApiOperation({ summary: 'Delete an AI engine configuration' })
   @ApiResponse({ status: 200, description: 'Configuration deleted' })
   @ApiResponse({ status: 404, description: 'Configuration not found' })
@@ -181,7 +181,7 @@ export class AIEngineController {
     );
   }
 
-  @Post(':id(\\d+)/test')
+  @Post(':id/test')
   @ApiOperation({ summary: 'Test connection to an AI provider' })
   @ApiResponse({ status: 200, description: 'Test result returned' })
   async testConnection(@Param('id', ParseIntPipe) id: number) {
