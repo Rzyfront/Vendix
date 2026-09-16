@@ -363,7 +363,6 @@
                       <app-icon name="truck" size="16"></app-icon>
                     </span>
                     <div>
-                      <span>Entrega</span>
                       <h3>Direccion de Entrega</h3>
                     </div>
                     @if (
@@ -371,9 +370,9 @@
                       orderData.shipping_address_id ===
                         orderData.billing_address_id
                     ) {
-                      <span class="addr-badge">Ambas</span>
+                      <span class="addr-badge addr-badge-both">Ambas</span>
                     } @else {
-                      <span class="addr-badge">Envío</span>
+                      <span class="addr-badge addr-badge-shipping">Envío</span>
                     }
                   </div>
                   @if (
@@ -390,7 +389,9 @@
                       }
                       <p class="truncate">
                         {{ addr.city }}, {{ addr.state_province }}
-                        {{ addr.postal_code }}
+                        {{ addr.postal_code }}@if (addr.country_code) {
+                          — {{ countryName(addr.country_code) }}
+                        }
                       </p>
                       @if (addr.phone_number) {
                         <p class="customer-address-phone">
@@ -398,20 +399,15 @@
                           {{ addr.phone_number }}
                         </p>
                       }
-                      @if (addr.country_code) {
-                        <span class="customer-country-chip">
-                          {{ addr.country_code }}
-                        </span>
-                      }
-                      <button
-                        type="button"
-                        (click)="promptEditShippingAddress(addr)"
-                        class="mt-2 inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
-                        title="Editar dirección de entrega"
+                      <app-button
+                        variant="secondary"
+                        size="sm"
+                        (clicked)="promptEditShippingAddress(addr)"
+                        ariaLabel="Editar dirección de entrega"
                       >
-                        <app-icon name="edit-3" size="13"></app-icon>
+                        <app-icon slot="icon" name="edit-3" size="13"></app-icon>
                         Editar dirección
-                      </button>
+                      </app-button>
                     </div>
                   } @else {
                     <button
@@ -441,7 +437,8 @@
                     orderData.shipping_address_id &&
                     orderData.shipping_address_id ===
                       orderData.billing_address_id
-                  )
+                  ) &&
+                  orderData.addresses_orders_billing_address_idToaddresses
                 ) {
                 <!-- Direccion de Facturacion -->
                 <section class="customer-address-panel addr-mini-card">
@@ -450,10 +447,9 @@
                       <app-icon name="file-text" size="16"></app-icon>
                     </span>
                     <div>
-                      <span>Factura</span>
                       <h3>Direccion de Facturacion</h3>
                     </div>
-                    <span class="addr-badge">Facturación</span>
+                    <span class="addr-badge addr-badge-billing">Facturación</span>
                   </div>
                   @if (
                     orderData.addresses_orders_billing_address_idToaddresses;
@@ -468,18 +464,10 @@
                       }
                       <p class="truncate">
                         {{ addr.city }}, {{ addr.state_province }}
-                        {{ addr.postal_code }}
+                        {{ addr.postal_code }}@if (addr.country_code) {
+                          — {{ countryName(addr.country_code) }}
+                        }
                       </p>
-                      @if (addr.country_code) {
-                        <span class="customer-country-chip">
-                          {{ addr.country_code }}
-                        </span>
-                      }
-                    </div>
-                  } @else {
-                    <div class="customer-address-empty">
-                      <app-icon name="file-check" size="18"></app-icon>
-                      <span>Igual a la direccion de envio</span>
                     </div>
                   }
                 </section>

@@ -97,6 +97,7 @@ import {
   invoiceStatusTone,
   toneClasses,
 } from '../../../invoicing/components/invoice-detail/invoice-fiscal-status.util';
+import { CountryService } from '../../../../../../services/country.service';
 import { DocumentPrintService } from '../../../../../../shared/services/print/document-print.service';
 import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { DispatchTicketPrintService } from '../../../dispatch-ticket/services/dispatch-ticket-print.service';
@@ -1472,6 +1473,7 @@ export class OrderDetailsPageComponent {
   // (`pos_order` vía `resolveAndPrint`) y `dispatchTicketPrint`
   // (`formatType: 'dispatch_ticket'`): cada formato sale por su servicio.
   private readonly dispatchNotePrint = inject(DispatchNotePrintService);
+  private readonly countryService = inject(CountryService);
   // CP-DTLP Phase E.3 — guard del disparador manual (default true ADR-7).
   private readonly settingsFacade = inject(StoreSettingsFacade);
 
@@ -3105,6 +3107,16 @@ export class OrderDetailsPageComponent {
    * pantalla. Respeta `prefers-reduced-motion`. Lo invoca el badge
    * pre-despacho clickeable.
    */
+  /**
+   * Nombre del país para mostrar en las mini-cards de dirección.
+   * Solo presentación: persiste el `country_code` (`CO`) y resuelve el
+   * nombre vía `CountryService` (fallback al código si no lo conoce).
+   */
+  countryName(code?: string | null): string {
+    if (!code) return '';
+    return this.countryService.getCountryName(code);
+  }
+
   focusGestionEnvio(): void {
     const el = document.getElementById('gestionEnvioAnchor');
     if (!el) return;

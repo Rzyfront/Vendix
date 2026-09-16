@@ -280,16 +280,34 @@
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
-  min-height: 1.5rem;
-  padding: 0.25rem 0.5rem;
+  min-height: 1.25rem;
+  padding: 0.125rem 0.5rem;
   border-radius: 999px;
   color: var(--color-text-secondary);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  font-size: 0.6875rem;
+  font-size: 0.625rem;
   font-weight: 800;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+.addr-badge-shipping {
+  color: rgb(var(--color-warning-rgb));
+  background: rgba(var(--color-warning-rgb), 0.12);
+  border-color: rgba(var(--color-warning-rgb), 0.4);
+}
+
+.addr-badge-billing {
+  color: rgb(var(--color-info-rgb));
+  background: rgba(var(--color-info-rgb), 0.12);
+  border-color: rgba(var(--color-info-rgb), 0.4);
+}
+
+.addr-badge-both {
+  color: rgb(var(--color-success-rgb));
+  background: rgba(var(--color-success-rgb), 0.12);
+  border-color: rgba(var(--color-success-rgb), 0.4);
 }
 
 .customer-address-heading {
@@ -345,21 +363,6 @@
   align-items: center;
   gap: 0.375rem;
   margin-top: 0.25rem !important;
-}
-
-.customer-country-chip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 1.5rem;
-  margin-top: 0.375rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: 999px;
-  color: var(--color-text-secondary);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  font-size: 0.6875rem;
-  font-weight: 800;
-  text-transform: uppercase;
 }
 
 .customer-address-empty {
