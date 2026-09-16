@@ -305,6 +305,118 @@ export interface PaginatedAIAppResponse {
   };
 }
 
+// --- AI Tools (F5: catálogo vivo del AIToolRegistry) ---
+
+export type AIToolCategory = 'read' | 'write' | 'ui';
+
+export const AI_TOOL_CATEGORIES: AIToolCategory[] = ['read', 'write', 'ui'];
+
+export const AI_TOOL_CATEGORY_LABELS: Record<AIToolCategory, string> = {
+  read: 'Lectura',
+  write: 'Escritura',
+  ui: 'Interfaz',
+};
+
+export interface AIToolCatalogEntry {
+  name: string;
+  domain: string;
+  description: string;
+  requiredPermissions: string[];
+  category: AIToolCategory;
+  readOnly: boolean;
+  clientSide: boolean;
+  requiresConfirmation: boolean;
+}
+
+// --- AI Queues / Jobs (F5: tab Jobs) ---
+
+export interface AIQueueCounts {
+  waiting: number;
+  active: number;
+  completed: number;
+  failed: number;
+  delayed: number;
+  paused: number;
+}
+
+export interface AIQueueOverviewEntry {
+  name: string;
+  available: boolean;
+  counts: AIQueueCounts | null;
+  error: string | null;
+}
+
+export interface AIQueuesOverview {
+  queues: AIQueueOverviewEntry[];
+}
+
+export const AI_ENGINE_QUEUE_NAMES = [
+  'ai-generation',
+  'ai-embedding',
+  'ai-agent',
+  'receipt-scan',
+  'expense-scan',
+] as const;
+
+export type AIQueueName = (typeof AI_ENGINE_QUEUE_NAMES)[number];
+
+export interface AIJobLookupResult {
+  job_id: string;
+  status: string;
+  result?: any;
+  error?: string;
+  progress?: number;
+}
+
+// --- AI Agents (F5: CRUD contra el endpoint F4) ---
+
+export interface AIAgent {
+  id: number;
+  key: string;
+  name: string;
+  description?: string | null;
+  app_key?: string | null;
+  system_prompt?: string | null;
+  allowed_tools: string[];
+  max_iterations?: number | null;
+  requires_confirmation_default: boolean;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreateAIAgentDto {
+  key: string;
+  name: string;
+  description?: string;
+  app_key?: string | null;
+  system_prompt?: string | null;
+  allowed_tools?: string[];
+  max_iterations?: number | null;
+  requires_confirmation_default?: boolean;
+  is_active?: boolean;
+}
+
+export interface UpdateAIAgentDto extends Partial<CreateAIAgentDto> {}
+
+export interface AIAgentQueryDto {
+  page?: number;
+  limit?: number;
+  search?: string;
+  app_key?: string;
+  is_active?: boolean;
+}
+
+export interface PaginatedAIAgentResponse {
+  data: AIAgent[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
 export const KNOWN_PROVIDERS: KnownProvider[] = [
   {
     name: 'OpenAI',

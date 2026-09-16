@@ -8,7 +8,7 @@
       [class.text-primary]="activeTab() === 'configs'"
       [class.text-text-secondary]="activeTab() !== 'configs'"
     >
-      Configuraciones
+      Modelos
       @if (activeTab() === "configs") {
         <span
           class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
@@ -23,6 +23,45 @@
     >
       Aplicaciones
       @if (activeTab() === "apps") {
+        <span
+          class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
+        ></span>
+      }
+    </button>
+    <button
+      (click)="switchTab('tools')"
+      class="px-4 py-2.5 text-sm font-medium transition-colors relative"
+      [class.text-primary]="activeTab() === 'tools'"
+      [class.text-text-secondary]="activeTab() !== 'tools'"
+    >
+      Tools
+      @if (activeTab() === "tools") {
+        <span
+          class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
+        ></span>
+      }
+    </button>
+    <button
+      (click)="switchTab('jobs')"
+      class="px-4 py-2.5 text-sm font-medium transition-colors relative"
+      [class.text-primary]="activeTab() === 'jobs'"
+      [class.text-text-secondary]="activeTab() !== 'jobs'"
+    >
+      Jobs
+      @if (activeTab() === "jobs") {
+        <span
+          class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
+        ></span>
+      }
+    </button>
+    <button
+      (click)="switchTab('agents')"
+      class="px-4 py-2.5 text-sm font-medium transition-colors relative"
+      [class.text-primary]="activeTab() === 'agents'"
+      [class.text-text-secondary]="activeTab() !== 'agents'"
+    >
+      Agentes
+      @if (activeTab() === "agents") {
         <span
           class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
         ></span>
@@ -73,7 +112,7 @@
       >
         <div class="flex-1 min-w-0">
           <h3 class="text-lg font-semibold text-text-primary">
-            Configuraciones de IA
+            Modelos de IA
           </h3>
           <p class="hidden sm:block text-xs text-text-secondary mt-0.5">
             Gestiona los proveedores y modelos de inteligencia artificial
@@ -291,6 +330,360 @@
   }
 </div>
 
+  <!-- ═══════════════════════════════════════ -->
+  <!-- TOOLS TAB (catálogo vivo del registry)  -->
+  <!-- ═══════════════════════════════════════ -->
+  @if (activeTab() === "tools") {
+    <!-- Stats Grid -->
+    <div class="stats-container">
+      <app-stats
+        title="Total Tools"
+        [value]="tools().length"
+        iconName="plug"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      ></app-stats>
+      <app-stats
+        title="Lectura"
+        [value]="toolCountByCategory().read"
+        iconName="eye"
+        iconBgColor="bg-green-100"
+        iconColor="text-green-600"
+      ></app-stats>
+      <app-stats
+        title="Escritura"
+        [value]="toolCountByCategory().write"
+        iconName="edit"
+        iconBgColor="bg-orange-100"
+        iconColor="text-orange-600"
+      ></app-stats>
+      <app-stats
+        title="Interfaz"
+        [value]="toolCountByCategory().ui"
+        iconName="monitor"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-600"
+      ></app-stats>
+    </div>
+    <!-- Main Content Card -->
+    <app-card [padding]="false" overflow="visible">
+      <!-- Table Header -->
+      <div
+        class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
+      >
+        <div class="flex-1 min-w-0">
+          <h3 class="text-lg font-semibold text-text-primary">
+            Tools del Agente
+          </h3>
+          <p class="hidden sm:block text-xs text-text-secondary mt-0.5">
+            Catalogo vivo del registry: lo que ves es lo que el agente puede invocar
+          </p>
+        </div>
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+        >
+          <div class="w-full sm:w-60">
+            <app-inputsearch
+              placeholder="Buscar tools..."
+              [debounceTime]="300"
+              (searchChange)="onToolSearchChange($event)"
+              size="sm"
+              fullWidth="true"
+            ></app-inputsearch>
+          </div>
+          <app-options-dropdown
+            [filters]="toolFilterConfigs"
+            [filterValues]="toolFilterValues"
+            [isLoading]="isLoadingTools()"
+            (filterChange)="onToolFilterChange($event)"
+            (clearAllFilters)="clearToolFilters()"
+          ></app-options-dropdown>
+        </div>
+      </div>
+      <!-- Table Container -->
+      <div class="relative min-h-[400px] p-2 md:p-4">
+        @if (isLoadingTools()) {
+          <div
+            class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+          >
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        }
+        <app-responsive-data-view
+          [columns]="toolTableColumns"
+          [data]="filteredTools()"
+          [cardConfig]="toolCardConfig"
+          [loading]="isLoadingTools()"
+        >
+          @if (!isLoadingTools() && filteredTools().length === 0) {
+            <div class="p-8 flex justify-center w-full">
+              <app-empty-state
+                icon="plug"
+                [title]="tools().length ? 'Sin resultados' : 'No hay tools registradas'"
+                [description]="
+                  tools().length
+                    ? 'Ajusta tu busqueda o filtros'
+                    : 'Los dominios registran sus tools al iniciar el backend'
+                "
+                [showActionButton]="false"
+              ></app-empty-state>
+            </div>
+          }
+        </app-responsive-data-view>
+      </div>
+    </app-card>
+  }
+
+  <!-- ═══════════════════════════════════════ -->
+  <!-- JOBS TAB (colas + búsqueda por id)      -->
+  <!-- ═══════════════════════════════════════ -->
+  @if (activeTab() === "jobs") {
+    <!-- Queue Grid -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      @for (queue of queues(); track queue.name) {
+        <app-card>
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0">
+              <h4 class="text-sm font-semibold text-text-primary truncate">
+                {{ queue.name }}
+              </h4>
+              <p class="text-xs text-text-secondary mt-0.5">
+                @if (queue.available) {
+                  {{ queueTotal(queue) }} jobs registrados
+                } @else {
+                  {{ queue.error || 'No disponible' }}
+                }
+              </p>
+            </div>
+            <span
+              class="shrink-0 text-xs font-medium px-2 py-0.5 rounded-full"
+              [class.bg-green-100]="queue.available"
+              [class.text-green-700]="queue.available"
+              [class.bg-red-100]="!queue.available"
+              [class.text-red-700]="!queue.available"
+            >
+              {{ queue.available ? 'Activa' : 'Caída' }}
+            </span>
+          </div>
+          @if (queue.available && queue.counts) {
+            <div class="grid grid-cols-3 gap-2 mt-3 text-center">
+              <div class="rounded-lg bg-muted/50 px-1 py-2">
+                <div class="text-base font-semibold text-text-primary">
+                  {{ queue.counts.waiting }}
+                </div>
+                <div class="text-[11px] text-text-secondary">Espera</div>
+              </div>
+              <div class="rounded-lg bg-muted/50 px-1 py-2">
+                <div class="text-base font-semibold text-text-primary">
+                  {{ queue.counts.active }}
+                </div>
+                <div class="text-[11px] text-text-secondary">Activos</div>
+              </div>
+              <div class="rounded-lg bg-muted/50 px-1 py-2">
+                <div class="text-base font-semibold text-text-primary">
+                  {{ queue.counts.completed }}
+                </div>
+                <div class="text-[11px] text-text-secondary">Listos</div>
+              </div>
+              <div class="rounded-lg bg-muted/50 px-1 py-2">
+                <div class="text-base font-semibold text-text-primary">
+                  {{ queue.counts.failed }}
+                </div>
+                <div class="text-[11px] text-text-secondary">Fallidos</div>
+              </div>
+              <div class="rounded-lg bg-muted/50 px-1 py-2">
+                <div class="text-base font-semibold text-text-primary">
+                  {{ queue.counts.delayed }}
+                </div>
+                <div class="text-[11px] text-text-secondary">Retrasados</div>
+              </div>
+              <div class="rounded-lg bg-muted/50 px-1 py-2">
+                <div class="text-base font-semibold text-text-primary">
+                  {{ queue.counts.paused }}
+                </div>
+                <div class="text-[11px] text-text-secondary">Pausados</div>
+              </div>
+            </div>
+          }
+        </app-card>
+      }
+      @if (!isLoadingQueues() && queues().length === 0) {
+        <div class="col-span-full p-8 flex justify-center">
+          <app-empty-state
+            icon="layers"
+            title="Sin datos de colas"
+            description="No se pudo leer el estado de las colas"
+            [showActionButton]="false"
+          ></app-empty-state>
+        </div>
+      }
+    </div>
+    <!-- Job Lookup Card -->
+    <app-card>
+      <div class="p-2 md:px-6 md:py-4">
+        <h3 class="text-lg font-semibold text-text-primary">
+          Buscar job por ID
+        </h3>
+        <p class="text-xs text-text-secondary mt-0.5">
+          Consulta el estado de un job en cualquiera de las colas
+        </p>
+        <form
+          [formGroup]="jobLookupForm"
+          (ngSubmit)="lookupJob()"
+          class="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-4 mt-4 items-end"
+        >
+          <app-selector
+            label="Cola"
+            [options]="queueOptions"
+            [formControl]="jobQueueControl"
+            [disabled]="isLookingUp()"
+          ></app-selector>
+          <app-input
+            formControlName="job_id"
+            label="Job ID"
+            placeholder="42"
+            [required]="true"
+            [control]="jobIdControl"
+            [disabled]="isLookingUp()"
+          ></app-input>
+          <app-button
+            variant="primary"
+            (clicked)="lookupJob()"
+            [disabled]="jobLookupForm.invalid || isLookingUp()"
+            [loading]="isLookingUp()"
+          >
+            Buscar
+          </app-button>
+        </form>
+        @if (jobResult()) {
+          <div class="mt-4 rounded-lg border border-border p-4 space-y-2">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-sm font-medium text-text-primary">
+                Job {{ jobResult()!.job_id }}
+              </span>
+              <span
+                class="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700"
+              >
+                {{ formatJobStatus(jobResult()!.status) }}
+              </span>
+              @if (jobResult()!.progress !== undefined) {
+                <span class="text-xs text-text-secondary">
+                  Progreso: {{ jobResult()!.progress }}%
+                </span>
+              }
+            </div>
+            @if (jobResult()!.error) {
+              <p class="text-sm text-red-600" role="alert">
+                {{ jobResult()!.error }}
+              </p>
+            }
+            @if (jobResult()!.result !== undefined && jobResult()!.result !== null) {
+              <pre
+                class="text-xs bg-muted/50 rounded-lg p-3 overflow-auto max-h-64 text-text-primary"
+              >{{ jobResult()!.result | json }}</pre
+              >
+            }
+          </div>
+        }
+        @if (jobLookupError()) {
+          <p class="mt-4 text-sm text-red-600" role="alert">
+            {{ jobLookupError() }}
+          </p>
+        }
+      </div>
+    </app-card>
+  }
+
+  <!-- ═══════════════════════════════════════ -->
+  <!-- AGENTS TAB (CRUD del endpoint F4)       -->
+  <!-- ═══════════════════════════════════════ -->
+  @if (activeTab() === "agents") {
+    <!-- Main Content Card -->
+    <app-card [padding]="false" overflow="visible">
+      <!-- Table Header -->
+      <div
+        class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
+      >
+        <div class="flex-1 min-w-0">
+          <h3 class="text-lg font-semibold text-text-primary">
+            Agentes de IA
+          </h3>
+          <p class="hidden sm:block text-xs text-text-secondary mt-0.5">
+            Agentes configurables: Vexi es uno mas, crear otro no exige deploy
+          </p>
+        </div>
+        <div
+          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+        >
+          <div class="w-full sm:w-60">
+            <app-inputsearch
+              placeholder="Buscar agentes..."
+              [debounceTime]="300"
+              (searchChange)="onAgentSearchChange($event)"
+              size="sm"
+              fullWidth="true"
+            ></app-inputsearch>
+          </div>
+          <app-options-dropdown
+            [actions]="agentDropdownActions"
+            [isLoading]="isLoadingAgents()"
+            (actionClick)="onAgentActionClick($event)"
+          ></app-options-dropdown>
+        </div>
+      </div>
+      <!-- Table Container -->
+      <div class="relative min-h-[400px] p-2 md:p-4">
+        @if (isLoadingAgents()) {
+          <div
+            class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+          >
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        }
+        <app-responsive-data-view
+          [columns]="agentTableColumns"
+          [data]="agents()"
+          [actions]="agentTableActions"
+          [cardConfig]="agentCardConfig"
+          [loading]="isLoadingAgents()"
+        >
+          @if (!isLoadingAgents() && agents().length === 0) {
+            <div class="p-8 flex justify-center w-full">
+              <app-empty-state
+                icon="bot"
+                title="No hay agentes"
+                description="Crea tu primer agente configurable"
+                actionButtonText="Nuevo Agente"
+                [showActionButton]="true"
+                (actionClick)="openCreateAgentModal()"
+              ></app-empty-state>
+            </div>
+          }
+        </app-responsive-data-view>
+      </div>
+      <!-- Pagination -->
+      @if (agents().length > 0) {
+        <div
+          class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
+        >
+          <app-pagination
+            [currentPage]="agentPagination.page"
+            [totalPages]="agentPagination.totalPages"
+            [total]="agentPagination.total"
+            [limit]="agentPagination.limit"
+            infoStyle="range"
+            (pageChange)="onAgentPageChange($event)"
+          />
+        </div>
+      }
+    </app-card>
+  }
+</div>
+
 @defer (when showConfigModal()) {
   <app-ai-engine-config-modal
     [isOpen]="showConfigModal()"
@@ -313,4 +706,16 @@
     (submit)="saveApp($event)"
   >
   </app-ai-engine-app-modal>
+}
+
+@defer (when showAgentModal()) {
+  <app-ai-engine-agent-modal
+    [isOpen]="showAgentModal()"
+    (isOpenChange)="showAgentModal.set($event)"
+    [agent]="selectedAgent()"
+    [apps]="apps()"
+    [isSubmitting]="isSubmittingAgent()"
+    (submit)="saveAgent($event)"
+  >
+  </app-ai-engine-agent-modal>
 }
