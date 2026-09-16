@@ -4,6 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { OrderFlowService } from './order-flow.service';
+import { OrderFlowController } from './order-flow.controller';
+import { PERMISSIONS_KEY } from '../../../auth/decorators/permissions.decorator';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { PaymentType } from './dto';
@@ -1280,5 +1282,480 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
     expect(prismaMock.kitchen_tickets.update).not.toHaveBeenCalled();
     expect(eventEmitter.emit).not.toHaveBeenCalled();
     expect(result).toEqual(orderView);
+  });
+});
+
+/**
+ * 1060 paso 1 — guarda de entregado en {@link OrderFlowService.cancelOrderItem}.
+ *
+ * Un ítem con `delivered_at != null` es un hecho de servicio consumado: la
+ * cancelación normal lo rechaza con `ITEM_ALREADY_DELIVERED` (409) SIN mutar
+ * nada (sin tx, sin KDS, sin stock, sin soft cancel). Cubre mesa, legacy y
+ * detalle porque las tres rutas pasan por este seam.
+ */
+describe('OrderFlowService.cancelOrderItem — guarda delivered (1060 paso 1)', () => {
+  const ORDER_ID = 3017;
+  const ITEM_ID = 701;
+
+  const deliveredItem = (overrides: Record<string, unknown> = {}) => ({
+    id: ITEM_ID,
+    product_name: 'Pollo asado',
+    inventory_consumed_at_fire: false,
+    cancelled_at: null,
+    delivered_at: new Date('2026-09-10T12:00:00.000Z'),
+    kitchen_ticket_items: [],
+    ...overrides,
+  });
+
+  const buildService = (item: Record<string, unknown>) => {
+    const txMock: any = {
+      kitchen_tickets: { findFirst: jest.fn() },
+      inventory_transactions: { findMany: jest.fn().mockResolvedValue([]) },
+      order_items: {
+        update: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      orders: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const prismaMock: any = {
+      order_items: { findFirst: jest.fn().mockResolvedValue(item) },
+      $transaction: jest.fn((cb: any) => cb(txMock)),
+    };
+    const kitchenFireService = {
+      cancelTicketInTx: jest.fn().mockResolvedValue(undefined),
+      emitTicketCancelledEvent: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      kitchenFireService as any,
+    );
+    jest
+      .spyOn(service as any, 'getOrder')
+      .mockResolvedValue({ id: ORDER_ID, state: 'created' });
+    return { service, prismaMock, txMock, kitchenFireService };
+  };
+
+  it('409 ITEM_ALREADY_DELIVERED sin mutación (ruta por defecto)', async () => {
+    const { service, prismaMock, txMock, kitchenFireService } = buildService(
+      deliveredItem(),
+    );
+
+    await expect(
+      service.cancelOrderItem(ORDER_ID, ITEM_ID, 'cliente se arrepintió'),
+    ).rejects.toMatchObject({ errorCode: 'ITEM_ALREADY_DELIVERED' });
+
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(txMock.order_items.update).not.toHaveBeenCalled();
+    expect(txMock.orders.update).not.toHaveBeenCalled();
+    expect(kitchenFireService.cancelTicketInTx).not.toHaveBeenCalled();
+    expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
+  });
+
+  it('409 ITEM_ALREADY_DELIVERED sin mutación (ruta con cancellation_type explícito)', async () => {
+    const { service, prismaMock, txMock } = buildService(deliveredItem());
+
+    await expect(
+      service.cancelOrderItem(
+        ORDER_ID,
+        ITEM_ID,
+        'merma pactada con el dueño',
+        'after_fire_waste',
+      ),
+    ).rejects.toMatchObject({ errorCode: 'ITEM_ALREADY_DELIVERED' });
+
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(txMock.order_items.update).not.toHaveBeenCalled();
+  });
+
+  it('el conflicto de estado domina: entregado + motivo corto sigue siendo 409', async () => {
+    const { service, prismaMock } = buildService(deliveredItem());
+
+    await expect(
+      service.cancelOrderItem(ORDER_ID, ITEM_ID, 'x'),
+    ).rejects.toMatchObject({ errorCode: 'ITEM_ALREADY_DELIVERED' });
+
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 1060 paso 2 — reversa de entrega {@link OrderFlowService.cancelDeliveredOrderItem}.
+ *
+ * Único camino para cancelar un ítem ya entregado: exige motivo (mín 3) y
+ * destino (`restock` | `waste`). `restock` devuelve las unidades al stock vía
+ * `StockLevelManager`; `waste` no toca stock (la merma queda auditada). Ambas
+ * escriben `audit_logs` (`order_item.cancel_delivered` con usuario, motivo y
+ * destino) y devuelven la vista de la orden.
+ */
+describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', () => {
+  const ORDER_ID = 4017;
+  const ITEM_ID = 801;
+
+  const deliveredItem = (overrides: Record<string, unknown> = {}) => ({
+    id: ITEM_ID,
+    product_id: 11,
+    product_variant_id: null,
+    product_name: 'Pollo asado',
+    quantity: 2,
+    delivered_at: new Date('2026-09-10T12:00:00.000Z'),
+    cancelled_at: null,
+    ...overrides,
+  });
+
+  const buildService = (opts: {
+    order?: Record<string, unknown>;
+    item?: Record<string, unknown> | null;
+    activeItems?: Array<{
+      total_price: number;
+      order_item_taxes?: Array<{ tax_amount: number | null }>;
+    }>;
+  }) => {
+    const txMock: any = {
+      order_items: {
+        update: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue(
+          opts.activeItems ?? [{ total_price: 30000, order_item_taxes: [] }],
+        ),
+      },
+      orders: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const prismaMock: any = {
+      order_items: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(
+            opts.item === undefined ? deliveredItem() : opts.item,
+          ),
+      },
+      $transaction: jest.fn((cb: any) => cb(txMock)),
+    };
+    const stockLevelManager = {
+      getDefaultLocationForProduct: jest.fn().mockResolvedValue(1),
+      updateStock: jest.fn().mockResolvedValue({}),
+    };
+    const auditService = { logCustom: jest.fn().mockResolvedValue(undefined) };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      stockLevelManager as any,
+      {} as any,
+      {} as any,
+      auditService as any,
+    );
+    const orderView = {
+      id: ORDER_ID,
+      state: 'created',
+      store_id: 4,
+      ...(opts.order ?? {}),
+    };
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(orderView);
+    return { service, prismaMock, txMock, stockLevelManager, auditService };
+  };
+
+  it('restock: devuelve stock, cancela suave y audita con destino', async () => {
+    const { service, txMock, stockLevelManager, auditService } = buildService(
+      {},
+    );
+
+    const result = await service.cancelDeliveredOrderItem(
+      ORDER_ID,
+      ITEM_ID,
+      'el cliente devolvió el plato intacto',
+      'restock',
+    );
+
+    // Destino aplicado: las 2 unidades vuelven al stock como `return`.
+    expect(
+      stockLevelManager.getDefaultLocationForProduct,
+    ).toHaveBeenCalledWith(11, undefined);
+    expect(stockLevelManager.updateStock).toHaveBeenCalledTimes(1);
+    expect(stockLevelManager.updateStock.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        product_id: 11,
+        quantity_change: 2,
+        movement_type: 'return',
+        source_module: 'order_item_cancel_delivered',
+        create_movement: true,
+        validate_availability: false,
+      }),
+    );
+    // Soft cancel con el tipo contable de la reversa.
+    expect(txMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({
+        cancellation_reason: 'el cliente devolvió el plato intacto',
+        cancellation_type: 'delivered_restock',
+        updated_at: expect.any(Date),
+      }),
+    });
+    // Auditoría con usuario, motivo y destino.
+    expect(auditService.logCustom).toHaveBeenCalledTimes(1);
+    expect(auditService.logCustom.mock.calls[0][1]).toBe(
+      'order_item.cancel_delivered',
+    );
+    expect(auditService.logCustom.mock.calls[0][3]).toEqual(
+      expect.objectContaining({
+        order_id: ORDER_ID,
+        order_item_id: ITEM_ID,
+        reason: 'el cliente devolvió el plato intacto',
+        destination: 'restock',
+      }),
+    );
+    expect((result as any).id).toBe(ORDER_ID);
+  });
+
+  it('waste: NO toca stock, deja merma auditada', async () => {
+    const { service, txMock, stockLevelManager, auditService } = buildService(
+      {},
+    );
+
+    await service.cancelDeliveredOrderItem(
+      ORDER_ID,
+      ITEM_ID,
+      'se cayó el plato al llevarlo',
+      'waste',
+    );
+
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(
+      stockLevelManager.getDefaultLocationForProduct,
+    ).not.toHaveBeenCalled();
+    expect(txMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({ cancellation_type: 'delivered_waste' }),
+    });
+    expect(auditService.logCustom).toHaveBeenCalledTimes(1);
+    expect(auditService.logCustom.mock.calls[0][3]).toEqual(
+      expect.objectContaining({ destination: 'waste' }),
+    );
+  });
+
+  it('422 si el motivo tiene menos de 3 caracteres (sin mutación)', async () => {
+    const { service, prismaMock, stockLevelManager, auditService } =
+      buildService({});
+
+    await expect(
+      service.cancelDeliveredOrderItem(ORDER_ID, ITEM_ID, 'x', 'restock'),
+    ).rejects.toMatchObject({
+      errorCode: 'TABLE_SESSION_ADD_ITEMS_INVALID',
+    });
+
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(auditService.logCustom).not.toHaveBeenCalled();
+  });
+
+  it('422 si el destino no es restock|waste (sin mutación)', async () => {
+    const { service, prismaMock, stockLevelManager, auditService } =
+      buildService({});
+
+    await expect(
+      service.cancelDeliveredOrderItem(
+        ORDER_ID,
+        ITEM_ID,
+        'motivo válido pero destino no',
+        'invalid' as any,
+      ),
+    ).rejects.toMatchObject({
+      errorCode: 'TABLE_SESSION_ADD_ITEMS_INVALID',
+    });
+
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(auditService.logCustom).not.toHaveBeenCalled();
+  });
+
+  it('409 si el ítem no está entregado (sin mutación)', async () => {
+    const { service, prismaMock, stockLevelManager, auditService } =
+      buildService({ item: deliveredItem({ delivered_at: null }) });
+
+    await expect(
+      service.cancelDeliveredOrderItem(
+        ORDER_ID,
+        ITEM_ID,
+        'no hay entrega que reversar',
+        'waste',
+      ),
+    ).rejects.toMatchObject({
+      errorCode: 'TABLE_SESSION_ITEM_NOT_REMOVABLE',
+    });
+
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(auditService.logCustom).not.toHaveBeenCalled();
+  });
+
+  it('404 si el ítem no pertenece a la orden', async () => {
+    const { service, prismaMock } = buildService({ item: null });
+
+    await expect(
+      service.cancelDeliveredOrderItem(ORDER_ID, 999999, 'motivo válido', 'waste'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('idempotencia: ítem ya cancelado devuelve la vista sin reescribir ni auditar', async () => {
+    const { service, prismaMock, stockLevelManager, auditService } =
+      buildService({
+        item: deliveredItem({
+          cancelled_at: new Date('2026-09-01T12:00:00.000Z'),
+        }),
+      });
+
+    const result = await service.cancelDeliveredOrderItem(
+      ORDER_ID,
+      ITEM_ID,
+      'segundo intento',
+      'restock',
+    );
+
+    expect((result as any).id).toBe(ORDER_ID);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(auditService.logCustom).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * 1060 paso 3 — si el finish falla tras el claim, `payOrder` restaura el
+ * estado previo al claim (el pago compensado con motivo se conserva).
+ */
+describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 3)', () => {
+  const DTO: any = { store_payment_method_id: 1, payment_type: PaymentType.DIRECT };
+
+  const CREATED_PAYMENT = {
+    id: 999,
+    gateway_response: { payment_type: 'direct' },
+  };
+
+  const buildService = () => {
+    const prismaMock: any = {
+      store_payment_methods: {
+        findFirst: jest
+          .fn()
+          .mockResolvedValue({ id: 1, system_payment_method: { type: 'card' } }),
+      },
+      payments: {
+        create: jest.fn().mockResolvedValue(CREATED_PAYMENT),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      // Pre-claim (paso 3), shipping-gate y cupón comparten este mock: sin
+      // `coupon_id` el cupón no hace nada; sin `delivery_type`/`shipping`
+      // el gate no aplica; `state` alimenta la restauración.
+      orders: {
+        findFirst: jest.fn().mockResolvedValue({ state: 'created' }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue({
+          settings: { pos: { allow_anonymous_sales: true } },
+        }),
+      },
+      coupon_uses: { findFirst: jest.fn().mockResolvedValue(null) },
+      coupons: { findFirst: jest.fn().mockResolvedValue(null) },
+    };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+    );
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({
+      id: 1,
+      state: 'created',
+      delivery_type: 'direct_delivery',
+      grand_total: 4000,
+      currency: 'COP',
+      store_id: 4,
+    });
+    jest
+      .spyOn(service as any, 'generateTransactionId')
+      .mockResolvedValue('TXN-1');
+    jest
+      .spyOn(service as any, 'hasPendingKitchenItems')
+      .mockResolvedValue(false);
+    jest.spyOn(service as any, 'validateTransition').mockReturnValue(undefined);
+    jest
+      .spyOn(service as any, 'recordPayOrderCashMovement')
+      .mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'computeAndPersistEta')
+      .mockResolvedValue(undefined);
+    return { service, prismaMock };
+  };
+
+  it('finish → INV_STOCK_002: anula el pago Y restaura created', async () => {
+    const { service, prismaMock } = buildService();
+    jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockRejectedValue(new VendixHttpException(ErrorCodes.INV_STOCK_002));
+
+    await expect(service.payOrder(1, DTO)).rejects.toMatchObject({
+      errorCode: 'ORD_FLOW_PAYMENT_FAILED_001',
+    });
+
+    // Pago compensado con motivo (regla existente, intacta).
+    expect(prismaMock.payments.update).toHaveBeenCalledWith({
+      where: { id: 999 },
+      data: expect.objectContaining({
+        state: 'cancelled',
+        gateway_response: expect.objectContaining({
+          cancellation_reason: 'finish_blocked_insufficient_stock',
+        }),
+      }),
+    });
+    // Estado restaurado al previo al claim (no varado en `processing`).
+    const restoreCalls = prismaMock.orders.updateMany.mock.calls.filter(
+      (c: any) => c[0]?.data?.state === 'created',
+    );
+    expect(restoreCalls.length).toBeGreaterThanOrEqual(1);
+    expect(restoreCalls[0][0]).toEqual({
+      where: { id: 1 },
+      data: expect.objectContaining({ state: 'created' }),
+    });
+  });
+
+  it('finish OK: NO restaura (el claim es el único updateMany)', async () => {
+    const { service, prismaMock } = buildService();
+    jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockResolvedValue({ id: 1, state: 'finished' });
+
+    await service.payOrder(1, DTO);
+
+    expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * 1060 paso 2 (RBAC) — el endpoint de reversa exige el permiso propio
+ * `store:orders:order_flow:cancel_delivered` (no hereda `order_flow:create`
+ * del mesero). El seed lo asigna a cashier/admin/owner y NUNCA a
+ * waiter/employee; el guard niega (403) a quien no lo porta.
+ */
+describe('OrderFlowController.cancelDeliveredOrderItem — permiso propio (1060 paso 2)', () => {
+  it(`declara @Permissions('store:orders:order_flow:cancel_delivered')`, () => {
+    const perms = Reflect.getMetadata(
+      PERMISSIONS_KEY,
+      (OrderFlowController.prototype as any).cancelDeliveredOrderItem,
+    );
+    expect(perms).toContain('store:orders:order_flow:cancel_delivered');
   });
 });

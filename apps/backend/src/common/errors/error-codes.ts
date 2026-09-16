@@ -5448,6 +5448,16 @@ export const ErrorCodes = {
     devMessage:
       'El plato preparado debe estar listo en cocina antes de marcarse entregado',
   },
+  // 1060 paso 1 — un ítem con `delivered_at` es un hecho de servicio
+  // consumado: la cancelación normal lo rechaza (409, sin mutar nada) y
+  // solo la reversa explícita (`cancel-delivered`, con motivo + destino)
+  // puede tocarlo.
+  ITEM_ALREADY_DELIVERED: {
+    code: 'ITEM_ALREADY_DELIVERED',
+    httpStatus: 409,
+    devMessage:
+      'El ítem ya fue entregado; no se puede cancelar por esta vía (usar la reversa de entrega)',
+  },
   KITCHEN_FIRE_NO_RECIPE: {
     code: 'KITCHEN_FIRE_NO_RECIPE',
     httpStatus: 422,

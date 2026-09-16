@@ -677,6 +677,15 @@ export class OrderFlowService {
     // already in use. Direct path mutates back via the existing
     // `updateOrderState` calls below; online stays in processing until
     // the gateway callback lands.
+    //
+    // 1060 paso 3 — capturar el estado previo al claim (lectura read-only):
+    // si el finish falla tras el claim, la orden se restaura a este estado
+    // en vez de quedar varada en `processing`. El pago compensado con su
+    // motivo se conserva.
+    const preClaimRow = await this.prisma.orders
+      .findFirst({ where: { id: orderId }, select: { state: true } })
+      .catch(() => null);
+    const preClaimState = (preClaimRow?.state as OrderState | undefined) ?? null;
     const claim = await this.prisma.orders.updateMany({
       where: {
         id: orderId,
@@ -1138,6 +1147,10 @@ export class OrderFlowService {
               },
             },
           });
+          // 1060 paso 3 — el finish falló tras el claim: restaurar el estado
+          // previo al claim para no dejar la orden varada en `processing`
+          // (el pago compensado con motivo se conserva arriba).
+          await this.restorePreClaimState(orderId, preClaimState);
           // Round 1 MAJOR #11: el código de superficie que ve el caller es
           // SIEMPRE `ORD_FLOW_PAYMENT_FAILED_001`. El código tipado original
           // (p.ej. `INV_STOCK_002` / `SERIAL_REQUIRED_001`) viaja en
@@ -1149,7 +1162,9 @@ export class OrderFlowService {
           );
         }
         // Error de infra (no Vendix): envolvemos también, pero sin un
-        // cause_code tipado.
+        // cause_code tipado. La restauración aplica igual: el claim ya se
+        // tomó y el finish no comprometió nada.
+        await this.restorePreClaimState(orderId, preClaimState);
         throw this.wrapPaymentFailure('finish_blocked_infra', {
           order_id: orderId,
           error: (e as Error)?.message ?? 'unknown',
@@ -1942,6 +1957,9 @@ export class OrderFlowService {
    *   5. SOFT CANCEL + recálculo filtrando `cancelled_at IS NULL`.
    *   6. IDEMPOTENCIA — ítem ya cancelado devuelve la vista sin reescribir
    *      (`cancelled_at` queda fijo en la primera cancelación).
+   *   7. 1060 paso 1 — ítem con `delivered_at != null` se rechaza con
+   *      `ITEM_ALREADY_DELIVERED` (409) sin mutar nada; solo la reversa
+   *      explícita (`cancelDeliveredOrderItem`) puede tocarlo.
    *
    * Scope multi-tenant: `getOrder` (404 si la orden no es de la tienda) +
    * `order_items.findFirst` con `order_id: orderId` (si el ítem es de otra
@@ -1988,6 +2006,9 @@ export class OrderFlowService {
         product_name: true,
         inventory_consumed_at_fire: true,
         cancelled_at: true,
+        // 1060 paso 1 — el guard de entregado vive acá (el select debe
+        // traerlo; sin él la guarda sería ciega).
+        delivered_at: true,
         kitchen_ticket_items: {
           orderBy: { id: 'desc' },
           select: {
@@ -2011,6 +2032,20 @@ export class OrderFlowService {
     // 3. Idempotencia: la primera cancelación es la que ocurrió.
     if (orderItem.cancelled_at) {
       return this.getOrder(orderId);
+    }
+
+    // 3b. 1060 paso 1 — entregado es hecho consumado: la cancelación normal
+    //     lo rechaza SIN mutar nada (sin KDS, sin stock, sin soft cancel).
+    //     Solo la reversa explícita (`cancelDeliveredOrderItem`, con motivo
+    //     + destino restock|waste) puede tocarlo. Va antes de la validación
+    //     del motivo (igual que los guards paid/terminal): el conflicto de
+    //     estado domina sobre la calidad del input. Cubre mesa, legacy y
+    //     detalle porque todos pasan por este seam.
+    if (orderItem.delivered_at != null) {
+      throw new VendixHttpException(
+        ErrorCodes.ITEM_ALREADY_DELIVERED,
+        `No se puede cancelar el ítem #${orderItemId}: ya fue entregado`,
+      );
     }
 
     // 4. Derivar el tipo contable si el caller no lo proveyó + motivo
@@ -2195,6 +2230,224 @@ export class OrderFlowService {
 
     // 6. Devolver la vista de la orden actualizada (forma `getOrder`,
     //    igual que `deliverOrderItem`).
+    return this.getOrder(orderId);
+  }
+
+  /**
+   * Reversa de entrega a NIVEL DE ÍTEM (1060 paso 2 — único camino para
+   * cancelar un ítem ya entregado; el seam `cancelOrderItem` lo rechaza
+   * con `ITEM_ALREADY_DELIVERED`).
+   *
+   * Reglas:
+   *   1. GUARDS — espejo del seam: bloquea si la orden está cobrada o en
+   *      estado terminal (`completed`/`cancelled`/`refunded`).
+   *   2. MOTIVO obligatorio (mín 3) + DESTINO obligatorio (`restock` |
+   *      `waste`): el DTO lo exige (400/422 sin ellos); la validación acá
+   *      queda como defensa en profundidad para callers directos.
+   *   3. IDEMPOTENCIA — ítem ya cancelado devuelve la vista sin reescribir.
+   *   4. SOLO ENTREGADOS — sin `delivered_at` no hay entrega que reversar
+   *      (409, sin mutar nada).
+   *   5. DESTINO — `restock` devuelve las unidades al stock vía
+   *      `stockLevelManager.updateStock` (`movement_type='return'`, sin
+   *      `order_item_id` por la FK `Restrict`, igual que la reversa del
+   *      seam); `waste` no toca stock: la merma queda auditada.
+   *   6. SOFT CANCEL + recálculo filtrando `cancelled_at IS NULL` (mismo
+   *      patrón F-082 del seam: conserva envío/propina/descuento).
+   *   7. AUDITORÍA — fila `order_item.cancel_delivered` vía `AuditService`
+   *      con usuario, motivo y destino (best-effort post-commit, igual que
+   *      `order.promoted_to_created`: nunca revierte la reversa).
+   *
+   * Scope multi-tenant: `getOrder` (404 si la orden no es de la tienda) +
+   * `order_items.findFirst` con `order_id: orderId` (404 sin filtrar nada).
+   */
+  async cancelDeliveredOrderItem(
+    orderId: number,
+    orderItemId: number,
+    reason: string,
+    destination: 'restock' | 'waste',
+  ) {
+    // 1. Orden debe existir en la tienda del contexto + guards paid/terminal
+    //    (espejo exacto del seam `cancelOrderItem`).
+    const order = await this.getOrder(orderId);
+
+    const BLOCKED_STATES = ['completed', 'cancelled', 'refunded'] as const;
+    const isPaid =
+      (order as any).payment_status === 'paid' ||
+      (order as any).payment_status === 'succeeded';
+    if (isPaid) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        'No se puede reversar la entrega de un ítem de una orden ya cobrada',
+      );
+    }
+    if (BLOCKED_STATES.includes(order.state as any)) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        `No se puede reversar la entrega de un ítem en estado '${order.state}'`,
+      );
+    }
+
+    // 2. El ítem debe pertenecer a ESTA orden (barrera de scope: 404 sin
+    //    filtrar nada de otra orden/tenant, igual que el seam).
+    const orderItem = await this.prisma.order_items.findFirst({
+      where: { id: orderItemId, order_id: orderId },
+      select: {
+        id: true,
+        product_id: true,
+        product_variant_id: true,
+        product_name: true,
+        quantity: true,
+        delivered_at: true,
+        cancelled_at: true,
+      },
+    });
+
+    if (!orderItem) {
+      throw new NotFoundException(
+        `Order item #${orderItemId} not found on order #${orderId}`,
+      );
+    }
+
+    // 3. Idempotencia: la primera reversa es la que ocurrió.
+    if (orderItem.cancelled_at) {
+      return this.getOrder(orderId);
+    }
+
+    // 4. Motivo + destino obligatorios (defensa en profundidad; el DTO ya
+    //    los exige).
+    if (!reason || reason.trim().length < 3) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'Debes proporcionar un motivo de reversa (mínimo 3 caracteres)',
+      );
+    }
+    if (destination !== 'restock' && destination !== 'waste') {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        `Destino de reversa inválido: '${destination}'. Debe ser 'restock' o 'waste'`,
+      );
+    }
+
+    // 5. Solo entregados: sin `delivered_at` no hay entrega que reversar.
+    if (orderItem.delivered_at == null) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+        `No se puede reversar la entrega del ítem #${orderItemId}: no está entregado`,
+      );
+    }
+
+    const trimmedReason = reason.trim();
+    const cancellationType =
+      destination === 'restock' ? 'delivered_restock' : 'delivered_waste';
+    const userId = RequestContextService.getUserId() ?? null;
+
+    await this.prisma.$transaction(async (tx) => {
+      // Destino restock: devolver las unidades al stock. `waste` no toca
+      // stock (la merma queda en la auditoría del paso 7).
+      if (destination === 'restock' && orderItem.product_id != null) {
+        const locationId =
+          await this.stockLevelManager.getDefaultLocationForProduct(
+            orderItem.product_id,
+            orderItem.product_variant_id ?? undefined,
+          );
+        await this.stockLevelManager.updateStock(
+          {
+            product_id: orderItem.product_id,
+            variant_id: orderItem.product_variant_id ?? undefined,
+            location_id: locationId,
+            quantity_change: orderItem.quantity,
+            movement_type: 'return',
+            reason: `Reversa entrega ítem orden — restock (${trimmedReason})`,
+            source_module: 'order_item_cancel_delivered',
+            // NO order_item_id: la reversa no debe crear un hijo que
+            // apunte al order_item cancelado (FK onDelete: Restrict).
+            create_movement: true,
+            validate_availability: false,
+          },
+          tx,
+        );
+      }
+
+      // Soft cancel: el ítem queda VISIBLE marcado como cancelado, pero
+      // EXCLUIDO de los totales. Motivo + destino persistidos para
+      // auditoría y para que el detalle de orden los muestre.
+      await tx.order_items.update({
+        where: { id: orderItemId },
+        data: {
+          cancelled_at: new Date(),
+          cancellation_reason: trimmedReason,
+          cancellation_type: cancellationType,
+          updated_at: new Date(),
+        },
+      });
+
+      // Recálculo excluyendo cancelados (`cancelled_at IS NULL`) — mismo
+      // patrón F-082 del seam (conserva envío/propina/descuento, clamp 0).
+      const activeItems = await tx.order_items.findMany({
+        where: { order_id: orderId, cancelled_at: null },
+        select: {
+          total_price: true,
+          order_item_taxes: { select: { tax_amount: true } },
+        },
+      });
+      const subtotal = activeItems.reduce(
+        (acc, it) => acc + Number(it.total_price),
+        0,
+      );
+      const tax = activeItems.reduce(
+        (acc, it) =>
+          acc +
+          (it.order_item_taxes ?? []).reduce(
+            (s, t) => s + Number(t.tax_amount ?? 0),
+            0,
+          ),
+        0,
+      );
+      const shippingCost = Number((order as any).shipping_cost ?? 0);
+      const tipAmount = Number((order as any).tip_amount ?? 0);
+      const discountAmount = Number((order as any).discount_amount ?? 0);
+      const grandTotal = Math.max(
+        0,
+        subtotal + tax + shippingCost + tipAmount - discountAmount,
+      );
+      await tx.orders.update({
+        where: { id: orderId },
+        data: {
+          subtotal_amount: new Prisma.Decimal(subtotal),
+          tax_amount: new Prisma.Decimal(tax),
+          grand_total: new Prisma.Decimal(grandTotal),
+          updated_at: new Date(),
+        },
+      });
+    });
+
+    // 7. Auditoría post-commit (best-effort, nunca revierte la reversa).
+    try {
+      await this.auditService.logCustom(
+        userId ?? 0,
+        'order_item.cancel_delivered',
+        AuditResource.ORDERS,
+        {
+          request_id: RequestContextService.getRequestId() ?? null,
+          store_id: (order as any)?.store_id ?? null,
+          order_id: orderId,
+          order_item_id: orderItemId,
+          reason: trimmedReason,
+          destination,
+          cancellation_type: cancellationType,
+        },
+        orderId,
+      );
+    } catch (auditErr) {
+      this.logger.warn(
+        `[cancelDeliveredOrderItem audit failed] order=${orderId} item=${orderItemId}: ${(auditErr as Error).message}`,
+      );
+    }
+
+    this.logger.log(
+      `Order item delivery reversed: order=${orderId} item=${orderItemId} destination=${destination}`,
+    );
+
     return this.getOrder(orderId);
   }
 
@@ -4165,6 +4418,38 @@ export class OrderFlowService {
    * El `stage` NUNCA viaja como código de error — es solo una etiqueta
    * legible. La UI y soporte discriminan por `cause_code`.
    */
+  /**
+   * 1060 paso 3 — compensación de estado del claim de `payOrder`.
+   *
+   * Si el finish falla tras el claim, la orden quedaría varada en
+   * `processing` (estado intermedio del race-claim, no un estado de negocio
+   * válido para reintentar el cobro). Se restaura el estado previo al claim
+   * para que el cajero pueda reintentar. Best-effort: si la restauración
+   * falla, el operador ve la orden en `processing` y la mueve a mano (mismo
+   * contrato que los rollbacks ya existentes en `payOrder`).
+   *
+   * Solo la llama el catch del finish (rama direct → finished): no toca
+   * VALID_TRANSITIONS, guards de pay, F2-guard ni ningún otro flujo.
+   */
+  private async restorePreClaimState(
+    orderId: number,
+    preClaimState: OrderState | null,
+  ): Promise<void> {
+    if (!preClaimState) {
+      return;
+    }
+    try {
+      await this.prisma.orders.updateMany({
+        where: { id: orderId },
+        data: { state: preClaimState, updated_at: new Date() },
+      });
+    } catch (restoreErr) {
+      this.logger.error(
+        `[payOrder pre-claim state restore failed] order=${orderId}: ${(restoreErr as Error).message}`,
+      );
+    }
+  }
+
   private wrapPaymentFailure(
     stage: string,
     cause: VendixHttpException | Error | Record<string, unknown>,
