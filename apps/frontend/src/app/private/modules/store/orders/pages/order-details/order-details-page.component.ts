@@ -1,5 +1,7 @@
 import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { NgClass, DatePipe } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
+import { environment } from '../../../../../../../environments/environment';
 import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
@@ -10,6 +12,8 @@ import {
   StoreOrdersService,
   CreateAddressPayload,
   UpdateAddressPayload,
+  FlowCancelOrderDto,
+  KitchenDisposition,
 } from '../../services/store-orders.service';
 // Plan refund-gateway-dispatch-fix (Step C.1): `resolveRefund` lives on
 // `OrdersService` (W1-C), not on `StoreOrdersService`. Aliased to
@@ -95,6 +99,7 @@ import {
   invoiceStatusTone,
   toneClasses,
 } from '../../../invoicing/components/invoice-detail/invoice-fiscal-status.util';
+import { CountryService } from '../../../../../../services/country.service';
 import { DocumentPrintService } from '../../../../../../shared/services/print/document-print.service';
 import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { DispatchTicketPrintService } from '../../../dispatch-ticket/services/dispatch-ticket-print.service';
@@ -112,6 +117,10 @@ import {
   RepartosApiError,
 } from '../../../../store-delivery/services/repartos.service';
 import { STATUS_LABELS as DISPATCH_NOTE_STATUS_LABELS } from '../../../dispatch-notes/constants/dispatch-note.constants';
+import {
+  resolveFiscalAlert,
+  type FiscalAlertEntry,
+} from '../../utils/fiscal-alert-dictionary';
 
 export interface LifecycleStep {
   key: string;
@@ -180,6 +189,16 @@ export class OrderDetailsPageComponent {
   private destroyRef = inject(DestroyRef);
   orderId: string | null = null;
   order = signal<Order | null>(null);
+  /**
+   * C.9 CP-pos-exclusive-tax-double-charge — entrada del diccionario de alerta
+   * fiscal para el `fiscal_alert_code` de la orden; `null` = sin banner. El
+   * copy del banner se deriva de aquí, nunca de texto fijo en la plantilla.
+   */
+  readonly fiscalAlert = computed<FiscalAlertEntry | null>(() => {
+    const code = this.order()?.fiscal_alert_code;
+    if (!code) return null;
+    return resolveFiscalAlert(code);
+  });
   readonly appliedTierSummary = computed(() => {
     const order = this.order();
     const groups = new Map<string, { name: string; total: number; count: number }>();
@@ -325,6 +344,19 @@ export class OrderDetailsPageComponent {
   /** True if the active store is a restaurant (industries cascade). */
   readonly isRestaurant = computed<boolean>(() => this.authFacade.isRestaurant());
   /**
+   * C.7 (§5.3, base gross) — esta superficie pinta líneas en BRUTO
+   * (`final_total_price ?? total_price`): el pie no lleva Subtotal ni fila
+   * de impuesto que sume; sólo TOTAL y, con desglose respaldado, la nota
+   * informativa fuera de la aritmética.
+   */
+  readonly showDetailVatNote = computed(() => {
+    const order = this.order();
+    const tax = Number(
+      (order as unknown as { tax_amount?: unknown } | null)?.tax_amount ?? 0,
+    );
+    return this.authFacade.printsVatBreakdown() && tax > 0;
+  });
+  /**
    * Plan KDS fire-flows (F3): show the per-plate kitchen dispatch UI only
    * for restaurant stores, when there is at least one pending prepared
    * item, and the order is not in a terminal state (cancelled/refunded).
@@ -357,6 +389,24 @@ export class OrderDetailsPageComponent {
    */
   resendItemId = signal<number | null>(null);
   readonly showResendModal = computed<boolean>(() => this.resendItemId() !== null);
+  /**
+   * Ítem actualmente elegido para reenvío (`null` = modal cerrado).
+   * Alimenta `[cancellationType]` del modal para el texto de remake
+   * post-cancelación ("con/sin nuevos insumos" según la decisión).
+   */
+  readonly resendItem = computed<OrderItem | null>(() => {
+    const id = this.resendItemId();
+    if (id == null) return null;
+    return this.order()?.order_items?.find((it) => it.id === id) ?? null;
+  });
+  /**
+   * Decisión de cocina persistida del ítem en reenvío
+   * (`after_fire_reused` | `after_fire_waste` | null). `null` = flujo
+   * clásico sin decisión (textos por defecto del modal).
+   */
+  readonly resendItemCancellationType = computed<string | null>(
+    () => this.resendItem()?.cancellation_type ?? null,
+  );
 
   // Payment methods for pay modal
   paymentMethods = signal<StorePaymentMethod[]>([]);
@@ -740,17 +790,59 @@ export class OrderDetailsPageComponent {
   });
 
   /**
+   * Un pedido a domicilio (`home_delivery`) SIEMPRE se entrega por el flujo de
+   * despacho — remisión, ruta o app de entrega — aunque sus platos hayan
+   * pasado por cocina. Entregar los platos es entregarlos al domiciliario, no
+   * al cliente: son dos hechos distintos. Este predicado es el que impide que
+   * la detección de cocina (`isKitchenOrder`) se coma el botón "Despachar
+   * Orden" en un domicilio de restaurante. Su espejo backend vive en
+   * `OrderFlowService.markKitchenOrderDelivered`, que por la misma razón deja
+   * la orden en `processing` cuando la cocina termina.
+   */
+  readonly requiresDispatchFlow = computed<boolean>(
+    () => (this.order()?.delivery_type || 'direct_delivery') === 'home_delivery',
+  );
+
+  /**
+   * Plan 1060 (paso 5) — "Despachar Orden" solo existe cuando hay
+   * fulfillment: domicilio (`requiresDispatchFlow`) o platos presentes en
+   * cocina (`isKitchenOrder`). Una mesa `direct_delivery` sin cocina no
+   * ofrece despacho. Solo visibilidad: no toca `shipOrder` ni el backend.
+   */
+  readonly canOfferDispatch = computed<boolean>(
+    () => this.requiresDispatchFlow() || this.isKitchenOrder(),
+  );
+
+  /**
+   * Platos ya disparados a cocina que aún no están entregados (ticket ni
+   * `delivered` ni `cancelled`). Solo informa: despachar un domicilio con
+   * cocina pendiente se advierte, nunca se bloquea — el operador puede estar
+   * armando la ruta mientras el último plato sale.
+   */
+  readonly undeliveredKitchenItems = computed<OrderItem[]>(() => {
+    const order = this.order();
+    if (!order?.order_items) return [];
+    return order.order_items.filter((it) => {
+      const ks = this.kitchenStateFor(it);
+      return !!ks && ks.status !== 'delivered' && ks.status !== 'cancelled';
+    });
+  });
+
+  /**
    * Whether this order can produce a remisión (dispatch note). Mirrors the
-   * backend gate in `createFromOrder`: kitchen orders finalize directly and
-   * `direct_delivery` hands goods over at the counter — neither goes through
-   * the remisión + recaudo cycle. Drives whether the unified "Despachar orden"
-   * button opens the con/sin-remisión chooser or ships directly.
+   * backend gate in `createFromOrder`: `direct_delivery` hands goods over at
+   * the counter, so it never goes through the remisión + recaudo cycle. Una
+   * orden de cocina tampoco lo hace... SALVO que sea a domicilio
+   * (`requiresDispatchFlow`), donde la remisión es justamente el documento del
+   * envío. Drives whether the unified "Despachar orden" button opens the
+   * con/sin-remisión chooser or ships directly.
    */
   readonly canGenerateRemision = computed<boolean>(() => {
     const order = this.order();
     if (!order) return false;
     const delivery = order.delivery_type || 'direct_delivery';
-    return !this.isKitchenOrder() && delivery !== 'direct_delivery';
+    if (delivery === 'direct_delivery') return false;
+    return !this.isKitchenOrder() || this.requiresDispatchFlow();
   });
 
   /**
@@ -842,7 +934,7 @@ export class OrderDetailsPageComponent {
 
         // Dispatching is allowed BEFORE the payment is confirmed so the route
         // can carry the order (COD collects on delivery; online still uncaptured).
-        if (this.canGenerateRemision()) {
+        if (this.canOfferDispatch() && this.canGenerateRemision()) {
           // Unified entry: one button → con/sin-remisión chooser.
           actions.push({
             id: 'dispatch-order',
@@ -850,7 +942,7 @@ export class OrderDetailsPageComponent {
             icon: 'truck',
             variant: dispatchVariant,
           });
-        } else if (isShipping) {
+        } else if (this.canOfferDispatch() && isShipping) {
           // direct_delivery: no remisión; manual ship.
           actions.push({
             id: 'manual-ship',
@@ -883,13 +975,26 @@ export class OrderDetailsPageComponent {
       }
 
       case 'processing':
-        if (this.isKitchenOrder()) {
-          // Kitchen orders skip shipping/dispatch entirely: once the kitchen
+        if (this.isKitchenOrder() && !this.requiresDispatchFlow()) {
+          // Kitchen orders consumed in the store (mesa / mostrador / para
+          // llevar) skip shipping/dispatch entirely: once the kitchen
           // finishes, the operator finalizes directly. Reuse the exact same
           // `finish` action config/handler as `delivered` (backend allows
-          // `processing → finished`).
+          // `processing → finished`). Un domicilio NO entra aquí: su entrega
+          // la estampa el flujo de despacho (ver `requiresDispatchFlow`).
           actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
-        } else if (this.canGenerateRemision()) {
+        } else if (this.canOfferDispatch() && this.canGenerateRemision()) {
+          // Domicilio de restaurante con platos aún en cocina: se avisa, no se
+          // bloquea. El despacho sigue siendo la única vía de entrega.
+          if (this.requiresDispatchFlow() && this.undeliveredKitchenItems().length > 0) {
+            actions.push({
+              id: 'kitchen-info',
+              type: 'alert',
+              color: 'info',
+              icon: 'chef-hat',
+              label: `Hay ${this.undeliveredKitchenItems().length} plato(s) en cocina sin entregar. Puedes despachar igual cuando el domiciliario los reciba.`,
+            } as OrderActionConfig);
+          }
           // Unified dispatch entry point: ONE button opens the con/sin-remisión
           // chooser. "Con remisión" runs the wizard (document + optional route)
           // then ships the order; "sin remisión" just marks it shipped. Both
@@ -906,9 +1011,16 @@ export class OrderDetailsPageComponent {
               variant: 'warning',
             });
           }
+        } else if (!hasPaid) {
+          // Re-auditoría 1060: sin fulfillment no hay nada que despachar,
+          // pero el paso por `shipped` es la ÚNICA vía de cobro (ofrece
+          // Registrar Pago y en `processing` no hay `pay`). Se etiqueta
+          // como cobro, nunca como despacho.
+          actions.push({ id: 'ship', label: 'Pasar a Cobro', icon: 'credit-card', variant: 'primary' });
         } else {
-          // direct_delivery: counter handover, no remisión cycle. Ship directly.
-          actions.push({ id: 'ship', label: 'Despachar Orden', icon: 'package', variant: 'primary' });
+          // Pagada y sin fulfillment: finalizar directo (el backend permite
+          // processing → finished; sin filas de cocina el F2-guard pasa).
+          actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
         }
         if (this.isPrivilegedUser()) {
           actions.push({ id: 'cancel-payment', label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning' });
@@ -1198,27 +1310,20 @@ export class OrderDetailsPageComponent {
   });
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
-    { id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer' },
-    // CP-DTLP Phase E.3 / QUI-764b — disparador 2 manual del tiquete de
-    // despacho desde la pantalla de la orden. El `disabled` SIGUE al mismo
-    // predicado compartido (`shouldAutoPrintDispatchTicket`) que el handler
-    // `printDispatchTicket` — si vuelven a divergir estaríamos en el mismo
-    // lugar dentro de un mes. `trigger: 'explicit'` ignora `printDispatchTicketAuto`
-    // (solo el auto origin lo exige) y respeta `print_dispatch_ticket_on_counter`
-    // para que el botón salga habilitado cuando la tienda eligió imprimir el
-    // tiquete como comprobante de mostrador/para-llevar.
+    { id: 'print', label: 'Imprimir ticket', variant: 'outline', icon: 'printer' },
+    // Tiquete de despacho del gate (`formatType: 'dispatch_ticket'` desde
+    // los datos de la orden). Siempre habilitado.
     {
       id: 'print-dispatch-ticket',
-      label: 'e-ticket de envío',
+      label: 'Imprimir despacho',
       variant: 'outline',
       icon: 'package',
-      disabled: !this.canPrintDispatchTicketExplicit(),
     },
   ]);
 
   /**
    * QUI-764b — predicado MANUAL del tiquete de despacho. Decide si el
-   * botón `e-ticket de envío` debe estar habilitado y si el handler
+   * botón `Imprimir despacho` debe estar habilitado y si el handler
    * `printDispatchTicket` debe imprimir. Una sola fuente de verdad:
    * `headerActions.disabled` y el handler consultan este computed.
    *
@@ -1271,6 +1376,7 @@ export class OrderDetailsPageComponent {
   private fb = inject(FormBuilder);
   private ordersService = inject(StoreOrdersService);
   private ordersFlowService = inject(OrdersService);
+  private http = inject(HttpClient);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
   private paymentMethodsService = inject(PaymentMethodsService);
@@ -1328,6 +1434,7 @@ export class OrderDetailsPageComponent {
   // desde acá sólo lanzamos el manual al pulsar el botón del header o de
   // la card "Gestión de Envío".
   private readonly dispatchTicketPrint = inject(DispatchTicketPrintService);
+  private readonly countryService = inject(CountryService);
   // CP-DTLP Phase E.3 — guard del disparador manual (default true ADR-7).
   private readonly settingsFacade = inject(StoreSettingsFacade);
 
@@ -2056,12 +2163,21 @@ export class OrderDetailsPageComponent {
 
   /**
    * "Envío directo" (entrega completa): en un solo gesto crea una remisión
-   * confirmada SIN ruta, la marca como entregada y finaliza la orden.
-   * Encadena tres endpoints existentes en secuencia:
+   * confirmada SIN ruta y la marca como entregada. Encadena DOS endpoints:
    *   1. `POST /store/dispatch-notes/from-order/:orderId`  (confirmed, mode:none;
    *      `items: []` = quick-accept de todo lo pendiente).
    *   2. `POST /store/dispatch-notes/:id/deliver` (con `courier_name` del modal).
-   *   3. `POST /store/orders/:id/flow/confirm-delivery`.
+   *
+   * NO se llama a `flow/confirm-delivery`. Ese tercer paso forzaba la orden a
+   * `finished` y era el bug del flujo de despacho en restaurante: al tener
+   * platos en cocina sin entregar, `confirmDelivery` lanza
+   * `ORDER_HAS_PENDING_KITCHEN_ITEMS` y el gesto moría DESPUÉS de haber creado
+   * y entregado la remisión — orden a medio camino y sin botón para
+   * recuperarla. El estado correcto lo deriva el reconciliador único
+   * (`reconcileOrderFromDispatch`, disparado por `dispatch_note.delivered`):
+   * remisión entregada + saldo 0 → Finalizada; con saldo pendiente →
+   * Entregada. Una sola fuente de verdad para el estado de la orden.
+   *
    * Ante un fallo en cualquier paso mostramos el toast y abortamos; al terminar
    * recargamos la orden para reflejar el nuevo estado. Reutiliza el mismo
    * `isProcessingAction` de los demás flujos para el loading.
@@ -2081,8 +2197,7 @@ export class OrderDetailsPageComponent {
       await firstValueFrom(
         this.dispatchNotesService.deliver(note.id, { courier_name: courierName }),
       );
-      await firstValueFrom(this.ordersService.flowConfirmDelivery(orderId));
-      this.toastService.success('Orden entregada y finalizada');
+      this.toastService.success('Orden entregada');
       this.loadData();
     } catch (err: any) {
       this.toastService.error(
@@ -2407,28 +2522,130 @@ export class OrderDetailsPageComponent {
       });
   }
 
+  // ── Cancelación de orden con estado KDS (decisión reuse/waste) ──
+  //
+  // Contrato backend (`POST /store/orders/:id/flow/cancel`): acepta
+  // `{ reason, kitchenDisposition?: 'reuse' | 'waste' }`, requerido solo
+  // con ítems avanzados. Por ítem persiste `cancellation_type`
+  // (`after_fire_reused` | `after_fire_waste`) y el resend acepta el
+  // remake post-cancelación con esa decisión (ver `can-resend.ts`).
+  // Si el backend aún no está, la UI es tolerante: 422/403 → toast,
+  // sin romper la vista (el modal queda abierto).
+
+  /**
+   * Ítems disparados a cocina con presencia en KDS. Sin fired, el modal
+   * de cancelación queda intacto (solo motivo).
+   */
+  readonly cancelKdsItems = computed<OrderItem[]>(() =>
+    (this.order()?.order_items ?? []).filter(
+      (it) =>
+        it.inventory_consumed_at_fire === true &&
+        it.cancelled_at == null &&
+        this.kitchenStateFor(it) != null,
+    ),
+  );
+
+  /** Disparados aún en `pending`: se auto-cancelan, sin decisión. */
+  readonly cancelPendingKdsItems = computed<OrderItem[]>(() =>
+    this.cancelKdsItems().filter(
+      (it) => this.kitchenStateFor(it)?.status === 'pending',
+    ),
+  );
+
+  /** Disparados ya avanzados: exigen decisión reuse/waste obligatoria. */
+  readonly cancelAdvancedKdsItems = computed<OrderItem[]>(() => {
+    const advanced = new Set(['in_preparation', 'ready', 'delivered']);
+    return this.cancelKdsItems().filter((it) =>
+      advanced.has(this.kitchenStateFor(it)?.status ?? ''),
+    );
+  });
+
+  /** True con ≥1 avanzado: la decisión reuse/waste es obligatoria. */
+  readonly cancelRequiresDisposition = computed<boolean>(
+    () => this.cancelAdvancedKdsItems().length > 0,
+  );
+
+  /**
+   * Decisión de cocina elegida en el modal. Vive en un signal —no en el
+   * `cancelForm`— para que el gate del botón sea reactivo en zoneless
+   * (leer `form.value` dentro de un `computed` no se recomputa: no es
+   * un signal). `null` hasta que el operador elige.
+   */
+  readonly cancelKitchenDisposition = signal<KitchenDisposition | null>(null);
+
+  /**
+   * Gate del botón confirmar (además de `cancelForm.invalid`, que el
+   * template sigue leyendo directo como hoy): procesamiento en vuelo
+   * o decisión obligatoria sin elegir.
+   */
+  readonly cancelConfirmBlocked = computed<boolean>(
+    () =>
+      this.isProcessingAction() ||
+      (this.cancelRequiresDisposition() &&
+        this.cancelKitchenDisposition() === null),
+  );
+
+  /** Elige la decisión de cocina (radio reuse/waste del modal). */
+  selectCancelDisposition(value: KitchenDisposition): void {
+    if (this.isProcessingAction()) return;
+    this.cancelKitchenDisposition.set(value);
+  }
+
   openCancelModal(): void {
     this.cancelForm.reset();
+    this.cancelKitchenDisposition.set(null);
     this.showCancelModal.set(true);
   }
 
   submitCancellation(): void {
     if (this.cancelForm.invalid || !this.orderId) return;
+    if (
+      this.cancelRequiresDisposition() &&
+      this.cancelKitchenDisposition() == null
+    )
+      return;
+
+    // La decisión solo viaja cuando el operador la eligió (única forma
+    // de elegirla es con ≥1 avanzado): sin fired o solo pendientes el
+    // body queda `{ reason }`, idéntico al contrato anterior.
+    const disposition = this.cancelKitchenDisposition();
+    const payload: FlowCancelOrderDto = {
+      ...this.cancelForm.value,
+      ...(disposition != null ? { kitchenDisposition: disposition } : {}),
+    };
 
     this.isProcessingAction.set(true);
     this.ordersService
-      .flowCancelOrder(this.orderId, this.cancelForm.value)
+      .flowCancelOrder(this.orderId, payload)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.showCancelModal.set(false);
           this.isProcessingAction.set(false);
+          this.cancelKitchenDisposition.set(null);
           this.toastService.success('Orden cancelada');
           this.loadData();
         },
-        error: (err) => {
+        error: (err: unknown) => {
           this.isProcessingAction.set(false);
-          this.toastService.error(err.message || 'Error al cancelar la orden');
+          // 403 (permiso de cancelar comandas) → copy fijo, sin romper
+          // la vista: el modal queda abierto para reintentar o salir.
+          // 422 (p. ej. decisión requerida) u otro → mensaje del backend
+          // tal cual llega vía `parseApiError`.
+          const wrapped = err as {
+            errorCode?: string | null;
+            cause?: { status?: number } | null;
+          };
+          const parsed = parseApiError(err);
+          const code = wrapped?.errorCode ?? parsed.errorCode ?? '';
+          const forbidden =
+            wrapped?.cause?.status === 403 ||
+            /forbid|permission|denied/i.test(code);
+          this.toastService.error(
+            forbidden
+              ? 'Requiere permiso de cancelar comandas (owner/admin)'
+              : parsed.userMessage || 'Error al cancelar la orden',
+          );
         },
       });
   }
@@ -2665,6 +2882,15 @@ export class OrderDetailsPageComponent {
     this.showRefundModal.set(true);
   }
 
+  /**
+   * C.9 — CTA de soporte de la fila *default* del diccionario de alerta
+   * fiscal: un código que este panel no reconoce nunca ofrece emitir; lleva
+   * al centro de ayuda y soporte de la tienda (`/admin/help/support`).
+   */
+  goToSupport(): void {
+    void this.router.navigate(['/admin/help/support']);
+  }
+
   onRefundSubmitted(): void {
     this.showRefundModal.set(false);
     this.toastService.success('Reembolso procesado exitosamente');
@@ -2688,7 +2914,6 @@ export class OrderDetailsPageComponent {
     } else if (actionId === 'credit-payment') {
       this.openPayModal();
     } else if (actionId === 'print-dispatch-ticket') {
-      // CP-DTLP Phase E.3 — disparador manual desde header.
       void this.printDispatchTicket();
     }
   }
@@ -2786,21 +3011,12 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * CP-DTLP Phase E.3 / QUI-764b — disparador 2 manual del tiquete de
-   * despacho desde la pantalla de la orden. Lo invocan el botón del
-   * headerActions (`e-ticket de envío`) y el botón secundario de la card
-   * "Gestión de Envío".
-   *
-   * La guarda se delega a `canPrintDispatchTicketExplicit` — el MISMO
-   * computed que el `disabled` del headerActions. Una sola fuente de
-   * verdad, sin condición paralela que pueda divergir. Política MANUAL:
-   * `print_dispatch_ticket_enabled` apagado mata todo; `direct_delivery`
-   * requiere `print_dispatch_ticket_on_counter` prendido; cualquier otro
-   * `delivery_type` imprime cuando el formato está habilitado. Ver
-   * docblock de `canPrintDispatchTicketExplicit` para la tabla completa.
-   * La copia se resuelve en `DispatchTicketPrintService` desde
-   * `receipts.printing.dispatch_ticket`; con `trigger: 'explicit'` y
-   * `copies: 0` el servicio imprime 0 copias.
+   * CP-DTLP Phase E.3 / QUI-764b — disparador manual del tiquete de
+   * despacho (`formatType: 'dispatch_ticket'`, distinto de `dispatch_note`
+   * y de `pos_order`). Lo invocan el headerActions y el botón de la card
+   * "Gestión de Envío". Guarda: `canPrintDispatchTicketExplicit` (la misma
+   * del `disabled`; ver su docblock para la política MANUAL). Datos:
+   * `buildDispatchTicketData` (no cambiar su mapeo).
    */
   async printDispatchTicket(): Promise<void> {
     const order = this.order();
@@ -2819,6 +3035,38 @@ export class OrderDetailsPageComponent {
       );
       this.toastService.error('No se pudo imprimir el tiquete de despacho');
     }
+  }
+
+  /**
+   * Lleva al operador a la card "Gestión de Envío"
+   * (`#gestionEnvioAnchor`): scroll suave + foco para teclado/lector de
+   * pantalla. Respeta `prefers-reduced-motion`. Lo invoca el indicador
+   * de entrega del strip de resumen.
+   */
+  /**
+   * Nombre del país para mostrar en las mini-cards de dirección.
+   * Solo presentación: persiste el `country_code` (`CO`) y resuelve el
+   * nombre vía `CountryService` (fallback al código si no lo conoce).
+   */
+  countryName(code?: string | null): string {
+    if (!code) return '';
+    return this.countryService.getCountryName(code);
+  }
+
+  focusGestionEnvio(): void {
+    const el = document.getElementById('gestionEnvioAnchor');
+    if (!el) return;
+    const reduceMotion =
+      window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ??
+      false;
+    el.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'start',
+    });
+    window.setTimeout(
+      () => el.focus({ preventScroll: true }),
+      reduceMotion ? 0 : 350,
+    );
   }
 
   /**
@@ -3268,6 +3516,31 @@ export class OrderDetailsPageComponent {
     return labels[state] || state;
   }
 
+  /**
+   * Plan 1060 (paso 4) — motivo humanizado de un pago `cancelled`, leído de
+   * `gateway_response.cancellation_reason` (lo escribe el backend al
+   * compensar: `finish_blocked_insufficient_stock` en
+   * `order-flow.service.ts` finish, `kitchen_items_pending` en el guard
+   * F2 de cocina). Solo presentación. Sin motivo (o código desconocido)
+   * devuelve `null` y el template deja el badge actual intacto.
+   */
+  paymentCancellationLabel(payment: Payment): string | null {
+    if (payment?.state !== 'cancelled') return null;
+    const code = (
+      payment.gateway_response as
+        | { cancellation_reason?: unknown }
+        | undefined
+    )?.cancellation_reason;
+    switch (code) {
+      case 'finish_blocked_insufficient_stock':
+        return 'Sin stock para finalizar';
+      case 'kitchen_items_pending':
+        return 'Cocina pendiente';
+      default:
+        return null;
+    }
+  }
+
   getStatusColor(status: string | undefined): string {
     const colors: Record<string, string> = {
       created: 'bg-gray-100 text-gray-800',
@@ -3488,8 +3761,8 @@ export class OrderDetailsPageComponent {
    * no ofrezco acciones que el backend rechazaría con 422.
    */
   canResend(item: OrderItem): boolean {
-    // Fila cancelada: excluida de acciones posteriores (badge + motivo).
-    if (item.cancelled_at) return false;
+    // La regla de fila cancelada vive en `canResendOrderItem` (testeable):
+    // veta SALVO decisión reuse/waste, que es el remake post-cancelación.
     return canResendOrderItem(item, this.order()?.state);
   }
 
@@ -3701,6 +3974,108 @@ export class OrderDetailsPageComponent {
       });
   }
 
+  // ─── Plan 1060 (reversa) — reversar un ítem entregado ──────────
+  /**
+   * Ítem actualmente en tránsito de reversión (POST en vuelo). `null`
+   * cuando ninguna reversión está pendiente. Misma forma que
+   * `deliveringItemId` / `cancellingItemId`: un solo ítem a la vez;
+   * alimenta el `[loading]` del botón Reversar mientras corre el backend.
+   */
+  readonly reversingItemId = signal<number | null>(null);
+
+  /**
+   * Ofrece "Reversar" a TODO ítem entregado no cancelado. Sin gate de
+   * permiso en el frontend: si el rol no tiene el permiso, el backend
+   * responde 403 y se muestra el toast correspondiente.
+   */
+  canReverseDeliveredItem(item: OrderItem): boolean {
+    return !!item.delivered_at && !item.cancelled_at;
+  }
+
+  /**
+   * Acción: reversa la entrega vía
+   * POST /store/orders/:orderId/flow/items/:orderItemId/cancel-delivered
+   * con body `{ reason, destination: 'restock' | 'waste' }`.
+   * Reutiliza el patrón de motivo de `cancelItem` (`dialogService.confirm`
+   * + `dialogService.prompt`, motivo mín 3 chars). `DialogService` no
+   * tiene selector (solo confirm/prompt), así que el destino se elige con
+   * `confirm()` nativo: Aceptar = restock, Cancelar = waste.
+   * Tras éxito, toast + refreshOrder() (patrón de `deliverItem`).
+   */
+  reverseDeliveredItem(item: OrderItem): void {
+    if (!this.canReverseDeliveredItem(item)) return;
+    const orderId = this.order()?.id;
+    if (!orderId) return;
+    this.dialogService
+      .confirm({
+        title: 'Reversar entrega',
+        message: `¿Reversar la entrega de "${item.product_name}"? El ítem quedará cancelado, se ajustará el total y se registrará el motivo.`,
+        confirmText: 'Continuar',
+        cancelText: 'Atrás',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (!confirmed) return;
+        this.dialogService
+          .prompt({
+            title: 'Motivo de reversión',
+            message: 'Quedará registrado en el pedido.',
+            placeholder: 'Describe el motivo (mínimo 3 caracteres)',
+            confirmText: 'Reversar entrega',
+            cancelText: 'Atrás',
+          })
+          .then((reasonInput) => {
+            if (reasonInput === undefined) {
+              this.toastService.error('Reversión abortada');
+              return;
+            }
+            const reason = reasonInput.trim();
+            if (reason.length < 3) {
+              this.toastService.error(
+                'El motivo debe tener al menos 3 caracteres',
+              );
+              return;
+            }
+            const destination = confirm(
+              'Destino del ítem reversado:\n\nAceptar = reingresar al stock (restock).\nCancelar = registrar como merma (waste).',
+            )
+              ? 'restock'
+              : 'waste';
+            this.reversingItemId.set(item.id);
+            this.http
+              .post(
+                `${environment.apiUrl}/store/orders/${orderId}/flow/items/${item.id}/cancel-delivered`,
+                { reason, destination },
+              )
+              .pipe(takeUntilDestroyed(this.destroyRef))
+              .subscribe({
+                next: () => {
+                  this.reversingItemId.set(null);
+                  this.toastService.success('Entrega reversada');
+                  this.refreshOrder();
+                },
+                error: (err: unknown) => {
+                  this.reversingItemId.set(null);
+                  const wrapped = err as {
+                    status?: number;
+                    cause?: { status?: number } | null;
+                  };
+                  const forbidden =
+                    wrapped?.status === 403 ||
+                    wrapped?.cause?.status === 403;
+                  this.toastService.error(
+                    forbidden
+                      ? 'No tienes permiso para reversar entregas'
+                      : parseApiError(err).userMessage ||
+                          'Error al reversar la entrega',
+                  );
+                  console.error('Reverse delivered item failed', err);
+                },
+              });
+          });
+      });
+  }
+
   /** Localised label for the KDS state badge. */
   kitchenStateLabel(ks: { status: string }): string {
     switch (ks.status) {
@@ -3899,13 +4274,18 @@ export class OrderDetailsPageComponent {
 
   /**
    * Visibilidad del botón «Emitir factura electrónica»: la orden admite
-   * factura Y la tienda está emitiendo en producción. Las dos condiciones,
-   * porque ofrecer el botón a una tienda que el backend va a rechazar
-   * (`INVOICING_ENABLEMENT_001`) es prometer lo que no se puede cumplir.
+   * factura Y la tienda está emitiendo en producción Y el diccionario de
+   * alerta fiscal lo permite. Las tres condiciones, porque ofrecer el botón
+   * a una tienda que el backend va a rechazar (`INVOICING_ENABLEMENT_001`)
+   * es prometer lo que no se puede cumplir — y ofrecerlo bajo
+   * `POS_EXCLUSIVE_TAX_DOUBLE` o un código desconocido quema un consecutivo
+   * con base inflada (C.9 CP-pos-exclusive-tax-double-charge).
    */
-  readonly canEmitInvoice = computed(
-    () => this.reinvoiceable() && this.electronicEmissionLive(),
-  );
+  readonly canEmitInvoice = computed(() => {
+    const code = this.order()?.fiscal_alert_code;
+    const emitAllowed = !code || resolveFiscalAlert(code).allowEmitInvoiceCta;
+    return this.reinvoiceable() && this.electronicEmissionLive() && emitAllowed;
+  });
 
   /**
    * ¿Esta tienda está habilitada para emitir facturación electrónica EN

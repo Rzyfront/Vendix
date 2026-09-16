@@ -2045,7 +2045,7 @@ export class SubscriptionFiscalService {
       address: dto.customer.address_line
         ? {
             address_line: dto.customer.address_line,
-            city_code: null,
+            city_code: dto.customer.city_code ?? null,
             city_name: dto.customer.city ?? null,
             department_code: dto.customer.department_code ?? null,
             department_name: null,
@@ -2111,6 +2111,7 @@ export class SubscriptionFiscalService {
         ? {
             line: dto.customer.address_line,
             city: dto.customer.city ?? null,
+            city_code: dto.customer.city_code ?? null,
             department_code: dto.customer.department_code ?? null,
             country_code: 'CO',
           }

@@ -1,0 +1,114 @@
+<div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+  <!-- KPI cards -->
+  @if (loading() && !summary()) {
+    <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
+          <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+          <div class="h-8 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      }
+    </div>
+  } @else {
+    <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <app-stats
+        title="Entregas"
+        [value]="summary()?.total_deliveries ?? 0"
+        [smallText]="getGrowthText(summary()?.deliveries_growth)"
+        iconName="package-check"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-600"
+        [loading]="loading()"
+      ></app-stats>
+
+      <app-stats
+        title="Cumplimiento"
+        [value]="formatRate(summary()?.fulfillment_rate)"
+        smallText="Entregas cumplidas sobre el total"
+        iconName="check-circle"
+        iconBgColor="bg-emerald-100"
+        iconColor="text-emerald-600"
+        [loading]="loading()"
+      ></app-stats>
+
+      <app-stats
+        title="Valor Entregado"
+        [value]="(summary()?.delivered_value ?? 0) | currency"
+        [smallText]="getGrowthText(summary()?.delivered_value_growth)"
+        iconName="package"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+        [loading]="loading()"
+      ></app-stats>
+
+      <app-stats
+        title="Recaudo en Caja"
+        [value]="(summary()?.cash_collected ?? 0) | currency"
+        smallText="Concilia con el cierre de caja"
+        iconName="wallet"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-600"
+        [loading]="loading()"
+      ></app-stats>
+    </div>
+  }
+
+  <!-- Header + filters -->
+  <div
+    class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-surface px-4 py-3 border-b border-border rounded-lg mx-1 mb-4"
+  >
+    <div class="flex items-center gap-2.5 min-w-0">
+      <div
+        class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0"
+      >
+        <app-icon name="truck" class="text-[var(--color-primary)]"></app-icon>
+      </div>
+      <div class="min-w-0">
+        <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
+          Resumen de Despachos
+        </h1>
+        <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
+          {{ formatCycleHours() }} · {{ formatAvgStops() }} · ventana por fecha de remisión
+        </p>
+      </div>
+    </div>
+    <app-options-dropdown
+      class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+      [filters]="filterConfigs"
+      [filterValues]="filterValues()"
+      [actions]="dropdownActions"
+      triggerLabel="Filtros"
+      triggerIcon="filter"
+      [debounceMs]="350"
+      (filterChange)="onFilterChange($event)"
+      (clearAllFilters)="onClearAllFilters()"
+    ></app-options-dropdown>
+  </div>
+
+  <!-- Charts -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <app-card shadow="none" [responsivePadding]="true">
+      <span class="text-sm font-bold text-[var(--color-text-primary)]">Entregas vs Rechazadas</span>
+      <div class="h-[320px] mt-2">
+        <app-chart [options]="deliveriesChartOptions()" [loading]="loading()"></app-chart>
+      </div>
+    </app-card>
+
+    <app-card shadow="none" [responsivePadding]="true">
+      <span class="text-sm font-bold text-[var(--color-text-primary)]">Valor Entregado por Periodo</span>
+      <div class="h-[320px] mt-2">
+        <app-chart [options]="deliveredValueChartOptions()" [loading]="loading()" [showLegend]="false"></app-chart>
+      </div>
+    </app-card>
+  </div>
+
+  <!-- Quick links -->
+  <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+    <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Despachos</span>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+      @for (view of dispatchViews; track view.key) {
+        <app-analytics-card [view]="view"></app-analytics-card>
+      }
+    </div>
+  </app-card>
+</div>

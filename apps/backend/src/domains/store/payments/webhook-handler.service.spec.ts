@@ -105,7 +105,13 @@ describe('WebhookHandlerService', () => {
         // A.3 CP-facturacion-fixes: webhook auto-send deps.
         {
           provide: InvoicingService,
-          useValue: { getElectronicEmissionEligibility: jest.fn() },
+          useValue: {
+            getElectronicEmissionEligibility: jest.fn(),
+            // Paso 3 (unificación auto-emisión): compuerta por carril en
+            // autoSendOrderInvoice().
+            getPosInvoicingSettings: jest.fn(),
+            getEcommerceInvoicingSettings: jest.fn(),
+          },
         },
         {
           provide: InvoiceFlowService,
@@ -292,22 +298,56 @@ describe('WebhookHandlerService', () => {
   });
 
   describe('confirmOrderPaid — invoice auto-send (A.3 CP-facturacion-fixes)', () => {
-  const pendingOrder = { id: 1, state: 'pending_payment', store_id: 4 };
+  // channel/delivery_type: fijados por defecto a un ecommerce corriente
+  // (Paso 3 — compuerta por carril). Los tests de la compuerta los
+  // sobrescriben vía setup({ channel, deliveryType }).
+  const pendingOrder = {
+    id: 1,
+    state: 'pending_payment',
+    store_id: 4,
+    channel: 'ecommerce',
+    delivery_type: 'home_delivery',
+  };
 
   const setup = (over: {
     invoice?: any;
     eligible?: boolean;
     sendFails?: boolean;
+    channel?: string;
+    deliveryType?: string;
+    posAutoEmit?: boolean;
+    ecommerceAutoEmit?: boolean;
   } = {}) => {
-    const { invoice = { id: 50, status: 'draft' }, eligible = true, sendFails = false } = over;
-    (prisma.orders.findUnique as jest.Mock).mockResolvedValue(pendingOrder);
+    const {
+      invoice = { id: 50, status: 'draft' },
+      eligible = true,
+      sendFails = false,
+      channel = pendingOrder.channel,
+      deliveryType = pendingOrder.delivery_type,
+      posAutoEmit = true,
+      ecommerceAutoEmit = true,
+    } = over;
+    (prisma.orders.findUnique as jest.Mock).mockResolvedValue({
+      ...pendingOrder,
+      channel,
+      delivery_type: deliveryType,
+    });
     (prisma.invoices.findFirst as jest.Mock).mockResolvedValue(invoice);
     const invoicing = (service as any).invoicing as {
       getElectronicEmissionEligibility: jest.Mock;
+      getPosInvoicingSettings: jest.Mock;
+      getEcommerceInvoicingSettings: jest.Mock;
     };
     invoicing.getElectronicEmissionEligibility.mockResolvedValue(
       eligible ? { eligible: true, reason: null } : { eligible: false, reason: 'area off' },
     );
+    invoicing.getPosInvoicingSettings.mockResolvedValue({
+      auto_emit: posAutoEmit,
+      on_failure: 'queue',
+    });
+    invoicing.getEcommerceInvoicingSettings.mockResolvedValue({
+      auto_emit: ecommerceAutoEmit,
+    });
     const flow = (service as any).invoiceFlow as {
       validate: jest.Mock;
       send: jest.Mock;
@@ -318,7 +358,7 @@ describe('WebhookHandlerService', () => {
     } else {
       flow.send.mockResolvedValue({ id: 50, status: 'sent' });
     }
-    return { flow };
+    return { flow, invoicing };
   };
 
   it('auto-sends the draft after payment confirmation and clears the flag', async () => {
@@ -358,6 +398,75 @@ describe('WebhookHandlerService', () => {
     expect(prisma.orders.update).not.toHaveBeenCalledWith({
       where: { id: 1 },
       data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+    });
+  });
+
+  describe('compuerta por carril (Paso 3 — unificación auto-emisión)', () => {
+    it('tienda en línea: no emite cuando invoicing.ecommerce.auto_emit es false', async () => {
+      const { flow } = setup({
+        channel: 'ecommerce',
+        deliveryType: 'home_delivery',
+        ecommerceAutoEmit: false,
+      });
+
+      await expect(
+        (service as any).confirmOrderPaid(1),
+      ).resolves.toBeUndefined();
+      expect(flow.validate).not.toHaveBeenCalled();
+      expect(flow.send).not.toHaveBeenCalled();
+      expect(prisma.orders.update).not.toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+      });
+    });
+
+    it('mostrador: no emite cuando invoicing.pos.auto_emit es false', async () => {
+      const { flow } = setup({
+        channel: 'pos',
+        deliveryType: 'direct_delivery',
+        posAutoEmit: false,
+      });
+
+      await expect(
+        (service as any).confirmOrderPaid(1),
+      ).resolves.toBeUndefined();
+      expect(flow.validate).not.toHaveBeenCalled();
+      expect(flow.send).not.toHaveBeenCalled();
+      expect(prisma.orders.update).not.toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+      });
+    });
+
+    it('mesa por QR (channel:ecommerce + delivery_type:dine_in) manda por invoicing.pos.auto_emit, no por ecommerce', async () => {
+      const { flow } = setup({
+        channel: 'ecommerce',
+        deliveryType: 'dine_in',
+        posAutoEmit: true,
+        ecommerceAutoEmit: false,
+      });
+
+      await expect(
+        (service as any).confirmOrderPaid(1),
+      ).resolves.toBeUndefined();
+      expect(flow.validate).toHaveBeenCalledWith(50);
+      expect(flow.send).toHaveBeenCalledWith(50);
+    });
+
+    it('factura ya accepted limpia la alerta fiscal sin importar las banderas de auto_emit', async () => {
+      setup({
+        invoice: { id: 50, status: 'accepted' },
+        posAutoEmit: false,
+        ecommerceAutoEmit: false,
+      });
+
+      await expect(
+        (service as any).confirmOrderPaid(1),
+      ).resolves.toBeUndefined();
+      expect(prisma.orders.update).toHaveBeenCalledWith({
+        where: { id: 1 },
+        data: { fiscal_alert_code: null },
+      });
     });
   });
 });

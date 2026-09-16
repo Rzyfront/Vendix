@@ -1,0 +1,50 @@
+-- DATA IMPACT:
+-- Tables affected: order_item_taxes
+-- Expected row changes: 0 (solo indice, ninguna fila mutada)
+-- Destructive operations: ninguna
+-- FK/cascade risk: ninguno
+-- Idempotency: CREATE INDEX CONCURRENTLY IF NOT EXISTS — re-ejecutable sin error
+-- Reversibility: DROP INDEX CONCURRENTLY IF EXISTS "order_item_taxes_order_item_id_idx";
+-- Approval: plan critico CP-pos-exclusive-tax-double-charge (QUI-832), paso D.13,
+--   compuerta G1 — "las ocho compuertas propuestas, solo dos viajan con este
+--   plan (G1 y G3 condicionada)". evidence/design-P3-data.md §7.
+-- Scope: D.13 — indice que hace barato el predicado de deteccion permanente de
+--   PERF-F-02 (DB-01: `ABS(tax_amount_item×units − unit_price×tax_rate) > 0,02`
+--   => 0 filas) y precondicion de F-033/F-095, ambos cerrados por esta migracion.
+
+-- ---------------------------------------------------------------------------
+-- POR QUE ESTE INDICE Y POR QUE SOLO
+--
+-- `order_item_taxes` (schema.prisma) no declara ningun indice sobre
+-- `order_item_id` pese a ser el FK que la mayoria de sus lectores usan para
+-- filtrar: el predicado de deteccion de este plan, el `include` de ADR-08
+-- dentro de la `$transaction` del cierre de mesa (F-033), el mismo `include`
+-- que ya paga `invoicing.service.ts:2159`, y la analitica fiscal
+-- (`financial-analytics.service.ts`, F-095) que hoy hace
+-- `Seq Scan (loops=887)` sobre esta tabla — 56 % de los buffers leidos en esa
+-- consulta. Ademas el FK `order_item_taxes_order_item_id_fkey` es
+-- `ON DELETE RESTRICT` sin indice en la columna referenciante: todo `DELETE`
+-- de `order_items` paga hoy un Seq Scan completo por fila borrada.
+--
+-- `CREATE INDEX CONCURRENTLY` no puede correr dentro de una transaccion y no
+-- toma un ACCESS EXCLUSIVE lock sobre la tabla mientras se construye — el
+-- patron ya probado en este repositorio (`20260819000000_po_perf_indexes`,
+-- `20260822180100_purchase_transparency_concurrent_indexes`): un archivo de
+-- migracion que contiene UNICAMENTE sentencias CONCURRENTLY, cada una por
+-- separado, sin mezclar DDL transaccional. Por eso, igual que esos dos
+-- precedentes, este indice NO se declara en `schema.prisma` (`@@index`): el
+-- motor de Prisma no sabe crear indices CONCURRENTLY, asi que anadirlo al
+-- schema haria que `prisma migrate dev`/`db push` intentara recrearlo de
+-- forma transaccional. Queda como drift aceptado y documentado, igual que
+-- sus dos precedentes.
+--
+-- Riesgo residual asumido (mismo que los precedentes): un CREATE INDEX
+-- CONCURRENTLY que falla deja un indice INVALID en vez de revertir. El
+-- `IF NOT EXISTS` no lo repara (un indice invalido cuenta como existente).
+-- Verificar con:
+--   SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid;
+-- y reconstruir con `REINDEX INDEX CONCURRENTLY` si aparece.
+-- ---------------------------------------------------------------------------
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "order_item_taxes_order_item_id_idx"
+  ON "order_item_taxes" ("order_item_id");

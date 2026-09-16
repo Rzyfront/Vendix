@@ -112,6 +112,13 @@ function buildHarness(opts: {
     preview: jest.fn().mockResolvedValue({ kind: 'downgrade' }),
   };
   const promotional: any = { validateCoupon, applyCoupon };
+  // Not exercised by these tests: `RequestContextService.getContext()` is
+  // stubbed to `{ user_id: 42 }` with no `organization_id`, so the
+  // `context?.organization_id` gate in `checkoutCommit()` short-circuits
+  // before `billingProfile.ensureCaptured` would ever be called.
+  const billingProfile: any = {
+    ensureCaptured: jest.fn().mockResolvedValue(undefined),
+  };
   const platformGw: any = {
     getActiveCredentials: jest.fn().mockResolvedValue({ id: 1 }),
   };
@@ -128,6 +135,7 @@ function buildHarness(opts: {
     proration,
     {} as any,
     promotional,
+    billingProfile,
     platformGw,
     prisma,
     responseService,

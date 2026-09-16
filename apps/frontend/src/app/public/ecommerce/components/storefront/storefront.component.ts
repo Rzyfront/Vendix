@@ -13,6 +13,24 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
 import { BadgeComponent } from '../../../../shared/components/badge/badge.component';
 import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
 
+/**
+ * F-013 — minutos de preparación a pintar, o `null` cuando no se renderiza
+ * nada: flag apagado, o valor ausente, nulo, no numérico o menor o igual a
+ * cero. `Math.floor`: un sub-minuto (0.5) se oculta en vez de pintar
+ * "~0.5 min". Puro y compartido: `product-card` y `product-detail` lo reusan
+ * para que el mismo dato no tenga tres renders.
+ */
+export function prepMinutesOrNull(
+  value: number | string | null | undefined,
+  enabled: boolean,
+): number | null {
+  if (enabled !== true) return null;
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes) || minutes <= 0) return null;
+  const floored = Math.floor(minutes);
+  return floored > 0 ? floored : null;
+}
+
 @Component({
   selector: 'app-storefront',
   standalone: true,
@@ -386,10 +404,10 @@ export class StorefrontComponent {
   prepMinutesFor(
     product: { preparation_time_minutes?: number | null } | null | undefined,
   ): number | null {
-    if (this.showPreparationTime() !== true) return null;
-    const minutes = Number(product?.preparation_time_minutes);
-    if (!Number.isFinite(minutes) || minutes <= 0) return null;
-    return Math.floor(minutes);
+    return prepMinutesOrNull(
+      product?.preparation_time_minutes,
+      this.showPreparationTime(),
+    );
   }
 
   private loadDefaultData() {

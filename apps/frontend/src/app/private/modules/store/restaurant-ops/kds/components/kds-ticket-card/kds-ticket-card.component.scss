@@ -206,7 +206,9 @@
   border-left: 3px solid var(--color-warning, #f59e0b);
   background: var(--color-warning-soft, rgba(245, 158, 11, 0.08));
   border-radius: 0 0.25rem 0.25rem 0;
-  font-size: 0.8125rem;
+  // La nota se lee a distancia: mismo tamano que el nombre del plato.
+  font-size: 0.875rem;
+  line-height: 1.35;
   font-weight: 600;
   font-style: normal;
   color: var(--color-text-primary, #111827);
@@ -224,7 +226,7 @@
     color: var(--color-warning, #f59e0b);
     margin-right: 0.25rem;
     text-transform: uppercase;
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     letter-spacing: 0.025em;
   }
 }

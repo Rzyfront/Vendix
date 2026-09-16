@@ -203,6 +203,19 @@ export class StoreEcommerceLayoutComponent {
   // + guest count (GAP-5).
   readonly is_bill_panel_open = signal(false);
   readonly guest_count = signal(1);
+  /**
+   * F-133(b) CP-pos-exclusive-tax-double-charge: true while the account is
+   * open and the SSE-pushed `grand_total` has changed since the diner
+   * started looking at it. `.bill-panel__summary` already carries
+   * `aria-live="polite"` + `aria-atomic="true"` (F-133 a), so this row rides
+   * that same announcement instead of adding a second live region. It is
+   * NOT a toast: it stays in the DOM — persistent, not timed — until the
+   * diner closes the account panel.
+   */
+  readonly bill_total_changed_notice = signal(false);
+  /** Baseline `grand_total` used to detect the diff above. Reset whenever
+   *  the panel is closed so a stale diff never resurfaces on reopen. */
+  private last_seen_grand_total: number | null = null;
   // QR dine-in — bottom-sheet de acciones (móvil). Sólo activo en flujo de mesa.
   readonly is_actions_sheet_open = signal(false);
 
@@ -449,6 +462,31 @@ export class StoreEcommerceLayoutComponent {
         .catch((err) =>
           this.toast_service.error(parseApiError(err).userMessage),
         );
+    });
+
+    // F-133(b) — el panel de cuenta se actualiza SOLO por SSE: el backend
+    // normaliza una línea (o llega un fire/orden nueva) y el `grand_total`
+    // cambia en sitio, mismo DOM, mismo rótulo, número distinto. Sin esto,
+    // un comensal que ya recorrió el panel no tiene ninguna señal de que el
+    // total que está mirando dejó de ser el que vio al abrir la cuenta.
+    // Mientras el panel está cerrado sólo se actualiza la base de
+    // comparación — no se dispara el aviso — para que reabrir la cuenta
+    // muestre el total vigente sin un aviso residual de un cambio ya visto.
+    effect(() => {
+      const total = this.table_context_service.bill()?.grand_total ?? null;
+      if (!this.is_bill_panel_open()) {
+        this.last_seen_grand_total = total;
+        this.bill_total_changed_notice.set(false);
+        return;
+      }
+      if (
+        this.last_seen_grand_total !== null &&
+        total !== null &&
+        total !== this.last_seen_grand_total
+      ) {
+        this.bill_total_changed_notice.set(true);
+      }
+      this.last_seen_grand_total = total;
     });
   }
 

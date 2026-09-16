@@ -62,20 +62,19 @@
                    impuesto ni descuento, "Subtotal" e "Impuestos $0" repiten
                    el total y le quitan protagonismo a la única cifra que el
                    mesero necesita leer de un vistazo. -->
+              <!-- C.7 (§5.3, base gross): sin fila Subtotal — las líneas ya
+                   van en bruto; sin fila de impuesto que sume — con desglose
+                   respaldado, nota informativa fuera de la aritmética. -->
               @if (hasTotalsBreakdown()) {
-                <div class="totals-row">
-                  <span class="totals-label">Subtotal</span>
-                  <span class="totals-value">{{ orderSubtotal() | currency }}</span>
-                </div>
                 @if (orderDiscount() > 0) {
                   <div class="totals-row totals-row--discount">
                     <span class="totals-label">Descuento</span>
                     <span class="totals-value">-{{ orderDiscount() | currency }}</span>
                   </div>
                 }
-                @if (orderTax() > 0) {
+                @if (showTableVatNote()) {
                   <div class="totals-row">
-                    <span class="totals-label">Impuestos</span>
+                    <span class="totals-label">IVA incluido</span>
                     <span class="totals-value">{{ orderTax() | currency }}</span>
                   </div>
                 }
@@ -582,6 +581,26 @@
                             >
                               <app-icon slot="icon" name="trash-2" [size]="13"></app-icon>
                             </app-button>
+                          } @else if (removeDisabledReason(item); as reason) {
+                            <!--
+                              Paso 6 plan 1060 — espejo del bloqueo en mesa:
+                              el ítem entregado (`delivered_at`) no ofrece
+                              cancelar: botón VISIBLE pero deshabilitado con
+                              tooltip motivo, patrón `deliverDisabledReason`
+                              del KDS. Solo presentación; el enforcement real
+                              lo pone el backend (paso 1).
+                            -->
+                            <app-button
+                              class="item-remove-btn"
+                              variant="outline-danger"
+                              size="sm"
+                              customClasses="!h-11 !w-11 !px-0"
+                              [disabled]="true"
+                              [attr.title]="reason"
+                              [attr.aria-label]="'Eliminar ' + item.product_name + ': ' + reason"
+                            >
+                              <app-icon slot="icon" name="trash-2" [size]="13"></app-icon>
+                            </app-button>
                           }
                         }
                       </div>
@@ -603,6 +622,7 @@
         class="session-cta__more"
         variant="ghost"
         size="md"
+        customClasses="!h-11 !w-11 !px-0"
         [attr.title]="'Más acciones'"
         [attr.aria-label]="'Más acciones'"
         (clicked)="isActionsSheetOpen.set(true)"
@@ -614,12 +634,13 @@
         class="session-cta__secondary"
         [variant]="checkoutEnabled() ? 'outline' : 'primary'"
         size="md"
+        customClasses="!h-11"
         [fullWidth]="!checkoutEnabled()"
         [disabled]="isClosed()"
         (clicked)="openAddItems()"
       >
         <app-icon slot="icon" name="plus" [size]="15"></app-icon>
-        Agregar items
+        Agregar
       </app-button>
 
       @if (checkoutEnabled()) {
@@ -627,6 +648,7 @@
           class="session-cta__primary"
           variant="primary"
           size="md"
+          customClasses="!h-11"
           [fullWidth]="true"
           [disabled]="items().length === 0"
           (clicked)="openPay()"

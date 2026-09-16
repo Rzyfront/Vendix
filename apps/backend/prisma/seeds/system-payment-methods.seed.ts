@@ -36,6 +36,7 @@ export async function seedSystemPaymentMethods(
       supported_currencies: ['USD', 'MXN', 'EUR', 'COP'],
       min_amount: 0,
       processing_mode: 'DIRECT', // Requires physical presence at store
+      dian_code: '10', // Efectivo
     },
     {
       name: 'stripe_card',
@@ -68,6 +69,7 @@ export async function seedSystemPaymentMethods(
       processing_fee_type: 'percentage',
       processing_fee_value: 2.9,
       processing_mode: 'ONLINE', // Processed via payment gateway
+      dian_code: '48', // Tarjeta credito
     },
     {
       name: 'paypal',
@@ -101,6 +103,7 @@ export async function seedSystemPaymentMethods(
       processing_fee_type: 'percentage',
       processing_fee_value: 3.4,
       processing_mode: 'ONLINE', // Processed via payment gateway
+      dian_code: '1', // Instrumento no definido
     },
     {
       name: 'bank_transfer',
@@ -165,6 +168,7 @@ export async function seedSystemPaymentMethods(
       },
       supported_currencies: ['USD', 'MXN', 'COP'],
       processing_mode: 'ONLINE', // No physical presence required
+      dian_code: '47', // Transferencia debito bancaria
     },
     {
       name: 'payment_vouchers',
@@ -204,6 +208,7 @@ export async function seedSystemPaymentMethods(
       processing_fee_type: 'fixed',
       processing_fee_value: 0,
       processing_mode: 'ONLINE', // Digital vouchers
+      dian_code: '1', // Instrumento no definido
     },
     {
       name: 'wompi',
@@ -254,7 +259,7 @@ export async function seedSystemPaymentMethods(
       processing_fee_type: 'percentage',
       processing_fee_value: 2.99,
       processing_mode: 'ONLINE',
-      dian_code: '48',
+      dian_code: '1', // Wompi multiplexa tarjeta/PSE/Nequi: el instrumento real no se persiste.
     },
     {
       name: 'wallet',
@@ -266,7 +271,7 @@ export async function seedSystemPaymentMethods(
       requires_config: false,
       supported_currencies: ['COP'],
       processing_mode: 'DIRECT',
-      dian_code: '99',
+      dian_code: '1', // '1' Instrumento no definido. '99' NO existe en la tabla DIAN.
     },
     {
       name: 'cash_on_delivery',

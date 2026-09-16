@@ -14,6 +14,26 @@ import {
 import { AIModelType } from '../../../../ai-engine/interfaces/ai-provider.interface';
 import { AI_MODEL_TYPES } from './create-ai-config.dto';
 
+/**
+ * Canonical AI feature keys (F1). Keep in sync with `AI_FEATURE_KEYS` in
+ * `apps/backend/src/domains/store/subscriptions/types/access.types.ts` and
+ * with the admin selector in `ai-engine-app-modal.component.ts`.
+ * Note: `realtime_voice` was missing from this DTO before F1, so voice apps
+ * could not be created through the validated API surface.
+ */
+export const AI_APP_FEATURE_CATEGORIES = [
+  'text_generation',
+  'streaming_chat',
+  'conversations',
+  'tool_agents',
+  'rag_embeddings',
+  'async_queue',
+  'realtime_voice',
+] as const;
+
+export type AIAppFeatureCategory =
+  (typeof AI_APP_FEATURE_CATEGORIES)[number];
+
 export class CreateAIAppDto {
   @IsString()
   @IsNotEmpty()
@@ -94,15 +114,8 @@ export class CreateAIAppDto {
   @IsObject()
   metadata?: Record<string, any>;
 
-  @IsOptional()
   @IsString()
-  @IsIn([
-    'text_generation',
-    'streaming_chat',
-    'conversations',
-    'tool_agents',
-    'rag_embeddings',
-    'async_queue',
-  ])
-  ai_feature_category?: string;
+  @IsNotEmpty()
+  @IsIn(AI_APP_FEATURE_CATEGORIES)
+  ai_feature_category: string;
 }

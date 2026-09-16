@@ -41,7 +41,10 @@ import { VendixHttpException } from '@common/errors';
 import { ErrorCodes } from '@common/errors/error-codes';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { CancelOrderItemDto } from '../../tables/dto/cancel-order-item.dto';
+import {
+  CancelOrderItemDto,
+  CancelDeliveredOrderItemDto,
+} from '../../tables/dto/cancel-order-item.dto';
 
 @Controller('store/orders/:orderId/flow')
 @UseGuards(PermissionsGuard)
@@ -344,6 +347,34 @@ export class OrderFlowController {
     return this.responseService.success(
       order,
       'Order item cancelled successfully',
+    );
+  }
+
+  // 1060 paso 2 — reversa de entrega a NIVEL DE ÍTEM (único camino para
+  // cancelar un ítem ya entregado; `cancelOrderItem` lo rechaza con
+  // `ITEM_ALREADY_DELIVERED`). Misma familia que `cancel` de arriba (mismo
+  // namespace de flow, mismo DTO base extendido con `destination`), pero con
+  // permiso propio `order_flow:cancel_delivered`: reversar una entrega mueve
+  // inventario (`restock`) o declara merma (`waste`), así que NO hereda el
+  // permiso grueso `order_flow:create` del mesero — solo cashier/admin/owner
+  // (ver `permissions-roles.seed.ts`).
+  @Post('items/:orderItemId/cancel-delivered')
+  @Permissions('store:orders:order_flow:cancel_delivered')
+  @HttpCode(HttpStatus.OK)
+  async cancelDeliveredOrderItem(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Param('orderItemId', ParseIntPipe) orderItemId: number,
+    @Body() dto: CancelDeliveredOrderItemDto,
+  ) {
+    const order = await this.orderFlowService.cancelDeliveredOrderItem(
+      orderId,
+      orderItemId,
+      dto.reason,
+      dto.destination,
+    );
+    return this.responseService.success(
+      order,
+      'Order item delivery reversed successfully',
     );
   }
 

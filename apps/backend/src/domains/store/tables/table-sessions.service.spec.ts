@@ -5,6 +5,11 @@ import { TablesService } from './tables.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from 'src/common/errors';
+// F-165: `resolveOrderLineFinals` (vía `findOne`) sólo expone `.total` — para
+// observar `unclosed_residual_cents` (el campo que declara el contrato
+// closest-below, F-158) hay que llamar al kernel directamente con los mismos
+// insumos, igual que en `final-price.util.spec.ts`.
+import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
 
 describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
   let service: TableSessionsService;
@@ -352,6 +357,73 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
             product_variant_id: 61,
             unit_price: new Prisma.Decimal(65000),
             total_price: new Prisma.Decimal(130000),
+          }),
+        }),
+      );
+    });
+
+    // F-129 (major, CP-pos-exclusive-tax-double-charge) — el único spec vivo
+    // de este archivo para `addItems` (el de arriba, "prices the line with
+    // the VARIANT value") prueba un producto SIN filas de impuesto: con cero
+    // tasas base == bruto, así que sus asserts pasan bajo las DOS
+    // convenciones (pre y post ADR-08) y el spec queda ciego al cambio que
+    // ADR-08 introdujo. Este caso fija la convención NUEVA con una tasa
+    // EXCLUSIVA 19% real: `unit_price` es la BASE despejada (no el
+    // publicado), `tax_amount_item` es el impuesto POR UNIDAD DE PRECIO
+    // (:824-831 — NUNCA por línea, ambos lectores ya multiplican por
+    // `resolveLineUnits`/`resolvePriceUnits`), y `final_unit_price` es el
+    // bruto. `quantity: 2` deja ver que `total_price` SÍ escala con las
+    // unidades de línea mientras `tax_amount_item` NO (queda por-unidad).
+    it('con impuesto: persiste unit_price=BASE, tax_amount_item POR UNIDAD y final_unit_price=BRUTO (ADR-08)', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue({
+        id: 1,
+        order_id: 100,
+        closed_at: null,
+        table_id: 5,
+        order: { state: 'draft', order_items: [] },
+        table: { id: 5, name: 'Mesa 5', zone: null, status: 'occupied' },
+      });
+      prismaMock.products.findMany.mockResolvedValue([
+        {
+          id: 70,
+          name: 'Pizza',
+          base_price: 8403,
+          is_sellable: true,
+          product_type: 'prepared',
+          track_inventory: false,
+        },
+      ]);
+      // Mismo shape que consume `resolveFullTaxRowsByProductId` (:2637):
+      // UN batch de `product_tax_assignments` con `tax_categories.tax_rates`
+      // incluido, resuelto ANTES de abrir la transacción (:695-703).
+      prismaMock.product_tax_assignments.findMany.mockResolvedValue([
+        {
+          product_id: 70,
+          is_inclusive: false,
+          tax_categories: {
+            tax_type: 'iva',
+            tax_rates: [{ id: 1, name: 'IVA', rate: 0.19, is_inclusive: false }],
+          },
+        },
+      ]);
+      prismaMock.order_items.findMany.mockResolvedValue([]);
+      prismaMock.order_items.create.mockResolvedValue({});
+      prismaMock.orders.update.mockResolvedValue({});
+
+      await service.addItems(1, {
+        items: [{ product_id: 70, quantity: 2 }],
+      } as any);
+
+      // Base 8403 + EXC 19% → cuota 1596,57 → bruto 9999,57 (mismos
+      // importes que `final-price.util.spec.ts` F-151, para que la
+      // diferencia base/bruto sea visible a simple vista).
+      expect(prismaMock.order_items.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            unit_price: new Prisma.Decimal(8403),
+            total_price: new Prisma.Decimal(16806),
+            tax_amount_item: new Prisma.Decimal(1596.57),
+            final_unit_price: new Prisma.Decimal(9999.57),
           }),
         }),
       );
@@ -1358,7 +1430,13 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       expect(Number(item.total_price)).toBe(20000);
     });
 
-    it('findOne inclusivo no crece el total: unit 10000 + INC 19% → 10000', async () => {
+    it('findOne inclusivo closest-below: unit 10000 + INC 19% → 9999.99 (residuo declarado)', async () => {
+      // F-165: misma deriva closest-below que F-158 (`final-price.util.spec.ts`).
+      // Con truncado a 2 decimales no existe base cuyo bruto dé 10.000,00
+      // exacto (`tax-inclusive-math.util.ts:79-83,95`); el kernel elige el
+      // mayor bruto por debajo y DECLARA el céntimo que no cierra. El
+      // contrato NO promete que el bruto se conserve exacto — la expectativa
+      // vieja (10000) estaba un día por detrás del kernel.
       (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
         findOneRow({
           id: 503,
@@ -1383,8 +1461,18 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       const view = await service.findOne(83);
       const item = (view.order as any).order_items[0];
 
-      expect(item.final_unit_price).toBe(10000);
-      expect(item.final_total_price).toBe(10000);
+      expect(item.final_unit_price).toBe(9999.99);
+      expect(item.final_total_price).toBe(9999.99);
+
+      // `resolveOrderLineFinals` (el camino real de `findOne`) sólo expone
+      // `.total`, no `unclosed_residual_cents` — esta aserción NO observa el
+      // camino bajo prueba, llama al kernel aparte con los mismos insumos
+      // para dejar constancia del residuo que la respuesta HTTP no declara
+      // (mismo gap que F-158 documentó en `final-price.util.spec.ts`).
+      expect(
+        resolveLineTotals(10000, [{ rate: 0.19, is_inclusive: true }])
+          .unclosed_residual_cents,
+      ).toBe(1);
     });
 
     it('findOne cocina NO recibe finales y no dispara el batch (ADR-10)', async () => {

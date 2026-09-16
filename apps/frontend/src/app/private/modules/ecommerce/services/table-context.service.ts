@@ -233,6 +233,12 @@ export interface TableBillItem {
    * same contract as the catalog). Null/undefined → placeholder icon.
    */
   image_url?: string | null;
+  /**
+   * C.7 (CP-pos-exclusive-tax-double-charge, ADR-12) — impuesto de la línea
+   * completa (no por unidad), aditivo junto a `total` (BASE). Optional:
+   * backends viejos sin desplegar el fix no lo mandan.
+   */
+  tax_amount?: number;
 }
 
 /**
@@ -251,6 +257,14 @@ export interface TableBill {
   total_paid?: number;
   /** Outstanding balance = grand_total − total_paid (backend getBill). Optional. */
   balance_due?: number;
+  /** Aditivo (C.8) — impuesto total de la cuenta. Optional por compatibilidad. */
+  tax_amount?: number;
+  /**
+   * C.7 (ADR-12) — gate fiscal del documento (fail-closed en el backend).
+   * Sin esto en `true` el panel no desglosa Subtotal/Impuestos aunque
+   * `tax_amount` sea positivo (regla anti-huérfana §5.3).
+   */
+  prints_vat_breakdown?: boolean;
 }
 
 interface TableBillResponse {

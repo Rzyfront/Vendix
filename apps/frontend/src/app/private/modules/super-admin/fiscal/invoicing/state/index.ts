@@ -51,7 +51,12 @@ export interface PlatformAcquirer {
   fiscal_responsibilities: string[];
   email: string | null;
   phone: string | null;
-  address: { line: string | null; city: string | null; department_code: string | null };
+  address: {
+    line: string | null;
+    city: string | null;
+    department_code: string | null;
+    city_code?: string | null;
+  };
   organization: { id: number; name: string | null };
   fiscal_data_complete: boolean;
 }

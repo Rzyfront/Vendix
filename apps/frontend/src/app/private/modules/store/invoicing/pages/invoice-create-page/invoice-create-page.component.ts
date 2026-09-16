@@ -224,6 +224,11 @@ import type { RetencionesRowPaths } from '../../../../../../shared/components/in
  */
 import { InvoiceSectionDivisaComponent } from '../../../../../../shared/components/invoice-sections/index';
 import type { DivisaSectionPaths } from '../../../../../../shared/components/invoice-sections/index';
+// F-225 (ADR-16): mismo kernel de dinero que `pos-cart.service.ts` — ver
+// `apps/frontend/tsconfig.app.json` (`paths`). `Math.abs(a - b) > 0.01`
+// tolera EXACTAMENTE 1 centavo; la traducción fiel es
+// `differsByAtLeastCents(a, b, 2)`, no el umbral por defecto (1).
+import { differsByAtLeastCents } from '@money-kernel/money-compare';
 /**
  * SECCIÓN FORMATO COMPARTIDA con el editor de perfiles (B.7/E.1). En la
  * factura no hay controles de plantilla que el DTO declare: lo que se pinta
@@ -1547,8 +1552,8 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
              poder leerlo MIENTRAS corrige. -->
         @if (submitError()) {
           <!-- F-053: el banner recibe foco programático cuando el error es
-               aritmético nuevo (`focusSubmitErrorBanner`), para que el lector
-               de pantalla anuncie el encabezado. `tabindex="-1"`: enfocable
+               aritmético nuevo ('focusSubmitErrorBanner'), para que el lector
+               de pantalla anuncie el encabezado. 'tabindex="-1"': enfocable
                por código, fuera del orden de tabulación. -->
           <app-alert-banner
             #submitErrorBanner
@@ -3013,8 +3018,8 @@ const SECTION_FIELDS: Record<SectionId, string[]> = {
           </vendix-invoice-form-section>
 
           <!-- Totales: siempre visibles, nunca dentro de una sección plegada -->
-          <!-- F-052: el total corregido SE ANUNCIA. `aria-live="polite"` con
-               `atomic` hace que el lector de pantalla reciba el valor central
+          <!-- F-052: el total corregido SE ANUNCIA. 'aria-live="polite"' con
+               'atomic' hace que el lector de pantalla reciba el valor central
                del fix sin mover el foco del campo que se está editando. -->
           <div
             class="rounded-lg border border-border p-3 bg-[var(--color-surface-muted)]"
@@ -4813,7 +4818,7 @@ export class InvoiceCreatePageComponent implements OnInit {
     // Un centavo de tolerancia: el `Decimal` del backend llega como string con
     // más escala de la que el `number` del input puede sostener, y marcar como
     // «override» una diferencia de redondeo confundiría en vez de avisar.
-    return Math.abs(current - Number(quote.rate)) > 0.01;
+    return differsByAtLeastCents(current, Number(quote.rate), 2);
   });
 
   /** Por qué no hay tasa oficial, en la frase que corresponda al caso. */

@@ -67,6 +67,12 @@ export interface VoucherSummary {
   order: VoucherOrder;
   customer?: VoucherCustomer;
   store?: VoucherStore;
+  /**
+   * C.7 (CP-pos-exclusive-tax-double-charge, ADR-12) — gate fiscal resuelto
+   * por el backend. Sin esto en `true` el comprobante impreso no desglosa
+   * Subtotal/Impuestos (regla anti-huérfana §5.3: o van juntos, o ninguno).
+   */
+  prints_vat_breakdown?: boolean;
 }
 
 /**
@@ -278,12 +284,31 @@ export class GuestOrderPrintService {
     ${paymentHtml}
 
     <!-- Totals -->
+    <!-- C.7 (§5.3, base taxable): sin impuesto, Subtotal solo alcanza. Con
+         impuesto, Subtotal e Impuestos van JUNTOS o NINGUNO — nunca un
+         Subtotal huérfano sin su fila de IVA al lado — gateado ahora por
+         prints_vat_breakdown (backend, C.7). -->
     <div style="display: flex; justify-content: flex-end; margin-bottom: 24px;">
       <div style="width: 260px;">
+        ${
+          Number(order.tax_amount || 0) === 0
+            ? `
+        <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
+          <span style="color: #6b7280;">Subtotal</span>
+          <span style="font-family: 'Courier New', monospace; color: #374151;">${fmt(Number(order.subtotal_amount))}</span>
+        </div>`
+            : summary.prints_vat_breakdown
+              ? `
         <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
           <span style="color: #6b7280;">Subtotal</span>
           <span style="font-family: 'Courier New', monospace; color: #374151;">${fmt(Number(order.subtotal_amount))}</span>
         </div>
+        <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
+          <span style="color: #6b7280;">Impuestos</span>
+          <span style="font-family: 'Courier New', monospace; color: #374151;">${fmt(Number(order.tax_amount))}</span>
+        </div>`
+              : ''
+        }
         ${
           Number(order.discount_amount) > 0
             ? `
@@ -296,10 +321,6 @@ export class GuestOrderPrintService {
         <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
           <span style="color: #6b7280;">Envio</span>
           <span style="font-family: 'Courier New', monospace; color: #374151;">${Number(order.shipping_cost) === 0 ? 'Gratis' : fmt(Number(order.shipping_cost))}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; padding: 6px 0; font-size: 14px;">
-          <span style="color: #6b7280;">IVA / Impuestos</span>
-          <span style="font-family: 'Courier New', monospace; color: #374151;">${fmt(Number(order.tax_amount))}</span>
         </div>
         <div style="display: flex; justify-content: space-between; padding: 10px 0 0; margin-top: 6px; border-top: 2px solid #111827; font-size: 18px; font-weight: 700;">
           <span>TOTAL</span>

@@ -345,6 +345,43 @@ export const analyticsRoutes: Routes = [
           },
         ],
       },
+      // Dispatch Analytics (shell) — PLAN-analytics-despachos-2026-09-12
+      {
+        path: 'dispatch',
+        loadComponent: () =>
+          import('./components/analytics-shell/analytics-shell.component').then(
+            (c) => c.AnalyticsShellComponent,
+          ),
+        data: { categoryId: 'dispatch' as AnalyticsCategoryId },
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            redirectTo: 'summary',
+          },
+          {
+            path: 'summary',
+            loadComponent: () =>
+              import('./pages/dispatch/dispatch-summary/dispatch-summary.component').then(
+                (c) => c.DispatchSummaryComponent,
+              ),
+          },
+          {
+            path: 'fulfillment',
+            loadComponent: () =>
+              import('./pages/dispatch/dispatch-fulfillment/dispatch-fulfillment.component').then(
+                (c) => c.DispatchFulfillmentComponent,
+              ),
+          },
+          {
+            path: 'collections',
+            loadComponent: () =>
+              import('./pages/dispatch/dispatch-collections/dispatch-collections.component').then(
+                (c) => c.DispatchCollectionsComponent,
+              ),
+          },
+        ],
+      },
     ],
   },
 ];

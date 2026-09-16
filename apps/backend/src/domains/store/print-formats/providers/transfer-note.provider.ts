@@ -55,8 +55,13 @@ export class TransferNoteDataProvider implements IDocumentDataProvider {
       include: {
         stock_transfer_items: {
           include: {
+            // C.3 (fix 2026-09-14): `products` no tiene columna `unit`
+            // (rompía con PrismaClientValidationError, 500 en CADA render de
+            // traslado). Nunca se leyó — el traslado no imprime unidad, solo
+            // nombre/SKU — así que se retira en vez de mapear a
+            // `stock_unit`/`stock_uom` para no inventar un campo nuevo.
             products: {
-              select: { id: true, name: true, sku: true, unit: true },
+              select: { id: true, name: true, sku: true },
             },
             product_variants: {
               select: { id: true, sku: true, name: true },
@@ -96,6 +101,13 @@ export class TransferNoteDataProvider implements IDocumentDataProvider {
         destination_location: transfer.to_location?.name || '',
         notes: transfer.notes || undefined,
       },
+      // C.2 (ADR-12, G-11) — irrelevante en la práctica: `unit_price` es
+      // siempre 0 en este formato. `taxable_base`/`false` por default de
+      // R-2: no hay settings de tienda/organización en memoria para
+      // resolver el gate fiscal real (este provider no trae `store`/`org`
+      // en su `include`).
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: false,
       items: (transfer.stock_transfer_items || []).map((it: any, idx: number) => ({
         index: idx + 1,
         product_name: it.products?.name || '',
@@ -152,6 +164,9 @@ export class TransferNoteDataProvider implements IDocumentDataProvider {
         destination_location: 'Tienda Unicentro Local 215',
         notes: 'Traslado de mercancía para reposición de inventario de fin de semana.',
       },
+      // C.2 (ADR-12) — muestra en paridad con `fetchDocumentData`.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: false,
       items: [
         {
           index: 1,

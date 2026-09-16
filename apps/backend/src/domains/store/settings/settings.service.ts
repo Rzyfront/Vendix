@@ -626,9 +626,10 @@ export class SettingsService {
       // (la respuesta sigue siendo 200).
       //
       // La lista se recorre en vez de escribirse a mano por subsección: `aiu`
-      // era la única cuando esto se escribió, `pos` llegó después, y lo que
-      // falla no es añadir la subsección — es olvidarse de añadirla AQUÍ.
-      for (const key of ['aiu', 'pos'] as const) {
+      // era la única cuando esto se escribió, `pos` llegó después y `ecommerce`
+      // después de esa, y lo que falla no es añadir la subsección — es
+      // olvidarse de añadirla AQUÍ.
+      for (const key of ['aiu', 'pos', 'ecommerce'] as const) {
         const patch = (dto.invoicing as Record<string, any>)[key];
         if (patch === undefined) continue;
         merged_invoicing[key] = { ...(current_invoicing[key] ?? {}), ...patch };

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -35,6 +35,8 @@ const KDS_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
  */
 @Injectable()
 export class KdsSessionsService {
+  private readonly logger = new Logger(KdsSessionsService.name);
+
   constructor(private prisma: StorePrismaService) {}
 
   private requireContext(): { storeId: number; userId: number } {
@@ -120,16 +122,18 @@ export class KdsSessionsService {
    * operadores concurrentes pasarían ambos este chequeo y dejarían la estación
    * con dos dueños. Por eso el P2002 se traduce, no se propaga crudo.
    *
-   * NOTA — QUI-760 ya NO hace backfill al abrir. La imputación de
-   * `inventory_transactions` se hace en el momento de la primera ACCIÓN de
-   * gestión sobre un ticket (`start`/`ready`/`delivered`), vía
-   * {@link attributeOpenSessionToTicketConsumption}. Razones del cambio:
-   *  - Si un operador entra por error a la KDS equivocada, cierra y abre
-   *    la suya, el turno viejo no debe quedarse con el consumo de la otra.
-   *  - El responsable del consumo es quien COCINA, no quien ABRE turno.
-   *  - El tablero KDS filtra por `business_date = hoy`, así que el límite
-   *    temporal está puesto por construcción y no necesita una ventana
-   *    propia acá.
+   * NOTA — QUI-760 movió la imputación al momento de la primera ACCIÓN
+   * de gestión sobre un ticket (`start`/`ready`/`delivered`), vía
+   * {@link attributeOpenSessionToTicketConsumption}: el responsable del
+   * consumo es quien COCINA, no quien ABRE turno. Este `open()` conserva
+   * además un backfill de HUÉRFANOS (ver
+   * {@link backfillOrphanConsumption}) porque hay un hueco que el
+   * imputador por acción no puede cerrar: el ticket disparado Y cocinado
+   * íntegramente sin sesión abierta (`assertCanMutateStationTicket`
+   * caso 1 deja actuar, pero el imputador devuelve 0 sin sesión). Ese
+   * consumo quedaba con `kds_session_id IS NULL` para siempre y el
+   * detalle/resumen del turno no lo mostraba: "el primer ticket no
+   * registra consumo".
    */
   async open(dto: OpenKdsSessionDto) {
     const { storeId, userId } = this.requireContext();
@@ -145,9 +149,10 @@ export class KdsSessionsService {
       throw new VendixHttpException(ErrorCodes.KDS_SESSION_ALREADY_OPEN);
     }
 
+    let session;
     try {
       const now = new Date();
-      return await this.prisma.kds_sessions.create({
+      session = await this.prisma.kds_sessions.create({
         data: {
           kds_id: dto.kds_id,
           store_id: storeId,
@@ -174,6 +179,89 @@ export class KdsSessionsService {
       }
       throw e;
     }
+
+    // Backfill best-effort DESPUÉS del create (no en la misma tx): la
+    // imputación es un efecto contable y no puede vetar la apertura del
+    // turno — mismo principio que los handlers de `kitchen-fire`, que
+    // imputan post-commit dentro de try/catch. Si el backfill falla, la
+    // sesión ya existe y la primera acción sobre cada ticket pendiente lo
+    // imputa vía `attributeOpenSessionToTicketConsumption`.
+    try {
+      const claimed = await this.backfillOrphanConsumption(
+        dto.kds_id,
+        session.id,
+        storeId,
+      );
+      if (claimed > 0) {
+        this.logger.log(
+          `KDS session ${session.id} (kds ${dto.kds_id}) backfilled ${claimed} orphan consumption movement(s)`,
+        );
+      }
+    } catch (err) {
+      this.logger.error(
+        `KDS session ${session.id} (kds ${dto.kds_id}): orphan backfill failed`,
+        err as Error,
+      );
+    }
+
+    // El shape de retorno NO cambia (la sesión): el conteo del backfill va
+    // a logs, no al contrato del `POST open` que consume el status bar.
+    return session;
+  }
+
+  /**
+   * Backfill de consumo huérfano al abrir turno: estampa `kds_session_id`
+   * de la sesión recién creada en las `inventory_transactions` con
+   * `kds_session_id IS NULL` cuyos `order_items` pertenecen a tickets de
+   * ESTA estación (`kitchen_ticket_items → kitchen_tickets.kds_id =
+   * dto.kds_id`).
+   *
+   * Filtros (cada uno con su razón):
+   *  - `kds_session_id IS NULL`: la razón de existir del backfill y su
+   *    idempotencia — reabrir el turno solo reclama huérfanos nuevos.
+   *  - `order_item_id IS NOT NULL` + `inventory_consumed_at_fire = true`:
+   *    solo consumo disparado al fire; ventas, ajustes y transferencias
+   *    nunca son elegibles (mismo criterio que
+   *    `getUnattributedConsumption`).
+   *  - `kitchen_tickets.kds_id + store_id`: el routing NO se rederiva por
+   *    producto — el fire ya lo resolvió al crear el ticket, igual que
+   *    asume {@link attributeOpenSessionToTicketConsumption}. El filtro
+   *    estricto por kds_id del ticket es lo que impide robar consumo de
+   *    otra estación; `store_id` es defensa explícita en profundidad
+   *    (el relational scope de `StorePrismaService` ya cubre por
+   *    `products.store_id`).
+   *  - Sin filtro por `type`: ver invariante documentada en
+   *    `attributeOpenSessionToTicketConsumption` (líneas ~259-270) — todo
+   *    `order_item` de un ticket de cocina tiene el flag flipeado y el
+   *    pago los salta, así que no hay `sale`/`return` que excluir.
+   *  - Sin filtro por estado del ticket: el caso que cierra este hueco es
+   *    justamente el ticket disparado y cocinado sin sesión (a menudo ya
+   *    `delivered` al abrir el turno). Los `recipeLess` no generan filas
+   *    y son no-op por construcción.
+   *
+   * Devuelve el conteo de filas estampadas (para logs del caller).
+   */
+  private async backfillOrphanConsumption(
+    kdsId: number,
+    sessionId: number,
+    storeId: number,
+  ): Promise<number> {
+    const result = await this.prisma.inventory_transactions.updateMany({
+      where: {
+        kds_session_id: null,
+        order_item_id: { not: null },
+        order_items: {
+          inventory_consumed_at_fire: true,
+          kitchen_ticket_items: {
+            some: {
+              kitchen_ticket: { kds_id: kdsId, store_id: storeId },
+            },
+          },
+        },
+      },
+      data: { kds_session_id: sessionId },
+    });
+    return result.count;
   }
 
   /**

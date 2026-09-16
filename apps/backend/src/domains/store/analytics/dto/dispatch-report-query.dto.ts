@@ -1,6 +1,7 @@
 import { IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 import { BaseReportQueryDto } from '@common/reports/base-report-query.dto';
+import { AnalyticsQueryDto } from './analytics-query.dto';
 
 /**
  * Query DTOs for the dispatch (`despachos`) analytics reports
@@ -66,4 +67,32 @@ export class DispatchVehiculosQueryDto extends BaseReportQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+}
+
+/** `route_type` segmentation shared by the 4 dispatch-analytics aggregates. */
+export type DispatchRouteTypeFilter = 'all' | 'dsd' | 'carrier';
+
+/**
+ * Query DTO for the 4 dispatch-analytics aggregates (`summary`, `trends`,
+ * `fulfillment`, `collections` — PLAN-analytics-despachos-2026-09-12 Paso 3).
+ *
+ * Extends {@link AnalyticsQueryDto} (not the bare `BaseReportQueryDto` the
+ * three report DTOs above extend): these are KPI/trend endpoints, so they
+ * need `date_preset` and `granularity` exactly like every other
+ * summary + trends pair in this controller (sales, products, inventory,
+ * ...). `route_type` is the only net-new field.
+ *
+ * The range cap stays `DISPATCH_RANGE_MAX_DAYS = 366` (enforced in
+ * `DispatchAnalyticsService.validateRange`, reused as-is — no new constant).
+ */
+export class DispatchAnalyticsQueryDto extends AnalyticsQueryDto {
+  /**
+   * Segments every aggregate by `dispatch_routes.is_carrier_route`:
+   * `dsd` = false, `carrier` = true, `all` = no filter (default). Defaulting
+   * to `all` keeps a caller that never sends the param seeing the same
+   * numbers as before this field existed — never a silent narrower slice.
+   */
+  @IsOptional()
+  @IsIn(['all', 'dsd', 'carrier'])
+  route_type?: DispatchRouteTypeFilter = 'all';
 }

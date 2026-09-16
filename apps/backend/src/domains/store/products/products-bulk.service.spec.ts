@@ -61,6 +61,13 @@ describe('ProductsBulkService', () => {
     tax_categories: {
       findMany: jest.fn(),
     },
+    // Catálogo de unidades (QUI-648): loadUomCatalogByCode (:442) sólo
+    // necesita findMany({ where: { is_active }, select: { id, code, name,
+    // is_stock_eligible } }). Vacío por defecto: ningún test de este spec
+    // ejercita códigos de unidad.
+    units_of_measure: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
   };
 
   const mockProductsService = {

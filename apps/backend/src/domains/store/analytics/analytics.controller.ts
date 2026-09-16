@@ -12,6 +12,7 @@ import { PurchasesAnalyticsService } from './services/purchases-analytics.servic
 import { ReviewsAnalyticsService } from './services/reviews-analytics.service';
 import { DispatchAnalyticsService } from './services/dispatch-analytics.service';
 import {
+  DispatchAnalyticsQueryDto,
   DispatchPlanillasQueryDto,
   DispatchRemisionesQueryDto,
   DispatchVehiculosQueryDto,
@@ -1190,6 +1191,42 @@ export class AnalyticsController {
     ]);
   }
 
+  @Get('financial/expenses')
+  @Permissions('store:analytics:read')
+  async getExpensesSummary(@Query() query: AnalyticsQueryDto) {
+    const result =
+      await this.financial_analytics_service.getExpensesSummary(query);
+    return this.response_service.paginated(
+      result.data,
+      result.total,
+      result.page,
+      result.limit,
+    );
+  }
+
+  @Get('financial/expenses/export')
+  @Permissions('store:analytics:read')
+  async exportExpensesSummary(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const rows =
+      await this.financial_analytics_service.getExpensesSummaryForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'category_name', header: 'Categoría', type: 'text' },
+      { key: 'expense_count', header: 'Nº Gastos', type: 'number' },
+      { key: 'total_amount', header: 'Total', type: 'currency' },
+      { key: 'avg_expense', header: 'Promedio', type: 'currency' },
+      { key: 'last_expense_date', header: 'Último Gasto', type: 'date' },
+    ];
+
+    await this.emitReport(res, 'resumen_gastos', tz, [
+      this.toSheet('Resumen de Gastos', columns, rows, tz),
+    ]);
+  }
+
   // ==================== DISPATCH (CP-despachos-reportes B.1 + B.2) ====================
   // Reportes de lectura del módulo Despachos. Servicios devuelven crudo (Date
   // + números); el formato vive en estas columnas. Pantalla y export comparten
@@ -1232,6 +1269,7 @@ export class AnalyticsController {
       { key: 'reasignada', header: 'Reasignada', type: 'text' },
       { key: 'parada_estado', header: 'Estado Parada', type: 'text' },
       { key: 'is_prepaid', header: 'Prepaga', type: 'text' },
+      { key: 'metodo_pago', header: 'Método de Pago', type: 'text' },
       { key: 'delivered_at', header: 'Entrega', type: 'date' },
     ];
 
@@ -1342,6 +1380,42 @@ export class AnalyticsController {
     await this.emitReport(res, 'vehiculos_despacho', tz, [
       this.toSheet('Vehículos', columns, sheetRows, tz),
     ]);
+  }
+
+  // ==================== DISPATCH ANALYTICS (KPIs) ====================
+  // PLAN-analytics-despachos-2026-09-12 Paso 3. Mismo permiso que el resto
+  // del módulo (`store:analytics:read`) — no se crea un permiso nuevo.
+
+  @Get('dispatch/summary')
+  @Permissions('store:analytics:read')
+  async getDispatchSummary(@Query() query: DispatchAnalyticsQueryDto) {
+    const result =
+      await this.dispatch_analytics_service.getDispatchSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('dispatch/trends')
+  @Permissions('store:analytics:read')
+  async getDispatchTrends(@Query() query: DispatchAnalyticsQueryDto) {
+    const result =
+      await this.dispatch_analytics_service.getDispatchTrends(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('dispatch/fulfillment')
+  @Permissions('store:analytics:read')
+  async getDispatchFulfillment(@Query() query: DispatchAnalyticsQueryDto) {
+    const result =
+      await this.dispatch_analytics_service.getDispatchFulfillment(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('dispatch/collections')
+  @Permissions('store:analytics:read')
+  async getDispatchCollections(@Query() query: DispatchAnalyticsQueryDto) {
+    const result =
+      await this.dispatch_analytics_service.getDispatchCollections(query);
+    return this.response_service.success(result);
   }
 }
 

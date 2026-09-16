@@ -1324,7 +1324,38 @@ export class CustomersService {
       throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
     }
 
-    return user;
+    // QUI-808 — el card de resumen del cliente (Última compra / Pedidos /
+    // Gasto total / Ticket promedio) leía siempre undefined porque
+    // findOne() no agregaba las stats de orders. La fuente de verdad
+    // histórica es /api/orders escopada por cliente; hacemos aquí un
+    // único round-trip con `groupBy` (mismo patrón que
+    // customers-analytics.service.ts) en vez de N+1.
+    //
+    // Estados contados: el cliente puede tener órdenes en cualquier
+    // estado; el card de "Pedidos" cuenta TODO lo registrado (incluye
+    // canceladas) porque refleja actividad histórica, no revenue. Si el
+    // equipo quiere un "Pedidos completados" separado, lo agregamos en
+    // un campo adicional en una iteración posterior.
+    const stats = await this.prisma.orders.groupBy({
+      by: ['customer_id'],
+      where: {
+        store_id: storeId,
+        customer_id: id,
+      },
+      _count: { id: true },
+      _sum: { grand_total: true },
+      _max: { created_at: true },
+    });
+
+    const row = stats[0];
+    return {
+      ...user,
+      total_orders: row?._count?.id ?? 0,
+      total_spend: row?._sum?.grand_total
+        ? Number(row._sum.grand_total)
+        : 0,
+      last_order_date: row?._max?.created_at ?? null,
+    };
   }
 
   async update(storeId: number, id: number, dto: UpdateCustomerDto) {

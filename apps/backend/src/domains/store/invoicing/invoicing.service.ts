@@ -57,11 +57,17 @@ import {
 import { resolveUneceUnitCode } from '../products/services/uom-uncefact.util';
 import {
   AiuSettings,
+  DEFAULT_ECOMMERCE_AUTO_EMIT,
   DEFAULT_POS_AUTO_EMIT,
   DEFAULT_POS_DIAN_FAILURE_POLICY,
+  EcommerceInvoicingSettings,
   PosInvoicingSettings,
 } from '../settings/interfaces/store-settings.interface';
 import { DIAN_INVOICE_OPERATION_TYPES } from './providers/dian-direct/constants/dian-document-types';
+import {
+  ORDER_PAYMENT_MEANS_INCLUDE,
+  resolveOrderDianPaymentMeans,
+} from '../payments/order-payment-means.contract';
 import {
   regimeFromTaxableBasis,
   resolveAiuTaxableBasis,
@@ -100,6 +106,7 @@ import {
   contractAlreadyInvoiced,
   contractNotReadyForInvoice,
 } from './contract-invoice.errors';
+import { normalizeInvoiceTaxRate } from './utils/invoice-tax-rate.util';
 
 /**
  * Listing rows whose send/transmission state is an error or a pending send get
@@ -290,14 +297,33 @@ export function orderTaxFractionToInvoiceRate(
   return Math.round(fraction * factor * 100) / 100;
 }
 
+// F-212 — el desambiguador de magnitud vive en `utils/invoice-tax-rate.util`
+// porque lo comparten TRES sitios de dos capas: este escritor, el escritor de
+// notas (`credit-notes.service.ts`, copista puro que NO pasa por
+// `buildInvoiceTaxCreateInput`) y el lector de impresión
+// (`fiscal-document-print.mapper.ts`, función pura sin DI que no puede
+// importar este servicio). Se re-exporta para no romper a quien ya lo
+// importaba desde aquí.
+export { normalizeInvoiceTaxRate } from './utils/invoice-tax-rate.util';
+
 /**
  * Lo mínimo que la agregación necesita leer de cada línea de la orden.
  * Estructural a propósito: la fila real de Prisma satisface esta forma y
  * entra tal cual, pero la agregación se ejercita en la matriz fiscal con
  * literales, sin DB.
+ *
+ * `tax_amount_item` (F-090/F-053): el escalar de impuesto POR LÍNEA que
+ * persiste `order_items.tax_amount_item` — el mismo campo que
+ * `createFromOrder` ya lee para armar `invoice_items[].tax_amount`
+ * (`Number(item.tax_amount_item || 0) * quantity`, ver más abajo en este
+ * archivo). Opcional a propósito: un llamador que no lo pase (p. ej. la
+ * matriz fiscal, que construye literales sin este campo) se comporta
+ * EXACTAMENTE igual que hoy — `undefined` se lee como `0` y nunca dispara
+ * la población 3 de `aggregateOrderTaxes`.
  */
 export interface OrderLineTaxSource {
   total_price?: unknown;
+  tax_amount_item?: unknown;
   order_item_taxes?: Array<{
     tax_rate_id?: unknown;
     tax_name: string;
@@ -324,6 +350,37 @@ export interface OrderLineTaxSource {
  * persisten despejada (A.3): NO se re-deriva por 1+r acá, para no
  * introducir una segunda verdad que difiera un centavo de la persistida
  * (A.4/ADR-02). Sin tasas la línea aporta su neto tal cual (ERR-03).
+ *
+ * ## LAS TRES POBLACIONES (F-090, eje de código de F-053)
+ *
+ * El bucle de arriba recorre `item.order_item_taxes || []`: por construcción,
+ * una línea SIN filas no le aporta nada a `taxGroups` ni a `lineTaxes`. Eso
+ * agrupa en un solo veredicto —"cero filas"— a DOS poblaciones que son
+ * fiscalmente opuestas, más una tercera que sí tiene filas:
+ *
+ *   1. LÍNEA EXENTA CORRECTA — `tax_amount_item` (el escalar persistido en
+ *      `order_items.tax_amount_item`, el mismo que `createFromOrder` usa
+ *      para `invoice_items[].tax_amount`) es `0` y no hay filas
+ *      `order_item_taxes`. Documento correcto: la línea de verdad no paga
+ *      impuesto.
+ *   2. LÍNEA CON DESGLOSE — hay filas `order_item_taxes` (con o sin escalar
+ *      coincidente). Este es el camino que el resto de la función agrega.
+ *   3. LÍNEA CON ESCALAR > 0 Y CERO FILAS — `tax_amount_item > 0` pero
+ *      `order_item_taxes` vacío. Nace de carriles de escritura que el
+ *      inventario del plan (`canonical-line-semantics`) no contó: orden
+ *      creada por pasarela de pago, split de cuenta, kitchen-fire. HOY cae
+ *      al mismo veredicto que la población 1 — `invoiceTaxRows` sale vacío
+ *      y la factura resultante tiene `invoice_items` con impuesto en su
+ *      escalar pero `invoice_taxes` vacío: internamente incoherente, y nada
+ *      lo señalaba (F-053). `canonical-line-semantics §9` midió 188 filas
+ *      así en dev — el plan nunca las contó al afirmar "elimina las 55+83
+ *      órdenes no facturables".
+ *
+ * Esta función AHORA discrimina la población 3 y la devuelve en
+ * `tax_scalar_without_breakdown` (conteo + índices de línea), pero
+ * DELIBERADAMENTE no le agrega nada a `header_rows` / `order_line_taxes` /
+ * `distinct_group_count` — ver el porqué en el comentario de esa sección
+ * más abajo. Es una señal para el llamador, no un recálculo.
  */
 export function aggregateOrderTaxes(
   order_items: OrderLineTaxSource[] | null | undefined,
@@ -331,6 +388,15 @@ export function aggregateOrderTaxes(
   order_line_taxes: DocumentLineTaxes;
   header_rows: InvoiceTaxRowInput[];
   distinct_group_count: number;
+  /**
+   * Población 3 (ver docblock arriba): líneas con `tax_amount_item` > 0 y
+   * CERO filas `order_item_taxes`. `count` y `line_indexes` son lo mínimo
+   * para que el llamador pueda loguearlas y localizarlas — NUNCA para
+   * sintetizar la fila que falta (ver el comentario junto al `push` de
+   * abajo: eso es "el documento soporte inventa la tarifa", ya sufrido en
+   * este repo).
+   */
+  tax_scalar_without_breakdown: { count: number; line_indexes: number[] };
 } {
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const taxGroups = new Map<
@@ -352,10 +418,27 @@ export function aggregateOrderTaxes(
    * justamente por acá, desde `order_item_taxes`.
    */
   const orderLineTaxes: DocumentLineTaxes = [];
+  // Población 3 (F-090/F-053, ver docblock de la función): índices de línea
+  // con `tax_amount_item` > 0 y CERO filas `order_item_taxes`. Se recolecta
+  // en el MISMO recorrido, sin alterar `taxGroups`/`orderLineTaxes` — es
+  // lectura pura, nunca escribe en las estructuras que arman el resultado
+  // aritmético.
+  const taxScalarWithoutBreakdownIndexes: number[] = [];
+  let lineIndex = 0;
   for (const item of order_items || []) {
     const lineNet = Number(item.total_price || 0);
     const lineBase = lineNet;
     const lineTaxes: InvoiceTaxRowInput[] = [];
+    const itemTaxRows = item.order_item_taxes || [];
+    // NO se sintetiza la fila que falta: derivar `tax_name`/`tax_type`/
+    // `tax_rate_id` a partir de este escalar sería exactamente "el
+    // documento soporte inventa la tarifa" (ver
+    // `project_support_document_invents_tax_rate` en la memoria del
+    // proyecto) — produciría una tarifa que no existe en ningún catálogo
+    // DIAN. Se reporta el índice; no se rellena el hueco.
+    if (Number(item.tax_amount_item ?? 0) > 0 && itemTaxRows.length === 0) {
+      taxScalarWithoutBreakdownIndexes.push(lineIndex);
+    }
     for (const t of item.order_item_taxes || []) {
       const type = (t.tax_type as string) || 'iva';
       const ratePct = orderTaxFractionToInvoiceRate(
@@ -394,6 +477,7 @@ export function aggregateOrderTaxes(
       });
     }
     orderLineTaxes.push(lineTaxes);
+    lineIndex++;
   }
 
   const invoiceTaxRows: InvoiceTaxRowInput[] = Array.from(
@@ -412,7 +496,39 @@ export function aggregateOrderTaxes(
     order_line_taxes: orderLineTaxes,
     header_rows: invoiceTaxRows,
     distinct_group_count: taxGroups.size,
+    tax_scalar_without_breakdown: {
+      count: taxScalarWithoutBreakdownIndexes.length,
+      line_indexes: taxScalarWithoutBreakdownIndexes,
+    },
   };
+}
+
+/**
+ * F-056 (`createFromOrder`): subtotal de cabecera de la factura generada
+ * desde una orden. La lectura literal de ADR-04 (":2293 usa Σ total_price")
+ * tiene tres lecturas y las tres fallan: sobre el arreglo local `items` de
+ * `createFromOrder` no compila —no tiene campo `total_price`, sólo
+ * `total_amount`—; sobre `total_amount` duplica el impuesto en el
+ * subtotal —ese campo YA suma `+ tax`—; y sobre
+ * `order.order_items[].total_price` a secas PIERDE el flete —la línea
+ * "Envio" es sintética y nunca es un `order_item` real—.
+ *
+ * La lectura correcta: Σ de la base ya persistida por línea de orden
+ * (`order_items.total_price`, que respeta `price_unit_quantity`/peso vía
+ * `resolveLineUnits` — recomputar `quantity × unit_price` los ignora y
+ * descuadra en líneas por peso o con tarifa por empaque) MÁS el flete, que
+ * nunca es un `order_item`. Exportada para fijarla sin Prisma/contexto (ver
+ * `invoicing.service.subtotal-shipping.spec.ts`).
+ */
+export function computeOrderInvoiceSubtotal(
+  order_items: Array<{ total_price?: unknown }> | null | undefined,
+  shipping_cost: number,
+): number {
+  const items_subtotal = (order_items || []).reduce(
+    (acc: number, item) => acc + Number((item as any)?.total_price || 0),
+    0,
+  );
+  return items_subtotal + Number(shipping_cost || 0);
 }
 
 /**
@@ -652,6 +768,78 @@ export class InvoicingService {
     } catch (error) {
       this.logger.warn(
         `No se pudieron leer los ajustes de facturación del POS; se usan los defaults: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return fallback;
+    }
+  }
+
+  /**
+   * `store_settings.invoicing.ecommerce` de la tienda en contexto, con sus
+   * defaults ya aplicados. Gemela de `getPosInvoicingSettings()` — mismo
+   * contrato, mismo `try/catch` que nunca deja escapar el error, misma razón:
+   * quien llame a este método está resolviendo una venta online ya cobrada, y
+   * no poder leer una preferencia no puede ser peor que la preferencia misma.
+   *
+   * ## El fallback legado que su gemela no necesita
+   *
+   * Antes de caer al default fijo (`DEFAULT_ECOMMERCE_AUTO_EMIT`), se consulta
+   * `receipts.auto_issue_invoice` del MISMO JSON. Esa clave es un interruptor
+   * que el comerciante SÍ ve y apaga desde la UI ("Emitir factura
+   * automáticamente" en Recibos), pero que hasta hoy no tenía ningún lector:
+   * apagarlo no cambiaba nada. La migración v3→v4 de `SettingsMigratorService`
+   * traslada esa intención ya registrada (sólo el caso explícito `false`) a
+   * `invoicing.{pos,ecommerce}.auto_emit` y borra la clave muda — pero esa
+   * migración es PEREZOSA: sólo se dispara cuando alguien lee los settings a
+   * través de `SettingsService` (panel de configuración,
+   * `settings.service.ts:330`) o vía el backfill de superadmin
+   * (`SettingsSyncService`, invocado desde
+   * `POST /superadmin/settings/sync-all-stores`,
+   * `settings-sync.service.ts:57`). Este método consulta `store_settings` con
+   * Prisma crudo, así que NUNCA ve la migración correr — para una tienda que
+   * apagó el interruptor y cuyo panel nadie ha abierto, sin este fallback
+   * seguiría emitiendo automáticamente pese a la preferencia ya declarada.
+   *
+   * Este fallback es TRANSITORIO: puede retirarse cuando todas las tiendas
+   * hayan pasado por el backfill (`sync-all-stores`) y `receipts` ya no cargue
+   * la clave en ninguna fila de producción.
+   */
+  async getEcommerceInvoicingSettings(): Promise<
+    Required<EcommerceInvoicingSettings>
+  > {
+    const fallback: Required<EcommerceInvoicingSettings> = {
+      auto_emit: DEFAULT_ECOMMERCE_AUTO_EMIT,
+    };
+
+    try {
+      const store_id = this.getContext().store_id;
+      if (typeof store_id !== 'number') return fallback;
+
+      const row = await this.prisma.store_settings.findFirst({
+        where: { store_id },
+        select: { settings: true },
+      });
+
+      const settings = row?.settings as Record<string, any> | null;
+      const ecommerce = settings?.invoicing?.ecommerce;
+      const receipts = settings?.receipts;
+
+      if (typeof ecommerce?.auto_emit === 'boolean') {
+        return { auto_emit: ecommerce.auto_emit };
+      }
+
+      // Sin valor explícito en la clave nueva: el interruptor legado, si fue
+      // apagado a mano, gana sobre el default — ver comentario de clase.
+      return {
+        auto_emit:
+          receipts?.auto_issue_invoice === false
+            ? false
+            : fallback.auto_emit,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `No se pudieron leer los ajustes de facturación de e-commerce; se usan los defaults: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -2110,6 +2298,14 @@ export class InvoicingService {
           orderBy: { created_at: 'desc' },
           take: 1,
         },
+        // Los pagos COBRADOS de la orden, con su método de tienda y el método
+        // de sistema que lleva el `dian_code`. Es lo que decide el par
+        // forma/medio de pago que se declara en `cac:PaymentMeans`. Se usa el
+        // include canónico compartido (y no uno escrito a mano acá) porque una
+        // superficie que olvide anidar `system_payment_method` no rompe la
+        // compilación: se queda sin `dian_code` y declara silenciosamente el
+        // default, que es exactamente el defecto que esto cierra.
+        payments: ORDER_PAYMENT_MEANS_INCLUDE,
       },
     });
 
@@ -2202,10 +2398,13 @@ export class InvoicingService {
     // los canales (POS y checkout persisten la base en `unit_price`): no se
     // resta nada acá. Con líneas agregadas, idéntico a hoy; con inclusivas,
     // el total == precio porque la base + la cuota suman el publicado.
-    const subtotal = items.reduce(
-      (acc: number, item: any) =>
-        acc + Number(item.quantity) * Number(item.unit_price),
-      0,
+    //
+    // F-056: fórmula fijada y documentada en `computeOrderInvoiceSubtotal`
+    // (arriba del todo en este archivo) — ahí está el porqué de las tres
+    // lecturas descartadas de ADR-04.
+    const subtotal = computeOrderInvoiceSubtotal(
+      order.order_items || [],
+      shippingCost,
     );
     const discount = items.reduce(
       (acc: number, item: any) => acc + Number(item.discount_amount),
@@ -2228,7 +2427,32 @@ export class InvoicingService {
       order_line_taxes: orderLineTaxes,
       header_rows: invoiceTaxRows,
       distinct_group_count: distinctGroupCount,
+      tax_scalar_without_breakdown: taxScalarWithoutBreakdown,
     } = aggregateOrderTaxes(order.order_items || []);
+    // F-090 (eje de código de F-053) — población 3 de `aggregateOrderTaxes`
+    // (ver su docblock): líneas con `tax_amount_item` > 0 pero SIN filas
+    // `order_item_taxes` no aportan nada a `invoiceTaxRows` y hoy se ven
+    // IDÉNTICAS a una línea exenta correcta — la factura resultante puede
+    // quedar con `invoice_items` cargando impuesto en su escalar e
+    // `invoice_taxes` vacío, y nada lo señalaba. Este warn —mismo shape que
+    // los demás del dominio (`[label]${formatGateCorrelation(...)} mensaje`,
+    // ver `recalculateDocument`/`invoice:create-from-contract`)— es lo único
+    // que hace contable en producción esta población, que es justo lo que
+    // F-090 dice que hoy no se puede. No se sintetiza la fila que falta
+    // (ver docblock de `aggregateOrderTaxes`): se reporta el conteo y los
+    // índices para que quien investigue pueda ir directo a la línea.
+    if (taxScalarWithoutBreakdown.count > 0) {
+      this.logger.warn(
+        `[invoice:create-from-order]${formatGateCorrelation({
+          store_id: context.store_id ?? null,
+          organization_id: context.organization_id ?? null,
+          order_id: order.id,
+        })} F-090: ${taxScalarWithoutBreakdown.count} línea(s) con ` +
+          `tax_amount_item > 0 y sin desglose order_item_taxes (índices: ` +
+          `${taxScalarWithoutBreakdown.line_indexes.join(', ')}); quedan ` +
+          `fuera de invoice_taxes — no se sintetiza la fila faltante`,
+      );
+    }
     // La línea de ENVÍO, cuando existe, se añade al final de `items` y no
     // lleva tributos: se representa como un arreglo vacío para que el
     // alineamiento por posición contra `invoice_items` siga siendo cierto.
@@ -2282,6 +2506,26 @@ export class InvoicingService {
     const acquirerRail = resolveAcquirerRail(declaredAcquirer);
     const customer_name = acquirerRail.identity.name;
 
+    /**
+     * CÓMO SE PAGÓ ESTA ORDEN, DICHO EN EL IDIOMA DE LA DIAN.
+     *
+     * Estas dos columnas quedaban en NULL en toda factura nacida de una orden,
+     * así que `ubl-invoice.builder.ts` caía en sus fallbacks (`'1'` y `'10'`) y
+     * CADA venta de tienda se declaraba «contado, en efectivo» — también las
+     * pagadas con tarjeta y también las que no se habían cobrado. El
+     * `schema.prisma` ya documentaba que `payment_form` «se propaga desde
+     * `orders.payment_form`»; esta línea es esa propagación, que nunca existió.
+     *
+     * La política vive entera en el contrato compartido y NO se reimplementa
+     * acá: es la misma que resuelve la etiqueta del tiquete POS y la columna
+     * «Método de pago» de los reportes. Si divergiera, una orden podría
+     * imprimirse «Tarjeta» y declararse «Efectivo».
+     */
+    const { payment_form, payment_means_code } = resolveOrderDianPaymentMeans(
+      order,
+      order.payments,
+    );
+
     const invoice = await this.prisma.invoices.create({
       data: {
         organization_id: context.organization_id,
@@ -2312,6 +2556,10 @@ export class InvoicingService {
         total_amount: new Prisma.Decimal(total),
         currency: 'COP',
         issue_date: new Date(),
+        // `cac:PaymentMeans/cbc:ID` y `cbc:PaymentMeansCode`, resueltos arriba
+        // desde los pagos cobrados de la orden.
+        payment_form,
+        payment_means_code,
         created_by_user_id: context.user_id,
         invoice_items: {
           create: items,
@@ -2487,6 +2735,23 @@ export class InvoicingService {
         `${customer.first_name || ''} ${customer.last_name || ''}`.trim())
       : undefined;
 
+    /**
+     * Par forma/medio de pago, por el MISMO contrato que `createFromOrder`.
+     *
+     * `sales_orders` no tiene columna `payment_form` ni relación `payments`: un
+     * pedido de venta registra qué se va a vender, no cómo se cobró. Por eso el
+     * contrato se invoca SIN evidencia, y con esa ausencia resuelve lo único
+     * cierto — `'2'` crédito (no hay cobro registrado) e instrumento `'1'` no
+     * definido. Lo que se evita es que la columna quede NULL y el emisor caiga
+     * en su fallback declarando «contado en efectivo» una venta que nadie
+     * cobró: el default silencioso afirma un movimiento de caja inexistente.
+     *
+     * Se llama al contrato, y no se escriben los literales a mano, para que el
+     * día que los pedidos de venta sí registren cobro la propagación ya esté
+     * puesta y baste con pasarle los pagos.
+     */
+    const { payment_form, payment_means_code } = resolveOrderDianPaymentMeans();
+
     const invoice = await this.prisma.invoices.create({
       data: {
         organization_id: context.organization_id,
@@ -2507,6 +2772,9 @@ export class InvoicingService {
         total_amount: new Prisma.Decimal(total),
         currency: 'COP',
         issue_date: new Date(),
+        // `cac:PaymentMeans/cbc:ID` y `cbc:PaymentMeansCode` — ver arriba.
+        payment_form,
+        payment_means_code,
         created_by_user_id: context.user_id,
         invoice_items: {
           create: items,
@@ -3547,7 +3815,7 @@ export class InvoicingService {
       // campo ausente no son lo mismo para el input de Prisma.
       tax_rate_id: tax.tax_rate_id ?? undefined,
       tax_name: tax.tax_name,
-      tax_rate: new Prisma.Decimal(tax.tax_rate),
+      tax_rate: normalizeInvoiceTaxRate(tax.tax_rate, tax.tax_type),
       // `?? 0`: la fila puede llegar sin `taxable_amount`/`tax_amount` cuando
       // el DTO omitió lo que el servidor recalcula de todas formas. Persistir 0
       // es seguro: el reconciliador de aceptación reescribe el valor real.

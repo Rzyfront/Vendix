@@ -110,6 +110,19 @@ export interface CashSessionExportRow {
   status: string;
 }
 
+/**
+ * One RAW expense-summary row grouped by category (QUI-544).
+ * Numeric amounts/counts are unformatted numbers (2-decimal rounded for money),
+ * and dates are RAW Date instants (the ReportBuilder renders them in the store timezone).
+ */
+export interface ExpenseSummaryRow {
+  category_name: string;
+  expense_count: number;
+  total_amount: number;
+  avg_expense: number;
+  last_expense_date: Date | null;
+}
+
 @Injectable()
 export class FinancialAnalyticsService {
   private readonly logger = new Logger(FinancialAnalyticsService.name);
@@ -189,7 +202,13 @@ export class FinancialAnalyticsService {
         SUM(oit.tax_amount)::decimal AS total_tax,
         CASE
           WHEN oit.tax_rate > 0
-            THEN SUM(oit.tax_amount) / (oit.tax_rate / 100)
+            -- F-117: order_item_taxes.tax_rate es Decimal(6,5) y guarda una
+            -- FRACCION (0.19), nunca un porcentaje (19). Un divisor con un
+            -- cien de mas en el denominador infla la base gravable 100x.
+            -- El escritor (payments.service.ts roundRate) persiste la
+            -- fraccion tal cual; aqui se deshace con el mismo divisor,
+            -- sin reescalar.
+            THEN SUM(oit.tax_amount) / oit.tax_rate
           ELSE 0
         END::decimal AS taxable_amount
       FROM order_item_taxes oit
@@ -203,6 +222,11 @@ export class FinancialAnalyticsService {
         AND o.state IN (${revenueStates})
         AND o.created_at >= ${startDate}
         AND o.created_at <= ${endDate}
+        -- F-117: excluir items cancelados — la consulta de ingresos gravados
+        -- (revenueRows, mas abajo) ya lo hace; taxRows quedaba desalineada y
+        -- podia contar el impuesto de una linea que la analitica de ingresos
+        -- ya excluia.
+        AND oi.cancelled_at IS NULL
       GROUP BY
         COALESCE(oit.tax_type::text, 'unclassified'),
         oit.tax_name,
@@ -595,7 +619,11 @@ export class FinancialAnalyticsService {
     // (revenue.total_invoiced, bottom_line.balance, comparison.balance). Bumped
     // with the shape so a rolling deploy cannot serve a v3-shaped object to a
     // frontend that reads `cash.*` and would render every card as 0.
-    const cacheKey = `analytics:financial:profit-loss:v4:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
+    // `v5` (C.10 CP-pos-exclusive-tax-double-charge): P1 moves subtotal_amount
+    // ~19% on exclusive-tax lines. Old v4 entries would keep serving the
+    // inflated figures on financial cards — bump the key for visibility, no
+    // calculation logic changes.
+    const cacheKey = `analytics:financial:profit-loss:v5:${storeId}:${query.date_preset ?? '_'}:${query.date_from ?? '_'}:${query.date_to ?? '_'}`;
     const cached =
       await this.cache.get<
         Awaited<ReturnType<FinancialAnalyticsService['computeProfitLossSummary']>>
@@ -608,7 +636,7 @@ export class FinancialAnalyticsService {
   }
 
   /**
-   * Bug 5/11 — Invalida todas las entradas del cache `profit-loss:v4:*` para
+   * Bug 5/11 — Invalida todas las entradas del cache `profit-loss:v5:*` para
    * un store. Usado por `FinancialAnalyticsCacheInvalidationListener` cuando
    * llega `expense.state_changed`, `payment.received` o `refund.completed`.
    *
@@ -619,7 +647,7 @@ export class FinancialAnalyticsService {
    * `reset()` (cache-manager v5). El catch final evita bloquear el flujo.
    */
   async invalidateCache(storeId: number, prefix = 'profit-loss'): Promise<void> {
-    const keyPrefix = `analytics:financial:${prefix}:v4:${storeId}:`;
+    const keyPrefix = `analytics:financial:${prefix}:v5:${storeId}:`;
     const pattern = `${keyPrefix}*`;
     try {
       const store: any = (this.cache as any).store;
@@ -1820,5 +1848,131 @@ export class FinancialAnalyticsService {
         status: s.status,
       };
     });
+  }
+
+  /**
+   * QUI-544: Returns paginated expense summary grouped by category for the report preview table.
+   * Filters by RECOGNIZED_EXPENSE_STATES ('approved', 'paid') and business dates in store timezone.
+   */
+  async getExpensesSummary(query: AnalyticsQueryDto) {
+    const allRows = await this.fetchAndGroupExpensesByCategory(query);
+    const page = Math.max(1, Number(query.page || 1));
+    const limit = Math.max(1, Number(query.limit || 10));
+    const skip = (page - 1) * limit;
+    const paginated = allRows.slice(skip, skip + limit);
+
+    return {
+      data: paginated,
+      total: allRows.length,
+      page,
+      limit,
+    };
+  }
+
+  /**
+   * QUI-544: Returns the full dataset of expenses grouped by category for XLSX export.
+   * Emits unformatted numbers and raw Date objects so ReportBuilder can format them.
+   */
+  async getExpensesSummaryForExport(
+    query: AnalyticsQueryDto,
+  ): Promise<ExpenseSummaryRow[]> {
+    return this.fetchAndGroupExpensesByCategory(query);
+  }
+
+  /**
+   * Internal helper to fetch and group recognized expenses by category.
+   * Filters by RECOGNIZED_EXPENSE_STATES ('approved', 'paid') and naive
+   * date-only window in store timezone via `resolveLocalDateOnlyRange`.
+   */
+  private async fetchAndGroupExpensesByCategory(
+    query: AnalyticsQueryDto,
+  ): Promise<ExpenseSummaryRow[]> {
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = resolveLocalDateOnlyRange(query, tz);
+
+    const expenses = await this.prisma.expenses.findMany({
+      where: {
+        state: { in: [...RECOGNIZED_EXPENSE_STATES] },
+        expense_date: { gte: startDate, lte: endDate }, // tz-audit:date-only — business-date; ventana de resolveLocalDateOnlyRange
+      },
+      select: {
+        amount: true,
+        expense_date: true,
+        category_id: true,
+        expense_categories: { select: { name: true } },
+      },
+      orderBy: { expense_date: 'desc' },
+      take: 10000,
+    });
+
+    const buckets = new Map<
+      number | string,
+      {
+        category_name: string;
+        expense_count: number;
+        total_amount: number;
+        last_expense_date: Date | null;
+      }
+    >();
+
+    for (const e of expenses) {
+      const key = e.category_id ?? 'uncategorized';
+      const categoryName = e.expense_categories?.name?.trim() || 'Sin categoría';
+      const amount = Number(e.amount || 0);
+      const date = e.expense_date;
+
+      const existing = buckets.get(key);
+      if (!existing) {
+        buckets.set(key, {
+          category_name: categoryName,
+          expense_count: 1,
+          total_amount: amount,
+          last_expense_date: date,
+        });
+      } else {
+        existing.expense_count += 1;
+        existing.total_amount += amount;
+        if (date && (!existing.last_expense_date || date > existing.last_expense_date)) {
+          existing.last_expense_date = date;
+        }
+      }
+    }
+
+    const rows: ExpenseSummaryRow[] = Array.from(buckets.values()).map(
+      (b): ExpenseSummaryRow => ({
+        category_name: b.category_name,
+        expense_count: b.expense_count,
+        total_amount: this.round2(b.total_amount),
+        avg_expense:
+          b.expense_count > 0
+            ? this.round2(b.total_amount / b.expense_count)
+            : 0,
+        last_expense_date: b.last_expense_date,
+      }),
+    );
+
+    const sortBy = query.sort_by;
+    const sortOrder = query.sort_order === 'asc' ? 'asc' : 'desc';
+
+    if (sortBy) {
+      rows.sort((a, b) => {
+        let valA = (a as any)[sortBy];
+        let valB = (b as any)[sortBy];
+        if (valA instanceof Date) valA = valA.getTime();
+        if (valB instanceof Date) valB = valB.getTime();
+        if (typeof valA === 'string') {
+          return sortOrder === 'asc'
+            ? valA.localeCompare(valB)
+            : valB.localeCompare(valA);
+        }
+        return sortOrder === 'asc'
+          ? (valA ?? 0) - (valB ?? 0)
+          : (valB ?? 0) - (valA ?? 0);
+      });
+    } else {
+      rows.sort((a, b) => b.total_amount - a.total_amount);
+    }
+
+    return rows;
   }
 }

@@ -15,7 +15,10 @@ import {
   PaymentResponse,
   Transaction,
 } from '../models/payment.model';
-import { PosShippingAddress } from '../models/shipping.model';
+import {
+  PosShippingAddress,
+  PosShippingSaleData,
+} from '../models/shipping.model';
 import { PosApiService } from './pos-api.service';
 
 // Re-export types for component usage
@@ -112,8 +115,13 @@ export class PosPaymentService {
     return this.cashRegisterService.getRegisterId();
   }
 
-  private mapCartItemsForPos(cartState: CartState): any[] {
-    return cartState.items.map((item) => this.mapCartItemForPos(item));
+  private mapCartItemsForPos(
+    cartState: CartState,
+    forceTakeaway = false,
+  ): any[] {
+    return cartState.items.map((item) =>
+      this.mapCartItemForPos(item, forceTakeaway),
+    );
   }
 
   private getAppliedPromotionIds(cartState: CartState): number[] {
@@ -123,7 +131,7 @@ export class PosPaymentService {
       .filter((promotionId) => Number.isFinite(promotionId));
   }
 
-  private mapCartItemForPos(item: CartItem): any {
+  private mapCartItemForPos(item: CartItem, forceTakeaway = false): any {
     // CP-POS-SVC-PERF-001 / Bugfix — `item.product.id` can be a number
     // (DB ids) or a string (synthetic ids for custom lines like
     // `custom-<uuid>`). Calling `.startsWith` on a number throws
@@ -171,7 +179,14 @@ export class PosPaymentService {
       product_sku: isCustomItem ? undefined : item.product.sku,
       quantity: item.quantity,
       unit_price: Number(item.unitPrice.toFixed(2)),
-      final_unit_price: Number(item.finalPrice.toFixed(2)),
+      // F-218 — `final_unit_price` es el único portador del bruto declarado y
+      // declararlo arma el guard `store:pos:price_override` en el backend. Viaja
+      // SOLO con edición real del cajero (`isPriceOverridden`) o ítem custom
+      // (precio digitado, sin catálogo contra el cual caer). En la línea normal
+      // se omite (no `null`): el backend cae a `catalogFinalPrice`.
+      ...((item.isPriceOverridden === true || isCustomItem) && {
+        final_unit_price: Number(item.finalPrice.toFixed(2)),
+      }),
       total_price: Number((item.finalPrice * lineUnits).toFixed(2)),
       tax_rate: taxRate,
       tax_amount_item:
@@ -207,6 +222,13 @@ export class PosPaymentService {
       // instead of the kitchen fire. Only meaningful for `prepared`
       // products; ignored for everything else.
       skip_kds: item.skipKds === true,
+      // QUI-653 — "Para llevar" a nivel de orden (paso Consumo en 'entrega',
+      // ver `isTakeawayOrder` del checkout-shell, que llega como
+      // `forceTakeaway`) o marca per-línea del carrito. Solo se envía cuando
+      // aplica: el backend ya tiene default false.
+      ...((item.isTakeaway === true || forceTakeaway === true) && {
+        is_takeaway: true,
+      }),
     };
   }
 
@@ -355,6 +377,9 @@ export class PosPaymentService {
     createdBy: string,
     tableSessionId?: number | null,
     tableId?: number | null,
+    // QUI-653 — decisión "Para llevar" de la orden (el shell la computa como
+    // `isTakeawayOrder`). Se estampa en las líneas sin mutar el carrito.
+    takeawayOrder?: boolean | null,
   ): Observable<any> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
@@ -404,7 +429,8 @@ export class PosPaymentService {
     //   calculation.
     const sale_data: any = {
       store_id: this.getStoreId(),
-      items: this.mapCartItemsForPos(cartState),
+      // QUI-653 — 'Para llevar' de la orden estampado por línea.
+      items: this.mapCartItemsForPos(cartState, takeawayOrder === true),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
       ),
@@ -508,14 +534,7 @@ export class PosPaymentService {
    */
   processShippingSale(
     cartState: CartState,
-    shippingData: {
-      shippingMethodId: number;
-      shippingCost: number;
-      deliveryType: string;
-      shippingAddress: PosShippingAddress;
-      deliveryNotes?: string;
-      shippingAddressId?: number | null;
-    },
+    shippingData: PosShippingSaleData,
     paymentRequest: PaymentRequest | null,
     createdBy: string,
     creditConfig?: {
@@ -559,7 +578,10 @@ export class PosPaymentService {
       customer_email: cartState.customer.email,
       customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
-      items: this.mapCartItemsForPos(cartState),
+      // QUI-653 — el envío (recoger en tienda o domicilio) siempre se empaca
+      // para llevar: estampa `is_takeaway` en todas las líneas para que el
+      // ticket KDS lo muestre. Esta función solo sirve al flujo de envío.
+      items: this.mapCartItemsForPos(cartState, true),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
       ),
@@ -831,10 +853,20 @@ export class PosPaymentService {
   /**
    * Guardar borrador de orden
    */
+  /**
+   * Guarda el carrito como borrador (`is_draft: true`, sin pago).
+   *
+   * `shipping` es el contexto del wizard de Envío. Sin él, un borrador
+   * guardado DESDE ese wizard nacía como orden de mostrador: método, costo,
+   * dirección y notas de envío se perdían en silencio y la orden quedaba sin
+   * forma de despacharse. Cuando viene, el borrador persiste las mismas claves
+   * que `processShippingSale` y el total incluye el costo del envío.
+   */
   saveDraft(
     cartState: CartState,
     createdBy: string,
     customerAlias?: string,
+    shipping?: PosShippingSaleData | null,
   ): Observable<any> {
     // Drafts are NOT transactional — no cash register session required.
     const user_id = this.storeContextService.getUserId();
@@ -871,12 +903,26 @@ export class PosPaymentService {
       // se perdía al guardar el borrador y reaparecía como `coupon_code = null`.
       coupon_id: cartState.appliedCoupon?.id ?? null,
       coupon_code: cartState.appliedCoupon?.code ?? null,
-      total_amount: Number(cartState.summary.total.toFixed(2)),
+      total_amount: Number(
+        (cartState.summary.total + (shipping?.shippingCost ?? 0)).toFixed(2),
+      ),
       is_draft: true,
       requires_payment: false,
+      // Claves de envío (solo cuando el borrador nace del wizard de Envío).
+      ...(shipping
+        ? {
+            delivery_type: shipping.deliveryType,
+            shipping_method_id: shipping.shippingMethodId,
+            shipping_cost: Number(shipping.shippingCost.toFixed(2)),
+            shipping_address_snapshot: shipping.shippingAddress,
+            ...(shipping.shippingAddressId
+              ? { shipping_address_id: shipping.shippingAddressId }
+              : {}),
+          }
+        : {}),
       ...(register_id ? { register_id } : {}),
       seller_user_id: user_id,
-      internal_notes: cartState.notes || '',
+      internal_notes: shipping?.deliveryNotes || cartState.notes || '',
       update_inventory: false,
     };
 

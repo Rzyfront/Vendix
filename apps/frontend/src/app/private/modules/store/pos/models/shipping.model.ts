@@ -20,6 +20,21 @@ export interface PosShippingAddress {
   recipient_phone?: string;
 }
 
+/**
+ * Contexto de envío que el wizard del POS produce una sola vez y consumen las
+ * DOS salidas del flujo: la venta (`processShippingSale`) y el borrador
+ * (`saveDraft`). Vive aquí, y no inline en el servicio, porque un borrador que
+ * pierde estas claves es una orden de domicilio sin domicilio.
+ */
+export interface PosShippingSaleData {
+  shippingMethodId: number;
+  shippingCost: number;
+  deliveryType: string;
+  shippingAddress: PosShippingAddress;
+  deliveryNotes?: string;
+  shippingAddressId?: number | null;
+}
+
 export interface PosShippingOption {
   id: number;
   /** Rate identifier — semantic alias of `id`, returned by backend calculator. */

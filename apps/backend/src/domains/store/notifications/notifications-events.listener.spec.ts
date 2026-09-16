@@ -17,6 +17,10 @@ describe('NotificationsEventsListener — appointment redesign handlers', () => 
     // y un cero no aparece como rojo en el recuento de «Tests», sólo en el de
     // «Test Suites».
     const eventEmitter = { emit: jest.fn() } as any;
+    // Séptima dependencia (InvoiceDeliveryService), añadida después: no la
+    // ejercita ningún test de este bloque (son los handlers de citas), pero
+    // el constructor real ya la exige.
+    const invoiceDeliveryService = { deliver: jest.fn() } as any;
 
     const listener = new NotificationsEventsListener(
       notificationsService,
@@ -25,6 +29,7 @@ describe('NotificationsEventsListener — appointment redesign handlers', () => 
       s3Service,
       appointmentQueueService,
       eventEmitter,
+      invoiceDeliveryService,
     );
 
     return {
@@ -234,21 +239,36 @@ describe('NotificationsEventsListener — appointment redesign handlers', () => 
 
 /**
  * E.10 (2026-08-25) — la entrega PRIMARIA al adquiriente (Anexo Técnico 1.9
- * §9.1) vive en `handleInvoicePdfGenerated`, no en `InvoiceDeliveryService`
- * (ese es el reenvío de conveniencia, E.6). Antes de este bloque el método
- * NO tenía cobertura de su propia lógica de decisión: sólo se probaba
- * `buildInvoiceEmailSubject` por separado (ver comentario de esa suite). El
- * hallazgo que motivó esto: se estampaba `email_sent_at` con sólo mirar
- * `result.success` del proveedor de correo, así que un correo enviado con
- * CERO adjuntos (PDF no descargable de S3 + factura sin `xml_document`)
- * quedaba contado como "entregado" — 16 de 95 facturas así, sin ninguna fila
- * en `invoice_delivery_events` para auditarlo.
+ * §9.1) vive en `handleInvoicePdfGenerated`. El hallazgo que motivó esto: se
+ * estampaba `email_sent_at` con sólo mirar `result.success` del proveedor de
+ * correo, así que un correo enviado con CERO adjuntos (PDF no descargable de
+ * S3 + factura sin `xml_document`) quedaba contado como "entregado" — 16 de
+ * 95 facturas así, sin ninguna fila en `invoice_delivery_events` para
+ * auditarlo.
+ *
+ * F-160 (2026-09-13) — desde entonces el handler dejó de armar el zip y
+ * llamar al proveedor de correo DIRECTAMENTE: delega TODO en
+ * `InvoiceDeliveryService.deliver()` (comentario "Entrega normativa —
+ * delegada, NO reimplementada", `notifications-events.listener.ts:830-874`).
+ * Estos tres tests seguían mockeando `s3Service.downloadImage` /
+ * `emailService.send*` / `globalPrisma.invoice_delivery_events.create`
+ * directamente — un camino que el handler ya no ejecuta — así que corrían en
+ * rojo con razón contra un `invoiceDeliveryService.deliver` sin
+ * `mockResolvedValue` (de ahí el `TypeError: Cannot read properties of
+ * undefined (reading 'zip_name')`). Reapuntados al colaborador real: se
+ * mockea `invoice_delivery_service.deliver()` y se observa lo único que
+ * SIGUE siendo responsabilidad de este handler — si `deliver()` devolvió un
+ * `zip_name` real, estampar `email_sent_at`; si no (o si `deliver()` lanzó),
+ * no estampar y no dejar escapar el error. El armado del zip, el envío por
+ * proveedor y la fila de `invoice_delivery_events` son responsabilidad de
+ * `InvoiceDeliveryService` y ya tienen su propia cobertura en
+ * `invoice-delivery.service.spec.ts` — no se reimplementan acá.
  *
  * Se construye el listener con mocks completos (Prisma/S3/email) y se llama
  * al método PÚBLICO tal como lo dispara el event emitter real — no el
  * método privado — porque lo que se prueba aquí es la decisión que cruza
- * "¿hubo adjunto?" con "¿el proveedor aceptó?", que vive en el cuerpo del
- * handler, no en una función pura extraíble.
+ * "¿`deliver()` devolvió zip?" con "¿estampar la idempotencia?", que vive en
+ * el cuerpo del handler, no en una función pura extraíble.
  */
 describe('NotificationsEventsListener.handleInvoicePdfGenerated (E.10)', () => {
   function buildInvoiceRow(overrides: Record<string, any> = {}) {
@@ -286,21 +306,24 @@ describe('NotificationsEventsListener.handleInvoicePdfGenerated (E.10)', () => {
   function buildListenerWithMocks(invoiceRow: any) {
     const notificationsService = { createAndBroadcast: jest.fn() } as any;
     const invoicesUpdate = jest.fn().mockResolvedValue({});
-    const deliveryEventsCreate = jest.fn().mockResolvedValue({});
     const globalPrisma = {
       invoices: {
         findUnique: jest.fn().mockResolvedValue(invoiceRow),
         update: invoicesUpdate,
       },
-      invoice_delivery_events: { create: deliveryEventsCreate },
     } as any;
-    const emailService = {
-      sendEmail: jest.fn(),
-      sendEmailWithAttachments: jest.fn(),
-    } as any;
-    const s3Service = { downloadImage: jest.fn() } as any;
+    // F-160: `s3Service`/`emailService` ya no los toca este handler — la
+    // descarga del PDF, el armado del zip y el envío por proveedor viven
+    // dentro de `InvoiceDeliveryService.deliver()`. Se dejan vacíos a
+    // propósito para que ningún assert futuro vuelva a apoyarse en un
+    // camino muerto.
+    const emailService = {} as any;
+    const s3Service = {} as any;
     const appointmentQueueService = {} as any;
     const eventEmitter = { emit: jest.fn() } as any;
+    // Séptima dependencia — hoy el colaborador real que hace el trabajo de
+    // entrega. Se resuelve/rechaza por test.
+    const invoiceDeliveryService = { deliver: jest.fn() } as any;
 
     const listener = new NotificationsEventsListener(
       notificationsService,
@@ -309,86 +332,90 @@ describe('NotificationsEventsListener.handleInvoicePdfGenerated (E.10)', () => {
       s3Service,
       appointmentQueueService,
       eventEmitter,
+      invoiceDeliveryService,
     );
 
-    return { listener, globalPrisma, emailService, s3Service, invoicesUpdate, deliveryEventsCreate };
+    return { listener, invoicesUpdate, invoiceDeliveryService };
   }
 
-  it('PDF no descargable + sin xml_document: NO estampa email_sent_at y deja fila status=error', async () => {
-    const invoiceRow = buildInvoiceRow({ xml_document: null });
-    const { listener, s3Service, emailService, invoicesUpdate, deliveryEventsCreate } =
+  it('deliver() sin zip (sin adjunto normativo): NO estampa email_sent_at', async () => {
+    const invoiceRow = buildInvoiceRow();
+    const { listener, invoicesUpdate, invoiceDeliveryService } =
       buildListenerWithMocks(invoiceRow);
 
-    s3Service.downloadImage.mockRejectedValue(new Error('NoSuchKey: does-not-exist'));
-    // Sin adjuntos, el handler cae a sendEmail (no sendEmailWithAttachments) y
-    // el proveedor igual puede "aceptar" el envío — ese es justo el caso que
-    // antes se contaba como entregado.
-    emailService.sendEmail.mockResolvedValue({ success: true, messageId: 'm-1' });
+    // Sin adjunto normativo, `deliver()` declara `zip_name: null` — esa
+    // decisión hoy vive en `InvoiceDeliveryService`, no en este listener
+    // (ver `invoice-delivery.service.spec.ts` para su cobertura).
+    invoiceDeliveryService.deliver.mockResolvedValue({
+      invoice_id: 501,
+      invoice_number: 'FVET9001',
+      recipient: 'ana@example.com',
+      zip_name: null,
+      message_id: undefined,
+    });
 
     await listener.handleInvoicePdfGenerated({
       invoice_id: 501,
       pdf_key: 'invoices/does-not-exist.pdf',
     });
 
-    expect(emailService.sendEmailWithAttachments).not.toHaveBeenCalled();
-    expect(invoicesUpdate).not.toHaveBeenCalled();
-    expect(deliveryEventsCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        invoice_id: 501,
-        organization_id: 6,
-        store_id: 10,
-        channel: 'email',
-        recipient: 'ana@example.com',
-        zip_name: null,
-        status: 'error',
-        provider_error: expect.stringContaining('sin adjuntos'),
-      }),
+    expect(invoiceDeliveryService.deliver).toHaveBeenCalledWith(501, {
+      email: 'ana@example.com',
     });
+    expect(invoicesUpdate).not.toHaveBeenCalled();
   });
 
-  it('descarga sana del PDF: estampa email_sent_at y deja fila status=sent', async () => {
-    const invoiceRow = buildInvoiceRow({ xml_document: null });
-    const { listener, s3Service, emailService, invoicesUpdate, deliveryEventsCreate } =
+  it('deliver() con zip: estampa email_sent_at', async () => {
+    const invoiceRow = buildInvoiceRow();
+    const { listener, invoicesUpdate, invoiceDeliveryService } =
       buildListenerWithMocks(invoiceRow);
 
-    s3Service.downloadImage.mockResolvedValue(Buffer.from('%PDF-fake'));
-    emailService.sendEmailWithAttachments.mockResolvedValue({ success: true, messageId: 'm-2' });
+    invoiceDeliveryService.deliver.mockResolvedValue({
+      invoice_id: 501,
+      invoice_number: 'FVET9001',
+      recipient: 'ana@example.com',
+      zip_name: 'Factura-FVET9001.zip',
+      message_id: 'm-2',
+    });
 
     await listener.handleInvoicePdfGenerated({
       invoice_id: 501,
       pdf_key: 'invoices/501.pdf',
     });
 
-    expect(emailService.sendEmailWithAttachments).toHaveBeenCalled();
+    expect(invoiceDeliveryService.deliver).toHaveBeenCalledWith(501, {
+      email: 'ana@example.com',
+    });
     expect(invoicesUpdate).toHaveBeenCalledWith({
       where: { id: 501 },
       data: { email_sent_at: expect.any(Date) },
     });
-    expect(deliveryEventsCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        invoice_id: 501,
-        status: 'sent',
-        provider_error: null,
-      }),
-    });
   });
 
-  it('proveedor de correo falla incluso con adjunto: NO estampa y provider_error trae el motivo del proveedor', async () => {
-    const invoiceRow = buildInvoiceRow({ xml_document: '<xml/>' });
-    const { listener, s3Service, emailService, invoicesUpdate, deliveryEventsCreate } =
+  it('deliver() lanza (proveedor de correo falló): NO estampa y el error no escapa del handler', async () => {
+    const invoiceRow = buildInvoiceRow();
+    const { listener, invoicesUpdate, invoiceDeliveryService } =
       buildListenerWithMocks(invoiceRow);
 
-    s3Service.downloadImage.mockResolvedValue(Buffer.from('%PDF-fake'));
-    emailService.sendEmailWithAttachments.mockResolvedValue({ success: false, error: 'SMTP timeout' });
+    // `deliver()` ya escribió su propia fila en `invoice_delivery_events`
+    // (status=error, provider_error) ANTES de lanzar — responsabilidad suya,
+    // cubierta en `invoice-delivery.service.spec.ts`. Lo que sí es
+    // responsabilidad de ESTE handler es no dejar escapar la excepción
+    // (try/catch a nivel de listener, `notifications-events.listener.ts`
+    // ~:908-913) y no estampar la idempotencia sobre una entrega que no
+    // ocurrió.
+    invoiceDeliveryService.deliver.mockRejectedValue(new Error('SMTP timeout'));
 
-    await listener.handleInvoicePdfGenerated({
-      invoice_id: 501,
-      pdf_key: 'invoices/501.pdf',
+    await expect(
+      listener.handleInvoicePdfGenerated({
+        invoice_id: 501,
+        pdf_key: 'invoices/501.pdf',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(invoiceDeliveryService.deliver).toHaveBeenCalledWith(501, {
+      email: 'ana@example.com',
     });
-
     expect(invoicesUpdate).not.toHaveBeenCalled();
-    expect(deliveryEventsCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({ status: 'error', provider_error: 'SMTP timeout' }),
-    });
   });
 });

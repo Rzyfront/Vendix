@@ -140,11 +140,15 @@ const RATE_PPM_DIVISOR = 1_000_000;
 /**
  * Tarifa a PORCENTAJE, con guarda de unidad.
  *
- * Espejo de `toPercent` (`invoice-tax-catalog.service.ts`): el contrato del
- * formulario es porcentaje (8 = 8 %), pero del catálogo pueden colarse
- * fracciones legadas (0.08). `> 1 ⇒ porcentaje`, `<= 1 ⇒ fracción × 100`
- * (F-013). La ambigüedad de una tarifa sub-1 % guardada como `1` no existe en
- * el catálogo (se guardaría como `0.01`), así que la regla es total.
+ * Contrato real: el `tax-selector` ya entrega `TaxSelection.rate` en
+ * porcentaje (8 = 8 %), pero del catálogo pueden colarse fracciones legadas
+ * (0.08). Misma regla que `toPercent`
+ * (`invoice-create/invoice-tax-catalog.service.ts`) y coherente con el
+ * default de `resolveRateBasis` (`invoice-calculator.service.ts`: sin
+ * `rate_basis` explícito todo lo no-ICA va en porcentaje). `> 1 ⇒
+ * porcentaje`, `<= 1 ⇒ fracción × 100`. La ambigüedad de una tarifa sub-1 %
+ * guardada como `1` no existe en el catálogo (se guardaría como `0.01`), así
+ * que la regla es total.
  */
 export function normalizeRatePercent(raw: unknown): number {
   const value = Number(raw);
@@ -308,7 +312,8 @@ function finishLine(
  * nombre del impuesto no entra porque no mueve ni un centavo.
  */
 function lineSignature(line: InvoiceLineMathInput): string {
-  const taxes = Array.isArray(line?.taxes) ? line.taxes : [];
+  const rawTaxes = line?.taxes;
+  const taxes: TaxSelection[] = Array.isArray(rawTaxes) ? rawTaxes : [];
   const taxSig = taxes
     .map(
       (t) =>
@@ -350,7 +355,8 @@ export function computeLineMath(line: InvoiceLineMathInput): InvoiceLineMath {
   if (cached) return cached;
 
   const grossCents = truncNetToCents(lineGrossNet(line));
-  const taxes = Array.isArray(line?.taxes) ? line.taxes : [];
+  const rawTaxes = line?.taxes;
+  const taxes: TaxSelection[] = Array.isArray(rawTaxes) ? rawTaxes : [];
   const cents = computeLineCents(grossCents, taxes);
   const result: InvoiceLineMath = {
     gross: cents.grossCents / 100,
@@ -498,7 +504,8 @@ export function aggregatePreviewTaxBreakdown(
 ): PreviewTaxRow[] {
   const rows = new Map<string, PreviewTaxRow & { baseCents: number; amountCents: number }>();
   for (let i = 0; i < items.length; i++) {
-    const taxes = Array.isArray(items[i]?.taxes) ? items[i].taxes : [];
+    const rawTaxes = items[i]?.taxes;
+    const taxes: TaxSelection[] = Array.isArray(rawTaxes) ? rawTaxes : [];
     const details = math[i]?.taxes ?? [];
     const baseCents = math[i]?.baseCents ?? 0;
     for (let j = 0; j < taxes.length; j++) {

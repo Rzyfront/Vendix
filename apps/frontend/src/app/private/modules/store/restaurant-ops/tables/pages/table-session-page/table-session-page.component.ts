@@ -61,6 +61,7 @@ import {
   readApiErrorRequestId,
 } from '../../../../../../../core/utils/parse-api-error';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { AddItemsModalComponent } from '../../components/add-items-modal/add-items-modal.component';
 import { SplitOrderModalComponent } from '../../components/split-order-modal/split-order-modal.component';
 import {
@@ -131,6 +132,8 @@ export class TableSessionPageComponent implements OnInit {
   private readonly kitchenService = inject(KitchenTicketsService);
   private readonly kdsSse = inject(KdsSseService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
+  // C.7 (§5.3) — par del .html: la nota informativa necesita el gate fiscal.
+  private readonly authFacade = inject(AuthFacade);
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
   private readonly route = inject(ActivatedRoute);
@@ -246,6 +249,14 @@ export class TableSessionPageComponent implements OnInit {
    */
   readonly hasTotalsBreakdown = computed(
     () => this.orderTax() > 0 || this.orderDiscount() > 0,
+  );
+
+  /**
+   * C.7 (§5.3, base gross) — nota informativa fuera de la aritmética, sólo
+   * con desglose respaldado (fail-closed: sin respaldo no hay fila fiscal).
+   */
+  readonly showTableVatNote = computed(
+    () => this.authFacade.printsVatBreakdown() && this.orderTax() > 0,
   );
 
   readonly elapsedSinceOpen = computed(() => {
@@ -700,7 +711,26 @@ export class TableSessionPageComponent implements OnInit {
    */
   canRemoveItem(item: TableSessionOrderItem): boolean {
     if (this.isClosed()) return false;
+    // Paso 6 plan 1060 — espejo del bloqueo en mesa: un ítem entregado
+    // (`delivered_at`, hecho de servicio) ya no se puede cancelar. Solo
+    // presentación: el enforcement real lo pone el backend (paso 1).
+    if (this.isDelivered(item)) return false;
     return !this.isItemFired(item) || this.kitchenStatusFor(item) === 'pending';
+  }
+
+  /**
+   * Paso 6 plan 1060 — motivo del botón eliminar cuando está bloqueado por
+   * entrega, patrón `deliverDisabledReason` del KDS: el botón queda VISIBLE
+   * pero deshabilitado con tooltip. Solo cubre `delivered_at`/entregado;
+   * el resto de estados bloqueados siguen ocultos (comportamiento actual).
+   * Retorna null cuando no hay bloqueo por entrega que señalizar.
+   */
+  removeDisabledReason(item: TableSessionOrderItem): string | null {
+    if (this.isClosed()) return null;
+    if (item.cancelled_at) return null;
+    if (this.isDelivered(item))
+      return 'Ya fue entregado al cliente. No se puede cancelar.';
+    return null;
   }
 
   kitchenBadgeVariant(status: KitchenTicketItemRefStatus): BadgeVariant {

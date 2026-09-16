@@ -14,6 +14,7 @@ import { InvoiceFlowService } from '../../../store/invoicing/invoice-flow/invoic
 import { PlatformInvoicingPersistenceService } from './platform-invoicing-persistence.service';
 import { PlatformTenantsService } from './platform-tenants.service';
 import { SubscriptionFiscalService } from './subscription-fiscal.service';
+import { resolveDianMunicipality } from '../../../store/invoicing/providers/dian-direct/constants/dian-geography';
 
 /**
  * CP-platform-fiscal-invoicing-mvp · Phase B.1
@@ -135,11 +136,21 @@ document_type: args.dto.customer.document_type ?? '31',
         fiscal_responsibilities: args.dto.customer.fiscal_responsibilities ?? ['R-99-PN'],
         email: args.dto.customer.email ?? null,
         phone: args.dto.customer.phone ?? null,
-        address: {
-          line: args.dto.customer.address?.line ?? null,
-          city: args.dto.customer.address?.city ?? null,
-          department_code: args.dto.customer.address?.department_code ?? null,
-        },
+        address: (() => {
+          const rawAddr = args.dto.customer.address;
+          if (!rawAddr) return null;
+          const resolved = resolveDianMunicipality({
+            city_code: rawAddr.city_code ?? null,
+            city_name: rawAddr.city ?? null,
+            department_code: rawAddr.department_code ?? null,
+          });
+          return {
+            line: rawAddr.line ?? null,
+            city: resolved?.name ?? rawAddr.city ?? null,
+            city_code: resolved?.code ?? rawAddr.city_code ?? null,
+            department_code: resolved?.department_code ?? rawAddr.department_code ?? null,
+          };
+        })(),
       };
     } else {
       tenant = await this.tenants.getTenantByKindAndId(this.prismaClient, {
@@ -174,6 +185,20 @@ document_type: args.dto.customer.document_type ?? '31',
         const t = v.trim();
         return t === '' ? undefined : t;
       };
+
+      const candidateLine = pick(trimmed(o.address?.line), tenant.address?.line ?? null);
+      const candidateCity = pick(trimmed(o.address?.city), tenant.address?.city ?? null);
+      const candidateCityCode = pick(trimmed(o.address?.city_code), tenant.address?.city_code ?? null);
+      const candidateDeptCode = pick(trimmed(o.address?.department_code), tenant.address?.department_code ?? null);
+      const resolvedTenantAddress =
+        candidateCityCode || (candidateCity && candidateDeptCode)
+          ? resolveDianMunicipality({
+              city_code: candidateCityCode ?? null,
+              city_name: candidateCity ?? null,
+              department_code: candidateDeptCode ?? null,
+            })
+          : null;
+
       tenant = {
         ...tenant,
         legal_name: pick(trimmed(o.legal_name), tenant.legal_name),
@@ -190,20 +215,12 @@ document_type: args.dto.customer.document_type ?? '31',
         tax_regime_code: pick(trimmed(o.tax_regime_code), tenant.tax_regime_code),
         email: pick(trimmed(o.email), tenant.email),
         phone: pick(trimmed(o.phone), tenant.phone),
-        address: o.address
+        address: (o.address || tenant.address)
           ? {
-              line: pick(
-                trimmed(o.address.line),
-                tenant.address?.line ?? null,
-              ),
-              city: pick(
-                trimmed(o.address.city),
-                tenant.address?.city ?? null,
-              ),
-              department_code: pick(
-                trimmed(o.address.department_code),
-                tenant.address?.department_code ?? null,
-              ),
+              line: candidateLine,
+              city: resolvedTenantAddress?.name ?? candidateCity,
+              city_code: resolvedTenantAddress?.code ?? candidateCityCode,
+              department_code: resolvedTenantAddress?.department_code ?? candidateDeptCode,
             }
           : tenant.address,
       };
@@ -700,6 +717,7 @@ document_type: args.dto.customer.document_type ?? '31',
         ? {
             line: tenant.address.line ?? undefined,
             city: tenant.address.city ?? undefined,
+            city_code: tenant.address.city_code ?? undefined,
             department_code: tenant.address.department_code ?? undefined,
             country_code: 'CO',
           }
@@ -887,6 +905,7 @@ document_type: args.dto.customer.document_type ?? '31',
         email: tenant.email ?? undefined,
         address_line: tenant.address?.line ?? undefined,
         city: tenant.address?.city ?? undefined,
+        city_code: tenant.address?.city_code ?? undefined,
         department_code: tenant.address?.department_code ?? undefined,
         document_type: tenant.document_type ?? undefined,
         person_type: tenant.person_type ?? undefined,

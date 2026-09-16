@@ -65,6 +65,28 @@ export interface CreateAddressPayload {
  * `phone_number` NO está en el DTO (vive en la columna Prisma pero el backend
  * no lo expone para escritura), así que se omite aquí.
  */
+/**
+ * Decisión de cocina al cancelar una orden con ítems ya disparados
+ * (`POST /store/orders/:id/flow/cancel`). Contrato fijado con el backend:
+ *  - `reuse`: revierte el insumo al stock con movimiento marcado
+ *    REUSO-INSUMO; rehacer NO consume de nuevo.
+ *  - `waste`: el insumo queda consumido como merma y el ticket se cancela;
+ *    rehacer SÍ consume insumos nuevos.
+ * Requerido solo cuando la orden tiene ítems avanzados en KDS
+ * (`in_preparation` / `ready` / `delivered`); el backend responde 422 sin él.
+ */
+export type KitchenDisposition = 'reuse' | 'waste';
+
+/**
+ * Body de `POST /store/orders/:id/flow/cancel`. Extiende `CancelOrderDto`
+ * (vive en `order.interface.ts`, fuera del alcance de este cambio) con la
+ * decisión de cocina opcional. Se declara aquí —junto a su único
+ * consumidor `flowCancelOrder`— para no tocar el archivo de interfaces.
+ */
+export interface FlowCancelOrderDto extends CancelOrderDto {
+  kitchenDisposition?: KitchenDisposition;
+}
+
 export interface UpdateAddressPayload {
   address_line_1?: string;
   address_line_2?: string;
@@ -645,7 +667,7 @@ export class StoreOrdersService {
     );
   }
 
-  flowCancelOrder(orderId: string, dto: CancelOrderDto): Observable<Order> {
+  flowCancelOrder(orderId: string, dto: FlowCancelOrderDto): Observable<Order> {
     const url = `${this.apiUrl}/store/orders/${orderId}/flow/cancel`;
     return this.http.post<any>(url, dto).pipe(
       map((r) => r.data || r),

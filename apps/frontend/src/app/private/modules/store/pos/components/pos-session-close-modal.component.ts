@@ -34,12 +34,17 @@ import {
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { extractApiError } from '../../../../../shared/utils/http-error.util';
+// F-225 (ADR-16): mismo kernel de dinero que `pos-cart.service.ts` — ver
+// `apps/frontend/tsconfig.app.json` (`paths`). `Math.abs(a - b) > 0.01`
+// tolera EXACTAMENTE 1 centavo; la traducción fiel es
+// `differsByAtLeastCents(a, b, 2)`, no el umbral por defecto (1).
+import { differsByAtLeastCents } from '@money-kernel/money-compare';
 
 /** Intervalo de refresco del resumen mientras el modal está abierto (QUI-572). */
 const SUMMARY_POLL_MS = 10_000;
 
-/** Tolerancia de comparación de montos: por debajo de un centavo no hay cambio. */
-const AMOUNT_EPSILON = 0.01;
+/** Tolerancia de comparación de montos: hasta 1 centavo de diferencia no cuenta como cambio. */
+const AMOUNT_TOLERANCE_CENTS = 2;
 
 const EXPECTED_STALE_CODE = 'CASH_SESSION_EXPECTED_STALE_001';
 
@@ -455,7 +460,11 @@ export class PosSessionCloseModalComponent {
     // Si el esperado volvió a coincidir (p.ej. venta y luego reembolso), ya no
     // hay nada rancio que confirmar: el banner se retira solo.
     this.staleFrom.set(
-      Math.abs(next.expected_cash_total - counted) > AMOUNT_EPSILON
+      differsByAtLeastCents(
+        next.expected_cash_total,
+        counted,
+        AMOUNT_TOLERANCE_CENTS,
+      )
         ? counted
         : null,
     );
@@ -527,7 +536,13 @@ export class PosSessionCloseModalComponent {
             return;
           }
 
-          if (Math.abs(fresh.expected_cash_total - counted) > AMOUNT_EPSILON) {
+          if (
+            differsByAtLeastCents(
+              fresh.expected_cash_total,
+              counted,
+              AMOUNT_TOLERANCE_CENTS,
+            )
+          ) {
             this.refreshing.set(false);
             this.toastService.warning(
               'El efectivo esperado cambió mientras contabas. Revisa el resumen actualizado antes de cerrar.',
@@ -591,7 +606,7 @@ export class PosSessionCloseModalComponent {
         );
         if (
           counted != null &&
-          Math.abs(expectedNow - counted) > AMOUNT_EPSILON
+          differsByAtLeastCents(expectedNow, counted, AMOUNT_TOLERANCE_CENTS)
         ) {
           this.staleFrom.set(counted);
         }

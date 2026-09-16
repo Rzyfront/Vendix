@@ -723,8 +723,8 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                               {{ aiu.label }}
                             </span>
                           }
-                          <!-- F-054: el `title` solo no lo lee el teclado ni la
-                               mayoría de lectores; el `aria-label` espeja el
+                          <!-- F-054: el 'title' solo no lo lee el teclado ni la
+                               mayoría de lectores; el 'aria-label' espeja el
                                texto para quien no pasa el cursor. -->
                           @if (item.is_inclusive) {
                             <span

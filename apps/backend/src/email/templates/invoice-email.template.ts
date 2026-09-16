@@ -28,9 +28,10 @@ export interface InvoiceEmailData {
 }
 
 function formatCurrency(amount: number, currency: string = 'COP'): string {
+  // C.7/F-106 — documento que se entrega en Colombia: miles con punto.
   return (
     '$' +
-    amount.toLocaleString('en-US', {
+    amount.toLocaleString('es-CO', {
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     })
@@ -176,10 +177,15 @@ export function generateInvoiceEmailHtml(data: InvoiceEmailData): string {
                       </tr>`
                           : ''
                       }
+                      ${
+                        data.tax > 0
+                          ? `
                       <tr>
                         <td style="padding: 6px 0; font-size: 14px; color: #6b7280;">Impuestos</td>
                         <td style="padding: 6px 0; font-size: 14px; color: #374151; text-align: right; font-family: monospace;">${formatCurrency(data.tax, data.currency)}</td>
-                      </tr>
+                      </tr>`
+                          : ''
+                      }
                       ${
                         data.withholding > 0
                           ? `

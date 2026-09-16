@@ -187,16 +187,19 @@ describe('QuotationDataProvider', () => {
     expect(data.document.valid_until_formatted).toBeTruthy();
   });
 
-  it('8. los impuestos se agregan por tarifa derivando la base del impuesto', async () => {
+  it('8. los impuestos se agregan por tarifa leyendo la base de la linea (F-205) con la tarifa en porcentaje', async () => {
     const { prisma } = prismaWith(quotationRow());
     const data = await new QuotationDataProvider(prisma).fetchDocumentData(3, 140);
 
     // Dos líneas al 19% ⇒ una sola fila agregada.
     expect(data.taxes).toHaveLength(1);
-    expect(data.taxes[0].rate).toBe(0.19);
+    // `quotation_items.tax_rate` es fracción (0.19); la fila que se pinta
+    // como `(${rate}%)` debe salir en porcentaje (19), no en fracción.
+    expect(data.taxes[0].rate).toBe(19);
     expect(data.taxes[0].tax_amount).toBe(3572000);
-    // Base = impuesto / tarifa, no total × tarifa.
-    expect(Math.round(data.taxes[0].base_amount)).toBe(Math.round(3572000 / 0.19));
+    // F-205: la base se LEE de `item.total_price` (13.600.000 + 5.200.000),
+    // nunca se deriva como `tax_amount / tax_rate`.
+    expect(data.taxes[0].base_amount).toBe(18800000);
     // La fila no afirma un tributo que la línea no guarda.
     expect(data.taxes[0].name).toBe('Impuesto');
   });
