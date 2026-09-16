@@ -2514,6 +2514,53 @@ describe('PaymentsService', () => {
   });
 
   /**
+   * Hallazgo 4 (CP-post-QUI-832, paso 6) — la compuerta `fixed_base` de
+   * `invertDeclaredGross` es código defensivo sin productor real hoy
+   * (`calculateProductTaxes` nunca emite `fixed_base`), así que se fija por
+   * código de error: una tasa con base propia rechaza con
+   * `POS_DECLARED_GROSS_FIXED_BASE_001` en vez de repartirse en silencio
+   * como tasa ordinaria. Se afirma el `errorCode` exacto — un
+   * `toBeInstanceOf(VendixHttpException)` pasaría con cualquier guarda
+   * anterior y no fijaría esta compuerta.
+   */
+  describe('invertDeclaredGross — compuerta fixed_base (hallazgo 4)', () => {
+    it('tasa con base propia rechaza con POS_DECLARED_GROSS_FIXED_BASE_001', async () => {
+      // Literal casteado, no derivado del tipo de `calculateProductTaxes`:
+      // el productor real nunca trae `fixed_base` y el test debe seguir
+      // describiendo el contrato aunque su firma cambie.
+      const source = {
+        total_rate: 0.19,
+        total_tax_amount: 19000,
+        base: 100000,
+        total: 119000,
+        taxes: [
+          {
+            tax_rate_id: 501,
+            name: 'AIU-test',
+            rate: 0.19,
+            tax_type: TaxFiscalType.IVA,
+            is_inclusive: true,
+            amount: 19000,
+            base: 100000,
+            fixed_base: 100000,
+          },
+        ],
+        unclosed_residual_cents: 0,
+        invalid_inputs: [],
+        resolved_from: 'catalog',
+      } as any;
+      // `invertDeclaredGross` es privado y síncrono: se invoca por índice y
+      // se envuelve en una promesa inmediata para afirmar el rechazo con el
+      // código exacto.
+      await expect(
+        (async () => (service as any).invertDeclaredGross(source, 119000))(),
+      ).rejects.toMatchObject({
+        errorCode: ErrorCodes.POS_DECLARED_GROSS_FIXED_BASE_001.code,
+      });
+    });
+  });
+
+  /**
    * F-014 (B.2) — las dos tuberías de redondeo divergen 1¢ con `lineUnits`
    * fraccionario y más de una tasa. No se afirma una igualdad que no existe:
    * se fija la tolerancia `|Σ OIT − TAI × L| ≤ 0,01 × n_tasas`, ejercitada
