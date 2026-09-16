@@ -172,8 +172,7 @@
 }
 
 .customer-eyebrow,
-.customer-address-heading span,
-.customer-contact-copy span {
+.customer-address-heading span {
   color: var(--color-text-secondary);
   font-size: 0.6875rem;
   font-weight: 800;
@@ -242,9 +241,7 @@
 
 .customer-contact-copy {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
+  display: block;
 }
 
 .customer-contact-copy strong {
