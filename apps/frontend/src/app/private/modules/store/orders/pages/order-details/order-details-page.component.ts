@@ -1344,30 +1344,6 @@ export class OrderDetailsPageComponent {
     return true;
   });
 
-  /**
-   * Agente C — badge pre-despacho clickeable. `true` cuando la orden exige
-   * gestión de envío (`delivery_type` distinto de `direct_delivery` /
-   * `other`), sigue en estado no terminal y aún no tiene despacho (sin
-   * `tracking_number` y sin remisiones). En post-despacho es `false` y el
-   * badge del sticky-header (estado de la orden, no clickeable) queda solo.
-   */
-  readonly showPreDispatchBadge = computed<boolean>(() => {
-    const order = this.order();
-    if (!order) return false;
-    const delivery = order.delivery_type || 'direct_delivery';
-    if (delivery === 'direct_delivery' || delivery === 'other') return false;
-    const terminalStates: OrderState[] = [
-      'shipped',
-      'delivered',
-      'finished',
-      'cancelled',
-      'refunded',
-    ];
-    if (terminalStates.includes(order.state as OrderState)) return false;
-    if ((this.flowMetadata().tracking_number ?? '').trim()) return false;
-    return this.dispatchNotes().length === 0;
-  });
-
   readonly paymentReceiptSubtitle = computed(() => {
     const receipt = this.paymentReceiptPreview();
     if (!receipt) return '';
@@ -3042,10 +3018,10 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * Agente C — lleva al operador a la card "Gestión de Envío"
+   * Lleva al operador a la card "Gestión de Envío"
    * (`#gestionEnvioAnchor`): scroll suave + foco para teclado/lector de
-   * pantalla. Respeta `prefers-reduced-motion`. Lo invoca el badge
-   * pre-despacho clickeable.
+   * pantalla. Respeta `prefers-reduced-motion`. Lo invoca el indicador
+   * de entrega del strip de resumen.
    */
   /**
    * Nombre del país para mostrar en las mini-cards de dirección.

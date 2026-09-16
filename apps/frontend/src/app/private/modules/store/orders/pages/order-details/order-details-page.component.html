@@ -146,26 +146,6 @@
       (actionClicked)="onHeaderAction($event)"
     ></app-sticky-header>
 
-    <!-- Agente C — badge pre-despacho clickeable: solo cuando la orden
-         exige gestión de envío y aún no tiene despacho (ver
-         `showPreDispatchBadge`: delivery_type + tracking vacío + sin
-         remisiones). En post-despacho no se pinta y el badge del
-         sticky-header (estado, no clickeable) queda solo. -->
-    @if (showPreDispatchBadge()) {
-      <div class="max-w-[1600px] mx-auto mb-2">
-        <button
-          type="button"
-          (click)="focusGestionEnvio()"
-          title="Ir a Gestión de Envío"
-          aria-label="Falta configurar el envío. Ir a Gestión de Envío."
-          class="w-full flex items-center justify-center gap-2 px-3 py-1.5 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors"
-        >
-          <app-icon name="pencil" size="14" class="text-amber-600"></app-icon>
-          Falta configurar el envío
-        </button>
-      </div>
-    }
-
     <!-- Main Grid: Two columns -->
     <div class="max-w-[1600px] mx-auto">
       <!-- Order summary strip: channel + delivery + credit (ultra-thin) -->
@@ -188,7 +168,13 @@
             }}</span>
           </div>
           <span class="w-px h-3.5 bg-border"></span>
-          <div class="flex items-center gap-1.5 text-text-primary font-medium">
+          <button
+            type="button"
+            (click)="focusGestionEnvio()"
+            title="Editar envío: ir a Gestión de Envío"
+            aria-label="Editar envío: ir a Gestión de Envío"
+            class="flex items-center gap-1.5 text-text-primary font-medium cursor-pointer hover:underline underline-offset-2"
+          >
             <app-icon
               [name]="deliveryConfig().icon"
               size="14"
@@ -198,7 +184,8 @@
             <span class="text-text-secondary font-normal">{{
               deliveryConfig().label
             }}</span>
-          </div>
+            <app-icon name="pencil" size="11" class="text-text-secondary"></app-icon>
+          </button>
           <!-- T10 B2 — la sección "Mesa" sólo aparece en tiendas restaurante
                Y si la orden trae sesión de mesa. Hoy se pintaba con sólo
                `tableName()`, sin preguntar la industria: una orden anómala
@@ -691,9 +678,7 @@
                         {{ item.product_name }}
                       </h3>
                       <p class="text-[10px] font-mono text-gray-400 truncate">
-                        SKU: {{ item.variant_sku || "N/A" }}@if (parseVariantAttributes(item.variant_attributes); as attrs) {@if (attrs.length) {
-                          <span> · </span>@for (attr of attrs; track attr.name + attr.value; let last = $last) {@if (attr.name) {<span>{{ attr.name }}: </span>}<span>{{ attr.value }}</span>@if (!last) {<span> · </span>}}
-                        }}
+                        SKU: {{ item.variant_sku || "N/A" }}@if (parseVariantAttributes(item.variant_attributes); as attrs) {@if (attrs.length) {@for (attr of attrs; track attr.name + attr.value) {<span class="variant-mini-badge">@if (attr.name) {<span>{{ attr.name }}: </span>}{{ attr.value }}</span>}}}
                       </p>
                       <!-- Restaurant Suite — Fase K Gap 2: per-item KDS
                            state badge. Renders only for items that were

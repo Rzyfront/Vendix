@@ -483,6 +483,22 @@ span {
   margin-top: 0.25rem;
 }
 
+/* Mini indicador de variante junto al SKU: visible sin gastar altura. */
+.variant-mini-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.25rem;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  color: rgb(var(--color-warning-rgb));
+  background: rgba(var(--color-warning-rgb), 0.12);
+  border: 1px solid rgba(var(--color-warning-rgb), 0.4);
+  font-size: 0.625rem;
+  font-weight: 800;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+
 /* Badges, etiquetas y acciones internas del ítem en ritmo denso. */
 .items-compact .mt-1 {
   margin-top: 0.125rem;
