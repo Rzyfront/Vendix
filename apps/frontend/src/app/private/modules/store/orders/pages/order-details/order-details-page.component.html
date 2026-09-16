@@ -365,50 +365,53 @@
                     <div>
                       <h3>Direccion de Entrega</h3>
                     </div>
-                    @if (
-                      orderData.shipping_address_id &&
-                      orderData.shipping_address_id ===
-                        orderData.billing_address_id
-                    ) {
-                      <span class="addr-badge addr-badge-both">Ambas</span>
-                    } @else {
-                      <span class="addr-badge addr-badge-shipping">Envío</span>
-                    }
                   </div>
                   @if (
                     orderData.addresses_orders_shipping_address_idToaddresses ||
                       $any(orderData).shipping_address_snapshot;
                     as addr
                   ) {
-                    <div class="customer-address-body">
-                      <p class="customer-address-main truncate" [title]="addr.address_line1">
-                        {{ addr.address_line1 }}
-                      </p>
-                      @if (addr.address_line2) {
-                        <p class="truncate">{{ addr.address_line2 }}</p>
-                      }
-                      <p class="truncate">
-                        {{ addr.city }}, {{ addr.state_province }}
-                        {{ addr.postal_code }}@if (addr.country_code) {
-                          — {{ countryName(addr.country_code) }}
-                        }
-                      </p>
-                      @if (addr.phone_number) {
-                        <p class="customer-address-phone">
-                          <app-icon name="phone" size="13"></app-icon>
-                          {{ addr.phone_number }}
+                    <div class="customer-address-body customer-address-split">
+                      <div class="addr-info">
+                        <p class="customer-address-main truncate" [title]="addr.address_line1">
+                          {{ addr.address_line1 }}
                         </p>
-                      }
-                      <app-button
-                        variant="outline-secondary"
-                        size="sm"
-                        style="align-self: flex-end"
-                        (clicked)="promptEditShippingAddress(addr)"
-                        ariaLabel="Editar dirección de entrega"
-                      >
-                        <app-icon slot="icon" name="edit-3" size="13"></app-icon>
-                        Editar dirección
-                      </app-button>
+                        @if (addr.address_line2) {
+                          <p class="truncate">{{ addr.address_line2 }}</p>
+                        }
+                        <p class="truncate">
+                          {{ addr.city }}, {{ addr.state_province }}
+                          {{ addr.postal_code }}@if (addr.country_code) {
+                            — {{ countryName(addr.country_code) }}
+                          }
+                        </p>
+                        @if (addr.phone_number) {
+                          <p class="customer-address-phone">
+                            <app-icon name="phone" size="13"></app-icon>
+                            {{ addr.phone_number }}
+                          </p>
+                        }
+                      </div>
+                      <div class="addr-side">
+                        @if (
+                          orderData.shipping_address_id &&
+                          orderData.shipping_address_id ===
+                            orderData.billing_address_id
+                        ) {
+                          <span class="addr-badge addr-badge-both">Ambas</span>
+                        } @else {
+                          <span class="addr-badge addr-badge-shipping">Envío</span>
+                        }
+                        <app-button
+                          variant="outline-secondary"
+                          size="sm"
+                          (clicked)="promptEditShippingAddress(addr)"
+                          ariaLabel="Editar dirección de entrega"
+                        >
+                          <app-icon slot="icon" name="edit-3" size="13"></app-icon>
+                          Editar dirección
+                        </app-button>
+                      </div>
                     </div>
                   } @else {
                     <button
@@ -450,25 +453,29 @@
                     <div>
                       <h3>Direccion de Facturacion</h3>
                     </div>
-                    <span class="addr-badge addr-badge-billing">Facturación</span>
                   </div>
                   @if (
                     orderData.addresses_orders_billing_address_idToaddresses;
                     as addr
                   ) {
-                    <div class="customer-address-body">
-                      <p class="customer-address-main truncate" [title]="addr.address_line1">
-                        {{ addr.address_line1 }}
-                      </p>
-                      @if (addr.address_line2) {
-                        <p class="truncate">{{ addr.address_line2 }}</p>
-                      }
-                      <p class="truncate">
-                        {{ addr.city }}, {{ addr.state_province }}
-                        {{ addr.postal_code }}@if (addr.country_code) {
-                          — {{ countryName(addr.country_code) }}
+                    <div class="customer-address-body customer-address-split">
+                      <div class="addr-info">
+                        <p class="customer-address-main truncate" [title]="addr.address_line1">
+                          {{ addr.address_line1 }}
+                        </p>
+                        @if (addr.address_line2) {
+                          <p class="truncate">{{ addr.address_line2 }}</p>
                         }
-                      </p>
+                        <p class="truncate">
+                          {{ addr.city }}, {{ addr.state_province }}
+                          {{ addr.postal_code }}@if (addr.country_code) {
+                            — {{ countryName(addr.country_code) }}
+                          }
+                        </p>
+                      </div>
+                      <div class="addr-side">
+                        <span class="addr-badge addr-badge-billing">Facturación</span>
+                      </div>
                     </div>
                   }
                 </section>

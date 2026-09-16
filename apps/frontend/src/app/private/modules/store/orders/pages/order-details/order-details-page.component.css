@@ -353,6 +353,32 @@
   max-width: 100%;
 }
 
+.customer-address-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: start;
+}
+
+.addr-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
+.addr-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.375rem;
+}
+
+.addr-side .addr-badge {
+  margin-left: 0;
+}
+
 .customer-address-main {
   color: var(--color-text-primary);
   font-weight: 800;
