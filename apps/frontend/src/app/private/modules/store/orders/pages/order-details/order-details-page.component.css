@@ -438,3 +438,39 @@ span {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* ── Order items: lista compacta ─────────────────────── */
+
+/* Ritmo vertical compacto de la lista de artículos del detalle
+   de orden. Complementa `space-y-1.5` del template. */
+.items-compact > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.375rem;
+}
+
+/* ── Detalle orden: subgrid Gestión + Historial ───────── */
+
+/* Dos cards hermanas (Gestión de Envío + Historial de la Orden):
+   apiladas en mobile con el historial debajo, 50/50 en PC.
+   Si una de las dos no se renderiza (p. ej. Gestión oculta),
+   la visible ocupa todo el ancho. */
+.shipping-history-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  min-width: 0;
+}
+
+.shipping-history-grid > * {
+  min-width: 0;
+}
+
+.shipping-history-grid > :only-child {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 1024px) {
+  .shipping-history-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+  }
+}
