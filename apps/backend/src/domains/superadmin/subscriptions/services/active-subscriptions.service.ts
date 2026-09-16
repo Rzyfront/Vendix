@@ -13,6 +13,8 @@ export class ActiveSubscriptionsService {
       page = 1,
       limit = 10,
       state,
+      status,
+      billing_cycle,
       plan_id,
       store_id,
       organization_id,
@@ -24,9 +26,27 @@ export class ActiveSubscriptionsService {
     const skip = (page - 1) * Number(limit);
     const where: Prisma.store_subscriptionsWhereInput = {};
 
-    if (state) where.state = state as any;
+    const resolvedState = state || status;
+    if (resolvedState) {
+      if (resolvedState === 'grace') {
+        where.state = { in: ['grace_soft', 'grace_hard'] };
+      } else if (resolvedState === 'suspended') {
+        where.state = { in: ['suspended', 'blocked'] };
+      } else {
+        where.state = resolvedState as any;
+      }
+    }
+
     if (plan_id) where.plan_id = plan_id;
     if (store_id) where.store_id = store_id;
+
+    if (billing_cycle) {
+      const cycle = billing_cycle === 'biannual' ? 'semiannual' : billing_cycle;
+      where.plan = {
+        ...((where.plan as any) || {}),
+        billing_cycle: cycle as any,
+      };
+    }
 
     if (organization_id) {
       where.store = { organization_id };
@@ -47,7 +67,7 @@ export class ActiveSubscriptionsService {
         orderBy: { [sort_by]: sort_order },
         include: {
           plan: {
-            select: { id: true, code: true, name: true, plan_type: true },
+            select: { id: true, code: true, name: true, plan_type: true, billing_cycle: true },
           },
           store: {
             select: {

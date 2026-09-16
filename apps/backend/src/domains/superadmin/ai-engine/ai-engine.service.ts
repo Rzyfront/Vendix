@@ -1,11 +1,38 @@
 import { Injectable } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
+import { getQueueToken } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AILoggingService } from '../../../ai-engine/ai-logging.service';
+import { AIToolRegistry } from '../../../ai-engine/tools/ai-tool-registry';
+import type { RegisteredTool } from '../../../ai-engine/tools/interfaces/tool.interface';
 import { AIUsageStatsFilter } from '../../../ai-engine/interfaces/ai-log.interface';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { CreateAIConfigDto, UpdateAIConfigDto, AIConfigQueryDto } from './dto';
+
+/**
+ * Queues visibles en el tab Jobs del módulo super-admin AI Engine (F5).
+ *
+ * Las tres primeras viven en `AIQueueModule`; `receipt-scan` y `expense-scan`
+ * son colas por dominio (dispatch-notes y expenses) con el mismo patrón
+ * async 202 + poll. `AIQueueService.getJobStatus()` solo conoce las tres
+ * primeras, así que el overview y el lookup resuelven las `Queue` de BullMQ
+ * directamente: una sola ruta de código y el mismo shape `AIJobResult` para
+ * las cinco.
+ */
+export const AI_ENGINE_QUEUE_NAMES = [
+  'ai-generation',
+  'ai-embedding',
+  'ai-agent',
+  'receipt-scan',
+  'expense-scan',
+] as const;
+
+export type AIQueueName = (typeof AI_ENGINE_QUEUE_NAMES)[number];
+
+export type AIToolCategory = 'read' | 'write' | 'ui';
 
 /**
  * Model types that cannot be the platform-wide default configuration.
@@ -31,6 +58,8 @@ export class AIEngineConfigService {
     private readonly prisma: GlobalPrismaService,
     private readonly aiEngine: AIEngineService,
     private readonly aiLoggingService: AILoggingService,
+    private readonly toolRegistry: AIToolRegistry,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   async create(dto: CreateAIConfigDto) {
@@ -289,6 +318,130 @@ export class AIEngineConfigService {
 
   async getUsageByTenant(orgId: number, dateFrom?: Date, dateTo?: Date) {
     return this.aiLoggingService.getUsageByTenant(orgId, dateFrom, dateTo);
+  }
+
+  /**
+   * Catálogo vivo de tools (F5, tab Tools).
+   *
+   * Proyección de solo lectura del `AIToolRegistry` en memoria: lo que ve el
+   * operador es exactamente lo que el agent loop puede invocar. Sin
+   * paginación — el catálogo es de decenas de entradas y el tab lo filtra en
+   * cliente.
+   */
+  async getToolsCatalog() {
+    return this.toolRegistry.getAll().map((tool) => ({
+      name: tool.name,
+      domain: tool.domain,
+      description: tool.description,
+      requiredPermissions: tool.requiredPermissions ?? [],
+      category: this.resolveToolCategory(tool),
+      readOnly: tool.readOnly ?? false,
+      clientSide: tool.clientSide ?? false,
+      requiresConfirmation: tool.requiresConfirmation ?? false,
+    }));
+  }
+
+  /**
+   * Overview de colas (F5, tab Jobs).
+   *
+   * Nunca rechaza por una cola caída o no registrada: cada entrada informa su
+   * propio `available`/`error` para que el tab siga mostrando el resto. Una
+   * cola ausente en el injector (p. ej. dominio sin workers en este deploy)
+   * se reporta como no disponible, no como 500.
+   */
+  async getQueuesOverview() {
+    const queues = await Promise.all(
+      AI_ENGINE_QUEUE_NAMES.map(async (name) => {
+        const queue = this.resolveQueue(name);
+        if (!queue) {
+          return {
+            name,
+            available: false,
+            counts: null,
+            error: `Queue '${name}' is not registered in this deployment`,
+          };
+        }
+        try {
+          const counts = await queue.getJobCounts(
+            'waiting',
+            'active',
+            'completed',
+            'failed',
+            'delayed',
+            'paused',
+          );
+          return { name, available: true, counts, error: null };
+        } catch (error: any) {
+          return {
+            name,
+            available: false,
+            counts: null,
+            error: error?.message ?? `Queue '${name}' is unreachable`,
+          };
+        }
+      }),
+    );
+    return { queues };
+  }
+
+  /**
+   * Estado de un job por cola + id (F5, tab Jobs, búsqueda).
+   *
+   * Mismo shape y mismo código que `AIQueueService.getJobStatus`: una cola
+   * desconocida y un job inexistente responden el mismo 404 (`AI_QUEUE_002`)
+   * para no filtrar existencia.
+   */
+  async getQueueJobStatus(queueName: string, jobId: string) {
+    if (
+      !(AI_ENGINE_QUEUE_NAMES as readonly string[]).includes(queueName) ||
+      !jobId
+    ) {
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_002);
+    }
+    const queue = this.resolveQueue(queueName);
+    if (!queue) {
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_002);
+    }
+    const job = await queue.getJob(jobId);
+    if (!job) {
+      throw new VendixHttpException(ErrorCodes.AI_QUEUE_002);
+    }
+    const state = await job.getState();
+    return {
+      job_id: job.id!,
+      status: state,
+      result: job.returnvalue,
+      error: job.failedReason,
+      progress: typeof job.progress === 'number' ? job.progress : undefined,
+    };
+  }
+
+  /**
+   * La categoría que muestra el tab Tools, derivada de las mismas flags que
+   * gobiernan la ejecución: `clientSide` se despacha en el navegador (UI),
+   * `requiresConfirmation` muta datos vía el circuito propose→confirm
+   * (write), el resto es solo lectura (read).
+   */
+  private resolveToolCategory(tool: RegisteredTool): AIToolCategory {
+    if (tool.clientSide) return 'ui';
+    if (tool.requiresConfirmation) return 'write';
+    return 'read';
+  }
+
+  /**
+   * Las colas de scan viven en módulos de dominio que este módulo no importa
+   * (hacerlo cerraría ciclos con `AIEngineModule`, que es `@Global()`), así
+   * que se resuelven por token en todo el contenedor. `strict: false` es lo
+   * que lo permite sin añadir imports entre dominios.
+   */
+  private resolveQueue(name: string): Queue | null {
+    try {
+      return this.moduleRef.get<Queue>(getQueueToken(name), {
+        strict: false,
+      });
+    } catch {
+      return null;
+    }
   }
 
   private maskApiKey(config: any): any {

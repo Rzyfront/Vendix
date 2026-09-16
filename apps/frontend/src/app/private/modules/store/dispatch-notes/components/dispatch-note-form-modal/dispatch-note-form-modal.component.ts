@@ -128,6 +128,7 @@ export class DispatchNoteFormModalComponent {
     this.items.removeAt(index);
   }
 
+  // tax_amount es impuesto TOTAL de la línea: se suma sin multiplicar por cantidad.
   getItemTotal(index: number): number {
     const item = this.items.at(index);
     const qty = item.get('dispatched_quantity')?.value || 0;

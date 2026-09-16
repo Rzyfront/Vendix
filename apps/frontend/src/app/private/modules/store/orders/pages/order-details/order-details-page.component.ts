@@ -97,6 +97,7 @@ import {
   invoiceStatusTone,
   toneClasses,
 } from '../../../invoicing/components/invoice-detail/invoice-fiscal-status.util';
+import { CountryService } from '../../../../../../services/country.service';
 import { DocumentPrintService } from '../../../../../../shared/services/print/document-print.service';
 import { DianConfigApiService } from '../../../../../../shared/services/dian';
 import { DispatchTicketPrintService } from '../../../dispatch-ticket/services/dispatch-ticket-print.service';
@@ -1290,27 +1291,20 @@ export class OrderDetailsPageComponent {
   });
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
-    { id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer' },
-    // CP-DTLP Phase E.3 / QUI-764b — disparador 2 manual del tiquete de
-    // despacho desde la pantalla de la orden. El `disabled` SIGUE al mismo
-    // predicado compartido (`shouldAutoPrintDispatchTicket`) que el handler
-    // `printDispatchTicket` — si vuelven a divergir estaríamos en el mismo
-    // lugar dentro de un mes. `trigger: 'explicit'` ignora `printDispatchTicketAuto`
-    // (solo el auto origin lo exige) y respeta `print_dispatch_ticket_on_counter`
-    // para que el botón salga habilitado cuando la tienda eligió imprimir el
-    // tiquete como comprobante de mostrador/para-llevar.
+    { id: 'print', label: 'Imprimir ticket', variant: 'outline', icon: 'printer' },
+    // Tiquete de despacho del gate (`formatType: 'dispatch_ticket'` desde
+    // los datos de la orden). Siempre habilitado.
     {
       id: 'print-dispatch-ticket',
-      label: 'e-ticket de envío',
+      label: 'Imprimir despacho',
       variant: 'outline',
       icon: 'package',
-      disabled: !this.canPrintDispatchTicketExplicit(),
     },
   ]);
 
   /**
    * QUI-764b — predicado MANUAL del tiquete de despacho. Decide si el
-   * botón `e-ticket de envío` debe estar habilitado y si el handler
+   * botón `Imprimir despacho` debe estar habilitado y si el handler
    * `printDispatchTicket` debe imprimir. Una sola fuente de verdad:
    * `headerActions.disabled` y el handler consultan este computed.
    *
@@ -1420,6 +1414,7 @@ export class OrderDetailsPageComponent {
   // desde acá sólo lanzamos el manual al pulsar el botón del header o de
   // la card "Gestión de Envío".
   private readonly dispatchTicketPrint = inject(DispatchTicketPrintService);
+  private readonly countryService = inject(CountryService);
   // CP-DTLP Phase E.3 — guard del disparador manual (default true ADR-7).
   private readonly settingsFacade = inject(StoreSettingsFacade);
 
@@ -2899,7 +2894,6 @@ export class OrderDetailsPageComponent {
     } else if (actionId === 'credit-payment') {
       this.openPayModal();
     } else if (actionId === 'print-dispatch-ticket') {
-      // CP-DTLP Phase E.3 — disparador manual desde header.
       void this.printDispatchTicket();
     }
   }
@@ -2997,21 +2991,12 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * CP-DTLP Phase E.3 / QUI-764b — disparador 2 manual del tiquete de
-   * despacho desde la pantalla de la orden. Lo invocan el botón del
-   * headerActions (`e-ticket de envío`) y el botón secundario de la card
-   * "Gestión de Envío".
-   *
-   * La guarda se delega a `canPrintDispatchTicketExplicit` — el MISMO
-   * computed que el `disabled` del headerActions. Una sola fuente de
-   * verdad, sin condición paralela que pueda divergir. Política MANUAL:
-   * `print_dispatch_ticket_enabled` apagado mata todo; `direct_delivery`
-   * requiere `print_dispatch_ticket_on_counter` prendido; cualquier otro
-   * `delivery_type` imprime cuando el formato está habilitado. Ver
-   * docblock de `canPrintDispatchTicketExplicit` para la tabla completa.
-   * La copia se resuelve en `DispatchTicketPrintService` desde
-   * `receipts.printing.dispatch_ticket`; con `trigger: 'explicit'` y
-   * `copies: 0` el servicio imprime 0 copias.
+   * CP-DTLP Phase E.3 / QUI-764b — disparador manual del tiquete de
+   * despacho (`formatType: 'dispatch_ticket'`, distinto de `dispatch_note`
+   * y de `pos_order`). Lo invocan el headerActions y el botón de la card
+   * "Gestión de Envío". Guarda: `canPrintDispatchTicketExplicit` (la misma
+   * del `disabled`; ver su docblock para la política MANUAL). Datos:
+   * `buildDispatchTicketData` (no cambiar su mapeo).
    */
   async printDispatchTicket(): Promise<void> {
     const order = this.order();
@@ -3030,6 +3015,38 @@ export class OrderDetailsPageComponent {
       );
       this.toastService.error('No se pudo imprimir el tiquete de despacho');
     }
+  }
+
+  /**
+   * Lleva al operador a la card "Gestión de Envío"
+   * (`#gestionEnvioAnchor`): scroll suave + foco para teclado/lector de
+   * pantalla. Respeta `prefers-reduced-motion`. Lo invoca el indicador
+   * de entrega del strip de resumen.
+   */
+  /**
+   * Nombre del país para mostrar en las mini-cards de dirección.
+   * Solo presentación: persiste el `country_code` (`CO`) y resuelve el
+   * nombre vía `CountryService` (fallback al código si no lo conoce).
+   */
+  countryName(code?: string | null): string {
+    if (!code) return '';
+    return this.countryService.getCountryName(code);
+  }
+
+  focusGestionEnvio(): void {
+    const el = document.getElementById('gestionEnvioAnchor');
+    if (!el) return;
+    const reduceMotion =
+      window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ??
+      false;
+    el.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'start',
+    });
+    window.setTimeout(
+      () => el.focus({ preventScroll: true }),
+      reduceMotion ? 0 : 350,
+    );
   }
 
   /**

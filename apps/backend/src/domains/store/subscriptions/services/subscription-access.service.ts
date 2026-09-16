@@ -29,6 +29,55 @@ export interface DunningOverdueInvoice {
   period_end: string | null;
 }
 
+/**
+ * F7 — snapshot de uso IA por tienda.
+ *
+ * Una entrada por feature con contador de cuota (`used` leído del contador
+ * Redis `ai:quota:{storeId}:{feature}:{period}` — la misma llave que
+ * `checkQuotaRemaining` consulta en el gate) y el `cap` resuelto del plan
+ * (`null` = ilimitado o sin cuota numérica). La superficie "Mi suscripción →
+ * Uso IA" lo consume para las barras usado/límite.
+ */
+export interface AIUsageSnapshotEntry {
+  used: number;
+  cap: number | null;
+  period: 'daily' | 'monthly';
+}
+
+export type AIUsageSnapshot = Partial<
+  Record<AIFeatureKey, AIUsageSnapshotEntry>
+>;
+
+/**
+ * F7 — plan resumido para el modal de upgrade. Solo catálogo público
+ * (id/código/nombre/precio + qué features IA habilita); nunca costos
+ * internos ni márgenes de partner.
+ */
+export interface UpgradePlanSummary {
+  id: number;
+  code: string;
+  name: string;
+  price: number;
+  includes: AIFeatureKey[];
+}
+
+/**
+ * F7 — sugerencia de upgrade para `SUBSCRIPTION_005/006`.
+ *
+ * `currentPlan` es el plan efectivo de la tienda (el que el resolver usa
+ * para gatear); `suggestedPlan` es el plan más barato por encima del actual
+ * que sí cubre `feature`, o `null` cuando ninguno la cubre. El CTA canónico
+ * es el picker (`/admin/subscription/picker`), nunca una ruta hardcodeada
+ * por plan.
+ */
+export interface UpgradeSuggestion {
+  feature: AIFeatureKey;
+  currentPlan: UpgradePlanSummary | null;
+  suggestedPlan: (UpgradePlanSummary & { cta: string }) | null;
+}
+
+export const UPGRADE_SUGGESTION_CTA = '/admin/subscription/picker';
+
 export interface DunningStateResponse {
   state: store_subscription_state_enum | 'none';
   deadlines: {
@@ -228,6 +277,35 @@ export class SubscriptionAccessService {
       has_record: resolved.found,
       ...(remainingMeta ? { remaining: remainingMeta } : {}),
     };
+  }
+
+  /**
+   * F3 — expone la `FeatureConfig` resuelta de una feature IA para el loop
+   * del agente (`tools_allowed` de `tool_agents`). El resolver ya aplica
+   * base + restricción de partner + unión promo, así que lo devuelto es la
+   * lista efectiva del plan.
+   *
+   * Nunca lanza: ante fila ausente o fallo interno devuelve null y el
+   * llamador conserva el comportamiento sin plan (solo filtro por permisos
+   * del caller). El gate de verdad sigue siendo `canUseAIFeature`; esto es
+   * solo lectura de la lista.
+   */
+  async getAIFeatureConfig(
+    storeId: number,
+    feature: AIFeatureKey,
+  ): Promise<FeatureConfig | null> {
+    if (!isAIFeatureKey(feature)) return null;
+    if (!Number.isInteger(storeId) || storeId <= 0) return null;
+    try {
+      const resolved = await this.resolver.resolveSubscription(storeId);
+      if (!resolved.found) return null;
+      return resolved.features[feature] ?? null;
+    } catch (err) {
+      this.logger.warn(
+        `getAIFeatureConfig failed for store=${storeId} feature=${feature}: ${(err as Error).message}`,
+      );
+      return null;
+    }
   }
 
   async canUseModule(
@@ -783,6 +861,230 @@ export class SubscriptionAccessService {
     }
   }
 
+  /**
+   * F7 — snapshot de uso IA por tienda para "Mi suscripción → Uso IA".
+   *
+   * Por cada feature con cuota numérica (`FEATURE_QUOTA_CONFIG`): lee el
+   * contador Redis `ai:quota:{storeId}:{feature}:{period}` con la misma
+   * llave de periodo UTC que `checkQuotaRemaining` usa en el gate, y lo
+   * empareja con el cap del plan resuelto (base + restricción de partner +
+   * unión promo). `cap: null` = ilimitado o sin cuota numérica.
+   *
+   * Solo lectura: nunca incrementa contadores. Ante fallo de Redis la
+   * entrada queda en `used: 0` (el gate real sigue siendo
+   * `canUseAIFeature`; esto es observabilidad, no autorización).
+   */
+  async getAIUsageSnapshot(storeId: number): Promise<AIUsageSnapshot> {
+    if (!Number.isInteger(storeId) || storeId <= 0) {
+      throw new InternalServerErrorException('Invalid storeId');
+    }
+
+    const resolved = await this.resolver.resolveSubscription(storeId);
+    const snapshot: AIUsageSnapshot = {};
+    if (!resolved.found) return snapshot;
+
+    for (const feature of AI_FEATURE_KEYS) {
+      const quotaCfg = FEATURE_QUOTA_CONFIG[feature];
+      if (!quotaCfg) continue;
+      const featureConfig = resolved.features[feature];
+      if (!featureConfig) continue;
+
+      const capRaw = featureConfig[quotaCfg.capField];
+      const cap =
+        typeof capRaw === 'number' && capRaw > 0 ? capRaw : null;
+
+      const periodKey = this.periodKey(quotaCfg.period);
+      const key = this.quotaKey(storeId, feature, periodKey);
+      const used = await this.getQuotaUsed(key);
+
+      snapshot[feature] = { used, cap, period: quotaCfg.period };
+    }
+
+    return snapshot;
+  }
+
+  /**
+   * F7 — sugiere el siguiente plan que cubre `feature` para el modal de
+   * upgrade (`SUBSCRIPTION_005` feature no incluida, `SUBSCRIPTION_006`
+   * cuota agotada).
+   *
+   * Criterio de cobertura: el plan candidato habilita la feature Y (cuando
+   * la feature tiene cap numérico y el plan actual declara uno) su cap es
+   * mayor que el actual o ilimitado. Sin plan actual (tienda en `no_plan`)
+   * el sugerido es el más barato que la cubre. Sin candidato que cubra,
+   * `suggestedPlan` es `null` y el frontend muestra el fallback genérico.
+   *
+   * Solo lee catálogo público vendible (`state='active'`, no archivado,
+   * `resellable`, no promocional) ordenado por precio ascendente: el
+   * "siguiente plan" es el primer candidato por encima del precio actual.
+   * Nunca lanza por datos ausentes — devuelve planes en `null`.
+   */
+  async suggestUpgradeForFeature(
+    storeId: number,
+    feature: AIFeatureKey,
+  ): Promise<UpgradeSuggestion> {
+    const empty: UpgradeSuggestion = {
+      feature,
+      currentPlan: null,
+      suggestedPlan: null,
+    };
+    if (!Number.isInteger(storeId) || storeId <= 0) return empty;
+
+    let resolved: ResolvedSubscription;
+    try {
+      resolved = await this.resolver.resolveSubscription(storeId);
+    } catch (err) {
+      this.logger.warn(
+        `suggestUpgradeForFeature resolve failed for store=${storeId}: ${(err as Error).message}`,
+      );
+      return empty;
+    }
+    if (!resolved.found) return empty;
+
+    const quotaCfg = FEATURE_QUOTA_CONFIG[feature];
+    const currentCfg = resolved.features[feature];
+    const currentCapRaw = quotaCfg
+      ? currentCfg?.[quotaCfg.capField]
+      : undefined;
+    const currentCap =
+      typeof currentCapRaw === 'number' && currentCapRaw > 0
+        ? currentCapRaw
+        : null;
+
+    let plans: Array<{
+      id: number;
+      code: string;
+      name: string;
+      base_price: unknown;
+      ai_feature_flags: unknown;
+    }>;
+    try {
+      plans = await this.prisma.subscription_plans.findMany({
+        where: {
+          state: 'active',
+          archived_at: null,
+          resellable: true,
+          is_promotional: false,
+        },
+        orderBy: [{ sort_order: 'asc' }, { base_price: 'asc' }],
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          base_price: true,
+          ai_feature_flags: true,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `suggestUpgradeForFeature catalog failed for store=${storeId}: ${(err as Error).message}`,
+      );
+      return empty;
+    }
+
+    // El plan efectivo es el pagado (fuente de verdad del gate); en trial
+    // `paid_plan_id` es null por diseño y rige `plan_id`.
+    const currentPlanId = resolved.paidPlanId ?? resolved.planId;
+    const currentRow = plans.find((p) => p.id === currentPlanId) ?? null;
+    // Si el plan efectivo ya no está en el catálogo vendible (archivado),
+    // igual se reporta como actual leyendo su fila directa.
+    let currentPlan: UpgradePlanSummary | null = currentRow
+      ? this.toUpgradePlanSummary(currentRow)
+      : null;
+    if (!currentPlan && currentPlanId != null) {
+      try {
+        const row = await this.prisma.subscription_plans.findUnique({
+          where: { id: currentPlanId },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            base_price: true,
+            ai_feature_flags: true,
+          },
+        });
+        if (row) currentPlan = this.toUpgradePlanSummary(row);
+      } catch (err) {
+        this.logger.warn(
+          `suggestUpgradeForFeature current-plan lookup failed for store=${storeId}: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    const currentPrice = currentPlan ? currentPlan.price : -1;
+    const suggestedRow =
+      plans.find((p) => {
+        if (currentPlanId != null && p.id === currentPlanId) return false;
+        if (this.toNumber(p.base_price) <= currentPrice) return false;
+        return this.planCoversFeature(p.ai_feature_flags, feature, currentCap);
+      }) ?? null;
+
+    return {
+      feature,
+      currentPlan,
+      suggestedPlan: suggestedRow
+        ? {
+            ...this.toUpgradePlanSummary(suggestedRow),
+            cta: UPGRADE_SUGGESTION_CTA,
+          }
+        : null,
+    };
+  }
+
+  /**
+   * F7 — resume una fila de `subscription_plans` al shape público del
+   * modal: identidad + precio + keys IA habilitadas.
+   */
+  private toUpgradePlanSummary(row: {
+    id: number;
+    code: string;
+    name: string;
+    base_price: unknown;
+    ai_feature_flags: unknown;
+  }): UpgradePlanSummary {
+    const flags =
+      row.ai_feature_flags && typeof row.ai_feature_flags === 'object'
+        ? (row.ai_feature_flags as Record<string, unknown>)
+        : {};
+    const includes = AI_FEATURE_KEYS.filter((key) => {
+      const cfg = flags[key];
+      return (
+        !!cfg &&
+        typeof cfg === 'object' &&
+        (cfg as { enabled?: unknown }).enabled === true
+      );
+    });
+    return {
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      price: this.toNumber(row.base_price),
+      includes,
+    };
+  }
+
+  /**
+   * F7 — cobertura de una feature por los flags crudos de un plan
+   * candidato: habilitada y, cuando ambos caps son numéricos, con cap
+   * mayor que el actual (`null` = ilimitado, siempre cubre).
+   */
+  private planCoversFeature(
+    flags: unknown,
+    feature: AIFeatureKey,
+    currentCap: number | null,
+  ): boolean {
+    if (!flags || typeof flags !== 'object') return false;
+    const cfg = (flags as Record<string, unknown>)[feature];
+    if (!cfg || typeof cfg !== 'object') return false;
+    if ((cfg as { enabled?: unknown }).enabled !== true) return false;
+
+    const quotaCfg = FEATURE_QUOTA_CONFIG[feature];
+    if (!quotaCfg || currentCap == null) return true;
+    const capRaw = (cfg as Record<string, unknown>)[quotaCfg.capField];
+    if (typeof capRaw !== 'number' || capRaw <= 0) return true; // ilimitado
+    return capRaw > currentCap;
+  }
+
   // ------------------------------------------------------------------
   // Internals
   // ------------------------------------------------------------------
@@ -962,6 +1264,7 @@ export class SubscriptionAccessService {
     else if (feature === 'async_queue') remaining.jobs = remainingUnits;
     else if (feature === 'realtime_voice')
       remaining.voice_seconds = remainingUnits;
+    else if (feature === 'tool_agents') remaining.tool_calls = remainingUnits;
 
     return {
       exceeded: safeCurrent >= cap,

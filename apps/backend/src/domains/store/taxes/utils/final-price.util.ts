@@ -334,3 +334,64 @@ export function resolveOrderLinePrintedGross(
     gross_total_price: roundMoney2(baseTotal + lineTax),
   };
 }
+
+/**
+ * Entrada mínima de una línea de remisión para derivar sus columnas BRUTAS.
+ * `quantity` es la cantidad despachada, `tax_amount` el impuesto TOTAL de la
+ * línea y `discount_amount` el descuento TOTAL de la línea (ambos ya en base
+ * de línea, no por unidad).
+ */
+export interface DispatchNoteLineGrossInput {
+  unit_price?: unknown;
+  total_price?: unknown;
+  tax_amount?: unknown;
+  discount_amount?: unknown;
+  quantity?: unknown;
+}
+
+/**
+ * Columnas BRUTAS de una línea de remisión (`dispatch_note_items`) para un
+ * documento que declara `money_basis: 'gross'`.
+ *
+ * Hallazgo 1b (F-228 reabierto): las dos convenciones de `total_price`
+ * conviven en el histórico. Las filas NUEVAS lo persisten en BRUTO
+ * (`unit_price × cantidad − descuento + tax_amount`,
+ * `dispatch-notes.service.ts:1247/1749`); las filas VIEJAS (18 históricas B)
+ * lo guardan en BASE, así que derivar el unitario como
+ * `baseUnit + lineTax/quantity` manteniendo el total persistido imprime una
+ * fila que no cuadra consigo misma. El discriminante es aritmético, estilo
+ * ADR-08: se reconstruye la base de línea y se compara contra el total
+ * persistido con tolerancia de un centavo.
+ *
+ *   `baseLine = baseUnit × quantity − discount`
+ *   `totalIsGross = |persistedTotal − (baseLine + lineTax)| < 0.01`
+ *   `grossTotal = totalIsGross ? persistedTotal : persistedTotal + lineTax`
+ *   `grossUnit = quantity > 0 ? grossTotal / quantity : baseUnit`
+ *
+ * El unitario es presentación (redondeado a 2 vía `roundMoney2`); el total es
+ * la magnitud que el invariante de suma verifica. Definición ÚNICA para lo
+ * que hoy está duplicado en los dos rieles de impresión de la remisión
+ * (`print-formats/providers/dispatch-note.provider.ts` y
+ * `dispatch-notes/pdf/dispatch-note-pdf.service.ts`): ambos la consumen sin
+ * aritmética propia para no volver a divergir.
+ */
+export function resolveDispatchNoteLinePrintedGross(
+  line: DispatchNoteLineGrossInput | null | undefined,
+): { gross_unit_price: number; gross_total_price: number } {
+  const quantity = toFiniteNumber(line?.quantity);
+  const baseUnit = toFiniteNumber(line?.unit_price);
+  const persistedTotal = toFiniteNumber(line?.total_price);
+  const lineTax = toFiniteNumber(line?.tax_amount);
+  const discount = toFiniteNumber(line?.discount_amount);
+  const baseLine = baseUnit * quantity - discount;
+  const totalIsGross =
+    Math.abs(persistedTotal - (baseLine + lineTax)) < 0.01;
+  const grossTotal = totalIsGross
+    ? persistedTotal
+    : roundMoney2(persistedTotal + lineTax);
+  return {
+    gross_unit_price:
+      quantity > 0 ? roundMoney2(grossTotal / quantity) : baseUnit,
+    gross_total_price: grossTotal,
+  };
+}

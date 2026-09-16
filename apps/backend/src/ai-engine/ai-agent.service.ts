@@ -1,9 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { randomUUID } from 'crypto';
 import { AIEngineService } from './ai-engine.service';
 import { AILoggingService } from './ai-logging.service';
 import { AIToolRegistry } from './tools/ai-tool-registry';
 import { RequestContextService } from '../common/context/request-context.service';
+import { SubscriptionAccessService } from '../domains/store/subscriptions/services/subscription-access.service';
 import { VendixHttpException, ErrorCodes } from '../common/errors';
 import { VexiUiChannelService } from '../domains/store/vexi/vexi-ui-channel.service';
 import { PROPOSE_PLAN_TOOL } from './tools/domains/planning.tools';
@@ -107,6 +109,10 @@ export class AIAgentService {
     private readonly toolRegistry: AIToolRegistry,
     private readonly eventEmitter: EventEmitter2,
     private readonly uiChannel: VexiUiChannelService,
+    // Mismo patrón que `AIEngineService`: `SubscriptionsModule` es `@Global()`
+    // y no importa este módulo, así que inyectar el access service no cierra
+    // ningún ciclo DI.
+    private readonly subscriptionAccess: SubscriptionAccessService,
   ) {}
 
   /**
@@ -129,6 +135,105 @@ export class AIAgentService {
       !response.tool_calls?.length &&
       !response.usage?.totalTokens
     );
+  }
+
+  /**
+   * F3 — allowlist efectiva de tools del plan (`tool_agents.tools_allowed`).
+   *
+   * - Sin `storeId` → `null`: llamada interna, sin alcance de plan.
+   * - Gate bloqueado (feature deshabilitada → `SUBSCRIPTION_005`, cuota
+   *   agotada → `SUBSCRIPTION_006`, estado terminal) → set vacío: el turno
+   *   sigue sin tools en lugar de ofrecer el catálogo completo.
+   * - Gate permitido + `tools_allowed` declarado → intersección exacta.
+   * - Gate permitido + sin lista declarada → `null` (el plan no acota).
+   * - Fallo del gate → `null` + warn: no se rompe el turno por un fallo de
+   *   infraestructura de metering; cada iteración sigue pasando por el gate
+   *   de `run()` (F2).
+   *
+   * El filtrado aplica siempre, también en modo log-only: la lista es alcance
+   * del plan, no enforcement — ofrecer tools que el plan no incluye sería
+   * regalar capacidad que la tienda no compró.
+   */
+  private async resolvePlanToolAllowlist(
+    storeId: number | undefined,
+  ): Promise<Set<string> | null> {
+    if (!storeId) return null;
+    try {
+      const [gate, config] = await Promise.all([
+        this.subscriptionAccess.canUseAIFeature(storeId, 'tool_agents'),
+        this.subscriptionAccess.getAIFeatureConfig(storeId, 'tool_agents'),
+      ]);
+
+      this.logger.log(
+        JSON.stringify({
+          event: 'AI_TOOLS_GATE',
+          storeId,
+          allowed: gate.allowed,
+          reason: gate.reason ?? null,
+          tools_allowed_declared: Array.isArray(config?.tools_allowed)
+            ? config.tools_allowed.length
+            : null,
+        }),
+      );
+
+      if (!gate.allowed) return new Set();
+      if (!config || !Array.isArray(config.tools_allowed)) return null;
+      return new Set(
+        config.tools_allowed.map((name) =>
+          this.toolRegistry.canonicalName(name),
+        ),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `AI_TOOLS_GATE lookup failed for store=${storeId}: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * F3 — 1 unidad al contador mensual por `tool_result` exitoso,
+   * post-ejecución, nunca pre-consumo (mismo Lua con dedup que el resto de
+   * cuotas IA).
+   *
+   * El `requestId` se deriva por llamada (`turno + tool_call.id`): con el id
+   * del turno a secas, el dedup colapsaría N llamadas del mismo turno en un
+   * solo incremento y el contador mentiría; con uno fresco por llamada se
+   * perdería la idempotencia ante reintentos. Nominalmente único por llamada
+   * es el punto correcto.
+   *
+   * Solo ejecuciones servidoras exitosas (`executeTool` resolvió): los
+   * despachos `clientSide` los ejecuta el navegador (resultado no observado),
+   * las propuestas `AI_AGENT_005` aún no ejecutaron nada y los errores no
+   * consumieron capacidad. Nunca lanza: el metering no rompe turnos.
+   */
+  private async consumeToolCallQuota(
+    storeId: number | undefined,
+    toolCallId: string | undefined,
+    toolName: string,
+  ): Promise<void> {
+    if (!storeId) return;
+    try {
+      const base =
+        RequestContextService.getRequestId() ?? `internal-${randomUUID()}`;
+      await this.subscriptionAccess.consumeAIQuota(
+        storeId,
+        'tool_agents',
+        1,
+        `${base}:tool:${toolCallId || randomUUID()}`,
+      );
+      this.logger.log(
+        JSON.stringify({
+          event: 'AI_TOOL_CONSUMED',
+          storeId,
+          tool: toolName,
+        }),
+      );
+    } catch (err) {
+      this.logger.warn(
+        `AI_TOOL_CONSUMED failed for store=${storeId} tool=${toolName}: ${(err as Error).message}`,
+      );
+    }
   }
 
   /**
@@ -253,7 +358,21 @@ export class AIAgentService {
     // `[]` is truthy, so the fallback needs a length check.
     const granted = context?.permissions;
     const authScopes = granted?.length ? granted : (context?.roles ?? []);
-    const toolDefinitions = this.toolRegistry.getAvailableDefinitions(authScopes);
+    const permissionTools =
+      this.toolRegistry.getAvailableDefinitions(authScopes);
+
+    // F3 — el plan del tenant filtra el catálogo del turno: el modelo solo ve
+    // la intersección entre los permisos del caller y `tools_allowed`. Sin
+    // store_id (llamadas internas, cron, super-admin) se conserva el
+    // comportamiento actual. `null` = sin alcance de plan; un `Set` (quizá
+    // vacío) = alcance aplicado.
+    const planAllowed = await this.resolvePlanToolAllowlist(context?.store_id);
+    const toolDefinitions =
+      planAllowed === null
+        ? permissionTools
+        : permissionTools.filter((t) =>
+            planAllowed.has(this.toolRegistry.canonicalName(t.function.name)),
+          );
 
     // Filter tools if specific ones requested
     const filteredTools = params.tools?.length
@@ -515,6 +634,15 @@ export class AIAgentService {
               args: toolArgs,
               result,
             });
+
+            // F3 — el `tool_result` exitoso suma 1 al contador mensual del
+            // periodo, post-ejecución. Va después de `executeTool` a propósito:
+            // propuestas, errores y despachos clientSide no consumen.
+            await this.consumeToolCallQuota(
+              context?.store_id,
+              toolCall.id,
+              toolName,
+            );
 
             // A plan is a promise about the rest of the turn, so the turn is
             // given room to keep it. Raised here rather than at the top because

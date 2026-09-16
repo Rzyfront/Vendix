@@ -1,9 +1,11 @@
-import { Component, DestroyRef, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpClient } from '@angular/common/http';
 import { SubscriptionAdminService } from '../../services/subscription-admin.service';
-import { DunningSubscription } from '../../interfaces/subscription-admin.interface';
+import {
+  DunningSubscription,
+  StoreSubscription,
+} from '../../interfaces/subscription-admin.interface';
 import {
   StatsComponent,
   ButtonComponent,
@@ -15,13 +17,19 @@ import {
   PaginationComponent,
   CardComponent,
   EmptyStateComponent,
+  InputsearchComponent,
   ToastService,
-  DialogService,
 } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
+import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  FilterConfig,
+  FilterValues,
+} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { environment } from '../../../../../../../environments/environment';
 import { DunningPreviewModalComponent } from '../../components/dunning-preview-modal.component';
 import { DunningPreviewTargetState } from '../../interfaces/subscription-admin.interface';
+import { SubscriptionDetailModalComponent } from '../../components/subscription-detail-modal/subscription-detail-modal.component';
 
 @Component({
   selector: 'app-dunning-board',
@@ -34,8 +42,11 @@ import { DunningPreviewTargetState } from '../../interfaces/subscription-admin.i
     PaginationComponent,
     CardComponent,
     EmptyStateComponent,
+    InputsearchComponent,
+    OptionsDropdownComponent,
     CurrencyPipe,
     DunningPreviewModalComponent,
+    SubscriptionDetailModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -56,30 +67,46 @@ import { DunningPreviewTargetState } from '../../interfaces/subscription-admin.i
           iconColor="text-red-600"
         ></app-stats>
         <app-stats
+          title="Pendiente de pago"
+          [value]="pendingPaymentCount()"
+          iconName="hourglass"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-600"
+        ></app-stats>
+        <app-stats
           title="Total en mora"
           [value]="totalOverdue() | currency"
           iconName="banknote"
           iconBgColor="bg-orange-100"
           iconColor="text-orange-600"
         ></app-stats>
-        <app-stats
-          title="Promedio días en mora"
-          [value]="avgDaysOverdue()"
-          iconName="calendar"
-          iconBgColor="bg-blue-100"
-          iconColor="text-blue-600"
-        ></app-stats>
       </div>
 
       <div class="md:space-y-4">
         <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[600px]">
-          <!-- Search Section -->
+          <!-- Search & Filter Section -->
           <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
             <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
               <h2 class="text-[13px] font-semibold text-text-secondary tracking-wide md:text-lg md:font-semibold md:text-text-primary md:tracking-normal">
-                Dunning <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">({{ pagination().total }})</span>
+                Cobranza / Dunning <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">({{ pagination().total }})</span>
               </h2>
-              <div class="flex items-center gap-2 w-full md:w-auto justify-end">
+              <div class="flex items-center gap-2 w-full md:w-auto">
+                <app-inputsearch
+                  class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                  size="sm"
+                  placeholder="Buscar en cobranza..."
+                  [debounceTime]="500"
+                  (searchChange)="onSearch($event)"
+                />
+                <app-options-dropdown
+                  [filters]="filters()"
+                  [filterValues]="filterValues()"
+                  [showActions]="false"
+                  triggerLabel="Filtros"
+                  triggerIcon="sliders-horizontal"
+                  (filterChange)="onFilterChange($event)"
+                  (clearAllFilters)="onClearAllFilters()"
+                />
                 <app-button
                   variant="outline"
                   size="md"
@@ -87,7 +114,7 @@ import { DunningPreviewTargetState } from '../../interfaces/subscription-admin.i
                   (clicked)="loadDunning()"
                   title="Refrescar"
                 >
-                  <app-icon slot="icon" name="refresh" [size]="18"></app-icon>
+                  <app-icon slot="icon" name="refresh-cw" [size]="18"></app-icon>
                 </app-button>
               </div>
             </div>
@@ -106,7 +133,7 @@ import { DunningPreviewTargetState } from '../../interfaces/subscription-admin.i
             <app-empty-state
               icon="alert-circle"
               title="No hay suscripciones en cobranza"
-              description="No subscriptions in dunning right now."
+              description="Ninguna suscripción coincide con los filtros aplicados."
               [showActionButton]="false"
             ></app-empty-state>
           }
@@ -120,6 +147,7 @@ import { DunningPreviewTargetState } from '../../interfaces/subscription-admin.i
                 [cardConfig]="cardConfig"
                 [actions]="actions"
                 [loading]="loading()"
+                (rowClick)="openDetail($event, 'general')"
               />
               @if (pagination().totalPages > 1) {
                 <div class="mt-4 flex justify-center">
@@ -147,22 +175,37 @@ import { DunningPreviewTargetState } from '../../interfaces/subscription-admin.i
       (closed)="closePreview()"
       (confirmed)="confirmTransition($event)"
     />
+
+    <!-- Comprehensive Subscription Detail Modal -->
+    <app-subscription-detail-modal
+      [isOpen]="isDetailModalOpen()"
+      [subscription]="selectedSubscription()"
+      [initialTab]="detailModalTab()"
+      (closed)="isDetailModalOpen.set(false)"
+    />
   `,
 })
 export class DunningBoardComponent {
   private service = inject(SubscriptionAdminService);
   private destroyRef = inject(DestroyRef);
-  readonly router = inject(Router);
   private http = inject(HttpClient);
   private toast = inject(ToastService);
-  private dialog = inject(DialogService);
 
   readonly dunning = signal<DunningSubscription[]>([]);
   readonly loading = signal(false);
+  readonly searchTerm = signal('');
+  readonly selectedState = signal('');
+
+  // Stats signals
   readonly graceCount = signal(0);
   readonly suspendedCount = signal(0);
+  readonly pendingPaymentCount = signal(0);
   readonly totalOverdue = signal(0);
-  readonly avgDaysOverdue = signal(0);
+
+  // Detail Modal signals
+  readonly isDetailModalOpen = signal(false);
+  readonly selectedSubscription = signal<StoreSubscription | null>(null);
+  readonly detailModalTab = signal<'general' | 'events'>('general');
 
   readonly pagination = signal({
     page: 1,
@@ -170,6 +213,26 @@ export class DunningBoardComponent {
     total: 0,
     totalPages: 0,
   });
+
+  readonly filterValues = computed<FilterValues>(() => ({
+    state: this.selectedState(),
+  }));
+
+  readonly filters = computed<FilterConfig[]>(() => [
+    {
+      key: 'state',
+      label: 'Estado de cobranza',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los estados' },
+        { value: 'grace', label: 'En gracia (Soft / Hard)' },
+        { value: 'pending_payment', label: 'Pendiente de pago' },
+        { value: 'suspended', label: 'Suspendida' },
+        { value: 'blocked', label: 'Bloqueada' },
+      ],
+      defaultValue: '',
+    },
+  ]);
 
   // S4.1 — Force-transition preview modal state.
   readonly previewOpen = signal(false);
@@ -185,14 +248,19 @@ export class DunningBoardComponent {
       key: 'status',
       label: 'Estado',
       sortable: true,
-      width: '110px',
+      width: '120px',
       align: 'center',
       badge: true,
       priority: 1,
       badgeConfig: {
         type: 'custom',
         size: 'sm',
-        colorMap: { grace: '#f59e0b', suspended: '#ef4444' },
+        colorMap: {
+          grace: '#f59e0b',
+          suspended: '#ef4444',
+          blocked: '#b91c1c',
+          pending_payment: '#8b5cf6',
+        },
       },
     },
     { key: 'days_overdue', label: 'Días en mora', sortable: true, width: '120px', align: 'center', priority: 1 },
@@ -201,9 +269,21 @@ export class DunningBoardComponent {
 
   actions: TableAction[] = [
     {
+      label: 'Detalle',
+      icon: 'eye',
+      variant: 'primary',
+      action: (item: DunningSubscription) => this.openDetail(item, 'general'),
+    },
+    {
+      label: 'Eventos',
+      icon: 'activity',
+      variant: 'info',
+      action: (item: DunningSubscription) => this.openDetail(item, 'events'),
+    },
+    {
       label: 'Recordar',
       icon: 'bell',
-      variant: 'info',
+      variant: 'secondary',
       action: (item: DunningSubscription) => this.sendReminder(item.id),
     },
     {
@@ -227,7 +307,12 @@ export class DunningBoardComponent {
     badgeConfig: {
       type: 'custom',
       size: 'sm',
-      colorMap: { grace: '#f59e0b', suspended: '#ef4444' },
+      colorMap: {
+        grace: '#f59e0b',
+        suspended: '#ef4444',
+        blocked: '#b91c1c',
+        pending_payment: '#8b5cf6',
+      },
     },
     detailKeys: [
       { key: 'plan_name', label: 'Plan' },
@@ -237,14 +322,38 @@ export class DunningBoardComponent {
   };
 
   constructor() {
+    this.loadStats();
     this.loadDunning();
+  }
+
+  loadStats(): void {
+    this.service
+      .getDunningStats()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          if (res?.success && res.data) {
+            const d = res.data;
+            this.graceCount.set(d.grace_soft + d.grace_hard);
+            this.suspendedCount.set(d.suspended + d.blocked);
+            this.pendingPaymentCount.set(d.pending_payment ?? 0);
+            this.totalOverdue.set(d.total_overdue ?? 0);
+          }
+        },
+        error: () => {},
+      });
   }
 
   loadDunning(): void {
     this.loading.set(true);
     const pag = this.pagination();
     this.service
-      .getDunningSubscriptions({ page: pag.page, limit: pag.limit })
+      .getDunningSubscriptions({
+        page: pag.page,
+        limit: pag.limit,
+        search: this.searchTerm(),
+        state: this.selectedState(),
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
@@ -255,7 +364,6 @@ export class DunningBoardComponent {
               total: res.meta.total,
               totalPages: res.meta.totalPages,
             }));
-            this.computeStats(res.data);
           }
           this.loading.set(false);
         },
@@ -263,21 +371,53 @@ export class DunningBoardComponent {
       });
   }
 
-  computeStats(data: DunningSubscription[]): void {
-    this.graceCount.set(data.filter((d) => d.status === 'grace').length);
-    this.suspendedCount.set(data.filter((d) => d.status === 'suspended').length);
-    this.totalOverdue.set(data.reduce((sum, d) => sum + d.price, 0));
-    const avg = data.length > 0 ? data.reduce((sum, d) => sum + d.days_overdue, 0) / data.length : 0;
-    this.avgDaysOverdue.set(Math.round(avg));
+  openDetail(item: DunningSubscription, tab: 'general' | 'events' = 'general'): void {
+    const subObj: StoreSubscription = {
+      id: item.id,
+      store_id: item.store_id,
+      store_name: item.store_name,
+      organization_name: item.organization_name,
+      plan_name: item.plan_name,
+      billing_cycle: 'monthly',
+      price: item.price,
+      currency_code: item.currency_code,
+      state: item.status,
+      status: item.status === 'grace' ? 'grace' : 'suspended',
+      current_period_start: '',
+      current_period_end: item.current_period_end,
+      grace_period_end: item.grace_period_end,
+      auto_renew: true,
+      partner_id: null,
+      partner_margin_amount: 0,
+      created_at: '',
+    };
+    this.selectedSubscription.set(subObj);
+    this.detailModalTab.set(tab);
+    this.isDetailModalOpen.set(true);
+  }
+
+  onSearch(term: string): void {
+    this.searchTerm.set(term);
+    this.pagination.update((p) => ({ ...p, page: 1 }));
+    this.loadDunning();
+  }
+
+  onFilterChange(values: FilterValues): void {
+    const stateVal = typeof values['state'] === 'string' ? values['state'] : '';
+    this.selectedState.set(stateVal);
+    this.pagination.update((p) => ({ ...p, page: 1 }));
+    this.loadDunning();
+  }
+
+  onClearAllFilters(): void {
+    this.selectedState.set('');
+    this.pagination.update((p) => ({ ...p, page: 1 }));
+    this.loadDunning();
   }
 
   changePage(page: number): void {
     this.pagination.update((p) => ({ ...p, page }));
     this.loadDunning();
-  }
-
-  onViewDetails(item: DunningSubscription): void {
-    this.router.navigate(['/super-admin/subscriptions/events'], { queryParams: { subscriptionId: item.id } });
   }
 
   sendReminder(id: string): void {
@@ -303,12 +443,6 @@ export class DunningBoardComponent {
       });
   }
 
-  /**
-   * Open the force-transition preview modal targeting `cancelled` for the
-   * given subscription. The modal computes the side-effects (emails, feature
-   * deltas, invoices, commissions) before the operator confirms. Replaces
-   * the old plain confirm dialog (S4.1).
-   */
   cancelSubscription(id: string): void {
     this.openPreview(id, 'cancelled');
   }
@@ -324,12 +458,6 @@ export class DunningBoardComponent {
     this.previewSubscriptionId.set(null);
   }
 
-  /**
-   * Fired by DunningPreviewModalComponent after the operator ticks the
-   * acknowledgement and confirms. Currently only the `cancelled` target is
-   * wired to a backend endpoint (cancel). Other targets are reserved for
-   * future force-transition endpoints.
-   */
   confirmTransition(target: DunningPreviewTargetState): void {
     const id = this.previewSubscriptionId();
     if (!id) return;
@@ -346,6 +474,7 @@ export class DunningBoardComponent {
             this.toast.success('Suscripción cancelada');
             this.closePreview();
             this.loadDunning();
+            this.loadStats();
           },
           error: () => {
             this.toast.error('Error al cancelar');
@@ -355,7 +484,6 @@ export class DunningBoardComponent {
       return;
     }
 
-    // Defensive: no other target is wired yet.
     this.toast.error(`Transición a "${target}" no está soportada todavía.`);
     this.closePreview();
   }

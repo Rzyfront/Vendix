@@ -5,6 +5,7 @@ export type ButtonVariant =
   | 'primary'
   | 'secondary'
   | 'outline'
+  | 'outline-secondary'
   | 'outline-danger'
   | 'outline-warning'
   | 'outline-success'
@@ -151,6 +152,14 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
         background: rgba(var(--color-primary-rgb), 0.06);
       }
 
+      .btn-outline-secondary-border {
+        border: 1px solid rgba(var(--color-secondary-rgb), 0.5);
+      }
+
+      .btn-outline-secondary-border:hover:not(:disabled) {
+        background: rgba(var(--color-secondary-rgb), 0.06);
+      }
+
       .btn-outline-danger-border {
         border: 1px solid rgba(var(--color-destructive-rgb), 0.5);
       }
@@ -258,6 +267,11 @@ export class ButtonComponent {
         'btn-outline-border',
         'text-[var(--color-primary)]',
         'focus:ring-[var(--color-primary)]/50',
+      ],
+      'outline-secondary': [
+        'btn-outline-secondary-border',
+        'text-[var(--color-secondary)]',
+        'focus:ring-[var(--color-secondary)]/50',
       ],
       'outline-danger': [
         'btn-outline-danger-border',

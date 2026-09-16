@@ -289,6 +289,42 @@ describe('pos-sale-ticket: pipeline real provider→composer (F-100/F-148)', () 
       const sumLineTotals = data.items.reduce((s, it) => s + Number(it.total_price || 0), 0);
       expect(Math.abs(sumLineTotals - Number(data.totals.grand_total || 0))).toBeLessThanOrEqual(1);
     });
+
+    /**
+     * Hallazgo 3 (CP-post-QUI-832) — el tiquete emite `tax_amount` de LÍNEA.
+     * Sin filas `order_item_taxes` el impuesto sale del escalar por unidad
+     * (ADR-10) × unidades: con cantidad 3 e impuesto unitario 1.900 la línea
+     * declara 5.700, no 1.900. Y la fila cuadra: bruto de línea = base de
+     * línea + impuesto de línea (30.000 + 5.700 = 35.700).
+     */
+    it('hallazgo 3: con cantidad 3 el tax_amount de línea es 3 × unidad y la fila cuadra', async () => {
+      const order = {
+        ...buildOrder(settings),
+        subtotal_amount: 30000,
+        tax_amount: 5700,
+        grand_total: 35700,
+        order_items: [
+          {
+            product_name: 'Vino de mesa',
+            variant_sku: 'VIN-01',
+            quantity: 3,
+            unit_price: 10000,
+            discount_amount: 0,
+            total_price: 30000,
+            tax_rate: 0.19,
+            tax_amount_item: 1900,
+            order_item_taxes: [],
+          },
+        ],
+      };
+      const data = await makeProvider(order).fetchDocumentData(10, 501);
+
+      // Impuesto de LÍNEA, no por unidad: 3 × 1.900.
+      expect(data.items[0].tax_amount).toBe(5700);
+      // La fila cuadra en bruto: base de línea + impuesto = total impreso.
+      expect(data.items[0].total_price).toBe(30000 + 5700);
+      expect(data.items[0].unit_price).toBe(11900);
+    });
   });
 
   describe('comercio NO responsable de IVA (F-148: sin gate, la nota se coló siempre)', () => {
