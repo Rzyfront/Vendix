@@ -79,36 +79,20 @@
           <app-options-dropdown
             class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
             [filters]="filterConfigs"
-            [filterValues]="filterValues"
+            [filterValues]="filterValues()"
             [actions]="dropdownActions"
             [isLoading]="isLoading()"
-            (filterChange)="onStatusFilter($event)"
+            (filterChange)="onFilterChange($event)"
             (clearAllFilters)="clearFilters()"
             (actionClick)="onActionClick($event)"
           />
         </div>
       </div>
 
-      <!-- Rango de fechas (YYYY-MM-DD, UTC) -->
-      <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
-        <app-input
-          class="flex-1 sm:max-w-52"
-          type="date"
-          label="Desde"
-          [ngModel]="from()"
-          (ngModelChange)="onFromChange($event)"
-        />
-        <app-input
-          class="flex-1 sm:max-w-52"
-          type="date"
-          label="Hasta"
-          [ngModel]="to()"
-          (ngModelChange)="onToChange($event)"
-        />
-        <p class="pb-2 text-xs text-text-secondary">
-          Rango: {{ rangeLabel() }} · ordenado por score, mayor a menor
-        </p>
-      </div>
+      <!-- Contexto del rango activo (los filtros viven en el dropdown) -->
+      <p class="mt-2 px-1 text-xs text-text-secondary">
+        Rango: {{ rangeLabel() }} · ordenado por score, mayor a menor
+      </p>
     </div>
 
     <div class="px-2 pb-2 pt-3 md:p-4">

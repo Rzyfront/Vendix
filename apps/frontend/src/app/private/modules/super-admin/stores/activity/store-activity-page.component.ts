@@ -15,7 +15,6 @@ import {
   EmptyStateComponent,
   FilterConfig,
   FilterValues,
-  InputComponent,
   InputsearchComponent,
   ItemListCardConfig,
   OptionsDropdownComponent,
@@ -54,7 +53,7 @@ function defaultFrom(): string {
  * Super-admin `Cuentas > Actividad`: ranking de tiendas por actividad.
  *
  * Patrón standard-module: 4 `app-stats`, `app-card` con barra sticky de
- * búsqueda + filtros (estado, organización, rango `YYYY-MM-DD`),
+ * búsqueda + dropdown `Filtros` (estado y rango `YYYY-MM-DD` con presets),
  * `app-responsive-data-view` reordenable y `app-pagination` server-side.
  * El detalle por tienda es un modal sobre el ranking: abrirlo y filtrarlo
  * no pierde la página ni los filtros del ranking.
@@ -67,7 +66,6 @@ function defaultFrom(): string {
     StatsComponent,
     CardComponent,
     InputsearchComponent,
-    InputComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
@@ -102,6 +100,7 @@ export class StoreActivityPageComponent {
   readonly statusValue = signal('');
   readonly from = signal(defaultFrom());
   readonly to = signal(toLocalDateString());
+  readonly rangePreset = signal('custom');
   readonly sortBy = signal<StoreActivitySortBy>('score');
   readonly sortOrder = signal<'asc' | 'desc'>('desc');
 
@@ -113,7 +112,18 @@ export class StoreActivityPageComponent {
   readonly selectedStore = signal<StoreActivityRow | null>(null);
   readonly isDetailOpen = signal(false);
 
-  filterValues: FilterValues = {};
+  /**
+   * Proyección reactiva al contrato plano del dropdown: el filtro
+   * `'date-range'` se descompone en `range_start/range_end/range_preset`
+   * (mismo patrón que las analíticas de tienda). El rango vive aquí en
+   * señales `YYYY-MM-DD` y el dropdown solo lo edita.
+   */
+  readonly filterValues = computed<FilterValues>(() => ({
+    is_active: this.statusValue() || null,
+    range_start: this.from() || null,
+    range_end: this.to() || null,
+    range_preset: this.rangePreset(),
+  }));
 
   readonly filterConfigs: FilterConfig[] = [
     {
@@ -125,6 +135,11 @@ export class StoreActivityPageComponent {
         { value: 'true', label: 'Activas' },
         { value: 'false', label: 'Inactivas' },
       ],
+    },
+    {
+      key: 'range',
+      label: 'Rango de fechas',
+      type: 'date-range',
     },
   ];
 
@@ -342,19 +357,13 @@ export class StoreActivityPageComponent {
     this.filters.update((f) => ({ ...f, page: 1 }));
   }
 
-  onStatusFilter(values: FilterValues): void {
-    this.filterValues = { ...values };
+  onFilterChange(values: FilterValues): void {
     this.statusValue.set((values['is_active'] as string) ?? '');
-    this.filters.update((f) => ({ ...f, page: 1 }));
-  }
-
-  onFromChange(value: string): void {
-    this.from.set(value ?? '');
-    this.filters.update((f) => ({ ...f, page: 1 }));
-  }
-
-  onToChange(value: string): void {
-    this.to.set(value ?? '');
+    // Vacío (limpiar del dropdown) = volver al rango por defecto de 30 días,
+    // nunca fechas rotas: las señales siempre llevan `YYYY-MM-DD` válido.
+    this.from.set((values['range_start'] as string) || defaultFrom());
+    this.to.set((values['range_end'] as string) || toLocalDateString());
+    this.rangePreset.set((values['range_preset'] as string) || 'custom');
     this.filters.update((f) => ({ ...f, page: 1 }));
   }
 
@@ -385,7 +394,9 @@ export class StoreActivityPageComponent {
     this.searchTerm.set('');
     this.organizationInput.set('');
     this.statusValue.set('');
-    this.filterValues = {};
+    this.from.set(defaultFrom());
+    this.to.set(toLocalDateString());
+    this.rangePreset.set('custom');
     this.sortBy.set('score');
     this.sortOrder.set('desc');
     this.filters.update((f) => ({ ...f, page: 1 }));
