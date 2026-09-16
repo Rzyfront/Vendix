@@ -230,6 +230,35 @@ export class SubscriptionAccessService {
     };
   }
 
+  /**
+   * F3 — expone la `FeatureConfig` resuelta de una feature IA para el loop
+   * del agente (`tools_allowed` de `tool_agents`). El resolver ya aplica
+   * base + restricción de partner + unión promo, así que lo devuelto es la
+   * lista efectiva del plan.
+   *
+   * Nunca lanza: ante fila ausente o fallo interno devuelve null y el
+   * llamador conserva el comportamiento sin plan (solo filtro por permisos
+   * del caller). El gate de verdad sigue siendo `canUseAIFeature`; esto es
+   * solo lectura de la lista.
+   */
+  async getAIFeatureConfig(
+    storeId: number,
+    feature: AIFeatureKey,
+  ): Promise<FeatureConfig | null> {
+    if (!isAIFeatureKey(feature)) return null;
+    if (!Number.isInteger(storeId) || storeId <= 0) return null;
+    try {
+      const resolved = await this.resolver.resolveSubscription(storeId);
+      if (!resolved.found) return null;
+      return resolved.features[feature] ?? null;
+    } catch (err) {
+      this.logger.warn(
+        `getAIFeatureConfig failed for store=${storeId} feature=${feature}: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  }
+
   async canUseModule(
     storeId: number,
     _moduleKey: string,
@@ -962,6 +991,7 @@ export class SubscriptionAccessService {
     else if (feature === 'async_queue') remaining.jobs = remainingUnits;
     else if (feature === 'realtime_voice')
       remaining.voice_seconds = remainingUnits;
+    else if (feature === 'tool_agents') remaining.tool_calls = remainingUnits;
 
     return {
       exceeded: safeCurrent >= cap,
