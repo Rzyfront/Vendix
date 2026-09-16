@@ -10,6 +10,8 @@ import {
   StoreActivityDetailQuery,
   StoreActivityQuery,
   StoreActivityRow,
+  StoreActivitySeries,
+  StoreActivitySeriesQuery,
   StoreActivityStats,
 } from '../contracts/store-activity.contract';
 
@@ -30,6 +32,7 @@ export class StoreActivityService {
   readonly isLoadingRanking = signal(false);
   readonly isLoadingStats = signal(false);
   readonly isLoadingDetail = signal(false);
+  readonly isLoadingSeries = signal(false);
 
   private readonly baseUrl = `${this.apiUrl}/superadmin/stores/activity`;
 
@@ -72,8 +75,20 @@ export class StoreActivityService {
       .pipe(finalize(() => this.isLoadingDetail.set(false)));
   }
 
+  getSeries(
+    storeId: number,
+    query: StoreActivitySeriesQuery = {},
+  ): Observable<ApiResponse<StoreActivitySeries>> {
+    this.isLoadingSeries.set(true);
+    return this.http
+      .get<ApiResponse<StoreActivitySeries>>(`${this.baseUrl}/${storeId}/series`, {
+        params: this.toHttpParams(query),
+      })
+      .pipe(finalize(() => this.isLoadingSeries.set(false)));
+  }
+
   private toHttpParams(
-    query: StoreActivityQuery | StoreActivityDetailQuery,
+    query: StoreActivityQuery | StoreActivityDetailQuery | StoreActivitySeriesQuery,
   ): HttpParams {
     let params = new HttpParams();
     for (const [key, raw] of Object.entries(query)) {

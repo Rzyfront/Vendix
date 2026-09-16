@@ -160,3 +160,29 @@ export interface StoreActivityDetail {
   /** Paginación del `timeline`. El backend no pagina nada más aquí. */
   meta: PaginationMeta;
 }
+
+/** Un bucket diario de la serie (`GET /superadmin/stores/activity/:storeId/series`).
+ * Rango en UTC con días en cero incluidos. */
+export interface StoreActivitySeriesDay {
+  date: string;
+  orders: number;
+  revenue_operating: number;
+  audit_events: number;
+  logins: number;
+}
+
+/** Serie diaria + agregados por canal y por estado de orden del rango. */
+export interface StoreActivitySeries {
+  days: StoreActivitySeriesDay[];
+  by_channel: Record<string, number>;
+  by_state: Record<string, number>;
+}
+
+/** Query de la serie: rango `YYYY-MM-DD` + acotadores de pedidos.
+ * `channel` y `order_state` solo aplican a las métricas de pedidos. */
+export interface StoreActivitySeriesQuery {
+  from?: string;
+  to?: string;
+  channel?: string;
+  order_state?: string;
+}
