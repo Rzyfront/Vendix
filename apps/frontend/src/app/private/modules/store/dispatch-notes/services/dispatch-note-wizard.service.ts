@@ -38,7 +38,19 @@ export interface WizardItem {
   ordered_quantity: number;
   pending_quantity: number;
   dispatched_quantity: number;
-  tax_amount: number;
+  /**
+   * Impuesto POR UNIDAD de precio, igual que `order_items.tax_amount_item`
+   * (ADR-10) y que `discount_amount` de acá abajo. El total de la línea es
+   * `tax_amount_unit × dispatched_quantity` y lo compone `totals`.
+   *
+   * NO es el `tax_amount` del DTO de creación, que es de LÍNEA: este campo
+   * nunca viaja al backend — ningún payload del wizard lo envía (el carril de
+   * orden va por `createFromOrder`, que recalcula el impuesto en el servidor).
+   * Es un acumulador de pantalla. El nombre lleva el sufijo `_unit` justamente
+   * para que no se lo confunda con el campo del DTO.
+   */
+  tax_amount_unit: number;
+  /** Descuento POR UNIDAD: `totals` lo multiplica por la cantidad despachada. */
   discount_amount: number;
   location_id?: number;
 }
@@ -162,8 +174,13 @@ export class DispatchNoteWizardService {
     for (const item of this.items()) {
       subtotal += item.unit_price * item.dispatched_quantity;
       discount += item.discount_amount * item.dispatched_quantity;
-      // tax_amount es impuesto TOTAL de la línea: se suma sin multiplicar por cantidad.
-      tax += item.tax_amount;
+      // `tax_amount_unit` es POR UNIDAD: el impuesto de la línea se compone acá
+      // multiplicando por la cantidad despachada, igual que subtotal y
+      // descuento. Así el pie sigue vivo cuando el usuario edita la cantidad
+      // (`updateItemQuantity`, `acceptAllPending` y `clearAll` sólo tocan
+      // `dispatched_quantity`; si el impuesto se guardara ya compuesto quedaría
+      // congelado en el valor de la semilla).
+      tax += item.tax_amount_unit * item.dispatched_quantity;
     }
     return { subtotal, discount, tax, grandTotal: subtotal - discount + tax };
   });
@@ -421,12 +438,11 @@ export class DispatchNoteWizardService {
         ordered_quantity: oi.quantity,
         pending_quantity: pending,
         dispatched_quantity: dispatched,
-        // tax_amount es impuesto TOTAL de la línea: se prorratea a lo despachado;
-        // sin cantidad de orden se usa el valor tal cual.
-        tax_amount:
-          oi.quantity > 0
-            ? ((oi.tax_amount_item ?? 0) * dispatched) / oi.quantity
-            : (oi.tax_amount_item ?? 0),
+        // `order_items.tax_amount_item` ya es POR UNIDAD (ADR-10) y este campo
+        // también, así que se copia sin escalar: prorratearlo acá lo dividía
+        // entre la cantidad una vez de más y el pie mostraba el impuesto de UNA
+        // unidad para toda la línea.
+        tax_amount_unit: oi.tax_amount_item ?? 0,
         discount_amount: 0,
       };
     });
