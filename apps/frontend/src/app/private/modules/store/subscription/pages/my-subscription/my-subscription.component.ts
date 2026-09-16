@@ -587,6 +587,11 @@ import {
                           @if (feature.enabled && feature.limit !== null) {
                             <p class="text-[11px] text-text-secondary">
                               {{ feature.used }} / {{ feature.limit }} {{ feature.unit || '' }}
+                              @if (feature.period === 'daily') {
+                                <span>· por día</span>
+                              } @else if (feature.period === 'monthly') {
+                                <span>· por mes</span>
+                              }
                             </p>
                           } @else if (feature.enabled) {
                             <p class="text-[11px] text-green-700 font-medium">Sin límite</p>
@@ -1025,8 +1030,19 @@ export class MySubscriptionComponent implements OnInit {
     return 'fresh';
   });
 
+  /**
+   * F7 — uso IA real del periodo vigente (`GET /store/subscriptions/usage`):
+   * usado leído del contador Redis `ai:quota:*` y cap del plan resuelto.
+   * La matriz del facade solo trae configuración (sin `used`); el snapshot
+   * manda cuando existe entrada para la feature.
+   */
+  readonly aiUsage = signal<
+    Record<string, { used: number; cap: number | null; period: string }>
+  >({});
+
   readonly featuresList = computed(() => {
     const matrix = this.featureMatrix();
+    const usage = this.aiUsage();
     const featureMeta: Record<string, { label: string; icon: string }> = {
       text_generation: { label: 'Generación de Texto', icon: 'pen-line' },
       streaming_chat: { label: 'Chat en Streaming', icon: 'message-square' },
@@ -1034,35 +1050,77 @@ export class MySubscriptionComponent implements OnInit {
       tool_agents: { label: 'Agentes con Herramientas', icon: 'bot' },
       rag_embeddings: { label: 'RAG / Embeddings', icon: 'database' },
       async_queue: { label: 'Procesamiento Asíncrono', icon: 'layers' },
+      realtime_voice: { label: 'Voz en Tiempo Real', icon: 'mic' },
     };
     return Object.entries(featureMeta).map(([key, meta]) => {
       const feature = matrix?.[key];
       const enabled = feature?.enabled === true;
+      const snapshot = usage?.[key];
+      const cap =
+        snapshot?.cap ??
+        (enabled
+          ? (feature.monthly_tokens_cap ??
+              feature.daily_messages_cap ??
+              feature.indexed_docs_cap ??
+              feature.monthly_jobs_cap ??
+              feature.monthly_tool_calls_cap ??
+              feature.monthly_voice_seconds_cap ??
+              null)
+          : null);
+      const limit = typeof cap === 'number' && cap > 0 ? cap : null;
+      const unitSource =
+        snapshot && limit === snapshot.cap && snapshot.cap != null
+          ? this.unitForFeatureKey(key)
+          : null;
       return {
         key,
         label: meta.label,
         icon: meta.icon,
         enabled,
-        used: feature?.used ?? 0,
-        limit: enabled
-          ? (feature.monthly_tokens_cap ??
-              feature.daily_messages_cap ??
-              feature.indexed_docs_cap ??
-              feature.monthly_jobs_cap ??
-              null)
-          : null,
-        unit: enabled && feature?.monthly_tokens_cap
-          ? 'tokens'
-          : enabled && feature?.daily_messages_cap
-            ? 'msgs'
-            : enabled && feature?.indexed_docs_cap
-              ? 'docs'
-              : enabled && feature?.monthly_jobs_cap
-                ? 'jobs'
-                : null,
+        used: snapshot?.used ?? feature?.used ?? 0,
+        limit,
+        period: snapshot?.period ?? null,
+        unit:
+          unitSource ??
+          (enabled && feature?.monthly_tokens_cap
+            ? 'tokens'
+            : enabled && feature?.daily_messages_cap
+              ? 'msgs'
+              : enabled && feature?.indexed_docs_cap
+                ? 'docs'
+                : enabled && feature?.monthly_jobs_cap
+                  ? 'jobs'
+                  : enabled && feature?.monthly_tool_calls_cap
+                    ? 'llamadas'
+                    : enabled && feature?.monthly_voice_seconds_cap
+                      ? 'segs'
+                      : null),
       };
     });
   });
+
+  /**
+   * F7 — unidad canónica por feature cuando el límite viene del snapshot de
+   * uso (el snapshot no trae unidad, solo usado/cap/periodo).
+   */
+  private unitForFeatureKey(key: string): string | null {
+    switch (key) {
+      case 'text_generation':
+        return 'tokens';
+      case 'streaming_chat':
+        return 'msgs';
+      case 'rag_embeddings':
+        return 'docs';
+      case 'async_queue':
+        return 'jobs';
+      case 'tool_agents':
+        return 'llamadas';
+      case 'realtime_voice':
+        return 'segs';
+      default:
+        return null;
+    }
+  }
 
   readonly enabledCount = computed(() => this.featuresList().filter((f) => f.enabled).length);
 
@@ -1188,6 +1246,13 @@ export class MySubscriptionComponent implements OnInit {
   ngOnInit(): void {
     this.facade.loadCurrent();
     this.facade.loadAccess();
+    // F7 — snapshot de uso real (contadores Redis del periodo vigente) para
+    // las barras usado/límite. Best-effort: el servicio retorna `{}` ante
+    // error y la UI conserva los límites del plan sin `used`.
+    void this.accessService
+      .getAiUsage()
+      .then((usage) => this.aiUsage.set(usage ?? {}))
+      .catch(() => this.aiUsage.set({}));
   }
 
   usagePercent(feature: { used: number; limit: number | null }): number {

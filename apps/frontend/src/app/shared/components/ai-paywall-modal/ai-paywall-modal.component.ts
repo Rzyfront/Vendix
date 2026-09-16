@@ -1,13 +1,15 @@
-import { Component, computed, input, model, output } from '@angular/core';
+import { Component, computed, inject, input, model, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ModalComponent } from '../modal/modal.component';
 import { IconComponent } from '../icon/icon.component';
 import { ButtonComponent } from '../button/button.component';
 import { BadgeComponent, BadgeVariant } from '../badge/badge.component';
 import {
+  AI_FEATURE_LABELS,
   PaywallCategory,
   PaywallSeverity,
   PaywallVariant,
+  SubscriptionAccessService,
 } from '../../../core/services/subscription-access.service';
 
 /**
@@ -102,6 +104,42 @@ const CATEGORIES_WITH_BENEFITS: ReadonlySet<PaywallCategory> = new Set([
         <div class="paywall-body">
           <h3 class="paywall-title">{{ resolvedTitle() }}</h3>
           <p class="paywall-description">{{ resolvedDescription() }}</p>
+
+          <!-- F7 — bloque de upgrade para 005/006: funcionalidad pedida,
+               plan actual (nombre + qué incluye) y siguiente plan sugerido
+               con datos vivos del catálogo. Sin sugerencia (cargando o sin
+               candidato) se muestra el copy base del variant. -->
+          @if (showUpgradeBlock()) {
+            <div class="paywall-upgrade">
+              @if (requestedFeatureLabel()) {
+                <p class="paywall-upgrade-feature">
+                  <app-icon name="zap" [size]="14" class="paywall-hint-icon" />
+                  Función solicitada: <strong>{{ requestedFeatureLabel() }}</strong>
+                </p>
+              }
+              @if (currentPlanName()) {
+                <p class="paywall-upgrade-current">
+                  Tu plan actual: <strong>{{ currentPlanName() }}</strong>
+                  @if (currentPlanIncludesLabel()) {
+                    <span class="paywall-upgrade-includes"> — incluye {{ currentPlanIncludesLabel() }}</span>
+                  }
+                </p>
+              }
+              @if (upgradeLoading()) {
+                <p class="paywall-upgrade-loading" aria-busy="true">Buscando el mejor plan para ti…</p>
+              } @else if (suggestedPlanName()) {
+                <div class="paywall-upgrade-suggestion">
+                  <app-icon name="crown" [size]="16" class="paywall-hint-icon" />
+                  <span>
+                    Te recomendamos <strong>{{ suggestedPlanName() }}</strong>
+                    @if (suggestedPlanPriceLabel()) {
+                      <span> ({{ suggestedPlanPriceLabel() }})</span>
+                    }
+                  </span>
+                </div>
+              }
+            </div>
+          }
 
           @if (showBenefits()) {
             <ul class="paywall-benefits">
@@ -290,6 +328,77 @@ export class AiPaywallModalComponent {
 
   readonly recommendedHint = computed(
     () => this.variantConfig()?.recommendedPlanHint ?? '',
+  );
+
+  /**
+   * F7 — estado vivo del paywall para el bloque de upgrade. El outlet no se
+   * toca: el modal lee directo del servicio (mismo singleton que abre el
+   * interceptor), así el bloque aparece en cuanto llega la sugerencia sin
+   * re-abrir el modal.
+   */
+  private readonly access = inject(SubscriptionAccessService);
+
+  private readonly upgradeCode = computed(
+    () => this.access.paywallState()?.code ?? null,
+  );
+
+  private readonly isUpgradePaywall = computed(() => {
+    const code = this.upgradeCode();
+    if (code === 'SUBSCRIPTION_005' || code === 'SUBSCRIPTION_006') return true;
+    // Uso standalone (sin estado del servicio): decide por categoría.
+    if (!code) {
+      const category = this.variantConfig()?.category;
+      return category === 'feature-locked' || category === 'quota-exhausted';
+    }
+    return false;
+  });
+
+  private readonly requestedFeatureKey = computed(
+    () =>
+      this.access.suggestionFeature() ??
+      this.access.paywallState()?.details?.feature ??
+      null,
+  );
+
+  readonly requestedFeatureLabel = computed(() => {
+    const key = this.requestedFeatureKey();
+    if (!key) return '';
+    return AI_FEATURE_LABELS[key] ?? key;
+  });
+
+  readonly currentPlanName = computed(
+    () =>
+      this.access.suggestion()?.currentPlan?.name ??
+      this.access.paywallState()?.details?.plan_name ??
+      '',
+  );
+
+  readonly currentPlanIncludesLabel = computed(() => {
+    const includes = this.access.suggestion()?.currentPlan?.includes ?? [];
+    return includes
+      .map((key) => AI_FEATURE_LABELS[key] ?? key)
+      .join(', ');
+  });
+
+  readonly upgradeLoading = computed(() => this.access.suggestionLoading());
+
+  readonly suggestedPlanName = computed(
+    () => this.access.suggestion()?.suggestedPlan?.name ?? '',
+  );
+
+  readonly suggestedPlanPriceLabel = computed(() => {
+    const price = this.access.suggestion()?.suggestedPlan?.price;
+    if (typeof price !== 'number' || !Number.isFinite(price)) return '';
+    return `$${price.toLocaleString('es-CO')}`;
+  });
+
+  readonly showUpgradeBlock = computed(
+    () =>
+      this.isUpgradePaywall() &&
+      (this.requestedFeatureKey() != null ||
+        this.currentPlanName() !== '' ||
+        this.upgradeLoading() ||
+        this.suggestedPlanName() !== ''),
   );
 
   primaryAction(): void {

@@ -1,6 +1,9 @@
 import { Injectable, Signal, computed, inject, signal } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { SubscriptionFacade } from '../store/subscription';
+import { environment } from '../../../environments/environment';
 
 /**
  * Backend error codes that map to a paywall modal variant.
@@ -115,6 +118,58 @@ export interface PaywallDetails {
   grace_period_end?: string | null;
   /** Optional human-readable plan name for inline interpolation. */
   plan_name?: string | null;
+  /**
+   * F7 — canonical AI feature key that triggered a `SUBSCRIPTION_005/006`
+   * paywall (e.g. `streaming_chat`). Sent by the backend when available;
+   * otherwise the paywall interceptor infers it from the request URL as a
+   * fallback. Drives the "funcionalidad pedida" block and the upgrade
+   * suggestion lookup — never hardcoded per plan.
+   */
+  feature?: string | null;
+}
+
+/**
+ * F7 — canonical display labels for AI feature keys. Labels only (no plan
+ * data); plans always come from the live backend catalog. Shared by the
+ * paywall modal ("funcionalidad pedida") and the usage UI.
+ */
+export const AI_FEATURE_LABELS: Record<string, string> = {
+  text_generation: 'Generación de texto',
+  streaming_chat: 'Chat en streaming',
+  conversations: 'Conversaciones',
+  tool_agents: 'Agentes con herramientas',
+  rag_embeddings: 'RAG / Embeddings',
+  async_queue: 'Procesamiento asíncrono',
+  realtime_voice: 'Voz en tiempo real',
+};
+
+/**
+ * F7 — one entry of the tenant AI usage snapshot (`GET
+ * /store/subscriptions/usage`): units consumed in the current UTC period
+ * vs the resolved plan cap (`null` = unlimited).
+ */
+export interface AiUsageEntry {
+  used: number;
+  cap: number | null;
+  period: 'daily' | 'monthly';
+}
+
+/**
+ * F7 — plan summary for the upgrade modal, served by `GET
+ * /store/subscriptions/upgrade-suggestion`. Public catalog data only.
+ */
+export interface UpgradePlanSummary {
+  id: number;
+  code: string;
+  name: string;
+  price: number;
+  includes: string[];
+}
+
+export interface UpgradeSuggestion {
+  feature: string;
+  currentPlan: UpgradePlanSummary | null;
+  suggestedPlan: (UpgradePlanSummary & { cta: string }) | null;
 }
 
 /**
@@ -232,7 +287,9 @@ const PAYWALL_VARIANTS: Record<PaywallCode, PaywallVariant> = {
     title: 'Función incluida en planes superiores',
     description: 'Esta función no está disponible en tu plan actual. Mejóralo para acceder a más herramientas.',
     ctaLabel: 'Mejorar plan',
-    ctaRoute: '/admin/subscription/plans',
+    // F7 — el CTA de upgrade va al picker, donde el modal ya muestra el
+    // siguiente plan sugerido con datos vivos del catálogo.
+    ctaRoute: '/admin/subscription/picker',
     severity: 'info',
     category: 'feature-locked',
     iconName: 'lock',
@@ -247,7 +304,8 @@ const PAYWALL_VARIANTS: Record<PaywallCode, PaywallVariant> = {
     title: 'Cuota de IA agotada',
     description: 'Has alcanzado el límite de IA de tu plan en este periodo. Mejora tu plan para seguir disfrutando.',
     ctaLabel: 'Ampliar mi plan',
-    ctaRoute: '/admin/subscription/plans',
+    // F7 — mismo destino que 005: el picker con la sugerencia viva.
+    ctaRoute: '/admin/subscription/picker',
     severity: 'warning',
     category: 'quota-exhausted',
     iconName: 'zap',
@@ -530,10 +588,27 @@ const PAYWALL_VARIANTS: Record<PaywallCode, PaywallVariant> = {
 export class SubscriptionAccessService {
   private facade = inject(SubscriptionFacade);
   private router = inject(Router);
+  /**
+   * F7 — opcional a propósito: los specs históricos del servicio se
+   * instancian sin provider HTTP y solo ejercitan el catálogo de variants.
+   * En la app `HttpClient` siempre existe (root). Los métodos F7 degradan
+   * a `{}`/`null` cuando no hay cliente en lugar de lanzar.
+   */
+  private http = inject(HttpClient, { optional: true });
 
   /** Tracks whether a paywall modal is currently displayed (dedupe). */
   private readonly isOpen = signal(false);
   private readonly state = signal<PaywallState | null>(null);
+
+  /**
+   * F7 — sugerencia viva de upgrade para el paywall 005/006 (plan actual +
+   * siguiente plan que cubre la feature pedida, desde el catálogo del
+   * backend — nunca hardcodeado). Lectura síncrona para el modal; se carga
+   * con `loadUpgradeSuggestion()` y se limpia en `closePaywall()`.
+   */
+  readonly suggestion = signal<UpgradeSuggestion | null>(null);
+  readonly suggestionFeature = signal<string | null>(null);
+  readonly suggestionLoading = signal(false);
 
   /** Public read-only view of the current paywall state. */
   readonly paywallState: Signal<PaywallState | null> = this.state.asReadonly();
@@ -702,6 +777,11 @@ export class SubscriptionAccessService {
   closePaywall(): void {
     this.isOpen.set(false);
     this.state.set(null);
+    // F7 — la sugerencia pertenece al paywall que se cierra; limpiarla evita
+    // mostrar el plan de un bloqueo anterior en el siguiente modal.
+    this.suggestion.set(null);
+    this.suggestionFeature.set(null);
+    this.suggestionLoading.set(false);
   }
 
   /** Trigger the variant CTA — navigate to the plan / payment route, then close. */
@@ -727,5 +807,57 @@ export class SubscriptionAccessService {
       return;
     }
     this.triggerCta();
+  }
+
+  /**
+   * F7 — uso IA del tenant (`GET /store/subscriptions/usage`): usado/límite
+   * por feature del periodo UTC vigente. Lo consume "Mi suscripción → Uso
+   * IA" para las barras. Nunca lanza al llamante: ante error retorna `{}`.
+   */
+  async getAiUsage(): Promise<Record<string, AiUsageEntry>> {
+    if (!this.http) return {};
+    try {
+      const res = await firstValueFrom(
+        this.http.get<{ success: boolean; data: { features: Record<string, AiUsageEntry> } }>(
+          `${environment.apiUrl}/store/subscriptions/usage`,
+        ),
+      );
+      return res?.data?.features ?? {};
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * F7 — carga la sugerencia de upgrade para la feature pedida (`GET
+   * /store/subscriptions/upgrade-suggestion?feature=`). Fire-and-forget
+   * para el interceptor: actualiza `suggestion` cuando responde y nunca
+   * lanza (el modal base ya está abierto con el copy del catálogo).
+   */
+  loadUpgradeSuggestion(feature?: string | null): void {
+    const key = (feature ?? '').toString().trim();
+    if (!key || !this.http) return;
+    this.suggestionFeature.set(key);
+    this.suggestionLoading.set(true);
+    void firstValueFrom(
+      this.http.get<{ success: boolean; data: UpgradeSuggestion }>(
+        `${environment.apiUrl}/store/subscriptions/upgrade-suggestion`,
+        { params: { feature: key } },
+      ),
+    )
+      .then((res) => {
+        // Ignora respuestas tardías de un paywall ya cerrado o reemplazado.
+        if (this.suggestionFeature() !== key) return;
+        this.suggestion.set(res?.data ?? null);
+      })
+      .catch(() => {
+        if (this.suggestionFeature() !== key) return;
+        this.suggestion.set(null);
+      })
+      .finally(() => {
+        if (this.suggestionFeature() === key) {
+          this.suggestionLoading.set(false);
+        }
+      });
   }
 }
