@@ -9,7 +9,7 @@ import {
   COMPLETED_SALE_STATES,
   computeOperatingRevenue,
   round2,
-} from '../../../../store/analytics/analytics-metrics.contract';
+} from '../../../store/analytics/analytics-metrics.contract';
 import { StoreActivityQueryDto } from './dto/store-activity-query.dto';
 import { StoreActivityDetailQueryDto } from './dto/store-activity-detail-query.dto';
 
@@ -74,6 +74,42 @@ export interface StoreActivityTimelineItem {
   state?: string;
   actor?: string;
 }
+
+const orderTimelineSelect = {
+  id: true,
+  order_number: true,
+  state: true,
+  channel: true,
+  grand_total: true,
+  created_at: true,
+} satisfies Prisma.ordersSelect;
+
+type OrderTimelineRow = Prisma.ordersGetPayload<{
+  select: typeof orderTimelineSelect;
+}>;
+
+const auditTimelineSelect = {
+  id: true,
+  action: true,
+  resource: true,
+  resource_id: true,
+  created_at: true,
+  users: { select: { email: true } },
+} satisfies Prisma.audit_logsSelect;
+
+type AuditTimelineRow = Prisma.audit_logsGetPayload<{
+  select: typeof auditTimelineSelect;
+}>;
+
+const loginTimelineSelect = {
+  id: true,
+  email: true,
+  attempted_at: true,
+} satisfies Prisma.login_attemptsSelect;
+
+type LoginTimelineRow = Prisma.login_attemptsGetPayload<{
+  select: typeof loginTimelineSelect;
+}>;
 
 function parseUtcDay(value: string): Date {
   const match = DATE_PARTS_REGEX.exec(value);
@@ -536,7 +572,11 @@ export class StoreActivityService {
     const wantAudits = !query.event_type || query.event_type === 'audit';
     const wantLogins = !query.event_type || query.event_type === 'login';
 
-    const [orders, audits, logins] = await Promise.all([
+    const [orders, audits, logins]: [
+      OrderTimelineRow[],
+      AuditTimelineRow[],
+      LoginTimelineRow[],
+    ] = await Promise.all([
       wantOrders
         ? this.prisma.orders.findMany({
             where: {
@@ -545,38 +585,24 @@ export class StoreActivityService {
               ...(query.channel ? { channel: query.channel } : {}),
               ...(query.order_state ? { state: query.order_state } : {}),
             },
-            select: {
-              id: true,
-              order_number: true,
-              state: true,
-              channel: true,
-              grand_total: true,
-              created_at: true,
-            },
+            select: orderTimelineSelect,
             orderBy: { created_at: 'desc' },
           })
-        : [],
+        : ([] as OrderTimelineRow[]),
       wantAudits
         ? this.prisma.audit_logs.findMany({
             where: { store_id: storeId, created_at: range },
-            select: {
-              id: true,
-              action: true,
-              resource: true,
-              resource_id: true,
-              created_at: true,
-              users: { select: { email: true } },
-            },
+            select: auditTimelineSelect,
             orderBy: { created_at: 'desc' },
           })
-        : [],
+        : ([] as AuditTimelineRow[]),
       wantLogins
         ? this.prisma.login_attempts.findMany({
             where: { store_id: storeId, success: true, attempted_at: range },
-            select: { id: true, email: true, attempted_at: true },
+            select: loginTimelineSelect,
             orderBy: { attempted_at: 'desc' },
           })
-        : [],
+        : ([] as LoginTimelineRow[]),
     ]);
 
     const items: StoreActivityTimelineItem[] = [
