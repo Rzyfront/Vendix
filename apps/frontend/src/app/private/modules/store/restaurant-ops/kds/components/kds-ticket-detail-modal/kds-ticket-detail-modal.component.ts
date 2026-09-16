@@ -63,10 +63,21 @@ export class KdsTicketDetailModalComponent {
   readonly isOpen = input<boolean>(false);
   readonly ticket = input<KitchenTicket | null>(null);
   readonly isMutating = input<boolean>(false);
-  /** Ver `KdsTicketCardComponent.deliverDisabledReason`: entregar es accion
-   *  de mesero/cajero, no de cocina; el boton queda visible pero inerte. */
-  readonly deliverDisabledReason =
-    'La entrega la registra el mesero o el cajero, no la cocina';
+  /** Ver `KdsTicketCardComponent.allTakeaway`: "Entregar" se habilita solo
+   *  para tickets todo-para-llevar; el resto lo registra mesero/cajero. */
+  readonly allTakeaway = computed(() => {
+    const items = this.ticketDisplay()?.items ?? [];
+    return (
+      items.length > 0 &&
+      items.every((it) => it.order_item?.is_takeaway === true)
+    );
+  });
+  /** Ver `KdsTicketCardComponent.deliverDisabledReason`: mismo motivo dual. */
+  readonly deliverDisabledReason = computed(() =>
+    this.allTakeaway()
+      ? 'La entrega la registra el mesero o el cajero, no la cocina'
+      : 'Solo los platos para llevar se entregan en cocina',
+  );
 
   /** Re-emit actions back to the board so the SSE pipeline stays in charge. */
   readonly startClicked = output<KitchenTicket>();

@@ -213,10 +213,17 @@
           <app-icon slot="icon" name="x" [size]="14" /> Cancelar
         </app-button>
         <!--
-          Igual que en la tarjeta del board: entregar es accion de mesero/cajero,
-          no de cocina. Visible para señalizar el estado, deshabilitado siempre.
+          Igual que en la tarjeta del board (takeaway-only KDS): "Entregar"
+          se habilita solo para tickets todo-para-llevar (ver `allTakeaway`).
+          Visible para señalizar el estado en el resto de casos.
         -->
-        <app-button variant="primary" [disabled]="true" [attr.title]="deliverDisabledReason">
+        <app-button
+          variant="primary"
+          (clicked)="onDeliver()"
+          [disabled]="isMutating() || !allTakeaway()"
+          [loading]="isMutating()"
+          [attr.title]="deliverDisabledReason()"
+        >
           <app-icon slot="icon" name="check-circle" [size]="14" /> Entregar
         </app-button>
       } @else {
