@@ -65,4 +65,23 @@ export class StoreActivityController {
       { total: result.total, page: result.page, limit: result.limit },
     );
   }
+
+  @Permissions('superadmin:stores:read')
+  @Get(':storeId/series')
+  @ApiOperation({ summary: 'Daily activity series for one store (UTC buckets)' })
+  @ApiResponse({ status: 200, description: 'Store activity series retrieved successfully' })
+  @ApiResponse({ status: 404, description: 'Store not found' })
+  async getSeries(
+    @Param('storeId') storeId: string,
+    @Query() query: StoreActivityDetailQueryDto,
+  ) {
+    const result = await this.storeActivityService.getSeries(
+      Number(storeId),
+      query,
+    );
+    return this.responseService.success(
+      result,
+      'Store activity series retrieved successfully',
+    );
+  }
 }

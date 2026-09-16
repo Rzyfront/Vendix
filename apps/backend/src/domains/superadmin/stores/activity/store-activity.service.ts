@@ -75,6 +75,20 @@ export interface StoreActivityTimelineItem {
   actor?: string;
 }
 
+export interface StoreActivitySeriesDay {
+  date: string;
+  orders: number;
+  revenue_operating: number;
+  audit_events: number;
+  logins: number;
+}
+
+export interface StoreActivitySeries {
+  days: StoreActivitySeriesDay[];
+  by_channel: Record<string, number>;
+  by_state: Record<string, number>;
+}
+
 const orderTimelineSelect = {
   id: true,
   order_number: true,
@@ -107,9 +121,24 @@ const loginTimelineSelect = {
   attempted_at: true,
 } satisfies Prisma.login_attemptsSelect;
 
+const seriesOrderSelect = {
+  channel: true,
+  state: true,
+  subtotal_amount: true,
+  discount_amount: true,
+  shipping_cost: true,
+  created_at: true,
+} satisfies Prisma.ordersSelect;
+
 type LoginTimelineRow = Prisma.login_attemptsGetPayload<{
   select: typeof loginTimelineSelect;
 }>;
+
+function formatUtcDay(value: Date): string {
+  const month = String(value.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(value.getUTCDate()).padStart(2, '0');
+  return `${value.getUTCFullYear()}-${month}-${day}`;
+}
 
 function parseUtcDay(value: string): Date {
   const match = DATE_PARTS_REGEX.exec(value);
@@ -280,6 +309,106 @@ export class StoreActivityService {
       page,
       limit,
     };
+  }
+
+  async getSeries(
+    storeId: number,
+    query: StoreActivityDetailQueryDto,
+  ): Promise<StoreActivitySeries> {
+    if (!Number.isInteger(storeId) || storeId <= 0) {
+      throw new VendixHttpException(
+        ErrorCodes.STORE_VALIDATE_001,
+        'Invalid store id',
+      );
+    }
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { id: true },
+    });
+    if (!store) {
+      throw new VendixHttpException(ErrorCodes.ORG_STORE_001);
+    }
+    const window = this.resolveWindow(query.from, query.to);
+    const range = { gte: window.start, lt: window.end };
+
+    // NOTE: `event_type`/`page`/`limit` from the reused detail DTO do not
+    // apply here — the series always covers the full window. `channel` and
+    // `order_state` scope the ORDER aggregates only; audit_events and logins
+    // stay store-wide per day.
+    const [orders, audits, logins] = await Promise.all([
+      this.prisma.orders.findMany({
+        where: {
+          store_id: storeId,
+          created_at: range,
+          ...(query.channel ? { channel: query.channel } : {}),
+          ...(query.order_state ? { state: query.order_state } : {}),
+        },
+        select: seriesOrderSelect,
+      }),
+      this.prisma.audit_logs.findMany({
+        where: { store_id: storeId, created_at: range },
+        select: { created_at: true },
+      }),
+      this.prisma.login_attempts.findMany({
+        where: { store_id: storeId, success: true, attempted_at: range },
+        select: { attempted_at: true },
+      }),
+    ]);
+
+    const completedStates = new Set<string>([...COMPLETED_SALE_STATES]);
+    const days: StoreActivitySeriesDay[] = [];
+    for (let index = 0; index < window.days; index++) {
+      days.push({
+        date: formatUtcDay(
+          new Date(window.start.getTime() + index * DAY_MS),
+        ),
+        orders: 0,
+        revenue_operating: 0,
+        audit_events: 0,
+        logins: 0,
+      });
+    }
+    const bucketIndex = (value: Date): number | null => {
+      const index = Math.floor(
+        (value.getTime() - window.start.getTime()) / DAY_MS,
+      );
+      return index >= 0 && index < days.length ? index : null;
+    };
+
+    const by_channel: Record<string, number> = {};
+    const by_state: Record<string, number> = {};
+    for (const order of orders) {
+      if (!order.created_at) continue;
+      const index = bucketIndex(order.created_at);
+      if (index === null) continue;
+      days[index].orders += 1;
+      if (completedStates.has(String(order.state))) {
+        days[index].revenue_operating += computeOperatingRevenue({
+          subtotal: Number(order.subtotal_amount ?? 0),
+          discounts: Number(order.discount_amount ?? 0),
+          shipping: Number(order.shipping_cost ?? 0),
+          tax: 0,
+        });
+      }
+      const channel = String(order.channel);
+      const state = String(order.state);
+      by_channel[channel] = (by_channel[channel] ?? 0) + 1;
+      by_state[state] = (by_state[state] ?? 0) + 1;
+    }
+    for (const day of days) {
+      day.revenue_operating = round2(day.revenue_operating);
+    }
+    for (const audit of audits) {
+      if (!audit.created_at) continue;
+      const index = bucketIndex(audit.created_at);
+      if (index !== null) days[index].audit_events += 1;
+    }
+    for (const login of logins) {
+      if (!login.attempted_at) continue;
+      const index = bucketIndex(login.attempted_at);
+      if (index !== null) days[index].logins += 1;
+    }
+    return { days, by_channel, by_state };
   }
 
   // ---- internals ---------------------------------------------------------
