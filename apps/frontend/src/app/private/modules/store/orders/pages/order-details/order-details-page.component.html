@@ -667,7 +667,7 @@
                   <div class="flex items-center gap-2">
                     <!-- Product Image -->
                     <div
-                      class="w-9 h-9 bg-surface rounded-md flex-shrink-0 flex items-center justify-center border border-border overflow-hidden"
+                      class="w-[65px] h-[65px] bg-surface rounded-md flex-shrink-0 flex items-center justify-center border border-border overflow-hidden"
                     >
                       @if (item.variant_image_url || (item.products && item.products.image_url)) {
                         <img
@@ -677,7 +677,7 @@
                       } @else {
                         <app-icon
                           name="image"
-                          size="16"
+                          size="24"
                           class="text-gray-300"
                         ></app-icon>
                       }
@@ -690,8 +690,10 @@
                       >
                         {{ item.product_name }}
                       </h3>
-                      <p class="text-[10px] font-mono text-gray-400">
-                        SKU: {{ item.variant_sku || "N/A" }}
+                      <p class="text-[10px] font-mono text-gray-400 truncate">
+                        SKU: {{ item.variant_sku || "N/A" }}@if (parseVariantAttributes(item.variant_attributes); as attrs) {@if (attrs.length) {
+                          <span> · </span>@for (attr of attrs; track attr.name + attr.value; let last = $last) {@if (attr.name) {<span>{{ attr.name }}: </span>}<span>{{ attr.value }}</span>@if (!last) {<span> · </span>}}
+                        }}
                       </p>
                       <!-- Restaurant Suite — Fase K Gap 2: per-item KDS
                            state badge. Renders only for items that were
@@ -835,22 +837,6 @@
                           Cancelar
                         </app-button>
                       }
-                      @if (parseVariantAttributes(item.variant_attributes); as attrs) {
-                        @if (attrs.length) {
-                          <div class="mt-1 flex flex-wrap gap-1">
-                            @for (attr of attrs; track attr.name + attr.value) {
-                              <span
-                                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 border border-border text-[11px] text-gray-700"
-                              >
-                                @if (attr.name) {
-                                  <span class="font-medium text-gray-500">{{ attr.name }}:</span>
-                                }
-                                <span class="font-semibold">{{ attr.value }}</span>
-                              </span>
-                            }
-	                          </div>
-	                        }
-	                      }
 	                      @if (item.applied_price_tier_name_snapshot) {
 	                        <div class="mt-2 flex flex-wrap gap-1.5">
 	                          <span
