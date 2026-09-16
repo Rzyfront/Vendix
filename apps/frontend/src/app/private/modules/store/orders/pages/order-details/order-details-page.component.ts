@@ -1,5 +1,7 @@
 import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { NgClass, DatePipe } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
+import { environment } from '../../../../../../../environments/environment';
 import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
@@ -802,6 +804,16 @@ export class OrderDetailsPageComponent {
   );
 
   /**
+   * Plan 1060 (paso 5) — "Despachar Orden" solo existe cuando hay
+   * fulfillment: domicilio (`requiresDispatchFlow`) o platos presentes en
+   * cocina (`isKitchenOrder`). Una mesa `direct_delivery` sin cocina no
+   * ofrece despacho. Solo visibilidad: no toca `shipOrder` ni el backend.
+   */
+  readonly canOfferDispatch = computed<boolean>(
+    () => this.requiresDispatchFlow() || this.isKitchenOrder(),
+  );
+
+  /**
    * Platos ya disparados a cocina que aún no están entregados (ticket ni
    * `delivered` ni `cancelled`). Solo informa: despachar un domicilio con
    * cocina pendiente se advierte, nunca se bloquea — el operador puede estar
@@ -922,7 +934,7 @@ export class OrderDetailsPageComponent {
 
         // Dispatching is allowed BEFORE the payment is confirmed so the route
         // can carry the order (COD collects on delivery; online still uncaptured).
-        if (this.canGenerateRemision()) {
+        if (this.canOfferDispatch() && this.canGenerateRemision()) {
           // Unified entry: one button → con/sin-remisión chooser.
           actions.push({
             id: 'dispatch-order',
@@ -930,7 +942,7 @@ export class OrderDetailsPageComponent {
             icon: 'truck',
             variant: dispatchVariant,
           });
-        } else if (isShipping) {
+        } else if (this.canOfferDispatch() && isShipping) {
           // direct_delivery: no remisión; manual ship.
           actions.push({
             id: 'manual-ship',
@@ -971,7 +983,7 @@ export class OrderDetailsPageComponent {
           // `processing → finished`). Un domicilio NO entra aquí: su entrega
           // la estampa el flujo de despacho (ver `requiresDispatchFlow`).
           actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
-        } else if (this.canGenerateRemision()) {
+        } else if (this.canOfferDispatch() && this.canGenerateRemision()) {
           // Domicilio de restaurante con platos aún en cocina: se avisa, no se
           // bloquea. El despacho sigue siendo la única vía de entrega.
           if (this.requiresDispatchFlow() && this.undeliveredKitchenItems().length > 0) {
@@ -999,8 +1011,10 @@ export class OrderDetailsPageComponent {
               variant: 'warning',
             });
           }
-        } else {
+        } else if (this.canOfferDispatch()) {
           // direct_delivery: counter handover, no remisión cycle. Ship directly.
+          // Plan 1060 (paso 5): sin fulfillment (mesa direct_delivery sin
+          // cocina) esta rama queda vacía — no se ofrece despacho.
           actions.push({ id: 'ship', label: 'Despachar Orden', icon: 'package', variant: 'primary' });
         }
         if (this.isPrivilegedUser()) {
@@ -1357,6 +1371,7 @@ export class OrderDetailsPageComponent {
   private fb = inject(FormBuilder);
   private ordersService = inject(StoreOrdersService);
   private ordersFlowService = inject(OrdersService);
+  private http = inject(HttpClient);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
   private paymentMethodsService = inject(PaymentMethodsService);
@@ -3496,6 +3511,31 @@ export class OrderDetailsPageComponent {
     return labels[state] || state;
   }
 
+  /**
+   * Plan 1060 (paso 4) — motivo humanizado de un pago `cancelled`, leído de
+   * `gateway_response.cancellation_reason` (lo escribe el backend al
+   * compensar: `finish_blocked_insufficient_stock` en
+   * `order-flow.service.ts` finish, `kitchen_items_pending` en el guard
+   * F2 de cocina). Solo presentación. Sin motivo (o código desconocido)
+   * devuelve `null` y el template deja el badge actual intacto.
+   */
+  paymentCancellationLabel(payment: Payment): string | null {
+    if (payment?.state !== 'cancelled') return null;
+    const code = (
+      payment.gateway_response as
+        | { cancellation_reason?: unknown }
+        | undefined
+    )?.cancellation_reason;
+    switch (code) {
+      case 'finish_blocked_insufficient_stock':
+        return 'Sin stock para finalizar';
+      case 'kitchen_items_pending':
+        return 'Cocina pendiente';
+      default:
+        return null;
+    }
+  }
+
   getStatusColor(status: string | undefined): string {
     const colors: Record<string, string> = {
       created: 'bg-gray-100 text-gray-800',
@@ -3923,6 +3963,108 @@ export class OrderDetailsPageComponent {
                     typeof err === 'string' ? err : 'Error al cancelar el plato',
                   );
                   console.error('Cancel item failed', err);
+                },
+              });
+          });
+      });
+  }
+
+  // ─── Plan 1060 (reversa) — reversar un ítem entregado ──────────
+  /**
+   * Ítem actualmente en tránsito de reversión (POST en vuelo). `null`
+   * cuando ninguna reversión está pendiente. Misma forma que
+   * `deliveringItemId` / `cancellingItemId`: un solo ítem a la vez;
+   * alimenta el `[loading]` del botón Reversar mientras corre el backend.
+   */
+  readonly reversingItemId = signal<number | null>(null);
+
+  /**
+   * Ofrece "Reversar" a TODO ítem entregado no cancelado. Sin gate de
+   * permiso en el frontend: si el rol no tiene el permiso, el backend
+   * responde 403 y se muestra el toast correspondiente.
+   */
+  canReverseDeliveredItem(item: OrderItem): boolean {
+    return !!item.delivered_at && !item.cancelled_at;
+  }
+
+  /**
+   * Acción: reversa la entrega vía
+   * POST /store/orders/:orderId/flow/items/:orderItemId/cancel-delivered
+   * con body `{ reason, destination: 'restock' | 'waste' }`.
+   * Reutiliza el patrón de motivo de `cancelItem` (`dialogService.confirm`
+   * + `dialogService.prompt`, motivo mín 3 chars). `DialogService` no
+   * tiene selector (solo confirm/prompt), así que el destino se elige con
+   * `confirm()` nativo: Aceptar = restock, Cancelar = waste.
+   * Tras éxito, toast + refreshOrder() (patrón de `deliverItem`).
+   */
+  reverseDeliveredItem(item: OrderItem): void {
+    if (!this.canReverseDeliveredItem(item)) return;
+    const orderId = this.order()?.id;
+    if (!orderId) return;
+    this.dialogService
+      .confirm({
+        title: 'Reversar entrega',
+        message: `¿Reversar la entrega de "${item.product_name}"? El ítem vuelve a pendiente y se registra el motivo.`,
+        confirmText: 'Continuar',
+        cancelText: 'Atrás',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (!confirmed) return;
+        this.dialogService
+          .prompt({
+            title: 'Motivo de reversión',
+            message: 'Quedará registrado en el pedido.',
+            placeholder: 'Describe el motivo (mínimo 3 caracteres)',
+            confirmText: 'Reversar entrega',
+            cancelText: 'Atrás',
+          })
+          .then((reasonInput) => {
+            if (reasonInput === undefined) {
+              this.toastService.error('Reversión abortada');
+              return;
+            }
+            const reason = reasonInput.trim();
+            if (reason.length < 3) {
+              this.toastService.error(
+                'El motivo debe tener al menos 3 caracteres',
+              );
+              return;
+            }
+            const destination = confirm(
+              'Destino del ítem reversado:\n\nAceptar = reingresar al stock (restock).\nCancelar = registrar como merma (waste).',
+            )
+              ? 'restock'
+              : 'waste';
+            this.reversingItemId.set(item.id);
+            this.http
+              .post(
+                `${environment.apiUrl}/store/orders/${orderId}/flow/items/${item.id}/cancel-delivered`,
+                { reason, destination },
+              )
+              .pipe(takeUntilDestroyed(this.destroyRef))
+              .subscribe({
+                next: () => {
+                  this.reversingItemId.set(null);
+                  this.toastService.success('Entrega reversada');
+                  this.refreshOrder();
+                },
+                error: (err: unknown) => {
+                  this.reversingItemId.set(null);
+                  const wrapped = err as {
+                    status?: number;
+                    cause?: { status?: number } | null;
+                  };
+                  const forbidden =
+                    wrapped?.status === 403 ||
+                    wrapped?.cause?.status === 403;
+                  this.toastService.error(
+                    forbidden
+                      ? 'No tienes permiso para reversar entregas'
+                      : parseApiError(err).userMessage ||
+                          'Error al reversar la entrega',
+                  );
+                  console.error('Reverse delivered item failed', err);
                 },
               });
           });

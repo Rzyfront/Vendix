@@ -70,13 +70,17 @@
           como entregada y luego finalízala manualmente.
         </p>
         <div class="flex gap-2 mt-3">
-          <button
-            type="button"
-            class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white"
-            (click)="dispatchOrder()"
-          >
-            Despachar
-          </button>
+          <!-- Plan 1060 (paso 5) — Despachar solo con fulfillment
+               (domicilio o cocina presente). -->
+          @if (canOfferDispatch()) {
+            <button
+              type="button"
+              class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary text-white"
+              (click)="dispatchOrder()"
+            >
+              Despachar
+            </button>
+          }
           <button
             type="button"
             class="px-3 py-1.5 text-xs font-semibold rounded-md bg-info text-white"
@@ -785,6 +789,23 @@
                           } @else {
                             Entregar
                           }
+                        </app-button>
+                      }
+                      <!-- Plan 1060 (reversa) — reversar un ítem entregado:
+                           pide motivo + destino (restock|waste) y llama
+                           POST .../flow/items/:id/cancel-delivered. Sin
+                           gate de permiso: el backend responde 403. -->
+                      @if (canReverseDeliveredItem(item)) {
+                        <app-button
+                          variant="outline"
+                          size="xsm"
+                          customClasses="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 ml-1 bg-amber-50 text-amber-700 border border-amber-200 disabled:opacity-50"
+                          title="Reversar la entrega de este ítem (pide motivo y destino)"
+                          [loading]="reversingItemId() === item.id"
+                          (clicked)="reverseDeliveredItem(item)"
+                        >
+                          <app-icon slot="icon" name="rotate-ccw" [size]="10" />
+                          Reversar
                         </app-button>
                       }
                       <!-- Paso 2 PLAN-order-detail-cancel-item — badge de
@@ -2367,6 +2388,14 @@
                         <span class="text-gray-400">{{
                           bankAccount.account_number
                         }}</span>
+                      </p>
+                    }
+                    <!-- Plan 1060 (paso 4) — motivo humanizado del pago
+                         cancelado (`gateway_response.cancellation_reason`).
+                         Sin motivo, solo el badge de arriba (intacto). -->
+                    @if (paymentCancellationLabel(payment); as cancelLabel) {
+                      <p class="text-[11px] font-medium text-text-secondary mt-1">
+                        Motivo: {{ cancelLabel }}
                       </p>
                     }
                     <p class="text-[10px] text-gray-400 mt-1">
