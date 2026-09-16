@@ -581,6 +581,26 @@
                             >
                               <app-icon slot="icon" name="trash-2" [size]="13"></app-icon>
                             </app-button>
+                          } @else if (removeDisabledReason(item); as reason) {
+                            <!--
+                              Paso 6 plan 1060 — espejo del bloqueo en mesa:
+                              el ítem entregado (`delivered_at`) no ofrece
+                              cancelar: botón VISIBLE pero deshabilitado con
+                              tooltip motivo, patrón `deliverDisabledReason`
+                              del KDS. Solo presentación; el enforcement real
+                              lo pone el backend (paso 1).
+                            -->
+                            <app-button
+                              class="item-remove-btn"
+                              variant="outline-danger"
+                              size="sm"
+                              customClasses="!h-11 !w-11 !px-0"
+                              [disabled]="true"
+                              [attr.title]="reason"
+                              [attr.aria-label]="'Eliminar ' + item.product_name + ': ' + reason"
+                            >
+                              <app-icon slot="icon" name="trash-2" [size]="13"></app-icon>
+                            </app-button>
                           }
                         }
                       </div>
