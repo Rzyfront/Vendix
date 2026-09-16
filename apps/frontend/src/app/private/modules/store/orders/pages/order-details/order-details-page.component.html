@@ -648,26 +648,26 @@
           <app-card shadow="sm" [responsivePadding]="true">
             <div slot="header" class="flex items-center justify-between w-full">
               <h3
-                class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)]"
+                class="text-sm font-semibold text-[var(--color-text-primary)]"
               >
                 Articulos del Pedido
               </h3>
               <span
-                class="text-[11px] sm:text-xs font-medium text-gray-500 bg-[var(--color-background)] px-2.5 py-1 rounded-lg"
+                class="text-[10px] font-medium text-gray-500 bg-[var(--color-background)] px-2 py-0.5 rounded-lg"
               >
                 {{ orderData.order_items?.length || 0 }} productos
               </span>
             </div>
 
-            <div class="space-y-1.5 items-compact">
+            <div class="space-y-1 items-compact">
               @for (item of orderData.order_items; track item.id) {
                 <div
-                  class="p-3 bg-[var(--color-surface)] rounded-xl border border-border hover:border-gray-300 transition-colors"
+                  class="p-2 bg-[var(--color-surface)] rounded-lg border border-border hover:border-gray-300 transition-colors"
                 >
-                  <div class="flex items-center gap-3 sm:gap-4">
+                  <div class="flex items-center gap-2">
                     <!-- Product Image -->
                     <div
-                      class="w-11 h-11 sm:w-14 sm:h-14 bg-surface rounded-lg flex-shrink-0 flex items-center justify-center border border-border overflow-hidden"
+                      class="w-9 h-9 bg-surface rounded-md flex-shrink-0 flex items-center justify-center border border-border overflow-hidden"
                     >
                       @if (item.variant_image_url || (item.products && item.products.image_url)) {
                         <img
@@ -677,8 +677,8 @@
                       } @else {
                         <app-icon
                           name="image"
-                          size="20"
-                          class="text-gray-300 sm:[--icon-size:24px]"
+                          size="16"
+                          class="text-gray-300"
                         ></app-icon>
                       }
                     </div>
@@ -686,11 +686,11 @@
                     <!-- Product Info -->
                     <div class="flex-1 min-w-0">
                       <h3
-                        class="text-sm sm:text-base font-semibold text-gray-900 truncate"
+                        class="text-sm font-semibold text-gray-900 truncate"
                       >
                         {{ item.product_name }}
                       </h3>
-                      <p class="text-[11px] font-mono text-gray-400 mt-0.5">
+                      <p class="text-[10px] font-mono text-gray-400">
                         SKU: {{ item.variant_sku || "N/A" }}
                       </p>
                       <!-- Restaurant Suite — Fase K Gap 2: per-item KDS
@@ -883,13 +883,13 @@
                       <p class="text-[10px] font-medium uppercase tracking-wide text-gray-400 leading-none">
                         Total línea
                       </p>
-                      <p class="font-bold text-gray-900 text-sm sm:text-lg">
+                      <p class="font-bold text-gray-900 text-sm">
                         {{
                           (item.final_total_price ?? item.total_price) || 0
                             | currency
                         }}
                       </p>
-                      <p class="text-xs text-gray-500">
+                      <p class="text-[11px] text-gray-500">
                         <span class="sr-only">Precio unitario: </span>{{ item.quantity }} x
                         {{
                           (item.final_unit_price ?? item.unit_price) || 0
@@ -909,16 +909,16 @@
                  selection fires all pending items. -->
             @if (canShowKitchenDispatch()) {
               <div
-                class="mt-4 border-t border-border pt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+                class="mt-2 border-t border-border pt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5"
               >
-                <p class="text-xs text-gray-500">
+                <p class="text-[11px] text-gray-500">
                   {{ selectedKitchenItemIds().size }} de
                   {{ pendingKitchenItems().length }} plato(s) seleccionado(s)
                 </p>
-                <div class="flex flex-wrap items-center gap-2">
+                <div class="flex flex-wrap items-center gap-1.5">
                   <app-button
                     variant="ghost"
-                    size="sm"
+                    size="xsm"
                     [disabled]="isFiringKitchen()"
                     (clicked)="selectAllPendingKitchen()"
                   >
@@ -926,7 +926,7 @@
                   </app-button>
                   <app-button
                     variant="ghost"
-                    size="sm"
+                    size="xsm"
                     [disabled]="isFiringKitchen() || selectedKitchenItemIds().size === 0"
                     (clicked)="clearKitchenSelection()"
                   >
@@ -934,7 +934,7 @@
                   </app-button>
                   <app-button
                     variant="primary"
-                    size="sm"
+                    size="xsm"
                     [loading]="isFiringKitchen()"
                     [disabled]="pendingKitchenItems().length === 0"
                     (clicked)="fireSelectedToKitchen()"
@@ -946,14 +946,14 @@
               </div>
             }
 	            @if (appliedTierSummary().length > 0) {
-	              <div class="mt-4 border-t border-border pt-3">
-	                <p class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">
+	              <div class="mt-2 border-t border-border pt-2">
+	                <p class="text-[11px] font-bold uppercase tracking-wide text-gray-500 mb-1.5">
 	                  Resumen por tarifa
 	                </p>
-	                <div class="flex flex-wrap gap-2">
+	                <div class="flex flex-wrap gap-1.5">
 	                  @for (tier of appliedTierSummary(); track tier.name) {
 	                    <span
-	                      class="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-900"
+	                      class="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-900"
 	                    >
 	                      <span class="font-semibold">{{ tier.name }}</span>
 	                      <span>{{ tier.total | currency }}</span>
