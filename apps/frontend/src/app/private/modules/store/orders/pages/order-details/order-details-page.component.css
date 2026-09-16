@@ -171,7 +171,6 @@
   flex: 1;
 }
 
-.customer-eyebrow,
 .customer-address-heading span {
   color: var(--color-text-secondary);
   font-size: 0.6875rem;
@@ -191,7 +190,7 @@
 
 .customer-contact-panel {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.5rem;
 }
 
@@ -245,11 +244,14 @@
 }
 
 .customer-contact-copy strong {
+  display: block;
   color: inherit;
   font-size: 0.75rem;
   font-weight: 800;
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .customer-address-grid {
@@ -429,10 +431,6 @@
 
   .customer-name-block h2 {
     font-size: 1.125rem;
-  }
-
-  .customer-contact-panel {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .customer-address-grid {

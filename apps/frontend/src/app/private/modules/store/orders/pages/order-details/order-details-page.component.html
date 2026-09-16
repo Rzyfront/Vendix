@@ -288,7 +288,6 @@
                     }}
                   </div>
                   <div class="customer-name-block">
-                    <span class="customer-eyebrow">Cliente</span>
                     <h2>
                       {{ customerDisplayName() }}
                       @if (isConsumidorFinal() && !customerDisplayName().length) {
@@ -311,9 +310,10 @@
                     <a
                       class="customer-contact-line"
                       [href]="'mailto:' + orderData.users?.email"
+                      [title]="orderData.users?.email"
                     >
                       <span class="customer-contact-icon">
-                        <app-icon name="mail" size="15"></app-icon>
+                        <app-icon name="mail" size="13"></app-icon>
                       </span>
                       <span class="customer-contact-copy">
                         <strong>{{ orderData.users?.email }}</strong>
@@ -322,7 +322,7 @@
                   } @else {
                     <div class="customer-contact-line is-muted">
                       <span class="customer-contact-icon">
-                        <app-icon name="mail" size="15"></app-icon>
+                        <app-icon name="mail" size="13"></app-icon>
                       </span>
                       <span class="customer-contact-copy">
                         <strong>Sin correo registrado</strong>
@@ -334,9 +334,10 @@
                     <a
                       class="customer-contact-line"
                       [href]="'tel:' + orderData.users?.phone"
+                      [title]="orderData.users?.phone"
                     >
                       <span class="customer-contact-icon">
-                        <app-icon name="phone" size="15"></app-icon>
+                        <app-icon name="phone" size="13"></app-icon>
                       </span>
                       <span class="customer-contact-copy">
                         <strong>{{ orderData.users?.phone }}</strong>
@@ -345,7 +346,7 @@
                   } @else {
                     <div class="customer-contact-line is-muted">
                       <span class="customer-contact-icon">
-                        <app-icon name="phone" size="15"></app-icon>
+                        <app-icon name="phone" size="13"></app-icon>
                       </span>
                       <span class="customer-contact-copy">
                         <strong>Sin telefono registrado</strong>
