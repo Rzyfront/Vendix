@@ -439,6 +439,17 @@
   <!-- JOBS TAB (colas + búsqueda por id)      -->
   <!-- ═══════════════════════════════════════ -->
   @if (activeTab() === "jobs") {
+    <div class="rounded-lg border border-border bg-background p-4 space-y-1 mb-4">
+      <h3 class="text-sm font-semibold text-text-primary">Qué son los jobs</h3>
+      <p class="text-sm text-text-secondary">
+        Trabajos IA que corren en segundo plano (colas BullMQ) porque tardan
+        demasiado para responder en la petición HTTP: el endpoint devuelve
+        <span class="font-mono">202 + job_id</span> y el resultado se consulta
+        por ID más abajo. Aquí se monitorean (en espera, activos, listos,
+        fallidos); no se crean a mano: nacen de los flujos del producto
+        (OCR de recibos y gastos, generación masiva, indexación).
+      </p>
+    </div>
     <!-- Queue Grid -->
     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
       @for (queue of queues(); track queue.name) {
@@ -448,6 +459,11 @@
               <h4 class="text-sm font-semibold text-text-primary truncate">
                 {{ queue.name }}
               </h4>
+              @if (queueDescription(queue.name)) {
+                <p class="text-xs text-text-secondary mt-0.5">
+                  {{ queueDescription(queue.name) }}
+                </p>
+              }
               <p class="text-xs text-text-secondary mt-0.5">
                 @if (queue.available) {
                   {{ queueTotal(queue) }} jobs registrados

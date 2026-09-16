@@ -358,6 +358,20 @@ export const AI_ENGINE_QUEUE_NAMES = [
   'expense-scan',
 ] as const;
 
+/** Qué hace cada cola, en lenguaje del operador. */
+export const AI_QUEUE_DESCRIPTIONS: Record<string, string> = {
+  'ai-generation':
+    'Generación en segundo plano: textos e imágenes que tardan demasiado para una petición HTTP.',
+  'ai-embedding':
+    'Indexación para búsqueda semántica (RAG): convierte documentos en embeddings.',
+  'ai-agent':
+    'Tareas delegadas del agente: revisiones y validaciones que corren sin supervisión.',
+  'receipt-scan':
+    'OCR de recibos y facturas de planillas de despacho. El endpoint responde 202 y se consulta por ID.',
+  'expense-scan':
+    'OCR de facturas de gasto. El endpoint responde 202 y se consulta por ID.',
+};
+
 export type AIQueueName = (typeof AI_ENGINE_QUEUE_NAMES)[number];
 
 export interface AIJobLookupResult {

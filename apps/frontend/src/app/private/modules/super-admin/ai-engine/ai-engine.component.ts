@@ -24,6 +24,7 @@ import {
   AIQueueOverviewEntry,
   AIJobLookupResult,
   AI_ENGINE_QUEUE_NAMES,
+  AI_QUEUE_DESCRIPTIONS,
   AIAgent,
   AIAgentQueryDto,
 } from './interfaces';
@@ -159,6 +160,9 @@ export class AIEngineComponent implements OnInit {
 
   // --- Jobs State (F5: colas + búsqueda por id) ---
   queues = signal<AIQueueOverviewEntry[]>([]);
+  queueDescription(name: string): string {
+    return AI_QUEUE_DESCRIPTIONS[name] ?? '';
+  }
   isLoadingQueues = signal<boolean>(false);
   jobLookupForm: FormGroup = this.fb.group({
     queue: ['ai-generation', [Validators.required]],
