@@ -108,6 +108,7 @@ import {
 } from '../../../../../../shared/services/print/dispatch-ticket-autoprint';
 import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
+import { DispatchNotePrintService } from '../../../dispatch-notes/services/dispatch-note-print.service';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
 import {
   RepartosService,
@@ -1306,6 +1307,17 @@ export class OrderDetailsPageComponent {
       icon: 'package',
       disabled: !this.canPrintDispatchTicketExplicit(),
     },
+    // Agente C — remisión del despacho (`formatType: 'dispatch_note'`).
+    // `disabled` sigue a `canPrintDispatchNote` (hay remisión): sin
+    // remisión no hay `documentId` para el gateway. Se renderiza vía las
+    // `actions()` del sticky-header, igual que `print` y el e-ticket.
+    {
+      id: 'print-dispatch-note',
+      label: 'Imprimir despacho',
+      variant: 'outline',
+      icon: 'file-text',
+      disabled: !this.canPrintDispatchNote(),
+    },
   ]);
 
   /**
@@ -1348,6 +1360,41 @@ export class OrderDetailsPageComponent {
       return false;
     }
     return true;
+  });
+
+  /**
+   * Agente C — predicado del botón "Imprimir despacho" (remisión). La única
+   * guarda es la existencia de remisiones: la card "Despacho / Remisiones"
+   * se pinta con `dispatchNotes().length > 0` y el headerActions, el botón
+   * del sidebar y el handler consultan este computed. Sin remisión no hay
+   * `documentId` que mandar al gateway (`formatType: 'dispatch_note'`).
+   */
+  readonly canPrintDispatchNote = computed<boolean>(
+    () => this.dispatchNotes().length > 0,
+  );
+
+  /**
+   * Agente C — badge pre-despacho clickeable. `true` cuando la orden exige
+   * gestión de envío (`delivery_type` distinto de `direct_delivery` /
+   * `other`), sigue en estado no terminal y aún no tiene despacho (sin
+   * `tracking_number` y sin remisiones). En post-despacho es `false` y el
+   * badge del sticky-header (estado de la orden, no clickeable) queda solo.
+   */
+  readonly showPreDispatchBadge = computed<boolean>(() => {
+    const order = this.order();
+    if (!order) return false;
+    const delivery = order.delivery_type || 'direct_delivery';
+    if (delivery === 'direct_delivery' || delivery === 'other') return false;
+    const terminalStates: OrderState[] = [
+      'shipped',
+      'delivered',
+      'finished',
+      'cancelled',
+      'refunded',
+    ];
+    if (terminalStates.includes(order.state as OrderState)) return false;
+    if ((this.flowMetadata().tracking_number ?? '').trim()) return false;
+    return this.dispatchNotes().length === 0;
   });
 
   readonly paymentReceiptSubtitle = computed(() => {
@@ -1420,6 +1467,11 @@ export class OrderDetailsPageComponent {
   // desde acá sólo lanzamos el manual al pulsar el botón del header o de
   // la card "Gestión de Envío".
   private readonly dispatchTicketPrint = inject(DispatchTicketPrintService);
+  // Agente C — impresión de la remisión (`formatType: 'dispatch_note'`).
+  // Tercer carril de impresión del detalle, junto a `ticketService`
+  // (`pos_order` vía `resolveAndPrint`) y `dispatchTicketPrint`
+  // (`formatType: 'dispatch_ticket'`): cada formato sale por su servicio.
+  private readonly dispatchNotePrint = inject(DispatchNotePrintService);
   // CP-DTLP Phase E.3 — guard del disparador manual (default true ADR-7).
   private readonly settingsFacade = inject(StoreSettingsFacade);
 
@@ -2901,6 +2953,9 @@ export class OrderDetailsPageComponent {
     } else if (actionId === 'print-dispatch-ticket') {
       // CP-DTLP Phase E.3 — disparador manual desde header.
       void this.printDispatchTicket();
+    } else if (actionId === 'print-dispatch-note') {
+      // Agente C — remisión del despacho desde header.
+      void this.printDispatchNote();
     }
   }
 
@@ -2997,21 +3052,12 @@ export class OrderDetailsPageComponent {
   }
 
   /**
-   * CP-DTLP Phase E.3 / QUI-764b — disparador 2 manual del tiquete de
-   * despacho desde la pantalla de la orden. Lo invocan el botón del
-   * headerActions (`e-ticket de envío`) y el botón secundario de la card
-   * "Gestión de Envío".
-   *
-   * La guarda se delega a `canPrintDispatchTicketExplicit` — el MISMO
-   * computed que el `disabled` del headerActions. Una sola fuente de
-   * verdad, sin condición paralela que pueda divergir. Política MANUAL:
-   * `print_dispatch_ticket_enabled` apagado mata todo; `direct_delivery`
-   * requiere `print_dispatch_ticket_on_counter` prendido; cualquier otro
-   * `delivery_type` imprime cuando el formato está habilitado. Ver
-   * docblock de `canPrintDispatchTicketExplicit` para la tabla completa.
-   * La copia se resuelve en `DispatchTicketPrintService` desde
-   * `receipts.printing.dispatch_ticket`; con `trigger: 'explicit'` y
-   * `copies: 0` el servicio imprime 0 copias.
+   * CP-DTLP Phase E.3 / QUI-764b — disparador manual del tiquete de
+   * despacho (`formatType: 'dispatch_ticket'`, distinto de `dispatch_note`
+   * y de `pos_order`). Lo invocan el headerActions y el botón de la card
+   * "Gestión de Envío". Guarda: `canPrintDispatchTicketExplicit` (la misma
+   * del `disabled`; ver su docblock para la política MANUAL). Datos:
+   * `buildDispatchTicketData` (no cambiar su mapeo).
    */
   async printDispatchTicket(): Promise<void> {
     const order = this.order();
@@ -3030,6 +3076,49 @@ export class OrderDetailsPageComponent {
       );
       this.toastService.error('No se pudo imprimir el tiquete de despacho');
     }
+  }
+
+  /**
+   * Agente C — imprime la remisión (despacho) más reciente de la orden vía
+   * `DispatchNotePrintService` (gateway, `formatType: 'dispatch_note'` —
+   * distinto de `dispatch_ticket` del e-ticket y de `pos_order` del ticket).
+   * La guarda es `canPrintDispatchNote` (hay remisión), el MISMO computed
+   * que deshabilita el headerActions y oculta el botón del sidebar. El
+   * manejo de error replica `printOrder`: rastro en consola + toast.
+   */
+  async printDispatchNote(): Promise<void> {
+    if (!this.canPrintDispatchNote()) return;
+    const note = this.dispatchNotes()[0];
+    if (!note) return;
+
+    try {
+      await this.dispatchNotePrint.printDispatchNote(note);
+    } catch (err) {
+      console.error('Error generating dispatch note:', err);
+      this.toastService.error('Error al generar la remisión');
+    }
+  }
+
+  /**
+   * Agente C — lleva al operador a la card "Gestión de Envío"
+   * (`#gestionEnvioAnchor`): scroll suave + foco para teclado/lector de
+   * pantalla. Respeta `prefers-reduced-motion`. Lo invoca el badge
+   * pre-despacho clickeable.
+   */
+  focusGestionEnvio(): void {
+    const el = document.getElementById('gestionEnvioAnchor');
+    if (!el) return;
+    const reduceMotion =
+      window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ??
+      false;
+    el.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth',
+      block: 'start',
+    });
+    window.setTimeout(
+      () => el.focus({ preventScroll: true }),
+      reduceMotion ? 0 : 350,
+    );
   }
 
   /**
