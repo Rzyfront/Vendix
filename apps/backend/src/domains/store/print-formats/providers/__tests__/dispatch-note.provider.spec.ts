@@ -31,6 +31,12 @@
  *     (mismo gate que el otro riel de impresión) — fail-closed sin config.
  *  7. El cliente prioriza el snapshot `note.customer_name`/`customer_tax_id`
  *     y cae a la relación `note.customer` sólo si el snapshot falta.
+ *  8. Hallazgo 1b (F-228 reabierto): fila B con el total en BASE — el
+ *     discriminante (`resolveDispatchNoteLinePrintedGross`) suma el impuesto
+ *     y la fila cuadra consigo misma (177.310 × 2 = 354.620).
+ *  9. Hallazgo 1b con descuento: fila en bruto con descuento — el
+ *     discriminante resta el descuento antes de comparar, así que el total
+ *     persistido se mantiene y la fila cuadra (107.100 × 3 = 321.300).
  */
 import { VendixHttpException } from 'src/common/errors';
 import { DispatchNoteDataProvider } from '../dispatch-note.provider';
@@ -128,6 +134,78 @@ describe('DispatchNoteDataProvider', () => {
         total_price: '80000.00',
         discount_amount: '0.00',
         tax_amount: '0.00',
+      },
+    ],
+    customer: null,
+    store: storeRow(),
+  });
+
+  /** Fila B histórica: el `total_price` quedó persistido en BASE. */
+  const baseTotalDispatchNoteRow = () => ({
+    id: 503,
+    dispatch_number: 'REM-0503',
+    created_at: new Date('2026-09-12T10:00:00.000Z'),
+    state: 'shipped',
+    carrier_name: 'Coordinadora',
+    tracking_number: 'GUIA-2',
+    notes: null,
+    customer_name: 'Distribuciones La 33',
+    customer_phone: '+57 320 444 5566',
+    customer_tax_id: '800555666',
+    customer_address: { address_line1: 'Cll 33 # 70-20', city: 'Medellín' },
+    subtotal_amount: '298000.00',
+    discount_amount: '0.00',
+    tax_amount: '56620.00',
+    shipping_cost: '0.00',
+    grand_total: '354620.00',
+    dispatch_note_items: [
+      {
+        product_id: 11,
+        product: { id: 11, name: 'Cable Encauchetado 3x12' },
+        product_variant: null,
+        ordered_quantity: 2,
+        dispatched_quantity: 2,
+        unit_price: '149000.00',
+        // Fila B: 149.000 × 2 = 298.000 en BASE (sin el impuesto de 56.620).
+        total_price: '298000.00',
+        discount_amount: '0.00',
+        tax_amount: '56620.00',
+      },
+    ],
+    customer: null,
+    store: storeRow(),
+  });
+
+  /** Fila en bruto CON descuento: el total ya trae base − descuento + IVA. */
+  const discountedGrossDispatchNoteRow = () => ({
+    id: 504,
+    dispatch_number: 'REM-0504',
+    created_at: new Date('2026-09-13T10:00:00.000Z'),
+    state: 'shipped',
+    carrier_name: 'Coordinadora',
+    tracking_number: 'GUIA-3',
+    notes: null,
+    customer_name: 'Ferretería El Tornillo',
+    customer_phone: '+57 320 111 2233',
+    customer_tax_id: '800222333',
+    customer_address: { address_line1: 'Cll 80 # 40-10', city: 'Bogotá' },
+    subtotal_amount: '300000.00',
+    discount_amount: '30000.00',
+    tax_amount: '51300.00',
+    shipping_cost: '0.00',
+    grand_total: '321300.00',
+    dispatch_note_items: [
+      {
+        product_id: 9,
+        product: { id: 9, name: 'Taladro Percutor 750W' },
+        product_variant: { id: 3, sku: 'TAL-750W' },
+        ordered_quantity: 3,
+        dispatched_quantity: 3,
+        unit_price: '100000.00',
+        // 100.000 × 3 − 30.000 + 51.300 = 321.300 en BRUTO.
+        total_price: '321300.00',
+        discount_amount: '30000.00',
+        tax_amount: '51300.00',
       },
     ],
     customer: null,
@@ -288,6 +366,51 @@ describe('DispatchNoteDataProvider', () => {
 
     expect(data.customer!.name).toBe('Ferretería El Tornillo');
     expect(data.customer!.tax_id).toBe('800222333');
+  });
+
+  it('8. fila B en base: el discriminante suma el impuesto y la fila cuadra (hallazgo 1b)', async () => {
+    const { prisma } = prismaWith(baseTotalDispatchNoteRow());
+    const data = await new DispatchNoteDataProvider(prisma).fetchDocumentData(
+      7,
+      503,
+    );
+
+    // Base de línea 149.000 × 2 = 298.000; + impuesto 56.620 = 354.620, que
+    // NO coincide con el persistido (298.000) → el total estaba en base y se
+    // lleva a bruto sumando el impuesto. Unitario: 354.620 / 2 = 177.310.
+    expect(data.items).toHaveLength(1);
+    expect(data.items[0]).toMatchObject({
+      quantity: 2,
+      unit_price: 177310,
+      total_price: 354620,
+    });
+    const linea = data.items[0]!;
+    expect(linea.unit_price! * linea.quantity!).toBe(linea.total_price);
+    const suma = data.items.reduce((a, i) => a + Number(i.total_price || 0), 0);
+    expect(suma).toBe(data.totals.grand_total);
+  });
+
+  it('9. fila en bruto con descuento: el discriminante resta el descuento y mantiene el total (hallazgo 1b)', async () => {
+    const { prisma } = prismaWith(discountedGrossDispatchNoteRow());
+    const data = await new DispatchNoteDataProvider(prisma).fetchDocumentData(
+      7,
+      504,
+    );
+
+    // Base de línea 100.000 × 3 − 30.000 = 270.000; + impuesto 51.300 =
+    // 321.300, que SÍ coincide con el persistido → ya era bruto y se
+    // mantiene. Unitario: 321.300 / 3 = 107.100. Sin restar el descuento, el
+    // discriminante lo habría clasificado mal (diferencia de 30.000).
+    expect(data.items).toHaveLength(1);
+    expect(data.items[0]).toMatchObject({
+      quantity: 3,
+      unit_price: 107100,
+      total_price: 321300,
+    });
+    const linea = data.items[0]!;
+    expect(linea.unit_price! * linea.quantity!).toBe(linea.total_price);
+    const suma = data.items.reduce((a, i) => a + Number(i.total_price || 0), 0);
+    expect(suma).toBe(data.totals.grand_total);
   });
 
   it('fetchDocumentData rechaza un documentId no numérico antes de tocar la base', async () => {
