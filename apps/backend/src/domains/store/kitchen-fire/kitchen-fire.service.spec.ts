@@ -883,6 +883,10 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       product: {
         recipes: [{ id: 7, is_active: false, product_variant_id: null }],
       },
+      // Paso 3 — `KITCHEN_TICKET_INCLUDE` siempre trae
+      // `order_item.is_takeaway`; el mock lo refleja para que
+      // `markDelivered` no rechace por takeaway en estos tests.
+      order_item: { is_takeaway: true },
     });
     const makeTicket = (status: string, items: any[]) => ({
       id: 555,
@@ -1041,6 +1045,177 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       await service.cancelTicket(555);
 
       expect(prismaMock.recipes.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('pasos 1+3 — puente compartido y entrega solo takeaway', () => {
+    const takeawayItem = (
+      id: number,
+      takeaway: boolean,
+      status = 'ready',
+    ) => ({
+      id,
+      order_item_id: 10 + id,
+      product_id: 50,
+      status,
+      order_item: { is_takeaway: takeaway },
+    });
+    const makeTicket = (status: string, items: any[]) => ({
+      id: 555,
+      store_id: 1,
+      order_id: 100,
+      kds_id: 1,
+      status,
+      items,
+    });
+
+    beforeEach(() => {
+      (service as any).kdsSessionsService = {
+        assertCanMutateStationTicket: jest.fn().mockResolvedValue(undefined),
+        attributeOpenSessionToTicketConsumption: jest
+          .fn()
+          .mockResolvedValue(undefined),
+      };
+      prismaMock.kitchen_tickets = {
+        findFirst: jest.fn(),
+        update: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([]),
+      };
+      prismaMock.kitchen_ticket_items = {
+        updateMany: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([]),
+      };
+      prismaMock.order_items.updateMany = jest
+        .fn()
+        .mockResolvedValue({ count: 1 });
+    });
+
+    const setupCancelTx = () => {
+      prismaMock.$transaction.mockImplementation(async (cb: any) =>
+        cb({
+          kitchen_tickets: {
+            update: jest.fn().mockResolvedValue({}),
+          },
+          kitchen_ticket_items: {
+            updateMany: jest.fn().mockResolvedValue({}),
+          },
+        }),
+      );
+    };
+
+    it('paso 1 — cancelar el último ticket pendiente emite kitchen.order_all_delivered', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('pending', [takeawayItem(11, true, 'pending')]),
+      );
+      setupCancelTx();
+      // El otro ticket de la orden ya fue entregado; este cancel deja
+      // todos terminal con ≥1 delivered y cierra el handoff.
+      prismaMock.kitchen_tickets.findMany.mockResolvedValue([
+        { status: 'delivered' },
+        { status: 'cancelled' },
+      ]);
+
+      await service.cancelTicket(555);
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        'kitchen.order_all_delivered',
+        { orderId: 100, storeId: 1 },
+      );
+    });
+
+    it('paso 1 — cancelar sin completar el handoff no emite el puente', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('pending', [takeawayItem(11, true, 'pending')]),
+      );
+      setupCancelTx();
+      // Queda otro ticket pendiente: el handoff sigue abierto.
+      prismaMock.kitchen_tickets.findMany.mockResolvedValue([
+        { status: 'pending' },
+        { status: 'cancelled' },
+      ]);
+
+      await service.cancelTicket(555);
+
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(
+        'kitchen.order_all_delivered',
+        expect.anything(),
+      );
+    });
+
+    it('paso 3 — ticket 100 % takeaway se entrega y evalúa el puente', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('ready', [takeawayItem(11, true), takeawayItem(12, true)]),
+      );
+      prismaMock.kitchen_ticket_items.findMany.mockResolvedValue([
+        { order_item_id: 21 },
+        { order_item_id: 22 },
+      ]);
+      prismaMock.kitchen_tickets.findMany.mockResolvedValue([
+        { status: 'delivered' },
+      ]);
+
+      const result = await service.markDelivered(555);
+
+      expect(result).toMatchObject({ id: 555 });
+      expect(prismaMock.kitchen_tickets.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 555 } }),
+      );
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        'kitchen.order_all_delivered',
+        { orderId: 100, storeId: 1 },
+      );
+    });
+
+    it('paso 3 — ticket de mesa se bloquea completo con KITCHEN_TICKET_NOT_TAKEAWAY', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('ready', [takeawayItem(11, false), takeawayItem(12, false)]),
+      );
+
+      const err = await service.markDelivered(555).catch((e) => e);
+
+      expect(err).toMatchObject({ errorCode: 'KITCHEN_TICKET_NOT_TAKEAWAY' });
+      const body = (err as any).getResponse?.() ?? {};
+      expect(body.details).toMatchObject({
+        hint: 'Solo los platos para llevar se entregan en cocina',
+      });
+      expect(prismaMock.kitchen_tickets.update).not.toHaveBeenCalled();
+      expect(
+        prismaMock.kitchen_ticket_items.updateMany,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('paso 3 — ticket mixto (una fila no-takeaway) se bloquea completo', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('ready', [takeawayItem(11, true), takeawayItem(12, false)]),
+      );
+
+      const err = await service.markDelivered(555).catch((e) => e);
+
+      expect(err).toMatchObject({ errorCode: 'KITCHEN_TICKET_NOT_TAKEAWAY' });
+      expect(prismaMock.kitchen_tickets.update).not.toHaveBeenCalled();
+      expect(
+        prismaMock.kitchen_ticket_items.updateMany,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('paso 3 — fila cancelada no-takeaway no bloquea la entrega', async () => {
+      prismaMock.kitchen_tickets.findFirst.mockResolvedValue(
+        makeTicket('ready', [
+          takeawayItem(11, false, 'cancelled'),
+          takeawayItem(12, true),
+        ]),
+      );
+      prismaMock.kitchen_ticket_items.findMany.mockResolvedValue([
+        { order_item_id: 22 },
+      ]);
+      prismaMock.kitchen_tickets.findMany.mockResolvedValue([
+        { status: 'delivered' },
+      ]);
+
+      const result = await service.markDelivered(555);
+
+      expect(result).toMatchObject({ id: 555 });
+      expect(prismaMock.kitchen_tickets.update).toHaveBeenCalled();
     });
   });
 });
