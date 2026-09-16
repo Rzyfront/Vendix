@@ -841,7 +841,9 @@ export class ItemPickerStepComponent {
         }
       }
     }
-    const taxAmount = price * (taxRate / 100);
+    // tax_amount es impuesto TOTAL de la línea: precio × tarifa × cantidad despachada.
+    const dispatchedQuantity = 1;
+    const taxAmount = price * (taxRate / 100) * dispatchedQuantity;
 
     const item: WizardItem = {
       product_id: Number(product.id),
@@ -850,9 +852,9 @@ export class ItemPickerStepComponent {
       product_image_url: product.image_url || product.image,
       product_variant_id: variantId,
       requires_serial_numbers: !!product.requires_serial_numbers,
-      ordered_quantity: 1,
+      ordered_quantity: dispatchedQuantity,
       pending_quantity: 9999,
-      dispatched_quantity: 1,
+      dispatched_quantity: dispatchedQuantity,
       unit_price: price,
       discount_amount: 0,
       tax_amount: taxAmount,

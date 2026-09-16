@@ -162,7 +162,8 @@ export class DispatchNoteWizardService {
     for (const item of this.items()) {
       subtotal += item.unit_price * item.dispatched_quantity;
       discount += item.discount_amount * item.dispatched_quantity;
-      tax += item.tax_amount * item.dispatched_quantity;
+      // tax_amount es impuesto TOTAL de la línea: se suma sin multiplicar por cantidad.
+      tax += item.tax_amount;
     }
     return { subtotal, discount, tax, grandTotal: subtotal - discount + tax };
   });
@@ -420,7 +421,12 @@ export class DispatchNoteWizardService {
         ordered_quantity: oi.quantity,
         pending_quantity: pending,
         dispatched_quantity: dispatched,
-        tax_amount: oi.tax_amount_item ?? 0,
+        // tax_amount es impuesto TOTAL de la línea: se prorratea a lo despachado;
+        // sin cantidad de orden se usa el valor tal cual.
+        tax_amount:
+          oi.quantity > 0
+            ? ((oi.tax_amount_item ?? 0) * dispatched) / oi.quantity
+            : (oi.tax_amount_item ?? 0),
         discount_amount: 0,
       };
     });
