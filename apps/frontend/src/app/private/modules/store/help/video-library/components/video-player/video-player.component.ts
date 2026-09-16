@@ -85,7 +85,11 @@ export class VideoPlayerComponent {
 
   embedUrl = computed<SafeResourceUrl | null>(() => {
     const source = this.videoSource();
-    const id = this.externalId() || this.extractIdFromUrl(this.videoUrl(), source);
+    const rawId = this.externalId() || this.extractIdFromUrl(this.videoUrl(), source);
+    if (!rawId || !/^[a-zA-Z0-9_-]+$/.test(rawId)) {
+      return null;
+    }
+    const id = rawId;
     const auto = this.autoplay() ? 1 : 0;
 
     if (source === 'YOUTUBE' && id) {

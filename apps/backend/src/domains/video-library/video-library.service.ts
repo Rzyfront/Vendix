@@ -208,28 +208,47 @@ export class VideoLibraryService {
   }
 
   async toggleLike(id: number, liked?: boolean) {
-    const current = await this.globalPrisma.videos.findUnique({
-      where: { id },
-      select: { like_count: true },
-    });
+    if (liked === false) {
+      const current = await this.globalPrisma.videos.findUnique({
+        where: { id },
+        select: { id: true, like_count: true },
+      });
 
-    if (!current) {
-      throw new NotFoundException('Video no encontrado');
+      if (!current) {
+        throw new NotFoundException('Video no encontrado');
+      }
+
+      if (current.like_count <= 0) {
+        return { like_count: 0 };
+      }
+
+      const updated = await this.globalPrisma.videos.update({
+        where: { id },
+        data: {
+          like_count: { decrement: 1 },
+        },
+        select: { id: true, like_count: true },
+      });
+
+      return { like_count: Math.max(0, updated.like_count) };
     }
 
-    const currentLikes = current.like_count || 0;
-    const newLikes =
-      liked === false ? Math.max(0, currentLikes - 1) : currentLikes + 1;
+    try {
+      const updated = await this.globalPrisma.videos.update({
+        where: { id },
+        data: {
+          like_count: { increment: 1 },
+        },
+        select: { id: true, like_count: true },
+      });
 
-    const updated = await this.globalPrisma.videos.update({
-      where: { id },
-      data: {
-        like_count: newLikes,
-      },
-      select: { id: true, like_count: true },
-    });
-
-    return { like_count: updated.like_count };
+      return { like_count: updated.like_count };
+    } catch (error: any) {
+      if (error?.code === 'P2025') {
+        throw new NotFoundException('Video no encontrado');
+      }
+      throw error;
+    }
   }
 
   async getCategories() {

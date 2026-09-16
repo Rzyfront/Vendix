@@ -6,6 +6,8 @@ import {
   IsBoolean,
   IsArray,
   MaxLength,
+  IsUrl,
+  Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -36,6 +38,7 @@ export class CreateVideoDto {
   description?: string;
 
   @IsString()
+  @IsUrl({}, { message: 'video_url debe ser una URL válida' })
   video_url: string;
 
   @IsOptional()
@@ -45,6 +48,10 @@ export class CreateVideoDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)
+  @Matches(/^[a-zA-Z0-9_-]+$/, {
+    message:
+      'external_id solo puede contener caracteres alfanuméricos, guiones y guiones bajos',
+  })
   external_id?: string;
 
   @IsOptional()

@@ -76,19 +76,34 @@ export function stripAccents(str: string): string {
 
 /**
  * Descompone una frase en tokens útiles de búsqueda.
+ * Preserva tanto los términos con tildes originales (para coincidir con contains/ILIKE en DB)
+ * como sus variantes sin tildes (para coincidir con keywords o textos sin acentos).
  */
 export function tokenizeQuery(input: string): string[] {
   if (!input || !input.trim()) return [];
-  const normalized = stripAccents(input.toLowerCase().trim());
-  const words = normalized
+  const lower = input.toLowerCase().trim();
+  const words = lower
     .split(/[^\p{L}\p{N}]+/u)
-    .filter((w) => w.length >= 2 && !SPANISH_STOPWORDS.has(w));
-  return Array.from(new Set(words)).slice(0, 10);
+    .filter((w) => w.length >= 2);
+
+  const resultSet = new Set<string>();
+  for (const w of words) {
+    const unaccented = stripAccents(w);
+    if (SPANISH_STOPWORDS.has(unaccented)) {
+      continue;
+    }
+    resultSet.add(w);
+    if (unaccented !== w) {
+      resultSet.add(unaccented);
+    }
+  }
+  return Array.from(resultSet).slice(0, 15);
 }
 
 /**
  * Normaliza las palabras clave ingresadas por un administrador.
- * Guarda tanto las frases completas como los términos individuales indexables.
+ * Guarda tanto las frases completas como los términos individuales indexables,
+ * preservando versiones con y sin tildes.
  *
  * Ejemplo:
  *   Input: ["cambiar cliente orden", "borrar producto"]
@@ -118,13 +133,19 @@ export function normalizeKeywords(
       resultSet.add(unaccented);
     }
 
-    // 3. Palabras individuales que no sean stopwords
-    const tokens = unaccented
+    // 3. Palabras individuales que no sean stopwords (con y sin tildes)
+    const rawTokens = phrase
       .split(/[^\p{L}\p{N}]+/u)
-      .filter((t) => t.length >= 2 && !SPANISH_STOPWORDS.has(t));
+      .filter((t) => t.length >= 2);
 
-    for (const token of tokens) {
-      resultSet.add(token);
+    for (const token of rawTokens) {
+      const unaccentedToken = stripAccents(token);
+      if (!SPANISH_STOPWORDS.has(unaccentedToken)) {
+        resultSet.add(token);
+        if (unaccentedToken !== token) {
+          resultSet.add(unaccentedToken);
+        }
+      }
     }
   }
 
@@ -154,7 +175,8 @@ export function calculateRelevance(
   const keywords = (item.keywords || []).map((k) => stripAccents(k.toLowerCase()));
   const tags = (item.tags || []).map((t) => stripAccents(t.toLowerCase()));
 
-  return tokens.reduce((score, token) => {
+  return tokens.reduce((score, rawToken) => {
+    const token = stripAccents(rawToken.toLowerCase());
     let tokenScore = 0;
 
     // Coincidencia en Keywords: peso 4 (prioridad máxima)
