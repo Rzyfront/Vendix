@@ -283,30 +283,6 @@
                         >CF</span>
                       }
                     </h2>
-                    <div class="customer-data-pills">
-                      <span
-                        class="customer-data-pill"
-                        [class.customer-data-pill-muted]="!orderData.users?.email"
-                      >
-                        <app-icon name="mail-check" size="13"></app-icon>
-                        {{
-                          orderData.users?.email
-                            ? "Correo registrado"
-                            : "Sin correo"
-                        }}
-                      </span>
-                      <span
-                        class="customer-data-pill"
-                        [class.customer-data-pill-muted]="!orderData.users?.phone"
-                      >
-                        <app-icon name="phone" size="13"></app-icon>
-                        {{
-                          orderData.users?.phone
-                            ? "Telefono registrado"
-                            : "Sin telefono"
-                        }}
-                      </span>
-                    </div>
                   </div>
                 </div>
 
@@ -365,7 +341,7 @@
 
               <div class="customer-address-grid">
                 <!-- Direccion de Entrega -->
-                <section class="customer-address-panel">
+                <section class="customer-address-panel addr-mini-card">
                   <div class="customer-address-heading">
                     <span class="customer-address-icon">
                       <app-icon name="truck" size="16"></app-icon>
@@ -374,6 +350,15 @@
                       <span>Entrega</span>
                       <h3>Direccion de Entrega</h3>
                     </div>
+                    @if (
+                      orderData.shipping_address_id &&
+                      orderData.shipping_address_id ===
+                        orderData.billing_address_id
+                    ) {
+                      <span class="addr-badge">Ambas</span>
+                    } @else {
+                      <span class="addr-badge">Envío</span>
+                    }
                   </div>
                   @if (
                     orderData.addresses_orders_shipping_address_idToaddresses ||
@@ -435,8 +420,15 @@
                   }
                 </section>
 
+                @if (
+                  !(
+                    orderData.shipping_address_id &&
+                    orderData.shipping_address_id ===
+                      orderData.billing_address_id
+                  )
+                ) {
                 <!-- Direccion de Facturacion -->
-                <section class="customer-address-panel">
+                <section class="customer-address-panel addr-mini-card">
                   <div class="customer-address-heading">
                     <span class="customer-address-icon">
                       <app-icon name="file-text" size="16"></app-icon>
@@ -445,6 +437,7 @@
                       <span>Factura</span>
                       <h3>Direccion de Facturacion</h3>
                     </div>
+                    <span class="addr-badge">Facturación</span>
                   </div>
                   @if (
                     orderData.addresses_orders_billing_address_idToaddresses;
@@ -474,6 +467,7 @@
                     </div>
                   }
                 </section>
+                }
               </div>
             </div>
           </app-card>
