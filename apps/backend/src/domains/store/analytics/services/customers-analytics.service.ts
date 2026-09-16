@@ -31,6 +31,20 @@ export class CustomersAnalyticsService {
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
   /**
+   * ADR-01 (F-002) — ventana de inactividad X de la definición derivada de
+   * abandono. Un carrito cuenta como abandonado cuando lleva al menos X
+   * minutos sin actividad (`last_activity_at < NOW() - X`), sigue `active`
+   * y conserva items. X vive aquí como constante nombrada (sin migración,
+   * sin job, solo lectura).
+   *
+   * 30 minutos: muy por debajo del `cart_expiration_hours` por defecto
+   * (24 h), así el carrito es medible mucho antes de que el expiry borre
+   * sus items; solo afecta al borde reciente de la ventana actual, las
+   * ventanas históricas quedan estables.
+   */
+  private readonly ABANDONED_CART_INACTIVITY_MINUTES = 30;
+
+  /**
    * Resolves the current request's store timezone (single source of truth).
    * Falls back to the default when there is no store context.
    */
@@ -546,12 +560,18 @@ export class CustomersAnalyticsService {
   // ==================== ABANDONED CARTS ANALYTICS ====================
 
   /**
-   * QUI-628 v3 — definición operativa del abandono de carrito.
+   * QUI-628 v3 + ADR-01 (F-002) — definición DERIVADA del abandono de
+   * carrito. Nada escribe `state = 'abandoned'` (los escritores solo ponen
+   * `active`/`converted` y el expiry borra items sin tocar `state`), así
+   * que filtrar por el estado almacenado medía ~0 estructural.
    *
-   *   abandoned = `carts.state = 'abandoned'` con items, contados por
-   *               `last_activity_at` en la ventana (la migración 20260805120000
-   *               ya añade `state`, `converted_order_id`, `converted_at`,
-   *               `last_activity_at` con FK ON DELETE SET NULL + 2 índices).
+   *   abandoned = `carts.state = 'active'`
+   *               + `last_activity_at` en la ventana
+   *               + `last_activity_at < NOW() - ABANDONED_CART_INACTIVITY_MINUTES`
+   *               + con items (`EXISTS cart_items`).
+   *               (La migración 20260805120000 ya añade `state`,
+   *               `converted_order_id`, `converted_at`, `last_activity_at`
+   *               con FK ON DELETE SET NULL + 2 índices).
    *   recovered = `carts.state = 'converted'` contados por `converted_at` en
    *               la ventana — UN MISMO UNIVERSO (carts), no `orders.placed_at`.
    *   rates     = abandonados y recuperados comparten denominador (abandoned
@@ -590,9 +610,12 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    // Abandoned: state='abandoned' + cart con items + last_activity_at en
-    // ventana. EXISTS sobre cart_items blinda "carrito sin items" — un
-    // carrito vacío técnicamente existe pero NO cuenta como abandono real.
+    // Abandoned (ADR-01, definición derivada): state='active' + cart con
+    // items + last_activity_at en ventana + inactivo más de X minutos.
+    // EXISTS sobre cart_items blinda "carrito sin items" — un carrito
+    // vacío técnicamente existe pero NO cuenta como abandono real. El
+    // corte de inactividad excluye los carritos que siguen en uso en el
+    // borde reciente de la ventana actual.
     const abandonedRows = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{ count: bigint; total_value: number }>
     >`
@@ -601,9 +624,10 @@ export class CustomersAnalyticsService {
         COALESCE(SUM(c.subtotal), 0) AS total_value
       FROM carts c
       WHERE c.store_id = ${storeId}
-        AND c.state = 'abandoned'
+        AND c.state = 'active'
         AND c.last_activity_at >= ${startDate}
         AND c.last_activity_at <= ${endDate}
+        AND c.last_activity_at < NOW() - make_interval(mins => ${this.ABANDONED_CART_INACTIVITY_MINUTES})
         AND EXISTS (
           SELECT 1 FROM cart_items ci WHERE ci.cart_id = c.id
         )
@@ -641,9 +665,10 @@ export class CustomersAnalyticsService {
       SELECT COUNT(c.id) AS count
       FROM carts c
       WHERE c.store_id = ${storeId}
-        AND c.state = 'abandoned'
+        AND c.state = 'active'
         AND c.last_activity_at >= ${previousStartDate}
         AND c.last_activity_at <= ${previousEndDate}
+        AND c.last_activity_at < NOW() - make_interval(mins => ${this.ABANDONED_CART_INACTIVITY_MINUTES})
         AND EXISTS (
           SELECT 1 FROM cart_items ci WHERE ci.cart_id = c.id
         )
@@ -719,9 +744,10 @@ export class CustomersAnalyticsService {
         COALESCE(SUM(c.subtotal), 0) AS cart_value
       FROM carts c
       WHERE c.store_id = ${storeId}
-        AND c.state = 'abandoned'
+        AND c.state = 'active'
         AND c.last_activity_at >= ${startDate}
         AND c.last_activity_at <= ${endDate}
+        AND c.last_activity_at < NOW() - make_interval(mins => ${this.ABANDONED_CART_INACTIVITY_MINUTES})
         AND EXISTS (
           SELECT 1 FROM cart_items ci WHERE ci.cart_id = c.id
         )
@@ -801,7 +827,8 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    // Filtrar por carritos realmente abandonados (state='abandoned'), no por
+    // Filtrar por carritos realmente abandonados (definición derivada
+    // ADR-01: state='active' + inactivo más de X + con items), no por
     // TODOS los carritos del período. Antes este query contaba cualquier
     // carrito creado — incluyendo los convertidos, los vacíos y los activos
     // — y los etiquetaba como "motivos", lo cual es fabricación pura.
@@ -814,9 +841,10 @@ export class CustomersAnalyticsService {
         COALESCE(SUM(c.subtotal), 0) AS total_value
       FROM carts c
       WHERE c.store_id = ${storeId}
-        AND c.state = 'abandoned'
+        AND c.state = 'active'
         AND c.last_activity_at >= ${startDate}
         AND c.last_activity_at <= ${endDate}
+        AND c.last_activity_at < NOW() - make_interval(mins => ${this.ABANDONED_CART_INACTIVITY_MINUTES})
         AND EXISTS (
           SELECT 1 FROM cart_items ci WHERE ci.cart_id = c.id
         )
@@ -888,9 +916,10 @@ export class CustomersAnalyticsService {
       SELECT c.id, c.subtotal, c.last_activity_at, c.user_id
       FROM carts c
       WHERE c.store_id = ${storeId}
-        AND c.state = 'abandoned'
+        AND c.state = 'active'
         AND c.last_activity_at >= ${startDate}
         AND c.last_activity_at <= ${endDate}
+        AND c.last_activity_at < NOW() - make_interval(mins => ${this.ABANDONED_CART_INACTIVITY_MINUTES})
         AND EXISTS (
           SELECT 1 FROM cart_items ci WHERE ci.cart_id = c.id
         )

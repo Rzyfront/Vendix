@@ -125,6 +125,14 @@ export type AdminTablesEvent =
       ts?: number;
     }
   | {
+      // Llamado al mesero desde el QR (comensal). Puramente visual:
+      // no muta `tablesLive`; solo alimenta la señal `waiterCall`
+      // para el destello dorado del floor-map.
+      type: 'table_call_waiter';
+      data: Record<string, unknown>;
+      ts?: number;
+    }
+  | {
       type: 'payment.pending' | 'payment.confirmed';
       data: Record<string, unknown>;
       ts?: number;
@@ -212,6 +220,14 @@ export class AdminTablesSseService {
   /** True una vez que tenemos snapshot cargado (cells pintables). */
   readonly hasSnapshot = signal<boolean>(false);
   readonly lastEventAt = signal<Date | null>(null);
+  /**
+   * Último llamado al mesero (`table_call_waiter`) con su `table_id`.
+   * Lo consume el floor-map para el destello dorado de 1s. Null hasta
+   * el primer llamado; si el evento no trae `table_id` se ignora.
+   */
+  readonly waiterCall = signal<{ table_id: number; at: number } | null>(
+    null,
+  );
 
   constructor() {
     // Reaccionar al cambio de modo arrancando/detiniendo el polling.
@@ -363,6 +379,8 @@ export class AdminTablesSseService {
    *  - `payment.*` / `table_payment_*` → ajusta `payment_state`.
    *  - `bill.requested` / `kitchen.*` → no mutan el estado del map;
    *    sólo disparan `lastEventAt` para que la UI sepa "algo se movió".
+   *  - `table_call_waiter` → setea `waiterCall` (destello del plano);
+   *    sin `table_id` en el data se ignora.
    *  - cualquier otro tipo → default-deny (noop).
    */
   private applyEvent(event: AdminTablesEvent): void {
@@ -382,6 +400,16 @@ export class AdminTablesSseService {
       event.type === 'table_deleted'
     ) {
       void this.handleFloorTransition(event);
+      return;
+    }
+
+    // Llamado al mesero: no necesita session_id (el QR llama sin
+    // sesión POS abierta). Solo requiere `table_id`; sin él se ignora.
+    if (event.type === 'table_call_waiter') {
+      const tableId = this.extractTableId(event.data);
+      if (tableId != null) {
+        this.waiterCall.set({ table_id: tableId, at: Date.now() });
+      }
       return;
     }
 
@@ -544,6 +572,13 @@ export class AdminTablesSseService {
   }
 
   // ─── helpers ───────────────────────────────────────────────────────
+
+  private extractTableId(data: Record<string, unknown>): number | null {
+    const v =
+      data?.['table_id'] ??
+      (data?.['table'] as { id?: unknown } | undefined)?.id;
+    return typeof v === 'number' ? v : null;
+  }
 
   private extractSessionId(data: Record<string, unknown>): number | null {
     const v =

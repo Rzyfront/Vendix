@@ -4,3 +4,6 @@ export { AIConfigQueryDto } from './ai-config-query.dto';
 export { CreateAIAppDto } from './create-ai-app.dto';
 export { UpdateAIAppDto } from './update-ai-app.dto';
 export { AIAppQueryDto } from './ai-app-query.dto';
+export { CreateAIAgentDto } from './create-ai-agent.dto';
+export { UpdateAIAgentDto } from './update-ai-agent.dto';
+export { AIAgentQueryDto } from './ai-agent-query.dto';

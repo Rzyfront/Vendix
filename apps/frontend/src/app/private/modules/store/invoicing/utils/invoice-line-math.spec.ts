@@ -206,7 +206,7 @@ describe('invoice-line-math — preview en centavos con trunc+absorb (A.3)', () 
       expect(math.totalCents).toBe(300000);
       expect(math.unclosedResidualCents).toBe(0);
       // La cuota viaja truncada sobre la base FINAL, igual que `invoice_taxes`.
-      expect(math.taxes).toHaveLength(1);
+      expect(math.taxes.length).toBe(1);
       expect(math.taxes[0].cents).toBe(22222);
       expect(math.taxes[0].ratePercent).toBe(8);
     });
@@ -407,7 +407,7 @@ describe('invoice-line-math — preview en centavos con trunc+absorb (A.3)', () 
         [{ taxes: [incl(8)] }, { taxes: [incl(8)] }],
         [a, b],
       );
-      expect(rows).toHaveLength(1);
+      expect(rows.length).toBe(1);
       expect(rows[0].base).toBe(7407.41);
       expect(rows[0].amount).toBe(592.59);
       expect(rows[0].rate).toBe(8);
@@ -436,7 +436,7 @@ describe('invoice-line-math — preview en centavos con trunc+absorb (A.3)', () 
         ],
         [incLine, addLine],
       );
-      expect(rows).toHaveLength(2);
+      expect(rows.length).toBe(2);
     });
   });
 

@@ -158,7 +158,18 @@ describe('CheckoutService — línea inclusiva por bruto de línea (A.2)', () =>
         CheckoutService,
         { provide: EcommercePrismaService, useValue: prisma },
         { provide: StorePrismaService, useValue: storePrisma },
-        { provide: CartService, useValue: { clearCart: jest.fn().mockResolvedValue({ success: true }) } },
+        // `markCartConverted` NO es opcional: `runCheckout` lo llama en
+        // `checkout.service.ts:1842` en cuanto la orden tiene cliente
+        // resuelto (QUI-628). Sin él, el doble revienta con
+        // «this.cart_service.markCartConverted is not a function» DESPUÉS de
+        // crear la orden, y el fallo aparece disfrazado de error de cálculo.
+        {
+          provide: CartService,
+          useValue: {
+            clearCart: jest.fn().mockResolvedValue({ success: true }),
+            markCartConverted: jest.fn().mockResolvedValue(undefined),
+          },
+        },
         {
           provide: TaxesService,
           useValue: {

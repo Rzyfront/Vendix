@@ -33,11 +33,16 @@ import {
   AlertBannerComponent,
   BadgeComponent,
   ButtonComponent,
+  DianMunicipalitySelectComponent,
   IconComponent,
   InputComponent,
   ModalComponent,
   SelectorComponent,
 } from '../../../../../../../shared/components';
+import {
+  DianMunicipalityLookupService,
+  type DianMunicipalityOption,
+} from '../../../../../../../shared/services/dian-municipality-lookup.service';
 import type { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import { CurrencyPipe as VendixCurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import { AccountCodeSelectComponent } from '../../../../../store/products/components/account-code-select.component';
@@ -165,6 +170,7 @@ interface LineSeed {
     AlertBannerComponent,
     BadgeComponent,
     ButtonComponent,
+    DianMunicipalitySelectComponent,
     IconComponent,
     InputComponent,
     ModalComponent,
@@ -191,6 +197,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
   readonly store = inject(PlatformInvoicingStore);
   private readonly http = inject(HttpClient);
   private readonly fiscal = inject(FiscalBillingAdminService);
+  private readonly dianLookup = inject(DianMunicipalityLookupService);
 
   /**
    * LA PLATAFORMA SÓLO EMITE FACTURA DE VENTA ESTÁNDAR.
@@ -256,6 +263,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     external_phone: [''],
     external_address_line: [''],
     external_city: ['Bogotá, D.C.'],
+    external_city_code: ['11001'],
     external_department_code: ['11'],
 
     // Contabilidad
@@ -939,6 +947,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
     // antes de emitir» y en el formulario no habia ningun campo que capturar.
     // Ahora se ven, se pueden completar y se mandan como override.
     const personType = tenant.person_type === '2' ? '2' : '1';
+    const cityCode = tenant.address?.city_code || '';
     this.invoiceForm.patchValue({
       external_legal_name: tenant.legal_name || tenant.name || '',
       external_tax_id: tenant.tax_id ?? '',
@@ -950,8 +959,39 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       external_phone: tenant.phone ?? '',
       external_address_line: tenant.address?.line ?? '',
       external_city: tenant.address?.city ?? '',
+      external_city_code: cityCode,
       external_department_code: tenant.address?.department_code || '11',
     });
+
+    if (!cityCode && tenant.address?.city && tenant.address?.department_code) {
+      this.dianLookup
+        .resolveByName(tenant.address.city, tenant.address.department_code)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((match) => {
+          if (match?.code) {
+            this.invoiceForm.patchValue({
+              external_city_code: match.code,
+              external_city: match.name,
+              external_department_code: match.department_code,
+            });
+          }
+        });
+    }
+  }
+
+  onCustomerMunicipality(municipality: DianMunicipalityOption | null): void {
+    if (municipality) {
+      this.invoiceForm.patchValue({
+        external_city: municipality.name,
+        external_city_code: municipality.code,
+        external_department_code: municipality.department_code,
+      });
+    } else {
+      this.invoiceForm.patchValue({
+        external_city: '',
+        external_city_code: '',
+      });
+    }
   }
 
   /**
@@ -988,6 +1028,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       external_phone: '',
       external_address_line: '',
       external_city: '',
+      external_city_code: '',
       external_department_code: '11',
     });
   }
@@ -1432,6 +1473,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
         address: {
           line: val['external_address_line']?.trim() || undefined,
           city: val['external_city']?.trim() || undefined,
+          city_code: val['external_city_code']?.trim() || undefined,
           department_code: val['external_department_code']?.trim() || undefined,
         },
       };
@@ -1453,6 +1495,7 @@ export class PlatformInvoiceCreateComponent implements OnInit {
       };
       const addressLine = trimmed('external_address_line');
       const addressCity = trimmed('external_city');
+      const addressCityCode = trimmed('external_city_code');
       const addressDepartment = trimmed('external_department_code');
       customerPayload = {
         kind: tenant.kind,
@@ -1471,10 +1514,11 @@ export class PlatformInvoiceCreateComponent implements OnInit {
         email: trimmed('external_email'),
         phone: trimmed('external_phone'),
         address:
-          addressLine || addressCity || addressDepartment
+          addressLine || addressCity || addressDepartment || addressCityCode
             ? {
                 line: addressLine,
                 city: addressCity,
+                city_code: addressCityCode,
                 department_code: addressDepartment,
               }
             : undefined,

@@ -589,6 +589,20 @@ export interface ProductQueryDto {
   // (`include_variants?: boolean`, default false) y devuelve
   // `product_variants` en línea para expandir el selector de yield.
   include_variants?: boolean;
+  /**
+   * Ordena los `is_featured` primero (desempate por `created_at desc`).
+   * Usado por el picker de productos del modal "Agregar a la cuenta" para
+   * priorizar destacados en el primer lote sin paginar.
+   */
+  featured_first?: boolean;
+  /**
+   * Segundo criterio de orden: antepone los más vendidos de los últimos 30
+   * días (sólo órdenes en estado de venta completada). Combinado con
+   * `featured_first` da la prioridad de la grilla del POS: destacados → más
+   * vendidos → resto. Sin destacados en la tienda, la lista queda ordenada
+   * directamente por ventas.
+   */
+  best_selling_first?: boolean;
 }
 
 // Respuestas paginadas

@@ -50,6 +50,18 @@ import { WithholdingPreviewResult } from '../../withholding-tax/interfaces/withh
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { InvoicingService } from '../../invoicing/services/invoicing.service';
 import { PosUvtThreshold } from '../../invoicing/interfaces/invoice.interface';
+import {
+  catalogInclusiveDefault,
+  estimateNetBase,
+  estimatePriceWithTax,
+} from '../../products/utils/product-tax-inclusive.util';
+// F-222/F-225 (ADR-16): kernel único de aritmética de dinero compartido con
+// el backend — ver `apps/frontend/tsconfig.app.json` (`paths`) para el
+// mapeo de `@money-kernel`. Reemplaza `Math.abs(a - b) >= 0.01`, que compara
+// en punto flotante y el mismo centavo de diferencia cruza o no el umbral
+// según la magnitud de `a`/`b` (payments.service.ts ya migró el espejo
+// backend de este mismo gate).
+import { differsByAtLeastCents } from '@money-kernel/money-compare';
 
 /**
  * Presentational "faltan N und para el siguiente tramo" hint for an auto-apply
@@ -1132,27 +1144,60 @@ export class PosCartService {
    * para add y remove en modo adoptado: ambos envían la lista completa.
    */
   private serializeItemsForAdoptedOrder(items: CartItem[]): any[] {
-    return items.map((it) => ({
-      item_type: it.itemType === 'custom' ? 'custom' : 'product',
-      product_id:
-        it.itemType === 'custom' || !it.product?.id
-          ? null
-          : Number(it.product.id),
-      product_name: it.product?.name ?? '',
-      quantity: it.quantity,
-      unit_price: Number((it.unitPrice ?? 0).toFixed(2)),
-      final_unit_price: Number((it.finalPrice ?? it.unitPrice ?? 0).toFixed(2)),
-      total_price: Number((it.totalPrice ?? 0).toFixed(2)),
-      product_variant_id: it.variant_id ?? null,
-      variant_sku: it.variant_sku ?? null,
-      variant_attributes: it.variant_attributes ?? null,
-      description: it.description ?? it.notes ?? null,
-      // CP-POS-MODAL-SCOPE-001 / Phase F.4 — `skip_kds` belongs to the
-      // flow/pay pipeline (POS-vs-KDS modal on charge), NOT to the items-edit
-      // endpoint. Backend's `UpdateOrderItemsDto` does not declare it and
-      // `forbidNonWhitelisted` rejects with 400 SYS_VALIDATION_001. The flag
-      // continues to flow on `cartState.customer` and `processSaleWithPayment`.
-    }));
+    return items.map((it) => {
+      const unitPrice = Number((it.unitPrice ?? 0).toFixed(2));
+      // F-002 (C.8, blocker — revisión 2026-09-14): el multiplicador de línea
+      // NUNCA es `quantity` a secas (ver encabezado de `line-units.util.ts`).
+      // Con producto de PESO (`quantity=1`, el peso es el multiplicador) o
+      // con escala de precio (`price_unit_quantity ≠ 1`), `unitPrice ×
+      // quantity` desincroniza `total_price`/`tax_amount_item` contra
+      // `unit_price`, el mismo defecto que F-012/F-037 ya corrigieron
+      // server-side (`orders.service.ts:2177-2198`) para el editor.
+      // `resolveLineUnits` es el mismo multiplicador que ya usa este
+      // servicio para el subtotal del carrito (`:2587`).
+      const lineUnits = resolveLineUnits(it);
+      return {
+        item_type: it.itemType === 'custom' ? 'custom' : 'product',
+        product_id:
+          it.itemType === 'custom' || !it.product?.id
+            ? null
+            : Number(it.product.id),
+        product_name: it.product?.name ?? '',
+        quantity: it.quantity,
+        unit_price: unitPrice,
+        final_unit_price: Number((it.finalPrice ?? it.unitPrice ?? 0).toFixed(2)),
+        // F-002 (C.8, blocker): antes mandaba `it.totalPrice`, que
+        // `mapOrderItemToCartItem` define como `finalUnitPrice × quantity`
+        // (BRUTO) mientras `unit_price` de arriba es `it.unitPrice` (BASE,
+        // tras el fix del monto) — dos magnitudes distintas en la misma
+        // fila. `total_price` ahora queda en la MISMA magnitud que
+        // `unit_price` (DB-01: `total_price = unit_price × price_units`,
+        // donde `price_units = resolveLineUnits`, no `quantity`).
+        // `tax_amount_item` viaja explícito (antes no se mandaba) para que
+        // el backend no calcule `tax_amount = 0` por omisión. Este endpoint
+        // (`PUT /store/orders/:id/items`) suma `tax_amount_item` VERBATIM
+        // por línea sin multiplicador (`orders.service.ts:1396-1398`), así
+        // que aquí el campo viaja como total DE LÍNEA — a diferencia del
+        // editor (`pos.component.ts#buildEditorRequest`), que lo divide
+        // porque el servidor sí multiplica por su propio multiplicador.
+        total_price: Number((unitPrice * lineUnits).toFixed(2)),
+        tax_amount_item: Number(
+          (
+            (Number(it.finalPrice ?? it.unitPrice ?? 0) - unitPrice) *
+            lineUnits
+          ).toFixed(2),
+        ),
+        product_variant_id: it.variant_id ?? null,
+        variant_sku: it.variant_sku ?? null,
+        variant_attributes: it.variant_attributes ?? null,
+        description: it.description ?? it.notes ?? null,
+        // CP-POS-MODAL-SCOPE-001 / Phase F.4 — `skip_kds` belongs to the
+        // flow/pay pipeline (POS-vs-KDS modal on charge), NOT to the items-edit
+        // endpoint. Backend's `UpdateOrderItemsDto` does not declare it and
+        // `forbidNonWhitelisted` rejects with 400 SYS_VALIDATION_001. The flag
+        // continues to flow on `cartState.customer` and `processSaleWithPayment`.
+      };
+    });
   }
 
   /**
@@ -2018,6 +2063,7 @@ export class PosCartService {
     }
 
     const taxRate = this.calculateRateSum(product);
+    const { inclusiveRate, additionalRate } = this.calculateInclusiveRateSplit(product);
     const resolution = this.priceResolver.resolveWithTier(
       {
         id: product.id,
@@ -2056,11 +2102,56 @@ export class PosCartService {
           // Per-product/per-variant packaging override (cascade).
           override_units_per_package: o.override_units_per_package ?? null,
         })),
-      taxRate,
+      // F-215 (C.8, tercera boca — 2026-09-14): SIEMPRE 0, nunca `taxRate`.
+      // `resolveWithTier` multiplica ciegamente `unitPrice*(1+taxRate)`
+      // (mismo defecto en su espejo backend,
+      // `products/services/price-resolver.service.ts:398`), sin mirar
+      // `is_inclusive`: con INC 8% incluido y una tarifa fijando 15.000,
+      // devolvía `unitPrice` 15.000 y `unitPriceWithTax` 16.200 — los dos mal
+      // (el neto real es 13.888,89, el bruto ya es 15.000, no crece). Pasar 0
+      // acá dejar `resolution.unitPrice` como el precio YA resuelto por la
+      // tarifa SIN impuesto aplicado — que es exactamente lo que
+      // `payments.service.ts:2693-2733` hace del lado del servidor (mismo
+      // truco, mismo motivo) antes de despejarlo con el kernel real
+      // (`calculateProductTaxes`/`resolveInclusiveClearing`,
+      // `dian-money.util.ts`). El reparto neto/bruto ahora vive abajo, fuera
+      // de este archivo compartido con `pos-product.service.ts` y
+      // `quotation-form-modal.component.ts` — no se le cambia la semántica a
+      // `resolveWithTier` para no arrastrar el mismo defecto (o un cambio no
+      // pedido) a esos otros dos llamadores.
+      0,
     );
 
-    const unitPrice = this.roundMoney(resolution.unitPrice);
-    const finalUnitPrice = this.roundMoney(resolution.unitPriceWithTax);
+    // `resolution.unitPrice` es el precio que la tarifa fija ANTES de
+    // impuesto — con IVA/INC exclusivo eso YA es la base neta (sin cambios,
+    // caso histórico). Con impuesto INCLUIDO, ese mismo número es el precio
+    // FINAL ya resuelto (F-011, `tax-inclusive-math.util.ts`: "el input
+    // finalPrice es el precio FINAL ya resuelto (sale/tier/override). Nunca
+    // se despeja sobre base_price crudo"): la tarifa fija un precio de
+    // góndola, no una base gravable. `estimateNetBase`/`estimatePriceWithTax`
+    // (`product-tax-inclusive.util.ts`) son la misma fórmula que ya usa el
+    // formulario de producto para el signo neto/bruto; acá se reutilizan
+    // para el PRECIO, no sólo para mostrar, así que el redondeo a centavos
+    // ocurre UNA sola vez, abajo, sobre el resultado final — nunca sobre un
+    // intermedio. Cuando `additionalRate` es 0 (caso de producción real: INC
+    // 8% inclusivo sin impuesto adicional, tienda 105), `finalUnitPrice`
+    // queda IGUAL a `resolution.unitPrice` sin ninguna operación de punto
+    // flotante de por medio (suma de 0), o sea cero deriva contra el bruto
+    // que el backend compara para decidir si hubo override
+    // (`payments.service.ts:2834-2849`, tolerancia `>= 0.01`). Con impuesto
+    // adicional agregado mezclado (hoy sin casos reales — QUI-832: 0 filas
+    // cruzan tarifa aplicada + impuesto inclusivo), la deriva queda acotada a
+    // una fracción de centavo (un redondeo de la base neta multiplicado por
+    // una tasa < 1), muy por debajo de esa misma tolerancia.
+    const unitPrice = this.roundMoney(
+      estimateNetBase(resolution.unitPrice, inclusiveRate),
+    );
+    const finalUnitPrice = this.roundMoney(
+      estimatePriceWithTax(resolution.unitPrice, [
+        { rateFraction: inclusiveRate, inclusive: true },
+        { rateFraction: additionalRate, inclusive: false },
+      ]),
+    );
     const maxQuantity = this.getMaxSellableQuantity(
       product,
       variant,
@@ -2215,8 +2306,13 @@ export class PosCartService {
       isPriceOverridden:
         item.itemType === 'custom'
           ? false
-          : Math.abs(finalPrice - (item.originalFinalPrice ?? item.finalPrice)) >=
-            0.01,
+          // F-225: `>= 0.01` original rechazaba DESDE 1 centavo — traducción
+          // fiel es el umbral por defecto (1) de `differsByAtLeastCents`, no
+          // un umbral inventado.
+          : differsByAtLeastCents(
+              finalPrice,
+              item.originalFinalPrice ?? item.finalPrice,
+            ),
       priceOverrideReason: request.reason?.trim() || item.priceOverrideReason,
     };
 
@@ -2291,7 +2387,11 @@ export class PosCartService {
       // Update existing item
       const existingItem = currentState.items[existingItemIndex];
       const newQuantity = existingItem.quantity + request.quantity;
-      const finalUnitPrice = this.calculateItemFinalPriceWithBase(request.product, basePrice);
+      const finalUnitPrice = this.resolveCatalogFinalUnitPrice(
+        request.product,
+        request.variant,
+        basePrice,
+      );
       const mergedUnits = resolveLineUnits({
         ...existingItem,
         quantity: newQuantity,
@@ -2308,9 +2408,11 @@ export class PosCartService {
       };
     } else {
       // Add new item
-      const finalUnitPrice = request.variant
-        ? this.calculateItemFinalPriceWithBase(request.product, basePrice)
-        : (request.product.final_price || this.calculateItemFinalPrice(request.product));
+      const finalUnitPrice = this.resolveCatalogFinalUnitPrice(
+        request.product,
+        request.variant,
+        basePrice,
+      );
 
       // Calculate total price for weight products
       const weight = request.weight || 1;
@@ -2562,8 +2664,12 @@ export class PosCartService {
     );
     const taxAmount = items.reduce((sum, item) => sum + item.taxAmount, 0);
 
-    // Subtotal should be Net Amount (without tax) for display
-    const subtotal = grossTotal - taxAmount;
+    // C.6 (R-4) — el subtotal es la base NETA recibida (`unitPrice` neto ×
+    // `lineUnits`), nunca `grossTotal − taxAmount`: con truncado DIAN la
+    // resta no es exacta y deja un residuo huérfano entre Subtotal e IVA.
+    const subtotal = this.roundMoney(
+      items.reduce((sum, item) => sum + item.unitPrice * resolveLineUnits(item), 0),
+    );
 
     // Total is based on Gross Total minus Discounts
     const total = grossTotal - discountAmount;
@@ -2667,6 +2773,37 @@ export class PosCartService {
   }
 
   /**
+   * Precio final de catalogo de la linea: el que YA resolvio el servidor.
+   *
+   * `products.final_price` y `product_variants.final_price` salen de
+   * `resolveLineTotals` en el backend, que respeta `is_inclusive` con la
+   * precedencia asignacion > categoria > tasa y trunca a centavos igual que la
+   * DIAN. Es exactamente el numero que `payments.service.ts` reconstruye al
+   * cobrar para decidir si hubo override de precio.
+   *
+   * Recalcularlo aca con `calculateRateSum` —que suma las tasas SIN mirar
+   * `is_inclusive`— volvia a sumar el impuesto que ya venia dentro del precio
+   * publicado: con INC 8 % incluido, 18.500 pasaba a 19.980. El backend
+   * reconstruia 18.500, veia 1.480 de diferencia, marcaba override y, con
+   * `allow_pos_price_override = false`, rechazaba el cobro con
+   * POS_PRICE_OVERRIDE_NOT_ALLOWED_001.
+   *
+   * La aritmetica local queda solo como respaldo para payloads sin
+   * `final_price`. Con variante se cae al calculo sobre `basePrice` —que ya es
+   * variant-aware— y nunca a `product.final_price`, que seria el precio del
+   * padre y pisaria el `price_override` de la variante.
+   */
+  private resolveCatalogFinalUnitPrice(
+    product: Product,
+    variant: PosProductVariant | undefined,
+    basePrice: number,
+  ): number {
+    const serverFinal = variant ? variant.final_price : product.final_price;
+    if (serverFinal != null && Number(serverFinal) > 0) return Number(serverFinal);
+    return this.calculateItemFinalPriceWithBase(product, basePrice);
+  }
+
+  /**
    * Calculate final price with a specific base price (for variants)
    */
   private calculateItemFinalPriceWithBase(product: any, basePrice: number): number {
@@ -2689,6 +2826,47 @@ export class PosCartService {
         return rateSum + assignmentRate;
       }, 0) || 0
     );
+  }
+
+  /**
+   * F-215 (C.8, tercera boca — 2026-09-14): reparto inclusivo/adicional de
+   * `product.tax_assignments`, mismo dato de `calculateRateSum` pero sin
+   * cegarse a `is_inclusive`. Precedencia asignación > categoría > tasa —
+   * dueño único del criterio en `product-tax-inclusive.util.ts`
+   * (`catalogInclusiveDefault`), reutilizado tal cual y no reescrito: es el
+   * mismo fallback (`categoria.is_inclusive ?? categoria.tax_rates[0]
+   * .is_inclusive ?? false`) que ya rige el formulario de producto (F-007/
+   * F-022/F-024). `assignment.is_inclusive`/`tax_categories.is_inclusive`
+   * llegan en el payload del backend (`products.service.ts` los trae con
+   * `include`, no `select`, así que ningún escalar se recorta) aunque
+   * `ProductTaxAssignment`/`TaxCategory` (pos-product.service.ts) no los
+   * declaren — misma lectura a la defensiva que ya usa
+   * `pos-custom-item-modal.component.ts:readIsInclusive`, no se amplía una
+   * interfaz de otro dueño.
+   */
+  private calculateInclusiveRateSplit(product: any): {
+    inclusiveRate: number;
+    additionalRate: number;
+  } {
+    let inclusiveRate = 0;
+    let additionalRate = 0;
+    for (const assignment of product.tax_assignments ?? []) {
+      const rates = assignment?.tax_categories?.tax_rates ?? [];
+      const assignmentRate = rates.reduce(
+        (sum: number, tr: any) => sum + parseFloat(tr?.rate || '0'),
+        0,
+      );
+      if (assignmentRate === 0) continue;
+      const isInclusive =
+        assignment?.is_inclusive ??
+        catalogInclusiveDefault(assignment?.tax_categories);
+      if (isInclusive) {
+        inclusiveRate += assignmentRate;
+      } else {
+        additionalRate += assignmentRate;
+      }
+    }
+    return { inclusiveRate, additionalRate };
   }
 
   private calculateTaxCategoryRate(

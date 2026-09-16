@@ -187,6 +187,42 @@ export class AccountService {
     };
   }
 
+  /**
+   * C.8 (R-1 / ADR-06) — deriva el bruto por línea en LECTURA, sin asumir
+   * `final_unit_price` poblado: este endpoint (F-008) nunca importó
+   * `resolveOrderLineFinals` ni escribió la columna, así que para pedidos de
+   * checkout (`checkout.service.ts` nunca setea `final_unit_price`, F-005)
+   * el fallback es el camino COMÚN, no la excepción. Fórmula exacta del
+   * paso: `final_unit_price ?? (unit_price + COALESCE(tax_amount_item,0) /
+   * line_units)`. `line_total_gross` usa el MISMO multiplicador que ya
+   * relaciona `total_price` con `unit_price` en la fila persistida (en vez
+   * de asumir `quantity` o `price_unit_quantity`), para no inventar una
+   * tercera convención de escala en un archivo que no importa
+   * `price-unit.util.ts`.
+   */
+  private deriveLineGross(item: {
+    unit_price: any;
+    total_price: any;
+    tax_amount_item?: any;
+    final_unit_price?: any;
+    price_unit_quantity?: any;
+    quantity: any;
+  }): { unit_price_gross: number; line_total_gross: number } {
+    const netUnit = Number(item.unit_price ?? 0);
+    const netTotal = Number(item.total_price ?? 0);
+    const lineUnits = Number(item.price_unit_quantity ?? item.quantity ?? 1) || 1;
+    const grossUnit =
+      item.final_unit_price != null
+        ? Number(item.final_unit_price)
+        : netUnit + Number(item.tax_amount_item ?? 0) / lineUnits;
+    const multiplier = netUnit !== 0 ? netTotal / netUnit : Number(item.quantity ?? 0);
+    const grossTotal = Math.round(grossUnit * multiplier * 100) / 100;
+    return {
+      unit_price_gross: Math.round(grossUnit * 100) / 100,
+      line_total_gross: grossTotal,
+    };
+  }
+
   async getOrderDetail(order_id: number) {
     // store_id y user_id se aplican automáticamente por EcommercePrismaService
     const order = await this.prisma.orders.findFirst({
@@ -299,6 +335,12 @@ export class AccountService {
           quantity: item.quantity,
           unit_price: item.unit_price,
           total_price: item.total_price,
+          // C.8 (R-1, F-008 major): campos ADITIVOS — `unit_price`/
+          // `total_price` de arriba NO cambian de magnitud (siguen en
+          // BASE). F-008: este endpoint nunca tuvo sombra y nunca escribió
+          // `final_unit_price`, así que el fallback derivado de ADR-06 es
+          // el camino normal aquí, no una excepción.
+          ...this.deriveLineGross(item as any),
           // [resid-fiscal] — Aditivo. La línea cancelada sigue presente
           // en la respuesta (no la quitamos: el cliente la pidió, debe
           // verla tachada con el motivo). El FE la renderiza tachada con

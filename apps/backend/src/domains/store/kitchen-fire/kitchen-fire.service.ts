@@ -10,6 +10,7 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
 import { FireOrderItemsDto, KitchenTicketQueryDto, ResendOrderItemsDto } from './dto';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { KdsSessionsService } from '../kds/sessions/kds-sessions.service';
+import { roundMoney2 } from '../taxes/utils/final-price.util';
 
 /**
  * Single source of truth for the kitchen-ticket payload shape returned to
@@ -69,6 +70,19 @@ const KITCHEN_TICKET_INCLUDE = {
     },
   },
 } satisfies Prisma.kitchen_ticketsInclude;
+
+/**
+ * Paso 3 (takeaway-only KDS): `markDelivered` solo entrega tickets 100 %
+ * para llevar. Entrada local —no en `error-codes.ts`— por scope del paso
+ * (solo este archivo + su spec); promoverla al catálogo central si otro
+ * dominio la necesita.
+ */
+const KITCHEN_TICKET_NOT_TAKEAWAY_ENTRY = {
+  code: 'KITCHEN_TICKET_NOT_TAKEAWAY',
+  httpStatus: 422,
+  devMessage:
+    'El ticket contiene platos que no son para llevar; en cocina solo se entregan pedidos takeaway',
+};
 
 /**
  * Result of {@link KitchenFireService.fireOrderItems}. Returned to the
@@ -1129,6 +1143,13 @@ export class KitchenFireService {
    * transactions nuevas. Si estaban huérfanas, el turno que cocine el nuevo
    * ticket las imputa al hacer `start/ready/delivered`. El resend es transparente
    * al imputador — un ticket nuevo, no duplica consumo.
+   *
+   * Decisión reuse/waste (plan remake post-cancelación): el resend particiona
+   * por `order_items.cancellation_type`. `after_fire_waste` re-consume (flipea
+   * la bandera a false en-tx y delega a `fireOrderItemsInTx`: BOM + COGS
+   * nuevos con su `kitchen.fired`); `after_fire_reused` y el resto conservan
+   * el camino sin consumo. Una orden `cancelled` solo admite resend como
+   * remake (`reason='remake_dish'` con decisión en TODOS los items).
    */
   async resendOrderItems(
     dto: ResendOrderItemsDto,
@@ -1141,9 +1162,13 @@ export class KitchenFireService {
     firedItemIds: number[];
     /** Tickets viejos cancelados por este resend (solo `lost_command`). */
     cancelledTicketIds: number[];
+    /** Items `after_fire_waste` que re-consumieron insumos (remake con costo nuevo). */
+    wasteRefiredItemIds: number[];
   }> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
+    const organization_id = context?.organization_id;
+    const user_id = context?.user_id;
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
@@ -1192,6 +1217,10 @@ export class KitchenFireService {
             // inicial. Lo mandamos al fire normal en lugar de inventar
             // un ticket con consumo cero.
             inventory_consumed_at_fire: true,
+            // Decisión reuse/waste del flujo de cancelación
+            // (`after_fire_reused | after_fire_waste`). Define si el remake
+            // re-consume insumos o solo reimprime el ticket.
+            cancellation_type: true,
             products: {
               select: {
                 id: true,
@@ -1212,17 +1241,32 @@ export class KitchenFireService {
       throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_ITEM_NOT_FOUND);
     }
 
-    // 2. Validar estado de la orden. cancelled y refunded nunca reciben resend;
-    //    cualquier otro estado (created, processing, delivered, finished) es
-    //    legítimo porque un ticket se puede perder en cualquier momento de la
-    //    cadena mientras la orden siga activa.
+    // 2. Validar estado de la orden. `refunded` nunca recibe resend.
+    //    `cancelled` SOLO admite el remake post-cancelación: TODOS los
+    //    `order_item_ids` con decisión reuse/waste (`cancellation_type` en
+    //    `after_fire_reused | after_fire_waste`) y `reason='remake_dish'`.
+    //    Un `lost_command` sobre orden cancelada sigue bloqueado (no hay
+    //    comanda perdida que recuperar: la orden murió). Cualquier otro
+    //    estado (created, processing, delivered, finished) es legítimo porque
+    //    un ticket se puede perder en cualquier momento de la cadena mientras
+    //    la orden siga activa.
     const orderState = await this.prisma.orders.findUnique({
       where: { id: order.id },
       select: { state: true },
     });
+    // Decisiones que habilitan el remake post-cancelación (las escribe el
+    // flujo de cancelación en `order_items.cancellation_type`).
+    const POST_CANCEL_REMAKE_TYPES = ['after_fire_reused', 'after_fire_waste'];
+    const isPostCancelRemake =
+      orderState?.state === 'cancelled' &&
+      dto.reason === 'remake_dish' &&
+      order.order_items.length > 0 &&
+      order.order_items.every((it) =>
+        POST_CANCEL_REMAKE_TYPES.includes(it.cancellation_type ?? ''),
+      );
     if (
-      orderState?.state === 'cancelled' ||
-      orderState?.state === 'refunded'
+      orderState?.state === 'refunded' ||
+      (orderState?.state === 'cancelled' && !isPostCancelRemake)
     ) {
       throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_NOT_RESENDABLE);
     }
@@ -1244,22 +1288,28 @@ export class KitchenFireService {
     //    ticket de un item entregado no se reenvía: la cocina ya cocinó el
     //    plato y el cliente ya lo tiene. Si la operación humana insiste, el
     //    operador edita el pedido o crea uno nuevo.
-    const deliveredRows = await this.prisma.kitchen_ticket_items.findMany({
-      where: {
-        order_item_id: { in: order.order_items.map((it) => it.id) },
-        status: 'delivered',
-      },
-      select: { order_item_id: true },
-    });
-    if (deliveredRows.length > 0) {
-      const ids = Array.from(
-        new Set(deliveredRows.map((r) => r.order_item_id)),
-      ).join(', ');
-      throw new VendixHttpException(
-        ErrorCodes.KITCHEN_FIRE_NOT_RESENDABLE,
-        `Los items #${ids} ya fueron entregados y no se reenvían. ` +
-          `Cree un nuevo pedido si el cliente quiere repetir el plato.`,
-      );
+    //
+    //    Se levanta SOLO en el remake post-cancelación: la orden cancelada ya
+    //    entregó (o desechó) esos platos y el remake los cocina de nuevo por
+    //    decisión explícita del operador.
+    if (!isPostCancelRemake) {
+      const deliveredRows = await this.prisma.kitchen_ticket_items.findMany({
+        where: {
+          order_item_id: { in: order.order_items.map((it) => it.id) },
+          status: 'delivered',
+        },
+        select: { order_item_id: true },
+      });
+      if (deliveredRows.length > 0) {
+        const ids = Array.from(
+          new Set(deliveredRows.map((r) => r.order_item_id)),
+        ).join(', ');
+        throw new VendixHttpException(
+          ErrorCodes.KITCHEN_FIRE_NOT_RESENDABLE,
+          `Los items #${ids} ya fueron entregados y no se reenvían. ` +
+            `Cree un nuevo pedido si el cliente quiere repetir el plato.`,
+        );
+      }
     }
 
     // 5. Resolver KDS por item — mismo patrón que `fireOrderItemsInTx`. Si los
@@ -1289,41 +1339,17 @@ export class KitchenFireService {
     const businessDate = await this.getBusinessDate(store_id);
     const businessDateAsDate = new Date(`${businessDate}T00:00:00.000Z`);
 
-    // 6. Crear los tickets en transacción. Mismo advisory lock + count +
-    //    daily_number que el fire normal, agrupando por kds_id cuando los
-    //    items enrutan a estaciones distintas.
-    const snapshotsByKds = new Map<
-      number,
-      Array<{
-        orderItemId: number;
-        productId: number;
-        productName: string;
-        quantity: number;
-        productVariantId: number | null;
-        variantLabel: string | null;
-        notes: string | null;
-      }>
-    >();
-    for (const item of order.order_items) {
-      if (!item.product_id) continue;
-      const kdsId = kdsByProduct.get(item.product_id) ?? defaultKds.id;
-      const snap = {
-        orderItemId: item.id,
-        productId: item.product_id,
-        productName: item.product_name,
-        quantity: Number(item.quantity || 0),
-        productVariantId: item.product_variant_id ?? null,
-        variantLabel: this.variantLabelFor(item),
-        notes: item.notes ?? null,
-      };
-      const bucket = snapshotsByKds.get(kdsId);
-      if (bucket) bucket.push(snap);
-      else snapshotsByKds.set(kdsId, [snap]);
-    }
+    // 6. Partición por decisión de cancelación (plan remake post-cancelación).
+    //
+    //    - `after_fire_waste`: los insumos originales se perdieron (merma) y
+    //      el remake cocina DE NUEVO: camino CON consumo (paso 6b).
+    //    - `after_fire_reused` (o sin decisión): el plato se reimprime SIN
+    //      tocar stock: camino original sin consumo (paso 6c).
+    const wasteItems = order.order_items.filter(
+      (it) => it.cancellation_type === 'after_fire_waste',
+    );
 
-    const createdTickets: Array<{ id: number; kds_id: number }> = [];
-
-    // 6b. Tickets viejos candidatos a cancelacion (solo en `lost_command`).
+    // 6a. Tickets viejos candidatos a cancelacion (solo en `lost_command`).
     //
     // Buscamos TODOS los tickets previos que tengan AL MENOS UN item de los
     // reenviados, sin importar el estado del item, PERO limitamos la
@@ -1359,11 +1385,105 @@ export class KitchenFireService {
           )
         : [];
 
-    const ticketIds: number[] = await this.prisma.$transaction(
+    // 6b. Camino CON consumo (waste): los items `after_fire_waste` perdieron
+    //     sus insumos (merma) y el remake cocina DE NUEVO con insumos nuevos.
+    //     Se flipea la bandera a false EN-TX y se delega a
+    //     `fireOrderItemsInTx` (explota el BOM otra vez, descuenta stock,
+    //     reconoce COGS y re-flipea la bandera a true). NO se reimplementa
+    //     la explosión: `prepareFireContext` corre DENTRO del mismo tx (su
+    //     firma lo soporta) para que vea la bandera ya flipeada.
+    //
+    //     Si el prepare no encuentra nada disparable (ej. item no-prepared),
+    //     se restaura la bandera y esos ids caen al camino sin consumo (6c).
+    //     El tx siempre commitea un estado consistente: nunca deja la
+    //     bandera en false sin su consumo.
+    let wasteTicketIds: number[] = [];
+    let wasteCogsTotal = 0;
+    let wasteConsumedLineCount = 0;
+    let wasteRefiredItemIds: number[] = [];
+    const fallbackReuseIds: number[] = [];
+    if (wasteItems.length > 0) {
+      const wasteIds = wasteItems.map((it) => it.id);
+      const wasteResult = await this.prisma.$transaction(async (tx) => {
+        await tx.order_items.updateMany({
+          where: { id: { in: wasteIds } },
+          data: { inventory_consumed_at_fire: false },
+        });
+        const ctx = await this.prepareFireContext(dto.order_id, wasteIds, tx);
+        if (!ctx) {
+          await tx.order_items.updateMany({
+            where: { id: { in: wasteIds } },
+            data: { inventory_consumed_at_fire: true },
+          });
+          return null;
+        }
+        if (ctx.skippedItemIds.length > 0) {
+          await tx.order_items.updateMany({
+            where: { id: { in: ctx.skippedItemIds } },
+            data: { inventory_consumed_at_fire: true },
+          });
+          fallbackReuseIds.push(...ctx.skippedItemIds);
+        }
+        return this.fireOrderItemsInTx(tx, store_id, ctx);
+      });
+      if (wasteResult) {
+        wasteTicketIds = wasteResult.ticketIds;
+        wasteCogsTotal = wasteResult.cogsTotal;
+        wasteConsumedLineCount = wasteResult.consumedLineCount;
+        wasteRefiredItemIds = wasteResult.firedItemSnapshots.map(
+          (s) => s.orderItemId,
+        );
+      } else {
+        fallbackReuseIds.push(...wasteIds);
+      }
+    }
+
+    // 6c. Camino SIN consumo (reused + resto + caídos del waste): el gemelo
+    //     original del fire que SOLO crea tickets. Corre DESPUÉS del waste
+    //     para absorber sus `fallbackReuseIds`. La cancelación de tickets
+    //     viejos vive en este tx (como antes); el waste nunca cancela.
+    //     Mismo advisory lock + count + daily_number que el fire normal,
+    //     agrupando por kds_id cuando los items enrutan a estaciones
+    //     distintas.
+    const plainItems = order.order_items.filter(
+      (it) =>
+        it.cancellation_type !== 'after_fire_waste' ||
+        fallbackReuseIds.includes(it.id),
+    );
+    const snapshotsByKds = new Map<
+      number,
+      Array<{
+        orderItemId: number;
+        productId: number;
+        productName: string;
+        quantity: number;
+        productVariantId: number | null;
+        variantLabel: string | null;
+        notes: string | null;
+      }>
+    >();
+    for (const item of plainItems) {
+      if (!item.product_id) continue;
+      const kdsId = kdsByProduct.get(item.product_id) ?? defaultKds.id;
+      const snap = {
+        orderItemId: item.id,
+        productId: item.product_id,
+        productName: item.product_name,
+        quantity: Number(item.quantity || 0),
+        productVariantId: item.product_variant_id ?? null,
+        variantLabel: this.variantLabelFor(item),
+        notes: item.notes ?? null,
+      };
+      const bucket = snapshotsByKds.get(kdsId);
+      if (bucket) bucket.push(snap);
+      else snapshotsByKds.set(kdsId, [snap]);
+    }
+
+    const plainTicketIds: number[] = await this.prisma.$transaction(
       async (tx) => {
         const ids: number[] = [];
 
-        // 6b.i Cancelar los tickets viejos en la MISMA transaccion. Solo
+        // 6c.i Cancelar los tickets viejos en la MISMA transaccion. Solo
         // se invoca si la razon es `lost_command` — si el operador eligio
         // `remake_dish`, oldTicketIdsToCancel viene vacio y este bloque es
         // no-op. El helper `cancelTicketInTx` flipea el ticket a 'cancelled'
@@ -1429,11 +1549,42 @@ export class KitchenFireService {
             include: { items: true },
           });
           ids.push(ticket.id);
-          createdTickets.push({ id: ticket.id, kds_id: kdsId });
         }
         return ids;
       },
     );
+
+    const ticketIds = [...plainTicketIds, ...wasteTicketIds];
+
+    // 7a. `kitchen.fired` SOLO cuando el remake consumió insumos NUEVOS
+    //     (camino waste con líneas de BOM). Es un consumo real y su COGS
+    //     (DR 6135 / CR 1435) debe asentarse como en cualquier fire. Los
+    //     remakes sin consumo no lo emiten (como hoy).
+    const wastePrimaryTicketId = wasteTicketIds[0];
+    if (
+      wastePrimaryTicketId !== undefined &&
+      wasteConsumedLineCount > 0
+    ) {
+      try {
+        this.eventEmitter.emit('kitchen.fired', {
+          kitchen_ticket_id: wastePrimaryTicketId,
+          kitchen_ticket_ids: wasteTicketIds,
+          order_id: order.id,
+          organization_id,
+          store_id,
+          total_cost: wasteCogsTotal,
+          consumed_line_count: wasteConsumedLineCount,
+          user_id,
+        });
+      } catch (err) {
+        this.logger.error(
+          `Failed to emit kitchen.fired for waste remake tickets ${wasteTicketIds.join(', ')}: ${
+            (err as Error).message
+          }`,
+          (err as Error).stack,
+        );
+      }
+    }
 
     // 7. Emitir `ticket.created` por cada uno (igual que el fire normal:
     //    después del commit, best-effort). El tipo es `ticket.created`
@@ -1472,13 +1623,14 @@ export class KitchenFireService {
     }
 
     // El primario es el de menor kds_id (mismo criterio que el fire
-    // normal). Aquí ya tenemos `createdTickets` ordenada por kds_id, así
-    // que el primero es el primario.
+    // normal): tanto el camino sin consumo como el waste insertan por
+    // kds_id ascendente, así que el primero del merge es el primario.
     return {
       ticketId: ticketIds[0],
       ticketIds,
       firedItemIds: order.order_items.map((it) => it.id),
       cancelledTicketIds: oldTicketIdsToCancel,
+      wasteRefiredItemIds,
     };
   }
 
@@ -2496,6 +2648,25 @@ export class KitchenFireService {
         },
       );
     }
+    // Paso 3 (takeaway-only KDS): en cocina solo se entregan platos
+    // para llevar. Si ALGUNA fila no-cancelada del ticket no es takeaway
+    // (`order_item.is_takeaway != true`, ya incluido vía
+    // KITCHEN_TICKET_INCLUDE), el ticket completo se bloquea: un ticket
+    // mixto o de mesa no se entrega por partes desde cocina.
+    const nonTakeaway = (ticket.items ?? []).filter(
+      (it) => it.status !== 'cancelled' && it.order_item?.is_takeaway !== true,
+    );
+    if (nonTakeaway.length > 0) {
+      throw new VendixHttpException(
+        KITCHEN_TICKET_NOT_TAKEAWAY_ENTRY,
+        undefined,
+        {
+          from: ticket.status,
+          to: 'delivered',
+          hint: 'Solo los platos para llevar se entregan en cocina',
+        },
+      );
+    }
     // ticket.status is `ready` or `in_preparation` — both valid.
     // If still in_preparation, bump to ready first (sets ready_at).
     if (ticket.status === 'in_preparation') {
@@ -2568,45 +2739,56 @@ export class KitchenFireService {
       );
     }
 
-    // Restaurant lifecycle bridge: once EVERY kitchen ticket of this order is
-    // in a terminal state (delivered/cancelled) and at least one was actually
-    // delivered, the kitchen handoff is complete. We emit an event (AFTER the
-    // ticket mutations have committed above) so the orders domain can move the
-    // order `processing -> delivered`. We use the event pattern instead of
-    // injecting OrderFlowService here to avoid a cross-module dependency cycle
-    // (KitchenFireModule would otherwise have to import the orders/order-flow
-    // graph). The listener re-establishes the store tenant context via
-    // StoreContextRunner before calling OrderFlowService.updateOrderState.
+    // Paso 1: puente cocina→orden extraído a `maybeEmitOrderAllDelivered`
+    // para reutilizarlo desde `cancelTicket`.
+    const orderId = (full.ticket as any)?.order_id ?? ticket.order_id;
+    if (orderId != null) {
+      await this.maybeEmitOrderAllDelivered(orderId, store_id, ticketId);
+    }
+
+    return full.ticket;
+  }
+
+  /**
+   * Paso 1 — puente cocina→orden: una vez que TODOS los tickets de la orden
+   * están en estado terminal (delivered/cancelled) y al menos uno fue
+   * entregado, el handoff de cocina está completo y se emite el evento
+   * (las mutaciones del ticket ya commitearon) para que el dominio de
+   * órdenes mueva la orden `processing -> delivered`. Patrón de eventos
+   * en lugar de inyectar OrderFlowService para evitar un ciclo de
+   * dependencias entre módulos; el listener restablece el contexto de
+   * tienda vía StoreContextRunner. Best-effort: nunca bloquea la mutación
+   * del ticket que lo invoca (`markDelivered` o `cancelTicket`).
+   */
+  private async maybeEmitOrderAllDelivered(
+    orderId: number,
+    storeId: number,
+    ticketId?: number,
+  ): Promise<void> {
     try {
-      const orderId = (full.ticket as any)?.order_id ?? ticket.order_id;
-      if (orderId != null) {
-        const orderTickets = await this.prisma.kitchen_tickets.findMany({
-          where: { order_id: orderId, store_id },
-          select: { status: true },
+      const orderTickets = await this.prisma.kitchen_tickets.findMany({
+        where: { order_id: orderId, store_id: storeId },
+        select: { status: true },
+      });
+      const allTerminal = orderTickets.every(
+        (t) => t.status === 'delivered' || t.status === 'cancelled',
+      );
+      const anyDelivered = orderTickets.some(
+        (t) => t.status === 'delivered',
+      );
+      if (orderTickets.length > 0 && allTerminal && anyDelivered) {
+        this.eventEmitter.emit('kitchen.order_all_delivered', {
+          orderId,
+          storeId,
         });
-        const allTerminal = orderTickets.every(
-          (t) => t.status === 'delivered' || t.status === 'cancelled',
-        );
-        const anyDelivered = orderTickets.some(
-          (t) => t.status === 'delivered',
-        );
-        if (orderTickets.length > 0 && allTerminal && anyDelivered) {
-          this.eventEmitter.emit('kitchen.order_all_delivered', {
-            orderId,
-            storeId: store_id,
-          });
-        }
       }
     } catch (e) {
-      // Best-effort: never block the ticket delivery on the order-side bridge.
       this.logger.warn(
-        `Failed to evaluate order-all-delivered bridge for ticket #${ticketId}: ${
+        `Failed to evaluate order-all-delivered bridge for ticket #${ticketId ?? orderId}: ${
           (e as Error).message
         }`,
       );
     }
-
-    return full.ticket;
   }
 
   /**
@@ -2681,6 +2863,13 @@ export class KitchenFireService {
         `QUI-760: failed to attribute ticket ${ticketId} consumption to KDS session`,
         err as Error,
       );
+    }
+    // Paso 1: un cancel como última acción también puede completar el
+    // handoff (todos terminal + ≥1 delivered) — mismo puente que
+    // `markDelivered`.
+    const orderId = (full.ticket as any)?.order_id ?? ticket.order_id;
+    if (orderId != null) {
+      await this.maybeEmitOrderAllDelivered(orderId, store_id, ticketId);
     }
     return full.ticket;
   }
@@ -2971,6 +3160,9 @@ export class KitchenFireService {
 
     const originals = await this.prisma.order_items.findMany({
       where: { id: { in: partial.map((e) => e.order_item_id) } },
+      // F-048 — el desglose (`order_item_taxes`, ADR-08) tiene que viajar a
+      // la línea nueva; sin incluirlo acá no hay nada que proporcionar.
+      include: { order_item_taxes: true },
     });
     // Tipo explicito: el Map inferido desde tuplas ensancha el valor a `{}` y todo
     // acceso a propiedades falla. Cuarta vez que aparece este patron en el repo.
@@ -3000,6 +3192,28 @@ export class KitchenFireService {
         // La linea ORIGINAL se queda con el resto SIN exclusion, y la nueva lleva
         // la excepcion. Al reves obligaria a mover la exclusion capturada al pedir
         // y a reescribir la fila que el cliente ya vio en su cuenta.
+        //
+        // F-048 (ADR-08 commit 5) — `tax_amount_item IS NULL` no es un
+        // marcador permanente: antes de este fix, la línea nueva nacía SIN
+        // `tax_rate`/`tax_amount_item` (quedaban NULL) y sin sus propias filas
+        // `order_item_taxes`, así que un normalizador que clasificara "línea
+        // pre-fix" por esa ausencia la habría re-invertido, y en paralelo la
+        // original conservaba el desglose fiscal ENTERO sobre un `total_price`
+        // ya encogido (`TAX_SUBTOTAL_MISMATCH`). Los dos importes por-unidad
+        // (`tax_rate`, `tax_amount_item`) son invariantes bajo un cambio de
+        // `quantity` — se copian tal cual; `order_item_taxes` es por-LÍNEA
+        // (DB-08) y se reparte proporcional a las unidades de cada mitad.
+        const originalTaxRows = original.order_item_taxes ?? [];
+        const proportion = qty > 0 ? remaining / qty : 0;
+        // El reparto se cierra por diferencia, no redondeando las dos mitades
+        // por separado: `roundMoney2(x*p) + roundMoney2(x*(1-p))` puede
+        // perder o ganar un centavo respecto de `x`, y ese centavo sale
+        // directo del invariante `Σ order_item_taxes = impuesto de la línea`.
+        const keptTaxById = new Map<number, number>();
+        for (const row of originalTaxRows) {
+          keptTaxById.set(row.id, roundMoney2(Number(row.tax_amount) * proportion));
+        }
+
         await tx.order_items.update({
           where: { id: original.id },
           data: {
@@ -3008,6 +3222,14 @@ export class KitchenFireService {
             updated_at: new Date(),
           },
         });
+        for (const row of originalTaxRows) {
+          await tx.order_item_taxes.update({
+            where: { id: row.id },
+            data: {
+              tax_amount: new Prisma.Decimal(keptTaxById.get(row.id) ?? 0),
+            },
+          });
+        }
 
         const created = await tx.order_items.create({
           data: {
@@ -3018,6 +3240,10 @@ export class KitchenFireService {
             quantity: units,
             unit_price: original.unit_price,
             total_price: new Prisma.Decimal(unitPrice * units),
+            tax_rate: original.tax_rate,
+            tax_amount_item: original.tax_amount_item,
+            final_unit_price: original.final_unit_price,
+            price_unit_quantity: original.price_unit_quantity,
             item_type: original.item_type,
             cost_price: original.cost_price,
             is_price_overridden: original.is_price_overridden,
@@ -3033,6 +3259,25 @@ export class KitchenFireService {
             split_from_order_item_id:
               original.split_from_order_item_id ?? original.id,
             updated_at: new Date(),
+            ...(originalTaxRows.length > 0
+              ? {
+                  order_item_taxes: {
+                    create: originalTaxRows.map((row) => ({
+                      tax_rate_id: row.tax_rate_id,
+                      tax_name: row.tax_name,
+                      tax_rate: row.tax_rate,
+                      tax_amount: new Prisma.Decimal(
+                        roundMoney2(
+                          Number(row.tax_amount) - (keptTaxById.get(row.id) ?? 0),
+                        ),
+                      ),
+                      tax_type: row.tax_type,
+                      is_compound: row.is_compound,
+                      is_inclusive: row.is_inclusive,
+                    })),
+                  },
+                }
+              : {}),
           },
         });
 

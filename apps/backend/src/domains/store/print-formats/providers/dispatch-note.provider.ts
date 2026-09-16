@@ -6,6 +6,32 @@ import { IDocumentDataProvider } from '../interfaces/document-data-provider.inte
 import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
+// C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-08: la remisión
+// declara `money_basis: 'gross'` y propaga el gate fiscal de C.1.
+//
+// F-101 (2026-09-14, unificación) — este provider era la mitad "sin dinero"
+// de los dos rieles de impresión de la remisión. La otra mitad
+// (`dispatch-notes/pdf/dispatch-note-pdf.builder.ts`, vivo vía
+// `POST /store/dispatch-notes/:id/pdf`) reutiliza AHORA el gate fiscal de
+// este mismo resolver (`resolvePrintsVatBreakdownForPrint`) en vez de
+// imprimir el IVA sin condición — ver comentario en
+// `dispatch-note-pdf.service.ts`. Ambos rieles siguen siendo dos motores de
+// render (HTML del gateway vs PDFKit binario: no hay motor html→pdf en el
+// stack, sólo pdfkit), pero ya NO pueden divergir en si el papel muestra el
+// desglose de IVA.
+//
+// Corregido en el mismo commit: este provider leía `order.order_items` /
+// `order.subtotal_amount` / `order.grand_total` — el snapshot de la ORDEN
+// completa, no el de ESTA remisión. Para remisiones parciales (una orden con
+// varias remisiones) o sin orden (traslados, recepciones de compra:
+// `order_id` es nullable) esto imprimía el total de la orden entera o una
+// tabla vacía. Ahora lee `dispatch_note_items` y los totales propios de
+// `dispatch_notes` — el mismo snapshot que ya usaba correctamente
+// `dispatch-note-pdf.service.ts`.
+import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
+// Hallazgo 1b — discriminante bruto-vs-base compartido (misma función que el
+// riel B): sin aritmética propia para que los dos motores no diverjan.
+import { resolveDispatchNoteLinePrintedGross } from '../../taxes/utils/final-price.util';
 
 @Injectable()
 export class DispatchNoteDataProvider implements IDocumentDataProvider {
@@ -25,16 +51,43 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
     const note = await this.prisma.dispatch_notes.findFirst({
       where: { id, store_id: storeId },
       include: {
-        stores: {
+        // C.3 (fix 2026-09-14): la relacion real en schema.prisma es
+        // `store`/`order` (singular) — `stores`/`orders` (plural, el nombre
+        // del modelo/tabla) no existe como campo de include en
+        // `dispatch_notes` y Prisma lo rechaza en runtime con
+        // PrismaClientValidationError, tumbando CADA render de remision con
+        // 500. Compilaba porque `StorePrismaService` no estrecha el tipo de
+        // include lo suficiente para que tsc lo atrape.
+        store: {
           include: {
             addresses: { take: 1 },
-            organizations: true,
+            // C.1 — settings para el gate fiscal
+            // `resolvePrintsVatBreakdownForPrint` (misma forma que
+            // `FISCAL_DOCUMENT_PRINT_INCLUDE`).
+            store_settings: { select: { settings: true } },
+            organizations: {
+              include: {
+                organization_settings: { select: { settings: true } },
+              },
+            },
           },
         },
-        orders: {
+        // F-101 — snapshot propio de la remisión (NO de la orden completa):
+        // cubre remisiones parciales y notas sin orden (traslado, recepción
+        // de compra). Mismo `include` que `dispatch-note-pdf.service.ts`.
+        dispatch_note_items: {
           include: {
-            order_items: true,
-            users: true,
+            product: { select: { id: true, name: true } },
+            product_variant: { select: { id: true, sku: true } },
+          },
+        },
+        customer: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            phone: true,
+            document_number: true,
           },
         },
       },
@@ -44,9 +97,9 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
       throw new VendixHttpException(ErrorCodes.PRINT_DOCUMENT_NOT_FOUND_001);
     }
 
-    const store = note.stores || {};
-    const order = note.orders || ({} as any);
-    const user = order.users || {};
+    const store = note.store || {};
+    const org = store.organizations || {};
+    const customer = note.customer || ({} as any);
     const storeAddr = store.addresses?.[0] || {};
 
     let customerAddress = '';
@@ -59,14 +112,34 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
       }
     }
 
-    const items = (order.order_items || []).map((it: any, idx: number) => ({
-      index: idx + 1,
-      product_name: it.product_name,
-      variant_sku: it.variant_sku || undefined,
-      quantity: Number(it.quantity || 1),
-      unit_price: Number(it.unit_price || 0),
-      total_price: Number(it.total_price || 0),
-    }));
+    // C.7 + hallazgo 1b — las dos columnas van en BRUTO bajo
+    // `money_basis: 'gross'`, y el total persistido NO siempre es bruto: las
+    // filas nuevas lo traen en bruto
+    // (`total_price = unit_price × cantidad − descuento + tax_amount`) pero
+    // las históricas B lo guardan en base. El discriminante vive en
+    // `resolveDispatchNoteLinePrintedGross` (definición única compartida con
+    // el riel B): acá sólo se consume, sin aritmética duplicada.
+    const items = (note.dispatch_note_items || []).map((it: any, idx: number) => {
+      const quantity = Number(it.dispatched_quantity ?? it.ordered_quantity ?? 1) || 1;
+      const gross = resolveDispatchNoteLinePrintedGross({
+        unit_price: it.unit_price,
+        total_price: it.total_price,
+        tax_amount: it.tax_amount,
+        discount_amount: it.discount_amount,
+        quantity,
+      });
+      return {
+        index: idx + 1,
+        product_name: it.product?.name || `Producto #${it.product_id}`,
+        variant_sku: it.product_variant?.sku || undefined,
+        quantity,
+        dispatched_qty: Number(it.dispatched_quantity || 0),
+        unit_price: gross.gross_unit_price,
+        total_price: gross.gross_total_price,
+        discount_amount: it.discount_amount ? Number(it.discount_amount) : undefined,
+        tax_amount: it.tax_amount ? Number(it.tax_amount) : undefined,
+      };
+    });
 
     return {
       store: {
@@ -79,8 +152,9 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
         city: storeAddr.city,
       },
       customer: {
-        name: (note as any).customer_name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Destinatario',
-        phone: (note as any).customer_phone || user.phone,
+        name: (note as any).customer_name || `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Destinatario',
+        tax_id: note.customer_tax_id || customer.document_number || undefined,
+        phone: (note as any).customer_phone || customer.phone,
         address: customerAddress,
       },
       document: {
@@ -94,19 +168,25 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
         shipping_tracking_number: note.tracking_number || undefined,
         notes: note.notes || undefined,
       },
+      // C.2 (ADR-12) — G-08: papel comercial, el destinatario ve el bruto.
+      money_basis: 'gross',
+      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(org, store),
       items,
       taxes: [],
+      // F-101 — totales propios de la remisión (`dispatch_notes.*`), no los
+      // de la orden completa: la única fuente correcta para una remisión
+      // parcial o sin orden.
       totals: {
-        subtotal: Number(order.subtotal_amount || 0),
-        subtotal_formatted: `$${Number(order.subtotal_amount || 0).toLocaleString('es-CO')}`,
-        discount_total: 0,
-        discount_total_formatted: '$0',
-        shipping_total: 0,
-        shipping_total_formatted: '$0',
-        tax_total: 0,
-        tax_total_formatted: '$0',
-        grand_total: Number(order.grand_total || 0),
-        grand_total_formatted: `$${Number(order.grand_total || 0).toLocaleString('es-CO')}`,
+        subtotal: Number(note.subtotal_amount || 0),
+        subtotal_formatted: `$${Number(note.subtotal_amount || 0).toLocaleString('es-CO')}`,
+        discount_total: Number(note.discount_amount || 0),
+        discount_total_formatted: `$${Number(note.discount_amount || 0).toLocaleString('es-CO')}`,
+        shipping_total: Number(note.shipping_cost || 0),
+        shipping_total_formatted: `$${Number(note.shipping_cost || 0).toLocaleString('es-CO')}`,
+        tax_total: Number(note.tax_amount || 0),
+        tax_total_formatted: `$${Number(note.tax_amount || 0).toLocaleString('es-CO')}`,
+        grand_total: Number(note.grand_total || 0),
+        grand_total_formatted: `$${Number(note.grand_total || 0).toLocaleString('es-CO')}`,
       },
     };
   }
@@ -138,6 +218,9 @@ export class DispatchNoteDataProvider implements IDocumentDataProvider {
         shipping_tracking_number: 'GUIA-889922001',
         notes: 'Entregar en horario de oficina. Solicitar sello y firma.',
       },
+      // C.2 (ADR-12) — muestra en `'gross'`, paridad con `fetchDocumentData`.
+      money_basis: 'gross',
+      prints_vat_breakdown: true,
       items: [
         {
           index: 1,

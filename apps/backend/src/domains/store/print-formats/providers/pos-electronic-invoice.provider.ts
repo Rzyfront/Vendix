@@ -14,6 +14,9 @@ import {
   resolveRawLogoKey,
 } from './fiscal-document-print.mapper';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
+// C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-02: tiquete factura
+// electrónica declara `money_basis: 'taxable_base'` y propaga el gate de C.1.
+import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
 
 @Injectable()
 export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
@@ -70,6 +73,11 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
       acceptedLabel: 'Aprobada por DIAN',
       pendingLabel: 'Pendiente',
       signedLogoUrl,
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(
+        invoice.organization,
+        invoice.store,
+      ),
     });
 
     // Si la factura tiene orden asociada, enriquecer con mesa/cajero si existen
@@ -149,6 +157,10 @@ export class PosElectronicInvoiceDataProvider implements IDocumentDataProvider {
         technical_key: '3a8f9c1b',
         environment: 'production',
       },
+      // C.2 (ADR-12) — muestra en `'taxable_base'`, paridad con
+      // `fetchDocumentData`.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: true,
       // La discriminación de impuestos vive en `taxes` a nivel raíz, no dentro
       // de `fiscal`: es el arreglo que `print-layout-composer` recorre para la
       // sección `fiscal_tax_breakdown`, y los otros diez formatos del dominio

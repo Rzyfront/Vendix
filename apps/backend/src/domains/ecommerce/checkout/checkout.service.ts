@@ -594,6 +594,15 @@ export class CheckoutService {
     });
     if (existing) return existing.id;
 
+    const { auto_emit } =
+      await this.invoicingService.getEcommerceInvoicingSettings();
+    if (!auto_emit) {
+      this.logger.log(
+        `Emisión automática de factura omitida para el pedido ${orderId}: la tienda desactivó invoicing.ecommerce.auto_emit`,
+      );
+      return null;
+    }
+
     const now = new Date();
     const [resolution, dianConfig] = await Promise.all([
       this.store_prisma.invoice_resolutions.findFirst({

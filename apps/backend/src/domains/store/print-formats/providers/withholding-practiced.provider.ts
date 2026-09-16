@@ -7,6 +7,7 @@ import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { mapUserAddress } from '../lib/customer-address';
+import { fractionalRateToPercent } from '../lib/tax-rate-percent.util';
 
 /**
  * [print-editor-dsk P8] — Certificado de retención PRACTICADA
@@ -95,11 +96,25 @@ export class WithholdingPracticedDataProvider implements IDocumentDataProvider {
         // no tiene columna de dirección y no se inventa nada.
         ...(!calculation.supplier?.name ? mapUserAddress(calculation.customer?.addresses?.[0]) : {}),
       },
+      // C.2 (ADR-12, G-14..16) — irrelevante en la practica: no hay
+      // `unit_price`/`total_price` (`items: []`), y el `tax_total` que este
+      // certificado imprime es RETENCION, no IVA (`prints_vat_breakdown` no
+      // aplica). `taxable_base`/`false` por default de R-2: no hay settings
+      // de tienda/organizacion en memoria.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: false,
       items: [],
       taxes: [
         {
           name: calculation.concept?.name || 'Retención',
-          rate: Number(calculation.withholding_rate || calculation.concept?.rate || 0),
+          // C.7 — `withholding_calculations.withholding_rate` y
+          // `withholding_concepts.rate` son FRACCIÓN (0.0250 = 2,5 %) y el
+          // compositor concatena `(${rate}%)`: sin escalar, el certificado
+          // decía «Retención en la fuente compras 2.5% (0.025%)».
+          rate:
+            fractionalRateToPercent(
+              calculation.withholding_rate || calculation.concept?.rate || 0,
+            ) ?? 0,
           base_amount: Number(calculation.base_amount || 0),
           tax_amount: Number(calculation.withholding_amount || 0),
           base_formatted: `$${Number(calculation.base_amount || 0).toLocaleString('es-CO')}`,
@@ -154,6 +169,9 @@ export class WithholdingPracticedDataProvider implements IDocumentDataProvider {
         address: 'Calle 100 # 15-20, Bogotá D.C.',
         city: 'Bogotá D.C.',
       },
+      // C.2 (ADR-12) - muestra en paridad con `fetchDocumentData`.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: false,
       items: [],
       taxes: [
         {

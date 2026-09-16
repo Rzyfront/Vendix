@@ -2,8 +2,10 @@ import { Logger } from '@nestjs/common';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { mapUserAddress } from '../lib/customer-address';
 import { RESOLUTION_PUBLIC_SELECT } from '../../invoicing/utils/technical-key.util';
+import { normalizeInvoiceTaxRateNumber } from '../../invoicing/utils/invoice-tax-rate.util';
 import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
 import { resolveFiscalIssuerForPrint } from '../services/fiscal-issuer-identity';
+import { roundMoney2 } from '../../taxes/utils/final-price.util';
 
 /**
  * A.3 (CP-facturacion-impuesto-incluido-redondeo, F-066) — el mapeador es una
@@ -72,6 +74,10 @@ export const FISCAL_DOCUMENT_PRINT_INCLUDE = {
           tax_name: true,
           tax_rate: true,
           tax_amount: true,
+          // F-212 — el desambiguador de magnitud mira el TIPO antes que el
+          // valor: sin `tax_type` no se puede distinguir un IVA con fracción
+          // colada (0.19) de un ICA legítimo sub-1 %.
+          tax_type: true,
         },
       },
     },
@@ -184,6 +190,33 @@ export interface FiscalDocumentPrintOptions {
    * de S3, el `<img>` daría 404 y el papel mostraría `alt="Logo"` literal.
    */
   signedLogoUrl?: string;
+  /**
+   * C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — base monetaria que
+   * declara el PROVIDER llamante, NUNCA este mapeador ni la plantilla
+   * (`print-gateway.service.ts:714-721` fusiona columnas por `id`). Nombrado
+   * en snake_case a propósito, igual que el campo del modelo
+   * (`StandardPrintDataModel.money_basis`): sin traducción, para que quede
+   * trivial auditar que el mapeador reenvía exactamente lo que el provider
+   * decidió.
+   *
+   * OPCIONAL: `profile-preview.service.ts:644` (fuera del alcance de C.2 —
+   * dominio `invoicing/profiles`, no `print-formats`) llama a este mapeador
+   * sin este campo. Si se vuelve requerido, ese call site deja de compilar
+   * y arreglarlo excede el alcance de este paso. El default vive en
+   * `mapFiscalDocumentToPrintData` (`?? 'taxable_base'`, R-2 de ADR-12); los
+   * cuatro providers de este dominio SÍ lo pasan explícito siempre.
+   */
+  money_basis?: 'gross' | 'taxable_base';
+  /**
+   * C.2 (ADR-12) — espejo backend de `selectPrintsVatBreakdown`, ya resuelto
+   * por el provider llamante con `resolvePrintsVatBreakdownForPrint(org, store)`
+   * sobre las filas que su propio `include` trae en memoria
+   * (`FISCAL_DOCUMENT_PRINT_INCLUDE` ya las declara para los cuatro).
+   *
+   * OPCIONAL por el mismo motivo que `money_basis` — ver comentario arriba.
+   * Default `?? false` (R-2 de ADR-12: fail-closed, "un papel no se retracta").
+   */
+  prints_vat_breakdown?: boolean;
 }
 
 /**
@@ -204,8 +237,13 @@ export function resolveRawLogoKey(invoice: any): string | undefined {
  * `minimum/maximumFractionDigits: 2` siempre. Sin el pineado, `toLocaleString`
  * usa 0–3 decimales según la magnitud y `$3000` se imprime `$3.000` mientras
  * el XML declara `3000.00`: el adquiriente suma distinto que la factura.
+ *
+ * F-007 — helper compartido: el override fiscal de
+ * `pos-sale-ticket.provider.ts` lo reusa para que la tirilla con snapshot
+ * pinte la misma precisión que el documento fiscal (mismo modelo, una sola
+ * precisión: `'$5.000,00'`).
  */
-const money = (n: number) =>
+export const formatFiscalMoney = (n: number) =>
   `$${Number(n || 0).toLocaleString('es-CO', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -221,13 +259,36 @@ export function mapFiscalDocumentToPrintData(
   const res = invoice.resolution || ({} as any);
 
   const items = (invoice.invoice_items || []).map((it: any, idx: number) => {
-    const unitPrice = Number(it.unit_price ?? it.price ?? 0);
-    const totalPrice = Number(
-      it.total_amount ??
-        it.total_price ??
-        it.total ??
-        unitPrice * Number(it.quantity || 1),
-    );
+    const rawUnitPrice = Number(it.unit_price ?? it.price ?? 0);
+    const lineTaxAmount = Number(it.tax_amount || 0);
+    const lineQuantity = Number(it.quantity || 1);
+    const snapshotLineTotal = it.total_amount ?? it.total_price ?? it.total;
+    // C.7 — el documento fiscal declara `money_basis: 'taxable_base'` y su pie
+    // imprime `Subtotal:` desde `invoices.subtotal_amount`, que es la BASE. La
+    // columna de total de línea leía `invoice_items.total_amount`, que es el
+    // BRUTO: verificado sobre la factura 66, línea 145 = 289.000 × 1 + 54.910
+    // de IVA = 343.910. Asi que Σ(columna) daba 5.577.530 contra
+    // `Subtotal: $4.687.000`, y la condición negativa de C.3 —si hay fila
+    // `Subtotal`, Σ líneas la iguala sin residuo— fallaba en los cuatro
+    // documentos que pasan por este mapeador. Se imprime la base de línea
+    // (`total_amount − tax_amount`); el impuesto ya viaja en la fila
+    // `Impuestos:` y en la DISCRIMINACIÓN DE IMPUESTOS, y contarlo dos veces
+    // en el mismo papel es exactamente lo que este plan persigue.
+    //
+    // Sin snapshot se conserva el fallback histórico intacto (`unitario ×
+    // cantidad`, que ya es base para una línea exclusiva): restarle impuesto
+    // a un total que nadie persistió sería inventar una base.
+    const totalPrice =
+      snapshotLineTotal === null || snapshotLineTotal === undefined
+        ? rawUnitPrice * lineQuantity
+        : roundMoney2(Number(snapshotLineTotal) - lineTaxAmount);
+    // `invoice_items.is_inclusive` marca la línea cuyo `unit_price` YA lleva el
+    // impuesto dentro: bajo base gravable ese unitario contradice su propia
+    // columna de total, así que se deriva de la base de línea.
+    const unitPrice =
+      it.is_inclusive === true && lineQuantity > 0
+        ? roundMoney2(totalPrice / lineQuantity)
+        : rawUnitPrice;
     const variantSku =
       it.sku ||
       it.product_variant?.sku ||
@@ -236,16 +297,29 @@ export function mapFiscalDocumentToPrintData(
       it.product?.barcode ||
       (it.product_id ? String(it.product_id) : String(idx + 1));
 
+    // F-212 — las filas ya escritas con la FRACCIÓN colada (`0.19` en una
+    // columna cuyo contrato es PORCENTAJE) no se corrigen en la base: decisión
+    // del dueño del producto, «lo que se pudrió podrido queda» (ADR-15 §7). Por
+    // eso la tolerancia vive en el lector: sin ella la factura 67 y la nota 170
+    // seguirían imprimiendo «0.19 %» para siempre. El escritor ya no puede
+    // producir filas nuevas así (`normalizeInvoiceTaxRate` en
+    // `buildInvoiceTaxCreateInput` y en `credit-notes.service.ts`).
     let taxRate = Number(it.tax_rate || 0);
     if (!taxRate && it.invoice_taxes && it.invoice_taxes.length > 0) {
-      taxRate = Number(it.invoice_taxes[0].tax_rate || 0);
+      taxRate = normalizeInvoiceTaxRateNumber(
+        it.invoice_taxes[0].tax_rate,
+        it.invoice_taxes[0].tax_type,
+      );
     } else if (
       !taxRate &&
       invoice.invoice_taxes &&
       invoice.invoice_taxes.length === 1 &&
       Number(it.tax_amount) > 0
     ) {
-      taxRate = Number(invoice.invoice_taxes[0].tax_rate || 0);
+      taxRate = normalizeInvoiceTaxRateNumber(
+        invoice.invoice_taxes[0].tax_rate,
+        invoice.invoice_taxes[0].tax_type,
+      );
     }
 
     const discountAmt = Number(it.discount_amount || 0);
@@ -256,21 +330,23 @@ export function mapFiscalDocumentToPrintData(
       variant_sku: variantSku,
       quantity: Number(it.quantity || 1),
       unit_price: unitPrice,
-      unit_price_formatted: money(unitPrice),
+      unit_price_formatted: formatFiscalMoney(unitPrice),
       discount_amount: discountAmt,
       discount_formatted:
-        discountAmt > 0 ? `-${money(discountAmt)}` : undefined,
+        discountAmt > 0 ? `-${formatFiscalMoney(discountAmt)}` : undefined,
       tax_rate: taxRate,
       tax_amount: Number(it.tax_amount || 0),
       total_price: totalPrice,
-      total_price_formatted: money(totalPrice),
+      total_price_formatted: formatFiscalMoney(totalPrice),
     };
   });
 
   const taxesMap = new Map<string, { name: string; rate: number; base_amount: number; tax_amount: number }>();
   for (const t of invoice.invoice_taxes || []) {
     const name = t.tax_name || 'IVA';
-    const rate = Number(t.tax_rate || 0);
+    // F-212 — misma tolerancia que arriba: la fila vieja con `0.19` se lee
+    // como 19 % en el papel sin que nadie toque el dato persistido.
+    const rate = normalizeInvoiceTaxRateNumber(t.tax_rate, t.tax_type);
     const key = `${name}_${rate}`;
     const base = Number(t.taxable_amount || 0);
     const amt = Number(t.tax_amount || 0);
@@ -284,8 +360,8 @@ export function mapFiscalDocumentToPrintData(
   }
   const taxes = Array.from(taxesMap.values()).map((t) => ({
     ...t,
-    base_formatted: money(t.base_amount),
-    tax_formatted: money(t.tax_amount),
+    base_formatted: formatFiscalMoney(t.base_amount),
+    tax_formatted: formatFiscalMoney(t.tax_amount),
   }));
 
   const subtotal = Number(invoice.subtotal_amount ?? 0);
@@ -428,6 +504,13 @@ export function mapFiscalDocumentToPrintData(
       notes: invoice.notes || undefined,
       reference_document_number: options.referenceDocumentNumber,
     },
+    // C.2 (ADR-12) — reenvío literal de lo que el provider decidió: este
+    // mapeador no elige, no convierte, sólo coloca lo recibido en el modelo.
+    // El `??` sólo protege al llamante fuera de alcance que no declara nada
+    // (`profile-preview.service.ts:644`) con el default seguro de R-2; los
+    // cuatro providers de este dominio siempre pasan un valor explícito.
+    money_basis: options.money_basis ?? 'taxable_base',
+    prints_vat_breakdown: options.prints_vat_breakdown ?? false,
     fiscal: {
       cufe: invoice.cufe || undefined,
       qr_code_content: invoice.qr_code || undefined,
@@ -450,17 +533,17 @@ export function mapFiscalDocumentToPrintData(
     taxes,
     totals: {
       subtotal,
-      subtotal_formatted: money(subtotal),
+      subtotal_formatted: formatFiscalMoney(subtotal),
       discount_total: discount,
-      discount_total_formatted: money(discount),
+      discount_total_formatted: formatFiscalMoney(discount),
       shipping_total: 0,
       shipping_total_formatted: '$0',
       tax_total: tax,
-      tax_total_formatted: money(tax),
+      tax_total_formatted: formatFiscalMoney(tax),
       withholding_total: withholding,
-      withholding_total_formatted: money(withholding),
+      withholding_total_formatted: formatFiscalMoney(withholding),
       grand_total: total,
-      grand_total_formatted: money(total),
+      grand_total_formatted: formatFiscalMoney(total),
       // Mismo `total` que la fila en cifras: una segunda fuente aquí sería una
       // contradicción interna del documento legal.
       grand_total_in_words: Number.isFinite(total)

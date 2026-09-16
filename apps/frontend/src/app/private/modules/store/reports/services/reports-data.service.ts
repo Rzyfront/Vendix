@@ -12,6 +12,7 @@ interface CacheEntry<T> {
 }
 
 const reportsCache = new Map<string, CacheEntry<Observable<any>>>();
+const lastRangePerReport = new Map<string, string>();
 
 @Injectable({
   providedIn: 'root',
@@ -19,7 +20,8 @@ const reportsCache = new Map<string, CacheEntry<Observable<any>>>();
 export class ReportsDataService {
   private http = inject(HttpClient);
   private adapter = inject(ReportDataAdapterService);
-  private readonly CACHE_TTL = 60000;
+  /** High TTL for heavy analytics queries: 5 minutes (QUI-544). */
+  private readonly CACHE_TTL = 300_000;
 
   private withCache<T>(key: string, factory: () => Observable<T>): Observable<T> {
     const now = Date.now();
@@ -71,13 +73,22 @@ export class ReportsDataService {
       params = params.set('limit', String(options.limit));
     }
 
-    // Invalidate previous cache entries for this report (different date ranges)
-    const reportPrefix = `${report.id}-`;
-    for (const key of reportsCache.keys()) {
-      if (key.startsWith(reportPrefix)) {
-        reportsCache.delete(key);
+    // Invalidate previous cache entries for this report ONLY when the date range or fiscal period changes.
+    // Preserves cached pages during pagination and tab returns (QUI-544).
+    const rangeSignature = JSON.stringify({
+      dateRange: options?.dateRange,
+      fiscalPeriodId: options?.fiscalPeriodId,
+    });
+    const lastRange = lastRangePerReport.get(report.id);
+    if (lastRange && lastRange !== rangeSignature) {
+      const reportPrefix = `${report.id}-`;
+      for (const key of reportsCache.keys()) {
+        if (key.startsWith(reportPrefix)) {
+          reportsCache.delete(key);
+        }
       }
     }
+    lastRangePerReport.set(report.id, rangeSignature);
 
     const cacheKey = `${report.id}-${dataEndpoint}-${JSON.stringify(options)}`;
     return this.withCache(cacheKey, () =>
@@ -85,6 +96,24 @@ export class ReportsDataService {
         map((response) => this.adapter.adapt(response, report)),
       ),
     );
+  }
+
+  /**
+   * Clears report cache entries. If reportId is provided, clears only entries for that report.
+   */
+  clearCache(reportId?: string): void {
+    if (reportId) {
+      const reportPrefix = `${reportId}-`;
+      for (const key of reportsCache.keys()) {
+        if (key.startsWith(reportPrefix)) {
+          reportsCache.delete(key);
+        }
+      }
+      lastRangePerReport.delete(reportId);
+    } else {
+      reportsCache.clear();
+      lastRangePerReport.clear();
+    }
   }
 
   /**

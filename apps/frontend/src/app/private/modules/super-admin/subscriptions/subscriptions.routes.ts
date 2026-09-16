@@ -87,10 +87,8 @@ export const SUBSCRIPTIONS_ROUTES: Routes = [
       },
       {
         path: 'events',
-        loadComponent: () =>
-          import('./pages/events/subscription-events.component').then(
-            (c) => c.SubscriptionEventsComponent,
-          ),
+        pathMatch: 'full',
+        redirectTo: 'active',
       },
       {
         path: 'gateway',

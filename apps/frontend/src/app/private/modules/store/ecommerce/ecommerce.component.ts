@@ -1537,8 +1537,9 @@ export class EcommerceComponent {
    * Ahora: el footer se guarda SIEMPRE como una operación
    * independiente (PATCH parcial). Si la sección principal está
    * inválida, se notifica pero no se aborta el footer. Si la sección
-   * principal está válida, se guardan ambas (footer primero para
-   * preservar el orden de toasts).
+   * principal está válida, se guarda el resto en el PATCH general SIN
+   * repetir el footer (F-012: el footer viaja en un solo PATCH y con un
+   * solo toast "Footer guardado").
    */
   async onSubmit(): Promise<void> {
     // Validate WhatsApp checkout before proceeding (afecta a la sección
@@ -1579,8 +1580,12 @@ export class EcommerceComponent {
     // Preparar el objeto de configuración (strip confirm_whatsapp_number — frontend-only)
     const { confirm_whatsapp_number, ...checkoutPayload } =
       this.settingsForm.value.checkout;
+    // F-012: si el footer ya se persistió vía saveFooterOnly(), se omite
+    // del payload general para que se guarde una sola vez (un solo PATCH
+    // con footer y un solo toast "Footer guardado").
     const settings: EcommerceSettings = {
       ...this.settingsForm.value,
+      ...(footerSaved ? {} : { footer: this.footerSettings() }),
       checkout: checkoutPayload,
       inicio: {
         ...this.settingsForm.value.inicio,
@@ -1604,7 +1609,6 @@ export class EcommerceComponent {
           open_in_new_tab: img.open_in_new_tab ?? true,
         })),
       },
-      footer: this.footerSettings(),
     };
 
     this.ecommerceService

@@ -2618,3 +2618,262 @@ describe('PurchaseOrdersService.findOne() — un recurso ausente es 404, no un s
     });
   });
 });
+
+/**
+ * F-214 — `buildPurchaseTaxGroups()` es el reemplazo del cociente
+ * `iva_amount / net_amount` que el materializador del documento soporte
+ * usaba para "adivinar" una tarifa efectiva. Evidencia en producción
+ * (`docs/critical-plans/CP-pos-exclusive-tax-double-charge/findings/F-214.md`):
+ * 4 documentos escribieron `tax_rate` 17,92 % y 0,04 %, ninguna existente en
+ * el catálogo (`tax_rates`: 0, 5, 19 %). La causa: numerador (Σ
+ * `deductible_tax_amount` de las líneas gravadas) y denominador (subtotal de
+ * cabecera, TODAS las líneas) vienen de universos distintos — una línea
+ * exenta infla el denominador sin aportar al numerador.
+ *
+ * El reemplazo agrupa por la tarifa de catálogo de CADA línea
+ * (`purchase_order_items.tax_rate`) y nunca deriva nada de un cociente.
+ */
+describe('PurchaseOrdersService.buildPurchaseTaxGroups() — F-214', () => {
+  let service: PurchaseOrdersService;
+
+  beforeEach(async () => {
+    // El método bajo prueba es puro (sin I/O), así que el resto de
+    // dependencias inyectadas no participan y se satisfacen con dobles vacíos.
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        { provide: StorePrismaService, useValue: {} as any },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: {} as any },
+        { provide: CostingMethodResolverService, useValue: {} as any },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: {} as any },
+        { provide: S3Service, useValue: {} as any },
+        { provide: SettingsService, useValue: {} as any },
+        { provide: FiscalScopeService, useValue: {} as any },
+        { provide: EventEmitter2, useValue: {} as any },
+        { provide: AccountsPayableService, useValue: {} as any },
+        { provide: VatResponsibilityService, useValue: {} as any },
+      ],
+    }).compile();
+
+    service = module.get(PurchaseOrdersService);
+  });
+
+  const buildGroups = (items: unknown[]) =>
+    (service as any).buildPurchaseTaxGroups(items);
+
+  it('línea con IVA 19%: reporta la tarifa del catálogo tal cual, no una derivada', () => {
+    const groups = buildGroups([
+      {
+        tax_rate: 19,
+        quantity_ordered: 10,
+        unit_cost: 1000,
+        deductible_tax_amount: 1900,
+      },
+    ]);
+
+    expect(groups).toEqual([
+      { tax_rate: 19, taxable_amount: 10000, tax_amount: 1900 },
+    ]);
+  });
+
+  it('línea exenta (tax_rate = 0 explícito): fila propia al 0%, no diluye la tarifa gravada', () => {
+    const groups = buildGroups([
+      {
+        tax_rate: 0,
+        quantity_ordered: 1,
+        unit_cost: 240720,
+        deductible_tax_amount: 0,
+      },
+    ]);
+
+    expect(groups).toEqual([
+      { tax_rate: 0, taxable_amount: 240720, tax_amount: 0 },
+    ]);
+  });
+
+  it('línea sin asignación de tarifa (tax_rate NULL): falla cerrado en vez de inventar una tarifa', () => {
+    expect(() =>
+      buildGroups([
+        {
+          tax_rate: null,
+          quantity_ordered: 3,
+          unit_cost: 1000,
+          deductible_tax_amount: 0,
+        },
+      ]),
+    ).toThrow(/F-214/);
+  });
+
+  it('línea sin tarifa pero con IVA descontable > 0 (dato heredado/corrupto): también falla cerrado', () => {
+    // Por invariante de `deriveLineTax`, una línea sin `tax_rate` sella
+    // `deductible_tax_amount = 0`. Si de todos modos apareciera con IVA > 0
+    // (dato de un flujo anterior a F1), no hay tarifa de catálogo a la que
+    // atribuirlo — el mismo defecto que F-214, sólo que en vez de un cociente
+    // se estaría inventando la tarifa por omisión (0% silencioso).
+    expect(() =>
+      buildGroups([
+        {
+          tax_rate: null,
+          quantity_ordered: 3,
+          unit_cost: 1000,
+          deductible_tax_amount: 150,
+        },
+      ]),
+    ).toThrow(/F-214/);
+  });
+
+  it('agrupa varias líneas que comparten tarifa en una sola fila', () => {
+    const groups = buildGroups([
+      {
+        tax_rate: 19,
+        quantity_ordered: 2,
+        unit_cost: 1000,
+        deductible_tax_amount: 380,
+      },
+      {
+        tax_rate: 19,
+        quantity_ordered: 3,
+        unit_cost: 1000,
+        deductible_tax_amount: 570,
+      },
+    ]);
+
+    expect(groups).toEqual([
+      { tax_rate: 19, taxable_amount: 5000, tax_amount: 950 },
+    ]);
+  });
+
+  it('compra multi-línea con tarifas mixtas: dos filas (19% y 0%), nunca el 17,92% del cociente', () => {
+    // Reproduce la composición EXACTA de las PO 641/647/679 medidas en
+    // producción (evidence/F-214-soporte-prod.txt, bloque S5/S6): 6 líneas al
+    // 19% con neto 3.985.813,08 e IVA 757.304,49, más 1 línea exenta de
+    // 240.720,00. El cociente 757.304,49 / 4.226.533,08 escribía 17,92%, una
+    // tarifa que no existe en tax_rates.
+    // Los montos por línea usan 2 decimales reales (Decimal(12,2) en DB); el
+    // último ajusta el residuo para sumar EXACTO a los totales de evidencia
+    // sin depender del redondeo del agrupador bajo prueba.
+    const seisLineasGravadas = [126217.42, 126217.42, 126217.42, 126217.42, 126217.42, 126217.39].map(
+      (ivaLinea) => ({
+        tax_rate: 19,
+        quantity_ordered: 1,
+        unit_cost: 664302.18,
+        deductible_tax_amount: ivaLinea,
+      }),
+    );
+    const lineaExenta = {
+      tax_rate: 0,
+      quantity_ordered: 1,
+      unit_cost: 240720,
+      deductible_tax_amount: 0,
+    };
+
+    const groups = buildGroups([...seisLineasGravadas, lineaExenta]);
+    const rates = groups.map((g: { tax_rate: number }) => g.tax_rate);
+
+    // Ninguna tarifa inventada: ni 17.92 ni 0.04 (las dos escritas en prod).
+    expect(rates).not.toContain(17.92);
+    expect(rates).not.toContain(0.04);
+
+    expect(groups).toEqual([
+      { tax_rate: 19, taxable_amount: 3985813.08, tax_amount: 757304.49 },
+      { tax_rate: 0, taxable_amount: 240720, tax_amount: 0 },
+    ]);
+  });
+});
+
+/**
+ * F-214 — `materializeVatDocument()` debe escribir UNA fila de
+ * `invoice_taxes` por grupo de `tax_groups`, nunca una única fila con una
+ * tarifa derivada de `iva_amount / net_amount` de cabecera.
+ */
+describe('PurchaseOrdersService.materializeVatDocument() — F-214', () => {
+  let service: PurchaseOrdersService;
+  let prismaService: any;
+
+  beforeEach(async () => {
+    prismaService = {
+      invoices: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 900 }),
+      },
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        { provide: StorePrismaService, useValue: prismaService },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: {} as any },
+        { provide: CostingMethodResolverService, useValue: {} as any },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: {} as any },
+        { provide: S3Service, useValue: {} as any },
+        { provide: SettingsService, useValue: {} as any },
+        { provide: FiscalScopeService, useValue: {} as any },
+        { provide: EventEmitter2, useValue: {} as any },
+        { provide: AccountsPayableService, useValue: {} as any },
+        { provide: VatResponsibilityService, useValue: {} as any },
+      ],
+    }).compile();
+
+    service = module.get(PurchaseOrdersService);
+  });
+
+  it('escribe una fila de invoice_taxes por cada grupo, con la tarifa del catálogo (no derivada)', async () => {
+    const tax_groups = [
+      { tax_rate: 19, taxable_amount: 3985813.08, tax_amount: 757304.49 },
+      { tax_rate: 0, taxable_amount: 240720, tax_amount: 0 },
+    ];
+
+    await (service as any).materializeVatDocument({
+      purchase_order_id: 641,
+      order_number: 'PO-20260820-241',
+      supplier_invoice_number: null,
+      supplier_invoice_date: null,
+      supplier: { id: 5, name: 'Proveedor Test', tax_id: '900123456' },
+      organization_id: 1,
+      store_id: 66,
+      accounting_entity_id: 77,
+      net_amount: 4226533.08,
+      iva_amount: 757304.49,
+      tax_groups,
+      user_id: 9,
+    });
+
+    expect(prismaService.invoices.create).toHaveBeenCalledTimes(1);
+    const createArgs = prismaService.invoices.create.mock.calls[0][0];
+
+    // Cabecera: sigue siendo el neto/iva TOTAL del documento (sin cambios).
+    expect(createArgs.data.subtotal_amount).toBe(4226533.08);
+    expect(createArgs.data.tax_amount).toBe(757304.49);
+    expect(createArgs.data.total_amount).toBe(4983837.57);
+
+    // Desglose: una fila por grupo, con la tarifa TAL CUAL viene del catálogo.
+    expect(createArgs.data.invoice_taxes.create).toEqual([
+      {
+        tax_name: 'IVA',
+        tax_rate: 19,
+        taxable_amount: 3985813.08,
+        tax_amount: 757304.49,
+        tax_type: 'iva',
+      },
+      {
+        tax_name: 'IVA',
+        tax_rate: 0,
+        taxable_amount: 240720,
+        tax_amount: 0,
+        tax_type: 'iva',
+      },
+    ]);
+
+    // Ninguna fila lleva la tarifa inventada que el cociente producía en prod.
+    const writtenRates = createArgs.data.invoice_taxes.create.map(
+      (row: { tax_rate: number }) => row.tax_rate,
+    );
+    expect(writtenRates).not.toContain(17.92);
+  });
+});

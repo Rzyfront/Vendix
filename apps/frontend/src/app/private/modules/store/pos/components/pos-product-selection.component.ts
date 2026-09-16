@@ -916,18 +916,35 @@ export class PosProductSelectionComponent {
       is_sellable: true,
     };
 
-    if (this.searchQuery()) {
-      filters.query = this.searchQuery();
+    const searchTerm = this.searchQuery();
+    if (searchTerm) {
+      filters.query = searchTerm;
     }
 
     const selectedCat = this.selectedCategory();
-    if (selectedCat && selectedCat.id !== '') {
-      filters.category = selectedCat.id;
+    const hasCategoryFilter = !!selectedCat && selectedCat.id !== '';
+    if (hasCategoryFilter) {
+      filters.category = selectedCat!.id;
     }
 
     const selectedBr = this.selectedBrand();
-    if (selectedBr && selectedBr.id !== '') {
-      filters.brand = selectedBr.id.toString();
+    const hasBrandFilter = !!selectedBr && selectedBr.id !== '';
+    if (hasBrandFilter) {
+      filters.brand = selectedBr!.id.toString();
+    }
+
+    // Primera pantalla del POS (sin búsqueda ni filtros): el cajero debe ver
+    // primero lo que la tienda quiere empujar y lo que más se vende, no lo más
+    // recién creado. Orden pedido: destacados (`is_featured`) → más vendidos
+    // (30 días, órdenes completadas) → resto por `created_at desc`.
+    //
+    // Con búsqueda, categoría o marca activos NO se envía: ahí manda el
+    // filtro, y anteponer destacados escondería el resultado buscado.
+    // El backend degrada solo al orden anterior si la tienda no tiene ventas
+    // ni destacados, así que la grilla nunca queda vacía por este flag.
+    if (!searchTerm && !hasCategoryFilter && !hasBrandFilter) {
+      filters.featured_first = true;
+      filters.best_selling_first = true;
     }
 
     this.productService

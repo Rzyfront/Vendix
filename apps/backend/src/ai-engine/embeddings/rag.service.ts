@@ -24,18 +24,19 @@ export class RAGService {
   async queryWithContext(params: RAGQueryParams): Promise<AIResponse> {
     const context = RequestContextService.getContext();
     const storeId = context?.store_id;
+    const appKey = params.app_key ?? 'chat_assistant';
 
-    if (!storeId) {
-      return this.aiEngine.chat([{ role: 'user', content: params.query }]);
-    }
-
+    // F2: todo consumo con store_id viaja por run() (gate + cuota + log con
+    // categoría). chat() directo queda prohibido en rutas de tienda.
     // Search for relevant context
-    const results = await this.embeddingService.searchByText(
-      storeId,
-      params.query,
-      params.entity_types,
-      params.max_context_items || 5,
-    );
+    const results = storeId
+      ? await this.embeddingService.searchByText(
+          storeId,
+          params.query,
+          params.entity_types,
+          params.max_context_items || 5,
+        )
+      : [];
 
     // Build augmented prompt
     const messages: AIMessage[] = [];
@@ -48,7 +49,7 @@ export class RAGService {
     messages.push({ role: 'system', content: augmentedPrompt });
     messages.push({ role: 'user', content: params.query });
 
-    return this.aiEngine.chat(messages);
+    return this.aiEngine.run(appKey, undefined, messages);
   }
 
   private buildRAGSystemPrompt(

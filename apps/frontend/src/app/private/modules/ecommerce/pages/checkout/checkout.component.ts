@@ -1725,12 +1725,14 @@ export class CheckoutComponent implements OnInit {
             this.shipping_coverage.set(isFallbackOnly ? 'pickup_only' : 'zone');
 
             // No pisar la elección del comprador en cada recotización: si la
-            // opción elegida sigue existiendo se conserva. Single-only: solo
-            // se autoselecciona cuando queda exactamente UNA opción no-pickup;
-            // con 2+ (p. ej. Riohacha céntrica vs. alejada) se limpia la
-            // selección y el comprador elige explícitamente — preseleccionar
-            // la barata subcobra el envío remoto. `nextStep` bloquea avanzar
-            // sin selección, así que limpiar equivale a exigir la elección.
+            // opción elegida sigue existiendo se conserva (ADR-03, F-005).
+            // Sin elección previa válida se muestran TODAS las tarifas
+            // aplicables y se preselecciona el mejor match solo como
+            // sugerencia cambiable (`postal_code_match` primero, si no la
+            // primera): cada tarjeta llama a `selectShippingMethod` al hacer
+            // clic/teclado y el comprador puede cambiarla sin bloqueo.
+            // `canConfirmOrder`/`nextStep` siguen exigiendo un método
+            // seleccionado: no hay bypass, solo sugerencia inicial.
             const matchedOption = options.find(
               (o: any) => o.id === this.selected_shipping_option_id,
             );
@@ -1759,9 +1761,10 @@ export class CheckoutComponent implements OnInit {
             } else if (stillValid && matchedOption) {
               this.shipping_cost.set(matchedOption.cost);
             } else if (!stillValid) {
-              // Preselección de tarifa en checkout:
-              // 1. Si alguna opción coincide exactamente con el código postal del comprador, se preselecciona esa.
-              // 2. Si ninguna coincide o el comprador no tiene código postal, se preselecciona la primera (shippable[0]).
+              // Sugerencia inicial cambiable (ADR-03, F-005), nunca imposición:
+              // 1. Si alguna opción coincide con el código postal del comprador, se sugiere esa.
+              // 2. Si ninguna coincide o no hay código postal, se sugiere la primera (shippable[0]).
+              // El comprador puede elegir otra tarifa sin bloqueo (ver comentario ADR-03 arriba).
               const preferred =
                 shippable.find((o: any) => o.postal_code_match) ?? shippable[0];
               this.selectShippingMethod(preferred, preferred.cost);

@@ -287,6 +287,97 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     );
   });
 
+  // ── d2) PREPAGO SOBREVENIDO: la orden se pagó DESPUÉS de armar la ruta ──
+  // La remisión nació contra entrega (`needs_collection: true`, congelado al
+  // crearla) y el cliente pagó luego por otro canal. El saldo vivo es 0, así
+  // que la parada ya NO debe exigir recaudo: entregarla con 0 es válido y no
+  // genera movimiento de caja (el dinero ya entró fuera de la ruta).
+  it('d2) COD note whose order was paid afterwards: settles delivered with collected=0 and emits no cash events', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(
+      buildStop({
+        // El booleano persistido sigue mintiendo (congelado en la creación).
+        is_prepaid: false,
+        dispatch_note: {
+          ...buildStop().dispatch_note,
+          needs_collection: true,
+          invoice: null,
+          order: { remaining_balance: new Prisma.Decimal(0) },
+        },
+      }),
+    );
+
+    await expect(
+      service.settleStop(ROUTE_ID, STOP_ID, {
+        result: 'delivered',
+        collected_amount: 0,
+      } as any),
+    ).resolves.toBeDefined();
+
+    expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
+    expect(cashSettlementMock.emitWithholding).not.toHaveBeenCalled();
+    expect(prismaMock.dispatch_route_stops.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'delivered',
+          collected_amount: 0,
+        }),
+      }),
+    );
+  });
+
+  // ── d3) NO REGRESIÓN: con saldo vivo el recaudo se sigue exigiendo ──────
+  it('d3) COD note with a live balance still demands the full collection (contra entrega intacto)', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(
+      buildStop({
+        dispatch_note: {
+          ...buildStop().dispatch_note,
+          needs_collection: true,
+          invoice: null,
+          order: { remaining_balance: new Prisma.Decimal(200) },
+        },
+      }),
+    );
+
+    await expect(
+      service.settleStop(ROUTE_ID, STOP_ID, {
+        result: 'delivered',
+        collected_amount: 0,
+      } as any),
+    ).rejects.toThrow(/menor que el total de la remisión/);
+
+    expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
+  });
+
+  // ── d4) Retenedor + prepago: sin retención que practicar ───────────────
+  // La retención se practica sobre el pago, y ese pago ocurrió fuera de la
+  // ruta. Exigir el desglose aquí era exigir recaudo sobre una orden saldada
+  // (y el modal ni siquiera muestra los campos cuando la parada es prepaga).
+  it('d4) withholding-agent customer on a prepaid stop: settles without a withholding breakdown', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(
+      buildStop({
+        dispatch_note: {
+          ...buildStop().dispatch_note,
+          needs_collection: true,
+          invoice: null,
+          order: { remaining_balance: new Prisma.Decimal(0) },
+          customer: { is_withholding_agent: true },
+        },
+      }),
+    );
+
+    await expect(
+      service.settleStop(ROUTE_ID, STOP_ID, {
+        result: 'delivered',
+        collected_amount: 0,
+      } as any),
+    ).resolves.toBeDefined();
+
+    expect(cashSettlementMock.emitWithholding).not.toHaveBeenCalled();
+  });
+
   // ── e) Single source of truth: route NEVER writes orders.state ─────
   it('e) linked COD order (live mode): settle does NOT write orders.state; emits dispatch_note.delivered carrying order_id for the single reconciler', async () => {
     prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());

@@ -51,6 +51,15 @@ export interface AIFeatureConfig {
   daily_messages_cap?: number | null;
   retention_days?: number | null;
   tools_allowed?: string[];
+  /**
+   * F6 — agentes del catálogo vivo (`ai_agents.key`) que pueden operar bajo
+   * esta feature. Viaja anidado en la config (p. ej.
+   * `tool_agents.agents_allowed`) para sobrevivir a
+   * `normalizeAIFeatureFlags`, que solo preserva keys de objeto y soltaría un
+   * arreglo superior en el round-trip load/save. El backend valida cada key
+   * contra `ai_agents` y rechaza rotas con 400.
+   */
+  agents_allowed?: string[];
   indexed_docs_cap?: number | null;
   monthly_jobs_cap?: number | null;
   /**
@@ -64,6 +73,33 @@ export interface AIFeatureConfig {
 }
 
 export type AIFeatureFlags = Partial<Record<AIFeatureKey, AIFeatureConfig>>;
+
+/** Opción viva para los pickers del plan (apps por categoría, agentes por key, tools por nombre). */
+export interface EngineCatalogOption {
+  value: string;
+  label: string;
+  description?: string;
+  inactive?: boolean;
+}
+
+/** App viva que resuelve una categoría, con el modelo activo que la atiende. */
+export interface EngineAppLineage {
+  key: string;
+  name: string;
+  isActive: boolean;
+  /** Etiqueta del modelo que resolverá la feature (`label · model_id` o similar). */
+  modelLabel: string | null;
+}
+
+/** Linaje visible plan→app→modelo por feature habilitada (F6, plan-detail). */
+export interface PlanFeatureLineage {
+  feature: AIFeatureKey;
+  enabled: boolean;
+  capLabel: string;
+  apps: EngineAppLineage[];
+  agents: { key: string; name: string | null; missing: boolean }[];
+  tools: { name: string; missing: boolean }[];
+}
 
 export interface SubscriptionPlan {
   // Identity
@@ -169,16 +205,28 @@ export interface PromotionalPlan {
   created_at: string;
 }
 
+export interface StoreSubscriptionQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  state?: string;
+  status?: string;
+  plan_id?: number | string;
+  billing_cycle?: string;
+}
+
 export interface StoreSubscription {
   id: string;
   store_id: string;
   store_name: string;
   organization_name: string;
   plan_name: string;
+  plan_id?: string;
   billing_cycle: string;
   price: number;
   currency_code: string;
-  status: 'active' | 'grace' | 'suspended' | 'cancelled' | 'trial';
+  state?: string;
+  status: 'active' | 'grace' | 'suspended' | 'cancelled' | 'trial' | 'pending_payment';
   current_period_start: string;
   current_period_end: string;
   grace_period_end: string | null;
@@ -186,6 +234,60 @@ export interface StoreSubscription {
   partner_id: string | null;
   partner_margin_amount: number;
   created_at: string;
+  raw?: any;
+}
+
+export interface SubscriptionPaymentRow {
+  id: number;
+  invoice_id: number;
+  amount: number;
+  currency: string;
+  state: 'pending' | 'succeeded' | 'failed' | 'refunded';
+  provider: string;
+  provider_reference: string | null;
+  payment_method_type: string | null;
+  paid_at: string | null;
+  created_at: string;
+  invoice?: {
+    id: number;
+    invoice_number: string;
+    total: number;
+    currency: string;
+    state: string;
+    store?: {
+      id: number;
+      name: string;
+    };
+    organization?: {
+      id: number;
+      name: string;
+    };
+    plan?: {
+      id: number;
+      name: string;
+      code: string;
+    };
+  };
+}
+
+export interface SubscriptionPaymentQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  state?: string;
+  provider?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface DunningStatsResponse {
+  grace_soft: number;
+  grace_hard: number;
+  suspended: number;
+  blocked: number;
+  pending_payment: number;
+  total: number;
+  total_overdue: number;
 }
 
 export interface DunningSubscription {

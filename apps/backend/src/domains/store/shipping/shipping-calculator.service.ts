@@ -207,10 +207,17 @@ export class ShippingCalculatorService {
           break;
       }
 
+      // ADR-04 (F-008): threshold 0 = envío gratis deliberado de la tienda.
+      // Comparación explícita `>= 0`, nunca truthiness: el campo Prisma es
+      // `Decimal` (objeto truthy incluso en 0), así que `if (threshold)` no
+      // distingue "gratis intencional" de "sin umbral". `null` = sin umbral;
+      // negativo legacy = sin gratis (inventariar pre-release con
+      // `SELECT id FROM shipping_rates WHERE free_shipping_threshold <= 0
+      // AND is_active` antes del release).
       if (
         isApplicable &&
         rate.free_shipping_threshold != null &&
-        Number(rate.free_shipping_threshold) > 0 &&
+        Number(rate.free_shipping_threshold) >= 0 &&
         cartTotals.totalPrice >= Number(rate.free_shipping_threshold)
       ) {
         cost = 0;

@@ -194,6 +194,40 @@ export type OutputFormat =
   | 'speech'
   | 'transcription';
 
+/**
+ * Canonical AI feature keys (F1). Keep in sync with `AI_FEATURE_KEYS` in
+ * `apps/backend/src/domains/store/subscriptions/types/access.types.ts` and
+ * `AI_APP_FEATURE_CATEGORIES` in `create-ai-app.dto.ts`.
+ */
+export type AIFeatureCategory =
+  | 'text_generation'
+  | 'streaming_chat'
+  | 'conversations'
+  | 'tool_agents'
+  | 'rag_embeddings'
+  | 'async_queue'
+  | 'realtime_voice';
+
+export const AI_FEATURE_CATEGORIES: AIFeatureCategory[] = [
+  'text_generation',
+  'streaming_chat',
+  'conversations',
+  'tool_agents',
+  'rag_embeddings',
+  'async_queue',
+  'realtime_voice',
+];
+
+export const AI_FEATURE_CATEGORY_LABELS: Record<AIFeatureCategory, string> = {
+  text_generation: 'Generacion de texto',
+  streaming_chat: 'Chat en streaming',
+  conversations: 'Conversaciones',
+  tool_agents: 'Agentes con herramientas',
+  rag_embeddings: 'RAG / Embeddings',
+  async_queue: 'Cola asincrona',
+  realtime_voice: 'Voz en tiempo real',
+};
+
 export interface AIEngineApp {
   id: number;
   key: string;
@@ -218,6 +252,7 @@ export interface AIEngineApp {
   retry_config?: { maxRetries: number; delayMs: number };
   is_active: boolean;
   metadata?: Record<string, any>;
+  ai_feature_category?: AIFeatureCategory;
   created_at?: string;
   updated_at?: string;
 }
@@ -237,6 +272,7 @@ export interface CreateAIAppDto {
   retry_config?: { maxRetries: number; delayMs: number };
   is_active?: boolean;
   metadata?: Record<string, any>;
+  ai_feature_category: AIFeatureCategory;
 }
 
 export interface UpdateAIAppDto extends Partial<CreateAIAppDto> {}
@@ -261,6 +297,132 @@ export interface AIAppStats {
 
 export interface PaginatedAIAppResponse {
   data: AIEngineApp[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+// --- AI Tools (F5: catálogo vivo del AIToolRegistry) ---
+
+export type AIToolCategory = 'read' | 'write' | 'ui';
+
+export const AI_TOOL_CATEGORIES: AIToolCategory[] = ['read', 'write', 'ui'];
+
+export const AI_TOOL_CATEGORY_LABELS: Record<AIToolCategory, string> = {
+  read: 'Lectura',
+  write: 'Escritura',
+  ui: 'Interfaz',
+};
+
+export interface AIToolCatalogEntry {
+  name: string;
+  domain: string;
+  description: string;
+  requiredPermissions: string[];
+  category: AIToolCategory;
+  readOnly: boolean;
+  clientSide: boolean;
+  requiresConfirmation: boolean;
+}
+
+// --- AI Queues / Jobs (F5: tab Jobs) ---
+
+export interface AIQueueCounts {
+  waiting: number;
+  active: number;
+  completed: number;
+  failed: number;
+  delayed: number;
+  paused: number;
+}
+
+export interface AIQueueOverviewEntry {
+  name: string;
+  available: boolean;
+  counts: AIQueueCounts | null;
+  error: string | null;
+}
+
+export interface AIQueuesOverview {
+  queues: AIQueueOverviewEntry[];
+}
+
+export const AI_ENGINE_QUEUE_NAMES = [
+  'ai-generation',
+  'ai-embedding',
+  'ai-agent',
+  'receipt-scan',
+  'expense-scan',
+] as const;
+
+/** Qué hace cada cola, en lenguaje del operador. */
+export const AI_QUEUE_DESCRIPTIONS: Record<string, string> = {
+  'ai-generation':
+    'Generación en segundo plano: textos e imágenes que tardan demasiado para una petición HTTP.',
+  'ai-embedding':
+    'Indexación para búsqueda semántica (RAG): convierte documentos en embeddings.',
+  'ai-agent':
+    'Tareas delegadas del agente: revisiones y validaciones que corren sin supervisión.',
+  'receipt-scan':
+    'OCR de recibos y facturas de planillas de despacho. El endpoint responde 202 y se consulta por ID.',
+  'expense-scan':
+    'OCR de facturas de gasto. El endpoint responde 202 y se consulta por ID.',
+};
+
+export type AIQueueName = (typeof AI_ENGINE_QUEUE_NAMES)[number];
+
+export interface AIJobLookupResult {
+  job_id: string;
+  status: string;
+  result?: any;
+  error?: string;
+  progress?: number;
+}
+
+// --- AI Agents (F5: CRUD contra el endpoint F4) ---
+
+export interface AIAgent {
+  id: number;
+  key: string;
+  name: string;
+  description?: string | null;
+  app_key?: string | null;
+  system_prompt?: string | null;
+  allowed_tools: string[];
+  max_iterations?: number | null;
+  requires_confirmation_default: boolean;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreateAIAgentDto {
+  key: string;
+  name: string;
+  description?: string;
+  app_key?: string | null;
+  system_prompt?: string | null;
+  allowed_tools?: string[];
+  max_iterations?: number | null;
+  requires_confirmation_default?: boolean;
+  is_active?: boolean;
+}
+
+export interface UpdateAIAgentDto extends Partial<CreateAIAgentDto> {}
+
+export interface AIAgentQueryDto {
+  page?: number;
+  limit?: number;
+  search?: string;
+  app_key?: string;
+  is_active?: boolean;
+}
+
+export interface PaginatedAIAgentResponse {
+  data: AIAgent[];
   meta: {
     total: number;
     page: number;

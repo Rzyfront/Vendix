@@ -130,6 +130,9 @@ export function getDefaultStoreSettings(): StoreSettings {
       // DTO garantiza que nunca se guarde true con allow_alias_sales=false.
       allow_alias_sales: false,
       alias_sales_as_default: false,
+      // F-127 — la compuerta fiscal por linea nace BLOQUEANTE: sin esta
+      // clave configurada el comportamiento es identico al de siempre.
+      tax_line_gate: 'block' as const,
       business_hours: getDefaultBusinessHours(),
       schedule_mode: 'continuous',
       enable_schedule_validation: false,
@@ -176,15 +179,13 @@ export function getDefaultStoreSettings(): StoreSettings {
       email_receipt: false,
       receipt_header: '',
       receipt_footer: '¡Gracias por su compra!',
-      // Electronic invoicing: safe defaults for a store that later gets DIAN
-      // habilitación — issue automatically, one printed copy, email the invoice.
-      auto_issue_invoice: true,
+      // `auto_issue_invoice` / `send_invoice_email` / `deliver_printed` fueron
+      // retirados (v3->v4): eran un interruptor MUDO — ningún lector los
+      // consultaba, sólo vivían en DTO/defaults/interfaz y en un formulario de
+      // UI ya retirado. El control real de emisión automática vive en
+      // `invoicing.{pos,ecommerce}.auto_emit`.
       invoice_copies: 1,
-      send_invoice_email: true,
       print_pos_ticket: false,
-      // Email is on by default, so the printed hand-off starts off: one delivery
-      // channel is enough to comply, and the UI keeps at least one active.
-      deliver_printed: false,
       // 80 mm roll, matching `PRINT_DEFAULTS.invoice`. This is a deliberate
       // change of behaviour, not a mirror of the old value: the previous seed
       // was `letter`, it IS read (`invoice-pdf.service.ts:resolveInvoiceFormat`),
@@ -264,9 +265,11 @@ export function getDefaultStoreSettings(): StoreSettings {
         analytics_products: true,
         analytics_customers: true,
         analytics_financial: true,
+        analytics_dispatch: true,
 
         // Reportes
         reports: true,
+        reports_dispatch: true,
 
         // Gastos
         expenses: true,

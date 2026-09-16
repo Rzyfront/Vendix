@@ -19,6 +19,9 @@ import {
 import {
   AIEngineApp,
   AIEngineConfig,
+  AI_FEATURE_CATEGORIES,
+  AI_FEATURE_CATEGORY_LABELS,
+  AIFeatureCategory,
   AIModelType,
   CreateAIAppDto,
   MODEL_TYPES,
@@ -132,6 +135,26 @@ import {
                 </span>
               </p>
             }
+          </div>
+
+          <!-- Feature category (F1): required. Drives the subscription gate
+               and quota metering; an app without a valid category is
+               skipped by the gate, so the backend rejects null. -->
+          <div class="space-y-1">
+            <app-selector
+              label="Categoria de feature IA"
+              placeholder="Selecciona una categoria"
+              [options]="aiFeatureCategoryOptions"
+              [formControl]="$any(form.get('ai_feature_category'))"
+              [disabled]="isSubmitting()"
+              [required]="true"
+            ></app-selector>
+            <p class="text-xs text-text-secondary">
+              Determina el gate de suscripcion y la cuota que consume cada
+              uso. Escaneres y OCR van en cola asincrona; texto puntual en
+              generacion de texto; Vexi chat en conversaciones; voz en tiempo
+              real.
+            </p>
           </div>
 
           <!-- Voice parameters — only meaningful for a speech application.
@@ -547,12 +570,20 @@ export class AIEngineAppModalComponent implements OnChanges {
     { value: 'opus', label: 'Opus' },
   ];
 
+  aiFeatureCategoryOptions: SelectorOption[] = AI_FEATURE_CATEGORIES.map(
+    (value) => ({
+      value,
+      label: AI_FEATURE_CATEGORY_LABELS[value],
+    }),
+  );
+
   form: FormGroup = this.fb.group({
     key: ['', [Validators.required, Validators.maxLength(100)]],
     name: ['', [Validators.required, Validators.maxLength(255)]],
     description: [''],
     config_id: [null],
     model_type: ['text' as AIModelType, [Validators.required]],
+    ai_feature_category: ['', [Validators.required]],
     system_prompt: [''],
     prompt_template: [''],
     temperature: [null],
@@ -642,6 +673,7 @@ export class AIEngineAppModalComponent implements OnChanges {
         description: a.description || '',
         config_id: a.config_id?.toString() || '',
         model_type: modelType,
+        ai_feature_category: a.ai_feature_category || '',
         system_prompt: a.system_prompt || '',
         prompt_template: a.prompt_template || '',
         temperature: a.temperature ?? null,
@@ -677,6 +709,7 @@ export class AIEngineAppModalComponent implements OnChanges {
       description: raw.description || undefined,
       config_id: raw.config_id ? Number(raw.config_id) : null,
       model_type: (raw.model_type || 'text') as AIModelType,
+      ai_feature_category: raw.ai_feature_category as AIFeatureCategory,
       system_prompt: raw.system_prompt || undefined,
       prompt_template: raw.prompt_template || undefined,
       temperature:
@@ -773,6 +806,7 @@ export class AIEngineAppModalComponent implements OnChanges {
       description: '',
       config_id: '',
       model_type: 'text' as AIModelType,
+      ai_feature_category: '',
       system_prompt: '',
       prompt_template: '',
       temperature: null,

@@ -400,6 +400,12 @@ export class DispatchRoutesService {
         grand_total: true,
         needs_collection: true,
         invoice: { select: { id: true, status: true, payment_date: true } },
+        // Saldo vivo de la orden: es la señal que manda en `resolveIsPrepaid`
+        // (por encima del `needs_collection` congelado de la remisión). Sin
+        // traerlo aquí, la planilla nacía con `is_prepaid=false` y un
+        // `total_to_collect` inflado para órdenes ya pagadas, y sólo las rutas
+        // de LECTURA corregían el dato — el encabezado mentía hasta el refresh.
+        order: { select: { remaining_balance: true } },
       },
     });
     if (existing_notes.length !== unique_note_ids.length) {

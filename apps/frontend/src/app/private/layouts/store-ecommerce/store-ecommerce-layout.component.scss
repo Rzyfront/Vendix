@@ -436,6 +436,34 @@
       font-weight: var(--fw-semibold);
     }
 
+    // F-133(b): aviso persistente cuando el `grand_total` empujado por SSE
+    // difiere del que el comensal ya vio. No es una fila de dinero — se
+    // desalinea a propósito del layout label/valor de las demás filas.
+    &--notice {
+      justify-content: flex-start;
+      align-items: flex-start;
+      padding: 0.5rem 0.65rem;
+      margin-bottom: 0.15rem;
+      border-radius: 0.5rem;
+      background: var(--color-warning-light);
+      color: var(--color-text-primary);
+      font-size: var(--fs-xs);
+      line-height: 1.35;
+
+      app-icon {
+        color: var(--color-warning);
+        flex-shrink: 0;
+        margin-top: 0.05rem;
+      }
+
+      > span:last-child {
+        font-variant-numeric: normal;
+        font-weight: var(--fw-medium);
+        color: var(--color-text-primary);
+        text-align: left;
+      }
+    }
+
     &--total {
       margin-top: 0.15rem;
       padding-top: 0.55rem;

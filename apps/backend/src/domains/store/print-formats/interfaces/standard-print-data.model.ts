@@ -125,6 +125,32 @@ export interface StandardPrintDataModel {
     technical_key?: string;
     environment?: 'production' | 'test';
   };
+  /**
+   * C.1 (CP-pos-exclusive-tax-double-charge, ADR-12) — qué magnitud llevan
+   * `items[].unit_price` y `items[].total_price`.
+   *
+   * Lo fija el PROVIDER del documento, nunca una columna de plantilla: el
+   * `key` de columna es dato de tienda y `print-gateway.service.ts` fusiona
+   * columnas por `id`, así que una tienda que guardó `col_price`
+   * conservaría su `key` para siempre y el gateway pintaría la magnitud
+   * contraria.
+   *
+   * OPCIONAL durante la transición; default `'taxable_base'` (la convención
+   * que el backend ya emite hoy en todas partes salvo la sombra `final_*`).
+   * Obligatorio para todo provider nuevo.
+   */
+  money_basis?: 'gross' | 'taxable_base';
+  /**
+   * C.1 (CP-pos-exclusive-tax-double-charge, ADR-12) — espejo backend de
+   * `selectPrintsVatBreakdown` (frontend). Lo resuelve el backend con
+   * `resolvePrintsVatBreakdownForPrint` (fail-closed) y viaja en el payload,
+   * lo que además habilita las superficies `@OptionalAuth` (cuenta QR-mesa,
+   * pedido de invitado) donde no hay usuario autenticado del que leerlo.
+   *
+   * OPCIONAL durante la transición; default `false` (un papel no se
+   * retracta). Obligatorio para todo provider nuevo.
+   */
+  prints_vat_breakdown?: boolean;
   items: StandardPrintItem[];
   taxes: StandardPrintTaxRow[];
   totals: {

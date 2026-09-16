@@ -5,7 +5,13 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { DocumentDataProviderRegistry } from '../providers/document-data-provider.registry';
 import { PrintLayoutComposerService } from './print-layout-composer.service';
 import { PrintFiscalValidatorService } from './print-fiscal-validator.service';
-import { FiscalInvoicePdfRenderService } from './fiscal-invoice-pdf-render.service';
+// ADR-15 §4 (unificación remisión-gateway) — el gateway ya no inyecta
+// `FiscalInvoicePdfRenderService` directo: consulta este registro, que
+// también sirve `dispatch_note` con un motor distinto sin que el gateway
+// necesite conocer esa distinción. `FiscalInvoicePdfRenderService` sigue
+// siendo el renderizador registrado para los dos formatos fiscales — sin
+// tocar ese archivo — así que su comportamiento no cambia.
+import { DocumentPdfRendererRegistry } from '../providers/document-pdf-renderer.registry';
 // [print-editor-dsk P2.2] — Single render path service. Wraps the
 // composer's HTML with explicit pixel dimensions so the preview no longer
 // relies on `srcdoc` + `doc.write` double-render or magic `3.78` math.
@@ -56,21 +62,6 @@ export interface RenderResult {
   width_mm: number;
 }
 
-/** Formatos que hoy tienen motor PDF detrás del gateway.
- *
- * [print-editor-dsk P8] — `fiscal_credit_note` entra al motor PDF. La nota
- * crédito electrónica comparte el mismo builder pdfkit que la factura
- * (`InvoicePdfBuilder.generate`) y el mismo resolvedor de identidad fiscal
- * (`resolveFiscalIssuerForPrint`) — la única diferencia es el texto del
- * sello y el del CUDE/CUFE; el resto del layout (papel, doble pasada de
- * rollo, QR §11.7) es idéntico. El render distingue el documento por la
- * fila `invoices.invoice_type`, no por el `format_type`.
- */
-const PDF_ENGINE_SUPPORTED_FORMATS: print_format_type_enum[] = [
-  'fiscal_electronic_invoice',
-  'fiscal_credit_note',
-];
-
 @Injectable()
 export class PrintGatewayService {
   private readonly logger = new Logger(PrintGatewayService.name);
@@ -80,7 +71,14 @@ export class PrintGatewayService {
     private readonly registry: DocumentDataProviderRegistry,
     private readonly composer: PrintLayoutComposerService,
     private readonly fiscalValidator: PrintFiscalValidatorService,
-    private readonly pdfRenderer: FiscalInvoicePdfRenderService,
+    // ADR-15 §4 — registro de renderizadores PDF (fiscal_electronic_invoice,
+    // fiscal_credit_note, dispatch_note...). `print-formats.module.ts` lo
+    // puebla en `onModuleInit`. Marcado `@Optional()` por la MISMA razón que
+    // `metrics`/`s3Service` abajo: los specs que construyen el gateway a mano
+    // (profile-template, merge-definition) no ejercitan `engine:'pdf'` y no
+    // necesitan wirear este registro.
+    @Optional()
+    private readonly pdfRendererRegistry?: DocumentPdfRendererRegistry,
     // [print-editor-dsk P9] — Injected via constructor; `print-formats.module.ts`
     // provides it. Marked `@Optional()` so existing unit tests that build the
     // gateway manually (engine-pdf, profile-template, merge-definition specs)
@@ -252,15 +250,17 @@ export class PrintGatewayService {
     bodyOnly: boolean = false,
   ): Promise<RenderResult> {
     const start = Date.now();
-    if (
-      engine === 'pdf' &&
-      !PDF_ENGINE_SUPPORTED_FORMATS.includes(formatType)
-    ) {
+    // ADR-15 §4 — el registro (no una lista literal aparte) decide qué
+    // formatos tienen motor PDF. `getSupportedFormats()` vacío (registro
+    // ausente, sólo en specs viejos que no ejercitan `engine:'pdf'`) rechaza
+    // todo por igual, que es el comportamiento seguro.
+    const pdfSupportedFormats = this.pdfRendererRegistry?.getSupportedFormats() ?? [];
+    if (engine === 'pdf' && !pdfSupportedFormats.includes(formatType)) {
       // Dejar de mentir incluye negarse: devolver HTML cuando pidieron PDF fue
       // exactamente el defecto de origen («aceptado e ignorado»).
       throw new VendixHttpException(
         ErrorCodes.SYS_VALIDATION_001,
-        `El motor 'pdf' no está disponible para el formato ${formatType}; formatos con motor PDF: ${PDF_ENGINE_SUPPORTED_FORMATS.join(', ')}.`,
+        `El motor 'pdf' no está disponible para el formato ${formatType}; formatos con motor PDF: ${pdfSupportedFormats.join(', ')}.`,
       );
     }
     const profileTemplateId = await this.resolveProfileTemplateId(
@@ -274,7 +274,23 @@ export class PrintGatewayService {
       profileTemplateId,
     );
 
-    if (!effective.is_active) {
+    // F-101/ADR-15 §4 (unificación remisión-gateway) — `dispatch_note` en
+    // motor PDF ignora el flag `is_active` de la config de tienda a propósito.
+    // El riel que este endpoint reemplaza (`DispatchNotePdfService.generatePdf`
+    // llamado directo desde el controller) NUNCA consultó este flag; en
+    // cambio, `is_active` SÍ es un toggle real y alcanzable por el comerciante
+    // hoy (`print-formats-hub.component.ts` — "Activar todos / Desactivar
+    // todos" opera sobre el mismo campo). Una tienda que hubiera desactivado
+    // "Remisión" en el Hub (por la razón que fuera: nunca usó el render HTML
+    // de ese formato, o lo apagó en un "Desactivar todos" masivo) descargaba
+    // su PDF de remisión sin problema hasta hoy porque ese riel nunca miraba
+    // el flag. Unificar el transporte NO puede retirar de golpe esa
+    // capacidad: el requisito duro es que ninguna tienda pierda la
+    // posibilidad de imprimir una remisión. El flag sigue rigiendo, sin
+    // cambios, el render HTML de `dispatch_note` (riel A) y los dos formatos
+    // fiscales en cualquier motor.
+    const isActiveGateAppliesHere = !(engine === 'pdf' && formatType === 'dispatch_note');
+    if (isActiveGateAppliesHere && !effective.is_active) {
       throw new VendixHttpException(
         ErrorCodes.SYS_FORBIDDEN_001,
         'El formato de impresión se encuentra desactivado para esta tienda.',
@@ -287,13 +303,25 @@ export class PrintGatewayService {
     let pdf_buffer: Buffer | undefined;
     if (engine === 'pdf') {
       try {
-        // [print-editor-dsk P8] — Pasamos `formatType` para que el motor
-        // distinga `fiscal_electronic_invoice` de `fiscal_credit_note` por
-        // la columna `invoices.invoice_type`, evitando que un id de factura
-        // renderice con la etiqueta de nota (o viceversa). El resto del
-        // render es idéntico: mismo builder pdfkit, misma resolución de
-        // papel, misma identidad fiscal.
-        pdf_buffer = await this.pdfRenderer.renderBuffer(storeId, documentId, formatType);
+        // ADR-15 §4 — el registro resuelve el motor por `formatType`. Para
+        // los dos formatos fiscales sigue siendo la MISMA instancia de
+        // `FiscalInvoicePdfRenderService` que antes se inyectaba directo
+        // (registrada en `print-formats.module.ts`), así que la llamada de
+        // abajo es bit-a-bit la misma que hacía el gateway antes de esta
+        // unificación. Pasamos `formatType` para que ese motor distinga
+        // `fiscal_electronic_invoice` de `fiscal_credit_note` por la columna
+        // `invoices.invoice_type`, evitando que un id de factura renderice
+        // con la etiqueta de nota (o viceversa).
+        const renderer = this.pdfRendererRegistry?.getRenderer(formatType);
+        if (!renderer) {
+          // Inalcanzable en teoría: `pdfSupportedFormats` ya filtró arriba.
+          // Defensa en profundidad si el registro cambiara entre ambos puntos.
+          throw new VendixHttpException(
+            ErrorCodes.PRINT_GATEWAY_RENDER_FAILED_001,
+            `No hay renderizador PDF registrado para el formato ${formatType}.`,
+          );
+        }
+        pdf_buffer = await renderer.renderBuffer(storeId, documentId, formatType);
         // TODO(integration-slice-4): thread `paper_definition` from caller
         //   - Cuando `RenderPrintDocumentDto` extienda `paper_format`
         //     (opción B del plan E.11), pasarlo aquí a `renderBuffer` por

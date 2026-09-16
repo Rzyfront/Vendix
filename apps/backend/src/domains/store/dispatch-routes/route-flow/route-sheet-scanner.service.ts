@@ -10,6 +10,7 @@ import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { RouteFlowService } from './route-flow.service';
 import { DispatchRoutesService } from '../dispatch-routes.service';
 import { SettleStopDto } from '../dto';
+import { deriveStopIsPrepaid } from '../utils/route-stop-calc';
 import {
   ConfirmRouteSheetDto,
   RouteSheetMatchResult,
@@ -255,18 +256,31 @@ export class RouteSheetScannerService {
       select: {
         id: true,
         status: true,
-        dispatch_note: { select: { grand_total: true } },
+        dispatch_note: {
+          select: {
+            grand_total: true,
+            // Señales de pago vivas para DERIVAR el prepago (nunca el
+            // `is_prepaid` congelado de la parada). El escáner liquida en lote
+            // por `settleStop`, así que debe juzgar la cobertura del cobro con
+            // el mismo criterio que él: una remisión ya pagada no tiene neto
+            // que cubrir y no puede caer en "cobro corto".
+            needs_collection: true,
+            invoice: { select: { payment_date: true } },
+            order: { select: { remaining_balance: true } },
+          },
+        },
       },
     });
     const stopById = new Map<
       number,
-      { net: number; status: string }
+      { net: number; status: string; is_prepaid: boolean }
     >(
       stops.map((s) => [
         s.id,
         {
           net: Number(s.dispatch_note?.grand_total ?? 0),
           status: s.status as string,
+          is_prepaid: deriveStopIsPrepaid(s),
         },
       ]),
     );
@@ -309,7 +323,12 @@ export class RouteSheetScannerService {
       const collected_amount = Number(decision.collected_amount ?? 0);
       const resolvedResult =
         (decision.result as dispatch_route_stop_result_enum) ??
-        this.deriveResult(decision.delivered, collected_amount, current.net);
+        this.deriveResult(
+          decision.delivered,
+          collected_amount,
+          current.net,
+          current.is_prepaid,
+        );
 
       // Entregada con cobro menor al neto: no hay resultado derivable. En ruta el
       // pago es total o no hay entrega, así que ni liquidamos ni elegimos por el
@@ -422,6 +441,7 @@ export class RouteSheetScannerService {
    * Derive the settle result from the delivery flag + collected amount. Mirrors
    * the validation in `RouteFlowService.settleStop`:
    *   not delivered           → 'rejected'
+   *   prepagada + delivered   → 'delivered' (sin cobertura que exigir)
    *   delivered + covers net  → 'delivered'
    *   delivered + short pay   → null (sin derivación — requiere decisión humana)
    *
@@ -430,13 +450,21 @@ export class RouteSheetScannerService {
    * Devolver `null` en el cobro corto es deliberado — ninguna de las dos salidas
    * automáticas es segura: `rejected` reversaría inventario de mercancía que ya
    * salió físicamente, y `delivered` moriría en el gate de monto de `settleStop`.
+   *
+   * La rama prepaga NO es una excepción al "pago total": es el mismo criterio
+   * que `settleStop` (`!stopIsPrepaid && total_paid + withholding < net`). Sin
+   * ella, una hoja de ruta con una remisión ya pagada salía siempre en
+   * `skipped[]` como `short_payment_requires_decision` — el escáner pedía al
+   * operador decidir sobre un faltante que no existe.
    */
   private deriveResult(
     delivered: boolean,
     collected: number,
     net: number,
+    isPrepaid = false,
   ): dispatch_route_stop_result_enum | null {
     if (!delivered) return 'rejected';
+    if (isPrepaid) return 'delivered';
     if (net > 0 && collected < net) return null;
     return 'delivered';
   }

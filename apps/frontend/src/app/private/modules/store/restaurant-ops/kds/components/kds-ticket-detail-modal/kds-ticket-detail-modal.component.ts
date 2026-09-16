@@ -63,6 +63,21 @@ export class KdsTicketDetailModalComponent {
   readonly isOpen = input<boolean>(false);
   readonly ticket = input<KitchenTicket | null>(null);
   readonly isMutating = input<boolean>(false);
+  /** Ver `KdsTicketCardComponent.allTakeaway`: "Entregar" se habilita solo
+   *  para tickets todo-para-llevar; el resto lo registra mesero/cajero. */
+  readonly allTakeaway = computed(() => {
+    const items = this.ticketDisplay()?.items ?? [];
+    return (
+      items.length > 0 &&
+      items.every((it) => it.order_item?.is_takeaway === true)
+    );
+  });
+  /** Ver `KdsTicketCardComponent.deliverDisabledReason`: mismo motivo dual. */
+  readonly deliverDisabledReason = computed(() =>
+    this.allTakeaway()
+      ? 'La entrega la registra el mesero o el cajero, no la cocina'
+      : 'Solo los platos para llevar se entregan en cocina',
+  );
 
   /** Re-emit actions back to the board so the SSE pipeline stays in charge. */
   readonly startClicked = output<KitchenTicket>();
@@ -217,12 +232,22 @@ export class KdsTicketDetailModalComponent {
   });
 
   constructor() {
-    // Whenever the ticket changes, refetch the recipes for the new
-    // (or newly-added) products. Cache by pair so re-firing
-    // the same dish is instant.
+    this.recipesService.recipeChanged$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((change) => {
+        this.invalidateRecipeCache(change.productId, change.variantId);
+        if (this.isOpen()) {
+          this.refreshRecipes();
+        }
+      });
+
+    // Whenever the ticket or open state changes, refetch the recipes for the
+    // new (or newly-added) products. Cache by pair so re-firing the same dish
+    // is instant.
     effect(() => {
+      const open = this.isOpen();
       const t = this.ticket();
-      if (!t) return;
+      if (!open || !t) return;
       for (const item of t.items ?? []) {
         const pid = item.product_id;
         if (typeof pid !== 'number') continue;

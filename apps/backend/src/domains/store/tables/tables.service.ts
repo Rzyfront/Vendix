@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { QrService } from '@common/services/qr.service';
+import { S3Service } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import {
@@ -57,6 +58,25 @@ export interface FloorMapTable {
 }
 
 /**
+ * Marca de la tienda que acompaña al QR de mesa para que el cartel imprimible
+ * del panel pueda estamparla sin adivinar. Todos los campos son anulables: una
+ * tienda sin logo, sin color o recién creada imprime igual.
+ */
+export interface TableQrBrand {
+  primary_color: string | null;
+  /** URL FIRMADA y lista para un `<img src>`, nunca la clave cruda de S3. */
+  logo_url: string | null;
+  store_name: string | null;
+}
+
+/** Respuesta de `GET /store/tables/:id/qr`. */
+export interface TableQrResult {
+  public_url: string;
+  qr_data_url: string;
+  brand: TableQrBrand;
+}
+
+/**
  * TablesService
  *
  * Store-scoped CRUD for the `tables` and `table_sessions` domain of the
@@ -84,6 +104,7 @@ export class TablesService {
     private prisma: StorePrismaService,
     private readonly qrService: QrService,
     private readonly notificationsSseService?: NotificationsSseService,
+    private readonly s3Service?: S3Service,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -403,15 +424,63 @@ export class TablesService {
   }
 
   /**
+   * Calcula la luminancia relativa WCAG de un hex de marca y decide si es
+   * lo bastante oscuro para teñir el QR sin arriesgar la lectura.
+   *
+   * IMPORTANTE: el umbral (0.35) protege la ESCANEABILIDAD, no la estética.
+   * Por encima de él, la tinta de marca no da suficiente contraste contra el
+   * fondo blanco del QR y el lector puede fallar — en ese caso se ignora el
+   * color de marca y se vuelve al negro clásico, que siempre escanea.
+   *
+   * Acepta `#RGB` y `#RRGGBB`, con o sin `#`. Cualquier hex que no parsea
+   * cae a negro (mismo criterio de "nunca reventar" que `QrService`).
+   */
+  private resolveQrDarkColor(primaryHex: string | null | undefined): string {
+    const FALLBACK = '#000000';
+    if (!primaryHex) return FALLBACK;
+
+    let hex = primaryHex.trim().replace(/^#/, '');
+    if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+      hex = hex
+        .split('')
+        .map((c) => c + c)
+        .join('');
+    }
+    if (!/^[0-9a-fA-F]{6}$/.test(hex)) return FALLBACK;
+
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+
+    const linearize = (channel: number) => {
+      const c = channel / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    };
+
+    const luminance =
+      0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b);
+
+    return luminance < 0.35 ? `#${hex}` : FALLBACK;
+  }
+
+  /**
    * Genera la URL pública de la mesa + el QR (data URL PNG) que apunta a
    * esa URL. El QR contiene `${ecommerceUrl}/?mesa=${public_token}`.
+   *
+   * A 80 mm impresos (tarjeta tipo cartel), 320 px equivalen a ~108 DPI:
+   * se ve pixelado en papel. 800 px dan ~254 DPI, nítido para impresión.
+   *
+   * El QR se tiñe con `branding.primary_color` de la tienda SOLO cuando
+   * ese color es lo bastante oscuro (ver `resolveQrDarkColor`); si no hay
+   * color de marca, la fila de settings no existe, o el color es demasiado
+   * claro, el QR se genera en negro clásico.
    *
    * Reutiliza `QrService.generateDataUrl` (common/services/qr.service) —
    * inyectado en el módulo. La resolución del dominio primario se
    * replica localmente porque `EcommerceService.findPrimaryEcommerceDomain`
    * es privado (ver arriba).
    */
-  async getQr(id: number): Promise<{ public_url: string; qr_data_url: string }> {
+  async getQr(id: number): Promise<TableQrResult> {
     const storeId = this.requireStoreId();
     const table = await this.getById(id);
 
@@ -433,11 +502,98 @@ export class TablesService {
       );
     }
 
+    // Lectura defensiva: la fila puede no existir, `settings` puede ser
+    // null, y `branding` puede faltar dentro del JSON. Cualquiera de esos
+    // casos deja `primaryColor` en `undefined` → QR negro, sin lanzar error.
+    const [settingsRow, store] = await Promise.all([
+      this.prisma.store_settings.findUnique({
+        where: { store_id: storeId },
+        select: { settings: true },
+      }),
+      this.prisma.stores.findUnique({
+        where: { id: storeId },
+        select: { name: true, logo_url: true },
+      }),
+    ]);
+    const branding = (
+      settingsRow?.settings as {
+        branding?: {
+          primary_color?: string;
+          logo_url?: string | null;
+          name?: string;
+        };
+      } | null
+    )?.branding;
+    const darkColor = this.resolveQrDarkColor(branding?.primary_color);
+
     const baseUrl = this.buildEcommerceUrl(domain.hostname);
     const publicUrl = `${baseUrl}/?mesa=${table.public_token}`;
-    const qrDataUrl = await this.qrService.generateDataUrl(publicUrl, 320);
+    const qrDataUrl = await this.qrService.generateDataUrl(
+      publicUrl,
+      800,
+      darkColor,
+    );
 
-    return { public_url: publicUrl, qr_data_url: qrDataUrl };
+    return {
+      public_url: publicUrl,
+      qr_data_url: qrDataUrl,
+      brand: await this.resolveQrBrand(branding, store),
+    };
+  }
+
+  /**
+   * Marca del cartel imprimible del QR, resuelta EN EL BACKEND a propósito.
+   *
+   * El frontend no puede resolverla solo: en `store_settings.settings.branding`
+   * y en `stores.logo_url` el logo se guarda como **clave de S3**, no como URL
+   * — es la misma clave que escribe la tarjeta "LOGO DE LA APP" de
+   * `settings/general/negocio` (`SettingsService.updateSettings`, sección
+   * `app`, que además sincroniza `stores.logo_url`). Pintar esa clave en un
+   * `<img src>` produce una ruta relativa que da 404 y el cartel sale sin logo.
+   *
+   * Por eso aquí se firma con `S3Service.signUrl` (24 h de validez, de sobra
+   * para el ciclo abrir-modal → imprimir) y se devuelve ya lista para el
+   * `<img>`. `signUrl` también devuelve tal cual una URL externa que no sea de
+   * S3, así que una tienda con el logo en otro host sigue funcionando.
+   *
+   * Precedencia del logo: `branding.logo_url` (lo que el panel de branding
+   * guardó) y, si está vacío, `stores.logo_url` (el espejo que escribe la
+   * misma tarjeta). Es la MISMA precedencia que usa `SettingsService.getSettings`
+   * para construir `app.logo_url`, la que ve el panel.
+   *
+   * El nombre prioriza `stores.name` porque `branding.name` arrastra el default
+   * literal `'Vendix'` de `getDefaultStoreSettings()` en toda tienda que nunca
+   * tocó el bloque: estampar la marca de la plataforma en el cartel de un
+   * restaurante sería peor que no estampar nada.
+   */
+  private async resolveQrBrand(
+    branding:
+      | { primary_color?: string; logo_url?: string | null; name?: string }
+      | undefined,
+    store: { name: string | null; logo_url: string | null } | null,
+  ): Promise<TableQrBrand> {
+    const logoKey = branding?.logo_url || store?.logo_url || null;
+
+    let logoUrl: string | null = null;
+    try {
+      logoUrl = (await this.s3Service?.signUrl(logoKey)) ?? null;
+    } catch (error) {
+      // Un fallo al firmar (credenciales, clave inexistente) NO puede tumbar la
+      // generación del QR: el cartel se imprime sin logo, que es degradación
+      // aceptable, y el QR —lo único imprescindible— sigue saliendo.
+      this.logger.warn(
+        `No se pudo firmar el logo de la tienda para el cartel QR: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      logoUrl = null;
+    }
+
+    return {
+      primary_color: branding?.primary_color ?? null,
+      logo_url: logoUrl,
+      store_name: store?.name ?? branding?.name ?? null,
+    };
   }
 
   async update(id: number, dto: UpdateTableDto) {

@@ -141,7 +141,8 @@ import { StoreSettingsFacade } from '../../../../../core/store/store-settings/st
           </div>
     
           <!-- Summary -->
-          <div class="pt-4 border-t border-border space-y-2.5">
+          <!-- F-134 (C.9, major — revisión 2026-09-14) -->
+          <div class="pt-4 border-t border-border space-y-2.5" aria-live="polite" aria-atomic="true">
             @if (showSubtotal) {
               <div class="flex justify-between text-sm text-text-secondary">
                 <span>Subtotal:</span>

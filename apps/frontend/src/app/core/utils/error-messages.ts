@@ -1116,6 +1116,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No hay métodos de pago configurados para cobro directo.',
   POS_CREDIT_METHOD_MISSING_001:
     'No hay métodos de pago configurados para venta a crédito.',
+  // F-070 — el backend rechaza el cobro (`payments.service.ts`) cuando el
+  // precio enviado difiere del catálogo y el producto tiene
+  // `allow_pos_price_override = false`. Sin este copy el cajero veía el
+  // mensaje genérico de SYS_VALIDATION_001, que no explica qué corregir.
+  POS_PRICE_OVERRIDE_NOT_ALLOWED_001:
+    'Este producto no permite editar su precio en el POS. Cóbralo al precio de catálogo o habilita el override de precio para este producto.',
   ORD_EDIT_STATE_CHANGED_001:
     'La orden cambió mientras se editaba. Actualiza la pantalla.',
   ORD_EDIT_NOT_ALLOWED_001: 'Esta orden ya no se puede editar.',
@@ -1153,6 +1159,18 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Este cupón no aplica a los productos del carrito. Revisa las condiciones del cupón o quítalo.',
   CPN_VALIDATE_001:
     'No se pudo validar el cupón. Revisa los datos e inténtalo de nuevo.',
+
+  // Impresión de formatos (F-154, plan CP-pos-exclusive-tax-double-charge,
+  // QUI-832). `PRINT_TOKEN_SYNTAX_001` lo lanza
+  // `print-template-compiler.service.ts:93-98` cuando una plantilla
+  // personalizada tiene un token mal cerrado; el commit de formatos lo
+  // asciende a primera pared del mostrador. Sin esta entrada el cajero veía
+  // 'Ocurrio un error. Intente de nuevo.' y reintentaba indefinidamente
+  // sobre un fallo 100 % determinista. El copy dice las tres cosas que él
+  // necesita: la venta YA quedó cobrada, el papel no va a salir por más que
+  // reintente, y a quién avisar.
+  PRINT_TOKEN_SYNTAX_001:
+    'La venta quedó registrada, pero el formato de impresión tiene un error en su plantilla y el documento no se puede generar. Reintentar no lo resuelve: avisa al administrador para que corrija la plantilla.',
 };
 
 export const EMPTY_CART_MESSAGE = 'El carrito está vacío.';
