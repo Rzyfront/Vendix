@@ -1011,11 +1011,16 @@ export class OrderDetailsPageComponent {
               variant: 'warning',
             });
           }
-        } else if (this.canOfferDispatch()) {
-          // direct_delivery: counter handover, no remisión cycle. Ship directly.
-          // Plan 1060 (paso 5): sin fulfillment (mesa direct_delivery sin
-          // cocina) esta rama queda vacía — no se ofrece despacho.
-          actions.push({ id: 'ship', label: 'Despachar Orden', icon: 'package', variant: 'primary' });
+        } else if (!hasPaid) {
+          // Re-auditoría 1060: sin fulfillment no hay nada que despachar,
+          // pero el paso por `shipped` es la ÚNICA vía de cobro (ofrece
+          // Registrar Pago y en `processing` no hay `pay`). Se etiqueta
+          // como cobro, nunca como despacho.
+          actions.push({ id: 'ship', label: 'Pasar a Cobro', icon: 'credit-card', variant: 'primary' });
+        } else {
+          // Pagada y sin fulfillment: finalizar directo (el backend permite
+          // processing → finished; sin filas de cocina el F2-guard pasa).
+          actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
         }
         if (this.isPrivilegedUser()) {
           actions.push({ id: 'cancel-payment', label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning' });
@@ -4004,7 +4009,7 @@ export class OrderDetailsPageComponent {
     this.dialogService
       .confirm({
         title: 'Reversar entrega',
-        message: `¿Reversar la entrega de "${item.product_name}"? El ítem vuelve a pendiente y se registra el motivo.`,
+        message: `¿Reversar la entrega de "${item.product_name}"? El ítem quedará cancelado, se ajustará el total y se registrará el motivo.`,
         confirmText: 'Continuar',
         cancelText: 'Atrás',
         confirmVariant: 'danger',
