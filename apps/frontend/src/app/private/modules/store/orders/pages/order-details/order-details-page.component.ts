@@ -1292,22 +1292,7 @@ export class OrderDetailsPageComponent {
   });
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
-    { id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer' },
-    // CP-DTLP Phase E.3 / QUI-764b — disparador 2 manual del tiquete de
-    // despacho desde la pantalla de la orden. El `disabled` SIGUE al mismo
-    // predicado compartido (`shouldAutoPrintDispatchTicket`) que el handler
-    // `printDispatchTicket` — si vuelven a divergir estaríamos en el mismo
-    // lugar dentro de un mes. `trigger: 'explicit'` ignora `printDispatchTicketAuto`
-    // (solo el auto origin lo exige) y respeta `print_dispatch_ticket_on_counter`
-    // para que el botón salga habilitado cuando la tienda eligió imprimir el
-    // tiquete como comprobante de mostrador/para-llevar.
-    {
-      id: 'print-dispatch-ticket',
-      label: 'e-ticket de envío',
-      variant: 'outline',
-      icon: 'package',
-      disabled: !this.canPrintDispatchTicketExplicit(),
-    },
+    { id: 'print', label: 'Imprimir ticket', variant: 'outline', icon: 'printer' },
     // Agente C — remisión del despacho (`formatType: 'dispatch_note'`).
     // `disabled` sigue a `canPrintDispatchNote` (hay remisión): sin
     // remisión no hay `documentId` para el gateway. Se renderiza vía las
@@ -2952,9 +2937,6 @@ export class OrderDetailsPageComponent {
       this.printOrder();
     } else if (actionId === 'credit-payment') {
       this.openPayModal();
-    } else if (actionId === 'print-dispatch-ticket') {
-      // CP-DTLP Phase E.3 — disparador manual desde header.
-      void this.printDispatchTicket();
     } else if (actionId === 'print-dispatch-note') {
       // Agente C — remisión del despacho desde header.
       void this.printDispatchNote();
