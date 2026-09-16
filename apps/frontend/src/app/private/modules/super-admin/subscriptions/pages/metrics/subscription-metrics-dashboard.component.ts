@@ -130,10 +130,8 @@ type PeriodPreset = 'last_30' | 'last_90' | 'last_365';
           </div>
         </app-card>
 
-        <app-card
-          [padding]="false"
-          customClasses="!p-4 lg:col-span-2"
-        >
+        <!-- Card: Distribución por plan -->
+        <app-card [padding]="false" customClasses="!p-4">
           <h3 class="text-sm font-semibold text-text-primary mb-3">
             Distribución por plan (suscripciones activas)
           </h3>
@@ -142,15 +140,43 @@ type PeriodPreset = 'last_30' | 'last_90' | 'last_365';
               No hay suscripciones activas para mostrar.
             </p>
           } @else {
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-              <div class="h-64 w-full max-w-sm mx-auto">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+              <div class="h-56 w-full max-w-[220px] mx-auto">
                 <canvas #planCanvas></canvas>
               </div>
               <ul class="space-y-2">
                 @for (row of planBreakdown(); track row.plan_id) {
                   <li class="flex items-center justify-between text-sm">
-                    <span class="text-text-primary">{{ row.plan_name }}</span>
-                    <span class="font-mono text-text-secondary">
+                    <span class="text-text-primary truncate max-w-[140px]">{{ row.plan_name }}</span>
+                    <span class="font-mono text-text-secondary font-semibold">
+                      {{ row.count }}
+                    </span>
+                  </li>
+                }
+              </ul>
+            </div>
+          }
+        </app-card>
+
+        <!-- Card: Distribución por ciclo de facturación -->
+        <app-card [padding]="false" customClasses="!p-4">
+          <h3 class="text-sm font-semibold text-text-primary mb-3">
+            Distribución por ciclo de facturación
+          </h3>
+          @if (cycleBreakdown().length === 0) {
+            <p class="text-sm text-text-secondary py-8 text-center">
+              No hay ciclos activos para mostrar.
+            </p>
+          } @else {
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+              <div class="h-56 w-full max-w-[220px] mx-auto">
+                <canvas #cycleCanvas></canvas>
+              </div>
+              <ul class="space-y-2">
+                @for (row of cycleBreakdown(); track row.billing_cycle) {
+                  <li class="flex items-center justify-between text-sm">
+                    <span class="text-text-primary">{{ cycleLabel(row.billing_cycle) }}</span>
+                    <span class="font-mono text-text-secondary font-semibold">
                       {{ row.count }}
                     </span>
                   </li>
@@ -171,10 +197,12 @@ export class SubscriptionMetricsDashboardComponent implements AfterViewInit {
   readonly mrrCanvas = viewChild<ElementRef<HTMLCanvasElement>>('mrrCanvas');
   readonly churnCanvas = viewChild<ElementRef<HTMLCanvasElement>>('churnCanvas');
   readonly planCanvas = viewChild<ElementRef<HTMLCanvasElement>>('planCanvas');
+  readonly cycleCanvas = viewChild<ElementRef<HTMLCanvasElement>>('cycleCanvas');
 
   private mrrChart: Chart | null = null;
   private churnChart: Chart | null = null;
   private planChart: Chart | null = null;
+  private cycleChart: Chart | null = null;
   private viewReady = false;
 
   // ─── state signals ───
@@ -249,6 +277,10 @@ export class SubscriptionMetricsDashboardComponent implements AfterViewInit {
     () => this.metrics()?.active_breakdown.by_plan ?? [],
   );
 
+  readonly cycleBreakdown = computed(
+    () => this.metrics()?.active_breakdown.by_billing_cycle ?? [],
+  );
+
   constructor() {
     // Reload when period changes
     effect(() => {
@@ -268,6 +300,7 @@ export class SubscriptionMetricsDashboardComponent implements AfterViewInit {
       this.mrrChart?.destroy();
       this.churnChart?.destroy();
       this.planChart?.destroy();
+      this.cycleChart?.destroy();
     });
   }
 
@@ -310,6 +343,7 @@ export class SubscriptionMetricsDashboardComponent implements AfterViewInit {
     this.renderMrrChart(m);
     this.renderChurnChart(m);
     this.renderPlanChart(m);
+    this.renderCycleChart(m);
   }
 
   private renderMrrChart(m: SubscriptionMetricsResponse): void {
@@ -354,9 +388,6 @@ export class SubscriptionMetricsDashboardComponent implements AfterViewInit {
   private renderChurnChart(m: SubscriptionMetricsResponse): void {
     const canvas = this.churnCanvas()?.nativeElement;
     if (!canvas) return;
-    // Approximate per-month cancellations: not directly returned, use a
-    // single-bar showing cancelled_count for the current period as proxy.
-    // Future work: backend can return monthly churn series.
     const labels = m.mrr_evolution.slice(-6).map((p) => p.month);
     const placeholder = labels.map(() => 0);
     placeholder[placeholder.length - 1] = m.churn.cancelled_count;
@@ -433,6 +464,68 @@ export class SubscriptionMetricsDashboardComponent implements AfterViewInit {
         plugins: { legend: { position: 'bottom' } },
       },
     });
+  }
+
+  private renderCycleChart(m: SubscriptionMetricsResponse): void {
+    const canvas = this.cycleCanvas()?.nativeElement;
+    if (!canvas) return;
+    const rows = m.active_breakdown.by_billing_cycle ?? [];
+    const labels = rows.map((r) => this.cycleLabel(r.billing_cycle));
+    const data = rows.map((r) => r.count);
+    const palette = [
+      '#6366f1',
+      '#3b82f6',
+      '#0ea5e9',
+      '#10b981',
+      '#f59e0b',
+      '#ec4899',
+    ];
+    const colors = labels.map((_, i) => palette[i % palette.length]);
+
+    if (rows.length === 0) {
+      this.cycleChart?.destroy();
+      this.cycleChart = null;
+      return;
+    }
+
+    if (this.cycleChart) {
+      this.cycleChart.data.labels = labels;
+      this.cycleChart.data.datasets[0].data = data;
+      (this.cycleChart.data.datasets[0] as any).backgroundColor = colors;
+      this.cycleChart.update('none');
+      return;
+    }
+
+    this.cycleChart = new Chart(canvas, {
+      type: 'doughnut',
+      data: {
+        labels,
+        datasets: [{ data, backgroundColor: colors, borderWidth: 0 }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom' } },
+      },
+    });
+  }
+
+  cycleLabel(cycle?: string): string {
+    switch (cycle) {
+      case 'monthly':
+        return 'Mensual';
+      case 'quarterly':
+        return 'Trimestral';
+      case 'semiannual':
+      case 'biannual':
+        return 'Semestral';
+      case 'annual':
+        return 'Anual';
+      case 'lifetime':
+        return 'De por vida';
+      default:
+        return cycle || 'Mensual';
+    }
   }
 
   // ─── helpers ───

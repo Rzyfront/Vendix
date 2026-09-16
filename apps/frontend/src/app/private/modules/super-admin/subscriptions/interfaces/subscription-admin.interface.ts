@@ -169,16 +169,28 @@ export interface PromotionalPlan {
   created_at: string;
 }
 
+export interface StoreSubscriptionQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  state?: string;
+  status?: string;
+  plan_id?: number | string;
+  billing_cycle?: string;
+}
+
 export interface StoreSubscription {
   id: string;
   store_id: string;
   store_name: string;
   organization_name: string;
   plan_name: string;
+  plan_id?: string;
   billing_cycle: string;
   price: number;
   currency_code: string;
-  status: 'active' | 'grace' | 'suspended' | 'cancelled' | 'trial';
+  state?: string;
+  status: 'active' | 'grace' | 'suspended' | 'cancelled' | 'trial' | 'pending_payment';
   current_period_start: string;
   current_period_end: string;
   grace_period_end: string | null;
@@ -186,6 +198,60 @@ export interface StoreSubscription {
   partner_id: string | null;
   partner_margin_amount: number;
   created_at: string;
+  raw?: any;
+}
+
+export interface SubscriptionPaymentRow {
+  id: number;
+  invoice_id: number;
+  amount: number;
+  currency: string;
+  state: 'pending' | 'succeeded' | 'failed' | 'refunded';
+  provider: string;
+  provider_reference: string | null;
+  payment_method_type: string | null;
+  paid_at: string | null;
+  created_at: string;
+  invoice?: {
+    id: number;
+    invoice_number: string;
+    total: number;
+    currency: string;
+    state: string;
+    store?: {
+      id: number;
+      name: string;
+    };
+    organization?: {
+      id: number;
+      name: string;
+    };
+    plan?: {
+      id: number;
+      name: string;
+      code: string;
+    };
+  };
+}
+
+export interface SubscriptionPaymentQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  state?: string;
+  provider?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface DunningStatsResponse {
+  grace_soft: number;
+  grace_hard: number;
+  suspended: number;
+  blocked: number;
+  pending_payment: number;
+  total: number;
+  total_overdue: number;
 }
 
 export interface DunningSubscription {

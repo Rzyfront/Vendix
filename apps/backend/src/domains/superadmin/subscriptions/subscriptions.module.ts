@@ -17,6 +17,7 @@ import { ActiveSubscriptionsService } from './services/active-subscriptions.serv
 import { DunningController } from './controllers/dunning.controller';
 import { DunningService } from './services/dunning.service';
 import { PayoutsController } from './controllers/payouts.controller';
+import { SubscriptionPaymentsController } from './controllers/subscription-payments.controller';
 import { PayoutsService } from './services/payouts.service';
 import { EventsController } from './controllers/events.controller';
 import { EventsService } from './services/events.service';
@@ -45,6 +46,7 @@ import { SubscriptionFiscalModule } from './fiscal/subscription-fiscal.module';
     ActiveSubscriptionsController,
     DunningController,
     PayoutsController,
+    SubscriptionPaymentsController,
     EventsController,
     SubscriptionsStatsController,
     SubscriptionMetricsController,

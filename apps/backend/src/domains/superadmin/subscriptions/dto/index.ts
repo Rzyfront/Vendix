@@ -14,7 +14,7 @@ export { UpdatePromotionalDto } from './update-promotional.dto';
 export { PromotionalQueryDto } from './promotional-query.dto';
 export { SubscriptionQueryDto } from './subscription-query.dto';
 export { DunningQueryDto } from './dunning-query.dto';
-export { PayoutQueryDto } from './payout.dto';
+export { PayoutQueryDto, SubscriptionPaymentQueryDto } from './payout.dto';
 export { ApprovePayoutDto } from './approve-payout.dto';
 export { RejectPayoutDto } from './reject-payout.dto';
 export { EventsQueryDto } from './events-query.dto';
