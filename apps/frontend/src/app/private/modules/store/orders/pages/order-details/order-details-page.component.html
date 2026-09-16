@@ -386,13 +386,13 @@
                     as addr
                   ) {
                     <div class="customer-address-body">
-                      <p class="customer-address-main">
+                      <p class="customer-address-main truncate" [title]="addr.address_line1">
                         {{ addr.address_line1 }}
                       </p>
                       @if (addr.address_line2) {
-                        <p>{{ addr.address_line2 }}</p>
+                        <p class="truncate">{{ addr.address_line2 }}</p>
                       }
-                      <p>
+                      <p class="truncate">
                         {{ addr.city }}, {{ addr.state_province }}
                         {{ addr.postal_code }}
                       </p>
@@ -464,13 +464,13 @@
                     as addr
                   ) {
                     <div class="customer-address-body">
-                      <p class="customer-address-main">
+                      <p class="customer-address-main truncate" [title]="addr.address_line1">
                         {{ addr.address_line1 }}
                       </p>
                       @if (addr.address_line2) {
-                        <p>{{ addr.address_line2 }}</p>
+                        <p class="truncate">{{ addr.address_line2 }}</p>
                       }
-                      <p>
+                      <p class="truncate">
                         {{ addr.city }}, {{ addr.state_province }}
                         {{ addr.postal_code }}
                       </p>
