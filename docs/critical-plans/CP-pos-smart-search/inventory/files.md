@@ -1,0 +1,27 @@
+# Critical Files
+
+- `apps/backend/src/domains/store/products/products.controller.ts` — GET /store/products → findAll(ProductQueryDto), permiso store:products:read
+- `apps/backend/src/domains/store/products/dto/index.ts` — ProductQueryDto: search, barcode, pos_optimized, featured_first, best_selling_first, paginación
+- `apps/backend/src/domains/store/products/products.service.ts` — buildProductWhere (:1360, fuente única del where), rama search OR (:1417-1424), rama barcode equals (:1401-1416), findAll (:1712), rama pos_optimized (:1917)
+- `apps/backend/src/prisma/services/store-prisma.service.ts` — StorePrismaService inyecta store_id (scope por tienda)
+- `apps/backend/prisma/schema.prisma` — products (:1820, índices 2022-2042), product_variants (:1817), ai_embeddings (:5476)
+- `apps/backend/src/domains/ecommerce/catalog/catalog.service.ts` — catálogo ecommerce con el mismo OR defectuoso (:99-101)
+- `apps/backend/src/domains/store/products/products.service.spec.ts` — specs que asertan el where actual (~:661, :1666), deberán actualizarse
+- `apps/backend/src/domains/store/products/products.controller.spec.ts` — specs del controller de productos
+- `apps/frontend/src/app/private/modules/store/pos/pos.component.ts` — monta pos-product-selection; scans barcode → getProductByBarcode; flujo Vexi aparte
+- `apps/frontend/src/app/private/modules/store/pos/components/pos-product-selection.component.ts` — buscador vivo del POS (input → searchSubject$ → filterProducts → searchProducts → grilla)
+- `apps/frontend/src/app/shared/components/inputsearch/inputsearch.component.ts` — input genérico con debounce 300ms + distinctUntilChanged
+- `apps/frontend/src/app/private/modules/store/pos/services/pos-product.service.ts` — searchProducts (:321-453) mapea filters.query → query.search, GET /store/products, transformProducts (:455)
+- `apps/frontend/src/app/private/modules/store/pos/components/pos-product-search.component.ts` — CÓDIGO MUERTO (selector sin uso, no exportado); no tocar
+- `apps/frontend/src/app/private/modules/store/pos/services/pos-barcode.service.ts` — captura del escáner (timing), emite scans$, sin lookup
+- `apps/frontend/src/app/private/modules/store/pos/services/pos-offline.service.ts` — cola de sync; sin caché ni búsqueda local
+- `apps/backend/src/ai-engine/tools/domains/products.tools.ts` — Vexi search_products → findAll con search (:758-776)
+- `apps/backend/src/domains/ecommerce/catalog/catalog.controller.ts` — ruta GET /ecommerce/catalog (:6-15, hermano con OR propio)
+- `apps/backend/src/domains/store/inventory/adjustments/dto/search-adjustable-products.dto.ts` — DTO hermano (ningún controller lo usa)
+- `apps/backend/src/domains/store/inventory/adjustments/inventory-adjustments.service.ts` — searchAdjustableProducts con OR propio (:708-720)
+- `apps/backend/src/domains/store/orders/stock-transfers/dto/search-transferable-products.dto.ts` — DTO hermano muerto igual
+- `apps/backend/src/domains/store/orders/stock-transfers/stock-transfers.service.ts` — searchTransferableProducts con where propio (:846)
+- `apps/frontend/src/app/private/modules/store/products/products.component.ts` — lista admin con search (:288-295)
+- `apps/frontend/src/app/private/modules/store/invoicing/services/invoice-product-lookup.service.ts` — typeahead factura con search (:77-84)
+- `apps/mobile/src/features/store/services/product.service.ts` — ProductService.search/list con search (:61-132)
+- `apps/mobile/app/(store-admin)/pos/index.tsx` — POS móvil consume search (:2457-2471)

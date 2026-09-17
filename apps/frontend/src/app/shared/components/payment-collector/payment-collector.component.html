@@ -483,11 +483,13 @@
         </div>
         <select
           class="pc-input"
+          aria-label="Cuota a pagar"
+          [value]="selectedInstallmentId() ?? 0"
           (change)="onInstallmentChange($any($event.target).value)"
         >
           <option [value]="0">Selecciona una cuota…</option>
           @for (opt of installmentOptions(); track opt.value) {
-            <option [value]="opt.value">{{ opt.label }}</option>
+            <option [value]="opt.value" [disabled]="opt.disabled">{{ opt.label }}</option>
           }
         </select>
       </section>

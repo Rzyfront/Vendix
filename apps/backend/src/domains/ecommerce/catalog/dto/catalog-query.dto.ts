@@ -1,5 +1,13 @@
-import { IsOptional, IsString, IsInt, Min, Max, IsEnum } from 'class-validator';
-import { Type } from 'class-transformer';
+import {
+  IsOptional,
+  IsString,
+  IsInt,
+  Min,
+  Max,
+  MaxLength,
+  IsEnum,
+} from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 
 export enum ProductSortBy {
   NAME = 'name',
@@ -11,8 +19,15 @@ export enum ProductSortBy {
 }
 
 export class CatalogQueryDto {
+  // D.3 (ADR-09, ERR-16, F-024): mismo hardening que B.1 en ProductQueryDto.
+  // Overlong → 400 SYS_VALIDATION_001; el storefront clampa a 200 (nunca 400
+  // por tipeo) y min-length en service evita scans de 1 char.
   @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || undefined : value,
+  )
   @IsString()
+  @MaxLength(200)
   search?: string;
 
   @IsOptional()

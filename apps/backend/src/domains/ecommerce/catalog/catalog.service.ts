@@ -1,6 +1,7 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
+import { createHash } from 'crypto';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CatalogQueryDto, ProductSortBy } from './dto/catalog-query.dto';
@@ -23,6 +24,44 @@ import type {
   ActiveProductPromotion,
   ActivePromotionProductInput,
 } from '../../store/promotions/dto/promotion-quote.interface';
+import { ErrorCodes, VendixHttpException } from 'src/common/errors';
+import {
+  buildTokenAndFieldOr,
+  isSearchAccentFolded,
+  tokenizeInternal,
+  tokenizePublic,
+  type SearchTextFieldMap,
+} from '@common/utils/search-text.util';
+import {
+  rankedIdsPage,
+  scoreTokens,
+} from '@common/utils/search-score.util';
+import { PosSearchPathService } from '../../store/settings/pos-smart-search/pos-search-path.service';
+
+/**
+ * D.3 — Set de recall del buscador público: PARIDAD con el OR legacy
+ * (name/description/sku, raíz `products`, sin nest).
+ */
+const CATALOG_SEARCH_FIELDS: SearchTextFieldMap = {
+  scalar: ['name', 'description', 'sku'],
+};
+
+/** D.3 — Scan-cap del rank público (sobre el cap, legacy barato). */
+const CATALOG_SEARCH_SCAN_CAP = 200;
+
+/**
+ * D.3 (F-047) — Min-length efectivo: con 1 char el autocomplete devuelve
+ * página vacía SIN tocar la DB (un token nunca tiene < 2 chars, así que
+ * ningún scan de 1 char puede matchear nada: puro costo evitado).
+ */
+const CATALOG_SEARCH_MIN_LENGTH = 2;
+
+/**
+ * D.3 (F-047) — TTL de la caché de búsqueda pública (store + query-norm +
+ * page + bit smart). Corta a propósito: promociones/disponibilidad derivan
+ * cada 20s como máximo; absorbe ráfagas de autocomplete del mismo visitante.
+ */
+const CATALOG_SEARCH_CACHE_TTL_MS = 20_000;
 
 /**
  * Una opción del selector de presentación de la vitrina
@@ -44,6 +83,8 @@ type PublicSaleUnitProjection = {
 
 @Injectable()
 export class CatalogService {
+  private readonly logger = new Logger(CatalogService.name);
+
   constructor(
     private readonly prisma: EcommercePrismaService,
     private readonly storePrisma: StorePrismaService,
@@ -53,6 +94,8 @@ export class CatalogService {
     private readonly promotionEngine: PromotionEngineService,
     private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    // D.3 — heredero L1 del motor POS (fail-open: down ⇒ legacy).
+    private readonly searchPath: PosSearchPathService,
   ) {}
 
   /**
@@ -82,6 +125,57 @@ export class CatalogService {
 
     const skip = (page - 1) * limit;
     const store_id = RequestContextService.getStoreId();
+    // D.3 (F-038/F-042): tenant obligatorio en service. Sin domain_context
+    // no hay scope: 404 explícito con código (antes: 403 genérico desde el
+    // Prisma scopeado, sin señal de QUÉ faltó).
+    if (!store_id) {
+      throw new VendixHttpException(
+        ErrorCodes.AUTH_STORE_001,
+        'Store could not be resolved from x-store-id, store_id or host',
+      );
+    }
+
+    // D.3 (F-047/F-077/F-087): tokens públicos (wrapper nombra el cap 4, no
+    // un número en el call-site) + señal de truncado para meta + gate de
+    // min-length que evita scans de 1 char.
+    const rawSearch = typeof search === 'string' ? search : '';
+    const searchActive = rawSearch !== '';
+    if (searchActive && rawSearch.trim().length < CATALOG_SEARCH_MIN_LENGTH) {
+      return {
+        data: [],
+        meta: {
+          total: 0,
+          page: Number(page),
+          limit: Number(limit),
+          total_pages: 1,
+          applied_tokens: [] as string[],
+          tokens_truncated: false,
+        },
+      };
+    }
+    const applied_tokens: readonly string[] = searchActive
+      ? tokenizePublic(rawSearch)
+      : [];
+    const tokens_truncated =
+      applied_tokens.length > 0 &&
+      tokenizeInternal(rawSearch).length > applied_tokens.length;
+    // Re-auditoría PR #817 (finding #2): query acentuada → OR legacy del
+    // where base (los tokens plegados no matchean en `contains`).
+    const smartSearch =
+      applied_tokens.length > 0 &&
+      !isSearchAccentFolded(rawSearch) &&
+      (await this.isSmartCatalogSearchOn());
+
+    // D.3 (F-047): caché corta de búsqueda (store + query-norm + page +
+    // bit smart en la llave). Hit ⇒ sin DB; miss/caída ⇒ se computa.
+    const searchCacheKey = searchActive
+      ? this.buildSearchCacheKey(store_id, query, smartSearch)
+      : null;
+    if (searchCacheKey) {
+      const cached = await this.getSearchCache(searchCacheKey);
+      if (cached) return cached;
+    }
+
     const catalogSettings = await this.getCatalogSettings(store_id);
 
     const where: any = {
@@ -94,11 +188,14 @@ export class CatalogService {
     const categoryIds = this.mergeIdFilters(category_id, category_ids);
     const brandIds = this.mergeIdFilters(brand_id, brand_ids);
 
-    if (search) {
+    // D.3 — El where base SIEMPRE lleva el OR-frase legacy verbatim: es el
+    // fail-open (kill-switch, sin tokens, sobre scan-cap o throw). La rama
+    // rankeada deriva su propio where (tokenizado) sin mutar este.
+    if (searchActive) {
       where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-        { sku: { contains: search, mode: 'insensitive' } },
+        { name: { contains: rawSearch, mode: 'insensitive' } },
+        { description: { contains: rawSearch, mode: 'insensitive' } },
+        { sku: { contains: rawSearch, mode: 'insensitive' } },
       ];
     }
 
@@ -194,13 +291,76 @@ export class CatalogService {
       !search &&
       !ids
     ) {
-      return this.getFeaturedWithFill(where, store_id, Number(limit));
+      const filled = await this.getFeaturedWithFill(
+        where,
+        store_id,
+        Number(limit),
+      );
+      // D.3 (F-077): meta uniforme; fill nunca lleva search ⇒ vacío.
+      return {
+        ...filled,
+        meta: { ...filled.meta, applied_tokens: [], tokens_truncated: false },
+      };
     }
+
+    // D.3 — Rama rankeada: scan tokenizado + rank en memoria + hydrate de la
+    // página con el include del listado. null (sobre scan-cap) o throw ⇒
+    // legacy de abajo con warn (fail-open, nunca 5xx por el motor).
+    // El where rankeado DERIVA del base (mismo helper A.1 + mismos filtros,
+    // OR-frase reemplazado): `where` queda intacto para el fallback.
+    if (smartSearch) {
+      try {
+        const tokenized = buildTokenAndFieldOr(
+          applied_tokens,
+          CATALOG_SEARCH_FIELDS,
+        );
+        const rankedWhere = {
+          ...where,
+          AND: [
+            ...((tokenized.AND as unknown[]) ?? []),
+            ...((where.AND as unknown[]) ?? []),
+          ],
+        };
+        delete rankedWhere.OR;
+        const ranked = await this.getProductsRanked(
+          rankedWhere,
+          Number(page),
+          Number(limit),
+          applied_tokens,
+          store_id,
+        );
+        if (ranked !== null) {
+          const payload = {
+            data: ranked.data,
+            meta: {
+              ...ranked.meta,
+              applied_tokens: [...applied_tokens],
+              tokens_truncated,
+            },
+          };
+          if (searchCacheKey) await this.setSearchCache(searchCacheKey, payload);
+          return payload;
+        }
+        this.logger.warn(
+          `[CatalogSearch] over scan-cap store=${store_id} tokens=${applied_tokens.length} → legacy`,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `[CatalogSearch] smart→legacy store=${store_id}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    // D.3 (F-088, ADR-09): `search` presente overridea `sort_by` — decisión
+    // explícita, sin nuevo enum RELEVANCE. Orden con search: relevancia
+    // (rama rank) o alta-reciente (legacy); el sort pedido se ignora.
+    const effectiveSort = searchActive ? ProductSortBy.NEWEST : sort_by;
 
     let orderBy: any;
     let explicitIds: number[] | null = null;
 
-    if (sort_by === ProductSortBy.BEST_SELLING && store_id) {
+    if (effectiveSort === ProductSortBy.BEST_SELLING && store_id) {
       // 1. Intentar obtener IDs de caché o base de datos
       explicitIds = await this.getBestSellingFromCache(store_id);
       if (!explicitIds) {
@@ -229,7 +389,7 @@ export class CatalogService {
     }
 
     // Configuración de Ordenamiento Estándar
-    switch (sort_by) {
+    switch (effectiveSort) {
       case ProductSortBy.NAME:
         orderBy = { name: 'asc' };
         break;
@@ -254,7 +414,7 @@ export class CatalogService {
 
     // Caso Especial: Best Selling (Lógica de mezcla)
     if (
-      sort_by === ProductSortBy.BEST_SELLING &&
+      effectiveSort === ProductSortBy.BEST_SELLING &&
       explicitIds &&
       explicitIds.length > 0
     ) {
@@ -369,6 +529,8 @@ export class CatalogService {
           ),
         );
 
+        // D.3 (F-077): meta uniforme; best_selling + search es imposible
+        // (override) ⇒ vacío.
         return {
           data: mappedData,
           meta: {
@@ -376,6 +538,8 @@ export class CatalogService {
             page: Number(page),
             limit: Number(limit),
             total_pages: 1, // Simplificado para sección destacados
+            applied_tokens: [],
+            tokens_truncated: false,
           },
         };
       }
@@ -444,15 +608,190 @@ export class CatalogService {
     // conviven sin interferir. Un producto enlazado a una carta con ventana
     // horaria sigue visible en el catálogo aunque esté fuera de ese horario;
     // la disponibilidad por horario se expone aparte en GET /ecommerce/menus.
-    return {
+    // D.3 (F-077/F-047): meta uniforme + caché de búsqueda.
+    const payload = {
       data: mappedData,
       meta: {
         total,
         page: Number(page),
         limit: Number(limit),
         total_pages: Math.max(1, Math.ceil(total / Number(limit))),
+        applied_tokens: [...applied_tokens],
+        tokens_truncated,
       },
     };
+    if (searchCacheKey) await this.setSearchCache(searchCacheKey, payload);
+    return payload;
+  }
+
+  /**
+   * D.3 — Heredero smart del motor POS. `false` ante cualquier duda (sin
+   * provider, kill-switch, throw) ⇒ OR legacy. Nunca lanza.
+   */
+  private async isSmartCatalogSearchOn(): Promise<boolean> {
+    try {
+      if (!this.searchPath) return false;
+      return !this.searchPath.isKillSwitchOn();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * D.3 — Rama rankeada del buscador público: MISMO where del listado
+   * (filtros incluidos) + MISMO include + MISMO pipeline de mapeo que el
+   * path legacy; solo cambia el orden (relevancia A.2 en vez de orderBy).
+   *
+   * `null` sobre scan-cap (el caller degrada a legacy). Los errores de los
+   * delegates propagan al caller, que degrada con warn (fail-open).
+   */
+  private async getProductsRanked(
+    where: any,
+    page: number,
+    limit: number,
+    tokens: readonly string[],
+    store_id: number,
+  ): Promise<{
+    data: any[];
+    meta: { total: number; page: number; limit: number; total_pages: number };
+  } | null> {
+    const outcome = await rankedIdsPage(where, page, limit, {
+      scanCap: CATALOG_SEARCH_SCAN_CAP,
+      scan: (scanWhere, take) =>
+        this.prisma.products.findMany({
+          where: scanWhere,
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            sku: true,
+            is_featured: true,
+            created_at: true,
+          },
+          take,
+        }),
+      score: (row: any) => {
+        const breakdown = scoreTokens(
+          tokens,
+          [
+            { key: 'name', value: row?.name },
+            { key: 'description', value: row?.description },
+            { key: 'sku', value: row?.sku },
+          ],
+          { primaryKey: 'name' },
+        );
+        const createdAt = row?.created_at
+          ? new Date(row.created_at).getTime()
+          : NaN;
+        return {
+          id: row?.id,
+          score: breakdown.score,
+          coverage: breakdown.coverage,
+          featured: row?.is_featured === true,
+          createdAt: Number.isFinite(createdAt) ? createdAt : 0,
+        };
+      },
+      hydrate: (_hydrateWhere, pageIds) =>
+        this.prisma.products.findMany({
+          // pageIds ya satisfacen el where completo (salieron del scan);
+          // el scope de tienda lo aplica EcommercePrismaService.
+          where: { id: { in: [...pageIds] } },
+          include: this.listingInclude(),
+        }),
+      getId: (row: any) => row?.id,
+    });
+    if (outcome === null) return null;
+
+    // Pipeline idéntico al path legacy de getProducts (mismo orden).
+    await this.hydrateSaleUnitsForListing(outcome.rows);
+    const activePromotionsByProductId =
+      await this.resolveActivePromotionsForListing(outcome.rows);
+    const availabilityByProductId = await this.resolveAvailabilityForProducts(
+      store_id,
+      outcome.rows,
+    );
+    const mappedData = await Promise.all(
+      outcome.rows.map((product) =>
+        this.mapProductToResponse(
+          product,
+          activePromotionsByProductId.get(product.id) ?? null,
+          availabilityByProductId.get(product.id) ?? null,
+        ),
+      ),
+    );
+    const total = outcome.totalCandidates;
+    return {
+      data: mappedData,
+      meta: {
+        total,
+        page,
+        limit,
+        total_pages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
+  }
+
+  /**
+   * D.3 (F-047) — Llave de caché: store + bit smart + sha256 de la query
+   * normalizada (todos los filtros que alteran el resultado). El bit smart
+   * evita servir rankeado con kill-switch on y viceversa ante un toggle.
+   */
+  private buildSearchCacheKey(
+    store_id: number,
+    query: CatalogQueryDto,
+    smartSearch: boolean,
+  ): string {
+    const norm = JSON.stringify({
+      s: query.search ?? '',
+      c: query.category_id ?? '',
+      cs: query.category_ids ?? '',
+      b: query.brand_id ?? '',
+      bs: query.brand_ids ?? '',
+      ids: query.ids ?? '',
+      min: query.min_price ?? '',
+      max: query.max_price ?? '',
+      sort: query.sort_by ?? '',
+      p: query.page ?? 1,
+      l: query.limit ?? 20,
+      d: String(query.has_discount ?? ''),
+      f: String(query.is_featured ?? ''),
+      fill: String(query.fill ?? ''),
+    });
+    const digest = createHash('sha256').update(norm).digest('hex');
+    return `catalog:search:v1:${store_id}:${smartSearch ? 1 : 0}:${digest}`;
+  }
+
+  /**
+   * D.3 (F-047) — Lectura best-effort: caché caída o shape inesperado ⇒
+   * miss (se computa). Nunca lanza, nunca devuelve shape roto.
+   */
+  private async getSearchCache(key: string): Promise<any | null> {
+    try {
+      const hit = await this.cache.get<any>(key);
+      if (
+        hit &&
+        typeof hit === 'object' &&
+        Array.isArray((hit as any).data) &&
+        (hit as any).meta &&
+        typeof (hit as any).meta === 'object'
+      ) {
+        return hit;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** D.3 (F-047) — Escritura best-effort: fallar cacheando no rompe nada. */
+  private async setSearchCache(key: string, payload: unknown): Promise<void> {
+    try {
+      await this.cache.set(key, payload, CATALOG_SEARCH_CACHE_TTL_MS);
+    } catch (error) {
+      this.logger.debug(
+        `[CatalogSearch] cache set skip: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   async getProductBySlug(slug: string) {

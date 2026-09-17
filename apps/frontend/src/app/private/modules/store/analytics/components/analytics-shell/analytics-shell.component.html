@@ -10,6 +10,6 @@
   ></app-sticky-header>
 
   <main class="shell-content">
-    <router-outlet></router-outlet>
+    <router-outlet (activate)="onActivate($event)"></router-outlet>
   </main>
 </div>
