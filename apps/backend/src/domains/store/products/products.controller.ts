@@ -116,12 +116,16 @@ export class ProductsController {
     try {
       const result = await this.productsService.findAll(query);
       if (result.data && result.meta) {
+        // B.2 (ADR-08): `meta.search` solo viaja con `search`. El spread
+        // condicional preserva la llamada de 5 args cuando no hay search
+        // (contrato que fijan los specs existentes; B.3 los extiende).
         return this.responseService.paginated(
           result.data,
           result.meta.total,
           result.meta.page,
           result.meta.limit,
           'Productos obtenidos exitosamente',
+          ...(result.meta.search ? [result.meta.search] : []),
         );
       }
       return this.responseService.success(

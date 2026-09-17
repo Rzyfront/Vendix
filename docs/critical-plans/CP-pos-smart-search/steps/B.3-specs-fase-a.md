@@ -28,4 +28,5 @@ skills: [vendix-backend, vendix-prisma-scopes, vendix-multi-tenant-context]
   - [ ] Suite products verde completa (service + controller)
   - [ ] page=-1 documenta shape success:false (ERR-06) sin cambiarlo
   - [ ] Spec barcode positivo con fixture (producto/variante/tier) intacto
+  - [ ] Extender should-return-paginated-products (meta.search con search) + specs gate tokens>0 y hydrate-fallback
 - **Status:** pending

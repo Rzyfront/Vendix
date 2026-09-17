@@ -40,4 +40,5 @@ skills: [vendix-backend, vendix-backend-api, vendix-prisma-scopes, vendix-multi-
   - [ ] F-081 — Paridad tokenizer-JS vs SQL sin fijar (minor)
   - [ ] F-085 — Errores raw/P2010 pueden ecoar schema y tenant (minor)
   - [ ] F-101 — Verificación índice solo-archivo sin re-check runtime (minor)
+  - [ ] F-090 — Sin admission control en path search (minor)
 - **Status:** pending

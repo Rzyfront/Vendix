@@ -2,7 +2,7 @@
 id: B.2
 title: "findAll rama rank-memoria con scan-cap"
 phase: B
-status: pending
+status: done
 owner: none
 updated: 2026-09-17
 contracts: [FB-01, FB-04, FB-05, FB-06, FB-07, FB-14, DB-01, DB-03, DB-04, DB-07, DB-17, ERR-01, ERR-17, ERR-18]
@@ -23,26 +23,25 @@ skills: [vendix-backend, vendix-backend-api, vendix-prisma-scopes, vendix-multi-
 - **Verification:**
   - `curl -s -H "Authorization: Bearer $T" "$API/store/products?search=cafe&pos_optimized=true&state=active" | jq '.data[0].name'`
 - **Acceptance checklist:**
-  - [ ] Mejor match primero con search; total == conjunto rankeado pre-slice
-  - [ ] Página 2 no repite ids de página 1 (orden determinista)
-  - [ ] Sobre scan-cap: degrada a orderBy sin vaciar grilla (fail-open)
-  - [ ] findIds devuelve mismo conjunto que findAll con filtros (DB-17)
-  - [ ] Degrade emite warn + counter + meta.search.rank_mode (auditable)
-  - [ ] search+best_selling: rank textual gana; featured-débil vs exacto pineado
-  - [ ] Paridad shapes flag-on/off + cocina sin dinero; página-2-caché sin scan
-  - [ ] F-001 — Rank gate pos_optimized contradice hereda-ranking (blocker)
-  - [ ] F-005 — Fase A: 3 queries/2 seq-scans por keystroke (blocker)
-  - [ ] F-012 — Fail-open scan-cap silencioso (log+counter+meta) (blocker)
-  - [ ] F-017 — Light query verbatim sin texto para scorizar (major)
-  - [ ] F-018 — Rama rank colisiona con best_selling_first (major)
-  - [ ] F-022 — Precedencia rank vs featured_first sin especificar (major)
-  - [ ] F-034 — Fail-open no cubre throws de light/hydrate (major)
-  - [ ] F-044 — Rank query trae variantes anchas: wire/memory por keystroke (major)
-  - [ ] F-045 — limit/search sin cota → hydrate pesado/OOM (major)
-  - [ ] F-046 — Cada página re-scanea y re-ordena sin caché (major)
-  - [ ] F-068 — Sin correlation id ni timing por etapa (major)
-  - [ ] F-076 — Hydrate B.2 debe preservar 2 shapes + promo + cocina (minor)
-  - [ ] F-083 — Delete concurrente light→hydrate = página corta (minor)
-  - [ ] F-089 — Extras fijos por keystroke comen p95 (minor)
-  - [ ] F-090 — Sin admission control en path search (minor)
-- **Status:** pending
+  - [x] Mejor match primero con search; total == conjunto rankeado pre-slice
+  - [x] Página 2 no repite ids de página 1 (orden determinista)
+  - [x] Sobre scan-cap: degrada a orderBy sin vaciar grilla (fail-open)
+  - [x] findIds devuelve mismo conjunto que findAll con filtros (DB-17)
+  - [x] Degrade emite warn + counter + meta.search.rank_mode (auditable)
+  - [x] search+best_selling: rank textual gana; featured-débil vs exacto pineado
+  - [x] Paridad shapes flag-on/off + cocina sin dinero; página-2-caché sin scan
+  - [x] F-001 — Rank gate pos_optimized contradice hereda-ranking (blocker)
+  - [x] F-005 — Fase A: 3 queries/2 seq-scans por keystroke (blocker)
+  - [x] F-012 — Fail-open scan-cap silencioso (log+counter+meta) (blocker)
+  - [x] F-017 — Light query verbatim sin texto para scorizar (major)
+  - [x] F-018 — Rama rank colisiona con best_selling_first (major)
+  - [x] F-022 — Precedencia rank vs featured_first sin especificar (major)
+  - [x] F-034 — Fail-open no cubre throws de light/hydrate (major)
+  - [x] F-044 — Rank query trae variantes anchas: wire/memory por keystroke (major)
+  - [x] F-045 — limit/search sin cota → hydrate pesado/OOM (major)
+  - [x] F-046 — Cada página re-scanea y re-ordena sin caché (major)
+  - [x] F-068 — Sin correlation id ni timing por etapa (major)
+  - [x] F-076 — Hydrate B.2 debe preservar 2 shapes + promo + cocina (minor)
+  - [x] F-083 — Delete concurrente light→hydrate = página corta (minor)
+  - [x] F-089 — Extras fijos por keystroke comen p95 (minor)
+- **Status:** done
