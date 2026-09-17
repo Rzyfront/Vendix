@@ -878,7 +878,7 @@ describe('ProductsBulkService', () => {
     const analyze = (rows: string[]) =>
       service.analyzeProducts(
         Buffer.from(['Nombre,SKU,Precio Venta', ...rows].join('\n')),
-        mockUser,
+        1,
       );
 
     it('marca la fila como error cuando el precio no es numérico', async () => {
