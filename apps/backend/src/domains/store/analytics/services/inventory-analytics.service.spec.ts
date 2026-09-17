@@ -12,6 +12,8 @@ type MockStorePrismaService = {
   products: { findMany: jest.Mock };
   store_settings: { findFirst: jest.Mock };
   inventory_movements: { findMany: jest.Mock };
+  supplier_products: { findMany: jest.Mock };
+  $queryRaw: jest.Mock;
   withoutScope: jest.Mock;
 } & Partial<StorePrismaService>;
 
@@ -43,7 +45,11 @@ describe('InventoryAnalyticsService', () => {
       // null -> DEFAULT_STORE_TIMEZONE ('America/Bogota') + default settings.
       store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
       inventory_movements: { findMany: jest.fn() },
-      withoutScope: jest.fn(),
+      supplier_products: { findMany: jest.fn().mockResolvedValue([]) },
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      withoutScope: jest.fn().mockReturnValue({
+        $queryRaw: jest.fn().mockResolvedValue([]),
+      }),
     } as MockStorePrismaService;
 
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
@@ -190,7 +196,7 @@ describe('InventoryAnalyticsService', () => {
           name: 'Muestra Gratis',
           sku: 'SAMPLE-1',
           product_images: [],
-          stock_quantity: 3,
+          stock_quantity: 1,
           cost_price: 0, // costo cero explícito
           min_stock_level: 1,
           reorder_point: 2,
@@ -496,33 +502,30 @@ describe('InventoryAnalyticsService', () => {
     // Cobertura mínima del nuevo método flat-array introducido por QUI-550.
     // Verifica la forma del retorno y que tolere tiendas sin productos.
     it('returns a flat array grouped by supplier with product_count, total_stock, total_value', async () => {
-      prisma.products.findMany.mockResolvedValue([
+      prisma.supplier_products.findMany.mockResolvedValue([
         {
-          id: 1,
-          name: 'Coca-Cola 350ml',
-          sku: 'CC350',
-          stock_quantity: 100,
-          cost_price: 1500,
-          primary_supplier_id: 10,
-          primary_supplier: { id: 10, name: 'Distribuidora Andina' },
+          supplier_id: 10,
+          product_id: 1,
+          cost_per_unit: 1500,
+          is_preferred: true,
+          supplier: { name: 'Distribuidora Andina', code: 'AND' },
+          products: { stock_quantity: 100, cost_price: 1500 },
         },
         {
-          id: 2,
-          name: 'Galletas Festival',
-          sku: 'GAL-FES',
-          stock_quantity: 50,
-          cost_price: 800,
-          primary_supplier_id: 10,
-          primary_supplier: { id: 10, name: 'Distribuidora Andina' },
+          supplier_id: 10,
+          product_id: 2,
+          cost_per_unit: 800,
+          is_preferred: true,
+          supplier: { name: 'Distribuidora Andina', code: 'AND' },
+          products: { stock_quantity: 50, cost_price: 800 },
         },
         {
-          id: 3,
-          name: 'Chocorramo',
-          sku: 'CHOCO',
-          stock_quantity: 200,
-          cost_price: 2000,
-          primary_supplier_id: 20,
-          primary_supplier: { id: 20, name: 'Post Colombiano SA' },
+          supplier_id: 20,
+          product_id: 3,
+          cost_per_unit: 2000,
+          is_preferred: true,
+          supplier: { name: 'Post Colombiano SA', code: 'COL' },
+          products: { stock_quantity: 200, cost_price: 2000 },
         },
       ] as any);
 
@@ -545,6 +548,144 @@ describe('InventoryAnalyticsService', () => {
         storeId: 1,
       } as any);
       expect(rows).toEqual([]);
+    });
+  });
+
+  // ==================== INGREDIENT CONSUMPTION ====================
+
+  describe('getIngredientConsumption & getIngredientConsumptionForExport', () => {
+    const rawConsumptionRows = [
+      {
+        ingredient_id: 7,
+        ingredient_name: 'Pechuga de Pollo',
+        ingredient_sku: 'POLLO-01',
+        ingredient_unit: 'kg',
+        dish_id: 30,
+        dish_name: 'Barril Pollo',
+        transaction_count: 5,
+        orders_count: 5,
+        dish_quantity: '10',
+        consumed_quantity: '5.5',
+        avg_unit_cost: '18000',
+        total_cost: '99000',
+      },
+      {
+        ingredient_id: 7,
+        ingredient_name: 'Pechuga de Pollo',
+        ingredient_sku: 'POLLO-01',
+        ingredient_unit: 'kg',
+        dish_id: 31,
+        dish_name: 'Barril Mixto',
+        transaction_count: 3,
+        orders_count: 3,
+        dish_quantity: '5',
+        consumed_quantity: '2.5',
+        avg_unit_cost: '18000',
+        total_cost: '45000',
+      },
+      {
+        ingredient_id: 15,
+        ingredient_name: 'Papas Francesas',
+        ingredient_sku: 'PAPA-01',
+        ingredient_unit: 'kg',
+        dish_id: 30,
+        dish_name: 'Barril Pollo',
+        transaction_count: 5,
+        orders_count: 5,
+        dish_quantity: '10',
+        consumed_quantity: '4',
+        avg_unit_cost: '5000',
+        total_cost: '20000',
+      },
+    ];
+
+    it('returns ingredient consumption grouped by ingredient by default', async () => {
+      const queryRawMock = jest.fn().mockResolvedValue(rawConsumptionRows);
+      prisma.withoutScope.mockReturnValue({
+        $queryRaw: queryRawMock,
+      });
+
+      const result = await service.getIngredientConsumption({
+        date_from: '2026-09-01',
+        date_to: '2026-09-14',
+      } as any);
+
+      expect(result.data).toHaveLength(3);
+      expect(result.data[0].section).toBe('Pechuga de Pollo (kg)');
+      expect(result.data[0].ingredient_name).toBe('Pechuga de Pollo');
+      expect(result.data[0].dish_name).toBe('Barril Pollo');
+      expect(result.data[0].consumed_quantity).toBe(5.5);
+      expect(result.data[0].total_cost).toBe(99000);
+
+      expect(result.data[2].section).toBe('Papas Francesas (kg)');
+      expect(result.data[2].total_cost).toBe(20000);
+
+      // Meta totals
+      expect(result.meta.totals.total_cost).toBe(164000);
+      expect(result.meta.totals.total_ingredients).toBe(2);
+      expect(result.meta.totals.total_dishes).toBe(2);
+      expect(result.meta.totals.total_movements).toBe(13);
+      expect(result.meta.group_by).toBe('ingredient');
+    });
+
+    it('supports grouping by dish (group_by: "dish")', async () => {
+      const queryRawMock = jest.fn().mockResolvedValue(rawConsumptionRows);
+      prisma.withoutScope.mockReturnValue({
+        $queryRaw: queryRawMock,
+      });
+
+      const result = await service.getIngredientConsumption({
+        date_from: '2026-09-01',
+        date_to: '2026-09-14',
+        group_by: 'dish',
+      } as any);
+
+      expect(result.data).toHaveLength(3);
+      expect(result.data[0].section).toBe('Barril Pollo (10 prep.)');
+      expect(result.data[1].section).toBe('Barril Mixto (5 prep.)');
+      expect(result.meta.group_by).toBe('dish');
+    });
+
+    it('rejects with STORE_CONTEXT_001 when store_id is missing', async () => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        organization_id: 1,
+        store_id: undefined,
+      } as any);
+
+      await expect(service.getIngredientConsumption({} as any)).rejects.toThrow(
+        VendixHttpException,
+      );
+    });
+
+    it('getIngredientConsumptionForExport returns two sheets (summaryRows and detailRows)', async () => {
+      const queryRawMock = jest.fn().mockResolvedValue(rawConsumptionRows);
+      prisma.withoutScope.mockReturnValue({
+        $queryRaw: queryRawMock,
+      });
+
+      const result = await service.getIngredientConsumptionForExport({
+        date_from: '2026-09-01',
+        date_to: '2026-09-14',
+      } as any);
+
+      expect(result.summaryRows).toHaveLength(2);
+      const polloSummary = result.summaryRows.find(
+        (s) => s.ingredient_name === 'Pechuga de Pollo',
+      );
+      expect(polloSummary).toBeDefined();
+      expect(polloSummary!.total_consumed).toBe(8);
+      expect(polloSummary!.total_cost).toBe(144000);
+      expect(polloSummary!.associated_dishes).toContain('Barril Pollo');
+      expect(polloSummary!.associated_dishes).toContain('Barril Mixto');
+
+      const papaSummary = result.summaryRows.find(
+        (s) => s.ingredient_name === 'Papas Francesas',
+      );
+      expect(papaSummary).toBeDefined();
+      expect(papaSummary!.total_consumed).toBe(4);
+      expect(papaSummary!.total_cost).toBe(20000);
+
+      expect(result.detailRows).toHaveLength(3);
     });
   });
 });

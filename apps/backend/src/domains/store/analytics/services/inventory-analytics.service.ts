@@ -97,6 +97,46 @@ export interface MovementExportRow {
 }
 
 /**
+ * One row of the ingredient-consumption nested report.
+ */
+export interface IngredientConsumptionRow {
+  section: string;
+  ingredient_id: number;
+  ingredient_name: string;
+  ingredient_sku: string | null;
+  ingredient_unit: string;
+  dish_id: number | null;
+  dish_name: string;
+  dish_quantity: number;
+  consumed_quantity: number;
+  unit: string;
+  unit_cost: number;
+  total_cost: number;
+  orders_count: number;
+}
+
+export interface IngredientConsumptionExportSummaryRow {
+  ingredient_name: string;
+  sku: string | null;
+  unit: string;
+  total_consumed: number;
+  avg_unit_cost: number;
+  total_cost: number;
+  associated_dishes: string;
+}
+
+export interface IngredientConsumptionExportDetailRow {
+  ingredient_name: string;
+  sku: string | null;
+  dish_name: string;
+  dish_quantity: number;
+  consumed_quantity: number;
+  unit: string;
+  unit_cost: number;
+  total_cost: number;
+}
+
+/**
  * Minimal product projection used to compute the summary's count KPIs over a
  * scope-coherent universe (see {@link InventoryAnalyticsService.getInventorySummary}).
  */
@@ -2314,5 +2354,214 @@ export class InventoryAnalyticsService {
     };
 
     return envelope;
+  }
+
+  /**
+   * Consolidado de consumo de insumos por plato y receta.
+   *
+   * Agrupa las transacciones de salida/consumo (`inventory_transactions`)
+   * generadas por `KitchenFireService` o `ProductionOrdersService`, vinculando
+   * el insumo gastado con el plato preparado.
+   *
+   * Admite agrupación por `ingredient` (secciones = insumos) o `dish` (secciones = platos).
+   */
+  async getIngredientConsumption(query: InventoryAnalyticsQueryDto): Promise<{
+    data: IngredientConsumptionRow[];
+    meta: {
+      totals: {
+        total_cost: number;
+        total_ingredients: number;
+        total_dishes: number;
+        total_movements: number;
+      };
+      date_from: string;
+      date_to: string;
+      group_by: 'ingredient' | 'dish';
+    };
+  }> {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(query, tz);
+    const groupBy = query.group_by === 'dish' ? 'dish' : 'ingredient';
+
+    const untypedClient = (this.prisma.withoutScope() as any) as {
+      $queryRaw: <T>(query: any) => Promise<T>;
+    };
+
+    const rawResults = await untypedClient.$queryRaw<
+      Array<{
+        ingredient_id: number;
+        ingredient_name: string;
+        ingredient_sku: string | null;
+        ingredient_unit: string | null;
+        dish_id: number | null;
+        dish_name: string;
+        transaction_count: number | bigint;
+        orders_count: number | bigint;
+        dish_quantity: any;
+        consumed_quantity: any;
+        avg_unit_cost: any;
+        total_cost: any;
+      }>
+    >(Prisma.sql`
+      SELECT
+        it.product_id AS ingredient_id,
+        ing.name AS ingredient_name,
+        ing.sku AS ingredient_sku,
+        COALESCE(ing.stock_unit, 'und') AS ingredient_unit,
+        oi.product_id AS dish_id,
+        COALESCE(dish.name, oi.product_name, it.notes, 'Consumo Interno') AS dish_name,
+        COUNT(DISTINCT it.id)::int AS transaction_count,
+        COUNT(DISTINCT oi.id)::int AS orders_count,
+        COALESCE(SUM(oi.quantity), COUNT(DISTINCT it.id))::numeric AS dish_quantity,
+        SUM(ABS(it.quantity_change))::numeric AS consumed_quantity,
+        AVG(COALESCE(it.unit_cost, ing.cost_price, 0))::numeric AS avg_unit_cost,
+        SUM(COALESCE(it.total_cost, ABS(it.quantity_change) * COALESCE(it.unit_cost, ing.cost_price, 0)))::numeric AS total_cost
+      FROM inventory_transactions it
+      JOIN products ing ON ing.id = it.product_id
+      LEFT JOIN order_items oi ON oi.id = it.order_item_id
+      LEFT JOIN products dish ON dish.id = oi.product_id
+      WHERE ing.store_id = ${storeId}
+        AND it.quantity_change < 0
+        AND (it.notes LIKE '%Fire%' OR it.notes LIKE '%Producci%' OR it.order_item_id IS NOT NULL)
+        AND COALESCE(it.transaction_date, it.created_at) >= ${startDate}
+        AND COALESCE(it.transaction_date, it.created_at) <= ${endDate}
+      GROUP BY it.product_id, ing.name, ing.sku, ing.stock_unit, oi.product_id, COALESCE(dish.name, oi.product_name, it.notes, 'Consumo Interno')
+      ORDER BY total_cost DESC
+    `);
+
+    const rows: IngredientConsumptionRow[] = rawResults.map((r) => {
+      const ingName = r.ingredient_name;
+      const ingUnit =
+        r.ingredient_unit && r.ingredient_unit !== 'und'
+          ? ` (${r.ingredient_unit})`
+          : '';
+      const dishName = r.dish_name;
+      const dishQty = Math.max(1, Math.round(Number(r.dish_quantity) || 1));
+
+      const section =
+        groupBy === 'dish'
+          ? `${dishName} (${dishQty} prep.)`
+          : `${ingName}${ingUnit}`;
+
+      return {
+        section,
+        ingredient_id: Number(r.ingredient_id),
+        ingredient_name: ingName,
+        ingredient_sku: r.ingredient_sku ?? null,
+        ingredient_unit: r.ingredient_unit || 'und',
+        dish_id: r.dish_id ? Number(r.dish_id) : null,
+        dish_name: dishName,
+        dish_quantity: dishQty,
+        consumed_quantity: Math.round(Number(r.consumed_quantity) * 1000) / 1000,
+        unit: r.ingredient_unit || 'und',
+        unit_cost: Math.round(Number(r.avg_unit_cost) * 100) / 100,
+        total_cost: Math.round(Number(r.total_cost) * 100) / 100,
+        orders_count: Number(r.orders_count) || 1,
+      };
+    });
+
+    const totalCost = rows.reduce((sum, r) => sum + r.total_cost, 0);
+    const distinctIngredients = new Set(rows.map((r) => r.ingredient_id)).size;
+    const distinctDishes = new Set(rows.map((r) => r.dish_name)).size;
+    const totalMovements = rawResults.reduce(
+      (sum, r) => sum + Number(r.transaction_count || 1),
+      0,
+    );
+
+    return {
+      data: rows,
+      meta: {
+        totals: {
+          total_cost: Math.round(totalCost * 100) / 100,
+          total_ingredients: distinctIngredients,
+          total_dishes: distinctDishes,
+          total_movements: totalMovements,
+        },
+        date_from: startDate.toISOString(),
+        date_to: endDate.toISOString(),
+        group_by: groupBy,
+      },
+    };
+  }
+
+  /**
+   * Prepara los datasets tabulares para la exportación XLSX en dos hojas:
+   * 1. Consolidado por Insumo (resumen ejecutivo de materia prima gastada).
+   * 2. Detalle Insumos por Plato (trazabilidad plato a plato).
+   */
+  async getIngredientConsumptionForExport(
+    query: InventoryAnalyticsQueryDto,
+  ): Promise<{
+    summaryRows: IngredientConsumptionExportSummaryRow[];
+    detailRows: IngredientConsumptionExportDetailRow[];
+  }> {
+    const { data } = await this.getIngredientConsumption({
+      ...query,
+      group_by: 'ingredient',
+    });
+
+    const summaryMap = new Map<
+      number,
+      {
+        ingredient_name: string;
+        sku: string | null;
+        unit: string;
+        total_consumed: number;
+        cost_sum: number;
+        dishes: Set<string>;
+      }
+    >();
+
+    for (const r of data) {
+      const existing = summaryMap.get(r.ingredient_id);
+      if (existing) {
+        existing.total_consumed += r.consumed_quantity;
+        existing.cost_sum += r.total_cost;
+        if (r.dish_name) existing.dishes.add(r.dish_name);
+      } else {
+        summaryMap.set(r.ingredient_id, {
+          ingredient_name: r.ingredient_name,
+          sku: r.ingredient_sku,
+          unit: r.unit,
+          total_consumed: r.consumed_quantity,
+          cost_sum: r.total_cost,
+          dishes: new Set(r.dish_name ? [r.dish_name] : []),
+        });
+      }
+    }
+
+    const summaryRows: IngredientConsumptionExportSummaryRow[] = Array.from(
+      summaryMap.values(),
+    ).map((s) => ({
+      ingredient_name: s.ingredient_name,
+      sku: s.sku,
+      unit: s.unit,
+      total_consumed: Math.round(s.total_consumed * 1000) / 1000,
+      avg_unit_cost:
+        s.total_consumed > 0
+          ? Math.round((s.cost_sum / s.total_consumed) * 100) / 100
+          : 0,
+      total_cost: Math.round(s.cost_sum * 100) / 100,
+      associated_dishes: Array.from(s.dishes).join(', '),
+    }));
+
+    const detailRows: IngredientConsumptionExportDetailRow[] = data.map((r) => ({
+      ingredient_name: r.ingredient_name,
+      sku: r.ingredient_sku,
+      dish_name: r.dish_name,
+      dish_quantity: r.dish_quantity,
+      consumed_quantity: r.consumed_quantity,
+      unit: r.unit,
+      unit_cost: r.unit_cost,
+      total_cost: r.total_cost,
+    }));
+
+    return { summaryRows, detailRows };
   }
 }
