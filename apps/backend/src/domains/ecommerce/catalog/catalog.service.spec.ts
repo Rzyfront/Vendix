@@ -7,6 +7,7 @@ import { PriceResolverService } from '../../store/products/services/price-resolv
 import { StorefrontPriceService } from '../shared/services/storefront-price.service';
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
+import { PosSearchFlagsService } from '../../store/settings/pos-smart-search/pos-search-flags.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { CatalogService } from './catalog.service';
 
@@ -100,6 +101,7 @@ describe('CatalogService reviews', () => {
           },
         },
         { provide: CACHE_MANAGER, useValue: { get: jest.fn(), set: jest.fn() } },
+        { provide: PosSearchFlagsService, useValue: { resolveSearchFlags: jest.fn().mockResolvedValue({ l1: false, l2: false, trigram: false }) } },
       ],
     }).compile();
 
@@ -240,10 +242,17 @@ describe('CatalogService active promotions on listing', () => {
           },
         },
         { provide: CACHE_MANAGER, useValue: { get: jest.fn(), set: jest.fn() } },
+        { provide: PosSearchFlagsService, useValue: { resolveSearchFlags: jest.fn().mockResolvedValue({ l1: false, l2: false, trigram: false }) } },
       ],
     }).compile();
 
     service = module.get(CatalogService);
+    // D.3: getProducts exige tenant (404 sin store).
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(10);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it('attaches active_promotion to products that match a product-scope auto promotion', async () => {
@@ -476,6 +485,7 @@ describe('CatalogService featured fill cascade', () => {
           },
         },
         { provide: CACHE_MANAGER, useValue: cache },
+        { provide: PosSearchFlagsService, useValue: { resolveSearchFlags: jest.fn().mockResolvedValue({ l1: false, l2: false, trigram: false }) } },
       ],
     }).compile();
 
@@ -776,6 +786,7 @@ describe('CatalogService available_sale_units (QUI-648 fase 2b)', () => {
           },
         },
         { provide: CACHE_MANAGER, useValue: { get: jest.fn(), set: jest.fn() } },
+        { provide: PosSearchFlagsService, useValue: { resolveSearchFlags: jest.fn().mockResolvedValue({ l1: false, l2: false, trigram: false }) } },
       ],
     }).compile();
 
@@ -918,5 +929,382 @@ describe('CatalogService available_sale_units (QUI-648 fase 2b)', () => {
     expect(
       prisma.product_price_tier_assignments.findMany,
     ).toHaveBeenCalledTimes(2); // 1 default en lote + 1 abanico en lote
+  });
+});
+
+describe('CatalogService public smart search (D.3)', () => {
+  let service: CatalogService;
+  let prisma: any;
+  let cache: { get: jest.Mock; set: jest.Mock };
+  let searchFlags: { resolveSearchFlags: jest.Mock };
+  let storeIdSpy: jest.SpyInstance;
+
+  const listedProduct = (id: number, over: Record<string, any> = {}) => ({
+    id,
+    name: `Producto ${id}`,
+    slug: `producto-${id}`,
+    description: 'Detalle',
+    base_price: 100,
+    sale_price: null,
+    is_on_sale: false,
+    is_featured: false,
+    sku: `SKU-${id}`,
+    track_inventory: true,
+    stock_quantity: 5,
+    product_images: [],
+    brands: null,
+    product_categories: [],
+    product_variants: [],
+    product_tax_assignments: [],
+    product_type: 'physical',
+    requires_booking: false,
+    service_duration_minutes: null,
+    service_modality: null,
+    booking_mode: null,
+    stock_levels: [],
+    created_at: new Date('2024-06-01T00:00:00Z'),
+    _count: { product_variants: 0 },
+    ...over,
+  });
+
+  beforeEach(async () => {
+    prisma = {
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue({
+          // show_out_of_stock:true ⇒ sin andFilters: wheres limpios.
+          settings: { ecommerce: { catalog: { show_out_of_stock: true } } },
+        }),
+      },
+      products: { findMany: jest.fn(), count: jest.fn() },
+      promotions: { findMany: jest.fn().mockResolvedValue([]) },
+      product_categories: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    cache = { get: jest.fn().mockResolvedValue(null), set: jest.fn() };
+    searchFlags = {
+      resolveSearchFlags: jest
+        .fn()
+        .mockResolvedValue({ l1: true, l2: true, trigram: false }),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        CatalogService,
+        { provide: EcommercePrismaService, useValue: prisma },
+        { provide: StorePrismaService, useValue: prisma },
+        {
+          provide: S3Service,
+          useValue: { signUrl: jest.fn(async (key) => key ?? null) },
+        },
+        {
+          provide: PriceResolverService,
+          useValue: {
+            resolvePrice: jest.fn(() => ({
+              unitBasePrice: 100,
+              unitPriceWithTax: 100,
+            })),
+          },
+        },
+        StorefrontPriceService,
+        {
+          provide: PromotionEngineService,
+          useValue: {
+            findActiveAutoPromotionsForProducts: jest
+              .fn()
+              .mockResolvedValue(new Map()),
+          },
+        },
+        {
+          provide: MenuAvailabilityCheckerService,
+          useValue: {
+            getAvailabilityMap: jest.fn().mockResolvedValue(new Map()),
+          },
+        },
+        { provide: CACHE_MANAGER, useValue: cache },
+        { provide: PosSearchFlagsService, useValue: searchFlags },
+      ],
+    }).compile();
+
+    service = module.get(CatalogService);
+    storeIdSpy = jest
+      .spyOn(RequestContextService, 'getStoreId')
+      .mockReturnValue(10);
+  });
+
+  afterEach(() => {
+    storeIdSpy.mockRestore();
+  });
+
+  it('flag on: where AND×OR name/description/sku + orden relevancia', async () => {
+    const scan = [
+      {
+        id: 1,
+        name: 'Cafe Sello Rojo',
+        description: 'Mezcla premium',
+        sku: 'CAF-1',
+        is_featured: false,
+        created_at: new Date('2024-01-01T00:00:00Z'),
+      },
+      {
+        id: 2,
+        name: 'Tetera Acero Inoxidable',
+        description: 'Para infusiones',
+        sku: 'TET-2',
+        is_featured: false,
+        created_at: new Date('2024-01-01T00:00:00Z'),
+      },
+    ];
+    // Hydrate devuelve en orden DB (invertido): el rank re-ordena.
+    const hyd = [
+      listedProduct(2, { name: 'Tetera Acero Inoxidable' }),
+      listedProduct(1, { name: 'Cafe Sello Rojo' }),
+    ];
+    prisma.products.findMany.mockImplementation(async (args: any) => {
+      if (args?.select) return scan;
+      return hyd;
+    });
+
+    const result = await service.getProducts({
+      search: 'cafe sello',
+      sort_by: 'price_desc',
+      page: 1,
+      limit: 10,
+    } as any);
+
+    // Scan: 2 tokens ⇒ 2 ramas AND, cada una OR sobre 3 campos.
+    const scanWhere = prisma.products.findMany.mock.calls[0][0].where;
+    expect(scanWhere.AND).toHaveLength(2);
+    for (const branch of scanWhere.AND) {
+      expect(branch.OR).toHaveLength(3);
+    }
+    expect(scanWhere.OR).toBeUndefined();
+    // Hydrate por ids de página con el include del listado.
+    expect(prisma.products.findMany.mock.calls[1][0].where).toEqual({
+      id: { in: [1, 2] },
+    });
+    expect(
+      prisma.products.findMany.mock.calls[1][0].include._count,
+    ).toBeDefined();
+    // Relevancia (A matchea 2/2, B 0/2) IGNORA sort_by=price_desc.
+    expect(result.data.map((p: any) => p.id)).toEqual([1, 2]);
+    expect(result.meta.total).toBe(2);
+    expect(result.meta.applied_tokens).toEqual(['cafe', 'sello']);
+    expect(result.meta.tokens_truncated).toBe(false);
+  });
+
+  it('cap público 4 vive en el path: 6 tokens ⇒ trunca + meta (F-087/F-077)', async () => {
+    prisma.products.findMany.mockResolvedValue([]);
+
+    const result = await service.getProducts({
+      search: 'cafe sello rojo molido extra fino',
+      page: 1,
+      limit: 10,
+    } as any);
+
+    const scanWhere = prisma.products.findMany.mock.calls[0][0].where;
+    expect(scanWhere.AND).toHaveLength(4);
+    expect(result.meta.applied_tokens).toEqual([
+      'cafe',
+      'sello',
+      'rojo',
+      'molido',
+    ]);
+    expect(result.meta.tokens_truncated).toBe(true);
+    expect(result.data).toEqual([]);
+    // Sin candidatos: hydrate jamás corre (un solo findMany).
+    expect(prisma.products.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('flag off: OR-frase legacy verbatim + orderBy alta-reciente (override)', async () => {
+    searchFlags.resolveSearchFlags.mockResolvedValue({
+      l1: false,
+      l2: false,
+      trigram: false,
+    });
+    prisma.products.findMany.mockResolvedValue([listedProduct(7)]);
+    prisma.products.count.mockResolvedValue(1);
+
+    const result = await service.getProducts({
+      search: 'cafe sello',
+      sort_by: 'price_asc',
+      page: 1,
+      limit: 10,
+    } as any);
+
+    const args = prisma.products.findMany.mock.calls[0][0];
+    expect(args.where.OR).toEqual([
+      { name: { contains: 'cafe sello', mode: 'insensitive' } },
+      { description: { contains: 'cafe sello', mode: 'insensitive' } },
+      { sku: { contains: 'cafe sello', mode: 'insensitive' } },
+    ]);
+    expect(args.where.AND).toBeUndefined();
+    // F-088: search ignora sort_by=price_asc ⇒ newest.
+    expect(args.orderBy).toEqual({ created_at: 'desc' });
+    expect(result.meta.applied_tokens).toEqual(['cafe', 'sello']);
+    expect(result.meta.tokens_truncated).toBe(false);
+    expect(result.data).toHaveLength(1);
+  });
+
+  it('sobre scan-cap: fail-open a legacy (OR-frase)', async () => {
+    const big = Array.from({ length: 201 }, (_, i) => ({
+      id: 1000 + i,
+      name: `Cafe ${i}`,
+      description: '',
+      sku: null,
+      is_featured: false,
+      created_at: new Date('2024-01-01T00:00:00Z'),
+    }));
+    prisma.products.findMany.mockImplementation(async (args: any) => {
+      if (args?.select) return big;
+      return [listedProduct(5)];
+    });
+    prisma.products.count.mockResolvedValue(1);
+
+    const result = await service.getProducts({
+      search: 'cafe',
+      page: 1,
+      limit: 10,
+    } as any);
+
+    expect(prisma.products.findMany.mock.calls[1][0].where.OR).toHaveLength(3);
+    expect(result.data).toHaveLength(1);
+  });
+
+  it('min-length: 1 char ⇒ página vacía SIN tocar la DB', async () => {
+    const result = await service.getProducts({ search: 'a' } as any);
+
+    expect(result).toEqual({
+      data: [],
+      meta: expect.objectContaining({
+        total: 0,
+        applied_tokens: [],
+        tokens_truncated: false,
+      }),
+    });
+    expect(prisma.products.findMany).not.toHaveBeenCalled();
+    expect(prisma.store_settings.findFirst).not.toHaveBeenCalled();
+    expect(searchFlags.resolveSearchFlags).not.toHaveBeenCalled();
+  });
+
+  it('sin search: legacy intacto, meta aplicada vacía', async () => {
+    prisma.products.findMany.mockResolvedValue([listedProduct(3)]);
+    prisma.products.count.mockResolvedValue(1);
+
+    const result = await service.getProducts({ page: 1, limit: 10 } as any);
+
+    const args = prisma.products.findMany.mock.calls[0][0];
+    expect(args.where.OR).toBeUndefined();
+    expect(args.where.AND).toBeUndefined();
+    expect(result.meta.applied_tokens).toEqual([]);
+    expect(result.meta.tokens_truncated).toBe(false);
+    expect(searchFlags.resolveSearchFlags).not.toHaveBeenCalled();
+  });
+
+  it('sin tenant: 404 AUTH_STORE_001, sin queries (F-038)', async () => {
+    storeIdSpy.mockReturnValue(undefined);
+
+    const err = await service.getProducts({} as any).catch((e) => e);
+
+    expect(err?.errorCode).toBe('AUTH_STORE_001');
+    expect(typeof err?.getStatus === 'function' && err.getStatus()).toBe(404);
+    expect(prisma.products.findMany).not.toHaveBeenCalled();
+  });
+
+  it('caché hit: devuelve sin DB; miss: computa + set con llave store/l1/sha', async () => {
+    const hitPayload = { data: [{ id: 9 }], meta: { total: 1 } };
+    cache.get.mockResolvedValueOnce(hitPayload);
+
+    const hit = await service.getProducts({ search: 'cafe' } as any);
+    expect(hit).toBe(hitPayload);
+    expect(prisma.products.findMany).not.toHaveBeenCalled();
+
+    cache.get.mockResolvedValue(null);
+    prisma.products.findMany.mockImplementation(async (args: any) => {
+      if (args?.select) return [];
+      return [];
+    });
+    await service.getProducts({ search: 'cafe', page: 1, limit: 10 } as any);
+    expect(cache.set).toHaveBeenCalledTimes(1);
+    const [key, payload, ttl] = cache.set.mock.calls[0];
+    expect(key).toMatch(/^catalog:search:v1:10:1:[0-9a-f]{64}$/);
+    expect((payload as any).meta.applied_tokens).toEqual(['cafe']);
+    expect(ttl).toBe(20000);
+  });
+
+  it('allowlist pública: la card jamás expone costos/tax interno/márgenes (F-038)', async () => {
+    searchFlags.resolveSearchFlags.mockResolvedValue({
+      l1: false,
+      l2: false,
+      trigram: false,
+    });
+    prisma.products.findMany.mockResolvedValue([
+      listedProduct(11, {
+        // Señuelos admin: aunque viajen en la fila, el mapper no los expone.
+        cost_price: 10,
+        unit_cost: 9,
+        margin: 0.5,
+        tax_map: { iva: 19 },
+        purchase_price: 8,
+      }),
+    ]);
+    prisma.products.count.mockResolvedValue(1);
+
+    const result = await service.getProducts({
+      search: 'producto',
+      page: 1,
+      limit: 10,
+    } as any);
+    const keys = Object.keys(result.data[0]).sort();
+
+    for (const leaked of [
+      'cost_price',
+      'unit_cost',
+      'margin',
+      'tax_map',
+      'purchase_price',
+      'product_tax_assignments',
+      'stock_levels',
+    ]) {
+      expect(keys).not.toContain(leaked);
+    }
+    // Pin exacto: la card pública es allowlist — cambiar el mapper exige
+    // actualizar esta lista a conciencia, no por accidente.
+    expect(keys).toEqual(
+      [
+        'active_promotion',
+        'available_stock',
+        'available_stock_units',
+        'base_price',
+        'booking_mode',
+        'brand',
+        'categories',
+        'description',
+        'effective_track_inventory',
+        'final_price',
+        'id',
+        'image_url',
+        'is_available',
+        'is_available_now',
+        'is_featured',
+        'is_on_sale',
+        'loose_unit_price',
+        'name',
+        'next_available',
+        'preparation_time_minutes',
+        'price_from',
+        'price_unit',
+        'product_type',
+        'requires_booking',
+        'sale_price',
+        'sale_unit',
+        'sale_unit_count',
+        'service_duration_minutes',
+        'service_modality',
+        'sku',
+        'slug',
+        'stock_quantity',
+        'track_inventory',
+        'variant_count',
+      ].sort(),
+    );
   });
 });

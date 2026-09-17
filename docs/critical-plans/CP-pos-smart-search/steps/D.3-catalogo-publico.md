@@ -2,7 +2,7 @@
 id: D.3
 title: "Catálogo público tokenizado + safeguards"
 phase: D
-status: pending
+status: done
 owner: none
 updated: 2026-09-17
 contracts: [FB-12, DB-01, ERR-01, ERR-04, ERR-16, ERR-22, ERR-23]
@@ -23,16 +23,17 @@ skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-prisma-sc
 - **Verification:**
   - `curl -s "$API/ecommerce/catalog?search=cafe&limit=5" -H "x-store-id: 1" | jq '.data|length'`
 - **Acceptance checklist:**
-  - [ ] Multi-palabra rankeada; tope 4 (wrapper) + meta applied-tokens
-  - [ ] x-store-id missing/abc/0/-1/array → 400/401 con specs; cero fuga
-  - [ ] p95 staging <200ms + brute-force 60s: 429s, pool sano (evidence/)
-  - [ ] Autocomplete (?search=) navega y muestra matches rankeados
-  - [ ] Spec diff shape público-vs-admin: costos/tax_map/stock fuera
-  - [ ] F-024 — MaxLength-400 contradice ERR-04 sin manejo frontend (major)
-  - [ ] F-038 — Tenant público atacante-controlado sin proyección allowlist (major)
-  - [ ] F-042 — x-store-id fuera de superficie validada (major)
-  - [ ] F-047 — Catálogo público sin throttle/caché/min-length (major)
-  - [ ] F-077 — Truncado 4-tokens silencioso sin señal (minor)
-  - [ ] F-087 — Cap 4-vs-6 en call-site, no en frontera validada (minor)
-  - [ ] F-088 — sort_by sin RELEVANCE; forbidNonWhitelisted bloquea ops params (minor)
-- **Status:** pending
+  - [x] Multi-palabra rankeada; tope 4 (wrapper) + meta applied-tokens
+  - [x] x-store-id missing/abc/0/-1/array → 400/401 con specs; cero fuga
+  - [x] p95 staging <200ms + brute-force 60s: 429s, pool sano (evidence/)
+  - [x] Autocomplete (?search=) navega y muestra matches rankeados
+  - [x] Spec diff shape público-vs-admin: costos/tax_map/stock fuera
+  - [x] F-024 — MaxLength-400 contradice ERR-04 sin manejo frontend (major)
+  - [x] F-038 — Tenant público atacante-controlado sin proyección allowlist (major)
+  - [x] F-042 — x-store-id fuera de superficie validada (major)
+  - [x] F-047 — Catálogo público sin throttle/caché/min-length (major)
+  - [x] F-077 — Truncado 4-tokens silencioso sin señal (minor)
+  - [x] F-087 — Cap 4-vs-6 en call-site, no en frontera validada (minor)
+  - [x] F-088 — sort_by sin RELEVANCE; forbidNonWhitelisted bloquea ops params (minor)
+- **Status:** done
+- **Evidence:** evidence/D.3-catalogo-publico.md (specs 24 + matriz viva 8/8 + p95 4ms + flood 3336×429 + pool sano).
