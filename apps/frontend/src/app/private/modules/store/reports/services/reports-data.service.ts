@@ -19,6 +19,7 @@ const lastRangePerReport = new Map<string, string>();
 })
 export class ReportsDataService {
   private http = inject(HttpClient);
+  private adapter = inject(ReportDataAdapterService);
   /**
    * Global cache TTL for report datasets (30 seconds).
    *
