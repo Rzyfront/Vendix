@@ -268,6 +268,11 @@ export class ReportViewerComponent {
   readonly pageChange = output<number>();
   readonly exportClick = output<void>();
   readonly refreshClick = output<void>();
+  /**
+   * Muestra la acción "Actualizar" solo en consumidores que la conectan
+   * (`(refreshClick)`). Evita un botón muerto en vistas que no la manejan.
+   */
+  readonly enableRefresh = input<boolean>(false);
 
   readonly exportLoading = input<boolean>(false);
   readonly dateRange = input<any>(undefined);
@@ -369,18 +374,18 @@ export class ReportViewerComponent {
   });
 
   /**
-   * Acción expuesta en el `<app-options-dropdown>` "Acciones" del header.
-   * Hoy solo `Exportar XLSX`; la estructura queda abierta para añadir más
-   * (ej. imprimir, refrescar) sin tocar la plantilla.
+   * Acciones expuestas en el `<app-options-dropdown>` "Acciones" del header:
+   * refrescar datos y exportar a XLSX si el reporte lo soporta.
    */
   readonly exportActions = computed<DropdownAction[]>(() => {
-    const actions: DropdownAction[] = [
-      {
+    const actions: DropdownAction[] = [];
+    if (this.enableRefresh()) {
+      actions.push({
         action: 'refresh',
-        label: 'Actualizar datos',
+        label: 'Actualizar',
         icon: 'refresh-cw',
-      },
-    ];
+      });
+    }
     if (this.report()?.exportEndpoint) {
       actions.push({
         action: 'export-xlsx',
@@ -392,10 +397,10 @@ export class ReportViewerComponent {
   });
 
   onActionsDropdownClick(action: string): void {
-    if (action === 'export-xlsx') {
-      this.exportClick.emit();
-    } else if (action === 'refresh') {
+    if (action === 'refresh') {
       this.refreshClick.emit();
+    } else if (action === 'export-xlsx') {
+      this.exportClick.emit();
     }
   }
 

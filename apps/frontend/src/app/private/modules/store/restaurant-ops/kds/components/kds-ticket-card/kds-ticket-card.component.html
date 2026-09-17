@@ -186,7 +186,8 @@
         size="xsm"
         [fullWidth]="true"
         (clicked)="onCancel()"
-        [disabled]="isMutating()"
+        [disabled]="isMutating() || !canCancelTicket()"
+        [attr.title]="canCancelTicket() ? null : cancelDisabledReason"
       >
         <app-icon slot="icon" name="x" [size]="14" />
         Cancelar
@@ -208,7 +209,8 @@
         size="xsm"
         [fullWidth]="true"
         (clicked)="onCancel()"
-        [disabled]="isMutating()"
+        [disabled]="isMutating() || !canCancelTicket()"
+        [attr.title]="canCancelTicket() ? null : cancelDisabledReason"
       >
         <app-icon slot="icon" name="x" [size]="14" />
         Cancelar
@@ -238,7 +240,8 @@
         size="xsm"
         [fullWidth]="true"
         (clicked)="onCancel()"
-        [disabled]="isMutating()"
+        [disabled]="isMutating() || !canCancelTicket()"
+        [attr.title]="canCancelTicket() ? null : cancelDisabledReason"
       >
         <app-icon slot="icon" name="x" [size]="14" />
         Cancelar

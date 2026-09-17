@@ -35,6 +35,32 @@ export const MODEL_TYPE_LABELS: Record<AIModelType, string> = {
 };
 
 /**
+ * Transporte para configs de imagen. `auto` prueba chat primero en OpenRouter
+ * y reintenta en /images solo ante el 404 que lo exige; un valor explícito
+ * nunca se adivina ni se reintenta en otro transporte.
+ */
+export type ImageGenerationMode =
+  | 'auto'
+  | 'chat_completions'
+  | 'images_api'
+  | 'standard';
+
+export const IMAGE_GENERATION_MODES: ImageGenerationMode[] = [
+  'auto',
+  'chat_completions',
+  'images_api',
+  'standard',
+];
+
+export const IMAGE_GENERATION_MODE_LABELS: Record<ImageGenerationMode, string> =
+  {
+    auto: 'Automático (recomendado)',
+    chat_completions: 'Chat Completions (hibridos: Gemini, GPT-image)',
+    images_api: 'Images API /v1/images (Muse, FLUX, puros)',
+    standard: 'Estándar OpenAI (/images/generations)',
+  };
+
+/**
  * Voces del Realtime API. Deliberadamente NO incluye `fable`, `onyx` ni `nova`:
  * esas son exclusivas de TTS y el proveedor rechaza la sesión al acuñar el
  * client secret, no al guardar la configuración — el operador vería el error
@@ -86,7 +112,10 @@ export interface AIEngineConfig {
     maxTokens?: number;
     thinking?: boolean;
     model_type?: AIModelType;
-    image_generation_mode?: string;
+    // Capacidades extra de un modelo multimodal, además del model_type
+    // primario. Ausente o vacío = un solo tipo (sin badge Multimodal).
+    capabilities?: AIModelType[];
+    image_generation_mode?: ImageGenerationMode;
     image_endpoint?: string;
     image_model?: string;
     modalities?: string[];
@@ -492,6 +521,15 @@ export const KNOWN_PROVIDERS: KnownProvider[] = [
     sdkType: 'openai_compatible',
     models: ['MiniMax-VL-01', 'MiniMax-Text-01'],
     defaultUrl: 'https://api.minimax.io/v1',
+  },
+  {
+    // Sin lista de modelos a propósito: el catálogo de OpenRouter cambia cada
+    // semana y un selector cerrado bloquearía modelos nuevos (meta/muse-image,
+    // ...). Solo sugiere la URL base, y únicamente cuando el campo está vacío.
+    name: 'OpenRouter',
+    sdkType: 'openai_compatible',
+    models: [],
+    defaultUrl: 'https://openrouter.ai/api/v1',
   },
   {
     name: 'Custom',

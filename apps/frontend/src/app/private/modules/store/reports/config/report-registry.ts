@@ -430,6 +430,42 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
+    // QUI-551: Ventas por usuario / vendedor.
+    // Muestra ventas desglosadas por vendedor con órdenes, unidades,
+    // total vendido, ticket promedio y última venta.
+    id: 'sales-by-user',
+    category: 'sales',
+    title: 'Por Vendedor',
+    description: 'Ventas desglosadas por vendedor o usuario que registró la orden',
+    detailedDescription:
+      'Analiza el rendimiento de tus vendedores y cajeros por cantidad de pedidos, unidades vendidas, monto total y ticket promedio. Exportable a Excel en 3 hojas: resumen, cruce por marca y cruce por proveedor.',
+    icon: 'user-check',
+    route: '/admin/reports/sales/sales-by-user',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'id',
+    columns: [
+      { key: 'user_name', header: 'Vendedor', type: 'text' },
+      { key: 'user_email', header: 'Correo', type: 'text' },
+      { key: 'orders_count', header: 'Órdenes', type: 'number', footer: 'sum' },
+      { key: 'items_sold', header: 'Unidades Vendidas', type: 'number', footer: 'sum' },
+      { key: 'grand_total', header: 'Total Vendido', type: 'currency', footer: 'sum' },
+      { key: 'avg_order', header: 'Ticket Promedio', type: 'currency', footer: 'average' },
+      { key: 'last_order_date', header: 'Última Venta', type: 'date' },
+    ],
+    exportFilename: 'ventas_por_vendedor',
+    stats: [
+      { key: 'grand_total', label: 'Total Vendido', type: 'currency', icon: 'dollar-sign' },
+      { key: 'orders_count', label: 'Órdenes Totales', type: 'number', icon: 'shopping-cart' },
+      { key: 'items_sold', label: 'Unidades Vendidas', type: 'number', icon: 'package' },
+      { key: 'avg_order', label: 'Ticket Promedio', type: 'currency', icon: 'calculator' },
+    ],
+    dataEndpoint: 'store/analytics/sales/by-user',
+    exportEndpoint: 'store/analytics/sales/by-user/export',
+  },
+
+  {
     id: 'sales-trends',
     category: 'sales',
     title: 'Tendencias',

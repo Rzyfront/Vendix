@@ -55,6 +55,7 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
         <input
           [type]="type()"
           [placeholder]="placeholder()"
+          [attr.aria-label]="ariaLabel() || null"
           [disabled]="isDisabled()"
           [readonly]="readonly()"
           [value]="value()"
@@ -120,6 +121,11 @@ export class InputsearchComponent
   readonly styleVariant = input<FormStyleVariant>('modern');
   readonly debounceTime = input(300);
   readonly autofocus = input(false);
+  /**
+   * Nombre accesible del input nativo (F-062): el placeholder no es label.
+   * `|| null` para no emitir `aria-label=""` cuando no se pasa.
+   */
+  readonly ariaLabel = input('');
   readonly helpText = input('');
   readonly errorMessage = input('');
   readonly customClasses = input('');

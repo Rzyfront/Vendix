@@ -128,6 +128,8 @@ model users {
   // fue" deben poder cerrar el cobro sin este dato. El nombre del
   // @relation debe coincidir EXACTAMENTE con la punta de orders.
   orders_tip_waiter             orders[]                         @relation("orders_tip_waiter_idTousers")
+  // QUI-551: Órdenes creadas por el usuario interno/vendedor
+  orders_created                orders[]                         @relation("orders_created_by")
 
   // Promotions
   order_promotions_customer order_promotions[]       @relation("order_promotions_customer")
@@ -1557,6 +1559,10 @@ model orders {
   tip_waiter_id                                   Int?
   users_orders_tip_waiter_idTousers               users?                    @relation("orders_tip_waiter_idTousers", fields: [tip_waiter_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   @@index([tip_waiter_id])
+  // QUI-551: Usuario interno / vendedor que registró la orden (atribución de ventas)
+  created_by_user_id                              Int?
+  users_orders_created_by                         users?                    @relation("orders_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  @@index([created_by_user_id])
   order_items                                     order_items[]
   order_installments                              order_installments[]
   addresses_orders_billing_address_idToaddresses  addresses?                @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -1609,6 +1615,7 @@ model orders {
   @@index([store_id, order_number])
   @@index([store_id, channel])
   @@index([store_id, dispatch_pool_at])
+  @@index([store_id, created_by_user_id])
 }
 
 model order_installments {
@@ -2040,6 +2047,29 @@ model products {
   /// tienda, que es como lo consultan los reportes con scope.
   @@index([state, id])
   @@index([store_id, state])
+}
+
+/// CP-pos-smart-search E.4 (F-069) — log append-only de selecciones del
+/// buscador para CTR-por-posición y detección de deriva del ranker.
+/// Sin FKs (convención audit_logs): reventar un delete de producto/tienda por
+/// una fila de telemetría sería inaceptable; la query cruda nunca se persiste
+/// (solo su sha256 normalizado) para no almacenar PII de búsqueda.
+model pos_search_selections {
+  id           Int      @id @default(autoincrement())
+  store_id     Int
+  user_id      Int?
+  query_hash   String   @db.VarChar(64)
+  position     Int
+  product_id   Int
+  result_count Int
+  rank_mode    String   @db.VarChar(24)
+  flags        Json?
+  surface      String   @default("pos_web") @db.VarChar(16)
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([store_id, created_at])
+  @@index([store_id, query_hash, created_at])
+  @@map("pos_search_selections")
 }
 
 // ===== PRICE TIERS (MULTI-TARIFA) =====

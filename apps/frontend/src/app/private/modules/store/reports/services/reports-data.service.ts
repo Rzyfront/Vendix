@@ -41,6 +41,7 @@ export class ReportsDataService {
   private withCache<T>(key: string, factory: () => Observable<T>): Observable<T> {
     const now = Date.now();
 
+    // Prune expired entries to keep cache clean and memory-bounded
     for (const [k, v] of reportsCache.entries()) {
       if (now - v.lastFetch >= this.CACHE_TTL) {
         reportsCache.delete(k);

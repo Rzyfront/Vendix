@@ -227,7 +227,9 @@ export class AIEngineComponent implements OnInit {
       badge: true,
       badgeConfig: { type: 'status', size: 'sm' },
       transform: (_value: unknown, item?: AIEngineConfig) =>
-        this.formatModelType(item ? this.resolveConfigModelType(item) : 'text'),
+        item
+          ? this.formatConfigTypesBadge(item)
+          : this.formatModelType('text'),
     },
     {
       key: 'is_active',
@@ -266,7 +268,9 @@ export class AIEngineComponent implements OnInit {
         key: 'model_type',
         label: 'Tipo',
         transform: (_value: unknown, item?: AIEngineConfig) =>
-          this.formatModelType(item ? this.resolveConfigModelType(item) : 'text'),
+          item
+            ? this.formatConfigTypesDetail(item)
+            : this.formatModelType('text'),
       },
       { key: 'sdk_type', label: 'SDK' },
     ],
@@ -1380,12 +1384,48 @@ export class AIEngineComponent implements OnInit {
       modelId.includes('image') ||
       modelId.includes('imagine') ||
       modelId.includes('seedream') ||
-      modelId.includes('dall-e')
+      modelId.includes('dall-e') ||
+      modelId.includes('muse') ||
+      modelId.includes('flux') ||
+      modelId.includes('imagen') ||
+      modelId.includes('diffusion') ||
+      modelId.includes('recraft')
     ) {
       return 'image';
     }
 
     return 'text';
+  }
+
+  /**
+   * Todos los tipos del modelo: primario + capacidades extra válidas. Más de
+   * uno = multimodal (badge en tabla, desglose en detalle).
+   */
+  private resolveConfigCapabilities(config: AIEngineConfig): AIModelType[] {
+    const primary = this.resolveConfigModelType(config);
+    const caps = config.settings?.capabilities;
+    if (!Array.isArray(caps)) return [primary];
+    const extras = [
+      ...new Set(
+        caps.filter(
+          (t): t is AIModelType =>
+            this.isAIModelType(t) && t !== primary,
+        ),
+      ),
+    ];
+    return [primary, ...extras];
+  }
+
+  private formatConfigTypesBadge(config: AIEngineConfig): string {
+    const types = this.resolveConfigCapabilities(config);
+    if (types.length > 1) return 'Multimodal';
+    return this.formatModelType(types[0]);
+  }
+
+  private formatConfigTypesDetail(config: AIEngineConfig): string {
+    return this.resolveConfigCapabilities(config)
+      .map((t) => this.formatModelType(t))
+      .join(' + ');
   }
 
   private isAIModelType(value: unknown): value is AIModelType {

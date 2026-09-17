@@ -214,24 +214,26 @@ const PNG_FALLBACK_MAX_SIDE = 2048;
               </div>
 
               @if (aiEnhanceHandler()) {
-                <div
-                  class="p-4 border border-gray-200 rounded-xl bg-gray-50 flex items-start gap-3 opacity-70 sm:col-span-2"
-                  title="Aún no disponible"
+                <button
+                  type="button"
+                  (click)="onPickAiGenerate()"
+                  [disabled]="effectiveRemainingSlots() <= 0"
+                  class="p-4 border border-gray-200 rounded-xl text-left hover:border-primary-400 hover:bg-primary-50/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-start gap-3 sm:col-span-2"
                 >
                   <div
-                    class="w-10 h-10 rounded-lg bg-gray-200 text-gray-500 flex items-center justify-center flex-shrink-0"
+                    class="w-10 h-10 rounded-lg bg-primary-50 text-primary-600 flex items-center justify-center flex-shrink-0"
                   >
                     <app-icon name="sparkles" size="20"></app-icon>
                   </div>
                   <div>
-                    <p class="text-sm font-semibold text-gray-700">
+                    <p class="text-sm font-semibold text-gray-900">
                       Generar con IA
                     </p>
                     <p class="text-xs text-gray-500 mt-0.5">
-                      Aún no disponible
+                      Crea una imagen desde cero describiendo lo que necesitas
                     </p>
                   </div>
-                </div>
+                </button>
               }
             </div>
 
@@ -575,6 +577,12 @@ const PNG_FALLBACK_MAX_SIDE = 2048;
               <app-icon slot="icon" name="rotate-ccw" size="16"></app-icon>
               Restablecer
             </app-button>
+            @if (aiEnhanceHandler()) {
+              <app-button variant="outline" (clicked)="onCropAiEnhance()">
+                <app-icon slot="icon" name="sparkles" size="16"></app-icon>
+                Mejorar con IA
+              </app-button>
+            }
             @if (mode() === 'add') {
               <app-button variant="outline" (clicked)="skipCurrent()">
                 <app-icon slot="icon" name="skip-forward" size="16"></app-icon>
@@ -629,6 +637,7 @@ export class ImageSourceModalComponent {
   readonly singleImage = input<boolean>(false);
   readonly remainingSlots = input<number>(5);
   readonly mode = input<ImageModalMode>('add');
+  readonly defaultAspect = input<AspectRatio>(DEFAULT_ASPECT);
   readonly aiEnhanceHandler = input<
     ((dataUrl: string) => Observable<string>) | null
   >(null);
@@ -636,6 +645,8 @@ export class ImageSourceModalComponent {
   readonly sourceImageUrl = input<string | null>(null);
   readonly imagesAdded = output<string[]>();
   readonly imageEdited = output<string>();
+  readonly requestAiGenerate = output<void>();
+  readonly requestAiEnhance = output<string>();
 
   readonly effectiveRemainingSlots = computed(() => {
     const raw = this.remainingSlots();
@@ -739,7 +750,7 @@ export class ImageSourceModalComponent {
     this.stage.set('select');
     this.queue.set([]);
     this.queueCursor.set(0);
-    this.aspect.set(DEFAULT_ASPECT);
+    this.aspect.set(this.defaultAspect());
     this.rotation.set(0);
     this.flipH.set(false);
     this.flipV.set(false);
@@ -753,6 +764,12 @@ export class ImageSourceModalComponent {
     this.pendingResults = [];
     this.lastStartedEditUrl = null;
     this.isOpen.set(false);
+  }
+
+  onPickAiGenerate(): void {
+    if (this.effectiveRemainingSlots() <= 0) return;
+    this.onClose();
+    this.requestAiGenerate.emit();
   }
 
   backToSelect(): void {
@@ -849,7 +866,7 @@ export class ImageSourceModalComponent {
     if (items.length === 0) return;
     this.queue.set(items);
     this.queueCursor.set(0);
-    this.aspect.set(DEFAULT_ASPECT);
+    this.aspect.set(this.defaultAspect());
     this.rotation.set(0);
     this.flipH.set(false);
     this.flipV.set(false);
@@ -864,7 +881,7 @@ export class ImageSourceModalComponent {
     this.stage.set('loading');
     this.queue.set([]);
     this.queueCursor.set(0);
-    this.aspect.set(DEFAULT_ASPECT);
+    this.aspect.set(this.defaultAspect());
     this.rotation.set(0);
     this.flipH.set(false);
     this.flipV.set(false);
@@ -1232,11 +1249,11 @@ export class ImageSourceModalComponent {
     });
   }
 
-  async applyCrop(): Promise<void> {
+  async getCroppedDataUrl(): Promise<string | null> {
     const item = this.queue()[this.queueCursor()];
     const f = this.cropFrame();
     const canvas = this.cropCanvasRef?.nativeElement;
-    if (!item || !f || !canvas) return;
+    if (!item || !f || !canvas) return null;
 
     const img = await this.loadImage(this.queueCursor(), item.dataUrl);
     const swapped = this.axesSwapped();
@@ -1252,7 +1269,7 @@ export class ImageSourceModalComponent {
     tmp.width = fullW;
     tmp.height = fullH;
     const tctx = tmp.getContext('2d');
-    if (!tctx) return;
+    if (!tctx) return null;
     tctx.save();
     tctx.translate(fullW / 2, fullH / 2);
     tctx.rotate((this.rotation() * Math.PI) / 180);
@@ -1273,10 +1290,15 @@ export class ImageSourceModalComponent {
     out.width = sw;
     out.height = sh;
     const octx = out.getContext('2d');
-    if (!octx) return;
+    if (!octx) return null;
     octx.drawImage(tmp, sx, sy, sw, sh, 0, 0, sw, sh);
 
-    const dataUrl = this.exportCanvas(out, octx);
+    return this.exportCanvas(out, octx);
+  }
+
+  async applyCrop(): Promise<void> {
+    const dataUrl = await this.getCroppedDataUrl();
+    if (!dataUrl) return;
 
     if (this.mode() === 'edit') {
       this.imageEdited.emit(dataUrl);
@@ -1286,6 +1308,13 @@ export class ImageSourceModalComponent {
 
     this.appendResult(dataUrl);
     this.advanceQueue();
+  }
+
+  async onCropAiEnhance(): Promise<void> {
+    const dataUrl = await this.getCroppedDataUrl();
+    if (!dataUrl) return;
+    this.onClose();
+    this.requestAiEnhance.emit(dataUrl);
   }
 
   /**
@@ -1466,7 +1495,7 @@ export class ImageSourceModalComponent {
       return;
     }
     this.queueCursor.set(next);
-    this.aspect.set(DEFAULT_ASPECT);
+    this.aspect.set(this.defaultAspect());
     this.rotation.set(0);
     this.flipH.set(false);
     this.flipV.set(false);

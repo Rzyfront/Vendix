@@ -1,6 +1,7 @@
 import {
   Component,
   computed,
+  inject,
   input,
   output,
 } from '@angular/core';
@@ -9,6 +10,7 @@ import { ButtonComponent } from '../../../../../../../shared/components/button/b
 import { BadgeComponent } from '../../../../../../../shared/components/badge/badge.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { AlertBannerComponent } from '../../../../../../../shared/components/alert-banner/alert-banner.component';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { KitchenTicketsService } from '../../services/kitchen-tickets.service';
 import {
   itemHasActiveRecipe,
@@ -63,6 +65,18 @@ export class KdsTicketCardComponent {
       ? 'La entrega la registra el mesero o el cajero, no la cocina'
       : 'Solo los platos para llevar se entregan en cocina',
   );
+  /**
+   * Gestión avanzada de tickets = admin/encargado: sin
+   * `store:kitchen_fire:cancel` el botón Cancelar queda visible pero
+   * deshabilitado con motivo (patrón `deliverDisabledReason`), nunca un 403
+   * por sorpresa. Roles con permiso ven cero cambios.
+   */
+  private readonly authFacade = inject(AuthFacade);
+  readonly canCancelTicket = computed(() =>
+    this.hasNamedPermission('store:kitchen_fire:cancel'),
+  );
+  readonly cancelDisabledReason =
+    'Solo un encargado puede cancelar tickets de cocina';
   readonly isMutating = input<boolean>(false);
   readonly showDelivered = input<boolean>(true);
   /** Shared millisecond clock pushed down by the board's single ticker. */
@@ -286,8 +300,19 @@ export class KdsTicketCardComponent {
   }
 
   onCancel(): void {
-    if (this.isMutating()) return;
+    if (this.isMutating() || !this.canCancelTicket()) return;
     this.cancelClicked.emit(this.ticket());
+  }
+
+  /** Patrón `hasPermission` de `pos-cart.component.ts` (con bypass super_admin). */
+  private hasNamedPermission(permission: string): boolean {
+    const permissions = this.authFacade.userPermissions();
+    const roles = this.authFacade.userRoles();
+    return (
+      permissions.includes(permission) ||
+      roles.includes('super_admin') ||
+      roles.includes('SUPER_ADMIN')
+    );
   }
 
   trackByItemId(_index: number, item: { id: number }): number {

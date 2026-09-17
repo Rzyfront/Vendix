@@ -1290,16 +1290,23 @@ export class ProductCreatePageComponent {
   readonly isImageAiEnhanceModalOpen = signal(false);
   readonly aiEnhanceImageUrl = signal<string | null>(null);
   readonly aiEnhanceImageIndex = signal<number | null>(null);
+  readonly aiModalMode = signal<'enhance' | 'generate'>('enhance');
+  readonly pendingCropSourceUrl = signal<string | null>(null);
 
   // Variant image modals state (paridad con producto base)
   readonly isVariantImageModalOpen = signal(false);
   readonly isVariantImageEditModalOpen = signal(false);
   readonly isVariantAiModalOpen = signal(false);
+  readonly variantAiModalMode = signal<'enhance' | 'generate'>('enhance');
+  readonly pendingVariantCropSourceUrl = signal<string | null>(null);
   readonly editingVariantIndex = signal<number | null>(null);
   readonly editingVariantImageUrl = computed<string | null>(() => {
     const idx = this.editingVariantIndex();
     if (idx === null) return null;
     return this.generatedVariants[idx]?.image_url ?? null;
+  });
+  readonly variantAiSourceImageUrl = computed<string | null>(() => {
+    return this.pendingVariantCropSourceUrl() ?? this.editingVariantImageUrl();
   });
   readonly remainingImageSlots = computed(() => {
     this.imageListVersion();
@@ -2859,8 +2866,43 @@ export class ProductCreatePageComponent {
       this.toastService.warning('La variante no tiene imagen para mejorar');
       return;
     }
+    this.pendingVariantCropSourceUrl.set(null);
+    this.variantAiModalMode.set('enhance');
     this.editingVariantIndex.set(idx);
     this.isVariantAiModalOpen.set(true);
+  }
+
+  openVariantImageAiGenerator(idx?: number): void {
+    const targetIdx = idx ?? this.editingVariantIndex();
+    if (targetIdx !== null && targetIdx !== undefined) {
+      this.editingVariantIndex.set(targetIdx);
+    }
+    this.pendingVariantCropSourceUrl.set(null);
+    this.isVariantImageModalOpen.set(false);
+    this.variantAiModalMode.set('generate');
+    this.isVariantAiModalOpen.set(true);
+  }
+
+  onVariantAiGenerated(newImageUrl: string): void {
+    const idx = this.editingVariantIndex();
+    if (idx === null) {
+      this.isVariantAiModalOpen.set(false);
+      this.pendingVariantCropSourceUrl.set(null);
+      return;
+    }
+    const variant = this.generatedVariants[idx];
+    if (!variant) {
+      this.isVariantAiModalOpen.set(false);
+      this.pendingVariantCropSourceUrl.set(null);
+      return;
+    }
+    variant.image_url = newImageUrl;
+    variant.image_file = undefined;
+    variant.image_id = undefined;
+    this.generatedVariants = [...this.generatedVariants];
+    this.isVariantAiModalOpen.set(false);
+    this.pendingVariantCropSourceUrl.set(null);
+    this.toastService.success('Imagen generada agregada a la variante');
   }
 
   onVariantImagesAdded(images: string[]): void {
@@ -2909,11 +2951,13 @@ export class ProductCreatePageComponent {
     const idx = this.editingVariantIndex();
     if (idx === null) {
       this.isVariantAiModalOpen.set(false);
+      this.pendingVariantCropSourceUrl.set(null);
       return;
     }
     const variant = this.generatedVariants[idx];
     if (!variant) {
       this.isVariantAiModalOpen.set(false);
+      this.pendingVariantCropSourceUrl.set(null);
       return;
     }
     variant.image_url = newImageUrl;
@@ -2922,12 +2966,37 @@ export class ProductCreatePageComponent {
     this.generatedVariants = [...this.generatedVariants];
     // ⚠️ NO llamar markImagesTouched() aquí (ver onVariantImagesAdded).
     this.isVariantAiModalOpen.set(false);
+    this.pendingVariantCropSourceUrl.set(null);
     this.toastService.success('Imagen reemplazada por la versión IA');
   }
 
   // Una variante solo permite 1 foto, por lo que "conservar ambas" se trata como reemplazo.
   onVariantAiKeep(newImageUrl: string): void {
     this.onVariantAiReplace(newImageUrl);
+  }
+
+  openVariantAiEnhanceFromCrop(croppedDataUrl: string): void {
+    this.isVariantImageModalOpen.set(false);
+    this.isVariantImageEditModalOpen.set(false);
+    this.pendingVariantCropSourceUrl.set(croppedDataUrl);
+    this.variantAiModalMode.set('enhance');
+    this.isVariantAiModalOpen.set(true);
+  }
+
+  onVariantAiLeaveOriginal(): void {
+    const idx = this.editingVariantIndex();
+    const original = this.pendingVariantCropSourceUrl();
+    if (idx !== null && original) {
+      const variant = this.generatedVariants[idx];
+      if (variant) {
+        variant.image_url = original;
+        variant.image_file = undefined;
+        variant.image_id = undefined;
+        this.generatedVariants = [...this.generatedVariants];
+        this.toastService.success('Imagen original agregada a la variante');
+      }
+    }
+    this.pendingVariantCropSourceUrl.set(null);
   }
 
   trackByIndex(index: number): number {
@@ -3317,9 +3386,56 @@ export class ProductCreatePageComponent {
       return;
     }
 
+    this.pendingCropSourceUrl.set(null);
+    this.aiModalMode.set('enhance');
     this.aiEnhanceImageUrl.set(sourceUrl);
     this.aiEnhanceImageIndex.set(index);
     this.isImageAiEnhanceModalOpen.set(true);
+  }
+
+  openProductImageAiGenerator(): void {
+    if (this.imageUrls.length >= 5) {
+      this.toastService.warning('Límite de 5 imágenes alcanzado');
+      return;
+    }
+    this.pendingCropSourceUrl.set(null);
+    this.isImageSourceModalOpen.set(false);
+    this.aiModalMode.set('generate');
+    this.aiEnhanceImageUrl.set(null);
+    this.aiEnhanceImageIndex.set(null);
+    this.isImageAiEnhanceModalOpen.set(true);
+  }
+
+  openAiEnhanceFromCrop(croppedDataUrl: string): void {
+    const isEditMode = this.imageModalMode() === 'edit';
+    const currentIndex = this.editingImageIndex();
+
+    this.isImageSourceModalOpen.set(false);
+    this.aiModalMode.set('enhance');
+    this.aiEnhanceImageUrl.set(croppedDataUrl);
+
+    if (isEditMode && currentIndex !== null) {
+      this.pendingCropSourceUrl.set(null);
+      this.aiEnhanceImageIndex.set(currentIndex);
+    } else {
+      this.pendingCropSourceUrl.set(croppedDataUrl);
+      this.aiEnhanceImageIndex.set(null);
+    }
+
+    this.isImageAiEnhanceModalOpen.set(true);
+  }
+
+  onAiImageGenerated(dataUrl: string): void {
+    if (this.imageUrls.length >= 5) {
+      this.toastService.warning('Límite de 5 imágenes alcanzado');
+      return;
+    }
+    this.imageUrls.push(dataUrl);
+    this.imageIds.push(null);
+    this.activeImageIndex = this.imageUrls.length - 1;
+    this.markImagesTouched();
+    this.toastService.success('Imagen generada con IA agregada');
+    this.pendingCropSourceUrl.set(null);
   }
 
   onImagesFromModal(urls: string[]): void {
@@ -3357,28 +3473,82 @@ export class ProductCreatePageComponent {
     this.toastService.success('Imagen ajustada correctamente');
   }
 
+  onAiImageLeaveOriginal(): void {
+    const index = this.aiEnhanceImageIndex();
+    if (index === null) {
+      const original = this.pendingCropSourceUrl();
+      if (original) {
+        if (this.imageUrls.length >= 5) {
+          this.toastService.warning('Límite de 5 imágenes alcanzado');
+          return;
+        }
+        this.imageUrls.push(original);
+        this.imageIds.push(null);
+        this.activeImageIndex = this.imageUrls.length - 1;
+        this.markImagesTouched();
+        this.toastService.success('Imagen original agregada al producto');
+      }
+    }
+    this.pendingCropSourceUrl.set(null);
+  }
+
   onAiImageReplace(dataUrl: string): void {
     const index = this.aiEnhanceImageIndex();
-    if (index === null || !this.imageUrls[index]) return;
-
-    this.imageUrls[index] = dataUrl;
-    this.imageIds[index] = null;
-    this.activeImageIndex = index;
-    this.markImagesTouched();
-    this.toastService.success('Imagen reemplazada por la versión IA');
+    if (index !== null && this.imageUrls[index]) {
+      this.imageUrls[index] = dataUrl;
+      this.imageIds[index] = null;
+      this.activeImageIndex = index;
+      this.markImagesTouched();
+      this.toastService.success('Imagen reemplazada por la versión IA');
+    } else {
+      if (this.imageUrls.length >= 5) {
+        this.toastService.warning('Límite de 5 imágenes alcanzado');
+        return;
+      }
+      this.imageUrls.push(dataUrl);
+      this.imageIds.push(null);
+      this.activeImageIndex = this.imageUrls.length - 1;
+      this.markImagesTouched();
+      this.toastService.success('Imagen mejorada con IA agregada al producto');
+    }
+    this.pendingCropSourceUrl.set(null);
   }
 
   onAiImageKeepBoth(dataUrl: string): void {
-    if (this.imageUrls.length >= 5) {
-      this.toastService.warning('Límite de 5 imágenes alcanzado');
-      return;
-    }
+    const index = this.aiEnhanceImageIndex();
+    if (index !== null) {
+      if (this.imageUrls.length >= 5) {
+        this.toastService.warning('Límite de 5 imágenes alcanzado');
+        return;
+      }
 
-    this.imageUrls.push(dataUrl);
-    this.imageIds.push(null);
-    this.activeImageIndex = this.imageUrls.length - 1;
-    this.markImagesTouched();
-    this.toastService.success('Versión IA agregada como nueva imagen');
+      this.imageUrls.push(dataUrl);
+      this.imageIds.push(null);
+      this.activeImageIndex = this.imageUrls.length - 1;
+      this.markImagesTouched();
+      this.toastService.success('Versión IA agregada como nueva imagen');
+    } else {
+      const original = this.pendingCropSourceUrl();
+      let added = 0;
+      if (original && this.imageUrls.length < 5) {
+        this.imageUrls.push(original);
+        this.imageIds.push(null);
+        added++;
+      }
+      if (this.imageUrls.length < 5) {
+        this.imageUrls.push(dataUrl);
+        this.imageIds.push(null);
+        added++;
+      }
+      if (added > 0) {
+        this.activeImageIndex = this.imageUrls.length - 1;
+        this.markImagesTouched();
+        this.toastService.success(
+          `${added} imagen(es) agregada(s) (original e IA)`,
+        );
+      }
+    }
+    this.pendingCropSourceUrl.set(null);
   }
 
   async onFileSelect(event: Event): Promise<void> {
