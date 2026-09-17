@@ -525,7 +525,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
       this.extraCapabilities().includes('image'),
   );
 
-  capabilityOptions = computed<SelectorOption[]>(() =>
+  capabilityOptions = computed<{ value: string; label: string }[]>(() =>
     MODEL_TYPES.filter((t) => t !== this.currentModelType()).map((value) => ({
       value,
       label: MODEL_TYPE_LABELS[value],
