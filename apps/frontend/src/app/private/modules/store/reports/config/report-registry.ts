@@ -732,6 +732,40 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/inventory/movement-summary',
   },
 
+  {
+    id: 'inventory-ingredient-consumption',
+    category: 'inventory',
+    title: 'Consumo de Insumos',
+    description: 'Insumos gastados y su costo consolidado por plato y receta',
+    detailedDescription:
+      'Vista consolidada de los insumos y materias primas consumidos en la cocina durante el período. Muestra cantidades gastadas, costo total y el desglose de qué platos o preparaciones requirieron cada insumo.',
+    icon: 'utensils',
+    route: '/admin/reports/inventory/inventory-ingredient-consumption',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'ingredient_id',
+    columns: [
+      { key: 'ingredient_name', header: 'Insumo / Ingrediente', type: 'text' },
+      { key: 'dish_name', header: 'Plato / Preparación', type: 'text' },
+      { key: 'dish_quantity', header: 'Cant. Platos', type: 'number', footer: 'sum' },
+      { key: 'consumed_quantity', header: 'Cant. Consumida', type: 'number', footer: 'sum' },
+      { key: 'unit', header: 'Unidad', type: 'text' },
+      { key: 'unit_cost', header: 'Costo Unit.', type: 'currency' },
+      { key: 'total_cost', header: 'Costo Total', type: 'currency', footer: 'sum' },
+      { key: 'orders_count', header: 'Órdenes', type: 'number', footer: 'sum' },
+    ],
+    exportFilename: 'consumo_insumos',
+    stats: [
+      { key: 'total_cost', label: 'Costo Total Insumos', type: 'currency', icon: 'dollar-sign' },
+      { key: 'total_ingredients', label: 'Insumos Utilizados', type: 'number', icon: 'package' },
+      { key: 'total_dishes', label: 'Platos Preparados', type: 'number', icon: 'utensils' },
+      { key: 'total_movements', label: 'Movimientos Consumo', type: 'number', icon: 'arrow-left-right' },
+    ],
+    dataEndpoint: 'store/analytics/inventory/ingredient-consumption',
+    exportEndpoint: 'store/analytics/inventory/ingredient-consumption/export',
+  },
+
   // ─── PRODUCTOS (3) ────────────────────────────────────────────────────────────
 
   {

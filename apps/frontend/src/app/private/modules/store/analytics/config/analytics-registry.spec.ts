@@ -61,9 +61,9 @@ describe('AnalyticsRegistry', () => {
       expect(salesViews).toHaveSize(7);
     });
 
-    it('should have inventory with 6 views', () => {
+    it('should have inventory with 7 views', () => {
       const inventoryViews = getViewsByCategory('inventory');
-      expect(inventoryViews).toHaveSize(6);
+      expect(inventoryViews).toHaveSize(7);
     });
 
     it('should have dispatch with 3 views', () => {
