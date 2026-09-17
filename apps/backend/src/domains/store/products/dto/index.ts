@@ -2345,3 +2345,4 @@ export * from './bulk-image-analysis.dto';
 export * from './update-product-promotions.dto';
 export * from './bulk-product-analysis.dto';
 export * from './bulk-edit-products.dto';
+export * from './log-search-selection.dto';

@@ -72,6 +72,7 @@ import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import {
   GenerateProductDescriptionDto,
   GenerateProductImageEnhancementDto,
+  LogSearchSelectionDto,
 } from './dto';
 import {
   resolvePosStockScope,
@@ -2338,6 +2339,40 @@ export class ProductsService {
     } catch {
       // El log nunca rompe el request.
     }
+  }
+
+  /**
+   * E.4 (F-069) — registra 1 selección del buscador (CTR-por-posición).
+   *
+   * Append-only, tenant-scoped desde contexto (store_id/user_id NUNCA del
+   * body). No lee productos: inserta la telemetría validada por DTO y
+   * devuelve el id. El emitter es fire-and-forget: un fallo acá jamás debe
+   * romper una venta (el cliente traga el error).
+   */
+  async logSearchSelection(dto: LogSearchSelectionDto) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    if (!storeId) {
+      throw new VendixHttpException(
+        ErrorCodes.AUTH_STORE_001,
+        'Store context required to log search selections',
+      );
+    }
+    const row = await this.prisma.pos_search_selections.create({
+      data: {
+        store_id: storeId,
+        user_id: context?.user_id ?? null,
+        query_hash: dto.query_hash,
+        position: dto.position,
+        product_id: dto.product_id,
+        result_count: dto.result_count,
+        rank_mode: dto.rank_mode,
+        flags: dto.flags ?? undefined,
+        surface: dto.surface ?? undefined,
+      },
+      select: { id: true },
+    });
+    return { id: row.id };
   }
 
   async findAll(query: ProductQueryDto) {

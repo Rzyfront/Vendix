@@ -1797,6 +1797,34 @@ export class PosProductSelectionComponent {
     this.productSelected.emit(product);
   }
 
+  /**
+   * E.4 (F-069) — evento CTR-por-posición. Solo bajo search activo (sin
+   * search no hay rank que evaluar): query-hash + posición 1-based en la
+   * grilla visible + total backend + rank_mode/layer. Silencioso siempre.
+   */
+  private emitSearchSelection(product: any): void {
+    const query = this.searchQuery().trim();
+    const meta = this.searchMeta();
+    if (!query || !meta) return;
+    const position =
+      this.filteredProducts().findIndex(
+        (p: any) => p?.id === product?.id,
+      ) + 1;
+    if (position < 1 || !Number.isFinite(product?.id)) return;
+    this.productService
+      .logSearchSelection({
+        query,
+        position,
+        product_id: product.id,
+        result_count: this.totalResults(),
+        rank_mode: meta.rank_mode,
+        layer: meta.layer,
+        surface: 'pos_web',
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
+  }
+
   isProductCardUnavailable(product: any): boolean {
     if (product.effective_track_inventory === false) return false;
     if (product.track_inventory === false) return false;
@@ -1825,6 +1853,9 @@ export class PosProductSelectionComponent {
   }
 
   async onAddToCart(product: any): Promise<void> {
+    // E.4 (F-069) — al tope: la elección ya se hizo aunque el flujo derive
+    // (variantes/booking/precio). Fire-and-forget, jamás bloquea la venta.
+    this.emitSearchSelection(product);
     if (product.price <= 0) {
       this.dialogService
         .confirm({

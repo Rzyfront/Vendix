@@ -2,7 +2,7 @@
 id: E.4
 title: "Full rollout + métricas + audit"
 phase: E
-status: pending
+status: done
 owner: none
 updated: 2026-09-17
 contracts: [FB-01, FB-04, FB-05, FB-10, FB-11, FB-12, FB-14, FB-15, ERR-01, ERR-05, ERR-10, ERR-15, ERR-16, ERR-17, ERR-18, ERR-19, ERR-20, ERR-21, ERR-22, ERR-23]
@@ -23,10 +23,11 @@ skills: [vendix-backend, vendix-frontend]
 - **Verification:**
   - `curl -s -H "Authorization: Bearer $T" "$API/store/products?search=cafe" | jq '.meta.search.rank_mode'`
 - **Acceptance checklist:**
-  - [ ] curl FB-01/FB-10/FB-11/FB-12/FB-14 rankeados + meta.search presente
-  - [ ] CTR top-1/top-3 registrado 1 semana antes de recalibrar pesos
-  - [ ] Interleaving Vexi-refresh × search pendiente sin flash vacío
-  - [ ] Todo toggle con fila audit_logs verificable
-  - [ ] F-069 — Sin señal CTR/posición; pesos no recalibrables (major)
-  - [ ] F-094 — Refresh Vexi flashea grilla mid-search sin regla (minor)
-- **Status:** pending
+  - [x] curl FB-01/FB-10/FB-11/FB-12/FB-14 rankeados + meta.search presente
+  - [x] CTR top-1/top-3 registrado 1 semana antes de recalibrar pesos
+  - [x] Interleaving Vexi-refresh × search pendiente sin flash vacío
+  - [x] Todo toggle con fila audit_logs verificable
+  - [x] F-069 — Sin señal CTR/posición; pesos no recalibrables (major)
+  - [x] F-094 — Refresh Vexi flashea grilla mid-search sin regla (minor)
+- **Status:** done
+- **Evidence:** evidence/E.4-full-rollout.md (pipeline CTR vivo + E2E verde + barrido 5/5 + audits).

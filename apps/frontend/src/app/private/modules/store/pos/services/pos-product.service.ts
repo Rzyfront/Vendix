@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
-import { Observable, of, throwError } from 'rxjs';
-import { delay, map, catchError } from 'rxjs/operators';
+import { Observable, from, of, throwError } from 'rxjs';
+import { delay, map, catchError, switchMap } from 'rxjs/operators';
 import { signal } from '@angular/core';
 import { toObservable } from '@angular/core/rxjs-interop';
 import { HttpClient, HttpErrorResponse, HttpParams } from '@angular/common/http';
@@ -224,6 +224,38 @@ export interface SearchRankMeta {
   rank_mode: 'ranked' | 'unranked_scan_cap' | 'unranked_error' | 'legacy';
   layer: 'legacy' | 'l1' | 'l2' | 'trigram';
   degraded: boolean;
+}
+
+/**
+ * CP-pos-smart-search · E.4 (F-069) — input del evento CTR. `query` es la
+ * cruda del input; el servicio la hashea antes de enviar (jamás viaja).
+ */
+export interface SearchSelectionInput {
+  query: string;
+  /** Posición 1-based dentro de la grilla visible al elegir. */
+  position: number;
+  product_id: number;
+  /** Total backend (`meta.total`), no el largo de página. */
+  result_count: number;
+  rank_mode: SearchRankMeta['rank_mode'];
+  layer?: SearchRankMeta['layer'];
+  surface?: string;
+}
+
+/**
+ * CP-pos-smart-search · E.4 (F-069) — sha256-hex de la query normalizada
+ * (lowercase + trim + espacios colapsados). Misma normalización que el
+ * backend documenta para `query_hash`: permite agrupar sin PII.
+ */
+export async function hashSearchQuery(query: string): Promise<string> {
+  const norm = query.toLowerCase().trim().replace(/\s+/g, ' ');
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(norm),
+  );
+  return Array.from(new Uint8Array(digest), (b) =>
+    b.toString(16).padStart(2, '0'),
+  ).join('');
 }
 
 /**
@@ -538,6 +570,28 @@ export class PosProductService {
       layer: candidate.layer as SearchRankMeta['layer'],
       degraded: candidate.degraded === true,
     };
+  }
+
+  /**
+   * E.4 (F-069) — registra la selección del cajero para CTR-por-posición.
+   * Fire-and-forget: traga cualquier error (hash o red) porque telemetría
+   * jamás debe romper una venta. La query cruda nunca sale del navegador.
+   */
+  logSearchSelection(input: SearchSelectionInput): Observable<unknown> {
+    return from(hashSearchQuery(input.query)).pipe(
+      switchMap((query_hash) =>
+        this.http.post(`${this.apiUrl}/search-selections`, {
+          query_hash,
+          position: input.position,
+          product_id: input.product_id,
+          result_count: input.result_count,
+          rank_mode: input.rank_mode,
+          flags: input.layer ? { layer: input.layer } : undefined,
+          surface: input.surface ?? 'pos_web',
+        }),
+      ),
+      catchError(() => of(null)),
+    );
   }
 
   /**

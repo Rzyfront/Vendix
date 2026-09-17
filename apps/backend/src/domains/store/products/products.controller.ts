@@ -25,6 +25,7 @@ import {
   GenerateProductDescriptionDto,
   GenerateProductImageEnhancementDto,
   UpdateProductPromotionsDto,
+  LogSearchSelectionDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -72,6 +73,17 @@ export class ProductsController {
   async enhanceImage(@Body() dto: GenerateProductImageEnhancementDto) {
     const result = await this.productsService.enhanceImage(dto);
     return this.responseService.success(result, 'Imagen mejorada exitosamente');
+  }
+
+  @ApiOperation({
+    summary:
+      'Registrar una selección del buscador (telemetría CTR-por-posición, E.4)',
+  })
+  @Post('search-selections')
+  @Permissions('store:products:read')
+  async logSearchSelection(@Body() dto: LogSearchSelectionDto) {
+    const result = await this.productsService.logSearchSelection(dto);
+    return this.responseService.created(result, 'Selección registrada');
   }
 
   @ApiOperation({
