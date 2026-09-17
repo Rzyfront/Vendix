@@ -21,6 +21,7 @@ import { SettingsService } from '../settings/settings.service';
 import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service';
 import { InventoryAdjustmentsService } from '../inventory/adjustments/inventory-adjustments.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { PosSearchFlagsService } from '../settings/pos-smart-search/pos-search-flags.service';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import {
   CreateProductDto,
@@ -46,6 +47,9 @@ describe('ProductsService', () => {
     jest
       .spyOn(RequestContextService, 'getOrganizationId')
       .mockReturnValue(1 as any);
+    // QUI-727 — default sin roles: el dinero viaja (los tests de cocina lo
+    // reprograman a ['kitchen'] por caso).
+    jest.spyOn(RequestContextService, 'getRoles').mockReturnValue([]);
   });
   let service: ProductsService;
   let prismaService: StorePrismaService;
@@ -256,6 +260,20 @@ describe('ProductsService', () => {
     },
   };
 
+  // B.3 — el @Optional() de `searchFlags` ya no es la única red: el harness
+  // provee el servicio mockeado (default-off) y cada test smart lo programa.
+  const mockSearchFlags = {
+    resolveSearchFlags: jest.fn(),
+    resolveSearchPathFor: jest.fn(),
+  };
+
+  // B.3 — extraído a const para poder programar hits/miss per-store.
+  const mockCacheManager = {
+    get: jest.fn().mockResolvedValue(null),
+    set: jest.fn(),
+    del: jest.fn(),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -342,11 +360,12 @@ describe('ProductsService', () => {
         // defined". Mismo patrón que organizations.service.spec.ts.
         {
           provide: CACHE_MANAGER,
-          useValue: {
-            get: jest.fn().mockResolvedValue(null),
-            set: jest.fn(),
-            del: jest.fn(),
-          },
+          useValue: mockCacheManager,
+        },
+        // B.3 — flags Tier-1 mockeados (default-off en el beforeEach).
+        {
+          provide: PosSearchFlagsService,
+          useValue: mockSearchFlags,
         },
       ],
     }).compile();
@@ -368,6 +387,19 @@ describe('ProductsService', () => {
     // antes de llegar a la regla que el test quiere probar.
     mockPrismaService.stock_levels.findMany.mockResolvedValue([]);
     mockGlobalPrisma.stock_levels.findMany.mockResolvedValue([]);
+    // B.3 — default-off: sin programar, el harness resuelve legacy (mismo
+    // comportamiento que cuando el provider no existía).
+    mockSearchFlags.resolveSearchFlags.mockResolvedValue({
+      l1: false,
+      l2: false,
+      trigram: false,
+    });
+    mockSearchFlags.resolveSearchPathFor.mockResolvedValue({
+      flags: { l1: false, l2: false, trigram: false },
+      trigramCapable: false,
+      killSwitch: false,
+      path: 'legacy',
+    });
   });
 
   afterEach(() => {
@@ -635,11 +667,14 @@ describe('ProductsService', () => {
       expect(result.data[1]).toEqual(
         expect.objectContaining({ id: 2, name: 'Test Product 2' }),
       );
+      // B.3 (ADR-08) — con `search` el meta trae `search` aunque el path sea
+      // legacy: el query del test trae search:'test' y los flags van off.
       expect(result.meta).toEqual({
         total: 2,
         page: 1,
         limit: 10,
         totalPages: 1,
+        search: { rank_mode: 'legacy', layer: 'legacy', degraded: false },
       });
     });
 
@@ -2070,6 +2105,888 @@ describe('ProductsService', () => {
       const result = await service.findIds({} as ProductQueryDto);
 
       expect(result).toEqual({ ids: [7, 9], total: 2, capped: false });
+    });
+  });
+
+  // ===========================================================================
+  // B.3 — CP-pos-smart-search Fase A: where tokenizado (B.1/ADR-02) + rank en
+  // memoria con fail-open (B.2/ADR-03). Las expectativas de orden se derivan a
+  // mano de la tabla de pesos (search-score.util.ts), NO reutilizando el
+  // scorer: estos specs son oráculo independiente del wiring B.2.
+  // ===========================================================================
+  describe('POS SMART SEARCH (B.1/B.2 — CP-pos-smart-search)', () => {
+    const FLAGS_OFF = { l1: false, l2: false, trigram: false };
+    const FLAGS_L1 = { l1: true, l2: false, trigram: false };
+    const FLAGS_L2 = { l1: true, l2: true, trigram: false };
+
+    const primeSearchPath = (flags: typeof FLAGS_OFF, path: string) => {
+      mockSearchFlags.resolveSearchFlags.mockResolvedValue(flags);
+      mockSearchFlags.resolveSearchPathFor.mockResolvedValue({
+        flags,
+        trigramCapable: false,
+        killSwitch: false,
+        path,
+      });
+    };
+
+    // Fila ligera del scan rank (F-017): id + texto + featured/created_at.
+    const lightRow = (over: Record<string, any>) => ({
+      description: null,
+      sku: null,
+      barcode: null,
+      is_featured: false,
+      created_at: new Date('2024-06-01T00:00:00.000Z'),
+      ...over,
+    });
+
+    // Fila hidratada: mismo shape que el mapper no-pos recorre (copia del
+    // builder de ACTIVE PROMOTIONS + created_at/is_featured para el re-score).
+    const fullRow = (over: Record<string, any>) => ({
+      id: over.id ?? 1,
+      name: 'Sample Product',
+      slug: 'sample-product',
+      description: null,
+      base_price: 100,
+      sale_price: null,
+      is_on_sale: false,
+      sku: null,
+      barcode: null,
+      cost_price: null,
+      profit_margin: null,
+      min_stock_level: null,
+      reorder_point: null,
+      state: ProductState.ACTIVE,
+      pricing_type: 'unit',
+      product_type: 'physical',
+      track_inventory: false,
+      available_for_ecommerce: true,
+      is_featured: false,
+      allow_pos_price_override: false,
+      requires_batch_tracking: false,
+      requires_booking: false,
+      booking_mode: null,
+      buffer_minutes: 0,
+      is_recurring: false,
+      service_duration_minutes: null,
+      service_modality: null,
+      service_pricing_type: null,
+      service_instructions: null,
+      created_at: new Date('2024-06-01T00:00:00.000Z'),
+      product_images: [],
+      brands: null,
+      product_categories: [],
+      product_tax_assignments: [],
+      product_price_tier_assignments: [],
+      stock_levels: [],
+      stores: { id: 1, name: 'T', slug: 't' },
+      _count: { product_variants: 0, product_images: 0, reviews: 0 },
+      ...over,
+    });
+
+    // Enruta el `findMany` doble del path rank: la light (select, sin include)
+    // devuelve `light`; el hydrate (include) devuelve las filas pedidas en
+    // ORDEN INVERSO — Prisma no respeta el orden del `in`, el servicio debe
+    // restaurarlo (re-sort por pageIds + re-score tier-2).
+    const routeScanHydrate = (
+      light: any[],
+      fullById: Map<number, any>,
+      onSelect?: (args: any) => any,
+    ) => {
+      mockPrismaService.products.findMany.mockImplementation((args: any) => {
+        if (args?.select && !args?.include) {
+          if (onSelect) return onSelect(args);
+          return Promise.resolve(light);
+        }
+        const ids: number[] | undefined = args?.where?.id?.in;
+        const rows = ids
+          ? ids.map((id) => fullById.get(id)).filter(Boolean)
+          : [...fullById.values()];
+        return Promise.resolve([...rows].reverse());
+      });
+    };
+
+    beforeEach(() => {
+      // Cada test smart parte de legacy + miss: mockResolvedValue persiste
+      // entre tests (clearAllMocks no lo borra) y un l2 de un test anterior
+      // contaminaría al siguiente.
+      primeSearchPath(FLAGS_OFF, 'legacy');
+      mockCacheManager.get.mockResolvedValue(null);
+    });
+
+    it('flags on (l1) + mult-token → AND×OR con tokens normalizados, orden legacy', async () => {
+      primeSearchPath(FLAGS_L1, 'l1');
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+
+      const result = await service.findAll({
+        search: 'café chocolate',
+        page: 1,
+        limit: 10,
+      });
+
+      const where = mockPrismaService.products.findMany.mock.calls[0][0].where;
+      // Un AND por token (ADR-02); el OR legacy de frase desaparece.
+      expect(where.AND).toHaveLength(2);
+      expect(where.OR).toBeUndefined();
+      // Tokens normalizados (unaccent): 'café'→'cafe'.
+      expect(where.AND[0].OR).toContainEqual({
+        name: { contains: 'cafe', mode: 'insensitive' },
+      });
+      expect(where.AND[1].OR).toContainEqual({
+        name: { contains: 'chocolate', mode: 'insensitive' },
+      });
+      // 3 escalares + 2 de variantes por token (unión sobre 5 espacios).
+      expect(where.AND[0].OR).toHaveLength(5);
+      expect(where.AND[0].OR).toContainEqual({
+        product_variants: {
+          some: { name: { contains: 'cafe', mode: 'insensitive' } },
+        },
+      });
+      expect(where.AND[0].OR).toContainEqual({
+        product_variants: {
+          some: { sku: { contains: 'cafe', mode: 'insensitive' } },
+        },
+      });
+      // L1 = recall nuevo, orden legacy by design (el rank es L2).
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(1);
+      expect(result.meta.search).toEqual({
+        rank_mode: 'legacy',
+        layer: 'l1',
+        degraded: false,
+      });
+    });
+
+    it('flags off + mult-token → OR de frase legacy intacto (fail-closed)', async () => {
+      primeSearchPath(FLAGS_OFF, 'legacy');
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+
+      const result = await service.findAll({
+        search: 'cafe chocolate',
+        page: 1,
+        limit: 10,
+      });
+
+      const where = mockPrismaService.products.findMany.mock.calls[0][0].where;
+      expect(where.AND).toBeUndefined();
+      expect(where.OR).toEqual([
+        { name: { contains: 'cafe chocolate', mode: 'insensitive' } },
+        { description: { contains: 'cafe chocolate', mode: 'insensitive' } },
+        { sku: { contains: 'cafe chocolate', mode: 'insensitive' } },
+      ]);
+      expect(result.meta.search).toEqual({
+        rank_mode: 'legacy',
+        layer: 'legacy',
+        degraded: false,
+      });
+    });
+
+    it('rank-1: el exacto en nombre gana al parcial featured + skip-count (F-005)', async () => {
+      primeSearchPath(FLAGS_L2, 'l2');
+      // Pesos: name word 40, description word 15, fullCoverage 15,
+      // allInPrimary 25. A: 40+40+15+25=120. B: 15+0=15 (coverage 1, sin
+      // bonus). 120 > 15 ⇒ A primero aunque B sea featured.
+      const light = [
+        lightRow({
+          id: 11,
+          name: 'Café molido',
+          sku: 'CAF-MOL-001',
+          created_at: new Date('2024-01-01T00:00:00.000Z'),
+        }),
+        lightRow({
+          id: 22,
+          name: 'Azúcar morena',
+          description: 'Endulza tu café de la mañana',
+          sku: 'AZU-001',
+          is_featured: true,
+        }),
+      ];
+      const fullById = new Map([
+        [
+          11,
+          fullRow({
+            id: 11,
+            name: 'Café molido',
+            sku: 'CAF-MOL-001',
+            created_at: new Date('2024-01-01T00:00:00.000Z'),
+          }),
+        ],
+        [
+          22,
+          fullRow({
+            id: 22,
+            name: 'Azúcar morena',
+            description: 'Endulza tu café de la mañana',
+            sku: 'AZU-001',
+            is_featured: true,
+          }),
+        ],
+      ]);
+      routeScanHydrate(light, fullById);
+
+      const result = await service.findAll({
+        search: 'cafe molido',
+        page: 1,
+        limit: 10,
+      });
+
+      // El hydrate devolvió [22,11]; el servicio restaura [11,22].
+      expect(result.data.map((row: any) => row.id)).toEqual([11, 22]);
+      expect(result.meta).toEqual({
+        total: 2,
+        page: 1,
+        limit: 10,
+        totalPages: 1,
+        search: { rank_mode: 'ranked', layer: 'l2', degraded: false },
+      });
+      // F-005: con rank el total es el conjunto rankeado — sin `count`.
+      expect(mockPrismaService.products.count).not.toHaveBeenCalled();
+      // Scan + hydrate: exactamente 2 round-trips.
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(2);
+      expect(
+        mockPrismaService.products.findMany.mock.calls[1][0].where.id,
+      ).toEqual({ in: [11, 22] });
+      // F-046: id-list completa cacheada 45s (no solo la página).
+      expect(mockCacheManager.set).toHaveBeenCalledWith(
+        expect.stringMatching(/^products:smartsearch:1:[0-9a-f]{12}:[0-9a-f]{12}$/),
+        { ids: [11, 22], total: 2 },
+        45_000,
+      );
+    });
+
+    it('featured desempat: a igual score/coverage gana featured', async () => {
+      primeSearchPath(FLAGS_L2, 'l2');
+      // 'cafe' vs name 'Café' (exacto 120) + fullCoverage 15 + allInPrimary
+      // 25 = 160 en ambas; coverage 1 en ambas ⇒ decide featured.
+      const created = new Date('2024-06-01T00:00:00.000Z');
+      const light = [
+        lightRow({ id: 44, name: 'Café', created_at: created }),
+        lightRow({
+          id: 33,
+          name: 'Café',
+          is_featured: true,
+          created_at: created,
+        }),
+      ];
+      const fullById = new Map([
+        [44, fullRow({ id: 44, name: 'Café', created_at: created })],
+        [
+          33,
+          fullRow({
+            id: 33,
+            name: 'Café',
+            is_featured: true,
+            created_at: created,
+          }),
+        ],
+      ]);
+      routeScanHydrate(light, fullById);
+
+      const result = await service.findAll({
+        search: 'cafe',
+        page: 1,
+        limit: 10,
+      });
+
+      expect(result.data.map((row: any) => row.id)).toEqual([33, 44]);
+      expect(result.meta.search).toEqual({
+        rank_mode: 'ranked',
+        layer: 'l2',
+        degraded: false,
+      });
+    });
+
+    it('orden determinista: input invertido → mismo orden; id DESC cierra', async () => {
+      primeSearchPath(FLAGS_L2, 'l2');
+      // Gemelas en todo (160/1/no-featured/mismo created_at): solo queda el
+      // id DESC. Sort estable + id ⇒ sin flips entre llamadas.
+      const created = new Date('2024-06-01T00:00:00.000Z');
+      const e = lightRow({ id: 55, name: 'Café', created_at: created });
+      const f = lightRow({ id: 66, name: 'Café', created_at: created });
+      const fullById = new Map([
+        [55, fullRow({ id: 55, name: 'Café', created_at: created })],
+        [66, fullRow({ id: 66, name: 'Café', created_at: created })],
+      ]);
+      const query = { search: 'cafe', page: 1, limit: 10 };
+
+      routeScanHydrate([e, f], fullById);
+      const first = await service.findAll(query);
+      routeScanHydrate([f, e], fullById);
+      const second = await service.findAll(query);
+
+      expect(first.data.map((row: any) => row.id)).toEqual([66, 55]);
+      expect(second.data.map((row: any) => row.id)).toEqual([66, 55]);
+    });
+
+    it('cache hit: página 2 no re-escanea ni cuenta (F-046)', async () => {
+      primeSearchPath(FLAGS_L2, 'l2');
+      mockCacheManager.get.mockResolvedValueOnce({
+        ids: [11, 22, 33, 44, 55],
+        total: 5,
+      });
+      const fullById = new Map([
+        [33, fullRow({ id: 33, name: 'Café molido', sku: 'C-33' })],
+        [
+          44,
+          fullRow({
+            id: 44,
+            name: 'Azúcar',
+            description: 'para el cafe',
+            sku: 'A-44',
+          }),
+        ],
+      ]);
+      mockPrismaService.products.findMany.mockImplementation((args: any) => {
+        if (args?.select && !args?.include) {
+          throw new Error('el hit no debe escanear');
+        }
+        const ids: number[] = args?.where?.id?.in ?? [];
+        return Promise.resolve(ids.map((id) => fullById.get(id)));
+      });
+
+      const result = await service.findAll({
+        search: 'cafe molido',
+        page: 2,
+        limit: 2,
+      });
+
+      // Slice [33,44] de la id-list; el re-score tier-2 confirma el orden
+      // (120 vs 15) en vez de confiarlo a ciegas.
+      expect(result.data.map((row: any) => row.id)).toEqual([33, 44]);
+      expect(result.meta.total).toBe(5);
+      expect(result.meta.search).toEqual({
+        rank_mode: 'ranked',
+        layer: 'l2',
+        degraded: false,
+      });
+      expect(mockPrismaService.products.count).not.toHaveBeenCalled();
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    // ---- FAIL-OPEN (B.2/ERR-17): over-cap o throw ⇒ legacy + meta ---------
+
+    it('over scan-cap → orderBy legacy + meta unranked_scan_cap (fail-open)', async () => {
+      const envKey = 'POS_SMART_SEARCH_SCAN_CAP';
+      const prev = process.env[envKey];
+      process.env[envKey] = '3';
+      try {
+        primeSearchPath(FLAGS_L2, 'l2');
+        const light = [1, 2, 3, 4].map((id) =>
+          lightRow({ id, name: `Café ${id}` }),
+        );
+        const fullById = new Map(
+          [1, 2, 3, 4].map((id) => [
+            id,
+            fullRow({ id, name: `Café ${id}` }),
+          ]),
+        );
+        // El scan pide cap+1 para detectar el desborde sin segundo round-trip.
+        routeScanHydrate(light, fullById, (args: any) => {
+          expect(args.take).toBe(4);
+          return Promise.resolve(light);
+        });
+        mockPrismaService.products.count.mockResolvedValue(4);
+
+        const result = await service.findAll({
+          search: 'cafe',
+          page: 1,
+          limit: 10,
+        });
+
+        // La grilla NO se vacía: llegan las 4 filas por el path legacy.
+        expect(result.data).toHaveLength(4);
+        expect(result.meta.total).toBe(4);
+        expect(result.meta.search).toEqual({
+          rank_mode: 'unranked_scan_cap',
+          layer: 'l2',
+          degraded: true,
+        });
+        // Degradado ⇒ recount legacy + hydrate con skip/take.
+        expect(mockPrismaService.products.count).toHaveBeenCalledTimes(1);
+        expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(2);
+        const legacyCall =
+          mockPrismaService.products.findMany.mock.calls[1][0];
+        expect(legacyCall.skip).toBe(0);
+        expect(legacyCall.take).toBe(10);
+        expect(legacyCall.where.id).toBeUndefined();
+        // Sin rank no hay nada que cachear.
+        expect(mockCacheManager.set).not.toHaveBeenCalled();
+      } finally {
+        if (prev === undefined) delete process.env[envKey];
+        else process.env[envKey] = prev;
+      }
+    });
+
+    it('hydrate lanza → re-fetch legacy + meta unranked_error (fail-open)', async () => {
+      primeSearchPath(FLAGS_L2, 'l2');
+      const light = [
+        lightRow({ id: 11, name: 'Café molido', sku: 'CAF-MOL-001' }),
+        lightRow({
+          id: 22,
+          name: 'Azúcar morena',
+          description: 'Endulza tu café de la mañana',
+          sku: 'AZU-001',
+        }),
+      ];
+      const fullById = new Map([
+        [11, fullRow({ id: 11, name: 'Café molido', sku: 'CAF-MOL-001' })],
+        [
+          22,
+          fullRow({
+            id: 22,
+            name: 'Azúcar morena',
+            description: 'Endulza tu café de la mañana',
+            sku: 'AZU-001',
+          }),
+        ],
+      ]);
+      let hydrateCalls = 0;
+      mockPrismaService.products.findMany.mockImplementation((args: any) => {
+        if (args?.select && !args?.include) {
+          return Promise.resolve(light);
+        }
+        // Solo el hydrate acotado a la página rankeada falla; el re-fetch
+        // legacy (mismo where, sin id.in) sana.
+        if (args?.where?.id?.in) {
+          hydrateCalls += 1;
+          return Promise.reject(new Error('hydrate down'));
+        }
+        return Promise.resolve([...fullById.values()]);
+      });
+      mockPrismaService.products.count.mockResolvedValue(2);
+
+      const result = await service.findAll({
+        search: 'cafe molido',
+        page: 1,
+        limit: 10,
+      });
+
+      expect(hydrateCalls).toBe(1);
+      expect(result.data).toHaveLength(2);
+      expect(result.meta.total).toBe(2);
+      expect(result.meta.search).toEqual({
+        rank_mode: 'unranked_error',
+        layer: 'l2',
+        degraded: true,
+      });
+      // Scan + hydrate-roto + re-fetch legacy.
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(3);
+      expect(mockPrismaService.products.count).toHaveBeenCalledTimes(1);
+    });
+
+    it('flags rechazan → legacy fail-closed (cutover never-throw)', async () => {
+      mockSearchFlags.resolveSearchPathFor.mockRejectedValueOnce(
+        new Error('flags down'),
+      );
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+
+      const result = await service.findAll({
+        search: 'cafe chocolate',
+        page: 1,
+        limit: 10,
+      });
+
+      const where = mockPrismaService.products.findMany.mock.calls[0][0].where;
+      expect(where.AND).toBeUndefined();
+      expect(where.OR).toEqual([
+        { name: { contains: 'cafe chocolate', mode: 'insensitive' } },
+        { description: { contains: 'cafe chocolate', mode: 'insensitive' } },
+        { sku: { contains: 'cafe chocolate', mode: 'insensitive' } },
+      ]);
+      expect(result.meta.search).toEqual({
+        rank_mode: 'legacy',
+        layer: 'legacy',
+        degraded: false,
+      });
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    // ---- GATE tokens>0 (B.2/F-013): 1-char/stopwords ⇒ legacy -------------
+
+    it("search 1-char 'e' + l2 → legacy, sin rank ni caché", async () => {
+      primeSearchPath(FLAGS_L2, 'l2');
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+
+      const result = await service.findAll({
+        search: 'e',
+        page: 1,
+        limit: 10,
+      });
+
+      // 0 tokens: el where cae a la frase legacy y el rank ni se intenta.
+      const where = mockPrismaService.products.findMany.mock.calls[0][0].where;
+      expect(where.AND).toBeUndefined();
+      expect(where.OR).toEqual([
+        { name: { contains: 'e', mode: 'insensitive' } },
+        { description: { contains: 'e', mode: 'insensitive' } },
+        { sku: { contains: 'e', mode: 'insensitive' } },
+      ]);
+      // layer=l2 (cutover) pero rank_mode=legacy (gate): la distinción que
+      // impide que meta.search mienta `ranked` sobre conjunto legacy.
+      expect(result.meta.search).toEqual({
+        rank_mode: 'legacy',
+        layer: 'l2',
+        degraded: false,
+      });
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(1);
+      expect(mockCacheManager.get).not.toHaveBeenCalled();
+      expect(mockPrismaService.products.count).toHaveBeenCalledTimes(1);
+    });
+
+    it("search solo-stopwords 'de la' + l2 → fallback frase legacy", async () => {
+      primeSearchPath(FLAGS_L2, 'l2');
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+
+      const result = await service.findAll({
+        search: 'de la',
+        page: 1,
+        limit: 10,
+      });
+
+      const where = mockPrismaService.products.findMany.mock.calls[0][0].where;
+      expect(where.AND).toBeUndefined();
+      expect(where.OR).toEqual([
+        { name: { contains: 'de la', mode: 'insensitive' } },
+        { description: { contains: 'de la', mode: 'insensitive' } },
+        { sku: { contains: 'de la', mode: 'insensitive' } },
+      ]);
+      expect(result.meta.search).toEqual({
+        rank_mode: 'legacy',
+        layer: 'l2',
+        degraded: false,
+      });
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(1);
+      expect(mockCacheManager.get).not.toHaveBeenCalled();
+    });
+
+    // ---- BARCODE — RAMA INTACTA (FB-02/DB-01) -------------------------------
+
+    it('barcode positivo: fixture producto/variante/tier intacto + scanned_price_tier_id', async () => {
+      const row = fullRow({
+        id: 5,
+        name: 'Caja x12',
+        sku: 'CJ-12',
+        barcode: '7701234000012',
+        product_variants: [
+          {
+            id: 51,
+            name: 'Caja x12',
+            sku: 'CJ-12',
+            barcode: '7701234000012-V',
+            price_override: 12000,
+            cost_price: 9000,
+            profit_margin: 25,
+            is_on_sale: false,
+            sale_price: null,
+            stock_quantity: 7,
+            track_inventory_override: null,
+            service_duration_minutes: null,
+            service_pricing_type: null,
+            buffer_minutes: null,
+            preparation_time_minutes: null,
+            attributes: null,
+            stock_levels: [],
+          },
+        ],
+        product_price_tier_assignments: [
+          { price_tier_id: 7, barcode: 'T-770' },
+        ],
+        _count: { product_variants: 1, product_images: 0, reviews: 0 },
+      });
+      mockPrismaService.products.findMany.mockResolvedValue([row]);
+      mockPrismaService.products.count.mockResolvedValue(1);
+
+      const result = await service.findAll({
+        barcode: 'T-770',
+        include_variants: true,
+        page: 1,
+        limit: 10,
+      });
+
+      // OR exacto sobre los 3 espacios del namespace (producto/variante/tier).
+      const where = mockPrismaService.products.findMany.mock.calls[0][0].where;
+      expect(where.OR).toEqual([
+        { barcode: { equals: 'T-770' } },
+        { product_variants: { some: { barcode: { equals: 'T-770' } } } },
+        {
+          product_price_tier_assignments: {
+            some: { barcode: { equals: 'T-770' } },
+          },
+        },
+      ]);
+      expect(where.AND).toBeUndefined();
+      // La rama barcode no toca flags ni rank.
+      expect(mockSearchFlags.resolveSearchPathFor).not.toHaveBeenCalled();
+      expect(mockCacheManager.get).not.toHaveBeenCalled();
+      expect(result.meta.search).toBeUndefined();
+      // Fixture intacto: la variante mapea con su barcode y el tier escaneado
+      // se resuelve (el POS cobra la presentación correcta sin adivinar).
+      expect((result.data[0] as any).scanned_price_tier_id).toBe(7);
+      expect((result.data[0] as any).has_variants).toBe(true);
+      expect((result.data[0] as any).product_variants[0]).toEqual(
+        expect.objectContaining({
+          id: 51,
+          sku: 'CJ-12',
+          barcode: '7701234000012-V',
+        }),
+      );
+    });
+
+    it('search⊗barcode: con barcode, search se anula (DB-01)', async () => {
+      primeSearchPath(FLAGS_L2, 'l2');
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+
+      const result = await service.findAll({
+        search: 'cafe',
+        barcode: '7701234',
+        page: 1,
+        limit: 10,
+      });
+
+      const where = mockPrismaService.products.findMany.mock.calls[0][0].where;
+      expect(where.OR).toEqual([
+        { barcode: { equals: '7701234' } },
+        { product_variants: { some: { barcode: { equals: '7701234' } } } },
+        {
+          product_price_tier_assignments: {
+            some: { barcode: { equals: '7701234' } },
+          },
+        },
+      ]);
+      expect(where.AND).toBeUndefined();
+      expect(JSON.stringify(where)).not.toContain('cafe');
+      expect(mockSearchFlags.resolveSearchPathFor).not.toHaveBeenCalled();
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(1);
+      // Hay search, pero barcode fuerza legacy en ambos ejes.
+      expect(result.meta.search).toEqual({
+        rank_mode: 'legacy',
+        layer: 'legacy',
+        degraded: false,
+      });
+    });
+
+    // ---- COCINA SIN DINERO (QUI-727/ADR-10) --------------------------------
+
+    it('cocina no recibe dinero en findAll (ni en variantes)', async () => {
+      jest
+        .spyOn(RequestContextService, 'getRoles')
+        .mockReturnValue(['kitchen']);
+      const row = fullRow({
+        id: 5,
+        name: 'Bandeja paisa',
+        base_price: 25000,
+        cost_price: 12000,
+        profit_margin: 52,
+        product_variants: [
+          {
+            id: 51,
+            name: 'Bandeja paisa',
+            sku: 'BP-01',
+            barcode: null,
+            price_override: 27000,
+            cost_price: 13000,
+            profit_margin: 50,
+            is_on_sale: false,
+            sale_price: 24000,
+            stock_quantity: 4,
+            track_inventory_override: null,
+            service_duration_minutes: null,
+            service_pricing_type: null,
+            buffer_minutes: null,
+            preparation_time_minutes: 20,
+            attributes: null,
+            stock_levels: [],
+          },
+        ],
+        _count: { product_variants: 1, product_images: 0, reviews: 0 },
+      });
+      mockPrismaService.products.findMany.mockResolvedValue([row]);
+      mockPrismaService.products.count.mockResolvedValue(1);
+
+      const result = await service.findAll({
+        page: 1,
+        limit: 10,
+        include_variants: true,
+      });
+
+      const dto = result.data[0] as any;
+      for (const money of [
+        'cost_price',
+        'profit_margin',
+        'base_price',
+        'sale_price',
+        'final_price',
+        'active_promotion',
+        'sale_config_summary',
+      ]) {
+        expect(dto).not.toHaveProperty(money);
+      }
+      // Lo estructural y el stock sí viajan (cocina los consume).
+      expect(dto).toEqual(
+        expect.objectContaining({
+          id: 5,
+          name: 'Bandeja paisa',
+          state: ProductState.ACTIVE,
+          total_stock_available: 0,
+        }),
+      );
+      const variant = dto.product_variants[0];
+      for (const money of [
+        'cost_price',
+        'profit_margin',
+        'sale_price',
+        'price_override',
+        'final_price',
+      ]) {
+        expect(variant).not.toHaveProperty(money);
+      }
+      expect(variant).toEqual(
+        expect.objectContaining({ id: 51, sku: 'BP-01', stock_quantity: 4 }),
+      );
+    });
+
+    // ---- findIds PARIDAD DE CONJUNTO (DB-17) ---------------------------------
+
+    it('findIds usa el mismo where smart que findAll (select-all exacto)', async () => {
+      primeSearchPath(FLAGS_L1, 'l1');
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+      const query = {
+        search: 'cafe chocolate',
+        state: ProductState.ACTIVE,
+      } as ProductQueryDto;
+
+      await service.findAll(query);
+      const whereFindAll =
+        mockPrismaService.products.findMany.mock.calls[0][0].where;
+      expect(whereFindAll.AND).toHaveLength(2);
+
+      mockPrismaService.products.findMany.mockClear();
+      mockPrismaService.products.count.mockClear();
+      mockSearchFlags.resolveSearchPathFor.mockClear();
+      mockSearchFlags.resolveSearchFlags.mockClear();
+
+      const ids = await service.findIds(query);
+      const whereFindIds =
+        mockPrismaService.products.findMany.mock.calls[0][0].where;
+
+      // Mismo conjunto: "seleccionar todo" opera sobre lo que se ve.
+      expect(whereFindIds).toEqual(whereFindAll);
+      expect(ids).toEqual({ ids: [], total: 0, capped: false });
+      // findIds hereda el where pero no duplica el rank: resuelve flags, no
+      // path (el orden le es irrelevante).
+      expect(mockSearchFlags.resolveSearchFlags).toHaveBeenCalledTimes(1);
+      expect(mockSearchFlags.resolveSearchPathFor).not.toHaveBeenCalled();
+    });
+
+    // ---- TENANT NEGATIVO (DB-11) ----------------------------------------------
+
+    it('flags y caché del rank van por la tienda del contexto', async () => {
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 2, organization_id: 1, user_id: 9 } as any);
+      jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(2);
+      primeSearchPath(FLAGS_L2, 'l2');
+      routeScanHydrate(
+        [lightRow({ id: 9, name: 'Café' })],
+        new Map([[9, fullRow({ id: 9, name: 'Café' })]]),
+      );
+
+      await service.findAll({ search: 'cafe', page: 1, limit: 10 });
+
+      expect(mockSearchFlags.resolveSearchPathFor).toHaveBeenCalledWith(2);
+      expect(mockCacheManager.set).toHaveBeenCalledWith(
+        expect.stringMatching(/^products:smartsearch:2:/),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('tienda B≁A: la id-list rankeada de B nunca sirve a A', async () => {
+      // Las filas las escopa StorePrismaService (DB-11, cubierto por sus
+      // specs); aquí se fija que la CAPA RANK tampoco cruza tiendas: flags y
+      // caché van por store_id, y un hit de B es miss para A.
+      primeSearchPath(FLAGS_L2, 'l2');
+      mockCacheManager.get.mockImplementation((key: string) =>
+        Promise.resolve(
+          key.includes(':2:') ? { ids: [99], total: 1 } : null,
+        ),
+      );
+      const fullById = new Map([
+        [7, fullRow({ id: 7, name: 'Café de A' })],
+        [99, fullRow({ id: 99, name: 'Café de B' })],
+      ]);
+      mockPrismaService.products.findMany.mockImplementation((args: any) => {
+        if (args?.select && !args?.include) {
+          return Promise.resolve([lightRow({ id: 7, name: 'Café de A' })]);
+        }
+        const ids: number[] | undefined = args?.where?.id?.in;
+        const rows = ids
+          ? ids.map((id) => fullById.get(id)).filter(Boolean)
+          : [...fullById.values()];
+        return Promise.resolve(rows);
+      });
+      const query = { search: 'cafe', page: 1, limit: 10 };
+
+      // Tienda 1 (contexto default): miss ⇒ re-escanea lo suyo.
+      const resA = await service.findAll(query);
+      const selectCallsA = mockPrismaService.products.findMany.mock.calls.filter(
+        ([args]: any[]) => args?.select && !args?.include,
+      );
+      expect(selectCallsA).toHaveLength(1);
+      expect(resA.data.map((row: any) => row.id)).toEqual([7]);
+
+      // Tienda 2: hit de SU caché (ids de B, jamás los de A).
+      jest
+        .spyOn(RequestContextService, 'getContext')
+        .mockReturnValue({ store_id: 2, organization_id: 1, user_id: 9 } as any);
+      jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(2);
+      mockPrismaService.products.findMany.mockClear();
+      const resB = await service.findAll(query);
+      const selectCallsB = mockPrismaService.products.findMany.mock.calls.filter(
+        ([args]: any[]) => args?.select && !args?.include,
+      );
+      expect(selectCallsB).toHaveLength(0);
+      expect(resB.data.map((row: any) => row.id)).toEqual([99]);
+      expect(
+        mockPrismaService.products.findMany.mock.calls[0][0].where.id,
+      ).toEqual({ in: [99] });
+    });
+
+    // ---- META.SEARCH AUSENTE + ERR-06 (documentación) --------------------------
+
+    it('sin search → meta.search ausente y flags ni se resuelven', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+
+      const result = await service.findAll({ page: 1, limit: 10 });
+
+      expect(result.meta.search).toBeUndefined();
+      expect(mockSearchFlags.resolveSearchPathFor).not.toHaveBeenCalled();
+      expect(mockSearchFlags.resolveSearchFlags).not.toHaveBeenCalled();
+      expect(mockCacheManager.get).not.toHaveBeenCalled();
+    });
+
+    it('page=-1: el servicio PROPAGA el rechazo de Prisma (ERR-06, no traga)', async () => {
+      // ERR-06 documentado, NO cambiado: page/limit<=0 pasa el DTO (sin @Min)
+      // y Prisma rechaza skip/take. El servicio deja propagar; el shape
+      // `200 success:false` lo produce el catch del controller (ver
+      // products.controller.spec.ts ERR-06). Si este test enrojece porque el
+      // servicio empieza a retornar en vez de lanzar, es un cambio de
+      // contrato que requiere decisión explícita.
+      mockPrismaService.products.findMany.mockRejectedValue(
+        new Error(
+          'Invalid `prisma.products.findMany()` invocation: Argument `skip` must be greater than or equal to 0.',
+        ),
+      );
+
+      await expect(
+        service.findAll({ page: -1, limit: 10 }),
+      ).rejects.toThrow(/skip/);
     });
   });
 });

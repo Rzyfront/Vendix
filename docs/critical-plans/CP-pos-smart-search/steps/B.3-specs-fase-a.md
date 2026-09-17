@@ -2,7 +2,7 @@
 id: B.3
 title: "Specs Fase A + scope negativo"
 phase: B
-status: pending
+status: done
 owner: none
 updated: 2026-09-17
 contracts: [FB-01, FB-02, DB-01, DB-11, DB-17, ERR-05, ERR-06]
@@ -23,10 +23,10 @@ skills: [vendix-backend, vendix-prisma-scopes, vendix-multi-tenant-context]
 - **Verification:**
   - `npm run buildcheck:test -- src/domains/store/products/products.service.spec.ts`
 - **Acceptance checklist:**
-  - [ ] Specs 646-671 y 1642-1679 asertan AND×OR + fallback + ranking
-  - [ ] Test negativo: tienda B no ve productos de tienda A con search
-  - [ ] Suite products verde completa (service + controller)
-  - [ ] page=-1 documenta shape success:false (ERR-06) sin cambiarlo
-  - [ ] Spec barcode positivo con fixture (producto/variante/tier) intacto
-  - [ ] Extender should-return-paginated-products (meta.search con search) + specs gate tokens>0 y hydrate-fallback
-- **Status:** pending
+  - [x] Specs 646-671 y 1642-1679 asertan AND×OR + fallback + ranking
+  - [x] Test negativo: tienda B no ve productos de tienda A con search
+  - [x] Suite products verde completa (service + controller)
+  - [x] page=-1 documenta shape success:false (ERR-06) sin cambiarlo
+  - [x] Spec barcode positivo con fixture (producto/variante/tier) intacto
+  - [x] Extender should-return-paginated-products (meta.search con search) + specs gate tokens>0 y hydrate-fallback
+- **Status:** done
