@@ -4,9 +4,10 @@ import { StockTransfersController } from './stock-transfers.controller';
 import { StockTransfersService } from './stock-transfers.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { InventoryTransactionsService } from '../../inventory/transactions/inventory-transactions.service';
+import { SettingsModule } from '../../settings/settings.module';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, SettingsModule],
   controllers: [StockTransfersController],
   providers: [
     StockTransfersService,

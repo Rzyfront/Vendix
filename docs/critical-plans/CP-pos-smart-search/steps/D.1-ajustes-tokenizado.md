@@ -2,7 +2,7 @@
 id: D.1
 title: "Ajustes: search tokenizado"
 phase: D
-status: pending
+status: done
 owner: none
 updated: 2026-09-17
 contracts: [FB-10, DB-01, ERR-01]
@@ -23,8 +23,9 @@ skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-prisma-sc
 - **Verification:**
   - `curl -s -H "Authorization: Bearer $T" "$API/store/inventory/adjustments/search-products?search=cafe&location_id=1" | jq '.data|length'`
 - **Acceptance checklist:**
-  - [ ] 'cafe tubo' halla producto multi-palabra con location_id intacto
-  - [ ] product_variant_id por fila se conserva tras el cambio
-  - [ ] Sin search: comportamiento idéntico a legacy
-  - [ ] Specs del service verdes con casos tokenizados
-- **Status:** pending
+  - [x] 'cafe tubo' halla producto multi-palabra con location_id intacto (vivo: `cafe sello`→[334] @loc 50)
+  - [x] product_variant_id por fila se conserva tras el cambio (vivo: pvid 444 intacto)
+  - [x] Sin search: comportamiento idéntico a legacy (legacy movido verbatim; gate tokens>0)
+  - [x] Specs del service verdes con casos tokenizados (5/5)
+- **Status:** done
+- **Evidence (vivo 2026-09-17, store 10):** flag-on `cafe`→[334,286] rankeado; flag-off→[286,334] sin rank (contraste prueba rama rank + fallback); F-074 cero importadores.

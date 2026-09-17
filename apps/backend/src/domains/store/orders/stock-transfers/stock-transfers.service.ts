@@ -2,11 +2,23 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import {
+  buildTokenAndFieldOr,
+  tokenizeInternal,
+  type SearchTextFieldMap,
+} from '../../../../common/utils/search-text.util';
+import {
+  rankedIdsPage,
+  scoreTokens,
+} from '../../../../common/utils/search-score.util';
+import { PosSearchFlagsService } from '../../settings/pos-smart-search/pos-search-flags.service';
+import { Prisma } from '@prisma/client';
 import { CreateTransferDto } from './dto/create-transfer.dto';
 import { UpdateTransferDto } from './dto/update-transfer.dto';
 import { TransferQueryDto } from './dto/transfer-query.dto';
@@ -27,13 +39,40 @@ const PENDING_LIKE_STATUSES: transfer_status_enum[] = [
   transfer_status_enum.draft,
 ];
 
+/**
+ * D.2 — Set de recall del picker de traslados: PARIDAD con el OR legacy
+ * (name/sku, raíz `products`, sin nest). El filtro `stock_levels.some`
+ * @origen se conserva intacto en ambas ramas.
+ */
+const TRANSFERABLE_SEARCH_FIELDS: SearchTextFieldMap = {
+  scalar: ['name', 'sku'],
+};
+
+/** D.2 — Scan-cap del picker (top-10; sobre el cap, legacy). */
+const TRANSFERABLE_SEARCH_SCAN_CAP = 200;
+
+interface TransferableSearchRow {
+  id: number;
+  name: string;
+  sku: string | null;
+  stock_levels: Array<{
+    location_id: number;
+    quantity_on_hand: unknown;
+    quantity_reserved: unknown;
+    quantity_available: unknown;
+  }>;
+}
+
 @Injectable()
 export class StockTransfersService {
+  private readonly logger = new Logger(StockTransfersService.name);
+
   constructor(
     private prisma: StorePrismaService,
     private stockLevelManager: StockLevelManager,
     private readonly event_emitter: EventEmitter2,
     private readonly operatingScopeService: OperatingScopeService,
+    private readonly searchFlags: PosSearchFlagsService,
   ) {}
 
   private async validateTransferScope(
@@ -843,7 +882,139 @@ export class StockTransfersService {
     });
   }
 
+  /**
+   * D.2 (CP-pos-smart-search) — picker de traslados con L1+L2 heredado.
+   *
+   * Con flag `l1` on: where tokenizado AND×OR (mismo helper A.1, raíz
+   * `products`) + rank en memoria (mismo A.2); `stock_levels.some` @origen
+   * intacto. Con flag off, sin tienda, sin tokens, sobre scan-cap o throw:
+   * el contains legacy, byte-idéntico (fail-open, sin rescate difuso).
+   * Shape `{success,data[]}` del controller intacto: aquí no se toca.
+   *
+   * F-074 guard: `dto/search-transferable-products.dto.ts` es HUÉRFANO (cero
+   * importadores; el controller usa @Query sueltos) — documentado, JAMÁS
+   * importado ni cableado. No revivirlo aquí.
+   */
   async searchTransferableProducts(
+    search: string,
+    fromLocationId: number,
+    toLocationId: number,
+    limit = 10,
+  ) {
+    const tokens = tokenizeInternal(search);
+    if (tokens.length > 0 && (await this.isSmartTransferSearchOn())) {
+      try {
+        return await this.searchTransferableProductsRanked(
+          tokens,
+          fromLocationId,
+          toLocationId,
+          limit,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `[TransferSearch] smart→legacy from=${fromLocationId} tokens=${tokens.length}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return this.searchTransferableProductsLegacy(
+      search,
+      fromLocationId,
+      toLocationId,
+      limit,
+    );
+  }
+
+  private async isSmartTransferSearchOn(): Promise<boolean> {
+    try {
+      const storeId = RequestContextService.getStoreId();
+      if (!storeId || !this.searchFlags) return false;
+      const flags = await this.searchFlags.resolveSearchFlags(storeId);
+      return flags.l1 === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async searchTransferableProductsRanked(
+    tokens: readonly string[],
+    fromLocationId: number,
+    toLocationId: number,
+    limit: number,
+  ) {
+    const where = {
+      ...buildTokenAndFieldOr(tokens, TRANSFERABLE_SEARCH_FIELDS),
+      stock_levels: {
+        some: { location_id: fromLocationId },
+      },
+    } as Prisma.productsWhereInput;
+    const select = {
+      id: true,
+      name: true,
+      sku: true,
+      stock_levels: {
+        where: {
+          location_id: { in: [fromLocationId, toLocationId] },
+        },
+        select: {
+          location_id: true,
+          quantity_on_hand: true,
+          quantity_reserved: true,
+          quantity_available: true,
+        },
+      },
+    } as const;
+    const byId = new Map<number, TransferableSearchRow>();
+    const outcome = await rankedIdsPage(where, 1, limit, {
+      scanCap: TRANSFERABLE_SEARCH_SCAN_CAP,
+      scan: async (scanWhere, take) => {
+        const rows = (await this.prisma.products.findMany({
+          where: scanWhere,
+          select,
+          take,
+        })) as TransferableSearchRow[];
+        for (const row of rows) byId.set(row.id, row);
+        return rows;
+      },
+      score: (row) => {
+        const breakdown = scoreTokens(
+          tokens,
+          [
+            { key: 'name', value: row.name },
+            { key: 'sku', value: row.sku },
+          ],
+          { primaryKey: 'name' },
+        );
+        return {
+          id: row.id,
+          score: breakdown.score,
+          coverage: breakdown.coverage,
+          featured: false,
+          createdAt: 0,
+        };
+      },
+      hydrate: async (_hydrateWhere, pageIds) =>
+        pageIds
+          .map((id) => byId.get(id))
+          .filter(
+            (row): row is TransferableSearchRow => row !== undefined,
+          ),
+      getId: (row) => row.id,
+    });
+    if (outcome === null) {
+      return this.searchTransferableProductsLegacy(
+        tokens.join(' '),
+        fromLocationId,
+        toLocationId,
+        limit,
+      );
+    }
+    return outcome.rows.map((p) =>
+      this.mapTransferableRow(p, fromLocationId, toLocationId),
+    );
+  }
+
+  private async searchTransferableProductsLegacy(
     search: string,
     fromLocationId: number,
     toLocationId: number,
@@ -878,39 +1049,46 @@ export class StockTransfersService {
       take: limit,
     });
 
+    return products.map((p) =>
+      this.mapTransferableRow(p, fromLocationId, toLocationId),
+    );
+  }
+
+  private mapTransferableRow(
+    p: TransferableSearchRow,
+    fromLocationId: number,
+    toLocationId: number,
+  ) {
     const defaultStock = {
       quantity_on_hand: 0,
       quantity_reserved: 0,
       quantity_available: 0,
     };
-
-    return products.map((p) => {
-      const originStock = p.stock_levels.find(
-        (sl) => sl.location_id === fromLocationId,
-      );
-      const destStock = p.stock_levels.find(
-        (sl) => sl.location_id === toLocationId,
-      );
-      return {
-        id: p.id,
-        name: p.name,
-        sku: p.sku,
-        stock_at_origin: originStock
-          ? {
-              quantity_on_hand: originStock.quantity_on_hand,
-              quantity_reserved: originStock.quantity_reserved,
-              quantity_available: originStock.quantity_available,
-            }
-          : defaultStock,
-        stock_at_destination: destStock
-          ? {
-              quantity_on_hand: destStock.quantity_on_hand,
-              quantity_reserved: destStock.quantity_reserved,
-              quantity_available: destStock.quantity_available,
-            }
-          : defaultStock,
-      };
-    });
+    const originStock = p.stock_levels.find(
+      (sl) => sl.location_id === fromLocationId,
+    );
+    const destStock = p.stock_levels.find(
+      (sl) => sl.location_id === toLocationId,
+    );
+    return {
+      id: p.id,
+      name: p.name,
+      sku: p.sku,
+      stock_at_origin: originStock
+        ? {
+            quantity_on_hand: originStock.quantity_on_hand,
+            quantity_reserved: originStock.quantity_reserved,
+            quantity_available: originStock.quantity_available,
+          }
+        : defaultStock,
+      stock_at_destination: destStock
+        ? {
+            quantity_on_hand: destStock.quantity_on_hand,
+            quantity_reserved: destStock.quantity_reserved,
+            quantity_available: destStock.quantity_available,
+          }
+        : defaultStock,
+    };
   }
 
   /**

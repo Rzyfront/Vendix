@@ -17,6 +17,47 @@ import {
 } from './interfaces/inventory-adjustment.interface';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../shared/services/stock-level-manager.service';
+import {
+  buildTokenAndFieldOr,
+  tokenizeInternal,
+  type SearchTextFieldMap,
+} from '@common/utils/search-text.util';
+import {
+  rankedIdsPage,
+  scoreTokens,
+} from '@common/utils/search-score.util';
+import { PosSearchFlagsService } from '../../settings/pos-smart-search/pos-search-flags.service';
+import { Prisma } from '@prisma/client';
+
+/**
+ * D.1 — Set de recall del picker de ajustes: PARIDAD con el OR legacy
+ * (name/sku/barcode). Anidado bajo `products:` (nestPath) porque la raíz del
+ * where es `stock_levels` (filtro location_id intacto).
+ */
+const ADJUSTABLE_SEARCH_FIELDS: SearchTextFieldMap = {
+  scalar: ['name', 'sku', 'barcode'],
+};
+const ADJUSTABLE_SEARCH_NEST: readonly string[] = ['products'];
+
+/**
+ * D.1 — Scan-cap del picker: 200 candidatos bastan para rankear un top-10;
+ * sobre el cap, fail-open al contains legacy (mismo shape, orden barato).
+ */
+const ADJUSTABLE_SEARCH_SCAN_CAP = 200;
+
+interface AdjustableSearchRow {
+  id: number;
+  product_variant_id: number | null;
+  quantity_on_hand: unknown;
+  quantity_reserved: unknown;
+  quantity_available: unknown;
+  products: {
+    id: number;
+    name: string;
+    sku: string | null;
+    barcode: string | null;
+  };
+}
 
 /** Una línea de un ajuste por lote (conteo, carga masiva, reconteo por IA). */
 export interface BatchAdjustmentInput {
@@ -113,6 +154,7 @@ export class InventoryAdjustmentsService {
     private prisma: StorePrismaService,
     private stockLevelManager: StockLevelManager,
     private eventEmitter: EventEmitter2,
+    private searchFlags: PosSearchFlagsService,
   ) {}
 
   /**
@@ -705,7 +747,128 @@ export class InventoryAdjustmentsService {
   /**
    * Busca productos con stock en una ubicación para ajustes
    */
+  /**
+   * D.1 (CP-pos-smart-search) — picker de ajustes con L1+L2 heredado.
+   *
+   * Con flag `l1` on: where tokenizado AND×OR (mismo helper A.1, nestPath
+   * `products:`) + rank en memoria vía `rankedIdsPage` (mismo A.2). Con flag
+   * off, sin tienda en contexto, sin tokens o sobre scan-cap: el contains
+   * legacy de abajo, byte-idéntico (fail-open; conteo físico no admite
+   * parecido ⇒ sin rescate difuso: el ranking ORDENA, jamás filtra).
+   *
+   * F-074 guard: `dto/search-adjustable-products.dto.ts` es HUÉRFANO (cero
+   * importadores; el controller usa @Query sueltos) — documentado, JAMÁS
+   * importado ni cableado. No revivirlo aquí.
+   */
   async searchAdjustableProducts(
+    search: string,
+    locationId: number,
+    limit = 10,
+  ) {
+    const tokens = tokenizeInternal(search);
+    if (tokens.length > 0 && (await this.isSmartAdjustSearchOn())) {
+      try {
+        return await this.searchAdjustableProductsRanked(
+          tokens,
+          locationId,
+          limit,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `[AdjustSearch] smart→legacy location=${locationId} tokens=${tokens.length}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return this.searchAdjustableProductsLegacy(search, locationId, limit);
+  }
+
+  private async isSmartAdjustSearchOn(): Promise<boolean> {
+    try {
+      const storeId = RequestContextService.getStoreId();
+      if (!storeId || !this.searchFlags) return false;
+      const flags = await this.searchFlags.resolveSearchFlags(storeId);
+      return flags.l1 === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async searchAdjustableProductsRanked(
+    tokens: readonly string[],
+    locationId: number,
+    limit: number,
+  ) {
+    const where = {
+      location_id: locationId,
+      ...buildTokenAndFieldOr(
+        tokens,
+        ADJUSTABLE_SEARCH_FIELDS,
+        ADJUSTABLE_SEARCH_NEST,
+      ),
+    } as Prisma.stock_levelsWhereInput;
+    const include = {
+      products: {
+        // barcode: aditivo SOLO para scorear (el shape mapeado no lo expone;
+        // sin él, un match por barcode rankearía 0 y se hundiría).
+        select: { id: true, name: true, sku: true, barcode: true },
+      },
+    } as const;
+    const byId = new Map<number, AdjustableSearchRow>();
+    const outcome = await rankedIdsPage(
+      where,
+      1,
+      limit,
+      {
+        scanCap: ADJUSTABLE_SEARCH_SCAN_CAP,
+        scan: async (scanWhere, take) => {
+          const rows = (await this.prisma.stock_levels.findMany({
+            where: scanWhere,
+            include,
+            take,
+          })) as AdjustableSearchRow[];
+          for (const row of rows) byId.set(row.id, row);
+          return rows;
+        },
+        score: (row) => {
+          const breakdown = scoreTokens(
+            tokens,
+            [
+              { key: 'name', value: row.products?.name },
+              { key: 'sku', value: row.products?.sku },
+              { key: 'barcode', value: row.products?.barcode },
+            ],
+            { primaryKey: 'name' },
+          );
+          return {
+            id: row.id,
+            score: breakdown.score,
+            coverage: breakdown.coverage,
+            featured: false,
+            createdAt: 0,
+          };
+        },
+        hydrate: async (_hydrateWhere, pageIds) =>
+          pageIds
+            .map((id) => byId.get(id))
+            .filter(
+              (row): row is AdjustableSearchRow => row !== undefined,
+            ),
+        getId: (row) => row.id,
+      },
+    );
+    if (outcome === null) {
+      // Sobre scan-cap: legacy (orden barato, mismo shape).
+      return this.searchAdjustableProductsLegacy(
+        tokens.join(' '),
+        locationId,
+        limit,
+      );
+    }
+    return outcome.rows.map((row) => this.mapAdjustableRow(row));
+  }
+
+  private async searchAdjustableProductsLegacy(
     search: string,
     locationId: number,
     limit = 10,
@@ -729,7 +892,17 @@ export class InventoryAdjustmentsService {
       take: limit,
     });
 
-    return stockLevels.map((sl) => ({
+    return stockLevels.map((sl) => this.mapAdjustableRow(sl));
+  }
+
+  private mapAdjustableRow(sl: {
+    products: { id: number; name: string; sku: string | null };
+    product_variant_id: number | null;
+    quantity_on_hand: unknown;
+    quantity_reserved: unknown;
+    quantity_available: unknown;
+  }) {
+    return {
       id: sl.products.id,
       name: sl.products.name,
       sku: sl.products.sku,
@@ -743,7 +916,7 @@ export class InventoryAdjustmentsService {
         quantity_reserved: sl.quantity_reserved,
         quantity_available: sl.quantity_available,
       },
-    }));
+    };
   }
 
   /**

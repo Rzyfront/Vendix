@@ -2,7 +2,7 @@
 id: D.2
 title: "Traslados: search tokenizado"
 phase: D
-status: pending
+status: done
 owner: none
 updated: 2026-09-17
 contracts: [FB-11, DB-01, ERR-01]
@@ -23,8 +23,9 @@ skills: [vendix-backend, vendix-backend-api, vendix-prisma-scopes, vendix-multi-
 - **Verification:**
   - `curl -s -H "Authorization: Bearer $T" "$API/store/stock-transfers/search-products?search=cafe&from_location_id=1&to_location_id=2" | jq '.data|length'`
 - **Acceptance checklist:**
-  - [ ] Multi-palabra halla producto conservando stock@origen/destino
-  - [ ] Shape {success,data[]} idéntico (sin ResponseService, como hoy)
-  - [ ] Sin search: comportamiento idéntico a legacy
-  - [ ] Specs del service verdes con casos tokenizados
-- **Status:** pending
+  - [x] Multi-palabra halla producto conservando stock@origen/destino (vivo: `cafe`→2 filas, some@origen intacto)
+  - [x] Shape {success,data[]} idéntico (sin ResponseService, como hoy; controller intacto)
+  - [x] Sin search: comportamiento idéntico a legacy (legacy movido verbatim; gate tokens>0)
+  - [x] Specs del service verdes con casos tokenizados (5/5)
+- **Status:** done
+- **Evidence (vivo 2026-09-17, store 10):** flag-on rankeado [334,286]; flag-off [286,334] sin rank; fix DI SettingsModule en stock-transfers.module (sin él, Nest no arranca); F-074 cero importadores.
