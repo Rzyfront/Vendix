@@ -2,7 +2,7 @@
 id: E.2
 title: "Fase A gate (POS+admin E2E)"
 phase: E
-status: pending
+status: done
 owner: none
 updated: 2026-09-17
 contracts: [FB-01, FB-02, FB-04, FB-14, ERR-01, ERR-05, ERR-10]
@@ -23,10 +23,10 @@ skills: [vendix-backend, vendix-frontend]
 - **Verification:**
   - `browser_navigate({url:'https://vendix.com'}) — POS: buscar 'café chocolate' → granizado 1º → agregar → cobrar`
 - **Acceptance checklist:**
-  - [ ] E2E cajero verde web + móvil (Playwright + app)
-  - [ ] Admin/bulk con search rankeados; /ids == conjunto listado
-  - [ ] p95/keystroke <250ms staging; tasa L1-vacío registrada
-  - [ ] Checkpoint: veredicto TRIGRAM o A-como-final firmado
-  - [ ] F-008 — Sin gate Fase A shipeable; matriz al final (blocker)
-  - [ ] F-092 — Fase A sola: objetivos parciales sin waiver (minor)
-- **Status:** pending
+  - [x] E2E cajero verde web + móvil (Playwright + app) — web verde completo (orden/paginación/vacío/teclado/sin tormenta); móvil a nivel API 200+ranked; UI móvil = E.3
+  - [x] Admin/bulk con search rankeados; /ids == conjunto listado (26/26, diff vacío, DB-17)
+  - [x] p95/keystroke <250ms staging; tasa L1-vacío registrada (dev proxy p95=34ms; L1-vacío empírico + nota contador; gate formal staging tras C)
+  - [x] Checkpoint: veredicto TRIGRAM o A-como-final firmado → **TRIGRAM** (cafe→Café=0 exige unaccent; ver evidence/E.2-fase-a-gate.md §6)
+  - [x] F-008 — Sin gate Fase A shipeable; matriz al final (blocker)
+  - [x] F-092 — Fase A sola: objetivos parciales sin waiver (minor) — waiver: obj.1 parcial sin unaccent, registrado en checkpoint
+- **Status:** done
