@@ -16,6 +16,14 @@ import {
   AIAppQueryDto,
   AIAppStats,
   PaginatedAIAppResponse,
+  AIToolCatalogEntry,
+  AIQueuesOverview,
+  AIJobLookupResult,
+  AIAgent,
+  CreateAIAgentDto,
+  UpdateAIAgentDto,
+  AIAgentQueryDto,
+  PaginatedAIAgentResponse,
 } from '../interfaces';
 
 interface CacheEntry<T> {
@@ -156,6 +164,61 @@ export class AIEngineService {
     return this.http.post<any>(
       `${this.apiUrl}/superadmin/ai-engine/applications/${id}/test`,
       {},
+    );
+  }
+
+  // --- AI Tools (F5: catálogo vivo, sin paginación) ---
+
+  getTools(): Observable<AIToolCatalogEntry[]> {
+    return this.http.get<any>(`${this.apiUrl}/superadmin/ai-engine/tools`);
+  }
+
+  // --- AI Queues / Jobs (F5) ---
+
+  getQueues(): Observable<AIQueuesOverview> {
+    return this.http.get<any>(`${this.apiUrl}/superadmin/ai-engine/jobs`);
+  }
+
+  getJob(queueName: string, jobId: string): Observable<AIJobLookupResult> {
+    return this.http.get<any>(
+      `${this.apiUrl}/superadmin/ai-engine/jobs/${queueName}/${jobId}`,
+    );
+  }
+
+  // --- AI Agents (F5: CRUD del endpoint F4) ---
+
+  getAgents(query: AIAgentQueryDto = {}): Observable<PaginatedAIAgentResponse> {
+    let params = new HttpParams();
+    if (query.page) params = params.set('page', query.page.toString());
+    if (query.limit) params = params.set('limit', query.limit.toString());
+    if (query.search) params = params.set('search', query.search);
+    if (query.app_key) params = params.set('app_key', query.app_key);
+    if (query.is_active !== undefined)
+      params = params.set('is_active', query.is_active.toString());
+
+    return this.http.get<any>(
+      `${this.apiUrl}/superadmin/ai-engine/agents`,
+      { params },
+    );
+  }
+
+  createAgent(data: CreateAIAgentDto): Observable<AIAgent> {
+    return this.http.post<any>(
+      `${this.apiUrl}/superadmin/ai-engine/agents`,
+      data,
+    );
+  }
+
+  updateAgent(id: number, data: UpdateAIAgentDto): Observable<AIAgent> {
+    return this.http.patch<any>(
+      `${this.apiUrl}/superadmin/ai-engine/agents/${id}`,
+      data,
+    );
+  }
+
+  deleteAgent(id: number): Observable<void> {
+    return this.http.delete<void>(
+      `${this.apiUrl}/superadmin/ai-engine/agents/${id}`,
     );
   }
 

@@ -61,6 +61,14 @@ export interface DispatchNotePdfData {
   subtotal_amount: number;
   discount_amount: number;
   tax_amount: number;
+  /**
+   * F-101 (CP-pos-exclusive-tax-double-charge) — gate fiscal resuelto por
+   * `resolvePrintsVatBreakdownForPrint` (mismo predicado que usa el otro
+   * riel de la remisión, `print-formats/providers/dispatch-note.provider.ts`).
+   * Sin `true`, la fila "IVA:" no se imprime aunque `tax_amount > 0`: un
+   * papel no se retracta (fail-closed), igual que en el resto del dominio.
+   */
+  prints_vat_breakdown: boolean;
   grand_total: number;
   currency?: string;
 
@@ -417,7 +425,9 @@ export class DispatchNotePdfBuilder {
     if (data.discount_amount > 0) {
       line('Descuento:', `-${COP.format(data.discount_amount)}`);
     }
-    if (data.tax_amount > 0) {
+    // F-101 — gateado por `prints_vat_breakdown` (antes se imprimía sin
+    // condición, divergiendo del riel A que sí gatea el desglose de IVA).
+    if (data.prints_vat_breakdown && data.tax_amount > 0) {
       line('IVA:', COP.format(data.tax_amount));
     }
 

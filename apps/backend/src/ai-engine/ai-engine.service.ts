@@ -1670,10 +1670,28 @@ export class AIEngineService implements OnModuleInit {
     const storeId = RequestContextService.getStoreId();
     if (!storeId) return; // internal caller
     if (!featureCategory || !isAIFeatureKey(featureCategory)) {
-      // Unmapped application — record for observability but never block.
-      this.logger.debug(
-        `AI_GATE_SKIP appKey=${appKey} reason=unmapped_feature_category`,
+      // F2: en rutas de tienda nunca hay skip silencioso. Tras F1 la columna
+      // es NOT NULL con backfill, así que esto solo cubre valores legacy no
+      // mapeados; se observa como denegado y bloquea en enforce.
+      this.logger.log(
+        JSON.stringify({
+          event: 'AI_GATE_CHECK',
+          appKey,
+          storeId,
+          feature: featureCategory ?? null,
+          allowed: false,
+          mode: 'block',
+          reason: 'unmapped_feature_category',
+          enforce: this.gateConfig.isEnforce(),
+        }),
       );
+      if (this.gateConfig.isEnforce()) {
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_005,
+          undefined,
+          { app_key: appKey, feature_category: featureCategory ?? null },
+        );
+      }
       return;
     }
     const feature = featureCategory;

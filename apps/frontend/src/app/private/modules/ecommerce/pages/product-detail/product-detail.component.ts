@@ -57,6 +57,11 @@ import {
   PromotionStackComponent,
   PromotionStackItem,
 } from '../../../../../shared/components/promotion-stack/promotion-stack.component';
+// F-225 (ADR-16): mismo kernel de dinero que `pos-cart.service.ts` — ver
+// `apps/frontend/tsconfig.app.json` (`paths`). `Math.abs(diff) > 0.01`
+// tolera EXACTAMENTE 1 centavo; la traducción fiel es
+// `differsByAtLeastCents(a, b, 2)`, no el umbral por defecto (1).
+import { differsByAtLeastCents } from '@money-kernel/money-compare';
 
 @Component({
   selector: 'app-product-detail',
@@ -1812,7 +1817,9 @@ export class ProductDetailComponent implements OnInit {
     });
     if (!variant) return null;
     const diff = variant.final_price - p.final_price;
-    return Math.abs(diff) > 0.01 ? diff : null;
+    return differsByAtLeastCents(variant.final_price, p.final_price, 2)
+      ? diff
+      : null;
   }
 
   // Variant-aware computed signals

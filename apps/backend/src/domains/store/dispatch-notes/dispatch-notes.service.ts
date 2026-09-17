@@ -56,6 +56,10 @@ import {
   RouteStopSequenceInput,
 } from '../dispatch-routes/utils/route-stop-calc';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import {
+  resolveOrderLineTaxTotal,
+  roundMoney2,
+} from '../taxes/utils/final-price.util';
 import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
 import { resolvePosStockScope } from '../inventory/shared/helpers/pos-stock-scope.helper';
 import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
@@ -2143,6 +2147,21 @@ export class DispatchNotesService {
           default_location_id,
         ));
 
+      // Impuesto de LÍNEA prorrateado (hallazgo 1a, CP-post-QUI-832):
+      // `tax_amount_item` es por unidad (ADR-10) y persistirlo tal cual
+      // subdeclara el impuesto cuando la cantidad despachada supera 1. Se lee
+      // el impuesto de la línea COMPLETA con el helper canónico y se prorratea
+      // por lo despachado frente a lo ordenado.
+      const lineTaxTotal = resolveOrderLineTaxTotal(order_item);
+      const orderQuantity = Number(order_item.quantity) || 0;
+      const dispatchedQuantity = Number(dto_item.dispatched_quantity) || 0;
+      // Guarda de división por cero: si la cantidad ordenada es 0 o inválida,
+      // se toma el impuesto de línea completo (factor completo).
+      const proratedTax =
+        orderQuantity > 0
+          ? roundMoney2((lineTaxTotal * dispatchedQuantity) / orderQuantity)
+          : roundMoney2(lineTaxTotal);
+
       dispatch_items.push({
         product_id: order_item.product_id,
         product_variant_id: order_item.product_variant_id,
@@ -2156,10 +2175,10 @@ export class DispatchNotesService {
         dispatched_quantity: dto_item.dispatched_quantity,
         unit_price: order_item.unit_price,
         discount_amount: 0,
-        tax_amount: order_item.tax_amount_item || 0,
+        tax_amount: proratedTax,
         total_price:
           Number(order_item.unit_price || 0) * dto_item.dispatched_quantity +
-          Number(order_item.tax_amount_item || 0),
+          proratedTax,
         lot_serial: dto_item.lot_serial,
       });
     }
@@ -2893,6 +2912,36 @@ export class DispatchNotesService {
     }
 
     return dispatch_note;
+  }
+
+  /**
+   * ADR-15 §4 — la tienda DUEÑA de la remisión, para que el gateway de
+   * impresión resuelva el formato correcto.
+   *
+   * No sale del `RequestContext`: ahí el `store_id` puede venir vacío (un
+   * usuario de alcance ORGANIZACIÓN corre con `store_id: null`, ver
+   * `tenant-context-runner.service.ts`) y, peor, puede apuntar a OTRA tienda
+   * que la que emitió la remisión — el papel saldría con el formato de la
+   * tienda del contexto en vez del de la tienda del documento. El riel viejo
+   * (`DispatchNotePdfService.generatePdf`) nunca miró el contexto para esto,
+   * así que tomarlo de ahí habría sido una regresión doble: un 403 nuevo y un
+   * formato ajeno.
+   *
+   * El `findFirst` va por el cliente con alcance, igual que `findOne`: quien
+   * no pueda ver la remisión sigue sin poder imprimirla. `select` mínimo
+   * porque el renderizador vuelve a cargar el documento completo.
+   */
+  async resolveStoreIdForPrint(id: number): Promise<number> {
+    const dispatch_note = await this.prisma.dispatch_notes.findFirst({
+      where: { id },
+      select: { store_id: true },
+    });
+
+    if (!dispatch_note?.store_id) {
+      throw new NotFoundException('Remisión no encontrada');
+    }
+
+    return dispatch_note.store_id;
   }
 
   async update(id: number, dto: UpdateDispatchNoteDto) {

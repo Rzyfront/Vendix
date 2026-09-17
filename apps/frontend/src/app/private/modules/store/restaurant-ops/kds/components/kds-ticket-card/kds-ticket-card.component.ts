@@ -42,13 +42,27 @@ import {
 export class KdsTicketCardComponent {
   readonly ticket = input.required<KitchenTicket>();
   /**
-   * Motivo unico del boton "Entregar" deshabilitado en el KDS. Entregar el
-   * plato no es accion de cocina: la registra el mesero o el cajero desde el
-   * POS / la cuenta de mesa. El boton se deja visible (senaliza que el ticket
-   * quedo listo y a la espera) pero nunca dispara la transicion.
+   * Takeaway-only KDS: "Entregar" se habilita solo cuando TODOS los items
+   * visibles del ticket son para llevar (`order_item.is_takeaway`). El dato
+   * ya viaja con el ticket (snapshot + eventos SSE), sin fetch extra.
    */
-  readonly deliverDisabledReason =
-    'La entrega la registra el mesero o el cajero, no la cocina';
+  readonly allTakeaway = computed(() => {
+    const items = this.ticket()?.items ?? [];
+    return (
+      items.length > 0 &&
+      items.every((it) => it.order_item?.is_takeaway === true)
+    );
+  });
+  /**
+   * Motivo del boton "Entregar" cuando esta deshabilitado. Si el ticket no
+   * es todo-para-llevar, el bloqueo es la regla takeaway; cuando esa regla
+   * no aplica (ticket todo-para-llevar), se conserva el motivo anterior.
+   */
+  readonly deliverDisabledReason = computed(() =>
+    this.allTakeaway()
+      ? 'La entrega la registra el mesero o el cajero, no la cocina'
+      : 'Solo los platos para llevar se entregan en cocina',
+  );
   readonly isMutating = input<boolean>(false);
   readonly showDelivered = input<boolean>(true);
   /** Shared millisecond clock pushed down by the board's single ticker. */

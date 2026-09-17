@@ -327,7 +327,13 @@ export const SYSTEM_PRINT_TEMPLATES: Array<{
       columns: [
         { id: 'col_desc', key: 'product_name', label: 'Concepto / Ítem', enabled: true, width_percent: 50, align: 'left', format: 'text' },
         { id: 'col_qty', key: 'quantity', label: 'Cant.', enabled: true, width_percent: 15, align: 'center', format: 'number' },
-        { id: 'col_val', key: 'unit_price', label: 'Valor Devuelto', enabled: true, width_percent: 35, align: 'right', format: 'currency' },
+        // C.7 (CP-pos-exclusive-tax-double-charge) — la unica columna de dinero
+        // de la nota credito comercial se llama «Valor Devuelto»: es el valor
+        // de LINEA acreditado, no el precio por unidad. Ligada a `unit_price`,
+        // una linea de 3 unidades imprimia un tercio del credito y la suma de
+        // la columna no cuadraba contra el Subtotal. Su hermana fiscal
+        // (`fiscal_credit_note`, «Total Afectado») ya usaba `total_price`.
+        { id: 'col_val', key: 'total_price', label: 'Valor Devuelto', enabled: true, width_percent: 35, align: 'right', format: 'currency' },
       ],
     },
   },

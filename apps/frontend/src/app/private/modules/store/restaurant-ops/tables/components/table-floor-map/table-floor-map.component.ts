@@ -34,7 +34,7 @@ interface TableCell {
   live: AdminTablesLivePayload | null;
   /**
    * True mientras dura el destello dorado del llamado al mesero
-   * (expira 1s después de recibirse `callingTableId`).
+   * (expira 4s después de recibirse `callingTableId`).
    */
   isCalling: boolean;
   /** Posición absoluta resuelta (px) usada por el lienzo. */
@@ -132,7 +132,7 @@ export class TableFloorMapComponent {
   readonly liveCounts = input<Map<number, AdminTablesLivePayload> | null>(null);
   /**
    * Id de la mesa que llamó al mesero (`AdminTablesSseService.waiterCall`).
-   * OPCIONAL — sin este input no hay destello. La expiración de 1s se
+   * OPCIONAL — sin este input no hay destello. La expiración de 4s se
    * gestiona internamente con `setTimeout` (signals, sin NgZone).
    */
   readonly callingTableId = input<number | null>(null);
@@ -190,7 +190,7 @@ export class TableFloorMapComponent {
 
   constructor() {
     // Destello dorado del llamado al mesero: refleja `callingTableId`
-    // en una señal interna que expira 1s después (signals + setTimeout,
+    // en una señal interna que expira 4s después (signals + setTimeout,
     // sin NgZone). Un llamado nuevo reinicia el temporizador.
     effect(() => {
       const id = this.callingTableId();
@@ -204,7 +204,7 @@ export class TableFloorMapComponent {
           this.callingTimer = setTimeout(() => {
             this.callingVisibleId.set(null);
             this.callingTimer = null;
-          }, 1000);
+          }, 4000);
         }
       });
     });

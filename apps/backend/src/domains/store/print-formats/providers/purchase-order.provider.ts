@@ -8,7 +8,6 @@ import { StandardPrintDataModel } from '../interfaces/standard-print-data.model'
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 // C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-10: orden de compra
 // declara `money_basis: 'taxable_base'` y propaga el gate de C.1.
-import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
 
 @Injectable()
 export class PurchaseOrderDataProvider implements IDocumentDataProvider {
@@ -126,12 +125,24 @@ export class PurchaseOrderDataProvider implements IDocumentDataProvider {
       // siempre sobre base gravable; el gate de IVA se resuelve con org/store
       // ya en memoria por el include de C.1.
       money_basis: 'taxable_base',
-      // Sin fila `store` propia (la OC es org-scoped), el resolvedor recibe
-      // `undefined` como store: si `org.fiscal_scope` no es explicitamente
-      // 'ORGANIZATION' el desempate cae a 'STORE' y no hay `store_settings`
-      // que leer → fail-closed (`false`), igual que cualquier otro estado
-      // fiscal indeterminado.
-      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(org, undefined),
+      // C.7 — antes esto era `resolvePrintsVatBreakdownForPrint(org, undefined)`.
+      // La OC es org-scoped y no trae fila `store`, asi que con
+      // `fiscal_scope = 'STORE'` (el desempate por defecto) el resolvedor no
+      // tenia `store_settings` que leer y devolvia `false` SIEMPRE. Con
+      // `money_basis: 'taxable_base'`, la regla anti-huerfana suprimia
+      // entonces `Subtotal:` e `Impuestos:` en toda orden de compra: el papel
+      // salia con los costos de linea, la fila `Envio:` y un `TOTAL:` que
+      // incluye un IVA que nada explica (OC 214: 640 + 800 + 1.000 = 2.440
+      // contra `TOTAL: $2.713,6`).
+      //
+      // El fail-closed de R-2 existe para que un comercio NO responsable de
+      // IVA no imprima un desglose que afirme que EL cobra IVA. En una orden
+      // de compra el IVA es el que nos cobra el PROVEEDOR — es su
+      // responsabilidad fiscal, no la nuestra, y viene del snapshot de la
+      // propia OC (G-10 del diseno: «costo, ajeno al IVA de venta»). Ocultarlo
+      // no protege nada y deja el total sin explicar, que es justo lo que este
+      // plan persigue.
+      prints_vat_breakdown: true,
       items,
       taxes: [],
       totals: {

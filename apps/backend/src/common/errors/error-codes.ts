@@ -5380,6 +5380,25 @@ export const ErrorCodes = {
     devMessage:
       'La estación tiene una sesión abierta: ciérrala antes de desactivarla',
   },
+  // El borrado FÍSICO (`DELETE /store/kds/:id?hard=true`) no arrastra
+  // historial: `kitchen_tickets.kds_id` es NOT NULL con FK RESTRICT y las
+  // sesiones son auditoría de turnos. Con sesiones o tickets, 409 y vía
+  // normal (baja lógica). Sin historial sí se puede borrar la fila.
+  KDS_HAS_HISTORY: {
+    code: 'KDS_HAS_HISTORY',
+    httpStatus: 409,
+    devMessage:
+      'La estación tiene historial (sesiones o tickets de cocina): desactívala en lugar de eliminarla',
+  },
+  // `products.kds_id` es SET NULL, así que la DB dejaría borrar — pero
+  // dejaría platos huérfanos de tablero que caerían al default en el fire.
+  // 409 con conteo para que el operador reasigne antes de reintentar.
+  KDS_HAS_PRODUCTS: {
+    code: 'KDS_HAS_PRODUCTS',
+    httpStatus: 409,
+    devMessage:
+      'La estación tiene productos asignados: reasígnalos a otra estación antes de eliminarla',
+  },
   KDS_SESSION_NOT_FOUND: {
     code: 'KDS_SESSION_NOT_FOUND',
     httpStatus: 404,
@@ -5428,6 +5447,16 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'El plato preparado debe estar listo en cocina antes de marcarse entregado',
+  },
+  // 1060 paso 1 — un ítem con `delivered_at` es un hecho de servicio
+  // consumado: la cancelación normal lo rechaza (409, sin mutar nada) y
+  // solo la reversa explícita (`cancel-delivered`, con motivo + destino)
+  // puede tocarlo.
+  ITEM_ALREADY_DELIVERED: {
+    code: 'ITEM_ALREADY_DELIVERED',
+    httpStatus: 409,
+    devMessage:
+      'El ítem ya fue entregado; no se puede cancelar por esta vía (usar la reversa de entrega)',
   },
   KITCHEN_FIRE_NO_RECIPE: {
     code: 'KITCHEN_FIRE_NO_RECIPE',
@@ -5921,6 +5950,25 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage:
       'El producto de esta línea perdió su asignación fiscal y el impuesto no se puede resolver; no se puede normalizar a IVA cero en silencio.',
+  },
+
+  // F-051 (CP-pos-exclusive-tax-double-charge) — `invertDeclaredGross` invierte
+  // un bruto DECLARADO tratando TODAS las tasas como inclusivas (ADR-01: el
+  // flag describe el INPUT, no el catálogo). Ese despeje NO sabe repartir una
+  // tasa con base propia (`fixed_base`, el carve-out de AIU): el kernel fuerza
+  // `fixed_base: undefined` en esta ruta (F-021, `tax-inclusive-math.ts:133`),
+  // así que una tasa AIU que llegara acá perdería su carve-out EN SILENCIO y
+  // la base declarada a la DIAN saldría mal, sin compuerta que lo note. Se
+  // rechaza en vez de resolver mal. No entra bajo la válvula
+  // `settings.pos.tax_line_gate` (F-127) a propósito: aquella baja una
+  // compuerta de DATOS del catálogo para no dejar la caja parada; ésta
+  // protege de una aritmética fiscal incorrecta, que es lo que la válvula
+  // nunca debe poder apagar.
+  POS_DECLARED_GROSS_FIXED_BASE_001: {
+    code: 'POS_DECLARED_GROSS_FIXED_BASE_001',
+    httpStatus: 422,
+    devMessage:
+      'Esta línea declara un precio bruto y su impuesto tiene base propia (fixed_base): el despeje de bruto declarado no puede repartirla y la base resultante sería incorrecta.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

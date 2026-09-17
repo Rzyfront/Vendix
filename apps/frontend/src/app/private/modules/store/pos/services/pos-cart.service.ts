@@ -55,6 +55,13 @@ import {
   estimateNetBase,
   estimatePriceWithTax,
 } from '../../products/utils/product-tax-inclusive.util';
+// F-222/F-225 (ADR-16): kernel único de aritmética de dinero compartido con
+// el backend — ver `apps/frontend/tsconfig.app.json` (`paths`) para el
+// mapeo de `@money-kernel`. Reemplaza `Math.abs(a - b) >= 0.01`, que compara
+// en punto flotante y el mismo centavo de diferencia cruza o no el umbral
+// según la magnitud de `a`/`b` (payments.service.ts ya migró el espejo
+// backend de este mismo gate).
+import { differsByAtLeastCents } from '@money-kernel/money-compare';
 
 /**
  * Presentational "faltan N und para el siguiente tramo" hint for an auto-apply
@@ -2299,8 +2306,13 @@ export class PosCartService {
       isPriceOverridden:
         item.itemType === 'custom'
           ? false
-          : Math.abs(finalPrice - (item.originalFinalPrice ?? item.finalPrice)) >=
-            0.01,
+          // F-225: `>= 0.01` original rechazaba DESDE 1 centavo — traducción
+          // fiel es el umbral por defecto (1) de `differsByAtLeastCents`, no
+          // un umbral inventado.
+          : differsByAtLeastCents(
+              finalPrice,
+              item.originalFinalPrice ?? item.finalPrice,
+            ),
       priceOverrideReason: request.reason?.trim() || item.priceOverrideReason,
     };
 

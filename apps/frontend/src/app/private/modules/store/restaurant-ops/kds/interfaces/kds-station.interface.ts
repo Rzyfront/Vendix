@@ -20,7 +20,7 @@ export interface KdsStation {
    */
   is_default: boolean;
   location_id: number | null;
-  _count?: { sessions: number; products: number };
+  _count?: { sessions: number; products: number; tickets?: number };
 }
 
 export type KdsSessionStatus = 'open' | 'closed';

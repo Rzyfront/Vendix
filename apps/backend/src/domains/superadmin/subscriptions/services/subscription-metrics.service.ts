@@ -34,6 +34,7 @@ export interface LTVResult {
 export interface ActiveBreakdownResult {
   by_state: Record<string, number>;
   by_plan: Array<{ plan_id: number; plan_name: string; count: number }>;
+  by_billing_cycle: Array<{ billing_cycle: string; count: number }>;
 }
 
 export interface MRREvolutionPoint {
@@ -199,23 +200,38 @@ export class SubscriptionMetricsService {
     const plans = planIds.length
       ? await this.prisma.subscription_plans.findMany({
           where: { id: { in: planIds } },
-          select: { id: true, name: true },
+          select: { id: true, name: true, billing_cycle: true },
         })
       : [];
-    const planNameById = new Map(plans.map((p) => [p.id, p.name] as const));
+    const planById = new Map(plans.map((p) => [p.id, p] as const));
+
+    const cycleCounts: Record<string, number> = {};
 
     const by_plan = byPlanRows
       .filter(
         (row): row is typeof row & { plan_id: number } => row.plan_id !== null,
       )
-      .map((row) => ({
-        plan_id: row.plan_id,
-        plan_name: planNameById.get(row.plan_id) ?? `Plan #${row.plan_id}`,
-        count: row._count._all,
+      .map((row) => {
+        const plan = planById.get(row.plan_id);
+        const cycle = plan?.billing_cycle ?? 'monthly';
+        cycleCounts[cycle] = (cycleCounts[cycle] ?? 0) + row._count._all;
+
+        return {
+          plan_id: row.plan_id,
+          plan_name: plan?.name ?? `Plan #${row.plan_id}`,
+          count: row._count._all,
+        };
+      })
+      .sort((a, b) => b.count - a.count);
+
+    const by_billing_cycle = Object.entries(cycleCounts)
+      .map(([billing_cycle, count]) => ({
+        billing_cycle,
+        count,
       }))
       .sort((a, b) => b.count - a.count);
 
-    return { by_state, by_plan };
+    return { by_state, by_plan, by_billing_cycle };
   }
 
   // ─── MRR Evolution ─────────────────────────────────────────────────

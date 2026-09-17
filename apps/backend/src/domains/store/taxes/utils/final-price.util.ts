@@ -190,17 +190,208 @@ export function resolveLineUnits(
  * tasas del producto, y ese valor × `line_units` redondeado a 2.
  * `final_unit_price` no depende del multiplicador: sólo el total de línea
  * cambia (C.12, cierra F-202).
+ *
+ * F-151 (major, CP-pos-exclusive-tax-double-charge) — ADR-08 declara
+ * `tax_amount_item IS NULL` el marcador permanente y gratuito que distingue
+ * las DOS convenciones que conviven hoy en `order_items`: las líneas VIEJAS
+ * (pre-ADR-08) persisten el PRECIO PUBLICADO (bruto) en `unit_price` y dejan
+ * `tax_amount_item` en NULL; las líneas NUEVAS (post-ADR-08,
+ * `table-sessions.service.ts:addItems` ~:800-870) persisten la BASE en
+ * `unit_price` y el impuesto POR UNIDAD de precio en `tax_amount_item`. Antes
+ * de este fix esta función le aplicaba las tasas a `unit_price`
+ * incondicionalmente: para una línea vieja con una tasa EXCLUSIVA eso volvía
+ * a sumar el impuesto sobre un valor que YA era bruto (`bruto × 1,19`),
+ * inflando la pantalla. Ahora honra el marcador: si la línea NO trae
+ * desglose (`tax_amount_item` explícitamente `null`, el caso real de una fila
+ * pre-ADR-08 leída con el campo proyectado) el `unit_price` persistido YA es
+ * el final publicado — se expone tal cual, sin volver a aplicar tasas. Con
+ * desglose presente (`tax_amount_item` con un valor) se deriva como siempre,
+ * porque ahí `unit_price` es la base.
+ *
+ * `tax_amount_item` es OPCIONAL a propósito: un llamador que no lo pase
+ * (queda `undefined`, no `null`) cae en la rama "con desglose" y conserva
+ * EXACTAMENTE el comportamiento de hoy (deriva siempre) — así ningún
+ * llamador ajeno a este fix cambia de semántica sin que nadie lo revise.
  */
 export function resolveOrderLineFinals(
-  line: OrderLineUnitsInput & { unit_price: unknown },
+  line: OrderLineUnitsInput & {
+    unit_price: unknown;
+    tax_amount_item?: unknown;
+  },
   rates: TypedTaxRate[] | null | undefined,
 ): { final_unit_price: number; final_total_price: number } {
-  const final_unit_price = resolveLineTotals(
-    Number(line?.unit_price),
-    rates ?? [],
-  ).total;
+  const unitPrice = Number(line?.unit_price);
+  // Marcador ADR-08: SOLO `null` explícito (línea vieja proyectada sin
+  // desglose) desactiva el re-cálculo. `undefined` (campo ni siquiera
+  // pasado por el llamador) NO cuenta como marcador — preserva el
+  // comportamiento histórico para quien todavía no fue migrado.
+  const hasNoTaxBreakdown = line?.tax_amount_item === null;
+  const final_unit_price = hasNoTaxBreakdown
+    ? unitPrice
+    : resolveLineTotals(unitPrice, rates ?? []).total;
   return {
     final_unit_price,
     final_total_price: roundMoney2(final_unit_price * resolveLineUnits(line)),
+  };
+}
+
+/**
+ * Línea de orden con su desglose de impuesto PERSISTIDO. Las dos magnitudes
+ * tienen unidades distintas y confundirlas es el defecto F-050:
+ * `order_item_taxes[].tax_amount` es el impuesto TOTAL de la línea;
+ * `order_items.tax_amount_item` es el impuesto POR UNIDAD de precio (ADR-10).
+ */
+export interface OrderLineTaxSnapshotInput extends OrderLineUnitsInput {
+  tax_amount_item?: unknown;
+  order_item_taxes?: Array<{ tax_amount?: unknown } | null> | null;
+}
+
+function toFiniteNumber(value: unknown): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Impuesto TOTAL de una línea de orden, leído del snapshot persistido.
+ *
+ * UNA definición para lo que hoy está copiado en tres sitios con la misma
+ * prioridad: `table-sessions.service.ts:appendItems` (F-050),
+ * `payments.service.ts:applyPosPaymentToTableSession` y
+ * `payments.service.ts:createOrUpdateOrderFromPos`. La prioridad es la que ya
+ * fijó F-050 y no cambia acá:
+ *
+ *   1. `order_item_taxes` si la línea tiene filas — YA es el total de línea,
+ *      es el snapshot de lo que se cobró y soporta desglose mixto (N tasas).
+ *   2. Si no hay filas, el escalar histórico `tax_amount_item` × `line_units`.
+ *      Para una línea pre-ADR-08 (`tax_amount_item` NULL) eso da 0, que es
+ *      exactamente lo que vale hoy: no se finge un impuesto que nadie calculó.
+ *
+ * No recalcula desde tasas a propósito. Recalcular exige conocer
+ * `is_inclusive` por tasa, y post-ADR-08 `unit_price` es la base NETA también
+ * para las tasas INCLUSIVAS (`checkout.service.ts:1472` persiste `netPrice`):
+ * volver a resolver con `resolveLineTotals` devolvería el precio intacto para
+ * esas líneas y perdería el impuesto entero. El snapshot no tiene esa
+ * ambigüedad.
+ */
+export function resolveOrderLineTaxTotal(
+  line: OrderLineTaxSnapshotInput | null | undefined,
+): number {
+  const rows = line?.order_item_taxes;
+  if (Array.isArray(rows) && rows.length > 0) {
+    return roundMoney2(
+      rows.reduce((sum, row) => sum + toFiniteNumber(row?.tax_amount), 0),
+    );
+  }
+  const perUnit = toFiniteNumber(line?.tax_amount_item);
+  if (perUnit === 0) return 0;
+  return roundMoney2(perUnit * resolveLineUnits(line));
+}
+
+/**
+ * Columnas BRUTAS de una línea para un documento que declara
+ * `money_basis: 'gross'` (ADR-12 / G-01: el tiquete del mostrador es papel
+ * comercial, sus columnas van en bruto y el IVA va como nota no sumada).
+ *
+ * Post-ADR-08 `order_items.unit_price`/`total_price` son la BASE gravable: un
+ * documento que los imprime tal cual bajo `money_basis: 'gross'` publica
+ * columnas que no suman su propio TOTAL, y la regla anti-huérfana del
+ * compositor —correcta— suprime `Subtotal:` e `Impuestos:` justamente porque
+ * se le declaró bruto, así que nada en el papel explica la diferencia.
+ *
+ * `gross_total_price` se deriva del impuesto de LÍNEA (no de
+ * `gross_unit_price × unidades`) para que Σ líneas cierre contra
+ * `grand_total` al centavo: el unitario es presentación, el total es la
+ * magnitud que el invariante de suma verifica.
+ *
+ * Marcador ADR-08: con `tax_amount_item` explícitamente `null` la línea es
+ * pre-ADR-08 y `unit_price`/`total_price` YA son el bruto publicado — se
+ * devuelven intactos, sin sumar nada encima.
+ */
+export function resolveOrderLinePrintedGross(
+  line: OrderLineTaxSnapshotInput & {
+    unit_price?: unknown;
+    total_price?: unknown;
+  },
+): { gross_unit_price: number; gross_total_price: number } {
+  const units = resolveLineUnits(line);
+  const baseUnit = toFiniteNumber(line?.unit_price);
+  const baseTotal =
+    line?.total_price === null || line?.total_price === undefined
+      ? roundMoney2(baseUnit * units)
+      : toFiniteNumber(line.total_price);
+
+  if (line?.tax_amount_item === null) {
+    return { gross_unit_price: baseUnit, gross_total_price: baseTotal };
+  }
+
+  const lineTax = resolveOrderLineTaxTotal(line);
+  if (lineTax === 0) {
+    return { gross_unit_price: baseUnit, gross_total_price: baseTotal };
+  }
+
+  return {
+    gross_unit_price: roundMoney2(baseUnit + (units > 0 ? lineTax / units : 0)),
+    gross_total_price: roundMoney2(baseTotal + lineTax),
+  };
+}
+
+/**
+ * Entrada mínima de una línea de remisión para derivar sus columnas BRUTAS.
+ * `quantity` es la cantidad despachada, `tax_amount` el impuesto TOTAL de la
+ * línea y `discount_amount` el descuento TOTAL de la línea (ambos ya en base
+ * de línea, no por unidad).
+ */
+export interface DispatchNoteLineGrossInput {
+  unit_price?: unknown;
+  total_price?: unknown;
+  tax_amount?: unknown;
+  discount_amount?: unknown;
+  quantity?: unknown;
+}
+
+/**
+ * Columnas BRUTAS de una línea de remisión (`dispatch_note_items`) para un
+ * documento que declara `money_basis: 'gross'`.
+ *
+ * Hallazgo 1b (F-228 reabierto): las dos convenciones de `total_price`
+ * conviven en el histórico. Las filas NUEVAS lo persisten en BRUTO
+ * (`unit_price × cantidad − descuento + tax_amount`,
+ * `dispatch-notes.service.ts:1247/1749`); las filas VIEJAS (18 históricas B)
+ * lo guardan en BASE, así que derivar el unitario como
+ * `baseUnit + lineTax/quantity` manteniendo el total persistido imprime una
+ * fila que no cuadra consigo misma. El discriminante es aritmético, estilo
+ * ADR-08: se reconstruye la base de línea y se compara contra el total
+ * persistido con tolerancia de un centavo.
+ *
+ *   `baseLine = baseUnit × quantity − discount`
+ *   `totalIsGross = |persistedTotal − (baseLine + lineTax)| < 0.01`
+ *   `grossTotal = totalIsGross ? persistedTotal : persistedTotal + lineTax`
+ *   `grossUnit = quantity > 0 ? grossTotal / quantity : baseUnit`
+ *
+ * El unitario es presentación (redondeado a 2 vía `roundMoney2`); el total es
+ * la magnitud que el invariante de suma verifica. Definición ÚNICA para lo
+ * que hoy está duplicado en los dos rieles de impresión de la remisión
+ * (`print-formats/providers/dispatch-note.provider.ts` y
+ * `dispatch-notes/pdf/dispatch-note-pdf.service.ts`): ambos la consumen sin
+ * aritmética propia para no volver a divergir.
+ */
+export function resolveDispatchNoteLinePrintedGross(
+  line: DispatchNoteLineGrossInput | null | undefined,
+): { gross_unit_price: number; gross_total_price: number } {
+  const quantity = toFiniteNumber(line?.quantity);
+  const baseUnit = toFiniteNumber(line?.unit_price);
+  const persistedTotal = toFiniteNumber(line?.total_price);
+  const lineTax = toFiniteNumber(line?.tax_amount);
+  const discount = toFiniteNumber(line?.discount_amount);
+  const baseLine = baseUnit * quantity - discount;
+  const totalIsGross =
+    Math.abs(persistedTotal - (baseLine + lineTax)) < 0.01;
+  const grossTotal = totalIsGross
+    ? persistedTotal
+    : roundMoney2(persistedTotal + lineTax);
+  return {
+    gross_unit_price:
+      quantity > 0 ? roundMoney2(grossTotal / quantity) : baseUnit,
+    gross_total_price: grossTotal,
   };
 }

@@ -711,7 +711,26 @@ export class TableSessionPageComponent implements OnInit {
    */
   canRemoveItem(item: TableSessionOrderItem): boolean {
     if (this.isClosed()) return false;
+    // Paso 6 plan 1060 — espejo del bloqueo en mesa: un ítem entregado
+    // (`delivered_at`, hecho de servicio) ya no se puede cancelar. Solo
+    // presentación: el enforcement real lo pone el backend (paso 1).
+    if (this.isDelivered(item)) return false;
     return !this.isItemFired(item) || this.kitchenStatusFor(item) === 'pending';
+  }
+
+  /**
+   * Paso 6 plan 1060 — motivo del botón eliminar cuando está bloqueado por
+   * entrega, patrón `deliverDisabledReason` del KDS: el botón queda VISIBLE
+   * pero deshabilitado con tooltip. Solo cubre `delivered_at`/entregado;
+   * el resto de estados bloqueados siguen ocultos (comportamiento actual).
+   * Retorna null cuando no hay bloqueo por entrega que señalizar.
+   */
+  removeDisabledReason(item: TableSessionOrderItem): string | null {
+    if (this.isClosed()) return null;
+    if (item.cancelled_at) return null;
+    if (this.isDelivered(item))
+      return 'Ya fue entregado al cliente. No se puede cancelar.';
+    return null;
   }
 
   kitchenBadgeVariant(status: KitchenTicketItemRefStatus): BadgeVariant {

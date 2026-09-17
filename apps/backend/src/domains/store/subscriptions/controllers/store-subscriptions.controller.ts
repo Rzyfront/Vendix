@@ -36,6 +36,7 @@ import { SubscriptionQueryDto } from '../dto/subscription-query.dto';
 import { TokenizePaymentMethodDto } from '../dto/tokenize-payment-method.dto';
 import { Prisma } from '@prisma/client';
 import { SkipSubscriptionGate } from '../decorators/skip-subscription-gate.decorator';
+import { isAIFeatureKey } from '../types/access.types';
 import { PromotionalRulesEvaluator } from '../evaluators/promotional-rules.evaluator';
 import { PromoEligibilityResult } from '../types/promo.types';
 
@@ -306,6 +307,37 @@ export class StoreSubscriptionsController {
     const data =
       await this.accessService.getDunningStateForCurrentStore(storeId);
     return this.responseService.success(data, 'Dunning state retrieved');
+  }
+
+  /**
+   * F7 — sugerencia de upgrade para el modal paywall (`SUBSCRIPTION_005` /
+   * `SUBSCRIPTION_006`): plan actual de la tienda (nombre + qué features IA
+   * incluye) y el siguiente plan del catálogo público que sí cubre la
+   * feature pedida, con CTA al picker.
+   *
+   * Solo lectura y con `@SkipSubscriptionGate` a nivel de clase: una tienda
+   * bloqueada debe poder ver su camino de salida. El scope de tenant sale
+   * de `RequestContextService` (nunca del query), así que no hay fuga
+   * entre tiendas.
+   */
+  @Get('upgrade-suggestion')
+  async getUpgradeSuggestion(@Query('feature') feature?: string) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    if (!isAIFeatureKey(feature)) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR,
+        'Invalid AI feature',
+      );
+    }
+
+    const data = await this.accessService.suggestUpgradeForFeature(
+      storeId,
+      feature,
+    );
+    return this.responseService.success(data, 'Upgrade suggestion retrieved');
   }
 
   /**

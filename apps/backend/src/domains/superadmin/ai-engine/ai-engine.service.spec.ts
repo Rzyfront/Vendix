@@ -13,6 +13,8 @@ describe('AIEngineConfigService', () => {
     };
   };
   let aiEngine: { reloadConfigurations: jest.Mock };
+  let toolRegistry: { getAll: jest.Mock };
+  let moduleRef: { get: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -26,11 +28,15 @@ describe('AIEngineConfigService', () => {
       },
     };
     aiEngine = { reloadConfigurations: jest.fn() };
+    toolRegistry = { getAll: jest.fn().mockReturnValue([]) };
+    moduleRef = { get: jest.fn() };
 
     service = new AIEngineConfigService(
       prisma as any,
       aiEngine as any,
       {} as any,
+      toolRegistry as any,
+      moduleRef as any,
     );
   });
 
@@ -301,6 +307,136 @@ describe('AIEngineConfigService', () => {
           where: expect.objectContaining({ model_type: 'embedding' }),
         }),
       );
+    });
+  });
+
+  describe('tools catalog (F5)', () => {
+    it('projects the live registry with category derived from execution flags', async () => {
+      toolRegistry.getAll.mockReturnValueOnce([
+        {
+          name: 'search_products',
+          domain: 'products',
+          description: 'Busca productos',
+          requiredPermissions: ['products.read'],
+          readOnly: true,
+        },
+        {
+          name: 'create_stock_adjustment',
+          domain: 'inventory',
+          description: 'Ajusta stock',
+          requiredPermissions: ['inventory.write'],
+          requiresConfirmation: true,
+        },
+        {
+          name: 'ui_navigate',
+          domain: 'ui',
+          description: 'Navega la app',
+          clientSide: true,
+        },
+      ]);
+
+      await expect(service.getToolsCatalog()).resolves.toEqual([
+        expect.objectContaining({
+          name: 'search_products',
+          domain: 'products',
+          category: 'read',
+          requiredPermissions: ['products.read'],
+        }),
+        expect.objectContaining({
+          name: 'create_stock_adjustment',
+          category: 'write',
+        }),
+        expect.objectContaining({
+          name: 'ui_navigate',
+          category: 'ui',
+          requiredPermissions: [],
+        }),
+      ]);
+    });
+
+    it('returns an empty catalog when no tool is registered', async () => {
+      await expect(service.getToolsCatalog()).resolves.toEqual([]);
+    });
+  });
+
+  describe('queues overview and job lookup (F5)', () => {
+    it('marks unregistered queues as unavailable instead of throwing', async () => {
+      moduleRef.get.mockImplementation(() => {
+        throw new Error('provider not found');
+      });
+
+      const overview = await service.getQueuesOverview();
+
+      expect(overview.queues).toHaveLength(5);
+      expect(overview.queues.map((q) => q.name)).toEqual([
+        'ai-generation',
+        'ai-embedding',
+        'ai-agent',
+        'receipt-scan',
+        'expense-scan',
+      ]);
+      for (const entry of overview.queues) {
+        expect(entry.available).toBe(false);
+        expect(entry.counts).toBeNull();
+        expect(typeof entry.error).toBe('string');
+      }
+    });
+
+    it('reports live counts for registered queues', async () => {
+      const counts = {
+        waiting: 2,
+        active: 1,
+        completed: 10,
+        failed: 0,
+        delayed: 0,
+        paused: 0,
+      };
+      moduleRef.get.mockReturnValue({ getJobCounts: jest.fn().mockResolvedValue(counts) });
+
+      const overview = await service.getQueuesOverview();
+
+      expect(
+        overview.queues.every(
+          (q) => q.available && q.counts === counts && q.error === null,
+        ),
+      ).toBe(true);
+    });
+
+    it('rejects an unknown queue name with AI_QUEUE_002', async () => {
+      await expect(
+        service.getQueueJobStatus('cola-fantasma', '1'),
+      ).rejects.toMatchObject({ errorCode: 'AI_QUEUE_002' });
+      expect(moduleRef.get).not.toHaveBeenCalled();
+    });
+
+    it('rejects a missing job with AI_QUEUE_002', async () => {
+      moduleRef.get.mockReturnValue({ getJob: jest.fn().mockResolvedValue(null) });
+
+      await expect(
+        service.getQueueJobStatus('ai-generation', '99999'),
+      ).rejects.toMatchObject({ errorCode: 'AI_QUEUE_002' });
+    });
+
+    it('returns the AIJobResult shape for a known job', async () => {
+      moduleRef.get.mockReturnValue({
+        getJob: jest.fn().mockResolvedValue({
+          id: '42',
+          getState: jest.fn().mockResolvedValue('completed'),
+          returnvalue: { ok: true },
+          failedReason: null,
+          progress: 100,
+        }),
+      });
+
+      await expect(
+        service.getQueueJobStatus('receipt-scan', '42'),
+      ).resolves.toEqual({
+        job_id: '42',
+        status: 'completed',
+        result: { ok: true },
+        error: null,
+        progress: 100,
+      });
     });
   });
 });

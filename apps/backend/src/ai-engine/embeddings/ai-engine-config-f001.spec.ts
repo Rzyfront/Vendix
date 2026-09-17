@@ -49,6 +49,9 @@ describe('AIEngineConfigService.update — F-001 masked ref regression', () => {
       prisma as any,
       aiEngine as any,
       {} as any,
+      // F5 añade registry + moduleRef al constructor; este spec no los usa.
+      { getAll: jest.fn().mockReturnValue([]) } as any,
+      { get: jest.fn() } as any,
     );
   });
 

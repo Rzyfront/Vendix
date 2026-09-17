@@ -1116,6 +1116,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No hay métodos de pago configurados para cobro directo.',
   POS_CREDIT_METHOD_MISSING_001:
     'No hay métodos de pago configurados para venta a crédito.',
+  // F-070 — el backend rechaza el cobro (`payments.service.ts`) cuando el
+  // precio enviado difiere del catálogo y el producto tiene
+  // `allow_pos_price_override = false`. Sin este copy el cajero veía el
+  // mensaje genérico de SYS_VALIDATION_001, que no explica qué corregir.
+  POS_PRICE_OVERRIDE_NOT_ALLOWED_001:
+    'Este producto no permite editar su precio en el POS. Cóbralo al precio de catálogo o habilita el override de precio para este producto.',
   ORD_EDIT_STATE_CHANGED_001:
     'La orden cambió mientras se editaba. Actualiza la pantalla.',
   ORD_EDIT_NOT_ALLOWED_001: 'Esta orden ya no se puede editar.',

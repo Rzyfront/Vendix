@@ -79,7 +79,12 @@ export class CreateDispatchNoteItemDto {
   @IsNumber({ maxDecimalPlaces: 4 })
   discount_amount?: number;
 
-  /** See {@link CreateDispatchNoteItemDto.unit_price} for why 4 decimals. */
+  /**
+   * Impuesto TOTAL de la línea (magnitud LÍNEA, no unitaria): se suma tal cual
+   * al total (`subtotal − descuento + tax_amount`). Ejemplo con qty > 1:
+   * 3 uds. a 1.000 con IVA 19 % → `tax_amount = 570`, no 190.
+   * See {@link CreateDispatchNoteItemDto.unit_price} for why 4 decimals.
+   */
   @IsOptional()
   @Transform(toOptionalNumber)
   @IsNumber({ maxDecimalPlaces: 4 })

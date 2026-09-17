@@ -41,7 +41,9 @@ export interface Product {
   name: string;
   sku: string;
   price: number;
-  final_price: number;
+  // F-221 — calculado de lectura (ver `vendix-calculated-pricing`): el payload
+  // puede no traerlo y entonces la clave queda ausente, nunca fabricada.
+  final_price?: number;
   cost?: number;
   is_on_sale?: boolean;
   sale_price?: number | null;
@@ -561,9 +563,14 @@ export class PosProductService {
         name: product.name || '',
         sku: product.sku || '',
         price: parseFloat(product.base_price || product.price || 0),
-        final_price: parseFloat(
-          product.final_price || product.base_price || product.price || 0,
-        ),
+        // F-221 — no fabricar `final_price`: el `||` convertía la ausencia en
+        // el NETO (`base_price`) y lo declaraba como BRUTO editado (-19 %).
+        // Si el payload no lo trae, la clave queda ausente y el catálogo manda
+        // (`resolveCatalogFinalUnitPrice` en el carrito, `catalogFinalPrice`
+        // en el backend).
+        ...(product.final_price != null && Number(product.final_price) > 0
+          ? { final_price: Number(product.final_price) }
+          : {}),
         active_promotion: activePromotion,
         allow_pos_price_override: product.allow_pos_price_override === true,
         cost: product.cost_price ? parseFloat(product.cost_price) : undefined,

@@ -109,6 +109,40 @@ export class AIEngineController {
     );
   }
 
+  @Get('tools')
+  @ApiOperation({ summary: 'Live AI tool catalog from the tool registry' })
+  @ApiResponse({ status: 200, description: 'Tools retrieved' })
+  async getTools() {
+    const tools = await this.aiEngineConfigService.getToolsCatalog();
+    return this.responseService.success(tools, 'AI tools retrieved');
+  }
+
+  @Get('jobs')
+  @ApiOperation({ summary: 'AI queue overview with live job counts' })
+  @ApiResponse({ status: 200, description: 'Queue overview retrieved' })
+  async getJobs() {
+    const overview = await this.aiEngineConfigService.getQueuesOverview();
+    return this.responseService.success(
+      overview,
+      'AI queue overview retrieved',
+    );
+  }
+
+  @Get('jobs/:queueName/:jobId')
+  @ApiOperation({ summary: 'Get AI job status by queue and job id' })
+  @ApiResponse({ status: 200, description: 'Job status retrieved' })
+  @ApiResponse({ status: 404, description: 'Queue or job not found' })
+  async getJobStatus(
+    @Param('queueName') queueName: string,
+    @Param('jobId') jobId: string,
+  ) {
+    const job = await this.aiEngineConfigService.getQueueJobStatus(
+      queueName,
+      jobId,
+    );
+    return this.responseService.success(job, 'AI job status retrieved');
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get an AI engine configuration by ID' })
   @ApiResponse({ status: 200, description: 'Configuration retrieved' })

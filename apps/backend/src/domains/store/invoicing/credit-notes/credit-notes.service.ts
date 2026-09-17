@@ -14,6 +14,7 @@ import {
 import { InvoiceNumberGenerator } from '../utils/invoice-number-generator';
 import { RESOLUTION_PUBLIC_SELECT } from '../utils/technical-key.util';
 import { absorbInclusiveLine } from '../utils/dian-money.util';
+import { normalizeInvoiceTaxRate } from '../utils/invoice-tax-rate.util';
 import {
   localDateString,
   resolveStoreTimezone,
@@ -482,7 +483,16 @@ export class CreditNotesService {
                 return {
                   tax_rate_id: tax_item.tax_rate_id,
                   tax_name: tax_item.tax_name,
-                  tax_rate: new Prisma.Decimal(tax_item.tax_rate),
+                  // F-212 — la nota es copista pura: el `tax_rate` que recibe
+                  // viaja tal cual a `invoice_taxes` (`Decimal(5,2)`,
+                  // PORCENTAJE). Por eso la nota 170 heredó el `0.19` de la
+                  // factura 67. Este es un SEGUNDO escritor: no pasa por
+                  // `buildInvoiceTaxCreateInput`, así que necesita el mismo
+                  // desambiguador que el escritor de facturas.
+                  tax_rate: normalizeInvoiceTaxRate(
+                    tax_item.tax_rate,
+                    (tax_item as any).tax_type,
+                  ),
                   taxable_amount: new Prisma.Decimal(tax_item.taxable_amount),
                   tax_amount: new Prisma.Decimal(tax_item.tax_amount),
                   tax_type: ((tax_item as any).tax_type ?? 'iva') as any,

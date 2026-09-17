@@ -488,16 +488,34 @@ export class WebhookHandlerService {
       // line per type: IVA → 2408, INC → 2436, ICA → 241205). Mirrors the
       // POS path in `payments.service.ts` so the listener payload is
       // shape-compatible regardless of origin.
+      //
+      // F-111 (CP-pos-exclusive-tax-double-charge) — mismo tratamiento que
+      // `payments.service.ts`: se trae `total_price` de la línea y
+      // `tax_rate` (ya fracción, `Decimal(6,5)`, no dividir) de cada
+      // impuesto para que `buildTaxBreakdown` pueda armar la compuerta de
+      // detección de `AutoEntryService.resolveTaxLines`.
       const orderItemsWithTaxes = await client.order_items.findMany({
         where: { order_id: order.id },
         select: {
+          total_price: true,
+          // `is_inclusive` no se lee: `total_price` ya es el NETO en
+          // ambas ramas del escritor. Ver el comentario extenso en
+          // `payments.service.ts`.
           order_item_taxes: {
-            select: { tax_type: true, tax_amount: true },
+            select: { tax_type: true, tax_amount: true, tax_rate: true },
           },
         },
       });
       const tax_breakdown = buildTaxBreakdown(
-        orderItemsWithTaxes.flatMap((i) => i.order_item_taxes || []),
+        orderItemsWithTaxes.flatMap((item) =>
+          (item.order_item_taxes || []).map((tax) => ({
+            ...tax,
+            // F-111 — misma regla documentada en `payments.service.ts`: la
+            // base de cada impuesto de la línea es el `total_price` completo
+            // de esa línea.
+            taxable_amount: Number(item.total_price || 0),
+          })),
+        ),
       );
 
       const systemPaymentMethod =

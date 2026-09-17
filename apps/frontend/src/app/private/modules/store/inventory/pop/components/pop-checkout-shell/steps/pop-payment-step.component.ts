@@ -24,6 +24,11 @@ import { InputComponent } from '../../../../../../../../shared/components/input/
 import { InputButtonsComponent } from '../../../../../../../../shared/components/input-buttons/input-buttons.component';
 import { IconComponent } from '../../../../../../../../shared/components/icon/icon.component';
 import { PopCartState } from '../../../interfaces/pop-cart.interface';
+// F-225 (ADR-16): mismo kernel de dinero que `pos-cart.service.ts` — ver
+// `apps/frontend/tsconfig.app.json` (`paths`). `Math.abs(a - b) <= 0.01`
+// tolera EXACTAMENTE 1 centavo; la traducción fiel es
+// `!differsByAtLeastCents(a, b, 2)`, no el umbral por defecto (1).
+import { differsByAtLeastCents } from '@money-kernel/money-compare';
 
 export type PopPaymentMode = 'immediate' | 'partial' | 'deferred' | 'installments';
 
@@ -173,7 +178,7 @@ export class PopPaymentStepComponent {
   });
 
   readonly installmentsBalanced = computed<boolean>(
-    () => Math.abs(this.installmentsTotal() - this.pendingBalance()) <= 0.01,
+    () => !differsByAtLeastCents(this.installmentsTotal(), this.pendingBalance(), 2),
   );
 
   /** Plan emitido al shell/padre, vigente en cada cambio del formulario. */

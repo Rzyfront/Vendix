@@ -30,15 +30,27 @@ export class KdsService {
     return storeId;
   }
 
+  /**
+   * El `_count` (sesiones, productos, tickets) es contrato con el frontend:
+   * con él decide entre borrado físico (`hard=true`, sin historial) y baja
+   * lógica. No quitarlo sin coordinar con el agente de consumo.
+   */
+  private static readonly KDS_COUNT_INCLUDE = {
+    _count: { select: { sessions: true, products: true, tickets: true } },
+  } as const;
+
   async findAll() {
     return this.prisma.kds.findMany({
       orderBy: [{ is_default: 'desc' }, { is_active: 'desc' }, { name: 'asc' }],
-      include: { _count: { select: { sessions: true, products: true } } },
+      include: KdsService.KDS_COUNT_INCLUDE,
     });
   }
 
   async findOne(id: number) {
-    const station = await this.prisma.kds.findFirst({ where: { id } });
+    const station = await this.prisma.kds.findFirst({
+      where: { id },
+      include: KdsService.KDS_COUNT_INCLUDE,
+    });
     if (!station) throw new VendixHttpException(ErrorCodes.KDS_NOT_FOUND);
     return station;
   }
@@ -127,11 +139,32 @@ export class KdsService {
   }
 
   /**
-   * Baja lógica. No se borra la fila: `kitchen_tickets.kds_id` es NOT NULL con
-   * FK RESTRICT, así que borrar una estación con historial fallaria — y debe
-   * fallar, no arrastrar los tickets.
+   * Reactivación explícita de una estación dada de baja lógica. Siempre
+   * permitida (incluso sobre el default: un default nunca está inactivo, así
+   * que no hay conflicto posible) e idempotente: si ya está activa, no-op.
+   * No toca `is_default`: promover es trabajo de `update({ is_default })`.
    */
-  async remove(id: number) {
+  async activate(id: number) {
+    const storeId = this.requireStoreId();
+    const current = await this.findOne(id);
+    if (current.is_active) return current;
+
+    await this.prisma.kds.updateMany({
+      where: { id, store_id: storeId },
+      data: { is_active: true, updated_at: new Date() },
+    });
+    return this.findOne(id);
+  }
+
+  /**
+   * Baja lógica (vía normal). No se borra la fila: `kitchen_tickets.kds_id`
+   * es NOT NULL con FK RESTRICT, así que borrar una estación con historial
+   * fallaria — y debe fallar, no arrastrar los tickets. Para borrar la fila
+   * ver `hardDelete` (`DELETE ?hard=true`).
+   */
+  async remove(id: number, hard = false) {
+    if (hard) return this.hardDelete(id);
+
     const storeId = this.requireStoreId();
     const current = await this.findOne(id);
     if (current.is_default) {
@@ -151,6 +184,78 @@ export class KdsService {
       data: { is_active: false, updated_at: new Date() },
     });
     return this.findOne(id);
+  }
+
+  /**
+   * Borrado FÍSICO. Solo procede sobre una estación sin historial:
+   *
+   *  1. El default nunca se borra (promover otra antes).
+   *  2. Con sesión abierta, 409 `KDS_HAS_OPEN_SESSION` — el chequeo va ANTES
+   *     del de historial porque una sesión abierta también cuenta como
+   *     historial y el operador necesita el mensaje accionable (cerrarla).
+   *  3. Con sesiones (cualquier estado) o tickets, 409 `KDS_HAS_HISTORY` con
+   *     conteos en `details`: la vía es la baja lógica.
+   *  4. Con productos apuntando (`products.kds_id`), 409 `KDS_HAS_PRODUCTS`:
+   *     la FK es SET NULL y la DB dejaría borrar, pero huérfanos de tablero
+   *     caerían al default en el fire. Reasignar antes de reintentar.
+   *
+   * Sin historial borra con `deleteMany({ id, store_id })` — forma scope-safe
+   * (el scope mergearía un `delete` único en `{ AND: [...] }` y Prisma lo
+   * rechazaría antes de llegar a SQL).
+   */
+  async hardDelete(id: number) {
+    const storeId = this.requireStoreId();
+    const current = await this.findOne(id);
+    if (current.is_default) {
+      throw new VendixHttpException(
+        ErrorCodes.KDS_DEFAULT_PROTECTED,
+        `La estación ${id} es la estación por defecto: promueve otra antes de eliminarla`,
+        { kds_id: id },
+      );
+    }
+
+    const openSession = await this.prisma.kds_sessions.findFirst({
+      where: { kds_id: id, status: 'open' },
+      select: { id: true },
+    });
+    if (openSession) {
+      throw new VendixHttpException(
+        ErrorCodes.KDS_HAS_OPEN_SESSION,
+        undefined,
+        { kds_id: id, open_session_id: openSession.id },
+      );
+    }
+
+    const [sessionCount, ticketCount] = await Promise.all([
+      this.prisma.kds_sessions.count({ where: { kds_id: id } }),
+      this.prisma.kitchen_tickets.count({ where: { kds_id: id } }),
+    ]);
+    if (sessionCount > 0 || ticketCount > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.KDS_HAS_HISTORY,
+        `La estación ${id} tiene historial (${sessionCount} sesiones, ${ticketCount} tickets): desactívala en lugar de eliminarla`,
+        { kds_id: id, sessions: sessionCount, tickets: ticketCount },
+      );
+    }
+
+    const productCount = await this.prisma.products.count({
+      where: { kds_id: id },
+    });
+    if (productCount > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.KDS_HAS_PRODUCTS,
+        `La estación ${id} tiene ${productCount} producto(s) asignado(s): reasígnalos a otra estación antes de eliminarla`,
+        { kds_id: id, products: productCount },
+      );
+    }
+
+    const deleted = await this.prisma.kds.deleteMany({
+      where: { id, store_id: storeId },
+    });
+    if (deleted.count !== 1) {
+      throw new VendixHttpException(ErrorCodes.KDS_NOT_FOUND);
+    }
+    return { deleted: true, id };
   }
 
   /**

@@ -1917,6 +1917,104 @@ describe('PaymentsService', () => {
     });
 
     /**
+     * F-127 — hoy, si la compuerta de arriba (`POS_TABLE_LINE_TAX_UNRESOLVABLE_001`)
+     * dispara en una tienda por una combinación de catálogo no contemplada, esa
+     * tienda no puede cobrar hasta un revert + deploy completo con la caja
+     * parada. `taxLineGateSeverity` (resuelto en `processPosPayment` desde
+     * `settings.pos.tax_line_gate`, default `'block'`) permite bajarla por
+     * tienda sin redeploy. Estos tres casos prueban el parámetro aislado, con
+     * el mismo fixture (`lostAssignment`) que ya prueba el 'block' de arriba.
+     */
+    describe('buildPosOrderItem — F-127: severidad configurable de la compuerta fiscal (pos.tax_line_gate)', () => {
+      const tx = {
+        products: { findFirst: jest.fn().mockResolvedValue(product) },
+      };
+      const item = { product_id: product.id, quantity: 1, unit_price: 0 };
+
+      const lostAssignment: CalcProductTaxesResult = {
+        total_rate: 0,
+        total_tax_amount: 0,
+        base: 10000,
+        total: 10000,
+        taxes: [],
+        unclosed_residual_cents: 0,
+        invalid_inputs: [],
+        resolved_from: 'catalog',
+        has_tax_assignment: false,
+      };
+
+      afterEach(() => {
+        jest.restoreAllMocks();
+      });
+
+      it("'block' explícito en cierre de mesa lanza POS_TABLE_LINE_TAX_UNRESOLVABLE_001 — mismo comportamiento que sin configurar la clave", async () => {
+        calculateProductTaxesMock.mockResolvedValue(lostAssignment);
+
+        await expect(
+          (service as any).buildPosOrderItem(
+            tx,
+            item,
+            dtoStoreId,
+            posUser,
+            undefined,
+            123,
+            true,
+            'block',
+          ),
+        ).rejects.toMatchObject({
+          errorCode: ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001.code,
+        });
+      });
+
+      it("'warn' NO lanza — deja pasar la línea normalizando el impuesto a cero y registra el mismo detalle (tienda/orden/producto) por logger.warn", async () => {
+        calculateProductTaxesMock.mockResolvedValue(lostAssignment);
+        const warnSpy = jest.spyOn((service as any).logger, 'warn');
+
+        const result = await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+          123,
+          true,
+          'warn',
+        );
+
+        expect(result.tax_amount_item).toBe(0);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            event: 'payments.pos_table_line_tax_unresolvable',
+            code: ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001.code,
+            severity: 'warn',
+            store_id: dtoStoreId,
+            order_ref: 123,
+            product_id: product.id,
+          }),
+        );
+      });
+
+      it("'off' NO lanza y NO registra — silencio total, deja pasar la línea igual que 'warn' pero sin dejar rastro", async () => {
+        calculateProductTaxesMock.mockResolvedValue(lostAssignment);
+        const warnSpy = jest.spyOn((service as any).logger, 'warn');
+
+        const result = await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+          123,
+          true,
+          'off',
+        );
+
+        expect(result.tax_amount_item).toBe(0);
+        expect(warnSpy).not.toHaveBeenCalled();
+      });
+    });
+
+    /**
      * F-013 — el espejo de la compuerta G-1 en la rama custom usaba
      * `taxInfo.base`, un campo que `calculateTaxCategoryTaxes` nunca
      * devuelve (`undefined + monto = NaN`, y `roundMoney` colapsa `NaN` a
@@ -2162,6 +2260,55 @@ describe('PaymentsService', () => {
         );
         expect(mismatchCalls).toHaveLength(0);
       });
+
+      // F-222/F-223 — el umbral de esta compuerta NO cambió con la migración.
+      // El original era `Math.abs(grossMismatchDelta) > 0.02` sobre un delta
+      // que YA venía redondeado a centavos por `roundMoney`, así que 2¢
+      // exactos no disparaban (`0.02 > 0.02` es falso): tolera 2¢ y registra
+      // desde 3¢. En centavos enteros eso es `differsByAtLeastCents(..., 3)`.
+      // Los dos tests de abajo fijan los dos lados del borde.
+      it('F-222: delta exacto de 2¢ (13603.14 vs 13603.12) NO registra — sigue tolerado', () => {
+        const errorSpy = jest.spyOn((service as any).logger, 'error');
+
+        (service as any).buildOrderItemSnapshot({
+          ...baseParams,
+          unitBasePrice: 13603.14,
+          finalUnitPrice: 13603.12,
+          isPriceOverridden: false,
+          productId: 10,
+          storeId: 3,
+          userId: 42,
+          taxInfo: { total_rate: 0, total_tax_amount: 0, taxes: [] },
+        });
+
+        const mismatchCalls = errorSpy.mock.calls.filter(
+          ([payload]) =>
+            (payload as any)?.event === 'pos.line_gross_mismatch',
+        );
+        expect(mismatchCalls).toHaveLength(0);
+      });
+
+      it('F-222: delta de 3¢ (13603.15 vs 13603.12) SÍ registra — el borde es determinista', () => {
+        const errorSpy = jest.spyOn((service as any).logger, 'error');
+
+        (service as any).buildOrderItemSnapshot({
+          ...baseParams,
+          unitBasePrice: 13603.15,
+          finalUnitPrice: 13603.12,
+          isPriceOverridden: false,
+          productId: 10,
+          storeId: 3,
+          userId: 42,
+          taxInfo: { total_rate: 0, total_tax_amount: 0, taxes: [] },
+        });
+
+        const mismatchCalls = errorSpy.mock.calls.filter(
+          ([payload]) =>
+            (payload as any)?.event === 'pos.line_gross_mismatch',
+        );
+        expect(mismatchCalls).toHaveLength(1);
+        expect(mismatchCalls[0][0]).toMatchObject({ delta: 0.03 });
+      });
     });
   });
 
@@ -2331,6 +2478,85 @@ describe('PaymentsService', () => {
 
       expect(caught).toBeDefined();
       expect(caught.errorCode).toBe('POS_PRICE_OVERRIDE_NOT_ALLOWED_001');
+    });
+
+    it('F-222: 1¢ real (declarado 13603.13 vs catálogo 13603.12) SÍ es override aunque el float diga que no', async () => {
+      // El par canónico: Math.abs(13603.13-13603.12) = 0.00999999999839...,
+      // así que el `>= 0.01` viejo NO armaba el guard y la venta pasaba como
+      // precio de catálogo. En centavos enteros difieren en 1¢: es override.
+      calculateProductTaxesMock.mockResolvedValue({
+        ...catalogExclusive(),
+        total: 13603.12,
+      });
+      const item = {
+        product_id: product.id,
+        quantity: 1,
+        final_unit_price: 13603.13,
+      };
+      const tx = txFor({ ...product, allow_pos_price_override: false });
+
+      let caught: any;
+      try {
+        await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+        );
+      } catch (e) {
+        caught = e;
+      }
+
+      expect(caught).toBeDefined();
+      expect(caught.errorCode).toBe('POS_PRICE_OVERRIDE_NOT_ALLOWED_001');
+    });
+  });
+
+  /**
+   * Hallazgo 4 (CP-post-QUI-832, paso 6) — la compuerta `fixed_base` de
+   * `invertDeclaredGross` es código defensivo sin productor real hoy
+   * (`calculateProductTaxes` nunca emite `fixed_base`), así que se fija por
+   * código de error: una tasa con base propia rechaza con
+   * `POS_DECLARED_GROSS_FIXED_BASE_001` en vez de repartirse en silencio
+   * como tasa ordinaria. Se afirma el `errorCode` exacto — un
+   * `toBeInstanceOf(VendixHttpException)` pasaría con cualquier guarda
+   * anterior y no fijaría esta compuerta.
+   */
+  describe('invertDeclaredGross — compuerta fixed_base (hallazgo 4)', () => {
+    it('tasa con base propia rechaza con POS_DECLARED_GROSS_FIXED_BASE_001', async () => {
+      // Literal casteado, no derivado del tipo de `calculateProductTaxes`:
+      // el productor real nunca trae `fixed_base` y el test debe seguir
+      // describiendo el contrato aunque su firma cambie.
+      const source = {
+        total_rate: 0.19,
+        total_tax_amount: 19000,
+        base: 100000,
+        total: 119000,
+        taxes: [
+          {
+            tax_rate_id: 501,
+            name: 'AIU-test',
+            rate: 0.19,
+            tax_type: TaxFiscalType.IVA,
+            is_inclusive: true,
+            amount: 19000,
+            base: 100000,
+            fixed_base: 100000,
+          },
+        ],
+        unclosed_residual_cents: 0,
+        invalid_inputs: [],
+        resolved_from: 'catalog',
+      } as any;
+      // `invertDeclaredGross` es privado y síncrono: se invoca por índice y
+      // se envuelve en una promesa inmediata para afirmar el rechazo con el
+      // código exacto.
+      await expect(
+        (async () => (service as any).invertDeclaredGross(source, 119000))(),
+      ).rejects.toMatchObject({
+        errorCode: ErrorCodes.POS_DECLARED_GROSS_FIXED_BASE_001.code,
+      });
     });
   });
 
