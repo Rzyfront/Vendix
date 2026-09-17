@@ -2,6 +2,11 @@
 
 Firmado 2026-09-17. Orden FIJO, no improvisable:
 
+> **Nota post-remoción de flags (dueño):** el paso 3 (activación por tienda)
+> ya no existe — con capability lista, trigram se activa solo al desplegar
+> el código. El paso 2 queda: código después de migraciones (aunque ambas
+> direcciones son seguras por la guarda F-049).
+
 ## Orden
 
 1. **Migraciones PRIMERO** (`prisma migrate deploy`): C.1 (extensiones + wrapper),

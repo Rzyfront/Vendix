@@ -99,7 +99,15 @@ const REQUIRED_COLUMNS = [
 ];
 
 /** Tablas cuya ausencia completa es igual de fatal. */
-const REQUIRED_TABLES = ['fiscal_scope_audit_log'];
+const REQUIRED_TABLES = [
+  'fiscal_scope_audit_log',
+  // CP-pos-smart-search E.4 — telemetría CTR (migración
+  // 20260917131000_add_pos_search_selections): el POS la escribe en cada
+  // agregar-al-carrito bajo search (fire-and-forget). Sin la tabla, el
+  // endpoint 201 revienta en caliente (el frontend lo traga, pero la señal
+  // CTR del gate de 1 semana se pierde en silencio).
+  'pos_search_selections',
+];
 
 /** Tipos enum que el schema referencia y la base debe conocer. */
 const REQUIRED_ENUM_TYPES = ['aiu_component_enum'];

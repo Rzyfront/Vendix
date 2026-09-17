@@ -1,5 +1,13 @@
 # Evidence — E.4 Full rollout + métricas + audit (2026-09-17)
 
+> **Nota post-remoción de flags (dueño, 2026-09-17):** los flags por tienda
+> (`pos_smart_search`) se eliminaron — el cutover ahora es global por
+> capability (kill-switch ⇒ legacy; capaz ⇒ trigram; si no ⇒ l2). La sección
+> "Auditoría de toggles" de abajo es histórica (el mecanismo ya no existe).
+> El gate CTR de 1 semana sigue vigente pero pasa a ser **observacional**
+> (sin grupo control por tienda): recolectar 7 días post-deploy antes de
+> recalibrar pesos.
+
 ## F-069 — Señal CTR/posición (major) ✅
 
 - Migración `20260917131000_add_pos_search_selections` (CREATE TABLE
