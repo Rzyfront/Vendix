@@ -25,6 +25,7 @@ import {
 import { KitchenTicketsService } from '../../services/kitchen-tickets.service';
 import { RecipesService } from '../../../recipes/services/recipes.service';
 import { Recipe } from '../../../recipes/interfaces';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 
 interface RecipeLoadState {
   status: 'idle' | 'loading' | 'ok' | 'missing' | 'error';
@@ -63,10 +64,32 @@ export class KdsTicketDetailModalComponent {
   readonly isOpen = input<boolean>(false);
   readonly ticket = input<KitchenTicket | null>(null);
   readonly isMutating = input<boolean>(false);
-  /** Ver `KdsTicketCardComponent.deliverDisabledReason`: entregar es accion
-   *  de mesero/cajero, no de cocina; el boton queda visible pero inerte. */
-  readonly deliverDisabledReason =
-    'La entrega la registra el mesero o el cajero, no la cocina';
+  /** Ver `KdsTicketCardComponent.allTakeaway`: "Entregar" se habilita solo
+   *  para tickets todo-para-llevar; el resto lo registra mesero/cajero. */
+  readonly allTakeaway = computed(() => {
+    const items = this.ticketDisplay()?.items ?? [];
+    return (
+      items.length > 0 &&
+      items.every((it) => it.order_item?.is_takeaway === true)
+    );
+  });
+  /** Ver `KdsTicketCardComponent.deliverDisabledReason`: mismo motivo dual. */
+  readonly deliverDisabledReason = computed(() =>
+    this.allTakeaway()
+      ? 'La entrega la registra el mesero o el cajero, no la cocina'
+      : 'Solo los platos para llevar se entregan en cocina',
+  );
+  /**
+   * Réplica del gating de la tarjeta: gestión avanzada de tickets =
+   * admin/encargado. Sin `store:kitchen_fire:cancel`, Cancelar queda visible
+   * pero deshabilitado con motivo, nunca un 403 por sorpresa.
+   */
+  private readonly authFacade = inject(AuthFacade);
+  readonly canCancelTicket = computed(() =>
+    this.hasNamedPermission('store:kitchen_fire:cancel'),
+  );
+  readonly cancelDisabledReason =
+    'Solo un encargado puede cancelar tickets de cocina';
 
   /** Re-emit actions back to the board so the SSE pipeline stays in charge. */
   readonly startClicked = output<KitchenTicket>();
@@ -397,7 +420,18 @@ export class KdsTicketDetailModalComponent {
   }
   onCancel(): void {
     const t = this.ticketDisplay();
-    if (t) this.cancelClicked.emit(t);
+    if (t && this.canCancelTicket()) this.cancelClicked.emit(t);
+  }
+
+  /** Patrón `hasPermission` de `pos-cart.component.ts` (con bypass super_admin). */
+  private hasNamedPermission(permission: string): boolean {
+    const permissions = this.authFacade.userPermissions();
+    const roles = this.authFacade.userRoles();
+    return (
+      permissions.includes(permission) ||
+      roles.includes('super_admin') ||
+      roles.includes('SUPER_ADMIN')
+    );
   }
   onRevert(): void {
     const t = this.ticketDisplay();

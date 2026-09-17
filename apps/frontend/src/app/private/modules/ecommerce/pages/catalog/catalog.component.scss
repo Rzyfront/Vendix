@@ -61,6 +61,13 @@
     }
   }
 
+  // D.3 (F-077): hint de query truncada a 4 tokens.
+  .truncation-hint {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    margin: 0.25rem 0 0;
+  }
+
   .catalog-controls {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;

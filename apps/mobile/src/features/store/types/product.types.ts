@@ -289,10 +289,10 @@ export interface ProductQuery {
   include_variants?: boolean;
   product_type?: ProductType;
   /**
-   * Filtros de paridad web `pos-product-search.component.ts`. El backend
-   * actualmente NO los declara en `ProductQueryDto`, pero los aceptamos
-   * silenciosamente vía `whitelist: false` — el cliente aplica fallback
-   * local (sort/inStock) si la respuesta los ignora.
+   * Filtros de paridad web `pos-product-search.component.ts`. El backend NO
+   * los declara en `ProductQueryDto` y el pipe es forbidNonWhitelisted, así
+   * que `ProductService.list` hace strip antes de enviar (E.3/F-025): viajan
+   * solo hasta el fallback local de `pos/index.tsx`, nunca por la red.
    */
   min_price?: number;
   max_price?: number;

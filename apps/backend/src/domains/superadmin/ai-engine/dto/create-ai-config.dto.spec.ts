@@ -58,4 +58,44 @@ describe('CreateAIConfigDto', () => {
       await expect(validate(dto)).resolves.toHaveLength(0);
     });
   });
+
+  describe('settings', () => {
+    it('accepts a multimodal config with image transport and capabilities', async () => {
+      const dto = buildDto('https://openrouter.ai/api/v1');
+      dto.model_type = 'image';
+      dto.settings = {
+        image_generation_mode: 'images_api',
+        capabilities: ['text'],
+      };
+
+      await expect(validate(dto)).resolves.toHaveLength(0);
+    });
+
+    it('rejects an unknown image_generation_mode', async () => {
+      const dto = buildDto('https://openrouter.ai/api/v1');
+      dto.settings = { image_generation_mode: 'telepathy' } as any;
+
+      const errors = await validate(dto);
+
+      expect(errors.find((e) => e.property === 'settings')).toBeDefined();
+    });
+
+    it('rejects capabilities that are not unique model types', async () => {
+      const dto = buildDto('https://openrouter.ai/api/v1');
+      dto.settings = { capabilities: ['text', 'text'] } as any;
+
+      const errors = await validate(dto);
+
+      expect(errors.find((e) => e.property === 'settings')).toBeDefined();
+    });
+
+    it('rejects an empty capabilities array — single-type configs omit the key', async () => {
+      const dto = buildDto('https://openrouter.ai/api/v1');
+      dto.settings = { capabilities: [] } as any;
+
+      const errors = await validate(dto);
+
+      expect(errors.find((e) => e.property === 'settings')).toBeDefined();
+    });
+  });
 });

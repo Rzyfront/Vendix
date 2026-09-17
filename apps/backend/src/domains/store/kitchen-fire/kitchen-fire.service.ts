@@ -72,6 +72,19 @@ const KITCHEN_TICKET_INCLUDE = {
 } satisfies Prisma.kitchen_ticketsInclude;
 
 /**
+ * Paso 3 (takeaway-only KDS): `markDelivered` solo entrega tickets 100 %
+ * para llevar. Entrada local —no en `error-codes.ts`— por scope del paso
+ * (solo este archivo + su spec); promoverla al catálogo central si otro
+ * dominio la necesita.
+ */
+const KITCHEN_TICKET_NOT_TAKEAWAY_ENTRY = {
+  code: 'KITCHEN_TICKET_NOT_TAKEAWAY',
+  httpStatus: 422,
+  devMessage:
+    'El ticket contiene platos que no son para llevar; en cocina solo se entregan pedidos takeaway',
+};
+
+/**
  * Result of {@link KitchenFireService.fireOrderItems}. Returned to the
  * controller and (eventually) the POS UI to confirm the fire was
  * accepted and which items were actually consumed.
@@ -2635,6 +2648,25 @@ export class KitchenFireService {
         },
       );
     }
+    // Paso 3 (takeaway-only KDS): en cocina solo se entregan platos
+    // para llevar. Si ALGUNA fila no-cancelada del ticket no es takeaway
+    // (`order_item.is_takeaway != true`, ya incluido vía
+    // KITCHEN_TICKET_INCLUDE), el ticket completo se bloquea: un ticket
+    // mixto o de mesa no se entrega por partes desde cocina.
+    const nonTakeaway = (ticket.items ?? []).filter(
+      (it) => it.status !== 'cancelled' && it.order_item?.is_takeaway !== true,
+    );
+    if (nonTakeaway.length > 0) {
+      throw new VendixHttpException(
+        KITCHEN_TICKET_NOT_TAKEAWAY_ENTRY,
+        undefined,
+        {
+          from: ticket.status,
+          to: 'delivered',
+          hint: 'Solo los platos para llevar se entregan en cocina',
+        },
+      );
+    }
     // ticket.status is `ready` or `in_preparation` — both valid.
     // If still in_preparation, bump to ready first (sets ready_at).
     if (ticket.status === 'in_preparation') {
@@ -2707,45 +2739,56 @@ export class KitchenFireService {
       );
     }
 
-    // Restaurant lifecycle bridge: once EVERY kitchen ticket of this order is
-    // in a terminal state (delivered/cancelled) and at least one was actually
-    // delivered, the kitchen handoff is complete. We emit an event (AFTER the
-    // ticket mutations have committed above) so the orders domain can move the
-    // order `processing -> delivered`. We use the event pattern instead of
-    // injecting OrderFlowService here to avoid a cross-module dependency cycle
-    // (KitchenFireModule would otherwise have to import the orders/order-flow
-    // graph). The listener re-establishes the store tenant context via
-    // StoreContextRunner before calling OrderFlowService.updateOrderState.
+    // Paso 1: puente cocina→orden extraído a `maybeEmitOrderAllDelivered`
+    // para reutilizarlo desde `cancelTicket`.
+    const orderId = (full.ticket as any)?.order_id ?? ticket.order_id;
+    if (orderId != null) {
+      await this.maybeEmitOrderAllDelivered(orderId, store_id, ticketId);
+    }
+
+    return full.ticket;
+  }
+
+  /**
+   * Paso 1 — puente cocina→orden: una vez que TODOS los tickets de la orden
+   * están en estado terminal (delivered/cancelled) y al menos uno fue
+   * entregado, el handoff de cocina está completo y se emite el evento
+   * (las mutaciones del ticket ya commitearon) para que el dominio de
+   * órdenes mueva la orden `processing -> delivered`. Patrón de eventos
+   * en lugar de inyectar OrderFlowService para evitar un ciclo de
+   * dependencias entre módulos; el listener restablece el contexto de
+   * tienda vía StoreContextRunner. Best-effort: nunca bloquea la mutación
+   * del ticket que lo invoca (`markDelivered` o `cancelTicket`).
+   */
+  private async maybeEmitOrderAllDelivered(
+    orderId: number,
+    storeId: number,
+    ticketId?: number,
+  ): Promise<void> {
     try {
-      const orderId = (full.ticket as any)?.order_id ?? ticket.order_id;
-      if (orderId != null) {
-        const orderTickets = await this.prisma.kitchen_tickets.findMany({
-          where: { order_id: orderId, store_id },
-          select: { status: true },
+      const orderTickets = await this.prisma.kitchen_tickets.findMany({
+        where: { order_id: orderId, store_id: storeId },
+        select: { status: true },
+      });
+      const allTerminal = orderTickets.every(
+        (t) => t.status === 'delivered' || t.status === 'cancelled',
+      );
+      const anyDelivered = orderTickets.some(
+        (t) => t.status === 'delivered',
+      );
+      if (orderTickets.length > 0 && allTerminal && anyDelivered) {
+        this.eventEmitter.emit('kitchen.order_all_delivered', {
+          orderId,
+          storeId,
         });
-        const allTerminal = orderTickets.every(
-          (t) => t.status === 'delivered' || t.status === 'cancelled',
-        );
-        const anyDelivered = orderTickets.some(
-          (t) => t.status === 'delivered',
-        );
-        if (orderTickets.length > 0 && allTerminal && anyDelivered) {
-          this.eventEmitter.emit('kitchen.order_all_delivered', {
-            orderId,
-            storeId: store_id,
-          });
-        }
       }
     } catch (e) {
-      // Best-effort: never block the ticket delivery on the order-side bridge.
       this.logger.warn(
-        `Failed to evaluate order-all-delivered bridge for ticket #${ticketId}: ${
+        `Failed to evaluate order-all-delivered bridge for ticket #${ticketId ?? orderId}: ${
           (e as Error).message
         }`,
       );
     }
-
-    return full.ticket;
   }
 
   /**
@@ -2820,6 +2863,13 @@ export class KitchenFireService {
         `QUI-760: failed to attribute ticket ${ticketId} consumption to KDS session`,
         err as Error,
       );
+    }
+    // Paso 1: un cancel como última acción también puede completar el
+    // handoff (todos terminal + ≥1 delivered) — mismo puente que
+    // `markDelivered`.
+    const orderId = (full.ticket as any)?.order_id ?? ticket.order_id;
+    if (orderId != null) {
+      await this.maybeEmitOrderAllDelivered(orderId, store_id, ticketId);
     }
     return full.ticket;
   }

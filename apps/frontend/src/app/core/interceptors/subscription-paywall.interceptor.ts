@@ -46,6 +46,28 @@ const PICKER_ROUTE = '/admin/subscription/picker';
 const PLANS_ROUTE = '/admin/subscription/plans';
 
 /**
+ * F7 — fallback que infiere la feature IA pedida desde la URL que falló
+ * con `SUBSCRIPTION_005/006`, cuando el backend no la trae en `details`.
+ * Solo cubre rutas de tienda conocidas; ante duda retorna `null` y el
+ * modal muestra el copy genérico (nunca se inventa una feature).
+ */
+const AI_FEATURE_BY_URL: Array<{ match: RegExp; feature: string }> = [
+  { match: /\/store\/ai-chat|\/store\/vexi|\/conversations/i, feature: 'streaming_chat' },
+  { match: /\/store\/ai-agents|\/agent/i, feature: 'tool_agents' },
+  { match: /\/embeddings|\/rag|\/documents\/(index|search)/i, feature: 'rag_embeddings' },
+  { match: /\/ai-queue|\/ocr|\/(receipt|expense)-scan|\/toolbox/i, feature: 'async_queue' },
+  { match: /\/voice|\/speech/i, feature: 'realtime_voice' },
+  { match: /\/ai-engine\/.*generate|\/copy|\/descriptions/i, feature: 'text_generation' },
+];
+
+function inferAiFeature(url: string): string | null {
+  for (const { match, feature } of AI_FEATURE_BY_URL) {
+    if (match.test(url)) return feature;
+  }
+  return null;
+}
+
+/**
  * Functional HTTP interceptor that listens for subscription / plan enforcement
  * errors (any HTTP status with a known `error_code`) and opens the paywall
  * modal via `SubscriptionAccessService`. The error is always re-thrown so
@@ -114,11 +136,34 @@ export const subscriptionPaywallInterceptor: HttpInterceptorFn = (req, next) => 
             // paywall modal via effect — let that flow win.
             (router.url === '/admin/subscription' && onSubscriptionTree);
           if (!suppressModal) {
+            // F7 — en 005/006 el modal muestra plan actual + siguiente plan
+            // para la funcionalidad pedida. La feature viene en `details`
+            // cuando el backend la envía; si no, se infiere de la URL como
+            // fallback (solo rutas IA conocidas). Sin feature el modal usa
+            // el copy genérico — nunca se bloquea ni se inventa el dato.
+            let details = body?.details;
+            let requestedFeature: string | null = null;
+            if (code === 'SUBSCRIPTION_005' || code === 'SUBSCRIPTION_006') {
+              requestedFeature =
+                details?.feature?.toString().trim() ||
+                inferAiFeature(req.url) ||
+                null;
+              if (requestedFeature && details?.feature !== requestedFeature) {
+                details = { ...(details ?? {}), feature: requestedFeature };
+              }
+            }
             try {
-              access.openPaywall(code, body?.message, body?.details);
+              access.openPaywall(code, body?.message, details);
             } catch {
               // Swallow modal open errors so the original HTTP error still
               // propagates to the caller.
+            }
+            if (requestedFeature) {
+              try {
+                access.loadUpgradeSuggestion(requestedFeature);
+              } catch {
+                // Suggestion is best-effort; the base modal is already open.
+              }
             }
           }
         }

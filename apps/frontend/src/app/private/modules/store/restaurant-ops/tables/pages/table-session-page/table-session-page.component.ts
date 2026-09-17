@@ -152,8 +152,9 @@ export class TableSessionPageComponent implements OnInit {
   readonly firingItemId = signal<number | null>(null);
   readonly deliveringTicketId = signal<number | null>(null);
   /**
-   * QUI-652 — spinner del item que se está entregando SIN pasar por cocina.
-   * Separado de `deliveringTicketId` porque estos items no tienen ticket:
+   * QUI-652 — spinner del item que se está entregando por el seam de mesa
+   * (sin pasar por cocina, o preparado dine-in). Separado de
+   * `deliveringTicketId` porque la entrega se dirige a la línea de pedido:
    * reutilizar esa señal dejaría el botón sin spinner o marcaría otra fila.
    */
   readonly deliveringItemId = signal<number | null>(null);
@@ -711,7 +712,26 @@ export class TableSessionPageComponent implements OnInit {
    */
   canRemoveItem(item: TableSessionOrderItem): boolean {
     if (this.isClosed()) return false;
+    // Paso 6 plan 1060 — espejo del bloqueo en mesa: un ítem entregado
+    // (`delivered_at`, hecho de servicio) ya no se puede cancelar. Solo
+    // presentación: el enforcement real lo pone el backend (paso 1).
+    if (this.isDelivered(item)) return false;
     return !this.isItemFired(item) || this.kitchenStatusFor(item) === 'pending';
+  }
+
+  /**
+   * Paso 6 plan 1060 — motivo del botón eliminar cuando está bloqueado por
+   * entrega, patrón `deliverDisabledReason` del KDS: el botón queda VISIBLE
+   * pero deshabilitado con tooltip. Solo cubre `delivered_at`/entregado;
+   * el resto de estados bloqueados siguen ocultos (comportamiento actual).
+   * Retorna null cuando no hay bloqueo por entrega que señalizar.
+   */
+  removeDisabledReason(item: TableSessionOrderItem): string | null {
+    if (this.isClosed()) return null;
+    if (item.cancelled_at) return null;
+    if (this.isDelivered(item))
+      return 'Ya fue entregado al cliente. No se puede cancelar.';
+    return null;
   }
 
   kitchenBadgeVariant(status: KitchenTicketItemRefStatus): BadgeVariant {
@@ -749,8 +769,8 @@ export class TableSessionPageComponent implements OnInit {
   }
 
   /**
-   * Can the item be marked delivered? (fired, ready or in_preparation, not
-   * yet terminal).
+   * Can the item be marked delivered? (fired, ready — or the takeaway
+   * in_preparation shortcut —, not yet terminal).
    *
    * Restaurant Suite — Fase K audit jun-2026: the previous `canDeliver`
    * returned `true` for ANY non-terminal state, including `pending`. That
@@ -761,7 +781,8 @@ export class TableSessionPageComponent implements OnInit {
    *
    * The new rules:
    *   - `ready`            → true  (primary path: kitchen said "listo")
-   *   - `in_preparation`   → true  (defensive: SSE race right before click)
+   *   - `in_preparation`   → true ONLY for takeaway (atajo vigente del
+   *     endpoint de cocina; el dine-in espera a `ready`)
    *   - `pending`          → false (must go through KDS board first)
    *   - `delivered`/`cancelled` → false (terminal)
    *   - `null`             → false (never fired)
@@ -779,7 +800,11 @@ export class TableSessionPageComponent implements OnInit {
     const status = this.kitchenStatusFor(item);
     if (status == null) return false;
     if (status === 'cancelled') return false;
-    return status === 'ready' || status === 'in_preparation';
+    if (status === 'ready') return true;
+    // Atajo vigente del endpoint de cocina: un takeaway en `in_preparation`
+    // se puede entregar directo; el dine-in espera a `ready` porque el seam
+    // de mesa lo exige para preparados.
+    return item.is_takeaway === true && status === 'in_preparation';
   }
 
   /**
@@ -1261,12 +1286,13 @@ export class TableSessionPageComponent implements OnInit {
    *    messages instead of the generic "Transición de estado no permitida".
    */
   markDelivered(item: TableSessionOrderItem): void {
-    // QUI-652 — dos caminos, una sola verdad. Un item que no pasa por cocina no
-    // tiene ticket que avanzar: se entrega contra su línea de pedido. El backend
-    // del ticket de cocina propaga a la misma columna, así que ambos caminos
-    // escriben `order_items.delivered_at`.
-    if (!this.needsKitchen(item)) {
-      this.deliverNonKitchenItem(item);
+    // Dos caminos, una sola verdad (`order_items.delivered_at`). Solo el
+    // preparado para llevar avanza su ticket de cocina — ese endpoint es
+    // takeaway-only y rechaza dine-in con KITCHEN_TICKET_NOT_TAKEAWAY (422).
+    // El dine-in, pase o no por cocina, se entrega por el seam de mesa, que
+    // exige `ready` para preparados y sincroniza el ticket solo.
+    if (!(item.is_takeaway === true && this.needsKitchen(item))) {
+      this.deliverTableSessionItem(item);
       return;
     }
 
@@ -1310,15 +1336,19 @@ export class TableSessionPageComponent implements OnInit {
   }
 
   /**
-   * QUI-652 — entrega de un item que NO pasa por cocina (una cerveza, un agua,
-   * algo de nevera). No hay ticket que avanzar: se escribe el hecho de servicio
-   * contra la línea de pedido.
+   * Entrega por el seam de mesa (`PATCH .../items/:id/deliver`): escribe el
+   * hecho de servicio contra la línea de pedido y sincroniza el ticket.
    *
-   * Usa `deliveringItemId` en vez de `deliveringTicketId` justamente porque
-   * estos items no tienen ticket, y reutilizar la señal del ticket dejaría el
-   * botón sin spinner o marcaría el equivocado.
+   * Cubre dos casos: (QUI-652) el item que NO pasa por cocina (una cerveza,
+   * un agua, algo de nevera — no hay ticket que avanzar) y el preparado
+   * dine-in en `ready` (el endpoint de cocina es takeaway-only y lo
+   * rechazaría con 422).
+   *
+   * Usa `deliveringItemId` en vez de `deliveringTicketId` porque la entrega
+   * se dirige a la línea de pedido, y reutilizar la señal del ticket dejaría
+   * el botón sin spinner o marcaría el equivocado.
    */
-  private deliverNonKitchenItem(item: TableSessionOrderItem): void {
+  private deliverTableSessionItem(item: TableSessionOrderItem): void {
     const sessionId = this.session()?.id;
     if (sessionId == null) return;
 

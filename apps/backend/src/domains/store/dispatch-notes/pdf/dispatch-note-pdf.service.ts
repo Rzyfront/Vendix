@@ -15,6 +15,9 @@ import {
 // función (no se duplica el predicado) para que ambos rieles coincidan en
 // si el papel muestra el desglose de IVA.
 import { resolvePrintsVatBreakdownForPrint } from '../../print-formats/services/print-vat-breakdown.resolver';
+// Hallazgo 1b — discriminante bruto-vs-base compartido (misma función que el
+// riel A): sin aritmética propia para que los dos motores no diverjan.
+import { resolveDispatchNoteLinePrintedGross } from '../../taxes/utils/final-price.util';
 
 /**
  * Dedicated include for the remisión PDF. It is intentionally separate from the
@@ -168,32 +171,31 @@ export class DispatchNotePdfService {
       this.formatJsonAddress(note.customer_address) ??
       undefined;
 
-    // C.7 — la columna "P. Unit." tiene que ser de la MISMA magnitud que la
-    // columna "Total", o la fila no cuadra consigo misma. El escritor
-    // (`dispatch-notes.service.ts:1247/1749`) persiste
-    // `total_price = unit_price × cantidad − descuento + tax_amount`: el total
-    // es BRUTO y el unitario es BASE. Se prorratea el impuesto de LÍNEA
-    // (`dispatch_note_items.tax_amount` es por línea) sobre la cantidad
-    // despachada; el total NO se recalcula — es el persistido. Mismo arreglo
-    // y misma aritmética que el riel A (`dispatch-note.provider.ts`), para que
-    // los dos motores detrás del gateway no vuelvan a divergir.
+    // C.7 + hallazgo 1b — la columna "P. Unit." tiene que ser de la MISMA
+    // magnitud que la columna "Total", y el total persistido NO siempre es
+    // bruto: las filas nuevas lo traen en bruto
+    // (`total_price = unit_price × cantidad − descuento + tax_amount`) pero
+    // las históricas B lo guardan en base. El discriminante vive en
+    // `resolveDispatchNoteLinePrintedGross` (definición única compartida con
+    // el riel A): acá sólo se consume, sin aritmética duplicada.
     const items: DispatchNotePdfItem[] = (note.dispatch_note_items || []).map(
       (item) => {
         const dispatched_quantity = Number(item.dispatched_quantity) || 0;
-        const line_tax = Number(item.tax_amount) || 0;
-        const base_unit = Number(item.unit_price) || 0;
-        const gross_unit =
-          line_tax !== 0 && dispatched_quantity > 0
-            ? Math.round((base_unit + line_tax / dispatched_quantity) * 100) / 100
-            : base_unit;
+        const gross = resolveDispatchNoteLinePrintedGross({
+          unit_price: item.unit_price,
+          total_price: item.total_price,
+          tax_amount: item.tax_amount,
+          discount_amount: item.discount_amount,
+          quantity: dispatched_quantity,
+        });
         return {
           product_name: item.product?.name || `Producto #${item.product_id}`,
           variant_sku: item.product_variant?.sku ?? null,
           lot_serial: item.lot_serial ?? null,
           ordered_quantity: Number(item.ordered_quantity) || 0,
           dispatched_quantity,
-          unit_price: gross_unit,
-          total_price: Number(item.total_price) || 0,
+          unit_price: gross.gross_unit_price,
+          total_price: gross.gross_total_price,
         };
       },
     );

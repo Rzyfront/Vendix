@@ -26,6 +26,24 @@ export interface ErrorResponse {
 export type StandardResponse<T = any> = SuccessResponse<T> | ErrorResponse;
 
 /**
+ * CP-pos-smart-search · B.2 (ADR-08) — cómo se ordenó un listado con search.
+ * Solo viaja en respuestas de listados con `search`; ausente en el resto.
+ */
+export type SearchRankMode =
+  | 'ranked'
+  | 'unranked_scan_cap'
+  | 'unranked_error'
+  | 'legacy';
+
+export type SearchRankLayer = 'legacy' | 'l1' | 'l2' | 'trigram';
+
+export interface SearchRankMeta {
+  rank_mode: SearchRankMode;
+  layer: SearchRankLayer;
+  degraded: boolean;
+}
+
+/**
  * Metadata de paginación
  */
 export interface PaginationMeta {
@@ -35,6 +53,10 @@ export interface PaginationMeta {
   totalPages: number;
   hasNextPage: boolean;
   hasPreviousPage: boolean;
+  truncated?: boolean;
+  [key: string]: any;
+  /** Presente solo en listados con `search` (contrato ADR-08). */
+  search?: SearchRankMeta;
 }
 
 /**

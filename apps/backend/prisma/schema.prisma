@@ -129,6 +129,8 @@ model users {
   // fue" deben poder cerrar el cobro sin este dato. El nombre del
   // @relation debe coincidir EXACTAMENTE con la punta de orders.
   orders_tip_waiter             orders[]                         @relation("orders_tip_waiter_idTousers")
+  // QUI-551: Órdenes creadas por el usuario interno/vendedor
+  orders_created                orders[]                         @relation("orders_created_by")
 
   // Promotions
   order_promotions_customer order_promotions[]       @relation("order_promotions_customer")
@@ -1558,6 +1560,10 @@ model orders {
   tip_waiter_id                                   Int?
   users_orders_tip_waiter_idTousers               users?                    @relation("orders_tip_waiter_idTousers", fields: [tip_waiter_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   @@index([tip_waiter_id])
+  // QUI-551: Usuario interno / vendedor que registró la orden (atribución de ventas)
+  created_by_user_id                              Int?
+  users_orders_created_by                         users?                    @relation("orders_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  @@index([created_by_user_id])
   order_items                                     order_items[]
   order_installments                              order_installments[]
   addresses_orders_billing_address_idToaddresses  addresses?                @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -1610,6 +1616,7 @@ model orders {
   @@index([store_id, order_number])
   @@index([store_id, channel])
   @@index([store_id, dispatch_pool_at])
+  @@index([store_id, created_by_user_id])
 }
 
 model order_installments {
@@ -2041,6 +2048,29 @@ model products {
   /// tienda, que es como lo consultan los reportes con scope.
   @@index([state, id])
   @@index([store_id, state])
+}
+
+/// CP-pos-smart-search E.4 (F-069) — log append-only de selecciones del
+/// buscador para CTR-por-posición y detección de deriva del ranker.
+/// Sin FKs (convención audit_logs): reventar un delete de producto/tienda por
+/// una fila de telemetría sería inaceptable; la query cruda nunca se persiste
+/// (solo su sha256 normalizado) para no almacenar PII de búsqueda.
+model pos_search_selections {
+  id           Int      @id @default(autoincrement())
+  store_id     Int
+  user_id      Int?
+  query_hash   String   @db.VarChar(64)
+  position     Int
+  product_id   Int
+  result_count Int
+  rank_mode    String   @db.VarChar(24)
+  flags        Json?
+  surface      String   @default("pos_web") @db.VarChar(16)
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([store_id, created_at])
+  @@index([store_id, query_hash, created_at])
+  @@map("pos_search_selections")
 }
 
 // ===== PRICE TIERS (MULTI-TARIFA) =====
@@ -5279,7 +5309,7 @@ model ai_engine_applications {
   retry_config        Json?
   is_active           Boolean            @default(true)
   metadata            Json?
-  ai_feature_category String?            @db.VarChar(32)
+  ai_feature_category String             @default("text_generation") @db.VarChar(32)
   created_at          DateTime?          @default(now()) @db.Timestamp(6)
   updated_at          DateTime?          @default(now()) @db.Timestamp(6)
 
@@ -5288,6 +5318,45 @@ model ai_engine_applications {
   @@index([config_id])
   @@index([ai_feature_category])
   @@index([model_type])
+}
+
+/// Agente conversacional configurable (F4).
+///
+/// Vexi es una fila más (`key = 'vexi'`); crear un segundo agente es insertar
+/// una fila, sin deploy. El turno del chat (`ai-chat.service`) resuelve
+/// `agent_key` (por mensaje, o `metadata.agent_key` de la conversación) y
+/// enruta al loop con la config de la fila; sin agente el comportamiento es
+/// el de hoy.
+///
+/// `app_key` NO es FK a propósito: las apps se borran desde su propio CRUD y
+/// una FK bloquearía ese borrado o encadenaría efectos. La existencia se
+/// valida en el servicio (`AIAgentsService`) con `AI_APP_001`.
+///
+/// `allowed_tools` vacío significa "sin filtro adicional": el turno ve la
+/// intersección de permisos del caller y `tools_allowed` del plan (F3). Solo
+/// una lista no vacía acota más. (Es `String[]` no-nulo porque Prisma no
+/// admite listas opcionales; el loop (`AIAgentService.runAgentStream`) trata
+/// un filtro vacío como ausente, así que `[]` y "sin filtro" coinciden.)
+///
+/// `requires_confirmation_default` queda almacenado y documentado pero sin
+/// enforcement en F4: el circuito de confirmación sigue siendo por
+/// herramienta (`requiresConfirmation` del registry).
+model ai_agents {
+  id                            Int       @id @default(autoincrement())
+  key                           String    @unique @db.VarChar(80)
+  name                          String    @db.VarChar(255)
+  description                   String?   @db.Text
+  app_key                       String?   @db.VarChar(100)
+  system_prompt                 String?   @db.Text
+  allowed_tools                 String[]                  @default([])
+  max_iterations                Int?
+  requires_confirmation_default Boolean   @default(false)
+  is_active                     Boolean   @default(true)
+  created_at                    DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                    DateTime? @default(now()) @db.Timestamp(6)
+
+  @@index([is_active])
+  @@index([app_key])
 }
 
 model ai_engine_logs {

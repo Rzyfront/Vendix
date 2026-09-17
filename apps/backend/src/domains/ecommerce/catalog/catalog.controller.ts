@@ -1,4 +1,5 @@
 import { Controller, Get, Param, Query, Header } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CatalogService } from './catalog.service';
 import { CatalogQueryDto } from './dto/catalog-query.dto';
 import { Public } from '@common/decorators/public.decorator';
@@ -7,7 +8,10 @@ import { Public } from '@common/decorators/public.decorator';
 export class CatalogController {
   constructor(private readonly catalog_service: CatalogService) {}
 
+  // D.3 (F-047, ERR-22): 100 req/min por IP (mismo techo que /public/plans).
+  // El guard global llavea por IP real; excedido ⇒ 429 + RATE_LIMIT_001.
   @Public()
+  @Throttle({ default: { limit: 100, ttl: 60000 } })
   @Get()
   @Header('Cache-Control', 'no-store')
   async getProducts(@Query() query: CatalogQueryDto) {

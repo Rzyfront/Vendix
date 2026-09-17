@@ -11,10 +11,18 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { SubscriptionAdminService } from '../../services/subscription-admin.service';
 import {
   AIFeatureFlags,
+  AIFeatureKey,
+  EngineAppLineage,
   PlanPricing,
   PlanType,
   PlanState,
 } from '../../interfaces/subscription-admin.interface';
+import type {
+  AIAgent,
+  AIEngineApp,
+  AIToolCatalogEntry,
+} from '../../../ai-engine/interfaces';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import {
   InputComponent,
   TextareaComponent,
@@ -292,6 +300,9 @@ interface PlanFormControls {
             <app-ai-feature-matrix
               [initialValue]="aiFeatures()"
               [systemModels]="systemAiModels()"
+              [availableTools]="catalogToolOptions()"
+              [availableAgents]="catalogAgentOptions()"
+              [appsByCategory]="catalogAppsByCategory()"
               (valueChange)="onAIFeaturesChange($event)"
             ></app-ai-feature-matrix>
           </div>
@@ -428,6 +439,47 @@ export class PlanFormComponent {
   readonly legacyMatrix = signal(false);
   readonly graceDays = signal<number | undefined>(undefined);
   readonly systemAiModels = signal<string[]>([]);
+  /**
+   * F6 — catálogo vivo del Engine para el picker enlazado (apps por
+   * categoría, agentes por key, tools por nombre). Se carga una vez al abrir
+   * el formulario; la matriz solo pinta lo que llega por inputs.
+   */
+  readonly engineApps = signal<AIEngineApp[]>([]);
+  readonly engineAgents = signal<AIAgent[]>([]);
+  readonly engineTools = signal<AIToolCatalogEntry[]>([]);
+
+  readonly catalogToolOptions = computed(() =>
+    this.engineTools().map((tool) => ({
+      value: tool.name,
+      label: tool.name,
+      description: tool.description || tool.domain,
+    })),
+  );
+
+  readonly catalogAgentOptions = computed(() =>
+    this.engineAgents().map((agent) => ({
+      value: agent.key,
+      label: agent.is_active ? agent.name : `${agent.name} (inactivo)`,
+      description: `key: ${agent.key}`,
+    })),
+  );
+
+  readonly catalogAppsByCategory = computed<Partial<Record<AIFeatureKey, EngineAppLineage[]>>>(() => {
+    const grouped: Partial<Record<AIFeatureKey, EngineAppLineage[]>> = {};
+    for (const app of this.engineApps()) {
+      const category = app.ai_feature_category as AIFeatureKey | undefined;
+      if (!category) continue;
+      const bucket = grouped[category] ?? [];
+      bucket.push({
+        key: app.key,
+        name: app.name,
+        isActive: app.is_active,
+        modelLabel: app.config ? `${app.config.label} · ${app.config.model_id}` : null,
+      });
+      grouped[category] = bucket;
+    }
+    return grouped;
+  });
   private readonly paidPricingBeforeFree = signal<PlanPricing[] | undefined>(undefined);
   private setupFeeBeforeFree: number | null = null;
 
@@ -510,6 +562,7 @@ export class PlanFormComponent {
     }
 
     this.loadSystemAiModels();
+    this.loadEngineCatalog();
     this.bindFormRules();
   }
 
@@ -603,6 +656,39 @@ export class PlanFormComponent {
           this.systemAiModels.set(labels);
         },
         error: () => this.systemAiModels.set([]),
+      });
+  }
+
+  /**
+   * F6 — trae el catálogo vivo contra el que el backend valida el guardado:
+   * aplicaciones (con su categoría y modelo), agentes (por key) y tools (por
+   * nombre). Un catálogo que falla no bloquea el formulario: la matriz
+   * muestra el vacío y el backend responde 400 si se declara una ref rota.
+   */
+  private loadEngineCatalog(): void {
+    this.aiEngineService
+      .getApps({ page: 1, limit: 100 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res: any) => this.engineApps.set(res?.data ?? []),
+        error: () => this.engineApps.set([]),
+      });
+    this.aiEngineService
+      .getAgents({ page: 1, limit: 100 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res: any) => this.engineAgents.set(res?.data ?? []),
+        error: () => this.engineAgents.set([]),
+      });
+    this.aiEngineService
+      .getTools()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res: any) => {
+          const data = res?.data ?? res ?? [];
+          this.engineTools.set(Array.isArray(data) ? data : []);
+        },
+        error: () => this.engineTools.set([]),
       });
   }
 
@@ -794,7 +880,12 @@ export class PlanFormComponent {
         }
         this.submitting.set(false);
       },
-      error: () => this.submitting.set(false),
+      error: (error) => {
+        // F6 — el 400 por referencia rota (SUBSCRIPTION_VALIDATION) llega con
+        // el detalle de qué key falta; se muestra tal cual en lugar de tragarlo.
+        this.toast.error(extractApiErrorMessage(error), 'No se pudo guardar el plan');
+        this.submitting.set(false);
+      },
     });
   }
 }

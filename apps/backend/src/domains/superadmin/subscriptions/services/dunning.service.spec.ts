@@ -15,6 +15,9 @@ describe('DunningService', () => {
         count: jest.fn(),
         findUnique: jest.fn(),
       },
+      subscription_invoices: {
+        aggregate: jest.fn().mockResolvedValue({ _sum: { total: 0 } }),
+      },
       subscription_events: {
         create: jest.fn(),
       },
@@ -44,7 +47,7 @@ describe('DunningService', () => {
 
       const args = prisma.store_subscriptions.findMany.mock.calls[0][0];
       expect(args.where.state).toEqual({
-        in: ['grace_soft', 'grace_hard', 'suspended', 'blocked'],
+        in: ['grace_soft', 'grace_hard', 'suspended', 'blocked', 'pending_payment'],
       });
     });
 
@@ -79,24 +82,35 @@ describe('DunningService', () => {
         .mockResolvedValueOnce(3) // grace_soft
         .mockResolvedValueOnce(2) // grace_hard
         .mockResolvedValueOnce(1) // suspended
-        .mockResolvedValueOnce(4); // blocked
+        .mockResolvedValueOnce(4) // blocked
+        .mockResolvedValueOnce(2); // pending_payment
+      prisma.subscription_invoices.aggregate.mockResolvedValueOnce({
+        _sum: { total: '150000' },
+      });
 
       const stats = await service.getStats();
 
       expect(stats).toEqual({
+        grace: 5,
         grace_soft: 3,
         grace_hard: 2,
         suspended: 1,
         blocked: 4,
-        total: 10,
+        pending_payment: 2,
+        total: 12,
+        total_overdue: 150000,
       });
-      expect(prisma.store_subscriptions.count).toHaveBeenCalledTimes(4);
+      expect(prisma.store_subscriptions.count).toHaveBeenCalledTimes(5);
     });
 
     it('returns zeros when no dunning rows exist', async () => {
       prisma.store_subscriptions.count.mockResolvedValue(0);
+      prisma.subscription_invoices.aggregate.mockResolvedValueOnce({
+        _sum: { total: null },
+      });
       const stats = await service.getStats();
       expect(stats.total).toBe(0);
+      expect(stats.total_overdue).toBe(0);
     });
   });
 

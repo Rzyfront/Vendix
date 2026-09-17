@@ -20,7 +20,10 @@ import {
 import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
 // C.7 / V-5 (ADR-12 G-01) — el bruto por línea sale de UNA definición
 // compartida que lee el desglose persistido; no se recalcula acá.
-import { resolveOrderLinePrintedGross } from '../../taxes/utils/final-price.util';
+import {
+  resolveOrderLinePrintedGross,
+  resolveOrderLineTaxTotal,
+} from '../../taxes/utils/final-price.util';
 
 @Injectable()
 export class PosSaleTicketDataProvider implements IDocumentDataProvider {
@@ -514,6 +517,12 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     const items = (order.order_items || []).map((it: any, i: number) => {
       const { gross_unit_price, gross_total_price } =
         resolveOrderLinePrintedGross(it);
+      // Hallazgo 3 (CP-post-QUI-832, ADR-12 G-01) — columnas en bruto, el
+      // impuesto habla la misma magnitud: `tax_amount` es el impuesto TOTAL
+      // de la línea (`order_item_taxes`, o el escalar por unidad × unidades),
+      // no el `tax_amount_item` por unidad (ADR-10) que descuadraba la fila
+      // con cantidad mayor que uno.
+      const lineTax = resolveOrderLineTaxTotal(it);
       return {
       index: i + 1,
       product_name: it.product_name,
@@ -542,9 +551,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         it.tax_rate !== null && it.tax_rate !== undefined
           ? Math.round(Number(it.tax_rate) * 10000) / 100
           : undefined,
-      tax_amount: it.tax_amount_item !== null && it.tax_amount_item !== undefined
-        ? Number(it.tax_amount_item)
-        : undefined,
+      tax_amount: lineTax > 0 ? lineTax : undefined,
       total_price: gross_total_price,
       total_price_formatted: `$${gross_total_price.toLocaleString('es-CO')}`,
       };

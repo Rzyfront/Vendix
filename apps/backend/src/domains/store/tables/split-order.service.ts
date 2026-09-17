@@ -252,6 +252,7 @@ export class SplitOrderService {
     order: {
       id: number;
       store_id: number;
+      created_by_user_id?: number | null;
       customer_id: number | null;
       currency: string | null;
       channel: string;
@@ -373,6 +374,7 @@ export class SplitOrderService {
         const subOrder = await tx.orders.create({
           data: {
             store_id: order.store_id,
+            created_by_user_id: order.created_by_user_id ?? null,
             customer_id: order.customer_id,
             order_number: orderNumber,
             state: 'draft',

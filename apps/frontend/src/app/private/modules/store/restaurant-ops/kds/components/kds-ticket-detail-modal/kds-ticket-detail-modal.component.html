@@ -189,7 +189,7 @@
         </app-button>
       }
       @if (t.status === 'pending') {
-        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating()">
+        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating() || !canCancelTicket()" [attr.title]="canCancelTicket() ? null : cancelDisabledReason">
           <app-icon slot="icon" name="x" [size]="14" /> Cancelar
         </app-button>
         <app-button
@@ -202,21 +202,28 @@
           <app-icon slot="icon" name="play" [size]="14" /> Iniciar
         </app-button>
       } @else if (t.status === 'in_preparation') {
-        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating()">
+        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating() || !canCancelTicket()" [attr.title]="canCancelTicket() ? null : cancelDisabledReason">
           <app-icon slot="icon" name="x" [size]="14" /> Cancelar
         </app-button>
         <app-button variant="success" (clicked)="onReady()" [disabled]="isMutating()" [loading]="isMutating()">
           <app-icon slot="icon" name="check" [size]="14" /> Listo
         </app-button>
       } @else if (t.status === 'ready') {
-        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating()">
+        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating() || !canCancelTicket()" [attr.title]="canCancelTicket() ? null : cancelDisabledReason">
           <app-icon slot="icon" name="x" [size]="14" /> Cancelar
         </app-button>
         <!--
-          Igual que en la tarjeta del board: entregar es accion de mesero/cajero,
-          no de cocina. Visible para señalizar el estado, deshabilitado siempre.
+          Igual que en la tarjeta del board (takeaway-only KDS): "Entregar"
+          se habilita solo para tickets todo-para-llevar (ver `allTakeaway`).
+          Visible para señalizar el estado en el resto de casos.
         -->
-        <app-button variant="primary" [disabled]="true" [attr.title]="deliverDisabledReason">
+        <app-button
+          variant="primary"
+          (clicked)="onDeliver()"
+          [disabled]="isMutating() || !allTakeaway()"
+          [loading]="isMutating()"
+          [attr.title]="deliverDisabledReason()"
+        >
           <app-icon slot="icon" name="check-circle" [size]="14" /> Entregar
         </app-button>
       } @else {
