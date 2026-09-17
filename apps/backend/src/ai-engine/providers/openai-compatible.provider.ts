@@ -134,15 +134,15 @@ export class OpenAICompatibleProvider implements AIProvider {
         return await this.generateImageWithOpenRouterImages(prompt, options);
       }
 
-      // `config.modelId` before the OpenAI default: on a model_type=image
-      // config the configured model IS the image model (meta/muse-image, …),
-      // and the caller usually passes no model — resolving to gpt-image-1
-      // would test and bill the wrong model while reporting success.
+      // Image-typed configs resolve to their own model (meta/muse-image, …):
+      // falling back to gpt-image-1 would test and bill the wrong model while
+      // reporting success. Any other type keeps the historical gpt-image-1
+      // default — image apps with no pinned config run on the text default,
+      // and that path generated with gpt-image-1 long before this change.
       const model =
         options?.model ||
         this.config.settings?.image_model ||
-        this.config.modelId ||
-        'gpt-image-1';
+        this.resolveStandardImageModel();
       const response = await this.client.images.generate({
         prompt,
         model,
@@ -1086,8 +1086,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       const model =
         options?.model ||
         this.config.settings?.image_model ||
-        this.config.modelId ||
-        'gpt-image-1';
+        this.resolveStandardImageModel();
       yield {
         type: 'progress',
         message: 'Preparando generación de imagen',
@@ -1818,6 +1817,19 @@ export class OpenAICompatibleProvider implements AIProvider {
       this.resolveImageMode() === 'images_api' &&
       this.isOpenRouterConfig()
     );
+  }
+
+  /**
+   * Standard-transport model default, split by config type so the image-model
+   * fix cannot move legacy rows: image configs use their own model id, while
+   * text (and any other) configs keep resolving to gpt-image-1 exactly as
+   * before — the image apps' seed metadata carries no image_model and most
+   * installs run them on the text default.
+   */
+  private resolveStandardImageModel(): string {
+    return this.getModelType() === 'image'
+      ? this.config.modelId
+      : 'gpt-image-1';
   }
 
   /**

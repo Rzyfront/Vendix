@@ -800,6 +800,33 @@ describe('OpenAICompatibleProvider', () => {
       );
     });
 
+    it('keeps the gpt-image-1 default for non-image configs (legacy image apps on text default)', async () => {
+      // The image apps ship with no image_model in metadata and usually no
+      // pinned config, so they run on the text default — which historically
+      // generated with gpt-image-1. That default must survive this change.
+      const provider = new OpenAICompatibleProvider({
+        provider: 'OpenAI',
+        sdkType: 'openai_compatible',
+        apiKey: 'test-key',
+        modelId: 'gpt-4o-mini',
+        baseUrl: 'https://api.openai.com/v1',
+        modelType: 'text',
+        settings: { model_type: 'text' },
+      });
+      const generate = jest
+        .spyOn((provider as any).client.images, 'generate')
+        .mockResolvedValue({
+          data: [{ b64_json: 'abc' }],
+          model: 'gpt-image-1',
+        } as any);
+
+      await provider.generateImage('a calm lake');
+
+      expect(generate).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'gpt-image-1' }),
+      );
+    });
+
     it('sniffs the mime type when the response carries no media_type', async () => {
       const provider = imageProvider('https://openrouter.ai/api/v1', {
         image_generation_mode: 'images_api',
