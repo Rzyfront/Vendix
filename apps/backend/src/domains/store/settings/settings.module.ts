@@ -6,6 +6,7 @@ import { EmailTemplatesController } from './email-templates.controller';
 import { RutScannerController } from './rut-scanner.controller';
 import { ScheduleValidationService } from './schedule-validation.service';
 import { SettingsMigratorService } from './migrations/settings-migrator.service';
+import { PosSearchPathService } from './pos-smart-search/pos-search-path.service';
 import { RutScannerService } from './rut-scanner.service';
 import { ResponseService } from '@common/responses/response.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
@@ -31,6 +32,7 @@ import { CashRegistersModule } from '../cash-registers/cash-registers.module';
     FiscalStatusService,
     ScheduleValidationService,
     SettingsMigratorService,
+    PosSearchPathService,
     RutScannerService,
     ResponseService,
   ],
@@ -39,6 +41,7 @@ import { CashRegistersModule } from '../cash-registers/cash-registers.module';
     FiscalStatusService,
     ScheduleValidationService,
     SettingsMigratorService,
+    PosSearchPathService,
     RutScannerService,
   ],
 })
