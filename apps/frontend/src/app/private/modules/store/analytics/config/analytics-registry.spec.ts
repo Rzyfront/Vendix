@@ -145,7 +145,8 @@ describe('AnalyticsRegistry', () => {
       const salesEntry = entries.find(e => e.label === 'Ventas');
       // QUI-551: Ventas incluye 7 vistas tras agregar sales_by_user
       expect(salesEntry?.viewCount).toBe(7);
-      expect(salesEntry?.views.some(v => v.key === 'sales_by_user')).toBe(true);
+      const salesViews = getViewsByCategory('sales');
+      expect(salesViews.some(v => v.key === 'sales_by_user')).toBe(true);
     });
   });
 });
