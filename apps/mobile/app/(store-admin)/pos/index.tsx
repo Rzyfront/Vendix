@@ -11,7 +11,8 @@ import {
   Animated,
   Dimensions,
 } from 'react-native';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
+import { getNextPageParam } from '@/core/api/pagination';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
@@ -351,6 +352,31 @@ const s = StyleSheet.create({
     backgroundColor: colors.background,
   },
   emptyActionText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold as any,
+    color: colorScales.gray[700],
+  },
+  // E.3 (F-059): footer contador + load-more, paridad web E.1.
+  loadMoreFooter: {
+    alignItems: 'center',
+    paddingVertical: spacing[4],
+    gap: spacing[2],
+  },
+  loadMoreCounter: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    textAlign: 'center',
+  },
+  loadMoreButton: {
+    marginTop: spacing[1],
+    paddingHorizontal: spacing[5],
+    paddingVertical: spacing[3],
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colorScales.gray[300],
+    backgroundColor: colors.background,
+  },
+  loadMoreButtonText: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold as any,
     color: colorScales.gray[700],
@@ -2436,22 +2462,24 @@ const PosScreen = () => {
   // nuevos borradores).
   const draftId = useCartStore((s) => (s as any).draftId ?? null);
 
-  const { data: products, isLoading } = useQuery({
+  // E.3 (F-059): query infinita paridad web E.1 — load-more + contador +
+  // rank backend intacto. Límites de primera página intactos (50 lista / 20
+  // search): cero regresión de primer pintado; el rank-25+ llega por páginas.
+  const {
+    data: productsPages,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: ['pos-products', search, activeFilters],
-    queryFn: () => {
+    queryFn: ({ pageParam = 1 }) => {
       const params: any = {
         pos_optimized: true,
         limit: 50,
+        page: pageParam,
         state: 'active',
         include_variants: true,
-        // Paridad web `pos-product-search.component` — el backend actual
-        // puede ignorar min_price/max_price/in_stock/sort_by (DTO no los
-        // declara); la app aplica fallback local en `productList` abajo.
-        min_price: activeFilters.min_price ? Number(activeFilters.min_price) : undefined,
-        max_price: activeFilters.max_price ? Number(activeFilters.max_price) : undefined,
-        in_stock: activeFilters.in_stock || undefined,
-        sort_by: activeFilters.sort_by || undefined,
-        sort_order: activeFilters.sort_by ? activeFilters.sort_order : undefined,
       };
 
       if (search) {
@@ -2467,10 +2495,18 @@ const PosScreen = () => {
       }
 
       return search
-        ? ProductService.search(search)
+        ? ProductService.search(search, 20, pageParam)
         : ProductService.list(params);
     },
+    getNextPageParam,
+    initialPageParam: 1,
   });
+
+  // Páginas acumuladas en orden backend (rank). `productList` abajo solo
+  // filtra en cliente (precio/stock); jamás re-ordena bajo search (E.3).
+  const products = (productsPages?.pages ?? []).flatMap((p) => p.data ?? []);
+  // Total real del backend (primera página), nunca el largo acumulado.
+  const totalResults = productsPages?.pages[0]?.pagination?.total ?? 0;
 
   /**
    * Fallback cliente para los filtros que el backend actual no aplica:
@@ -2508,8 +2544,10 @@ const PosScreen = () => {
       });
     }
 
-    // Sort.
-    if (activeFilters.sort_by) {
+    // Sort — SOLO sin búsqueda. Bajo search el orden lo dicta el rank
+    // backend (E.1 web: search overridea sort); re-ordenar acá rompería la
+    // relevancia y el rank-25 dejaría de ser alcanzable (E.3/F-059).
+    if (activeFilters.sort_by && !search) {
       const dir = activeFilters.sort_order === 'desc' ? -1 : 1;
       const sorted = [...list].sort((a: Product, b: Product) => {
         switch (activeFilters.sort_by) {
@@ -2543,7 +2581,7 @@ const PosScreen = () => {
     }
 
     return list;
-  }, [products, activeFilters]);
+  }, [products, activeFilters, search]);
 
   /**
    * QUI-648 — catálogo de presentaciones de la TIENDA
@@ -3122,6 +3160,38 @@ const PosScreen = () => {
           renderItem={({ item }) => (
             <ProductCard product={item} onPress={handleProductPress} width={cardWidth} />
           )}
+          // E.3 (F-059): contador + load-more paridad web E.1
+          // ("Mostrando X de Y" + botón "Cargar más"). El total es del
+          // backend; con filtros locales activos el visible puede ser menor.
+          ListFooterComponent={
+            <View style={s.loadMoreFooter}>
+              {totalResults > 0 ? (
+                <Text style={s.loadMoreCounter}>
+                  Mostrando {productList.length} de {totalResults}
+                </Text>
+              ) : null}
+              {hasNextPage ? (
+                <Pressable
+                  style={({ pressed }) => [
+                    s.loadMoreButton,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                  onPress={() => fetchNextPage()}
+                  disabled={isFetchingNextPage}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    isFetchingNextPage
+                      ? 'Cargando más productos'
+                      : 'Cargar más productos'
+                  }
+                >
+                  <Text style={s.loadMoreButtonText}>
+                    {isFetchingNextPage ? 'Cargando…' : 'Cargar más'}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          }
         />
       )}
 

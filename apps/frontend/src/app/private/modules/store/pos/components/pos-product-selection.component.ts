@@ -1,5 +1,6 @@
 import {
   Component,
+  ElementRef,
   NO_ERRORS_SCHEMA,
   input,
   output,
@@ -9,8 +10,10 @@ import {
   computed,
   DestroyRef,
   viewChild,
+  untracked,
 } from '@angular/core';
-import { Subject, distinctUntilChanged } from 'rxjs';
+import { Subject, distinctUntilChanged, of } from 'rxjs';
+import { map, switchMap, catchError } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -37,7 +40,11 @@ import { PosCartService } from '../services/pos-cart.service';
 import {
   PosProductService,
   PosProductVariant,
+  PosProductsLoadError,
+  SearchFilters,
+  SearchRankMeta,
   SearchResult,
+  isPosProductsLoadError,
 } from '../services/pos-product.service';
 import { PosScaleService } from '../services/pos-scale.service';
 import {
@@ -88,6 +95,63 @@ interface ActiveOrderPromotion {
   priority?: number;
 }
 
+/**
+ * CP-pos-smart-search · E.1 — request paginado de la grilla. `seq` es la
+ * identidad monótona del stream: el handler dropea respuestas cuya `seq`
+ * ya fue superseded (F-058).
+ */
+interface ProductsPageRequest {
+  filters: SearchFilters;
+  page: number;
+  append: boolean;
+  seq: number;
+}
+
+/**
+ * CP-pos-smart-search · E.1 — espejo frontend de `STOPWORDS_ES_SEARCH`
+ * (backend: `common/utils/search-text.util.ts`, forma normalizada sin
+ * acentos). Solo para decidir el hint F-099/ERR-20; el filtrado real es
+ * backend. Si el backend añade stopwords, este set se re-sincroniza.
+ */
+const POS_SEARCH_STOPWORDS_ES: ReadonlySet<string> = new Set([
+  'a', 'al', 'ante', 'aquel', 'aquella', 'aquellas', 'aquellos', 'bajo',
+  'cabe', 'como', 'con', 'contra', 'cual', 'cuales', 'cuando', 'de',
+  'del', 'desde', 'donde', 'durante', 'e', 'el', 'ella', 'ellas', 'ello',
+  'ellos', 'en', 'entre', 'esa', 'esas', 'ese', 'eso', 'esos', 'esta',
+  'estas', 'este', 'estos', 'hacia', 'hasta', 'la', 'las', 'le', 'les',
+  'lo', 'los', 'mas', 'mediante', 'mi', 'mis', 'muy', 'ni', 'nos', 'o',
+  'para', 'pero', 'por', 'porque', 'que', 'se', 'segun', 'sin', 'sobre',
+  'su', 'sus', 'tan', 'te', 'tras', 'tu', 'tus', 'u', 'un', 'una',
+  'unas', 'unos', 'versus', 'vs', 'y',
+]);
+
+/** Normalización mínima espejo de `normalizeSearchText` (solo hint UI). */
+function normalizeHintText(input: string): string {
+  return input
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
+ * True cuando la query solo trae stopwords (`de la`) — el backend cae al
+ * fallback frase-legacy (ERR-20) y la UI debe mostrar el hint F-099.
+ */
+function isStopwordsOnlyQuery(query: string): boolean {
+  const tokens = normalizeHintText(query)
+    .split(/[^a-z0-9ñ]+/)
+    .filter((token) => token.length > 0);
+  return (
+    tokens.length > 0 &&
+    tokens.every((token) => POS_SEARCH_STOPWORDS_ES.has(token))
+  );
+}
+
+/** True cuando la query trae 2+ tokens (copy de vacío multi-token, F-064). */
+function isMultiTokenQuery(query: string): boolean {
+  return query.trim().split(/\s+/).filter(Boolean).length >= 2;
+}
+
 @Component({
   selector: 'app-pos-product-selection',
   standalone: true,
@@ -119,12 +183,14 @@ interface ActiveOrderPromotion {
           <app-inputsearch
             class="flex-1"
             size="sm"
-            placeholder="Buscar productos..."
+            placeholder="Busca por nombre, SKU o palabras en cualquier orden"
+            ariaLabel="Buscar productos"
             [debounceTime]="300"
             [autofocus]="true"
             [ngModel]="searchQuery()"
             (ngModelChange)="searchQuery.set($event)"
             (searchChange)="onSearch($event)"
+            (enter)="onSearchEnter()"
           />
 
           <!-- Componente de filtros -->
@@ -145,6 +211,9 @@ interface ActiveOrderPromotion {
               class="relative flex items-center justify-center w-10 sm:w-11 h-10 sm:h-11 rounded-[10px] bg-accent/10 hover:bg-accent/20 transition-colors border border-accent/30 shrink-0"
               (click)="openQueueModal.emit()"
               title="Cola de clientes ({{ queueCount() }})"
+              [attr.aria-label]="
+                'Cola de clientes, ' + queueCount() + ' en espera'
+              "
             >
               <app-icon name="users" [size]="18" class="text-accent"></app-icon>
               <span
@@ -161,6 +230,11 @@ interface ActiveOrderPromotion {
               (clicked)="openCustomerModal.emit()"
               [title]="
                 selectedCustomer() ? selectedCustomer().name : 'Agregar cliente'
+              "
+              [ariaLabel]="
+                selectedCustomer()
+                  ? 'Cliente: ' + selectedCustomer().name
+                  : 'Agregar cliente'
               "
             >
               <app-icon
@@ -193,13 +267,75 @@ interface ActiveOrderPromotion {
             </app-badge>
           </div>
         }
+
+        <!-- E.1 — hint stopwords (F-099/ERR-20): la query solo trae palabras
+             comunes y el backend cae al fallback frase-legacy. -->
+        @if (showStopwordsHint()) {
+          <p class="mt-2 text-xs text-text-secondary" role="note">
+            Palabras muy comunes: prueba con palabras del producto, ej. 'aceite
+            casa'.
+          </p>
+        }
+
+        <!-- E.1 — chip orden degradado (F-011/ERR-17): visible + dismissible
+             cuando meta.search.degraded. Total honesto, orden aproximado. -->
+        @if (showDegradedChip()) {
+          <div class="mt-2 flex">
+            <app-badge
+              variant="warning"
+              size="sm"
+              badgeStyle="outline"
+              class="min-w-0"
+            >
+              <app-icon
+                name="alert-triangle"
+                [size]="13"
+                class="mr-1 shrink-0"
+              />
+              <span class="truncate max-w-[220px] sm:max-w-[360px]">
+                Muchos resultados: orden aproximado. Agrega más palabras.
+              </span>
+              <button
+                type="button"
+                class="ml-1 shrink-0 rounded-full p-0.5 hover:bg-warning/20"
+                aria-label="Descartar aviso de orden aproximado"
+                (click)="degradedDismissed.set(true)"
+              >
+                <app-icon name="x" [size]="12"></app-icon>
+              </button>
+            </app-badge>
+          </div>
+        }
+
+        <!-- E.1 — contador de paginación (F-066/F-098): copy exacto. Con
+             búsqueda enseña el ranking ("mejores coincidencias primero"). -->
+        @if (counterText()) {
+          <div
+            class="mt-2 flex items-center justify-between gap-2 text-xs text-text-secondary"
+          >
+            <span>{{ counterText() }}</span>
+            @if (isSearchActive() && filteredProducts().length > 0) {
+              <span class="hidden sm:inline shrink-0">
+                Enter &#8629; agrega el primer resultado
+              </span>
+            }
+          </div>
+        }
       </div>
 
       <!-- Products Content -->
-      <div class="flex-1 overflow-y-auto min-h-0 p-3 lg:p-6 relative z-0">
-        <!-- Loading State -->
-        @if (loading()) {
-          <div class="p-8 text-center">
+      <div
+        #productsScroll
+        tabindex="-1"
+        class="flex-1 overflow-y-auto min-h-0 p-3 lg:p-6 relative z-0 outline-none"
+        (pointerdown)="onGridPointerDown()"
+        (pointerup)="onGridPointerUp()"
+        (pointercancel)="onGridPointerUp()"
+      >
+        <!-- Loading State: spinner full SOLO en primera carga (F-056). Con
+             grilla previa, la búsqueda refresca sin destruir (ver overlay). -->
+        @if (loading() && filteredProducts().length === 0 && !loadError()) {
+          <div class="p-8 text-center" role="status">
             <div
               class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
@@ -207,8 +343,41 @@ interface ActiveOrderPromotion {
           </div>
         }
 
+        <!-- E.1 — banner de error página 1 (F-036/F-065): mensaje por causa +
+             reintento. Jamás se pinta como vacío: si hay grilla previa se
+             conserva debajo (dimmeada). Sin toast duplicado. -->
+        @if (loadError(); as err) {
+          <div
+            class="mb-3 flex items-center gap-3 rounded-card border border-error/40 bg-error/10 px-3 py-2.5"
+            role="alert"
+          >
+            <app-icon
+              name="alert-triangle"
+              [size]="18"
+              class="text-error shrink-0"
+            ></app-icon>
+            <p class="flex-1 text-xs sm:text-sm text-text-primary">
+              {{ err.message }}
+            </p>
+            <app-button
+              variant="outline"
+              size="sm"
+              customClasses="shrink-0"
+              ariaLabel="Reintentar cargar productos"
+              (clicked)="retryLoad()"
+            >
+              Reintentar
+            </app-button>
+          </div>
+        }
+
         <!-- Empty State -->
-        @if (!loading() && filteredProducts().length === 0) {
+        @if (
+          !loading() &&
+          !searching() &&
+          !loadError() &&
+          filteredProducts().length === 0
+        ) {
           <div
             class="flex flex-col items-center justify-center h-64 text-center p-8"
           >
@@ -228,22 +397,30 @@ interface ActiveOrderPromotion {
             <p class="text-sm text-text-secondary mb-4 max-w-xs mx-auto">
               {{ getEmptyStateDescription() }}
             </p>
-            @if (searchQuery()) {
+            <!-- E.1 (F-100) — la acción cumple lo que promete: con filtros
+                 activos limpia ambos scopes, no solo el texto. -->
+            @if (showEmptyAction()) {
               <app-button
                 variant="outline"
                 size="md"
-                (clicked)="onClearSearch()"
+                (clicked)="onEmptyAction()"
               >
-                Limpiar búsqueda
+                {{ emptyActionLabel() }}
               </app-button>
             }
           </div>
         }
 
-        <!-- Modern Compact Products Grid -->
-        @if (!loading() && filteredProducts().length > 0) {
+        <!-- Modern Compact Products Grid. La grilla previa persiste durante
+             búsquedas (dim + overlay "Buscando…", F-056/F-067): swap atómico
+             al responder, nunca flash a vacío. -->
+        @if (filteredProducts().length > 0) {
           <div
-            class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3"
+            role="list"
+            aria-label="Resultados de productos"
+            [attr.aria-busy]="searching()"
+            [class.opacity-60]="searching()"
+            class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3 transition-opacity duration-150"
           >
             <!-- Modern Product Card (iOS-style) -->
             @for (
@@ -251,7 +428,14 @@ interface ActiveOrderPromotion {
               track trackByProductId($index, product)
             ) {
               <div
+                role="listitem"
+                tabindex="0"
+                [attr.aria-label]="productCardLabel(product)"
+                [attr.aria-disabled]="
+                  isProductCardUnavailable(product) || null
+                "
                 (click)="onAddToCart(product)"
+                (keydown)="onProductCardKeydown($event, product)"
                 class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer product-card"
                 [class]="
                   isProductCardUnavailable(product)
@@ -376,7 +560,9 @@ interface ActiveOrderPromotion {
                     <button
                       [class]="getAddButtonClass(product)"
                       (click)="$event.stopPropagation(); onAddToCart(product)"
-                      aria-label="Agregar al carrito"
+                      [attr.aria-label]="
+                        'Agregar ' + product.name + ' al carrito'
+                      "
                     >
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
@@ -401,8 +587,12 @@ interface ActiveOrderPromotion {
                        El nombre completo se revela en hover mediante .name-pop,
                        un overlay absoluto que no altera el flujo ni el alto. -->
                   <div class="relative mb-0.5">
+                    <!-- E.1 (F-054) — con búsqueda activa, 2 líneas para que
+                         el token que justificó el rank no quede cortado. -->
                     <h3
-                      class="text-text-primary font-medium text-xs sm:text-sm leading-tight truncate group-hover:text-primary transition-colors"
+                      class="text-text-primary font-medium text-xs sm:text-sm leading-tight group-hover:text-primary transition-colors"
+                      [class.truncate]="!isSearchActive()"
+                      [class.line-clamp-2]="isSearchActive()"
                       [title]="product.name"
                     >
                       {{ product.name }}
@@ -454,8 +644,76 @@ interface ActiveOrderPromotion {
                 </div>
               </div>
             }
+
+            <!-- E.1 — skeletons de append (página 2+): la grilla existente
+                 queda intacta; solo la cola muestra carga. -->
+            @if (loadingMore()) {
+              @for (slot of loadMoreSkeletonSlots; track $index) {
+                <div
+                  aria-hidden="true"
+                  class="bg-surface border border-border rounded-card overflow-hidden"
+                >
+                  <div class="aspect-square bg-muted/40 animate-pulse"></div>
+                  <div class="p-2 space-y-1.5">
+                    <div class="h-3 rounded bg-muted/40 animate-pulse"></div>
+                    <div
+                      class="h-3 w-2/3 rounded bg-muted/40 animate-pulse"
+                    ></div>
+                  </div>
+                </div>
+              }
+            }
           </div>
+
+          <!-- E.1 — overlay "Buscando…" (F-067): la grilla previa dimmeada
+               sigue visible; el cajero nunca ve flash a vacío. -->
+          @if (searching()) {
+            <div
+              class="sticky top-2 z-[5] mx-auto mt-2 w-fit flex items-center gap-2 rounded-full border border-border bg-surface/95 px-3 py-1.5 text-xs text-text-secondary shadow-card"
+              role="status"
+            >
+              <span
+                class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent"
+              ></span>
+              Buscando…
+            </div>
+          }
+
+          <!-- E.1 — barra sticky-bottom de paginación (F-057/F-066): UN
+               mecanismo (botón, no scroll infinito). El botón persiste
+               durante la carga (disabled + aria-busy, F-010) y al fallar
+               el append ofrece reintento sin perder items (F-036). -->
+          @if (hasMoreResults() || loadingMore()) {
+            <div
+              class="sticky bottom-0 z-[5] -mx-3 lg:-mx-6 mt-3 border-t border-border bg-surface/95 px-3 lg:px-6 py-2.5 backdrop-blur-md"
+            >
+              <button
+                #loadMoreButton
+                type="button"
+                class="w-full rounded-[10px] border border-primary/40 bg-surface px-4 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary-light disabled:cursor-wait disabled:opacity-70"
+                [disabled]="loadingMore()"
+                [attr.aria-busy]="loadingMore()"
+                [attr.aria-label]="loadMoreText()"
+                (click)="loadMore()"
+              >
+                {{ loadMoreText() }}
+              </button>
+            </div>
+          } @else if (showTerminalLine()) {
+            <p
+              class="mt-3 pb-1 text-center text-xs text-text-secondary"
+              role="status"
+            >
+              {{ terminalText() }}
+            </p>
+          }
         }
+      </div>
+
+      <!-- E.1 — live-region (F-061): anuncia carga, conteo, vacío, total y
+           appends al lector de pantalla. -->
+      <div class="sr-only" role="status" aria-live="polite">
+        {{ liveMessage() }}
       </div>
     </div>
 
@@ -662,6 +920,9 @@ interface ActiveOrderPromotion {
   ],
 })
 export class PosProductSelectionComponent {
+  /** CP-pos-smart-search · E.1 — tamaño de página fijo de la grilla POS. */
+  private static readonly GRID_PAGE_SIZE = 20;
+
   private destroyRef = inject(DestroyRef);
   readonly loading = signal(false);
   readonly searchQuery = signal('');
@@ -671,6 +932,98 @@ export class PosProductSelectionComponent {
   readonly categories = signal<any[]>([]);
   readonly brands = signal<any[]>([]);
   addingToCart = new Set<string>();
+
+  // ─── E.1 — paginación backend-exhaustiva + estados UI ──────────────────────
+  /** Total real del backend (`meta.total`), nunca el largo de página. */
+  readonly totalResults = signal(0);
+  /** Última página confirmada por el backend. */
+  readonly currentPage = signal(1);
+  /** Búsqueda fresca con grilla previa: dim + overlay, sin destruir. */
+  readonly searching = signal(false);
+  /** Append página 2+ en curso: skeletons en cola, botón persistente. */
+  readonly loadingMore = signal(false);
+  /** Contrato observabilidad ADR-08 (`meta.search`), null sin search. */
+  readonly searchMeta = signal<SearchRankMeta | null>(null);
+  /** El cajero descartó el chip de orden aproximado (revive por búsqueda). */
+  readonly degradedDismissed = signal(false);
+  /** Error página 1 (banner + retry, F-036/F-065). */
+  readonly loadError = signal<PosProductsLoadError | null>(null);
+  /** El último append falló: la barra ofrece reintento (F-036). */
+  readonly appendFailed = signal(false);
+  /** Mensaje de la live-region (F-061). */
+  readonly liveMessage = signal('');
+  /** Slots fijos de skeletons de append. */
+  readonly loadMoreSkeletonSlots = [0, 1, 2, 3];
+
+  readonly isSearchActive = computed(() => this.searchQuery().trim().length > 0);
+
+  readonly hasActiveFilters = computed(() => {
+    const cat = this.selectedCategory();
+    const brand = this.selectedBrand();
+    return (
+      (cat != null && cat.id !== '') || (brand != null && brand.id !== '')
+    );
+  });
+
+  readonly remainingCount = computed(() =>
+    Math.max(0, this.totalResults() - this.filteredProducts().length),
+  );
+
+  readonly hasMoreResults = computed(() => this.remainingCount() > 0);
+
+  readonly showDegradedChip = computed(
+    () =>
+      (this.searchMeta()?.degraded ?? false) &&
+      !this.degradedDismissed() &&
+      this.filteredProducts().length > 0,
+  );
+
+  readonly showStopwordsHint = computed(() =>
+    isStopwordsOnlyQuery(this.searchQuery()),
+  );
+
+  /** Copy exacto del contador (F-066/F-098). Vacío cuando no hay total. */
+  readonly counterText = computed(() => {
+    const total = this.totalResults();
+    if (total === 0 || this.loadError() != null) return '';
+    const shown = this.filteredProducts().length;
+    const base = `Mostrando ${shown} de ${total}`;
+    return this.isSearchActive() ? `${base} · mejores coincidencias primero` : base;
+  });
+
+  /** Copy exacto del botón cargar-más / retry (F-066/F-036). */
+  readonly loadMoreText = computed(() => {
+    if (this.loadingMore()) return 'Cargando…';
+    if (this.appendFailed()) return 'Reintentar cargar más';
+    return `Cargar más (${this.remainingCount()} restantes)`;
+  });
+
+  /** Línea terminal cuando se agotó la paginación (F-066). */
+  readonly showTerminalLine = computed(
+    () =>
+      this.totalResults() >
+        PosProductSelectionComponent.GRID_PAGE_SIZE &&
+      !this.hasMoreResults() &&
+      !this.loadingMore() &&
+      this.filteredProducts().length > 0,
+  );
+
+  readonly terminalText = computed(
+    () => `Se muestran los ${this.totalResults()} resultados`,
+  );
+
+  /** Acción del vacío = promesa (F-100): limpia lo que limita el listado. */
+  readonly showEmptyAction = computed(
+    () => this.searchQuery().trim().length > 0 || this.hasActiveFilters(),
+  );
+
+  readonly emptyActionLabel = computed(() => {
+    const hasSearch = this.searchQuery().trim().length > 0;
+    const hasFilters = this.hasActiveFilters();
+    if (hasSearch && hasFilters) return 'Limpiar búsqueda y filtros';
+    if (hasFilters) return 'Limpiar filtros';
+    return 'Limpiar búsqueda';
+  });
 
   // Variant selection state
   readonly showVariantSelector = signal(false);
@@ -724,6 +1077,19 @@ export class PosProductSelectionComponent {
   readonly openQueueModal = output<void>();
 
   private searchSubject$ = new Subject<string>(); // LEGÍTIMO — distinctUntilChanged search stream (debounce ya vive dentro de app-inputsearch)
+  // E.1 — stream único de carga paginada (switchMap + seq, F-058).
+  private productsRequest$ = new Subject<ProductsPageRequest>(); // LEGÍTIMO — switchMap paginación con cancelación
+  private requestSeq = 0;
+  /** Query con la que se pidió la última página 1 (fast path Enter, F-053). */
+  private lastLoadedQuery = '';
+  /** Puntero abajo sobre la grilla: difiere reemplazos (F-055). */
+  private gridPointerDown = false;
+  /** Set fresco diferido por tap-stability, aplicado en pointerup. */
+  private pendingReplace: { products: any[]; total: number } | null = null;
+  private readonly gridScroll =
+    viewChild<ElementRef<HTMLDivElement>>('productsScroll');
+  private readonly loadMoreButton =
+    viewChild<ElementRef<HTMLButtonElement>>('loadMoreButton');
   private productService = inject(PosProductService);
   private cartService = inject(PosCartService);
   private toastService = inject(ToastService);
@@ -781,18 +1147,25 @@ export class PosProductSelectionComponent {
     this.initializeCategories();
     this.initializeBrands();
     this.setupSearchSubscription();
+    this.setupProductsStream();
     this.loadProducts();
     this.loadOrderScopePromotions();
 
+    // E.1 review fix — `untracked()` en ambos: `filterProducts()` lee
+    // `filteredProducts()` (hasPrevious) y cada respuesta hace `.set()` con
+    // array fresco. Sin `untracked`, el effect rastrea esa lectura y cada
+    // respuesta lo re-dispara: tormenta de ~300 reqs hasta agotar el throttle
+    // (medido en vivo: 301 llamadas en 17s). El effect debe reaccionar SOLO
+    // a su trigger (input/modo), jamás a su propio resultado.
     effect(() => {
       if (this.refreshTrigger() > 0) {
-        this.loadProducts();
+        untracked(() => this.loadProducts());
       }
     });
 
     effect(() => {
       if (this.restaurantIntegration.isRestaurantMode()) {
-        this.filterProducts();
+        untracked(() => this.filterProducts());
       }
     });
   }
@@ -897,15 +1270,65 @@ export class PosProductSelectionComponent {
       });
   }
 
+  /**
+   * E.1 (F-058) — UN solo stream de carga con `switchMap`: cada request nuevo
+   * cancela el anterior en vuelo, así una respuesta stale jamás pisa el rank
+   * de la query visible. La guarda `seq` cubre la ventana ya-entregada.
+   */
+  private setupProductsStream(): void {
+    this.productsRequest$
+      .pipe(
+        switchMap((req) =>
+          this.productService
+            .searchProducts(
+              req.filters,
+              req.page,
+              PosProductSelectionComponent.GRID_PAGE_SIZE,
+            )
+            .pipe(
+              map((result: SearchResult) => ({
+                req,
+                result,
+                error: null as PosProductsLoadError | null,
+              })),
+              catchError((error: unknown) =>
+                of({
+                  req,
+                  result: null as SearchResult | null,
+                  error: isPosProductsLoadError(error)
+                    ? error
+                    : ({
+                        message: 'Error al cargar productos',
+                        status: 0,
+                      } as PosProductsLoadError),
+                }),
+              ),
+            ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(({ req, result, error }) => {
+        if (req.seq !== this.requestSeq) return;
+        if (error != null || result == null) {
+          this.handleProductsError(req, error);
+          return;
+        }
+        this.handleProductsResult(req, result);
+      });
+  }
+
   loadProducts(): void {
     this.loading.set(true);
     this.filterProducts();
   }
 
-  private filterProducts(): void {
-    this.loading.set(true);
-    const filters: any = {
-      state: 'active',
+  /**
+   * E.1 — construye los filtros del request. El orden es 100% backend: con
+   * search manda el rank, sin search/filtros manda destacados→más vendidos;
+   * el cliente jamás re-ordena (cero `.sort()` sobre resultados).
+   */
+  private buildProductFilters(): SearchFilters {
+    const filters: SearchFilters = {
       pos_optimized: true,
       include_stock: true,
       // El POS es un canal de venta: nunca muestra insumos puros ni productos
@@ -916,7 +1339,7 @@ export class PosProductSelectionComponent {
       is_sellable: true,
     };
 
-    const searchTerm = this.searchQuery();
+    const searchTerm = this.searchQuery().trim();
     if (searchTerm) {
       filters.query = searchTerm;
     }
@@ -947,23 +1370,150 @@ export class PosProductSelectionComponent {
       filters.best_selling_first = true;
     }
 
-    this.productService
-      .searchProducts(filters)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result: SearchResult) => {
-          const uniqueProducts = this.removeDuplicateProducts(
-            result.products || [],
-          );
+    return filters;
+  }
 
-          this.filteredProducts.set(uniqueProducts);
-          this.loading.set(false);
-        },
-        error: (error: any) => {
-          this.loading.set(false);
-          this.toastService.error('Error al cargar productos');
-        },
-      });
+  /**
+   * E.1 — búsqueda fresca (página 1, reemplaza). Loading no-destructivo
+   * (F-056/F-067): spinner full solo sin grilla previa; con previa, dim +
+   * overlay "Buscando…" hasta el swap atómico.
+   */
+  private filterProducts(): void {
+    const hasPrevious = this.filteredProducts().length > 0;
+    this.requestSeq += 1;
+    this.lastLoadedQuery = this.searchQuery().trim();
+    this.currentPage.set(1);
+    this.loadError.set(null);
+    this.appendFailed.set(false);
+    this.degradedDismissed.set(false);
+    this.pendingReplace = null;
+    this.loading.set(!hasPrevious);
+    this.searching.set(hasPrevious);
+    this.announce(
+      this.searchQuery().trim() ? 'Buscando productos…' : 'Cargando productos…',
+    );
+    this.productsRequest$.next({
+      filters: this.buildProductFilters(),
+      page: 1,
+      append: false,
+      seq: this.requestSeq,
+    });
+  }
+
+  /**
+   * E.1 — página 2+ (F-057): CONCATENA al final, sin duplicados por id,
+   * preservando el orden backend de cada página. También sirve de retry tras
+   * un append fallido (la página no avanzó, se re-pide la misma).
+   */
+  loadMore(): void {
+    if (this.loadingMore() || this.loading() || this.searching()) return;
+    if (!this.hasMoreResults() && !this.appendFailed()) return;
+    // F-037 — clamp: la aritmética de paginación jamás emite page<1.
+    const nextPage = Math.max(1, Math.floor(this.currentPage() + 1) || 1);
+    this.requestSeq += 1;
+    this.appendFailed.set(false);
+    this.loadingMore.set(true);
+    this.announce('Cargando más productos…');
+    this.productsRequest$.next({
+      filters: this.buildProductFilters(),
+      page: nextPage,
+      append: true,
+      seq: this.requestSeq,
+    });
+  }
+
+  /** Retry del banner de error página 1: re-pide con los mismos filtros. */
+  retryLoad(): void {
+    if (this.loading() || this.searching()) return;
+    this.filterProducts();
+  }
+
+  private handleProductsResult(
+    req: ProductsPageRequest,
+    result: SearchResult,
+  ): void {
+    // E.1 review fix — un éxito posterior (retry, nueva búsqueda) limpia el
+    // banner: sin esto el error viejo convivía con resultados frescos.
+    this.loadError.set(null);
+    this.searchMeta.set(result.searchMeta);
+    this.totalResults.set(result.total);
+    this.currentPage.set(result.page);
+    this.loading.set(false);
+    this.searching.set(false);
+    this.loadingMore.set(false);
+    this.appendFailed.set(false);
+
+    if (req.append) {
+      // Dedupe defensivo cross-página por id (orden backend intacto).
+      const merged = this.removeDuplicateProducts([
+        ...this.filteredProducts(),
+        ...(result.products || []),
+      ]);
+      this.filteredProducts.set(merged);
+      this.announce(`Mostrando ${merged.length} de ${result.total}`);
+      // F-010 — si el botón se agota bajo el foco, destino determinista.
+      if (merged.length >= result.total) {
+        this.moveFocusFromExhaustedLoadMore();
+      }
+      return;
+    }
+
+    // F-055 tap-stability: con el puntero abajo sobre la grilla, el reemplazo
+    // espera al pointerup en vez de mover el card bajo el dedo.
+    if (this.gridPointerDown) {
+      this.pendingReplace = {
+        products: result.products || [],
+        total: result.total,
+      };
+      return;
+    }
+    this.applyFreshProducts(result.products || [], result.total);
+  }
+
+  private handleProductsError(
+    req: ProductsPageRequest,
+    error: PosProductsLoadError | null,
+  ): void {
+    const failure: PosProductsLoadError = error ?? {
+      message: 'Error al cargar productos',
+      status: 0,
+    };
+    this.loading.set(false);
+    this.searching.set(false);
+    this.loadingMore.set(false);
+    this.pendingReplace = null;
+
+    if (req.append) {
+      // F-036 — error p≥2: items intactos + toast por causa + retry en barra.
+      this.appendFailed.set(true);
+      this.toastService.error(failure.message);
+      this.announce(`Error al cargar más productos: ${failure.message}`);
+      return;
+    }
+    // F-036/F-065 — error página 1: banner por causa + retry. Jamás se pinta
+    // como vacío: la grilla previa (si hay) se conserva debajo del banner.
+    this.loadError.set(failure);
+    this.announce(`Error al cargar productos: ${failure.message}`);
+  }
+
+  /**
+   * Aplica un set fresco (página 1): reemplazo atómico + reset de scroll
+   * (F-093, el rank-1 queda en viewport) + anuncio de conteo (F-061).
+   */
+  private applyFreshProducts(products: any[], total: number): void {
+    const uniqueProducts = this.removeDuplicateProducts(products);
+    this.filteredProducts.set(uniqueProducts);
+    this.resetGridScroll();
+    const query = this.searchQuery().trim();
+    if (uniqueProducts.length === 0) {
+      this.announce(
+        query ? 'No se encontraron productos' : 'No hay productos disponibles',
+      );
+    } else if (query) {
+      this.announce(`${total} resultados para '${query}'`);
+    } else {
+      this.announce(`${total} productos`);
+    }
   }
 
   /**
@@ -1029,6 +1579,114 @@ export class PosProductSelectionComponent {
   onClearSearch(): void {
     this.searchQuery.set('');
     this.searchSubject$.next('');
+  }
+
+  /**
+   * E.1 (F-053) — fast path teclado: Enter en el buscador agrega el rank-1
+   * actual (o abre el selector si tiene variantes). Si el input trae texto
+   * más nuevo que lo cargado (debounce pendiente), primero dispara la
+   * búsqueda inmediata en vez de agregar un rank-1 stale.
+   */
+  onSearchEnter(): void {
+    const current = this.searchQuery().trim();
+    if (current !== this.lastLoadedQuery) {
+      this.searchSubject$.next(current);
+      return;
+    }
+    if (this.loading() || this.searching()) return;
+    const rank1 = this.filteredProducts()[0];
+    if (!rank1) return;
+    if (this.isProductCardUnavailable(rank1)) {
+      this.toastService.info('El primer resultado está agotado');
+      return;
+    }
+    void this.onAddToCart(rank1);
+  }
+
+  /**
+   * E.1 (F-100/ERR-02) — acción del vacío: limpia exactamente lo que limita
+   * el listado (texto, filtros o ambos) y confirma la recuperación.
+   */
+  onEmptyAction(): void {
+    const hadFilters = this.hasActiveFilters();
+    this.searchQuery.set('');
+    this.filterValues.set({});
+    this.selectedCategory.set(this.categories()[0]);
+    this.selectedBrand.set(this.brands()[0]);
+    this.searchSubject$.next('');
+    if (hadFilters) {
+      this.toastService.info('Mostrando todos los productos');
+    }
+  }
+
+  /** E.1 (F-055) — el puntero baja sobre la grilla: pineear el set visible. */
+  onGridPointerDown(): void {
+    this.gridPointerDown = true;
+  }
+
+  /** E.1 (F-055) — al soltar, aplicar el reemplazo diferido (si hay). */
+  onGridPointerUp(): void {
+    if (!this.gridPointerDown) return;
+    this.gridPointerDown = false;
+    const pending = this.pendingReplace;
+    this.pendingReplace = null;
+    if (pending) {
+      this.applyFreshProducts(pending.products, pending.total);
+    }
+  }
+
+  /**
+   * E.1 (F-009/F-095) — cards operables por teclado: Enter/Espacio agrega.
+   * Agotados focuseables pero no agregables (aria-disabled + aviso).
+   */
+  onProductCardKeydown(event: KeyboardEvent, product: any): void {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    if (this.isProductCardUnavailable(product)) {
+      this.toastService.info('Producto agotado');
+      return;
+    }
+    void this.onAddToCart(product);
+  }
+
+  /**
+   * E.1 (F-009/F-095) — nombre accesible del card: nombre + precio +
+   * disponibilidad en texto (no solo color/opacidad).
+   */
+  productCardLabel(product: any): string {
+    const name = String(product?.name ?? 'Producto');
+    const price = this.formatPrice(
+      Number(product?.final_price ?? product?.price ?? 0),
+    );
+    if (this.isProductCardUnavailable(product)) {
+      return `${name}, ${price}, Agotado`;
+    }
+    const stock = Number(product?.stock ?? 0);
+    return `${name}, ${price}, ${stock} disponibles`;
+  }
+
+  /** E.1 (F-061) — publica un anuncio en la live-region polite. */
+  private announce(message: string): void {
+    this.liveMessage.set(message);
+  }
+
+  /** E.1 (F-093) — cada set fresco arranca con el rank-1 en viewport. */
+  private resetGridScroll(): void {
+    this.gridScroll()?.nativeElement?.scrollTo({ top: 0 });
+  }
+
+  /**
+   * E.1 (F-010) — cuando la última página agota el botón bajo el foco de
+   * teclado, el foco va al contenedor de resultados (destino determinista)
+   * en vez de caer a `<body>`.
+   */
+  private moveFocusFromExhaustedLoadMore(): void {
+    const button = this.loadMoreButton()?.nativeElement;
+    if (button != null && document.activeElement === button) {
+      setTimeout(() => {
+        this.gridScroll()?.nativeElement?.focus({ preventScroll: true });
+      }, 0);
+    }
   }
 
   private readonly searchInput = viewChild(InputsearchComponent);
@@ -1139,6 +1797,34 @@ export class PosProductSelectionComponent {
     this.productSelected.emit(product);
   }
 
+  /**
+   * E.4 (F-069) — evento CTR-por-posición. Solo bajo search activo (sin
+   * search no hay rank que evaluar): query-hash + posición 1-based en la
+   * grilla visible + total backend + rank_mode/layer. Silencioso siempre.
+   */
+  private emitSearchSelection(product: any): void {
+    const query = this.searchQuery().trim();
+    const meta = this.searchMeta();
+    if (!query || !meta) return;
+    const position =
+      this.filteredProducts().findIndex(
+        (p: any) => p?.id === product?.id,
+      ) + 1;
+    if (position < 1 || !Number.isFinite(product?.id)) return;
+    this.productService
+      .logSearchSelection({
+        query,
+        position,
+        product_id: product.id,
+        result_count: this.totalResults(),
+        rank_mode: meta.rank_mode,
+        layer: meta.layer,
+        surface: 'pos_web',
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
+  }
+
   isProductCardUnavailable(product: any): boolean {
     if (product.effective_track_inventory === false) return false;
     if (product.track_inventory === false) return false;
@@ -1167,6 +1853,9 @@ export class PosProductSelectionComponent {
   }
 
   async onAddToCart(product: any): Promise<void> {
+    // E.4 (F-069) — al tope: la elección ya se hizo aunque el flujo derive
+    // (variantes/booking/precio). Fire-and-forget, jamás bloquea la venta.
+    this.emitSearchSelection(product);
     if (product.price <= 0) {
       this.dialogService
         .confirm({
@@ -1944,14 +2633,24 @@ export class PosProductSelectionComponent {
   }
 
   getEmptyStateTitle(): string {
-    if (this.searchQuery()) {
+    const query = this.searchQuery().trim();
+    // E.1 (F-064) — vacío multi-token con eco: el typo se distingue del cero
+    // real y el cajero ve qué corregir.
+    if (query && isMultiTokenQuery(query)) {
+      return `Sin resultados para '${query}'`;
+    }
+    if (query) {
       return 'No se encontraron productos';
     }
     return 'No hay productos disponibles';
   }
 
   getEmptyStateDescription(): string {
-    if (this.searchQuery()) {
+    const query = this.searchQuery().trim();
+    if (query && isMultiTokenQuery(query)) {
+      return 'Revisa la ortografía o prueba con menos palabras.';
+    }
+    if (query) {
       return 'Intenta buscar con otros términos o cambia la categoría.';
     }
     return 'Los productos aparecerán aquí cuando estén disponibles.';

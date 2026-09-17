@@ -6,6 +6,7 @@ import { ProductsModule } from '../../store/products/products.module';
 import { PromotionsModule } from '../../store/promotions/promotions.module';
 import { MenusModule } from '../../store/menus/menus.module';
 import { StorefrontSharedModule } from '../shared/storefront-shared.module';
+import { SettingsModule } from '../../store/settings/settings.module';
 
 @Module({
   imports: [
@@ -15,6 +16,9 @@ import { StorefrontSharedModule } from '../shared/storefront-shared.module';
     MenusModule,
     // StorefrontPriceService: fuente unica del precio publicado.
     StorefrontSharedModule,
+    // D.3 — PosSearchPathService (cutover smart); SettingsModule no importa
+    // CatalogModule ⇒ sin ciclo.
+    SettingsModule,
   ],
   controllers: [CatalogController],
   providers: [CatalogService],
