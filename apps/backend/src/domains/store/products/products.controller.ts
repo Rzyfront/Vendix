@@ -129,6 +129,11 @@ export class ProductsController {
         'Productos obtenidos exitosamente',
       );
     } catch (error) {
+      // B.1 (F-003, patrón `create()`): deja propagar las excepciones tipadas
+      // Vendix al AllExceptionsFilter para conservar status + error_code +
+      // details; sin esto, todo throw nuevo (tokenizer, rank, hydrate) caía
+      // a 200 `success:false` sin código: grilla vacía silenciosa.
+      if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener los productos',
         error.response?.message || error.message,

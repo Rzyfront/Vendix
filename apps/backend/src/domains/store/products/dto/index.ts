@@ -12,6 +12,7 @@ import {
   IsIn,
   IsDecimal,
   IsArray,
+  ArrayMaxSize,
   IsJSON,
   IsNumber,
   Min,
@@ -1201,37 +1202,91 @@ export class UpdateProductDto {
 }
 
 export class ProductQueryDto {
+  // B.1 (F-039, ADR-09): `@Min(1)` paridad catálogo — `?page=0` era skip
+  // negativo (5xx). Sin `@Max`: bulk pagina con limit grande vía `/ids`.
+  // B.1 (F-043): empty→undefined — `?page=` era `Number('')=0`.
+  // `@Type` NO corre cuando hay `@Transform` (ver campo `ids`): la
+  // conversión a Number vive DENTRO del transform, misma función que antes.
   @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === '' || raw === null || raw === undefined) return undefined;
+    return typeof raw === 'number' ? raw : Number(raw);
+  })
   @Type(() => Number)
   @IsInt()
+  @Min(1)
   page?: number = 1;
 
+  // B.1 (F-039, ADR-09): `?limit=0` era `data:[]` con `total:N`
+  // (envoltorio contradictorio); `?limit=-5` era take negativo (last-N).
+  // B.1 (F-043): empty→undefined — `?limit=` era `take:0`.
+  // Conversión dentro del transform (`@Type` no corre con `@Transform`).
   @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === '' || raw === null || raw === undefined) return undefined;
+    return typeof raw === 'number' ? raw : Number(raw);
+  })
   @Type(() => Number)
   @IsInt()
+  @Min(1)
   limit?: number = 10;
 
+  // B.1 (F-033/F-041, ADR-09): `@MaxLength(200)`+trim+empty→undefined.
+  // Overlong→400 SYS_VALIDATION_001; query larga ya no explota el AND×OR.
+  // `value` es seguro aquí (string→string es identidad bajo implicit
+  // conversion); no-string se entrega intacto para que `@IsString` lo 400.
   @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim() || undefined : value,
+  )
   @IsString()
+  @MaxLength(200)
   search?: string;
 
   @IsOptional()
   @IsEnum(ProductState)
   state?: ProductState;
 
+  // B.1 (F-043, ADR-09): empty→undefined + `@Min(1)` paridad catálogo.
+  // Conversión dentro del transform (`@Type` no corre con `@Transform`).
   @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === '' || raw === null || raw === undefined) return undefined;
+    return typeof raw === 'number' ? raw : Number(raw);
+  })
   @Type(() => Number)
   @IsInt()
+  @Min(1)
   store_id?: number;
 
+  // B.1 (F-043, ADR-09): `?category_id=` era `Number('')=0` → filtraba por
+  // categoría inexistente 0 (listado vacío en vez de sin filtro).
+  // Conversión dentro del transform (`@Type` no corre con `@Transform`).
   @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === '' || raw === null || raw === undefined) return undefined;
+    return typeof raw === 'number' ? raw : Number(raw);
+  })
   @Type(() => Number)
   @IsInt()
+  @Min(1)
   category_id?: number;
 
+  // B.1 (F-043, ADR-09): empty→undefined + `@Min(1)` paridad catálogo.
+  // Conversión dentro del transform (`@Type` no corre con `@Transform`).
   @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === '' || raw === null || raw === undefined) return undefined;
+    return typeof raw === 'number' ? raw : Number(raw);
+  })
   @Type(() => Number)
   @IsInt()
+  @Min(1)
   brand_id?: number;
 
   @IsOptional()
@@ -1239,9 +1294,24 @@ export class ProductQueryDto {
   @Type(() => Boolean)
   include_inactive?: boolean = false;
 
+  // B.1 (F-040, ADR-09): migrado al patrón `@Transform` raw `obj[key]` de
+  // `is_ingredient` (mismo archivo). `@Type(() => Boolean)` + implicit
+  // conversion hacía `Boolean('false')===true`: `?pos_optimized=false`
+  // activaba la rama POS y forzaba `state=active` — lo opuesto a lo pedido.
+  // Ausente → default `false` intacto; `''` → undefined (falsy ≡ false en
+  // todos los usos: `pos_optimized ?` en findAll/buildProductWhere).
   @IsOptional()
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === undefined || raw === null || raw === '') {
+      return undefined;
+    }
+    if (raw === true || raw === 'true') return true;
+    if (raw === false || raw === 'false') return false;
+    // Cualquier otra cosa se entrega intacta para que `@IsBoolean` la rechace.
+    return raw;
+  })
   @IsBoolean()
-  @Type(() => Boolean)
   pos_optimized?: boolean = false;
 
   @IsOptional()
@@ -1382,16 +1452,23 @@ export class ProductQueryDto {
 
   // Hidrata una selección concreta de productos (los que el usuario marcó en el
   // stack de edición masiva), aceptando `?ids=1&ids=2` o `?ids=1,2`.
+  // B.1 (F-086, ADR-09): `?ids=` → `undefined` (sin filtro), NO `[]` con
+  // semántica libre — DB-17 exige `/ids` ≡ listado. `@ArrayMaxSize(1000)`
+  // = `MAX_PRODUCT_IDS` (literal: importar el servicio desde el DTO sería
+  // ciclo dto↔service bajo swc).
   @IsOptional()
-  @Transform(({ obj }) =>
-    obj?.ids === undefined || obj?.ids === null
-      ? undefined
-      : (Array.isArray(obj.ids) ? obj.ids : String(obj.ids).split(','))
-          .map((raw: unknown) => String(raw).trim())
-          .filter((raw: string) => raw !== '')
-          .map((raw: string) => Number(raw)),
-  )
+  @Transform(({ obj }) => {
+    if (obj?.ids === undefined || obj?.ids === null) return undefined;
+    const parsed = (
+      Array.isArray(obj.ids) ? obj.ids : String(obj.ids).split(',')
+    )
+      .map((raw: unknown) => String(raw).trim())
+      .filter((raw: string) => raw !== '')
+      .map((raw: string) => Number(raw));
+    return parsed.length === 0 ? undefined : parsed;
+  })
   @IsArray()
+  @ArrayMaxSize(1000)
   @IsInt({ each: true })
   @Type(() => Number)
   ids?: number[];

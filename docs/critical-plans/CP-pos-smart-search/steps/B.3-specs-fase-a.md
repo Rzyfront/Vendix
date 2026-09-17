@@ -27,4 +27,5 @@ skills: [vendix-backend, vendix-prisma-scopes, vendix-multi-tenant-context]
   - [ ] Test negativo: tienda B no ve productos de tienda A con search
   - [ ] Suite products verde completa (service + controller)
   - [ ] page=-1 documenta shape success:false (ERR-06) sin cambiarlo
+  - [ ] Spec barcode positivo con fixture (producto/variante/tier) intacto
 - **Status:** pending

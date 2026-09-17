@@ -6,6 +6,7 @@ import {
   ConflictException,
   BadRequestException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
@@ -85,6 +86,16 @@ import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service'
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { SettingsService } from '../settings/settings.service';
+// B.1 — gate L1 (A.0) + tokenizado/ensamblaje canónicos (A.1, F-016). El
+// `.ts` de flags es puro (sin imports): cero riesgo de ciclo con settings.
+import { PosSearchFlagsService } from '../settings/pos-smart-search/pos-search-flags.service';
+import type { PosSearchFlags } from '../settings/pos-smart-search/pos-search-flags';
+import {
+  buildTokenAndFieldOr,
+  isSmartSearchActive,
+  tokenizeInternal,
+} from '@common/utils/search-text.util';
+import type { SearchTextFieldMap } from '@common/utils/search-text.util';
 import type {
   ActiveProductPromotion,
   ActivePromotionProductInput,
@@ -98,6 +109,17 @@ import type {
  * respuesta viene con `capped: true` y la UI debe decirlo explícitamente.
  */
 export const MAX_PRODUCT_IDS = 1000;
+
+/**
+ * B.1 (ADR-02) — campos buscables de `GET /store/products` + `/ids`.
+ * Escalares raíz + `product_variants` (name/sku): cada token del AND puede
+ * matchear en campo distinto, incluso en variantes de filas distintas.
+ * Solo B.1 lo declara; D.1/D.2/D.3 declaran el suyo (el LOOP vive en A.1).
+ */
+const POS_PRODUCT_SEARCH_FIELDS: SearchTextFieldMap = {
+  scalar: ['name', 'description', 'sku'],
+  relations: { product_variants: ['name', 'sku'] },
+};
 
 /**
  * CP-PURCHASE-TRANSPARENCY D.4 — una línea del castigo de inventario que
@@ -235,6 +257,10 @@ export class ProductsService {
     // Ranking de más vendidos del POS: se cachea 24 h por tienda para que la
     // agregación sobre `order_items` no se pague en cada carga de la grilla.
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    // B.1 (A.0) — flags Tier-1 del path smart. `@Optional()`: ausente (harness
+    // de specs sin provider, B.3 lo provee) ⇒ `undefined` ⇒ path legacy
+    // (fail-closed). En prod `SettingsModule` siempre lo provee.
+    @Optional() private readonly searchFlags?: PosSearchFlagsService,
   ) {}
 
   /**
@@ -1348,6 +1374,62 @@ export class ProductsService {
   }
 
   /**
+   * B.1 (F-016, ADR-02) — rama search: WRAP, no replace (F-075).
+   *
+   * Smart ⇔ `isSmartSearchActive` (A.1, predicado ÚNICO que B.2 reutiliza
+   * para el rank): algún tier on ∧ tokeniza a ≥1 token. Entonces
+   * `buildTokenAndFieldOr` (A.1) ensambla AND×OR sobre
+   * `POS_PRODUCT_SEARCH_FIELDS` — cada token en ≥1 campo.
+   *
+   * Legacy (OR de frase intacto, byte-identico al pre-B.1) sobrevive como:
+   *   1) fallback stopwords — query solo-stopwords (`de la`) tokeniza a []
+   *      ⇒ frase legacy contains (ERR-20, semántica pineada en err.md);
+   *   2) path L1-off — flags off/ausentes (kill-switch, flag-down, specs sin
+   *      provider) ⇒ listado idéntico al legacy (FB-08/FB-09).
+   *
+   * `search⊗barcode` excluyentes (DB-01): con barcode esta rama ni se evalúa
+   * (el spread `search && !barcode` del llamador lo garantiza).
+   */
+  private buildSearchCondition(
+    search: string,
+    flags?: PosSearchFlags | null,
+  ): Prisma.productsWhereInput {
+    if (isSmartSearchActive(search, flags ?? null)) {
+      const tokens = tokenizeInternal(search);
+      if (tokens.length > 0) {
+        // Único `as` en la costura (A.1): `common/` no importa Prisma.
+        return buildTokenAndFieldOr(
+          tokens,
+          POS_PRODUCT_SEARCH_FIELDS,
+        ) as Prisma.productsWhereInput;
+      }
+    }
+    return {
+      OR: [
+        { name: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { sku: { contains: search, mode: 'insensitive' } },
+      ],
+    };
+  }
+
+  /**
+   * B.1 (A.0) — resuelve los flags Tier-1 solo cuando la rama search puede
+   * usarlos (`search` presente ∧ sin `barcode`, que la anula). Never-throw
+   * hacia el llamador: servicio ausente o sin `store_id` ⇒ `undefined` ⇒
+   * path legacy (fail-closed). `resolveSearchFlags` ya es never-throw
+   * (flag-down ⇒ default-off + warn, ERR-19).
+   */
+  private async resolveSearchFlagsFor(
+    query: ProductQueryDto,
+    storeId?: number,
+  ): Promise<PosSearchFlags | undefined> {
+    if (!query.search || query.barcode) return undefined;
+    if (!storeId || !this.searchFlags) return undefined;
+    return this.searchFlags.resolveSearchFlags(storeId);
+  }
+
+  /**
    * Construye el `where` del catálogo de productos a partir de
    * `ProductQueryDto`. Fuente ÚNICA de la traducción filtro → Prisma: la
    * consumen `findAll()` (listado paginado) y `findIds()` (materialización de
@@ -1356,8 +1438,15 @@ export class ProductsService {
    *
    * El scope por tienda lo inyecta `StorePrismaService`; aquí no se resuelve
    * tenant a mano.
+   *
+   * B.1: `flags` ausente ⇒ rama search legacy (fail-closed). `findAll` y
+   * `findIds` lo resuelven vía `resolveSearchFlagsFor`: ambos comparten
+   * `buildProductWhere` + predicado ⇒ `findAll`≡`findIds` (DB-17).
    */
-  private buildProductWhere(query: ProductQueryDto): Prisma.productsWhereInput {
+  private buildProductWhere(
+    query: ProductQueryDto,
+    flags?: PosSearchFlags | null,
+  ): Prisma.productsWhereInput {
     const {
       search,
       state,
@@ -1414,14 +1503,10 @@ export class ProductsService {
           },
         ],
       }),
-      ...(search &&
-        !barcode && {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { description: { contains: search, mode: 'insensitive' } },
-            { sku: { contains: search, mode: 'insensitive' } },
-          ],
-        }),
+      // B.1 (ADR-02): wrap — smart AND×OR con OR legacy vivo adentro
+      // (fallback stopwords + path L1-off). `!barcode` conserva la
+      // precedencia exacta del barcode (DB-01, FB-02).
+      ...(search && !barcode && this.buildSearchCondition(search, flags)),
       ...(brand_id && { brand_id }),
       ...(category_id && {
         product_categories: {
@@ -1461,7 +1546,13 @@ export class ProductsService {
   async findIds(
     query: ProductQueryDto,
   ): Promise<{ ids: number[]; total: number; capped: boolean }> {
-    const where = this.buildProductWhere(query);
+    // B.1: MISMO where que findAll (DB-17) — flags resueltos igual.
+    const context = RequestContextService.getContext();
+    const searchFlags = await this.resolveSearchFlagsFor(
+      query,
+      context?.store_id,
+    );
+    const where = this.buildProductWhere(query, searchFlags);
 
     const [rows, total] = await Promise.all([
       this.prisma.products.findMany({
@@ -1729,7 +1820,12 @@ export class ProductsService {
     // QUI-727 (A.1) / ADR-10 — proyección por rol: `cocina` no ve dinero.
     const isCocina = this.isKitchenRole();
 
-    const where = this.buildProductWhere(query);
+    // B.1: flags Tier-1 para la rama search (fail-closed a legacy).
+    const searchFlags = await this.resolveSearchFlagsFor(
+      query,
+      context?.store_id,
+    );
+    const where = this.buildProductWhere(query, searchFlags);
 
     // Resolve POS stock scope so we can constrain the stock_levels includes at
     // the Prisma layer (server-side filtering) instead of post-filtering rows.
