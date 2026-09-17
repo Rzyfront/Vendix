@@ -11,6 +11,7 @@
 
 export * from './decimal';
 export * from './dian-money';
+export * from './parse-money-cell';
 // `tax-inclusive-math.ts` re-exporta `INCLUSIVE_SOLVER_MAX_STEPS` e
 // `InclusiveRateBasis` desde `./dian-money` (mismo patrón que el archivo
 // legacy, que los reexportaba de su propio import relativo) — `export *`
