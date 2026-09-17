@@ -72,6 +72,7 @@ import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import {
   GenerateProductDescriptionDto,
   GenerateProductImageEnhancementDto,
+  GenerateProductImageDto,
   LogSearchSelectionDto,
 } from './dto';
 import {
@@ -556,6 +557,65 @@ export class ProductsService {
         referenceImages: [{ url: referenceImage, detail: 'high' }],
       },
     );
+
+    if (!response.success || !response.imageBase64) {
+      throw new VendixHttpException(ErrorCodes.AI_REQUEST_001);
+    }
+
+    const imageUrl = response.imageBase64.startsWith('data:image/')
+      ? response.imageBase64
+      : `data:image/png;base64,${response.imageBase64}`;
+
+    return {
+      image_url: imageUrl,
+      revised_prompt: response.revisedPrompt,
+      model: response.model,
+    };
+  }
+
+  async generateImage(dto: GenerateProductImageDto) {
+    const productTypeLabel =
+      dto.product_type === 'service' ? 'servicio' : 'producto';
+    const variables: Record<string, string> = {
+      prompt: dto.prompt.trim(),
+      product_name: dto.product_name || '',
+      product_type: productTypeLabel,
+      description: dto.description || '',
+      context: JSON.stringify(dto.extra_context || {}),
+    };
+
+    let response;
+    try {
+      response = await this.ai_engine.runImage(
+        'product_image_generator',
+        variables,
+        {
+          action: 'generate',
+          quality: 'high',
+          outputFormat: 'png',
+          size: '1024x1024',
+        },
+      );
+    } catch (err) {
+      if (
+        err instanceof VendixHttpException &&
+        err.errorCode === ErrorCodes.AI_APP_001.code
+      ) {
+        variables['requested_improvement'] = dto.prompt.trim();
+        response = await this.ai_engine.runImage(
+          'product_image_enhancer',
+          variables,
+          {
+            action: 'generate',
+            quality: 'high',
+            outputFormat: 'png',
+            size: '1024x1024',
+          },
+        );
+      } else {
+        throw err;
+      }
+    }
 
     if (!response.success || !response.imageBase64) {
       throw new VendixHttpException(ErrorCodes.AI_REQUEST_001);

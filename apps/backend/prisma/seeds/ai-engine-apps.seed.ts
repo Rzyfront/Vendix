@@ -1081,6 +1081,44 @@ Contexto adicional: {{context}}
 Genera una nueva version comercial de la MISMA imagen, manteniendo el sujeto reconocible y aplicando exactamente la mejora solicitada.`,
     },
     {
+      key: 'product_image_generator',
+      name: 'Generador de Imagenes de Productos y Servicios',
+      description:
+        'Genera fotos comerciales para productos o servicios a partir de una descripción e información del catálogo',
+      output_format: 'image',
+      model_type: 'image' as ai_model_type_enum,
+      temperature: 0.6,
+      max_tokens: 1200,
+      is_active: true,
+      ai_feature_category: 'async_queue',
+      metadata: {
+        image_generation: {
+          size: '1024x1024',
+          quality: 'high',
+          output_format: 'png',
+          background: 'auto',
+          action: 'generate',
+          partial_images: 2,
+        },
+      },
+      system_prompt: `Eres un fotógrafo comercial y director de arte para ecommerce.
+Tu trabajo es generar una imagen de alta calidad, limpia y profesional para el catálogo comercial de un producto o servicio a partir de la descripción proporcionada.
+
+REGLAS CRÍTICAS:
+- Composición centrada, limpia y comercial apta para catálogo, POS y tienda virtual.
+- Iluminación de estudio profesional, sombras naturales, fondo limpio (neutro, blanco o ambiente comercial apropiado para el artículo).
+- No agregues textos inventados, marcas de agua, códigos SKU, IDs, sellos, precios ni logos ficticios dentro de la imagen.
+- Enfócate en el producto como protagonista absoluto con detalles nítidos y presentación atractiva.`,
+      prompt_template: `Genera una foto comercial de alta resolución para este {{product_type}}.
+
+Nombre: {{product_name}}
+Descripción: {{description}}
+Instrucción visual del usuario: {{prompt}}
+Contexto adicional: {{context}}
+
+Genera una fotografía comercial atractiva y nítida que represente fielmente lo solicitado por el usuario.`,
+    },
+    {
       key: 'marketing_ad_prompt_specialist',
       ai_feature_category: 'text_generation',
       name: 'Especialista de Prompts para Anuncios',
@@ -1402,7 +1440,8 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
 
       if (
         app.key === 'marketing_ad_image_generator' ||
-        app.key === 'product_image_enhancer'
+        app.key === 'product_image_enhancer' ||
+        app.key === 'product_image_generator'
       ) {
         if (existing.output_format !== app.output_format) {
           updates.output_format = app.output_format;
@@ -1514,6 +1553,7 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
   await linkImageAppsWhenAvailable(client, [
     'marketing_ad_image_generator',
     'product_image_enhancer',
+    'product_image_generator',
   ]);
 
   await linkVoiceAppsWhenAvailable(client);

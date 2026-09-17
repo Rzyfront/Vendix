@@ -2340,6 +2340,37 @@ export class GenerateProductImageEnhancementDto {
   extra_context?: Record<string, any>;
 }
 
+export class GenerateProductImageDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1200)
+  prompt: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['1:1', '4:3', '3:2', '16:9', '4:5', '9:16'])
+  aspect_ratio?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  product_name?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['physical', 'service'])
+  product_type?: 'physical' | 'service';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
+
+  @IsOptional()
+  @IsObject()
+  extra_context?: Record<string, any>;
+}
+
 export * from './bulk-image-upload.dto';
 export * from './bulk-image-analysis.dto';
 export * from './update-product-promotions.dto';
