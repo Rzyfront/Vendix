@@ -35,6 +35,7 @@ import {
       (dateRangeChange)="onDateRangeChange($event)"
       (pageChange)="onPageChange($event)"
       (exportClick)="onExport()"
+      [enableRefresh]="true"
       (refreshClick)="onRefresh()"
     />
   `,
