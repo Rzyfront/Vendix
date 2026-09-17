@@ -366,20 +366,21 @@ export class ProductsBulkService {
                 // Celda con texto que no es un número (p. ej. "cinco mil",
                 // "N/A"): no se descarta en silencio. Queda marcada para que
                 // la previsualización y la escritura rechacen la fila en vez
-                // de persistir un precio 0 (QUI-846).
-                const label =
-                  key === 'base_price'
-                    ? 'El precio de venta'
-                    : key === 'sale_price'
-                      ? 'El precio de oferta'
-                      : 'El precio de compra';
-                const cellErrors = product[this.CELL_ERRORS_KEY] ?? [];
-                cellErrors.push({
-                  code: 'INVALID_PRICE',
-                  message: `${label} no es un número válido. Escribe solo dígitos y separadores, por ejemplo 5000 o 5.000.`,
-                  field: key,
-                });
-                product[this.CELL_ERRORS_KEY] = cellErrors;
+                // de persistir un precio 0 (QUI-846). Las columnas de dinero
+                // que el importador ignora (Costo) no bloquean la fila.
+                if (!this.CATALOG_ONLY_IGNORED_FIELD_LABELS[key]) {
+                  const label =
+                    key === 'base_price'
+                      ? 'El precio de venta'
+                      : 'El precio de oferta';
+                  const cellErrors = product[this.CELL_ERRORS_KEY] ?? [];
+                  cellErrors.push({
+                    code: 'INVALID_PRICE',
+                    message: `${label} no es un número válido. Escribe solo dígitos y separadores, por ejemplo 5000 o 5.000.`,
+                    field: key,
+                  });
+                  product[this.CELL_ERRORS_KEY] = cellErrors;
+                }
               } else {
                 product[key] = parsed;
               }
