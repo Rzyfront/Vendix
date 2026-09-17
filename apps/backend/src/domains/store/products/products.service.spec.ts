@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ForbiddenException } from '@nestjs/common';
 // The products domain throws typed VendixHttpException (PROD_*): the HTTP status
 // travels in the error code, not the exception class.
 import { VendixHttpException } from '../../../common/errors/vendix-http.exception';
@@ -2877,10 +2878,10 @@ describe('ProductsService', () => {
       // Mismo conjunto: "seleccionar todo" opera sobre lo que se ve.
       expect(whereFindIds).toEqual(whereFindAll);
       expect(ids).toEqual({ ids: [], total: 0, capped: false });
-      // findIds hereda el where pero no duplica el rank: resuelve flags, no
-      // path (el orden le es irrelevante).
+      // C.3: findIds SÍ resuelve path (1 vez, cacheado) para decidir raw
+      // (trigram, acentos) vs ORM. En l1 cae al ORM con el where idéntico.
       expect(mockSearchFlags.resolveSearchFlags).toHaveBeenCalledTimes(1);
-      expect(mockSearchFlags.resolveSearchPathFor).not.toHaveBeenCalled();
+      expect(mockSearchFlags.resolveSearchPathFor).toHaveBeenCalledTimes(1);
     });
 
     // ---- TENANT NEGATIVO (DB-11) ----------------------------------------------
@@ -2987,6 +2988,294 @@ describe('ProductsService', () => {
       await expect(
         service.findAll({ page: -1, limit: 10 }),
       ).rejects.toThrow(/skip/);
+    });
+  });
+
+  describe('POS SMART SEARCH TRIGRAM (C.3 — CP-pos-smart-search)', () => {
+    const FLAGS_TRI = { l1: true, l2: true, trigram: true };
+    const CTX_1 = {
+      store_id: 1,
+      organization_id: 1,
+      user_id: 1,
+      request_id: 'req-c3-001',
+    } as any;
+
+    const primeTrigram = () => {
+      mockSearchFlags.resolveSearchFlags.mockResolvedValue(FLAGS_TRI);
+      mockSearchFlags.resolveSearchPathFor.mockResolvedValue({
+        flags: FLAGS_TRI,
+        trigramCapable: true,
+        killSwitch: false,
+        path: 'trigram',
+      });
+      mockCacheManager.get.mockResolvedValue(null);
+    };
+
+    // Tx interactiva mockeada: corre el callback con un tx doble y expone
+    // orden de llamadas (SET LOCAL primero) + SQL/params enviados.
+    const primeTx = (rankRows: any[], countTotal: number) => {
+      const calls: { method: string; sql: string }[] = [];
+      const tx = {
+        $executeRawUnsafe: jest.fn(async (sql: string) => {
+          calls.push({ method: 'exec', sql });
+          return 0;
+        }),
+        $queryRawUnsafe: jest.fn(
+          async (sql: string, ..._params: unknown[]) => {
+            void _params;
+            calls.push({ method: 'query', sql });
+            if (sql.includes('COUNT(*)')) return [{ total: countTotal }];
+            return rankRows;
+          },
+        ),
+      };
+      (mockPrismaService as any).withoutScope = jest.fn(() => ({
+        $transaction: jest.fn(async (fn: any) => fn(tx)),
+      }));
+      return { tx, calls };
+    };
+
+    const fullRow = (over: Record<string, any>) => ({
+      id: over.id ?? 1,
+      name: 'Sample Product',
+      slug: 'sample-product',
+      description: null,
+      base_price: 100,
+      sale_price: null,
+      is_on_sale: false,
+      sku: null,
+      barcode: null,
+      cost_price: null,
+      profit_margin: null,
+      min_stock_level: null,
+      reorder_point: null,
+      state: ProductState.ACTIVE,
+      pricing_type: 'unit',
+      product_type: 'physical',
+      track_inventory: false,
+      available_for_ecommerce: true,
+      is_featured: false,
+      allow_pos_price_override: false,
+      requires_batch_tracking: false,
+      requires_booking: false,
+      booking_mode: null,
+      buffer_minutes: 0,
+      is_recurring: false,
+      service_duration_minutes: null,
+      service_modality: null,
+      service_pricing_type: null,
+      service_instructions: null,
+      created_at: new Date('2024-06-01T00:00:00.000Z'),
+      product_images: [],
+      brands: null,
+      product_categories: [],
+      product_tax_assignments: [],
+      product_price_tier_assignments: [],
+      stock_levels: [],
+      stores: { id: 1, name: 'T', slug: 't' },
+      _count: { product_variants: 0, product_images: 0, reviews: 0 },
+      ...over,
+    });
+
+    beforeEach(() => {
+      primeTrigram();
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 1,
+        user_id: 1,
+      } as any);
+    });
+
+    it('trigram: SET LOCAL primero + rank + COUNT twin + meta layer trigram', async () => {
+      const { tx, calls } = primeTx(
+        [
+          { id: 11 },
+          { id: 22 },
+        ],
+        2,
+      );
+      // Empate de score/coverage/featured a propósito: el re-score tier-2
+      // post-hydrate re-ordena por created_at DESC (contrato compareSearchRank)
+      // ⇒ 11 (más nuevo) primero. El SQL entrega la página, JS manda el orden.
+      const byId = new Map([
+        [
+          11,
+          fullRow({
+            id: 11,
+            name: 'Café molido',
+            created_at: new Date('2024-06-02T00:00:00.000Z'),
+          }),
+        ],
+        [
+          22,
+          fullRow({
+            id: 22,
+            name: 'Café en grano',
+            created_at: new Date('2024-06-01T00:00:00.000Z'),
+          }),
+        ],
+      ]);
+      mockPrismaService.products.findMany.mockImplementation((args: any) =>
+        Promise.resolve(
+          (args?.where?.id?.in ?? []).map((id: number) => byId.get(id)),
+        ),
+      );
+
+      const result = await RequestContextService.run(CTX_1, () =>
+        service.findAll({ search: 'cafe', page: 1, limit: 10 }),
+      );
+
+      // Orden de tx: timeout → rank → count.
+      expect(calls.map((c) => c.method)).toEqual([
+        'exec',
+        'query',
+        'query',
+      ]);
+      expect(calls[0]?.sql).toContain('SET LOCAL statement_timeout');
+      expect(calls[1]?.sql).toContain('ORDER BY score DESC');
+      expect(calls[2]?.sql).toContain('COUNT(*)');
+      // Placeholders, no interpolación: el token no aparece literal.
+      expect(calls[1]?.sql).not.toContain('cafe');
+      expect(tx.$queryRawUnsafe.mock.calls[0].slice(1)).toContain('%cafe%');
+      // Scope $1 = tienda del ALS.
+      expect(tx.$queryRawUnsafe.mock.calls[0][1]).toBe(1);
+      // Outcome → hydrate por ids + total del twin (F-005, sin count Prisma).
+      expect(mockPrismaService.products.count).not.toHaveBeenCalled();
+      expect(result.meta.total).toBe(2);
+      expect(result.meta.search).toEqual({
+        rank_mode: 'ranked',
+        layer: 'trigram',
+        degraded: false,
+      });
+      expect(result.data.map((p: any) => p.id)).toEqual([11, 22]);
+      // Hydrate trigram: ids + escalares, SIN el AND×OR de texto (el raw ya
+      // filtró con acentos; re-aplicarlo vaciaría la página).
+      const hydrateCall = mockPrismaService.products.findMany.mock.calls.find(
+        (call: any[]) => Array.isArray(call[0]?.where?.id?.in),
+      );
+      expect(hydrateCall).toBeDefined();
+      const hydrateWhere = hydrateCall[0].where;
+      expect(hydrateWhere.id).toEqual({ in: [11, 22] });
+      expect(hydrateWhere.AND).toBeUndefined();
+      expect(hydrateWhere.OR).toBeUndefined();
+      expect(hydrateWhere.state).toBeDefined();
+    });
+
+    it('F-004 negativo 1: ALS vacío (solo spy estático) → Forbidden, sin SQL', async () => {
+      const { tx } = primeTx([], 0);
+      // Sin RequestContextService.run: ALS vacío aunque getContext diga 1.
+      await expect(
+        service.findAll({ search: 'cafe', page: 1, limit: 10 }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(tx.$queryRawUnsafe).not.toHaveBeenCalled();
+      expect(tx.$executeRawUnsafe).not.toHaveBeenCalled();
+    });
+
+    it('F-004 negativo 2: ALS tienda 2 ≠ caller 1 → Forbidden (cero filas)', async () => {
+      const { tx } = primeTx([{ id: 99 }], 1);
+      await expect(
+        RequestContextService.run(
+          { ...CTX_1, store_id: 2 },
+          () => service.findAll({ search: 'cafe', page: 1, limit: 10 }),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(tx.$queryRawUnsafe).not.toHaveBeenCalled();
+    });
+
+    it('F-085: throw del driver → unranked_error + meta genérica (cero eco)', async () => {
+      (mockPrismaService as any).withoutScope = jest.fn(() => ({
+        $transaction: jest.fn(async () => {
+          throw new Error(
+            'function unaccent(text) does not exist HINT: products_search_name_trgm_idx',
+          );
+        }),
+      }));
+      mockPrismaService.products.findMany.mockResolvedValue([
+        fullRow({ id: 5 }),
+      ]);
+      mockPrismaService.products.count.mockResolvedValue(1);
+
+      const result = await RequestContextService.run(CTX_1, () =>
+        service.findAll({ search: 'cafe', page: 1, limit: 10 }),
+      );
+
+      expect(result.meta.search).toEqual({
+        rank_mode: 'unranked_error',
+        layer: 'trigram',
+        degraded: true,
+      });
+      // El cliente ve filas legacy + meta genérica: ni rastro del driver.
+      expect(JSON.stringify(result)).not.toContain('unaccent');
+      expect(JSON.stringify(result)).not.toContain('products_search_');
+      expect(result.data).toHaveLength(1);
+    });
+
+    it('request_id limpio viaja como comment; sucio se omite (no rompe SQL)', async () => {
+      const { calls } = primeTx([], 0);
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      await RequestContextService.run(CTX_1, () =>
+        service.findAll({ search: 'cafe', page: 1, limit: 10 }),
+      );
+      expect(calls[1]?.sql.startsWith('/* req:req-c3-001 */')).toBe(true);
+
+      const evil = primeTx([], 0);
+      await RequestContextService.run(
+        { ...CTX_1, request_id: 'a*/ DROP TABLE x; --' },
+        () => service.findAll({ search: 'cafe', page: 1, limit: 10 }),
+      );
+      expect(evil.calls[1]?.sql.startsWith('/*')).toBe(false);
+      expect(evil.calls[1]?.sql).toContain('SELECT p.id AS id');
+    });
+
+    it('F-030 conductual: search `100%` no deja literal en el SQL', async () => {
+      // `100%` normaliza a token `100` (el símbolo muere en el tokenizer);
+      // el SQL solo ve $n y el patrón `%100%` viaja en params.
+      const { tx, calls } = primeTx([], 0);
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+      await RequestContextService.run(CTX_1, () =>
+        service.findAll({ search: '100%', page: 1, limit: 10 }),
+      );
+      expect(calls[1]?.sql).not.toContain('100%');
+      const params: unknown[] = tx.$queryRawUnsafe.mock.calls[0].slice(1);
+      expect(params).toContain('%100%');
+    });
+
+    it('findIds trigram (DB-17): conjunto del raw + capped honesto', async () => {
+      primeTx([{ id: 11 }, { id: 22 }], 1200);
+      const result = await RequestContextService.run(CTX_1, () =>
+        service.findIds({ search: 'cafe' } as any),
+      );
+      expect(result).toEqual({ ids: [11, 22], total: 1200, capped: true });
+      // Cero Prisma ORM: el conjunto lo define el raw (acentos incluidos).
+      expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
+      expect(mockPrismaService.products.count).not.toHaveBeenCalled();
+    });
+
+    it('findIds: throw operativo del raw → fail-open a legacy', async () => {
+      (mockPrismaService as any).withoutScope = jest.fn(() => ({
+        $transaction: jest.fn(async () => {
+          throw new Error('boom');
+        }),
+      }));
+      mockPrismaService.products.findMany.mockResolvedValue([{ id: 5 }]);
+      mockPrismaService.products.count.mockResolvedValue(1);
+      const result = await RequestContextService.run(CTX_1, () =>
+        service.findIds({ search: 'cafe' } as any),
+      );
+      expect(result).toEqual({ ids: [5], total: 1, capped: false });
+    });
+
+    it('findIds sin tienda en contexto → legacy (cero SQL crudo)', async () => {
+      const { tx } = primeTx([{ id: 1 }], 1);
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue(
+        undefined as any,
+      );
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+      const result = await service.findIds({ search: 'cafe' } as any);
+      expect(result).toEqual({ ids: [], total: 0, capped: false });
+      expect(tx.$queryRawUnsafe).not.toHaveBeenCalled();
     });
   });
 });

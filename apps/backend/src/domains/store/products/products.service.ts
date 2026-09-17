@@ -113,7 +113,17 @@ import {
   scoreProductSearchRow,
   type ProductSearchRow,
 } from './services/product-search-relevance.util';
-import { recordSearchDegraded } from './services/product-search-metrics';
+import {
+  observeSearchLatency,
+  recordSearchDegraded,
+} from './services/product-search-metrics';
+import {
+  buildTrigramCountQuery,
+  buildTrigramRankedQuery,
+  TRIGRAM_SLOW_LOG_MS,
+  TRIGRAM_STATEMENT_TIMEOUT_MS,
+  type TrigramFilterSet,
+} from './services/product-search-trigram.util';
 import type { SearchRankMeta } from '@common/responses/response.interface';
 import { createHash } from 'node:crypto';
 import type { SearchTextFieldMap } from '@common/utils/search-text.util';
@@ -1599,6 +1609,43 @@ export class ProductsService {
     );
     const where = this.buildProductWhere(query, searchFlags);
 
+    // C.3 (DB-17): con texto + path trigram, el conjunto lo define el raw
+    // (acentos incluidos: `cafe`⊃`Café`). El findMany/count Prisma NO vería
+    // esas filas ⇒ /ids discreparía del listado. Solo con tienda en contexto
+    // (sin store, legacy como siempre: cero cambio para llamadas sin request).
+    // Fail-open a legacy ante throw operativo (F-085); Forbidden propaga.
+    const { search, barcode } = query;
+    if (search && !barcode && context?.store_id && this.searchFlags) {
+      const storeId = context.store_id;
+      try {
+        const resolution =
+          await this.searchFlags.resolveSearchPathFor(storeId);
+        const tokens = tokenizeInternal(search);
+        if (resolution.path === 'trigram' && tokens.length > 0) {
+          const outcome = await this.searchIdsRankedTrigram({
+            search,
+            tokens,
+            storeId,
+            query,
+            limit: MAX_PRODUCT_IDS,
+            skip: 0,
+          });
+          return {
+            ids: outcome.pageIds,
+            total: outcome.total,
+            capped: outcome.total > MAX_PRODUCT_IDS,
+          };
+        }
+      } catch (error) {
+        if (error instanceof ForbiddenException) throw error;
+        this.logger.warn(
+          `[PosSmartSearch] findIds trigram→legacy store=${storeId} ` +
+            `qhash=${this.hashSearchQuery(search)}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     const [rows, total] = await Promise.all([
       this.prisma.products.findMany({
         where,
@@ -2103,6 +2150,133 @@ export class ProductsService {
   }
 
   /**
+   * C.3 (ADR-04) — ids rankeados vía raw trigram scopeado. Mismo contrato de
+   * salida que `resolveSmartRankedIdsPage` (ids de LA página + total del
+   * COUNT twin): el llamador hidrata y pagina igual en ambas ramas.
+   *
+   * - F-004 fail-closed: store_id SOLO de ALS directo
+   *   (`asyncLocalStorage.getStore()`, jamás `getContext()` con su fallback
+   *   estático) e IGUAL al del caller; cualquier otra cosa ⇒ Forbidden (que
+   *   el llamador re-lanza, nunca degrada: seguridad no hace fail-open).
+   * - F-030: `$queryRawUnsafe` con placeholders $1..$n del builder puro; cero
+   *   `${}` de input (gate en spec + grep).
+   * - F-070/F-090: `SET LOCAL statement_timeout` dentro de transacción
+   *   interactiva + slow-log sobre el presupuesto E.2 + histograma.
+   * - F-085: cualquier throw NO-seguridad propaga al catch del llamador, que
+   *   degrada a `orderBy` legacy con meta genérica (cero texto del driver al
+   *   cliente) + warn server-side.
+   * - B.2 nota: `request_id` viaja como comment SQL (sanitizado a
+   *   `[a-zA-Z0-9-]`; inválido ⇒ sin comment, jamás roto).
+   */
+  private async searchIdsRankedTrigram(args: {
+    search: string;
+    tokens: readonly string[];
+    storeId: number;
+    query: ProductQueryDto;
+    limit: number;
+    skip: number;
+  }): Promise<SmartSearchRankOutcome> {
+    const { search, tokens, storeId: callerStoreId, query, limit, skip } =
+      args;
+    const alsStore =
+      RequestContextService.asyncLocalStorage.getStore()?.store_id;
+    if (
+      typeof alsStore !== 'number' ||
+      !Number.isInteger(alsStore) ||
+      alsStore <= 0 ||
+      alsStore !== callerStoreId
+    ) {
+      throw new ForbiddenException(
+        'Store context required for ranked search',
+      );
+    }
+    const storeId = alsStore;
+    const filters: TrigramFilterSet = {
+      state: query.state ?? null,
+      includeInactive: query.include_inactive ?? null,
+      brandId: query.brand_id ?? null,
+      categoryId: query.category_id ?? null,
+      trackInventory: query.track_inventory ?? null,
+      productType: query.product_type ?? null,
+      requiresBooking: query.requires_booking ?? null,
+      isSellable: query.is_sellable ?? null,
+      isBatchProduced: query.is_batch_produced ?? null,
+      isIngredient: query.is_ingredient ?? undefined,
+      ids: query.ids ?? null,
+    };
+    const ranked = buildTrigramRankedQuery(
+      storeId,
+      tokens,
+      filters,
+      search,
+      limit,
+      skip,
+    );
+    const counted = buildTrigramCountQuery(storeId, tokens, filters);
+    const requestId =
+      RequestContextService.asyncLocalStorage.getStore()?.request_id;
+    const comment =
+      typeof requestId === 'string' &&
+      /^[a-zA-Z0-9-]{1,64}$/.test(requestId)
+        ? `/* req:${requestId} */ `
+        : '';
+    const base = this.prisma.withoutScope() as unknown as {
+      $transaction: <T>(
+        fn: (tx: {
+          $executeRawUnsafe: (sql: string) => Promise<unknown>;
+          $queryRawUnsafe: <R>(sql: string, ...params: unknown[]) => Promise<R>;
+        }) => Promise<T>,
+      ) => Promise<T>;
+    };
+    const start = Date.now();
+    const { pageIds, total } = await base.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SET LOCAL statement_timeout = '${TRIGRAM_STATEMENT_TIMEOUT_MS}ms'`,
+      );
+      const rows = await tx.$queryRawUnsafe<{ id: number }[]>(
+        `${comment}${ranked.sql}`,
+        ...ranked.params,
+      );
+      const totals = await tx.$queryRawUnsafe<{ total: number }[]>(
+        `${comment}${counted.sql}`,
+        ...counted.params,
+      );
+      return {
+        pageIds: Array.isArray(rows)
+          ? rows
+              .map((row) => Number(row?.id))
+              .filter(
+                (id) => Number.isInteger(id) && (id as number) > 0,
+              )
+          : [],
+        total:
+          Array.isArray(totals) &&
+          typeof totals[0]?.total === 'number' &&
+          Number.isFinite(totals[0].total)
+            ? Math.max(0, Math.trunc(totals[0].total))
+            : 0,
+      };
+    });
+    const msScanRank = Date.now() - start;
+    observeSearchLatency('trigram', 'ranked', msScanRank);
+    if (msScanRank > TRIGRAM_SLOW_LOG_MS) {
+      this.logger.warn(
+        `[PosSmartSearch] slow trigram store=${storeId} ` +
+          `qhash=${this.hashSearchQuery(search)} tokens=${tokens.length} ` +
+          `ms=${msScanRank} rows=${pageIds.length} total=${total}`,
+      );
+    }
+    return {
+      pageIds,
+      total,
+      fromCache: false,
+      candidates: total,
+      msCache: 0,
+      msScanRank,
+    };
+  }
+
+  /**
    * B.2 (F-068) — UNA línea estructurada por request con `search`: request_id,
    * store, query-hash, tokens, ms por etapa, candidatos, rank_mode + snapshot
    * de flags (A.0). Debug por defecto; warn si degradado o sobre presupuesto
@@ -2271,21 +2445,34 @@ export class ProductsService {
     if (useSmartRank && search && context?.store_id) {
       const storeId = context.store_id;
       try {
-        const outcome = await this.resolveSmartRankedIdsPage({
-          where,
-          search,
-          tokens: smartTokens,
-          storeId,
-          query,
-          page,
-          limit: rankLimit,
-          skip,
-          scanCap,
-        });
+        // C.3 (ADR-04): path trigram ⇒ raw scopeado; L2 ⇒ rank en memoria.
+        // Mismo contrato SmartSearchRankOutcome en ambas ramas.
+        const outcome =
+          smartSearch.path === 'trigram'
+            ? await this.searchIdsRankedTrigram({
+                search,
+                tokens: smartTokens,
+                storeId,
+                query,
+                limit: rankLimit,
+                skip,
+              })
+            : await this.resolveSmartRankedIdsPage({
+                where,
+                search,
+                tokens: smartTokens,
+                storeId,
+                query,
+                page,
+                limit: rankLimit,
+                skip,
+                scanCap,
+              });
         if (outcome === null) {
           rankDegraded = true;
           rankMode = 'unranked_scan_cap';
           recordSearchDegraded('scan_cap', storeId);
+          observeSearchLatency(smartSearch.path, rankMode, 0);
           this.logger.warn(
             `[PosSmartSearch] degraded reason=scan_cap store=${storeId} ` +
               `qhash=${this.hashSearchQuery(search)} tokens=${smartTokens.length} ` +
@@ -2294,12 +2481,20 @@ export class ProductsService {
         } else {
           rankOutcome = outcome;
           rankMode = 'ranked';
+          if (smartSearch.path === 'l2') {
+            observeSearchLatency('l2', rankMode, outcome.msScanRank);
+          }
         }
       } catch (error) {
+        // C.3 (F-004): Forbidden de scope JAMÁS degrada — seguridad no hace
+        // fail-open. Solo errores operativos caen al orderBy legacy (F-085:
+        // meta genérica al cliente, texto del driver solo server-side).
+        if (error instanceof ForbiddenException) throw error;
         rankDegraded = true;
         rankMode = 'unranked_error';
         rankOutcome = null;
         recordSearchDegraded('rank_error', storeId);
+        observeSearchLatency(smartSearch.path, rankMode, 0);
         this.logger.warn(
           `[PosSmartSearch] degraded reason=rank_error store=${storeId} ` +
             `qhash=${this.hashSearchQuery(search)} tokens=${smartTokens.length} ` +
@@ -2329,6 +2524,13 @@ export class ProductsService {
     // fail-open de hydrate (F-034) lo anula al re-hidratar en legacy.
     let pageIds = rankOutcome?.pageIds ?? bestSellingPageIds;
 
+    // C.3 — base del hydrate SIN predicado de texto: en path trigram los ids
+    // ya vienen filtrados por texto desde el raw (acentos incluidos);
+    // re-aplicar el AND×OR smart de Prisma (sin unaccent) vaciaría la página.
+    // Solo se nudea el texto (AND/OR lo produce únicamente la condición de
+    // búsqueda); los escalares se conservan como segunda cerradura.
+    const { AND: _omitTextAnd, OR: _omitTextOr, ...hydrateBaseNoText } =
+      where as Record<string, unknown>;
     // B.2 (F-034) — args del hydrate como builder: el path rank lo invoca con
     // los ids de la página y, si ESE hydrate lanza, el fallback lo re-invoca
     // sin ids (`orderBy` legacy, mismo include/mismo map, F-076). `satisfies`
@@ -2338,7 +2540,17 @@ export class ProductsService {
         // Con la página ya resuelta por ranking, el recorte lo hizo el orden en
         // memoria: aquí sólo se hidratan esos ids (sin skip/take, que volverían
         // a paginar sobre un conjunto ya paginado).
-        where: ids ? { ...where, id: { in: ids } } : where,
+        // C.3: el nudeo de texto aplica SOLO con rankOutcome trigram (el rank
+        // exige !barcode; sin outcome —best-sellers, fallbacks— `where`
+        // intacto para no alterar ningún otro camino).
+        where: ids
+          ? {
+              ...(rankOutcome && smartSearch.path === 'trigram'
+                ? (hydrateBaseNoText as typeof where)
+                : where),
+              id: { in: ids },
+            }
+          : where,
         ...(ids ? {} : { skip, take: limit }),
         include: {
           stores: {
