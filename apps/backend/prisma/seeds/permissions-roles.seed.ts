@@ -5274,6 +5274,15 @@ export async function seedPermissionsAndRoles(
     'store:recipes:read',
     // Productos con proyección reducida (sin dinero)
     'store:products:read',
+    // La cocina gestiona sus propias órdenes de producción (decisión del
+    // dueño): crear y completar producción es tarea del cocinero, no del
+    // encargado. `kitchen_fire:{cancel,resend}` quedan DELIBERADAMENTE fuera
+    // — gestión avanzada de tickets = admin/encargado vía detalle de orden
+    // (la UI gatea esos botones por permiso en vez de ofrecer un 403).
+    // `table_sessions:read` sigue fuera por ADR-10 (expone dinero).
+    'store:production_orders:read',
+    'store:production_orders:create',
+    'store:production_orders:update',
   ];
 
   const kitchenPermissions = allPermissions.filter((p) =>

@@ -426,6 +426,27 @@ export async function seedRestaurantE2E(
     );
   }
 
+  // Panel UI por rol del fixture: subconjunto curado de lo que el alta real
+  // produce (`staff-provisioning` → `generatePanelUI`, que trae TODAS las
+  // claves en true). El mesero conserva sus 4 claves; la cocina suma su
+  // tablero KDS, sus órdenes de producción y el módulo de recetas (lo opera
+  // con `recipes:read`; sin la clave visible repite el defecto QUI-735).
+  const MESERO_PANEL_UI: Record<string, boolean> = {
+    pos: true,
+    dashboard: true,
+    restaurant_ops: true,
+    restaurant_ops_tables: true,
+  };
+  const COCINA_PANEL_UI: Record<string, boolean> = {
+    pos: true,
+    dashboard: true,
+    restaurant_ops: true,
+    restaurant_ops_tables: true,
+    restaurant_ops_kds: true,
+    restaurant_ops_production: true,
+    restaurant_ops_recipes: true,
+  };
+
   async function ensureE2EUser(
     username: string,
     email: string,
@@ -433,6 +454,7 @@ export async function seedRestaurantE2E(
     lastName: string,
     roleId: number,
     roleLabel: string,
+    panelUiStoreAdmin: Record<string, boolean>,
   ): Promise<number> {
     let user = await client.users.findUnique({ where: { username } });
     if (user) {
@@ -477,13 +499,9 @@ export async function seedRestaurantE2E(
             // `{dashboard, pos}` dejaba al mesero sin acceso al módulo Mesas,
             // que es justamente donde vive su vista móvil (QUI-735), y eso se
             // leyó como un defecto de producto que no existe fuera del fixture.
+            // El mapa viaja por rol (MESERO_PANEL_UI / COCINA_PANEL_UI).
             panel_ui: {
-              STORE_ADMIN: {
-                pos: true,
-                dashboard: true,
-                restaurant_ops: true,
-                restaurant_ops_tables: true,
-              },
+              STORE_ADMIN: { ...panelUiStoreAdmin },
             },
             preferences: { language: 'es', theme: 'default' },
           },
@@ -492,8 +510,38 @@ export async function seedRestaurantE2E(
       console.log(`   ✅ Created user_settings for "${email}"`);
       created++;
     } else {
-      console.log(`   ⏭  Skipped user_settings for "${email}" (already exists)`);
-      skipped++;
+      // Merge aditivo (mismo espíritu no-destructivo que el punto C): si el
+      // settings ya existía de una corrida anterior, solo se AGREGAN las
+      // claves del fixture que falten; ningún valor existente se pisa.
+      const cfg = (existingSettings.config as Record<string, any>) ?? {};
+      const stored =
+        (cfg.panel_ui?.STORE_ADMIN as Record<string, boolean>) ?? {};
+      const missing = Object.keys(panelUiStoreAdmin).filter(
+        (k) => stored[k] === undefined,
+      );
+      if (missing.length > 0) {
+        await client.user_settings.update({
+          where: { user_id: user.id },
+          data: {
+            config: {
+              ...cfg,
+              panel_ui: {
+                ...(cfg.panel_ui ?? {}),
+                // El almacenado gana: solo se rellenan claves ausentes, un
+                // `false` curado por admin nunca se pisa con el `true` del fixture.
+                STORE_ADMIN: { ...panelUiStoreAdmin, ...stored },
+              },
+            },
+          },
+        });
+        console.log(
+          `   ✅ Merged ${missing.length} panel_ui key(s) for "${email}" (${missing.join(', ')})`,
+        );
+        created++;
+      } else {
+        console.log(`   ⏭  Skipped user_settings for "${email}" (already exists)`);
+        skipped++;
+      }
     }
 
     // store_users — requerido por login() para validar acceso a la tienda
@@ -545,6 +593,7 @@ export async function seedRestaurantE2E(
     'E2E',
     meseroRole.id,
     'waiter',
+    MESERO_PANEL_UI,
   );
   const cocinaId = await ensureE2EUser(
     'cocina.e2e.roku',
@@ -554,6 +603,7 @@ export async function seedRestaurantE2E(
     'E2E',
     cocinaRole.id,
     'kitchen',
+    COCINA_PANEL_UI,
   );
 
   return {
