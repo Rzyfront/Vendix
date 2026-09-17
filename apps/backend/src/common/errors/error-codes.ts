@@ -16,6 +16,15 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'DTO validation failed',
   },
+  // D.3 (ERR-22): throttle global IP (@nestjs/throttler) excedido.
+  // Lo asigna AllExceptionsFilter a TODO 429 no-Vendix (el guard de fábrica
+  // no trae error_code); los 429 de dominio (SUP_PQR_005, REV_*, AI_APP_004…)
+  // conservan su código porque son VendixHttpException.
+  RATE_LIMIT_001: {
+    code: 'RATE_LIMIT_001',
+    httpStatus: 429,
+    devMessage: 'Too many requests, slow down and retry',
+  },
   SYS_NOT_FOUND_001: {
     code: 'SYS_NOT_FOUND_001',
     httpStatus: 404,
