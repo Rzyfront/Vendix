@@ -290,10 +290,18 @@ import { ProductsService } from '../services/products.service';
           @if (mode() === 'enhance') {
             <app-button
               variant="outline"
-              (clicked)="close()"
+              (clicked)="leaveOriginal()"
               [disabled]="isGenerating()"
             >
               Dejar anterior
+            </app-button>
+            <app-button
+              variant="outline"
+              (clicked)="retryGeneration()"
+              [disabled]="isGenerating() || !canGenerate()"
+            >
+              <app-icon slot="icon" name="sparkles" size="14"></app-icon>
+              Generar de nuevo
             </app-button>
             <app-button
               variant="outline"
@@ -322,8 +330,8 @@ import { ProductsService } from '../services/products.service';
               (clicked)="retryGeneration()"
               [disabled]="isGenerating() || !canGenerate()"
             >
-              <app-icon slot="icon" name="refresh-cw" size="14"></app-icon>
-              Regenerar
+              <app-icon slot="icon" name="sparkles" size="14"></app-icon>
+              Generar de nuevo
             </app-button>
             <app-button
               variant="primary"
@@ -745,6 +753,7 @@ export class ProductImageAiEnhanceModalComponent {
   readonly replace = output<string>();
   readonly keep = output<string>();
   readonly generated = output<string>();
+  readonly leave = output<void>();
 
   readonly modalTitle = computed(() =>
     this.mode() === 'generate'
@@ -881,7 +890,7 @@ export class ProductImageAiEnhanceModalComponent {
   }
 
   retryGeneration(): void {
-    if (!this.canRetry()) return;
+    if (!this.canGenerate()) return;
     this.generate();
   }
 
@@ -903,6 +912,11 @@ export class ProductImageAiEnhanceModalComponent {
     const generated = this.generatedImageUrl();
     if (!generated) return;
     this.generated.emit(generated);
+    this.close();
+  }
+
+  leaveOriginal(): void {
+    this.leave.emit();
     this.close();
   }
 

@@ -577,6 +577,12 @@ const PNG_FALLBACK_MAX_SIDE = 2048;
               <app-icon slot="icon" name="rotate-ccw" size="16"></app-icon>
               Restablecer
             </app-button>
+            @if (aiEnhanceHandler()) {
+              <app-button variant="outline" (clicked)="onCropAiEnhance()">
+                <app-icon slot="icon" name="sparkles" size="16"></app-icon>
+                Mejorar con IA
+              </app-button>
+            }
             @if (mode() === 'add') {
               <app-button variant="outline" (clicked)="skipCurrent()">
                 <app-icon slot="icon" name="skip-forward" size="16"></app-icon>
@@ -640,6 +646,7 @@ export class ImageSourceModalComponent {
   readonly imagesAdded = output<string[]>();
   readonly imageEdited = output<string>();
   readonly requestAiGenerate = output<void>();
+  readonly requestAiEnhance = output<string>();
 
   readonly effectiveRemainingSlots = computed(() => {
     const raw = this.remainingSlots();
@@ -1242,11 +1249,11 @@ export class ImageSourceModalComponent {
     });
   }
 
-  async applyCrop(): Promise<void> {
+  async getCroppedDataUrl(): Promise<string | null> {
     const item = this.queue()[this.queueCursor()];
     const f = this.cropFrame();
     const canvas = this.cropCanvasRef?.nativeElement;
-    if (!item || !f || !canvas) return;
+    if (!item || !f || !canvas) return null;
 
     const img = await this.loadImage(this.queueCursor(), item.dataUrl);
     const swapped = this.axesSwapped();
@@ -1262,7 +1269,7 @@ export class ImageSourceModalComponent {
     tmp.width = fullW;
     tmp.height = fullH;
     const tctx = tmp.getContext('2d');
-    if (!tctx) return;
+    if (!tctx) return null;
     tctx.save();
     tctx.translate(fullW / 2, fullH / 2);
     tctx.rotate((this.rotation() * Math.PI) / 180);
@@ -1283,10 +1290,15 @@ export class ImageSourceModalComponent {
     out.width = sw;
     out.height = sh;
     const octx = out.getContext('2d');
-    if (!octx) return;
+    if (!octx) return null;
     octx.drawImage(tmp, sx, sy, sw, sh, 0, 0, sw, sh);
 
-    const dataUrl = this.exportCanvas(out, octx);
+    return this.exportCanvas(out, octx);
+  }
+
+  async applyCrop(): Promise<void> {
+    const dataUrl = await this.getCroppedDataUrl();
+    if (!dataUrl) return;
 
     if (this.mode() === 'edit') {
       this.imageEdited.emit(dataUrl);
@@ -1296,6 +1308,13 @@ export class ImageSourceModalComponent {
 
     this.appendResult(dataUrl);
     this.advanceQueue();
+  }
+
+  async onCropAiEnhance(): Promise<void> {
+    const dataUrl = await this.getCroppedDataUrl();
+    if (!dataUrl) return;
+    this.onClose();
+    this.requestAiEnhance.emit(dataUrl);
   }
 
   /**

@@ -34,6 +34,7 @@ type AspectRatio = 'free' | '1:1' | '4:3' | '3:2' | '16:9' | '4:5' | '9:16';
       (imagesAdded)="imagesAdded.emit($event)"
       (imageEdited)="imageEdited.emit($event)"
       (requestAiGenerate)="requestAiGenerate.emit()"
+      (requestAiEnhance)="requestAiEnhance.emit($event)"
     ></app-image-source-modal>
   `,
 })
@@ -48,6 +49,7 @@ export class ProductImageSourceModalComponent {
   readonly imagesAdded = output<string[]>();
   readonly imageEdited = output<string>();
   readonly requestAiGenerate = output<void>();
+  readonly requestAiEnhance = output<string>();
 
   private readonly noopEnhance = (dataUrl: string): Observable<string> =>
     of(dataUrl);

@@ -2280,6 +2280,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "273c749f",
+      "created_by": "dmin",
+      "created_at": "2026-09-17T14:06:57Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }

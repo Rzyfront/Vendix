@@ -4110,6 +4110,7 @@
   (imagesAdded)="onImagesFromModal($event)"
   (imageEdited)="onImageEdited($event)"
   (requestAiGenerate)="openProductImageAiGenerator()"
+  (requestAiEnhance)="openAiEnhanceFromCrop($event)"
 ></app-product-image-source-modal>
 
 <app-product-image-ai-enhance-modal
@@ -4123,6 +4124,7 @@
   [remainingSlots]="remainingImageSlots()"
   (replace)="onAiImageReplace($event)"
   (keep)="onAiImageKeepBoth($event)"
+  (leave)="onAiImageLeaveOriginal()"
   (generated)="onAiImageGenerated($event)"
 ></app-product-image-ai-enhance-modal>
 
@@ -4135,6 +4137,7 @@
   [mode]="'add'"
   (imagesAdded)="onVariantImagesAdded($event)"
   (requestAiGenerate)="openVariantImageAiGenerator()"
+  (requestAiEnhance)="openVariantAiEnhanceFromCrop($event)"
 ></app-product-image-source-modal>
 
 <app-product-image-source-modal
@@ -4145,19 +4148,21 @@
   [mode]="'edit'"
   [sourceImageUrl]="editingVariantImageUrl()"
   (imageEdited)="onVariantImageEdited($event)"
+  (requestAiEnhance)="openVariantAiEnhanceFromCrop($event)"
 ></app-product-image-source-modal>
 
 <app-product-image-ai-enhance-modal
   [isOpen]="isVariantAiModalOpen()"
   (isOpenChange)="isVariantAiModalOpen.set($event)"
   [mode]="variantAiModalMode()"
-  [sourceImageUrl]="editingVariantImageUrl()"
+  [sourceImageUrl]="variantAiSourceImageUrl()"
   [productName]="productForm.get('name')?.value || ''"
   [productType]="isService ? 'service' : 'physical'"
   [description]="productForm.get('description')?.value || ''"
   [remainingSlots]="1"
   (replace)="onVariantAiReplace($event)"
   (keep)="onVariantAiKeep($event)"
+  (leave)="onVariantAiLeaveOriginal()"
   (generated)="onVariantAiGenerated($event)"
 ></app-product-image-ai-enhance-modal>
 
