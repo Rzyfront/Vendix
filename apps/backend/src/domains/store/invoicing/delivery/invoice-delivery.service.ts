@@ -499,6 +499,17 @@ export class InvoiceDeliveryService {
       // y se reintenta sólo con el XML; si ni así cabe (caso extremo), el
       // correo sale sin adjunto en vez de fallar por peso sin que nadie sepa
       // por qué.
+      //
+      // F-211/D.13 (2026-09-14): borrar SÓLO `Factura-{n}.pdf` no bastaba —
+      // el `AttachedDocument` (paso 5.c) embebe el MISMO PDF en base64 dentro
+      // de `cbc:Note` cuando `pdf_buffer` estaba presente, así que un PDF de
+      // 3 MB seguía viajando duplicado (crudo + ~4/3 en base64 dentro del
+      // sobre) y el zip quedaba igual de sobrepeso tras el primer descarte —
+      // medido: `zip.getEntryCount()` bajaba a 2 pero el tamaño no bajaba lo
+      // suficiente, y el correo terminaba saliendo SIN NINGÚN adjunto en vez
+      // de sólo sin el PDF. El sobre normativo (§9.1) es descartable en este
+      // endpoint de conveniencia (ver docblock de la clase); el XML crudo
+      // (paso 5.b) no.
       if (zip_buffer.length > InvoiceDeliveryService.MAX_ZIP_ATTACHMENT_BYTES) {
         this.logger.warn(
           `El zip de la factura #${invoice.invoice_number} pesa ${zip_buffer.length} bytes (> 2 MB); se descarta el PDF y se reintenta sólo con el XML.`,
@@ -508,12 +519,22 @@ export class InvoiceDeliveryService {
           zip.deleteFile(pdf_entry_name);
           zip_buffer = zip.toBuffer();
         }
+        if (zip_buffer.length > InvoiceDeliveryService.MAX_ZIP_ATTACHMENT_BYTES) {
+          const attached_document_entry_name = `Factura-${invoice.invoice_number}-attached-document.xml`;
+          if (zip.getEntry(attached_document_entry_name)) {
+            this.logger.warn(
+              `La factura #${invoice.invoice_number} sigue > 2 MB sin el PDF suelto — el AttachedDocument embebe el mismo PDF en base64; se descarta también el sobre y queda sólo el XML crudo.`,
+            );
+            zip.deleteFile(attached_document_entry_name);
+            zip_buffer = zip.toBuffer();
+          }
+        }
         if (
           zip.getEntryCount() === 0 ||
           zip_buffer.length > InvoiceDeliveryService.MAX_ZIP_ATTACHMENT_BYTES
         ) {
           this.logger.error(
-            `La factura #${invoice.invoice_number} no cabe en 2 MB ni sin el PDF; el reenvío sale sin adjunto.`,
+            `La factura #${invoice.invoice_number} no cabe en 2 MB ni sin el PDF ni sin el sobre; el reenvío sale sin adjunto.`,
           );
           has_zip_content = false;
         }

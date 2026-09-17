@@ -1,4 +1,20 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "test", "tests", "dist", "scripts", "**/*spec.ts"]
+  // "src/testing/**" (ronda 3, plan CP-pos-exclusive-tax-double-charge, QUI-832,
+  // G3): el helper que autoriza a un spec destructivo a truncar una base
+  // (`destructive-e2e.guard.ts`) no es un `*.spec.ts`, así que sobrevivía al
+  // exclude de abajo y se compilaba/desplegaba dentro de la imagen de
+  // producción. Sólo lo importan specs de `domains/auth` (medido: ningún
+  // archivo de producción lo referencia) — no pertenece a `dist/`.
+  // `tsconfig.check.json` (typecheck de specs) SÍ lo sigue tipando, porque su
+  // `include` es explícito ["src/**/*", ...] y no hereda este exclude.
+  "exclude": [
+    "node_modules",
+    "test",
+    "tests",
+    "dist",
+    "scripts",
+    "**/*spec.ts",
+    "src/testing/**"
+  ]
 }

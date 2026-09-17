@@ -83,6 +83,13 @@ export class ResendDishModalComponent {
   /** Ítems a reenviar. Vacío = modal no se abre (defensa). */
   readonly orderItemIds = input<number[]>([]);
 
+  /**
+   * Decisión de cocina persistida del ítem (`cancellation_type` que el
+   * cancel guarda por ítem: `after_fire_reused` | `after_fire_waste`).
+   * `null` = flujo clásico sin decisión (textos por defecto).
+   */
+  readonly cancellationType = input<string | null>(null);
+
   /** Cerrado por backdrop/Esc. El padre limpia selección. */
   readonly cancel = output<void>();
 
@@ -95,7 +102,29 @@ export class ResendDishModalComponent {
   /** Spinner mientras el backend procesa. */
   readonly isSubmitting = signal(false);
 
-  readonly options = RESEND_OPTIONS;
+  /**
+   * Opciones con el texto de remake según la decisión del ítem:
+   * `wasted` → "Rehacer con nuevos insumos" (la merma ya consumió los
+   * insumos, el remake SÍ consume nuevos); `reused` → "Rehacer sin
+   * consumir" (el insumo volvió al stock con REUSO-INSUMO). Sin
+   * decisión, los textos clásicos quedan intactos.
+   */
+  readonly options = computed<ResendOption[]>(() => {
+    const decision = this.cancellationType();
+    if (decision !== 'after_fire_waste' && decision !== 'after_fire_reused') {
+      return RESEND_OPTIONS;
+    }
+    return RESEND_OPTIONS.map((o) => {
+      if (o.reason !== 'remake_dish') return o;
+      return {
+        ...o,
+        label:
+          decision === 'after_fire_waste'
+            ? 'Rehacer con nuevos insumos'
+            : 'Rehacer sin consumir',
+      };
+    });
+  });
 
   /** Confirmación deshabilitada hasta que haya selección. */
   readonly canConfirm = computed(

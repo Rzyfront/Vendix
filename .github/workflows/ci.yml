@@ -2,7 +2,27 @@ name: CI
 
 on:
   pull_request:
-    branches: [main, dev]
+    branches: [main, develop]
+  # F-172 (ronda 3, plan CP-pos-exclusive-tax-double-charge, QUI-832): este
+  # bloque `push:` existe por una decisión explícita del usuario del 2026-09-13,
+  # y REVIERTE lo que F-156 había concluido en la ronda 2 ("no se añade push:,
+  # duplicaría los doce jobs sin añadir señal"). Aquel razonamiento era correcto
+  # BAJO EL SUPUESTO de que todo trabajo llega por PR. El plan QUI-832 commitea
+  # directo sobre `develop`, sin rama y sin PR, así que sin este disparador el
+  # job `backend-test-scoped` -- la única compuerta del carril POS -- no vería
+  # ni uno solo de los commits de las fases B, C y D.
+  #
+  # Sólo `develop`: `main` recibe trabajo por PR de release (git-workflow R10) y
+  # ahí `pull_request` ya dispara.
+  #
+  # OJO (F-193, medido en la corrida 34792807926): este bloque obligó a añadir
+  # `actions/checkout` al job `changes`. `dorny/paths-filter` resuelve un
+  # `pull_request` contra la API de GitHub sin tocar el árbol, pero un `push` lo
+  # resuelve con git LOCAL (`before..after`) -- sin checkout muere con exit 128
+  # y arrastra los doce jobs que dependen de él. Este comentario afirmaba lo
+  # contrario hasta que la primera corrida real lo falsificó en ocho segundos.
+  push:
+    branches: [develop]
 
 permissions:
   contents: read
@@ -26,6 +46,15 @@ jobs:
       mobile: ${{ steps.filter.outputs.mobile }}
       backend: ${{ steps.filter.outputs.backend }}
     steps:
+      # OBLIGATORIO desde que existe el disparador `push` (F-193, ronda 3).
+      # `dorny/paths-filter` resuelve los cambios de un `pull_request` contra la
+      # API de GitHub, sin necesitar el arbol -- por eso este job funcionó dos
+      # años sin checkout. En un evento `push` NO usa la API: compara
+      # `github.event.before..after` con git LOCAL, y sin checkout muere en la
+      # primera orden con `fatal: not a git repository` (exit 128), tumbando el
+      # job y saltándose los doce restantes. Medido en la corrida 34792807926,
+      # el primer `push` a `develop` de este workflow.
+      - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
         with:
@@ -295,12 +324,38 @@ jobs:
         # specs (NgRx Store, Breadcrumb analytics, etc.) fail in
         # origin/dev and are tracked in separate tickets — not in
         # scope of QUI-723.
+        #
+        # F-217 (QUI-832): esta lista es literal, no un patron. Mientras
+        # `pos-cart.service.spec.ts` no estuvo aca, este job se puso VERDE sin
+        # ejecutar una sola de las specs de impuesto del carrito POS — el verde
+        # decia "los 3 archivos de la lista pasan", no "el frontend pasa", y se
+        # leyo como lo segundo. Las tres bocas del IVA inclusivo (alta/fusion,
+        # tarifa de cliente) viven en ese archivo; sin este `--include` su
+        # cobertura era invisible para la compuerta. Medido local con Chrome
+        # real: 16 de 16 en verde. Toda spec nueva que deba GATEAR necesita su
+        # propia linea aca; escribirla y no agregarla es escribir un test que
+        # CI nunca corre.
+        #
+        # Cierre de QUI-832 (2026-09-15): las otras cinco specs que el plan
+        # escribio o migro entran aca por el mismo motivo. La del shell de
+        # cobro estaba ademas ROJA de nacimiento y nadie lo vio porque nunca
+        # corrio: `fakeAsync()` no existe sin `zone.js/testing` —la app es
+        # zoneless— y al evaluarse como argumento de `it()` tumbaba el archivo
+        # entero; y el doble de `app-pos-payment-step` no declaraba el input
+        # `takeawayOrder` que la plantilla enlaza (NG0303). Con las dos
+        # reparaciones: 139 de 139 en verde con la lista completa.
         run: >-
           npx ng test --watch=false --browsers=ChromeHeadlessNoSandbox
           --progress=false
           --include='**/interceptors/auth.interceptor.spec.ts'
           --include='**/pos/utils/document-format-hint.util.spec.ts'
           --include='**/pos/utils/phone-format-hint.util.spec.ts'
+          --include='**/pos/services/pos-cart.service.spec.ts'
+          --include='**/analytics/config/analytics-registry.spec.ts'
+          --include='**/orders/pages/order-details/can-resend.spec.ts'
+          --include='**/orders/utils/fiscal-alert-dictionary.spec.ts'
+          --include='**/pos/components/pos-checkout-shell/pos-checkout-shell.component.spec.ts'
+          --include='**/print-formats/services/print-annex-validator.service.spec.ts'
 
   backend-build:
     name: Backend Build (prisma + nest)
@@ -323,18 +378,312 @@ jobs:
       - name: Generar Prisma Client
         working-directory: apps/backend
         run: npx prisma generate
-      # SALVEDAD (KG-9(a)): esto NO es un "typecheck completo" del backend.
-      # `apps/backend/tsconfig.build.json` excluye `**/*spec.ts`, asi que ni
-      # `nest build` aqui ni `npm run buildcheck:be` en local compilan las
-      # specs. Un spec con error de tipos -- p.ej. los 4 `TS2554` de aridad de
-      # `reservations.service.spec.ts` (QUI-649), que llegaron a produccion --
-      # pasa este job en verde. La unica compuerta que SI las compila es
-      # `backend-test` (jest via ts-jest), y hoy esta con `if: false`. Cualquier
-      # afirmacion de "typecheck completo" apoyada en este job hereda esta
-      # salvedad y debe decirlo.
+      # F-161 (plan CP-pos-exclusive-tax-double-charge, QUI-832): cierra el
+      # hueco que describe el comentario de abajo -- el arnés `buildcheck:types`
+      # (`tsconfig.check.json`) existía desde el paso A.3, pero ninguna compuerta
+      # lo invocaba. Va ANTES de `nest build` a propósito: medido en frío (sin
+      # `tsBuildInfoFile` previo, que es el caso en cualquier checkout limpio
+      # como este runner) entre ~22 s y ~74 s según la carga concurrente de la
+      # máquina -- tres corridas independientes en la misma máquina dieron
+      # 73,81 s, 40,69 s y 22,37 s; en caliente, segundos. `nest build` tarda
+      # minutos. Typechequea `src/`, `prisma/**` y specs vía `include` explícito
+      # (ronda 3, F4: antes era por exclusión y sumaba `test/**`, que corre bajo
+      # otro runner). Así falla rápido si un cambio (p.ej. ensanchar el retorno
+      # de `TaxesService.calculateProductTaxes` en la fase B de este plan) rompe
+      # la firma que usa un spec, antes de gastar tiempo en el build de
+      # producción de abajo.
+      - name: Typecheck de specs (buildcheck:types)
+        working-directory: apps/backend
+        run: npm run buildcheck:types
+      # SALVEDAD (KG-9(a)) -- actualizado por F-161: el paso de arriba ya cierra
+      # la mitad de este hueco, así que lo que sigue describe sólo lo que AÚN no
+      # cubre `nest build`. `apps/backend/tsconfig.build.json` sigue excluyendo
+      # `**/*spec.ts`, así que ni `nest build` aquí ni `npm run buildcheck:be` en
+      # local compilan las specs -- ya no es un problema para el typecheck,
+      # porque el paso de arriba las tipa antes de llegar aquí. Lo que sigue SIN
+      # ninguna compuerta en CI es la EJECUCIÓN de esas specs (jest corriendo las
+      # aserciones, no sólo tipando) para la MAYORÍA del backend. Desde F-123 y
+      # F-113 hay dos compuertas de ejecución, y ninguna cubre todo:
+      # `backend-test-scoped` corre de verdad 36 suites (`payments`, `orders`,
+      # `tables`, `taxes`), y `backend-test` -- el único que correría las 401
+      # (conteo medido 2026-09-13, `find apps/backend/src -name '*.spec.ts' |
+      # wc -l`) -- sigue con `if: false`. O sea: fuera de esos cuatro directorios la
+      # ejecución de los specs NO tiene compuerta. Cualquier afirmación de
+      # "cobertura completa" apoyada sólo en este job hereda esta salvedad y
+      # debe decirlo.
       - name: nest build
         working-directory: apps/backend
         run: npm run build
+
+  backend-test-scoped:
+    # F-123 y F-113 (plan crítico CP-pos-exclusive-tax-double-charge, QUI-832).
+    # Ambos hallazgos dicen lo mismo: el plan promete tests de regresión y hoy
+    # NINGÚN spec del backend se ejecuta en CI, así que esos tests pasarían en
+    # la máquina de quien los escriba y nadie los volvería a correr. El defecto
+    # original (eca276ce6, 2026-09-10) no tocó un solo spec de payments y llegó
+    # a producción; sin este job el siguiente viaja igual.
+    #
+    # Este job NO toca el `if: false` de `backend-test` (abajo). Aquella
+    # decisión tiene dueño y fecha (@lider-dev, 14-ago) y su precondición
+    # ("re-enable when baseline tests fixed") sigue sin cumplirse. Este job es
+    # su contrario: no intenta correr las 401 suites del repo (conteo medido
+    # 2026-09-13, `find apps/backend/src -name '*.spec.ts' | wc -l`), corre
+    # SÓLO la superficie del plan, y su línea base está VERDE -- medida, no
+    # supuesta.
+    #
+    # Alcance, y por qué es ése: `payments` (12 specs, donde vive el doble
+    # cobro), `orders` (17, el carril que persiste), `tables` (3, el carril de
+    # mesa de ADR-08) y `taxes` (4, el kernel). 36 suites, 706 tests.
+    #
+    # F-211 (D.13, plan CP-pos-exclusive-tax-double-charge, QUI-832,
+    # 2026-09-14): `print-formats` (35 specs) e `invoicing` (93 specs) se
+    # SUMAN a este job. Todo el trabajo de C.3/C.4/C.5/C.6 de ese plan
+    # -- la regla anti-huérfana del compositor, las etiquetas, el borrado de
+    # los cuatro emisores locales, la paridad del ticket -- vive en
+    # `print-formats`, y un commit de 34 archivos (`491033241`) lo tocó
+    # entero sin que un solo spec de ese dominio corriera en el servidor.
+    # `invoicing` se había dejado fuera antes por su costo (ver la nota
+    # histórica de abajo), y además tenía 4 rojos preexistentes en
+    # `invoice-delivery.service.spec.ts` -- reproducidos el 2026-09-14 sobre
+    # HEAD `58ac6793b` limpio en un worktree efímero, así que no eran ruido
+    # de este plan. Encender la compuerta sobre un rojo permanente es
+    # garantizar que alguien la vuelva a apagar; por eso el orden fue
+    # arreglar esos 4 primero (mismo PR) y sólo entonces añadir el paso.
+    # Con eso: 164 suites en este job (36 + 35 + 93), verde.
+    #
+    # Nota histórica -- por qué `invoicing` se había dejado fuera: tiene 93
+    # specs él solo, más que los otros cuatro directorios originales juntos.
+    # Medido entonces: una corrida local `--runInBand` de los cinco pasó de 30
+    # minutos sin terminar, mientras que los cuatro originales tardaban
+    # `real 260,31 s` (36/36 suites, 706/706 tests, verde, 2026-09-13). Sigue
+    # siendo cierto que el directorio es pesado; lo que cambió es que dejarlo
+    # fuera de CI significaba que el dominio que este plan reescribe no tenía
+    # puerta. Si el tiempo total del job se vuelve un problema real, la salida
+    # es partir el job con `strategy: matrix` (ver más abajo), no volver a
+    # sacar `invoicing`.
+    #
+    # Si algún día este job roza el timeout, la salida NO es apagarlo -- eso
+    # devuelve el repo al estado que F-113 describe. Es partirlo por dominio
+    # con `strategy: matrix`, como propone el punto 3(b) del comentario largo
+    # de `backend-test`.
+    #
+    # MEMORIA -- F-182 (ronda 3). `--runInBand` fuerza el camino en-banda del
+    # scheduler de jest, y ahí `workerIdleMemoryLimit` (`package.json`, 1024MB)
+    # NO se aplica: el reciclado por memoria vive en el pool de workers, que
+    # en-banda no existe (`@jest/core/build/testSchedulerHelper.js`). O sea: la
+    # protección que el repo configuró contra el OOM que apagó `backend-test`
+    # no cubre a este job. Pico de RSS medido en las 36 suites: 2588 MB contra
+    # un techo de heap de 4288 MB. Pasa hoy con margen, y el margen se consume
+    # solo según crezca el carril. Cuando falle será un `FatalProcessOutOfMemory`
+    # idéntico al de `backend-test`, y la salida NO es subir el heap: es volver
+    # a un pool con `--maxWorkers=2` y `workerIdleMemoryLimit`, pagando el
+    # arranque a cambio del reciclado.
+    # OJO: este `name:` es el IDENTIFICADOR que el ruleset de ramas fija como
+    # required status check. Si se renombra, el check obligatorio deja de
+    # reportar y TODOS los PRs quedan bloqueados esperando un nombre que ya no
+    # existe. Por eso no lleva cifras dentro: el alcance concreto (cuántas specs
+    # de cuántas) va al `$GITHUB_STEP_SUMMARY` del último paso, que se puede
+    # actualizar sin tocar nada. Decía «sólo payments/orders/tables/taxes (36 de
+    # 401 specs)» y ese 401 caduca cada vez que alguien añade una spec.
+    name: Backend Tests (carril POS)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    # F-220: 30 minutos era el techo, no el margen. Medido en dos corridas
+    # consecutivas del mismo job: `a2777f21a` cerro en VERDE a los 29m19s --41
+    # segundos por debajo del limite-- y `427b7b076` se corto a los 30m18s
+    # dentro de `jest -- invoicing`, con los otros cinco carriles ya en verde.
+    # O sea que el resultado del job no lo decidia el codigo sino el reloj: la
+    # unica compuerta de backend venia siendo un volado. Un `cancelled` se lee
+    # igual que el `cancelled` que deja un push encadenado, asi que ademas
+    # confundia las dos causas. 45 minutos da ~50 % de margen sobre la corrida
+    # verde conocida. El arreglo de fondo es partir los seis carriles en jobs
+    # paralelos (hoy corren en serie en un solo runner), pero eso cambia los
+    # required status checks del ruleset y no se toca sin acuerdo.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      # Los specs importan tipos del cliente de Prisma; sin esto fallan al
+      # compilar en ts-jest. No necesita base de datos.
+      - name: Generar Prisma Client (para tipos en specs)
+        working-directory: apps/backend
+        run: npx prisma generate
+      # `test:path` (apps/backend/package.json, paso A.3, reescrito en la ronda 3
+      # F2 como scripts/test-path.sh) es `jest --runInBand` y propaga el código
+      # de salida real. La razón de usarlo en vez de `buildcheck:test` de la
+      # raíz es de CONVENIENCIA Y ALCANCE, no que el otro mienta: el README
+      # (`apps/backend/README.md`) documenta que `buildcheck:test` de la raíz sí
+      # propaga el código de salida real de jest incluso ante un fallo de
+      # aserción -- el hallazgo F-162 falsificó la afirmación anterior de este
+      # comentario ("imprime FAIL y sale 0"). Lo único donde ese script puede
+      # dar un falso verde es corriendo la suite COMPLETA sin filtro con pool de
+      # workers (OOM de un worker), que no es este caso: aquí siempre se acota a
+      # un directorio.
+      #
+      # F1 (ronda 3, plan CP-pos-exclusive-tax-double-charge, QUI-832): estos
+      # `run:` van SEPARADOS a propósito, uno por directorio, y no es
+      # redundancia para "juntarlos de nuevo" -- medido: los argumentos
+      # posicionales de jest son un OR de regex, no una lista de rutas. Con una
+      # ruta buena y una mala en la MISMA invocación, jest corre las que casan y
+      # sale 0 sin avisar de la que no casó:
+      #   npx jest --runInBand src/domains/store/taxes src/domains/store/tablez
+      #     -> EXIT=0 (101 tests, corrió sólo `taxes`)
+      #   npx jest --runInBand src/domains/store/tablez
+      #     -> EXIT=1 ("0 matches")
+      # Con todas las rutas juntas en un solo `run:`, un rename de directorio
+      # (o un typo) deja la compuerta midiendo N-1 de N en verde. Separados,
+      # cada `name:` dice en el log de Checks cuál falló sin abrir nada. F-211
+      # suma `print-formats` e `invoicing` a la misma lista, mismo patrón.
+      # G5 (ronda 3, plan CP-pos-exclusive-tax-double-charge, QUI-832): cada
+      # paso escribe SU log a un archivo además de a stdout, para que comparar
+      # dos corridas no exija leer el log crudo del job a ojo (se sube como
+      # artefacto más abajo). `set -o pipefail` es explícito y no un supuesto
+      # del shell por defecto de GitHub Actions: sin él, `cmd | tee archivo`
+      # devuelve el código de salida de `tee` (casi siempre 0), no el de jest,
+      # y la compuerta quedaría verde aunque jest fallara. Medido: con
+      # `set -o pipefail` el `$?` de la línea es el de `npm run test:path`
+      # (que a su vez propaga el de jest, ver F1 arriba), con `tee` fallando
+      # sólo si no puede escribir el archivo.
+      - name: jest — payments
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/payments 2>&1 | tee jest-logs/payments.log
+      - name: jest — orders
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/orders 2>&1 | tee jest-logs/orders.log
+      - name: jest — tables
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/tables 2>&1 | tee jest-logs/tables.log
+      - name: jest — taxes
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/taxes 2>&1 | tee jest-logs/taxes.log
+      # F-211 (D.13, QUI-832, 2026-09-14): el dominio que este plan reescribe
+      # (C.3/C.4/C.5/C.6 -- compositor, etiquetas, emisores locales, paridad
+      # de ticket) no tenía puerta en CI. Mismo patrón que los cuatro pasos
+      # de arriba.
+      - name: jest — print-formats
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/print-formats 2>&1 | tee jest-logs/print-formats.log
+      # F-211 (D.13, QUI-832, 2026-09-14): antes fuera del job por costo (ver
+      # la nota histórica más arriba). Sus 4 rojos preexistentes en
+      # `invoice-delivery.service.spec.ts` se arreglaron en el mismo PR que
+      # añade este paso -- nunca se encendió una compuerta sobre un rojo
+      # permanente.
+      - name: jest — invoicing
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/invoicing 2>&1 | tee jest-logs/invoicing.log
+      # G5: artefacto de los logs de arriba. `if: always()` para que
+      # quede subido incluso si un paso de jest falló. Acción fijada por
+      # etiqueta (`@v4`), igual que `actions/checkout` y `actions/setup-node`
+      # en este mismo archivo — no se introduce una convención nueva aquí.
+      - name: Subir logs de jest (artefacto)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-scoped-jest-logs
+          path: apps/backend/jest-logs/
+          retention-days: 14
+      # Sin esto el job no deja ningún rastro legible en la pestaña Checks sin
+      # abrir el log crudo paso por paso. `if: always()` para que el resumen
+      # aparezca también cuando uno de los pasos de arriba falló. F-211
+      # (D.13, QUI-832, 2026-09-14): la lista y el `find` de abajo se
+      # ensanchan a los seis subdominios reales del job, no sólo los cuatro
+      # originales.
+      - name: Resumen en Checks
+        if: always()
+        working-directory: apps/backend
+        run: |
+          echo "### Backend Tests — carril POS" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Corre 6 de los $(find src/domains -mindepth 2 -maxdepth 2 -type d | wc -l | tr -d ' ') subdominios de \`apps/backend/src/domains\`:" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`payments\`, \`orders\`, \`tables\`, \`taxes\`, \`print-formats\`, \`invoicing\`." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| | specs |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| en esta compuerta | $(find src/domains/store/payments src/domains/store/orders src/domains/store/tables src/domains/store/taxes src/domains/store/print-formats src/domains/store/invoicing -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| en el repo | $(find src -name '*.spec.ts' | wc -l | tr -d ' ') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "El resto del backend **no se ejecuta en ningun job** salvo \`products\` (job aparte, ver \`Backend Tests (products)\`); \`backend-test\` sigue en \`if: false\`." >> "$GITHUB_STEP_SUMMARY"
+
+  backend-test-products:
+    # F-219 (plan crítico CP-pos-exclusive-tax-double-charge, QUI-832): el
+    # dominio `products` (12 specs, 250 tests) no corría en NINGÚN job de CI
+    # -- ni en `backend-test-scoped` (payments/orders/tables/taxes/
+    # print-formats/invoicing) ni en `backend-test` (deshabilitado con
+    # `if: false` más abajo). Así fue como tres defectos de arnés
+    # preexistentes (CACHE_MANAGER sin doblar en products.service.spec.ts,
+    # Prisma mockeado sin `units_of_measure` en products-bulk.service.spec.ts,
+    # dos excepciones sin atrapar en products-bulk.controller.spec.ts tras un
+    # cambio deliberado del controller) acumularon 65 pruebas rojas sin que
+    # ningún run verde lo reflejara.
+    #
+    # Job PROPIO, y no un séptimo paso de `backend-test-scoped`, a propósito:
+    # medido en local (2026-09-14) con las 3 causas ya arregladas y el
+    # cliente de Prisma regenerado, `products` tarda 145 s (12/12 suites,
+    # 245/250 tests, 5 skips preexistentes ajenos a este hallazgo). Sumarlo
+    # en serie a `backend-test-scoped` -- que ya corrió en 36m35s contra su
+    # techo de 45 min, o sea con sólo 8m25s de margen tras el crecimiento de
+    # F-211 -- lo dejaría en ~39 min con un margen de apenas ~6 min (13%):
+    # el mismo patrón que F-220 ya documentó como un volado (29m19s verde vs
+    # 30m18s cortado fue la razón de subir aquel techo de 30 a 45). Un job
+    # nuevo corre en PARALELO al carril POS -- no le suma un segundo -- y no
+    # es un required status check hasta que alguien lo añada al ruleset de
+    # ramas: corre pero no bloquea, que es lo que hace falta para observar su
+    # propia estabilidad antes de exigirlo.
+    name: Backend Tests (products)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    # 20 min: mismo presupuesto que `backend-build` (arriba) para un setup
+    # equivalente (checkout + npm ci + prisma generate). El propio jest de
+    # `products` mide 145 s en local; incluso con un runner de CI más lento y
+    # el arranque de ts-jest, este techo deja margen amplio.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Generar Prisma Client (para tipos en specs)
+        working-directory: apps/backend
+        run: npx prisma generate
+      - name: jest — products
+        working-directory: apps/backend
+        run: |
+          mkdir -p jest-logs
+          set -o pipefail
+          npm run test:path -- src/domains/store/products 2>&1 | tee jest-logs/products.log
+      - name: Subir logs de jest (artefacto)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-products-jest-logs
+          path: apps/backend/jest-logs/
+          retention-days: 14
 
   backend-test:
     # Hotfix post-PR-576: `tsconfig.build.json` excluye `**/*spec.ts` y

@@ -143,6 +143,13 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
         waiter_name: waiterName,
         notes: undefined,
       },
+      // C.2 (ADR-12, G-12) — irrelevante en la práctica: `unit_price` es
+      // siempre 0 en este formato (comanda de cocina, sin dinero).
+      // `taxable_base`/`false` por default de R-2: no hay settings de
+      // tienda/organización en memoria (este provider ni siquiera trae
+      // `store` real, ver `store: { name: '', tax_id: '' }` arriba).
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: false,
       items: (ticket.items || []).map((it: any, idx: number) => {
         const exclusionNames: string[] = (it.exclusions || []).map((e: any) =>
           e.component_product?.name || '',
@@ -213,6 +220,9 @@ export class KitchenTicketDataProvider implements IDocumentDataProvider {
         guests_count: 3,
         notes: 'Marchar platos principales juntos. Mesa con comensal alérgico a los frutos secos.',
       },
+      // C.2 (ADR-12) — muestra en paridad con `fetchDocumentData`.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: false,
       items: [
         {
           index: 1,

@@ -20,6 +20,10 @@ import {
   PayoutApprovalDto,
   DunningPreviewResponse,
   DunningPreviewTargetState,
+  StoreSubscriptionQuery,
+  SubscriptionPaymentRow,
+  SubscriptionPaymentQuery,
+  DunningStatsResponse,
 } from '../interfaces/subscription-admin.interface';
 
 export interface ApiResponse<T> {
@@ -252,6 +256,7 @@ export class SubscriptionAdminService {
     if (state === 'expired' || state === 'cancelled') return 'cancelled';
     if (state === 'blocked' || state === 'suspended') return 'suspended';
     if (state === 'trial') return 'trial';
+    if (state === 'pending_payment') return 'pending_payment';
     return 'active';
   }
 
@@ -262,9 +267,11 @@ export class SubscriptionAdminService {
       store_name: raw.store?.name ?? '—',
       organization_name: raw.store?.organizations?.name ?? raw.organization?.name ?? '—',
       plan_name: raw.partner_override?.custom_name ?? raw.plan?.name ?? '—',
+      plan_id: raw.plan?.id ? String(raw.plan.id) : undefined,
       billing_cycle: raw.plan?.billing_cycle ?? 'monthly',
       price: Number(raw.effective_price ?? 0),
       currency_code: raw.currency ?? 'COP',
+      state: raw.state,
       status: this.mapBackendStateToStatus(raw.state),
       current_period_start: raw.current_period_start,
       current_period_end: raw.current_period_end,
@@ -273,6 +280,7 @@ export class SubscriptionAdminService {
       partner_id: raw.partner_override?.organization_id ? String(raw.partner_override.organization_id) : null,
       partner_margin_amount: Number(raw.partner_margin_amount ?? 0),
       created_at: raw.created_at,
+      raw,
     };
   }
 
@@ -437,11 +445,17 @@ export class SubscriptionAdminService {
 
   // ─── Active Subscriptions ───
 
-  getStoreSubscriptions(query?: { page?: number; limit?: number; status?: string; search?: string }): Observable<PaginatedResponse<StoreSubscription>> {
+  getStoreSubscriptions(query?: StoreSubscriptionQuery): Observable<PaginatedResponse<StoreSubscription>> {
     let params = new HttpParams();
     if (query?.page) params = params.set('page', query.page.toString());
     if (query?.limit) params = params.set('limit', query.limit.toString());
-    if (query?.status) params = params.set('status', query.status);
+    if (query?.state) {
+      params = params.set('state', query.state);
+    } else if (query?.status) {
+      params = params.set('state', query.status);
+    }
+    if (query?.plan_id) params = params.set('plan_id', String(query.plan_id));
+    if (query?.billing_cycle) params = params.set('billing_cycle', query.billing_cycle);
     if (query?.search) params = params.set('search', query.search);
 
     return this.http
@@ -454,13 +468,22 @@ export class SubscriptionAdminService {
       );
   }
 
+  getSubscriptionById(id: string): Observable<ApiResponse<any>> {
+    return this.http.get<ApiResponse<any>>(`${this.apiUrl}/superadmin/subscriptions/active/${id}`);
+  }
+
   // ─── Dunning ───
 
-  getDunningSubscriptions(query?: { page?: number; limit?: number; status?: string }): Observable<PaginatedResponse<DunningSubscription>> {
+  getDunningSubscriptions(query?: { page?: number; limit?: number; status?: string; state?: string; search?: string }): Observable<PaginatedResponse<DunningSubscription>> {
     let params = new HttpParams();
     if (query?.page) params = params.set('page', query.page.toString());
     if (query?.limit) params = params.set('limit', query.limit.toString());
-    if (query?.status) params = params.set('status', query.status);
+    if (query?.state) {
+      params = params.set('state', query.state);
+    } else if (query?.status) {
+      params = params.set('state', query.status);
+    }
+    if (query?.search) params = params.set('search', query.search);
 
     return this.http
       .get<PaginatedResponse<any>>(`${this.apiUrl}/superadmin/subscriptions/dunning`, { params })
@@ -470,6 +493,10 @@ export class SubscriptionAdminService {
           data: (res.data ?? []).map((row: any) => this.toFrontendDunning(row)),
         })),
       );
+  }
+
+  getDunningStats(): Observable<ApiResponse<DunningStatsResponse>> {
+    return this.http.get<ApiResponse<DunningStatsResponse>>(`${this.apiUrl}/superadmin/subscriptions/dunning/stats`);
   }
 
   /**
@@ -487,7 +514,7 @@ export class SubscriptionAdminService {
     );
   }
 
-  // ─── Partner Payouts ───
+  // ─── Partner Payouts & Subscription Payments ───
 
   getPayouts(query?: { page?: number; limit?: number; status?: string }): Observable<PaginatedResponse<PartnerPayout>> {
     let params = new HttpParams();
@@ -503,6 +530,22 @@ export class SubscriptionAdminService {
           data: (res.data ?? []).map((row: any) => this.toFrontendPayout(row)),
         })),
       );
+  }
+
+  getSubscriptionPayments(query?: SubscriptionPaymentQuery): Observable<PaginatedResponse<SubscriptionPaymentRow>> {
+    let params = new HttpParams();
+    if (query?.page) params = params.set('page', query.page.toString());
+    if (query?.limit) params = params.set('limit', query.limit.toString());
+    if (query?.search) params = params.set('search', query.search);
+    if (query?.state) params = params.set('state', query.state);
+    if (query?.provider) params = params.set('provider', query.provider);
+    if (query?.from) params = params.set('from', query.from);
+    if (query?.to) params = params.set('to', query.to);
+
+    return this.http.get<PaginatedResponse<SubscriptionPaymentRow>>(
+      `${this.apiUrl}/superadmin/subscriptions/payments`,
+      { params },
+    );
   }
 
   approvePayout(id: string, data: PayoutApprovalDto): Observable<ApiResponse<PartnerPayout>> {
@@ -571,6 +614,7 @@ export interface SubscriptionMetricsResponse {
   active_breakdown: {
     by_state: Record<string, number>;
     by_plan: Array<{ plan_id: number; plan_name: string; count: number }>;
+    by_billing_cycle: Array<{ billing_cycle: string; count: number }>;
   };
   mrr_evolution: Array<{ month: string; mrr: string }>;
 }

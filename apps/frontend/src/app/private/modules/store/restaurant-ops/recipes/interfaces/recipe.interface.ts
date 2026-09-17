@@ -118,6 +118,16 @@ export type UpdateRecipeItemDto = Partial<
   Omit<CreateRecipeItemDto, 'component_product_id'>
 >;
 
+export interface ReplaceRecipeItemDto {
+  id?: number | null;
+  component_product_id: number;
+  quantity: number;
+  waste_percent?: number;
+  waste_mode?: 'percent' | 'absolute';
+  waste_absolute?: number;
+  is_optional?: boolean;
+}
+
 export interface RecipeQuery {
   page?: number;
   limit?: number;

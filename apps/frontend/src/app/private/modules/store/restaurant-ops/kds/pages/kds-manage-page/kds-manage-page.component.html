@@ -64,10 +64,28 @@
                   <app-icon slot="icon" name="pencil" [size]="14" />
                   Editar
                 </app-button>
+                <!-- Activar solo inactivas no-default: la de por defecto debe
+                     estar activa (KDS_DEFAULT_MUST_BE_ACTIVE) y una activa no
+                     necesita el botón. Pide confirmación con el nombre. -->
+                @if (!s.is_active && !s.is_default) {
+                  <app-button variant="outline-success" size="sm" (clicked)="askActivate(s)">
+                    <app-icon slot="icon" name="power" [size]="14" />
+                    Activar
+                  </app-button>
+                }
                 @if (s.is_active && !s.is_default) {
-                  <app-button variant="ghost" size="sm" (clicked)="deactivate(s)">
+                  <app-button variant="ghost" size="sm" (clicked)="askDeactivate(s)">
                     <app-icon slot="icon" name="power" [size]="14" />
                     Desactivar
+                  </app-button>
+                }
+                <!-- Borrar FÍSICO solo sin historial (0 turnos y 0 platos) y no
+                     default. Con historial el botón no aparece y se ofrece
+                     Desactivar; el backend re-valida con KDS_HAS_HISTORY. -->
+                @if (canHardDelete(s)) {
+                  <app-button variant="danger" size="sm" (clicked)="askDelete(s)">
+                    <app-icon slot="icon" name="trash-2" [size]="14" />
+                    Borrar
                   </app-button>
                 }
               </div>
@@ -197,6 +215,82 @@
     </app-button>
     <app-button slot="footer" variant="primary" [loading]="isSaving()" (clicked)="save()">
       Guardar
+    </app-button>
+  </app-modal>
+
+  <!-- ── Confirmar activación ────────────────────────────────────────── -->
+  <app-modal
+    [isOpen]="pendingActivate() !== null"
+    size="sm"
+    [dialog]="true"
+    title="Activar estación"
+    [showCloseButton]="true"
+    (cancel)="cancelActivate()"
+  >
+    <app-icon slot="header" name="power" [size]="20" class="text-primary" />
+    @if (pendingActivate(); as s) {
+      <p class="confirm-text">
+        ¿Activar la estación <strong class="confirm-name">"{{ s.name }}"</strong>?
+        Volverá a recibir tickets de cocina.
+      </p>
+    }
+    <app-button slot="footer" variant="secondary" (clicked)="cancelActivate()" [disabled]="confirmBusy()">
+      Cancelar
+    </app-button>
+    <app-button slot="footer" variant="success" [loading]="confirmBusy()" (clicked)="confirmActivate()">
+      Activar
+    </app-button>
+  </app-modal>
+
+  <!-- ── Confirmar desactivación (soft-delete) ─────────────────────────── -->
+  <app-modal
+    [isOpen]="pendingDeactivate() !== null"
+    size="sm"
+    [dialog]="true"
+    title="Desactivar estación"
+    [showCloseButton]="true"
+    (cancel)="cancelDeactivate()"
+  >
+    <app-icon slot="header" name="power" [size]="20" class="text-primary" />
+    @if (pendingDeactivate(); as s) {
+      <p class="confirm-text">
+        ¿Desactivar la estación <strong class="confirm-name">"{{ s.name }}"</strong>?
+        Dejará de recibir tickets, pero su historial de turnos se conserva.
+      </p>
+    }
+    <app-button slot="footer" variant="secondary" (clicked)="cancelDeactivate()" [disabled]="confirmBusy()">
+      Cancelar
+    </app-button>
+    <app-button slot="footer" variant="primary" [loading]="confirmBusy()" (clicked)="confirmDeactivate()">
+      Desactivar
+    </app-button>
+  </app-modal>
+
+  <!-- ── Confirmar borrado físico (solo sin historial) ─────────────────── -->
+  <app-modal
+    [isOpen]="pendingDelete() !== null"
+    size="sm"
+    [dialog]="true"
+    title="Borrar estación"
+    [showCloseButton]="true"
+    (cancel)="cancelDelete()"
+  >
+    <app-icon slot="header" name="trash-2" [size]="20" class="text-primary" />
+    @if (pendingDelete(); as s) {
+      <p class="confirm-text">
+        ¿Borrar definitivamente la estación
+        <strong class="confirm-name">"{{ s.name }}"</strong>?
+      </p>
+      <p class="confirm-warn">
+        Esta acción no se puede deshacer. Solo se ofrece porque la estación no
+        tiene turnos ni platos asociados.
+      </p>
+    }
+    <app-button slot="footer" variant="secondary" (clicked)="cancelDelete()" [disabled]="confirmBusy()">
+      Cancelar
+    </app-button>
+    <app-button slot="footer" variant="danger" [loading]="confirmBusy()" (clicked)="confirmDelete()">
+      Borrar
     </app-button>
   </app-modal>
 

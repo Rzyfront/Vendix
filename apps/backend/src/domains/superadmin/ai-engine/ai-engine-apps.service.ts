@@ -65,7 +65,7 @@ export class AIEngineAppsService {
         retry_config: dto.retry_config as any,
         is_active: dto.is_active ?? true,
         metadata: dto.metadata as any,
-        ai_feature_category: dto.ai_feature_category ?? null,
+        ai_feature_category: dto.ai_feature_category,
         updated_at: new Date(),
       },
       include: {
@@ -229,7 +229,10 @@ export class AIEngineAppsService {
         rate_limit: dto.rate_limit as any,
         retry_config: dto.retry_config as any,
         metadata: dto.metadata as any,
-        ai_feature_category: dto.ai_feature_category,
+        // Null/undefined on update means "leave unchanged": the DTO rejects
+        // null via @IsString, but PartialType makes the property optional, so
+        // an explicit null must not wipe a NOT NULL column into a 500.
+        ai_feature_category: dto.ai_feature_category ?? undefined,
         model_type: dto.model_type !== undefined ? dto.model_type : undefined,
         updated_at: new Date(),
       },

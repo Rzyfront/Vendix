@@ -155,6 +155,31 @@ describe('TaxesService.calculateProductTaxes — contrato por-tasa (A.3)', () =>
     expect(out.total).toBe(95000);
   });
 
+  it('V-2/ADR-10 — número de producción: base 5.200.000 con IVA 19% exclusivo no amputa unclosed_residual_cents/invalid_inputs/resolved_from (B.3)', async () => {
+    // Línea puramente exclusiva (la orden 5928 del defecto original): sin
+    // ninguna tasa inclusiva no hay despeje que backear, así que
+    // `base === basePrice` exacto y el residuo es 0 por construcción — el
+    // caso donde, antes de B.3, `taxes.service.ts:174-180` tiraba
+    // `unclosed_residual_cents`/`invalid_inputs` y el warn de
+    // `payments.service.ts` nunca podía dispararse (F-112/ERR-03).
+    const service = buildService();
+    const out = await service.calculateProductTaxes(7, 5200000, {
+      client: clientWith([
+        assignmentRow({
+          assignmentInclusive: false,
+          rates: [{ id: 1, name: 'IVA', rate: 0.19, inclusive: false }],
+        }),
+      ]) as any,
+    });
+    expect(out.base).toBe(5200000);
+    expect(out.total_tax_amount).toBe(988000);
+    expect(out.total).toBe(6188000);
+    // ADR-10 (ERR-03 cerrado): el retorno ya NO amputa estos campos.
+    expect(out.unclosed_residual_cents).toBe(0);
+    expect(out.invalid_inputs).toEqual([]);
+    expect(out.resolved_from).toBe('catalog');
+  });
+
   it('resolveLineTotals es el dueño único: delega en la función pura (F-003)', () => {
     const service = buildService();
     const rates = [
@@ -181,5 +206,37 @@ describe('TaxesService.calculateProductTaxes — contrato por-tasa (A.3)', () =>
         }),
       }),
     );
+  });
+
+  // F-065/ERR-23 (CP-pos-exclusive-tax-double-charge, QUI-832): un producto
+  // que perdió su `product_tax_assignments` (caso real: purga de Roma Motos)
+  // y uno que nunca tuvo impuesto deben poder distinguirse de un producto
+  // con impuestos resueltos a 0 — sin este campo ambos casos eran
+  // `{ total_tax_amount: 0, taxes: [] }` indistinguibles y la normalización
+  // de mesa los trataba a todos como "exento".
+  it('sin asignaciones fiscales ⇒ has_tax_assignment=false y sigue sin lanzar (F-065)', async () => {
+    const service = buildService();
+    const out = await service.calculateProductTaxes(7, 18500, {
+      client: clientWith([]) as any,
+    });
+
+    expect(out.has_tax_assignment).toBe(false);
+    // Comportamiento por defecto intacto (F-065 no cambia esto: sólo expone
+    // la señal para que el llamador la use).
+    expect(out.total_tax_amount).toBe(0);
+    expect(out.taxes).toEqual([]);
+    expect(out.base).toBe(18500);
+  });
+
+  it('con asignación fiscal viva ⇒ has_tax_assignment=true aunque la tasa sea 0 (F-065)', async () => {
+    const service = buildService();
+    const out = await service.calculateProductTaxes(7, 18500, {
+      client: clientWith([
+        assignmentRow({ rates: [{ id: 1, name: 'Exento', rate: 0 }] }),
+      ]) as any,
+    });
+
+    expect(out.has_tax_assignment).toBe(true);
+    expect(out.total_tax_amount).toBe(0);
   });
 });

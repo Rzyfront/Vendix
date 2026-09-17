@@ -113,6 +113,54 @@ describe('DispatchNotePdfService — courier_name (domiciliario) en el PDF', () 
     expect(generateSpy).not.toHaveBeenCalled();
   });
 
+  /**
+   * F-101 (CP-pos-exclusive-tax-double-charge, unificación 2026-09-14) —
+   * antes de este fix, la fila "IVA:" se imprimía siempre que
+   * `tax_amount > 0`, sin mirar el estado fiscal de la tienda. Ahora
+   * reutiliza `resolvePrintsVatBreakdownForPrint`, el mismo predicado que
+   * usa el otro riel de la remisión (`dispatch-note.provider.ts`).
+   */
+  describe('gate fiscal del desglose de IVA (prints_vat_breakdown)', () => {
+    it('resuelve false (fail-closed) cuando la tienda no tiene facturación fiscal configurada', async () => {
+      const generateSpy = mockBuilder();
+      prismaMock.dispatch_notes.findFirst.mockResolvedValue({
+        ...baseNote(),
+        tax_amount: 1900,
+      });
+
+      await service.generatePdf(220);
+
+      const data: DispatchNotePdfData = generateSpy.mock.calls[0][0];
+      expect(data.prints_vat_breakdown).toBe(false);
+    });
+
+    it('resuelve true cuando invoicing está ACTIVE y la tienda es responsable de IVA (O-48)', async () => {
+      const generateSpy = mockBuilder();
+      prismaMock.dispatch_notes.findFirst.mockResolvedValue({
+        ...baseNote(),
+        tax_amount: 1900,
+        store: {
+          id: 1,
+          store_settings: {
+            settings: {
+              fiscal_status: { invoicing: { state: 'ACTIVE' } },
+              fiscal_data: { tax_responsibilities: ['O-48'] },
+            },
+          },
+          organizations: {
+            ...baseNote().store.organizations,
+            fiscal_scope: 'STORE',
+          },
+        },
+      });
+
+      await service.generatePdf(220);
+
+      const data: DispatchNotePdfData = generateSpy.mock.calls[0][0];
+      expect(data.prints_vat_breakdown).toBe(true);
+    });
+  });
+
   describe('builder — bloque de firmas con/sin domiciliario (smoke)', () => {
     const minimalData = (): DispatchNotePdfData => ({
       dispatch_number: 'REM-220',
@@ -125,6 +173,7 @@ describe('DispatchNotePdfService — courier_name (domiciliario) en el PDF', () 
       subtotal_amount: 10000,
       discount_amount: 0,
       tax_amount: 0,
+      prints_vat_breakdown: false,
       grand_total: 10000,
     });
 
@@ -138,6 +187,28 @@ describe('DispatchNotePdfService — courier_name (domiciliario) en el PDF', () 
       const pdf = await DispatchNotePdfBuilder.generate({
         ...minimalData(),
         courier_name: 'Edga',
+      });
+      expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
+      expect(pdf.length).toBeGreaterThan(0);
+    });
+
+    it('genera PDF válido con tax_amount > 0 pero prints_vat_breakdown en false (fila IVA no se imprime)', async () => {
+      const pdf = await DispatchNotePdfBuilder.generate({
+        ...minimalData(),
+        tax_amount: 1900,
+        prints_vat_breakdown: false,
+        grand_total: 11900,
+      });
+      expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
+      expect(pdf.length).toBeGreaterThan(0);
+    });
+
+    it('genera PDF válido con tax_amount > 0 y prints_vat_breakdown en true (fila IVA sí se imprime)', async () => {
+      const pdf = await DispatchNotePdfBuilder.generate({
+        ...minimalData(),
+        tax_amount: 1900,
+        prints_vat_breakdown: true,
+        grand_total: 11900,
       });
       expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
       expect(pdf.length).toBeGreaterThan(0);

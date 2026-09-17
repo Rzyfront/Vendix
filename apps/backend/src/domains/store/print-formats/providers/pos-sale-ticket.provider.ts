@@ -14,6 +14,16 @@ import {
   ORDER_PAYMENT_MEANS_INCLUDE,
   resolveOrderPaymentLabel,
 } from '../../payments/order-payment-means.contract';
+// C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — el tiquete declara
+// `money_basis: 'gross'` (G-01) y propaga el gate fiscal que C.1 resolvió,
+// usando las filas `org`/`store` que el `include` de C.1 ya trae en memoria.
+import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
+// C.7 / V-5 (ADR-12 G-01) — el bruto por línea sale de UNA definición
+// compartida que lee el desglose persistido; no se recalcula acá.
+import {
+  resolveOrderLinePrintedGross,
+  resolveOrderLineTaxTotal,
+} from '../../taxes/utils/final-price.util';
 
 @Injectable()
 export class PosSaleTicketDataProvider implements IDocumentDataProvider {
@@ -62,7 +72,15 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         stores: {
           include: {
             addresses: { take: 1 },
-            organizations: true,
+            // C.1 — settings para el gate fiscal
+            // `resolvePrintsVatBreakdownForPrint` (misma forma que
+            // `FISCAL_DOCUMENT_PRINT_INCLUDE`).
+            store_settings: { select: { settings: true } },
+            organizations: {
+              include: {
+                organization_settings: { select: { settings: true } },
+              },
+            },
           },
         },
         // C.3 QUI-733 — mesa + mesero en el recibo POS. Se une la sesión
@@ -210,11 +228,11 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
    * Agrega `invoice_taxes` por `(tax_name, tax_rate)` sumando importes YA
    * truncados — igual que `aggregateHeaderTaxes` del calculador.
    *
-   * A diferencia de `aggregateTaxes` (filas de orden, donde la base se DERIVA
-   * como `tax/rate`), acá la base es CONOCIDA (`taxable_amount` persistido) y
-   * se suma directa: derivarla reintroduciría el céntimo que el truncado
-   * quiere evitar. La escala cruda de `rate` se preserva igual que allá
-   * (`invoice_taxes.tax_rate` es `Decimal(5,2)` en porcentaje).
+   * Igual que `aggregateTaxes` (filas de orden, donde desde C.6 la base se
+   * LEE de `item.total_price`), acá la base es CONOCIDA (`taxable_amount`
+   * persistido) y se suma directa: derivarla reintroduciría el céntimo que
+   * el truncado quiere evitar. La escala cruda de `rate` se preserva igual
+   * que allá (`invoice_taxes.tax_rate` es `Decimal(5,2)` en porcentaje).
    */
   private aggregateInvoiceTaxes(invoiceTaxes: any[]): Array<{
     name: string;
@@ -298,6 +316,9 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         change_due: 12500,
         change_due_formatted: '$12.500',
       },
+      // C.2 (ADR-12) — muestra en `'gross'`, paridad con `fetchDocumentData`.
+      money_basis: 'gross',
+      prints_vat_breakdown: true,
       items: [
         {
           index: 1,
@@ -310,6 +331,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           discount_amount: 5000,
           discount_formatted: '-$5.000',
           tax_rate: 19,
+          tax_amount: 9580,
           total_price: 60000,
           total_price_formatted: '$60.000',
         },
@@ -321,6 +343,7 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           unit_price: 27500,
           unit_price_formatted: '$27.500',
           tax_rate: 19,
+          tax_amount: 4391,
           total_price: 27500,
           total_price_formatted: '$27.500',
         },
@@ -481,7 +504,26 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         : '';
     const tableName = table?.name ? `Mesa ${table.name}` : '';
 
-    const items = (order.order_items || []).map((it: any, i: number) => ({
+    // C.7 / V-5 (CP-pos-exclusive-tax-double-charge, ADR-12 G-01) — el tiquete
+    // declara `money_basis: 'gross'` más abajo y hasta acá mapeaba
+    // `unit_price`/`total_price` directo desde `order_items`, que post-ADR-08
+    // son la BASE gravable. Con una tasa EXCLUSIVA el papel real del mostrador
+    // salía con «Precio $22.000 / Total $22.000» contra «TOTAL A PAGAR
+    // $26.180», y sin filas `Subtotal:`/`Impuestos:` —las suprime la regla
+    // anti-huérfana del compositor, precisamente porque se le declaró bruto—,
+    // así que nada en el papel explicaba los $4.180. El bruto se compone del
+    // desglose PERSISTIDO (`order_item_taxes`, que el `include` de arriba ya
+    // trae), no de un recálculo por tasas: ver `resolveOrderLinePrintedGross`.
+    const items = (order.order_items || []).map((it: any, i: number) => {
+      const { gross_unit_price, gross_total_price } =
+        resolveOrderLinePrintedGross(it);
+      // Hallazgo 3 (CP-post-QUI-832, ADR-12 G-01) — columnas en bruto, el
+      // impuesto habla la misma magnitud: `tax_amount` es el impuesto TOTAL
+      // de la línea (`order_item_taxes`, o el escalar por unidad × unidades),
+      // no el `tax_amount_item` por unidad (ADR-10) que descuadraba la fila
+      // con cantidad mayor que uno.
+      const lineTax = resolveOrderLineTaxTotal(it);
+      return {
       index: i + 1,
       product_name: it.product_name,
       variant_sku: it.variant_sku || undefined,
@@ -490,13 +532,30 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       // snapshot al crear la línea), no por un campo nuevo del modelo.
       variant_attributes: it.variant_attributes || undefined,
       quantity: Number(it.quantity || 1),
-      unit_price: Number(it.unit_price || 0),
-      unit_price_formatted: `$${Number(it.unit_price || 0).toLocaleString('es-CO')}`,
+      unit_price: gross_unit_price,
+      unit_price_formatted: `$${gross_unit_price.toLocaleString('es-CO')}`,
       discount_amount: Number(it.discount_amount || 0),
       discount_formatted: it.discount_amount ? `-$${Number(it.discount_amount).toLocaleString('es-CO')}` : undefined,
-      total_price: Number(it.total_price || 0),
-      total_price_formatted: `$${Number(it.total_price || 0).toLocaleString('es-CO')}`,
-    }));
+      // C.2 (ADR-12) — mismo mapeo que `quotation.provider.ts:101-104`: la
+      // línea trae su propio `tax_rate`/`tax_amount_item` denormalizado
+      // (`order_items`, igual columna que `quotation_items`). Con esto el
+      // compositor pinta la sublínea `IVA: r%` (`print-layout-composer
+      // .service.ts:793-794`) sin columna nueva — F-100.
+      //
+      // `order_items.tax_rate` es `Decimal(6,5)` — FRACCIÓN (0.19), no
+      // porcentaje. El compositor concatena literal `${item.tax_rate}%`, así
+      // que sin este ×100 el papel real imprimía "IVA: 0.19%" en vez de
+      // "IVA: 19%". Redondeado a 2 decimales de porcentaje para no arrastrar
+      // ruido de punto flotante (`0.19 * 100 = 18.999999999999996`).
+      tax_rate:
+        it.tax_rate !== null && it.tax_rate !== undefined
+          ? Math.round(Number(it.tax_rate) * 10000) / 100
+          : undefined,
+      tax_amount: lineTax > 0 ? lineTax : undefined,
+      total_price: gross_total_price,
+      total_price_formatted: `$${gross_total_price.toLocaleString('es-CO')}`,
+      };
+    });
 
     const taxes = this.aggregateTaxes(order.order_items);
 
@@ -581,6 +640,12 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
           ? { customer_alias: order.customer_alias }
           : {}),
       },
+      // C.2 (ADR-12) — G-01: el tiquete de mostrador es papel comercial, el
+      // cliente ve el bruto. `org`/`store` son las mismas filas que ya trae
+      // el `include` de C.1 (`stores.store_settings` /
+      // `stores.organizations.organization_settings`).
+      money_basis: 'gross',
+      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(org, store),
       items,
       taxes,
       totals: {
@@ -606,13 +671,12 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
    * presentarlos en la sección "Tributos" del tiquete se agrupan por
    * `(tax_name, tax_rate)` y se suman los `tax_amount`.
    *
-   * NO recalculamos la base con `base × tarifa` — eso introduce un céntimo
-   * de más por redondeo y descuadra contra `order.tax_amount`. La base se
-   * DERIVA de la línea (`tax_amount / tax_rate` cuando `tax_rate > 0`,
-   * 0 en otro caso) y se suma dentro del grupo. La suma de bases dentro
-   * del grupo no es igual a `tax_amount_total / tax_rate` porque la base
-   * de cada línea arrastra su propio redondeo — pero es la forma
-   * contablemente honesta: cada línea aporta lo que aportó.
+   * C.6 (R-4, F-105) — la base se LEE de la línea (`item.total_price`, base
+   * neta por INV-0: `total_price = unit_price × price_units`), nunca se
+   * deriva como `tax_amount / tax_rate`: con truncado DIAN la inversión no
+   * es exacta y con tasa 0 inventa base 0. En línea multi-tarifa la base se
+   * prorratea por participación de cuota (sólo magnitudes recibidas); si la
+   * línea no trae impuesto, su base va a su primera fila por convención.
    *
    * La escala cruda de `rate` se preserva (`Decimal(6,5)` ⇒ 0.19, NO 19).
    */
@@ -630,26 +694,36 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
     >();
 
     for (const item of orderItems || []) {
-      for (const t of item.order_item_taxes || []) {
+      const rows = item.order_item_taxes || [];
+      const lineBase = Number(item.total_price || 0);
+      const lineTax = rows.reduce(
+        (sum: number, t: any) => sum + Number(t.tax_amount || 0),
+        0,
+      );
+      rows.forEach((t: any, idx: number) => {
         const name = t.tax_name || 'IVA';
-        const rate = Number(t.tax_rate || 0);
+        // `order_item_taxes.tax_rate` es fracción (`Decimal(6,5)` ⇒ 0.19); la
+        // fila de impuesto se pinta como `(${rate}%)` — sin este ×100 salía
+        // "(0.19%)" en vez de "(19%)". Mismo defecto que el de arriba.
+        const rate = Math.round(Number(t.tax_rate || 0) * 10000) / 100;
         const taxAmount = Number(t.tax_amount || 0);
         const key = `${name}|${rate}`;
 
-        const lineBase = rate > 0 ? taxAmount / rate : 0;
+        const rowBase =
+          lineTax > 0 ? (lineBase * taxAmount) / lineTax : idx === 0 ? lineBase : 0;
         const existing = grouped.get(key);
         if (existing) {
           existing.tax_amount += taxAmount;
-          existing.base_amount += lineBase;
+          existing.base_amount += rowBase;
         } else {
           grouped.set(key, {
             name,
             rate,
             tax_amount: taxAmount,
-            base_amount: lineBase,
+            base_amount: rowBase,
           });
         }
-      }
+      });
     }
 
     return Array.from(grouped.values()).map((g) => ({

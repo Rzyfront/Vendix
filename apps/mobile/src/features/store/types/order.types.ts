@@ -79,6 +79,12 @@ export interface OrderItem {
   quantity: number;
   unit_price: number;
   total_price: number;
+  // C.11/F-007 (TS2339 en CI): sombreados en memoria por `GET /store/orders/:id`
+  // (`resolveOrderLineFinals`, orders.service.ts) — precio con impuesto,
+  // redondeado a 2 decimales. Opcionales: el backend NO los agrega para el
+  // rol cocina (`!this.isKitchenRole()`), así que pueden faltar en esa respuesta.
+  final_unit_price?: number;
+  final_total_price?: number;
   tax_rate?: number | null;
   tax_amount_item?: number | null;
   cost_price?: number | string | null;

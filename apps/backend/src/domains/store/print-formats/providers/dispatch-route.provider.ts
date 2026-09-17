@@ -46,7 +46,11 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
     const route = await this.prisma.dispatch_routes.findFirst({
       where: { id, store_id: storeId },
       include: {
-        vehicles: { select: { plate: true, type: true, brand: true, model_name: true } },
+        // C.3 (fix 2026-09-14): la relacion real es `vehicle` (singular) —
+        // `vehicles` (el nombre de la tabla) no existe como campo de include
+        // en `dispatch_routes` y tumbaba CADA render de planilla con
+        // PrismaClientValidationError (500).
+        vehicle: { select: { plate: true, type: true, brand: true, model_name: true } },
         driver_user: {
           select: { first_name: true, last_name: true, document_number: true },
         },
@@ -63,11 +67,20 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
                 id: true,
                 dispatch_number: true,
                 customer_name: true,
-                customer_phone: true,
+                // `dispatch_notes` no tiene columna `customer_phone` (rompía
+                // con PrismaClientValidationError). El telefono ya tenia
+                // fallback a `note.order.users.phone` (linea ~232) — se
+                // retira el select invalido en vez de anadir un relation
+                // `customer: { select: { phone } }` nuevo para mantener el
+                // fix acotado al crash.
                 customer_address: true,
                 order: {
                   select: {
-                    user: { select: { first_name: true, last_name: true, phone: true } },
+                    // `orders.users` (plural) es la relacion real hacia
+                    // `users` (`customer_id`) — mismo defecto que `vehicles`
+                    // arriba, habria tumbado esta rama en cuanto Prisma
+                    // llegara a validarla.
+                    users: { select: { first_name: true, last_name: true, phone: true } },
                   },
                 },
               },
@@ -107,6 +120,20 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
         state_label: 'Despachada',
         notes: 'Planilla demo con 4 paradas y 1 anulada.',
       },
+      // F-213 (C.3, minor — revisión 2026-09-14): este formato SIEMPRE tiene
+      // `tax_total === 0` e `items: []` (no es un documento de línea a línea,
+      // agrega COD de varias remisiones en `grand_total`). Con
+      // `money_basis: 'taxable_base'` la regla anti-huérfana de §5.3 SÍ
+      // autoriza la fila «Subtotal» cuando `taxTotal === 0` — y el resultado
+      // era «Subtotal: $0» junto a un TOTAL real, sin relación entre ambos.
+      // `'gross'` suprime Subtotal e Impuesto enteros (y no deja nota «IVA
+      // incluido» porque `prints_vat_breakdown` es `false`): sólo queda
+      // TOTAL, que es la única cifra que esta planilla puede respaldar.
+      // C.2 ya marcaba esta elección como «irrelevante» para este formato;
+      // F-213 prueba que no lo es, y resuelve la ambigüedad a favor de
+      // `'gross'` sin tocar el compositor compartido ni las plantillas.
+      money_basis: 'gross',
+      prints_vat_breakdown: false,
       items: [],
       taxes: [],
       totals: {
@@ -198,7 +225,7 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
   // ============================================================
 
   private mapRouteToPrintData(route: any): StandardPrintDataModel {
-    const vehicle = route.vehicles || {};
+    const vehicle = route.vehicle || {};
     const driver = route.driver_user || {};
     const carrier = route.external_carrier || {};
     const origin = route.origin_location || {};
@@ -210,12 +237,12 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
 
     const stops = (route.stops || []).map((s: any) => {
       const note = s.dispatch_note || {};
-      const user = note.order?.user || {};
+      const user = note.order?.users || {};
       const customerName =
         note.customer_name ||
         `${user.first_name || ''} ${user.last_name || ''}`.trim() ||
         'Cliente';
-      const phone = note.customer_phone || user.phone || '';
+      const phone = user.phone || '';
       const address = this.formatAddress(note.customer_address);
 
       return {
@@ -251,6 +278,9 @@ export class DispatchRouteDataProvider implements IDocumentDataProvider {
         state_label: route.status,
         notes: route.notes || undefined,
       },
+      // F-213 (C.3, minor) — ver mismo comentario en `getSampleData`.
+      money_basis: 'gross',
+      prints_vat_breakdown: false,
       items: [],
       taxes: [],
       totals: {

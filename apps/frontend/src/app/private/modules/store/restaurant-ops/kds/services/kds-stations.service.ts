@@ -185,6 +185,49 @@ export class KdsStationsService {
       );
   }
 
+  /**
+   * Reactiva una estación inactiva (completa el CRUD junto a deactivate).
+   *
+   * Contrato esperado — el backend corre en paralelo y puede aún no exponerlo:
+   *   POST /store/kds/:id/activate → 200 `{ success, data: KdsStation }`
+   *   404 si la estación no existe · 409 con código accionable si aplica.
+   * Hasta que exista, el `fail` propaga el mensaje del backend en un toast.
+   */
+  activateStation(id: number): Observable<KdsStation> {
+    return this.http
+      .post<ApiResponse<KdsStation>>(
+        `${this.apiUrl}/store/kds/${id}/activate`,
+        {},
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError((err) => this.fail(err, 'No se pudo activar la estación')),
+      );
+  }
+
+  /**
+   * Borrado FÍSICO de una estación sin historial (complemento del soft-delete
+   * de `deactivateStation`). La página solo lo ofrece cuando
+   * `_count.sessions == 0 && _count.products == 0` y no es la de por defecto;
+   * el backend re-valida y rechaza con 409 accionable.
+   *
+   * Contrato esperado — el backend corre en paralelo y puede aún no exponerlo:
+   *   DELETE /store/kds/:id?hard=true → 200
+   *   404 si no existe · 409 `KDS_DEFAULT_PROTECTED` / `KDS_HAS_OPEN_SESSION`
+   *   / `KDS_HAS_HISTORY` con el mensaje que se muestra en el toast.
+   */
+  deleteStationHard(id: number): Observable<void> {
+    const params = new HttpParams().set('hard', 'true');
+    return this.http
+      .delete<ApiResponse<unknown>>(`${this.apiUrl}/store/kds/${id}`, {
+        params,
+      })
+      .pipe(
+        map(() => undefined),
+        catchError((err) => this.fail(err, 'No se pudo borrar la estación')),
+      );
+  }
+
   // ------------------------------------------------------------- turnos
 
   /**

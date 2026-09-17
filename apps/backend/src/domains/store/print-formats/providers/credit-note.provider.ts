@@ -13,6 +13,9 @@ import {
   resolveRawLogoKey,
 } from './fiscal-document-print.mapper';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
+// C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-05: nota crédito no
+// fiscal declara `money_basis: 'taxable_base'` y propaga el gate de C.1.
+import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
 
 @Injectable()
 export class CreditNoteDataProvider implements IDocumentDataProvider {
@@ -77,6 +80,11 @@ export class CreditNoteDataProvider implements IDocumentDataProvider {
       pendingLabel: 'Nota crédito en borrador',
       referenceDocumentNumber,
       signedLogoUrl,
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(
+        note.organization,
+        note.store,
+      ),
     });
   }
 
@@ -107,6 +115,10 @@ export class CreditNoteDataProvider implements IDocumentDataProvider {
         reference_document_number: 'ORD-2026-0089',
         notes: 'Devolución de producto por cambio de talla solicitado por el cliente.',
       },
+      // C.2 (ADR-12) — muestra en `'taxable_base'`, paridad con
+      // `fetchDocumentData`.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: true,
       items: [
         {
           index: 1,

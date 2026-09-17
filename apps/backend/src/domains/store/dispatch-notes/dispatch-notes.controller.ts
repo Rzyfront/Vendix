@@ -8,19 +8,27 @@ import {
   Delete,
   Query,
   Res,
+  Inject,
   UseGuards,
   UseInterceptors,
   UploadedFile,
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  forwardRef,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { DispatchNotesService } from './dispatch-notes.service';
 import { DispatchNoteFlowService } from './dispatch-note-flow/dispatch-note-flow.service';
-import { DispatchNotePdfService } from './pdf/dispatch-note-pdf.service';
+// ADR-15 §4 (CP-pos-exclusive-tax-double-charge, unificación
+// remisión-gateway) — `POST /:id/pdf` ya no llama a `DispatchNotePdfService`
+// directo: pide el motor `pdf` del formato `dispatch_note` al gateway, que
+// internamente sigue delegando en `DispatchNotePdfService` a través de
+// `DispatchNotePdfRenderer` (ver `print-formats/providers/dispatch-note-pdf.renderer.ts`).
+// El builder pdfkit y el papel que produce no cambian.
+import { PrintGatewayService } from '../print-formats/services/print-gateway.service';
 import {
   CreateDispatchNoteDto,
   UpdateDispatchNoteDto,
@@ -56,7 +64,11 @@ export class DispatchNotesController {
   constructor(
     private readonly dispatchNotesService: DispatchNotesService,
     private readonly dispatchNoteFlowService: DispatchNoteFlowService,
-    private readonly dispatchNotePdfService: DispatchNotePdfService,
+    // ADR-15 §4 — cruza el ciclo `DispatchNotesModule` ↔ `PrintFormatsModule`
+    // (ver `dispatch-notes.module.ts`); `forwardRef` también en el punto de
+    // inyección, como exige Nest para dependencias circulares de módulos.
+    @Inject(forwardRef(() => PrintGatewayService))
+    private readonly printGatewayService: PrintGatewayService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -447,7 +459,22 @@ export class DispatchNotesController {
     @Param('id', ParseIntPipe) id: number,
     @Res() res: Response,
   ) {
-    const buffer = await this.dispatchNotePdfService.generatePdf(id);
+    // ADR-15 §4 (unificación remisión-gateway) — el `storeId` sale de la
+    // REMISIÓN, no del `RequestContext`. En el contexto el `store_id` puede
+    // venir vacío (alcance ORGANIZACIÓN corre con `store_id: null`) y puede
+    // apuntar a otra tienda que la emisora, con lo que el papel saldría con
+    // un formato ajeno. La consulta va con alcance, así que quien no pueda
+    // ver la remisión sigue sin poder imprimirla — la misma protección que
+    // daba el riel viejo.
+    const storeId = await this.dispatchNotesService.resolveStoreIdForPrint(id);
+
+    const { pdf_buffer } = await this.printGatewayService.renderDocument(
+      storeId,
+      'dispatch_note',
+      id,
+      'pdf',
+    );
+    const buffer = pdf_buffer as Buffer;
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `inline; filename="remision-${id}.pdf"`,

@@ -15,7 +15,25 @@
     "target": "ES2022",
     "module": "preserve",
     "moduleResolution": "bundler",
-    "paths": {}
+    // ADR-16 (`docs/critical-plans/CP-pos-exclusive-tax-double-charge/adr/`):
+    // kernel único de aritmética de dinero, compartido con `apps/backend`.
+    // Sin `baseUrl` los `paths` se resuelven relativos a ESTE archivo
+    // (soportado desde TS 4.1; aquí corre TS 5.8.2 — ver
+    // `apps/frontend/package.json`), por eso "../backend/..." resuelve a
+    // `apps/backend/...` sin declarar `baseUrl`. Se apunta directo al `.ts`
+    // fuente (no a un `.d.ts` generado) porque `tsconfig.app.json` limita su
+    // `include` a `src/**/*.ts`, pero un módulo alcanzado por resolución de
+    // `paths` entra al programa de TypeScript aunque viva fuera de ese glob
+    // — `include`/`exclude` sólo filtran el descubrimiento de archivos raíz,
+    // no los módulos importados transitivamente. Se expone también el
+    // submódulo `@money-kernel/money-compare` para importar sólo
+    // `differsByAtLeastCents` sin pasar por el barrel `index.ts` del kernel
+    // (que reexporta además `dian-money.ts`, no necesario en la mayoría de
+    // los sitios del frontend que sólo comparan montos).
+    "paths": {
+      "@money-kernel": ["../backend/src/common/money-kernel/index.ts"],
+      "@money-kernel/*": ["../backend/src/common/money-kernel/*"]
+    }
   },
   "angularCompilerOptions": {
     "enableI18nLegacyMessageIdFormat": false,

@@ -21,12 +21,22 @@ export class SubscriptionQueryDto {
     'active',
     'grace_soft',
     'grace_hard',
+    'grace',
     'suspended',
     'blocked',
     'cancelled',
     'expired',
+    'pending_payment',
   ])
   state?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
+
+  @IsOptional()
+  @IsIn(['monthly', 'quarterly', 'semiannual', 'biannual', 'annual', 'lifetime'])
+  billing_cycle?: string;
 
   @IsOptional()
   @Type(() => Number)

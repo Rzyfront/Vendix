@@ -69,6 +69,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { PrintFormatDefinition } from '../../print-formats/interfaces/print-format.interface';
 import { mapFiscalDocumentToPrintData } from '../../print-formats/providers/fiscal-document-print.mapper';
 import { PrintLayoutComposerService } from '../../print-formats/services/print-layout-composer.service';
+import { resolvePrintsVatBreakdownForPrint } from '../../print-formats/services/print-vat-breakdown.resolver';
 
 /**
  * Emisor de MUESTRA del XML proyectado.
@@ -641,8 +642,17 @@ export class ProfilePreviewService {
       // `compose` lee `definition.paper`: sin papel no hay papel que pintar.
       if (!definition?.paper) return null;
       const invoice = await this.toPrintInvoiceShape(prisma, input);
+      // F-208 (C.3): la vista previa declara su base monetaria igual que los
+      // emisores reales. Sin esto cae al default `prints_vat_breakdown: false`
+      // del mapper y la regla anti-huerfana del composer oculta Subtotal e IVA:
+      // el usuario aprobaria en el editor un formato distinto al que imprime.
       const data = mapFiscalDocumentToPrintData(invoice, {
         pendingLabel: 'Pendiente',
+        money_basis: 'taxable_base',
+        prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(
+          (invoice as any).organization,
+          (invoice as any).store,
+        ),
       });
       return composer.compose(definition, data, 'dummy');
     } catch (error) {

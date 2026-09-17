@@ -495,7 +495,10 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
       notes: null,
       total_to_collect: 1250000,
       total_collected: 0,
-      vehicles: { plate: 'WXB-987', brand: 'Chevrolet', model_name: 'NPR', type: 'truck' },
+      // C.3 (fix 2026-09-14): la relacion real es `vehicle` (singular); el
+      // fixture reflejaba el mismo nombre equivocado que el provider, asi
+      // que el bug y su prueba coincidian y el suite quedaba verde en falso.
+      vehicle: { plate: 'WXB-987', brand: 'Chevrolet', model_name: 'NPR', type: 'truck' },
       driver_user: { first_name: 'Carlos', last_name: 'Pérez', document_number: '79123456' },
       external_carrier: { name: '', code: '', contact_person: '' },
       origin_location: { name: 'Bodega Central Calle 80', code: 'BOD-01' },
@@ -511,9 +514,9 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
             id: 452,
             dispatch_number: 'REM-2026-00452',
             customer_name: 'Cliente Demo 1',
-            customer_phone: '+57 300 111 2222',
             customer_address: 'Calle 100 # 15-20',
-            order: { user: { first_name: '', last_name: '', phone: '' } },
+            // `orders.users` (plural) es la relacion real hacia `users`.
+            order: { users: { first_name: '', last_name: '', phone: '' } },
           },
         },
       ],

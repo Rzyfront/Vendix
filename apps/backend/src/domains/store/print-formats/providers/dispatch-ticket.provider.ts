@@ -126,6 +126,13 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
         state_label: 'En preparación',
         notes: 'Verificar empaque antes de despacho. Frágil.',
       },
+      // C.2 (ADR-12, G-09) — irrelevante en la práctica: `unit_price` es
+      // siempre 0 en este formato, así que la magnitud declarada no cambia
+      // lo que se pinta. `taxable_base`/`false` por default de R-2: no hay
+      // settings de tienda/organización en memoria (C.1 no las incluyó
+      // aquí) para resolver el gate fiscal real.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: false,
       items: [
         {
           index: 1,
@@ -335,6 +342,9 @@ export class DispatchTicketDataProvider implements IDocumentDataProvider {
           ? { customer_alias: order.customer_alias }
           : {}),
       },
+      // C.2 (ADR-12, G-09) — ver mismo comentario en `getSampleData`.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: false,
       items,
       taxes: [],
       totals: {

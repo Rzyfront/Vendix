@@ -33,6 +33,8 @@ import {
   type PrintDocumentConfig,
   type PrintingSettings,
 } from '../../settings/interfaces/store-settings.interface';
+// F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
+import { differsByAtLeastCents } from '@common/money-kernel';
 
 const ROUTE_INCLUDE = {
   vehicle: true,
@@ -690,7 +692,9 @@ export class RouteFlowService {
       }
       // Allow a 1-cent rounding tolerance on the breakdown sum vs the
       // declared withholding_amount.
-      if (Math.abs(breakdownSum - withholdingAmount) > 0.01) {
+      // F-222: MISMO umbral que el `> 0.01` original (tolera 1 centavo), pero
+      // medido en centavos enteros: `>= 2` ¢. Ver ADR-16.
+      if (differsByAtLeastCents(breakdownSum, withholdingAmount, 2)) {
         throw new BadRequestException(
           `El desglose de retención (${breakdownSum}) no coincide con el monto retenido (${withholdingAmount}).`,
         );

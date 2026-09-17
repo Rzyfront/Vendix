@@ -268,6 +268,7 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   // ─── Restaurant Suite — Fase K Gap 4: detail modal state ───────
   /** id of the ticket currently shown in the detail modal (null = closed). */
   private readonly selectedTicketId = signal<number | null>(null);
+  readonly detailModal = viewChild(KdsTicketDetailModalComponent);
   /**
    * Deep-link target (`?ticket=<kitchen_ticket_id>`) desde el detalle de
    * orden. El ticket puede no estar aún en `tickets()` al cargar (snapshot
@@ -294,6 +295,7 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
 
   /** Open the detail modal for a given ticket. */
   openDetail(ticket: KitchenTicket): void {
+    this.detailModal()?.invalidateRecipeCache();
     this.selectedTicketId.set(ticket.id);
   }
 
@@ -378,17 +380,29 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   }
 
   /** Lee y limpia el retorno pendiente (one-shot). `null` = nada pendiente. */
-  private consumePendingRecipeReturn(): { ticketId: number | null } | null {
+  private consumePendingRecipeReturn(): {
+    ticketId: number | null;
+    productId?: number;
+    variantId?: number | null;
+  } | null {
     try {
       const raw = sessionStorage.getItem(
         KdsBoardPageComponent.PENDING_RECIPE_KEY,
       );
       if (!raw) return null;
       sessionStorage.removeItem(KdsBoardPageComponent.PENDING_RECIPE_KEY);
-      const parsed = JSON.parse(raw) as { ticketId?: unknown };
+      const parsed = JSON.parse(raw) as {
+        ticketId?: unknown;
+        productId?: unknown;
+        variantId?: unknown;
+      };
       return {
         ticketId:
           typeof parsed?.ticketId === 'number' ? parsed.ticketId : null,
+        productId:
+          typeof parsed?.productId === 'number' ? parsed.productId : undefined,
+        variantId:
+          typeof parsed?.variantId === 'number' ? parsed.variantId : null,
       };
     } catch {
       return null;
@@ -409,19 +423,21 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
    *
    * El board congela el snapshot al fire y la creación/restauración de la
    * receta NO emite ningún evento `ticket.*` por SSE — sin este re-fetch el
-   * badge mentiría hasta el próximo cambio de estado. Solo se consulta por
-   * los items que TODAVÍA se ven sin receta activa (si el snapshot ya vino
-   * fresco, cero llamadas); cada éxito inserta la ref activa en
-   * `product.recipes[]` para que `itemHasActiveRecipe` pase sin bifurcar.
+   * badge mentiría hasta el próximo cambio de estado. Si se especifica
+   * `ticketId`, se refrescan todos los items de ese ticket (para reflejar
+   * cambios a recetas existentes); si `ticketId` es null, solo se consulta por
+   * los items que todavía se ven sin receta activa.
    */
   refreshTicketRecipes(ticketId: number | null): void {
     const ticket =
       ticketId != null
         ? this.tickets().find((t) => t.id === ticketId) ?? null
         : null;
-    const candidates = (ticketId != null ? (ticket ? [ticket] : []) : this.tickets())
+    const targetTickets =
+      ticketId != null ? (ticket ? [ticket] : []) : this.tickets();
+    const candidates = targetTickets
       .flatMap((t) => t.items ?? [])
-      .filter((item) => !itemHasActiveRecipe(item));
+      .filter((item) => ticketId != null || !itemHasActiveRecipe(item));
     if (candidates.length === 0) return;
 
     forkJoin(
@@ -706,7 +722,13 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
       .refreshSnapshot(120)
       .then(() => {
         const pending = this.consumePendingRecipeReturn();
-        if (pending) this.refreshTicketRecipes(pending.ticketId);
+        if (pending) {
+          this.detailModal()?.invalidateRecipeCache(
+            pending.productId,
+            pending.variantId,
+          );
+          this.refreshTicketRecipes(pending.ticketId);
+        }
       })
       .catch(() => {
         /* el SSE/polling reconciliará */
@@ -725,6 +747,10 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
         }
         const pending = this.consumePendingRecipeReturn();
         if (!pending) return;
+        this.detailModal()?.invalidateRecipeCache(
+          pending.productId,
+          pending.variantId,
+        );
         if (pending.ticketId != null) {
           this.refreshTicketRecipes(pending.ticketId);
         } else {

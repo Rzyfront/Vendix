@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma, partner_payout_batch_state_enum } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
-import { PayoutQueryDto, ApprovePayoutDto } from '../dto';
+import { PayoutQueryDto, SubscriptionPaymentQueryDto, ApprovePayoutDto } from '../dto';
 
 @Injectable()
 export class PayoutsService {
@@ -20,6 +20,7 @@ export class PayoutsService {
       limit = 10,
       partner_organization_id,
       state,
+      search,
       sort_by = 'created_at',
       sort_order = 'desc',
     } = query;
@@ -30,6 +31,13 @@ export class PayoutsService {
     if (partner_organization_id)
       where.partner_organization_id = partner_organization_id;
     if (state) where.state = state;
+
+    if (search) {
+      where.OR = [
+        { organization: { name: { contains: search, mode: 'insensitive' } } },
+        { reference: { contains: search, mode: 'insensitive' } },
+      ];
+    }
 
     const [data, total] = await Promise.all([
       this.prisma.partner_payout_batches.findMany({
@@ -43,6 +51,107 @@ export class PayoutsService {
         },
       }),
       this.prisma.partner_payout_batches.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page: Number(page),
+        limit: Number(limit),
+        totalPages: Math.ceil(total / Number(limit)),
+      },
+    };
+  }
+
+  async findPayments(query: SubscriptionPaymentQueryDto) {
+    const {
+      page = 1,
+      limit = 10,
+      state,
+      status,
+      search,
+      from,
+      to,
+      sort_by = 'created_at',
+      sort_order = 'desc',
+    } = query;
+
+    const skip = (page - 1) * Number(limit);
+    const where: Prisma.subscription_paymentsWhereInput = {};
+
+    const resolvedState = state || status;
+    if (resolvedState) {
+      where.state = resolvedState as any;
+    }
+
+    if (from || to) {
+      where.created_at = {};
+      if (from) where.created_at.gte = new Date(from);
+      if (to) where.created_at.lte = new Date(to);
+    }
+
+    if (search) {
+      where.OR = [
+        { gateway_reference: { contains: search, mode: 'insensitive' } },
+        {
+          invoice: {
+            invoice_number: { contains: search, mode: 'insensitive' },
+          },
+        },
+        {
+          invoice: {
+            store_subscription: {
+              store: {
+                name: { contains: search, mode: 'insensitive' },
+              },
+            },
+          },
+        },
+      ];
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.subscription_payments.findMany({
+        where,
+        skip,
+        take: Number(limit),
+        orderBy: { [sort_by]: sort_order },
+        include: {
+          invoice: {
+            select: {
+              id: true,
+              invoice_number: true,
+              total: true,
+              state: true,
+              due_at: true,
+              store_subscription: {
+                select: {
+                  id: true,
+                  store_id: true,
+                  plan: {
+                    select: {
+                      id: true,
+                      name: true,
+                      code: true,
+                      billing_cycle: true,
+                    },
+                  },
+                  store: {
+                    select: {
+                      id: true,
+                      name: true,
+                      organization_id: true,
+                      organizations: { select: { id: true, name: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.subscription_payments.count({ where }),
     ]);
 
     return {

@@ -93,3 +93,6 @@ pnpm-workspace.yaml
 # Bitácora acotada del `ng serve` nativo (scripts/dev-fe.sh). Se reescribe en
 # cada ciclo de compilación; nunca crece. La lee `buildcheck.sh --watch`.
 .dev/
+
+# Logs de jest del job backend-test-scoped (se suben como artefacto en CI)
+apps/backend/jest-logs/

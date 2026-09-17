@@ -98,6 +98,13 @@ export class AutoEntryService {
   private readonly logger = new Logger(AutoEntryService.name);
 
   /**
+   * F-111 — tolerancia de la compuerta de `resolveTaxLines`, en centavos
+   * enteros. Ver el docblock de `resolveTaxLines` para la justificación
+   * completa del número.
+   */
+  private static readonly TAX_MISMATCH_TOLERANCE_CENTS = 3;
+
+  /**
    * Cache en memoria de la zona horaria por `store_id`. La timezone de una
    * tienda no cambia en runtime, así que evitamos consultar `stores` en cada
    * asiento. `null` = tienda sin timezone configurada (usa el fallback).
@@ -140,6 +147,54 @@ export class AutoEntryService {
   }
 
   /**
+   * F-111 (CP-pos-exclusive-tax-double-charge) — segunda red de detección,
+   * INDEPENDIENTE del cálculo que ya hizo el POS/facturación al escribir
+   * `order_item_taxes`/`invoice_taxes`. El asiento contable absorbía el IVA
+   * inflado y "cuadraba" igual (`|debit-credit| > 0.001` es invariante ante
+   * inflar ambas patas), así que el balance del asiento NUNCA pudo detectar
+   * este defecto — hace falta un segundo cálculo desde una fuente distinta.
+   *
+   * `item.taxable_amount` viene de `Σ order_items.total_price` (el ESCRITOR
+   * de la línea) y `item.tax_amount` viene del ESCRITOR del impuesto — son
+   * dos columnas escritas por dos pasos de código distintos, por eso
+   * contrastarlas detecta una duplicación en uno de los dos sin depender del
+   * otro. Si esta comparación derivara la base desde el propio `tax_amount`
+   * sería tautológica y no detectaría nada.
+   *
+   * Comparación en CENTAVOS ENTEROS (F-222): `Math.abs(a-b) >= 0.01` en
+   * float falla (13603.13-13603.12 da 0.00999999999839...) y el defecto NO
+   * dispara. `Math.round(x*100)` colapsa el binario antes de comparar.
+   *
+   * Tolerancia: `TAX_MISMATCH_TOLERANCE_CENTS` = 3¢. Cada `order_item`
+   * redondea su `tax_amount_item`/`tax_amount` al centavo de forma
+   * independiente (`Decimal(12,2)`), así que el error máximo introducido por
+   * el redondeo de UNA línea es 0.5¢; una ficha POS con un puñado de líneas
+   * del mismo (tipo, tarifa) no debería acumular más de un par de centavos
+   * de deriva legítima. 3¢ cubre ese ruido sin diluir la sensibilidad: el
+   * defecto real en producción (asientos 3122/3229/3247) desvió ~303 COP =
+   * 30.300¢, cien veces el umbral. NO se calibra para "pasar" un test: se
+   * calibra por la física del redondeo y luego se verifica que SÍ dispara
+   * contra la forma real del defecto.
+   *
+   * REGISTRA, NUNCA LANZA (decisión del dueño del producto): una desviación
+   * fiscal se deja en `accounting_entry_failures` vía `recordSkip` con causa
+   * `DETECTED_TAX_MISMATCH` (best-effort, no bloquea) y la línea se emite
+   * IGUAL — la venta ya se completó, no hay nada que revertir acá. El job de
+   * `accounting-entry-failures-alert.job.ts` es quien la saca a la luz.
+   * `recordSkip` envuelve toda su escritura en `try/catch` y sólo registra en
+   * el log, así que ni un fallo de base de datos puede hacer subir una
+   * excepción por acá y tumbar el cobro.
+   *
+   * La fila se archiva bajo un `source_type` PROPIO
+   * (`<evento>.tax_mismatch.<tipo>`), no el del evento, porque `recordSkip`
+   * deduplica por esa clave y pisa el mensaje al chocar — ver el comentario
+   * en el cuerpo.
+   *
+   * Si `item.tax_rate` o `item.taxable_amount` faltan (7 llamadores
+   * históricos que no los traen, o `scaleBreakdownToTotal` que los descarta
+   * a propósito en reembolsos parciales) la compuerta simplemente no se
+   * arma — comportamiento idéntico al de hoy, sin ruido.
+   *
    * Build one journal line per fiscal tax type from a typed `tax_breakdown`,
    * routing each type to its own mapping key (`<prefix>.<type>_<suffix>`, e.g.
    * `invoice.validated.inc_payable` → 2436). This is what separates IVA, INC and
@@ -164,6 +219,12 @@ export class AutoEntryService {
     breakdown?: TaxBreakdownItem[];
     legacyKey: string; // e.g. 'invoice.validated.vat_payable'
     label: string;
+    // F-111 — contexto de origen SÓLO para poder dejar rastro en
+    // `accounting_entry_failures` si la compuerta detecta una desviación.
+    // Opcional: un llamador que no lo traiga simplemente no arma la
+    // compuerta (mismo criterio que un breakdown sin tarifa/base).
+    source_type?: string;
+    source_id?: number | null;
   }): Promise<(AutoEntryLine | null)[]> {
     const {
       organization_id,
@@ -175,6 +236,8 @@ export class AutoEntryService {
       breakdown,
       legacyKey,
       label,
+      source_type,
+      source_id,
     } = params;
 
     const makeLine = (amount: number, key: string, desc: string) =>
@@ -192,6 +255,53 @@ export class AutoEntryService {
       for (const item of breakdown) {
         const amount = Number(item.tax_amount || 0);
         if (amount <= 0) continue;
+
+        // F-111 — compuerta de detección. Ver docblock del método.
+        if (
+          source_type &&
+          item.tax_rate != null &&
+          item.tax_rate > 0 &&
+          item.taxable_amount != null
+        ) {
+          const expected_amount = item.taxable_amount * item.tax_rate;
+          const declared_cents = Math.round(amount * 100);
+          const expected_cents = Math.round(expected_amount * 100);
+          const delta_cents = Math.abs(declared_cents - expected_cents);
+          if (delta_cents > AutoEntryService.TAX_MISMATCH_TOLERANCE_CENTS) {
+            // F-111 — `source_type` PROPIO, no el del evento. `recordSkip`
+            // deduplica por `(organization_id, source_type, source_id,
+            // resolved_at: null)` y en caso de choque hace UPDATE, pisando
+            // `error_message`. Con el `source_type` del evento la fila de
+            // detección competiría por la misma clave que las de omisión: una
+            // factura que además cae en `SKIPPED_MISSING_MAPPING` (mismo
+            // evento, unas líneas más abajo, cosa nada rara en tiendas mal
+            // mapeadas) borraría la detección fiscal y nadie se enteraría de
+            // la desviación. El `tax_type` va en la clave por lo mismo: dos
+            // tributos desviados en el mismo documento son dos hallazgos, no
+            // uno que pisa al otro. Cabe en `VarChar(50)` con los tipos
+            // fiscales actuales; el `slice` es cinturón por si aparece uno
+            // más largo, porque pasarse trunca en Postgres, no falla.
+            const mismatch_source_type = `${source_type}.tax_mismatch.${item.tax_type}`.slice(
+              0,
+              50,
+            );
+            await this.entry_failure_service.recordSkip({
+              organization_id,
+              store_id,
+              source_type: mismatch_source_type,
+              source_id,
+              cause: 'DETECTED_TAX_MISMATCH',
+              detail:
+                // El evento va en el texto porque ya no va en `source_type`.
+                `evento=${source_type} tipo=${item.tax_type} tarifa=${item.tax_rate} ` +
+                `base_gravable=${item.taxable_amount.toFixed(2)} ` +
+                `impuesto_declarado=${amount.toFixed(2)} ` +
+                `impuesto_esperado=${expected_amount.toFixed(2)} ` +
+                `delta_centavos=${delta_cents}`,
+            });
+          }
+        }
+
         const typed_key = `${prefix}.${item.tax_type}_${suffix}`;
         const desc = `${label} (${item.tax_type.toUpperCase()})`;
         let line = await makeLine(amount, typed_key, desc);
@@ -1411,6 +1521,8 @@ export class AutoEntryService {
         breakdown: data.tax_breakdown,
         legacyKey: 'invoice.validated.vat_payable',
         label: 'VAT Payable',
+        source_type: 'invoice.validated',
+        source_id: data.invoice_id,
       })),
     );
 
@@ -1490,6 +1602,8 @@ export class AutoEntryService {
         breakdown: data.tax_breakdown,
         legacyKey: 'credit_note.accepted.iva_payable',
         label: 'Impuesto por Pagar (reversa nota crédito)',
+        source_type: 'credit_note.accepted',
+        source_id: data.invoice_id,
       })),
     );
 
@@ -2023,6 +2137,8 @@ export class AutoEntryService {
           breakdown: data.tax_breakdown,
           legacyKey: 'payment.received.vat_payable',
           label: `IVA venta directa${order_ref}`,
+          source_type: 'payment.received',
+          source_id: data.payment_id,
         })),
       );
 
@@ -2188,6 +2304,8 @@ export class AutoEntryService {
         breakdown: data.tax_breakdown,
         legacyKey: 'credit_sale.created.vat_payable',
         label: `IVA venta a crédito${order_ref}`,
+        source_type: 'credit_sale.created',
+        source_id: data.order_id,
       })),
     );
 
@@ -3442,6 +3560,8 @@ export class AutoEntryService {
         breakdown: data.tax_breakdown,
         legacyKey: 'refund.completed.vat_payable',
         label: 'IVA (reversa devolución)',
+        source_type: 'refund.completed',
+        source_id: data.refund_id,
       })),
     );
 

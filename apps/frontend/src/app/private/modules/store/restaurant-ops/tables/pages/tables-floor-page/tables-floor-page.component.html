@@ -58,6 +58,7 @@
         <app-table-floor-map
           [tables]="tables()"
           [liveCounts]="liveCounts()"
+          [callingTableId]="callingTableId()"
           (tableClicked)="onTableClick($event)"
         />
       </div>

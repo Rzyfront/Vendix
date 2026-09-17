@@ -26,6 +26,7 @@ import { AppNotification } from './notifications.actions';
 import { AuthFacade } from '../auth/auth.facade';
 import { StoreSettingsFacade } from '../store-settings/store-settings.facade';
 import { StaffScanApprovalService } from '../../../private/modules/store/restaurant-ops/tables/services/staff-scan-approval.service';
+import { ToastService } from '../../../shared/components/toast/toast.service';
 
 @Injectable()
 export class NotificationsEffects {
@@ -38,6 +39,7 @@ export class NotificationsEffects {
   private soundsCatalog = inject(NotificationSoundsCatalogService);
   private storeSettingsFacade = inject(StoreSettingsFacade);
   private staffScanApproval = inject(StaffScanApprovalService);
+  private toast = inject(ToastService);
   private eventSource: EventSource | null = null;
 
   /**
@@ -285,6 +287,29 @@ export class NotificationsEffects {
         filter(({ notification }) => notification.type === 'qr_table_scan'),
         tap(({ notification }) => {
           this.staffScanApproval.show(notification);
+        }),
+      ),
+    { dispatch: false },
+  );
+
+  /**
+   * Llamado al mesero (QR) — toast interruptivo además de la campana.
+   * El `body` ya trae `Mesa X solicita atención`; se reconstruye desde
+   * `data.table_name` y se anexa `data.note` cuando existe.
+   */
+  showWaiterCallToast$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(NotificationsActions.receivedNotification),
+        filter(({ notification }) => notification.type === 'table_call_waiter'),
+        tap(({ notification }) => {
+          const tableName = notification.data?.table_name as string | undefined;
+          const note = notification.data?.note as string | undefined | null;
+          const base =
+            tableName != null && tableName !== ''
+              ? `Mesa ${tableName} solicita atención`
+              : (notification.body ?? 'Mesa solicita atención');
+          this.toast.warning(note ? `${base}: ${note}` : base);
         }),
       ),
     { dispatch: false },

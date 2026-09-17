@@ -15,8 +15,12 @@ export class DunningQueryDto {
   limit?: number = 10;
 
   @IsOptional()
-  @IsIn(['grace_soft', 'grace_hard', 'suspended', 'blocked'])
+  @IsIn(['grace', 'grace_soft', 'grace_hard', 'suspended', 'blocked', 'pending_payment'])
   state?: string;
+
+  @IsOptional()
+  @IsString()
+  status?: string;
 
   @IsOptional()
   @Type(() => Number)
