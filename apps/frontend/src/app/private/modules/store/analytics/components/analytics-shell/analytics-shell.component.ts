@@ -138,13 +138,12 @@ export class AnalyticsShellComponent {
     const child = this.activeChildComponent;
     if (!child) return;
 
-    // 1. Preferred contract: child implements Refreshable
-    if (this.isRefreshable(child)) {
-      child.refresh();
-      return;
-    }
+    // Los hijos Refreshable ya recargan vía el effect de `refreshSignal`
+    // (disparado arriba con triggerRefresh()); llamarlos aquí duplicaría
+    // la carga. Solo quedan los fallbacks legacy sin suscripción.
+    if (this.isRefreshable(child)) return;
 
-    // 2. Fallbacks for unmigrated legacy analytics components
+    // Fallbacks for unmigrated legacy analytics components
     if (typeof child.loadData === 'function') {
       child.loadData();
     } else if (typeof child.loadChartData === 'function') {

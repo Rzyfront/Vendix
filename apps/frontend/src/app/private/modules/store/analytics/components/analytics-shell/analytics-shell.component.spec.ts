@@ -83,12 +83,14 @@ describe('AnalyticsShellComponent', () => {
     expect(toastServiceSpy.success).toHaveBeenCalledWith('Datos de analítica actualizados');
   });
 
-  it('delegates refresh action to child implementing Refreshable contract', () => {
+  it('does not call refresh() directly on Refreshable children (effect covers it)', () => {
     const refreshableChild = { refresh: jasmine.createSpy('refresh') };
     component.onActivate(refreshableChild);
     component.onActionClick('refresh');
     expect(analyticsServiceSpy.invalidateCache).toHaveBeenCalledTimes(1);
-    expect(refreshableChild.refresh).toHaveBeenCalledTimes(1);
+    // Refreshable children reload via the refreshSignal effect; a direct
+    // call here would fetch twice.
+    expect(refreshableChild.refresh).not.toHaveBeenCalled();
   });
 
   it('navigates to the report route for the current analytics URL', () => {
