@@ -240,6 +240,15 @@ export class AccountsReceivableService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // 0. Serialize concurrent abonos on the same AR: the installment
+      // distribution below is read-modify-write. Same convention as the
+      // invoice-number generator (advisory xact lock; $executeRaw, never
+      // $queryRaw, because void has no mappable column).
+      await tx.$executeRawUnsafe(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        `ar_payment:${ar_id}`,
+      );
+
       // 1. Create ar_payment record
       const payment = await tx.ar_payments.create({
         data: {
