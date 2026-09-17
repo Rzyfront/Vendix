@@ -2,7 +2,7 @@
 id: A.2
 title: "Scoring de relevancia producto + specs"
 phase: A
-status: pending
+status: done
 owner: none
 updated: 2026-09-17
 contracts: []
@@ -23,14 +23,14 @@ skills: [vendix-backend, vendix-naming-conventions, vendix-product-variants]
 - **Verification:**
   - `npm run buildcheck:test -- src/domains/store/products/services/product-search-relevance.util.spec.ts`
 - **Acceptance checklist:**
-  - [ ] 'café negro granizado con hielo y chocolate' rankea 1º para ['cafe','chocolate']
-  - [ ] sku exacto supera a nombre parcial; barcode exacto suma bonus +30
-  - [ ] Orden estable: score→coverage→featured→created_at→id (sin flips entre páginas)
-  - [ ] variants.name suma sin filtrar por stock (vendible ≠ disponible)
-  - [ ] SEARCH_WEIGHTS + fixture 4 queries compartidos B.2/C.3 (mismo orden ambos flags)
-  - [ ] rankedIdsPage reusable: D.1/D.2/D.3 cablean solo delegates (cero duplicación)
-  - [ ] F-014 — Scoring en products cruza frontera ecommerce (major)
-  - [ ] F-019 — Scoring duplicado B.2 vs C.3 sin contrato pesos (major)
-  - [ ] F-072 — Orquestación rank privada; hermanos la triplican (minor)
-  - [ ] F-073 — Motor en products pre-ordena ciclo DI futuro (minor)
-- **Status:** pending
+  - [x] 'café negro granizado con hielo y chocolate' rankea 1º para ['cafe','chocolate']
+  - [x] sku exacto supera a nombre parcial; barcode exacto suma bonus +30
+  - [x] Orden estable: score→coverage→featured→created_at→id (sin flips entre páginas)
+  - [x] variants.name suma sin filtrar por stock (vendible ≠ disponible)
+  - [x] SEARCH_WEIGHTS + fixture 4 queries compartidos B.2/C.3 (mismo orden ambos flags)
+  - [x] rankedIdsPage reusable: D.1/D.2/D.3 cablean solo delegates (cero duplicación)
+  - [x] F-014 — Scoring en products cruza frontera ecommerce (major)
+  - [x] F-019 — Scoring duplicado B.2 vs C.3 sin contrato pesos (major)
+  - [x] F-072 — Orquestación rank privada; hermanos la triplican (minor)
+  - [x] F-073 — Motor en products pre-ordena ciclo DI futuro (minor)
+- **Status:** done
