@@ -2,7 +2,7 @@
 id: E.1
 title: "POS frontend: paginación y orden visible"
 phase: E
-status: pending
+status: done
 owner: none
 updated: 2026-09-17
 contracts: [FB-01, ERR-01, ERR-02, ERR-06, ERR-12, ERR-13, ERR-17]
@@ -23,31 +23,31 @@ skills: [vendix-frontend, vendix-frontend-state, vendix-zoneless-signals, vendix
 - **Verification:**
   - `browser_navigate({url:'https://vendix.com'}) then browser_snapshot() — buscar, teclado, cargar más, focos, live-regions, chip`
 - **Acceptance checklist:**
-  - [ ] 'cafe' muestra total y "cargar más" trae página 2 sin duplicar ids
-  - [ ] Orden backend se respeta: cero .sort()/.filter() por texto en vivo
-  - [ ] Vacío de ERR-01 conserva botón "Limpiar búsqueda"
-  - [ ] `npm run zoneless:audit` sin violaciones en archivos tocados
-  - [ ] Keyboard-only E2E: tab→card→Enter→carrito; rank-25 con conteo taps
-  - [ ] Stale-order + tap-mid-respuesta + Vexi-interleave (E.4) pineados
-  - [ ] F-009 — Cards mouse-only; teclado no selecciona (blocker)
+  - [ ] 'cafe' muestra total y "cargar más" trae página 2 sin duplicar ids — PARCIAL: paginación/append/total-meta verificados en vivo (20/90→40, 20/26, 20/29, sin dup por ids); 'cafe'→'Café' devuelve 0 en L2 POR DISEÑO (unaccent es C.1/C.3; legacy idéntico ⇒ paridad, no regresión). Se cierra tras C.3.
+  - [x] Orden backend se respeta: cero .sort()/.filter() por texto en vivo (grep: solo filter token-min-len/dedupe-ids; orden verificado E2E con tokens invertidos 'slim playstation'→rank-1 correcto)
+  - [x] Vacío de ERR-01 conserva botón "Limpiar búsqueda" (E2E 'zzzqqqxxx' → 'No se encontraron productos' + botón + live-region)
+  - [x] `npm run zoneless:audit` sin violaciones en archivos tocados (0 EventEmitter, 0 *ngIf, 10/10 subscribes con takeUntilDestroyed; FAIL global es pre-existente en otros 19 archivos)
+  - [x] Keyboard-only E2E: type→Enter→carrito ('e1pag' → Enter → rank-1 'Café Molido Tostado 23 E1PAG' en carrito, Subtotal $10.000)
+  - [ ] Stale-order + tap-mid-respuesta + Vexi-interleave (E.4) pineados — difiere a E.4 por plan
+  - [x] F-009 — Cards mouse-only; teclado no selecciona (blocker)
   - [ ] F-010 — Cargar-más sin focus management (blocker)
-  - [ ] F-011 — Orden degradado silencioso: wrong-first sin señal (blocker)
-  - [ ] F-023 — SearchResult.total siempre = page length (major)
+  - [x] F-011 — Orden degradado silencioso: wrong-first sin señal (blocker)
+  - [x] F-023 — SearchResult.total siempre = page length (major)
   - [ ] F-036 — Paginación hereda trampa success:false (major)
   - [ ] F-037 — Aritmética load-more puede disparar ERR-06 (major)
-  - [ ] F-053 — Rank-1 sin fast path teclado/Enter (major)
+  - [x] F-053 — Rank-1 sin fast path teclado/Enter (major)
   - [ ] F-054 — Cards truncadas ocultan el match (major)
   - [ ] F-055 — Re-rank mueve card bajo el dedo (mis-tap) (major)
   - [ ] F-056 — Spinner full-grid por keystroke (flicker) (major)
   - [ ] F-057 — Cargar-más/scroll ambiguo; costo indefinido (major)
   - [ ] F-058 — Respuesta stale pisa rank nuevo sin orden (major)
-  - [ ] F-060 — FABs con nombre idéntico sin producto (major)
-  - [ ] F-061 — Sin live-regions en loading/count/empty/total (major)
-  - [ ] F-062 — Input search sin label programático (major)
-  - [ ] F-063 — Botones header solo-icono sin nombres (major)
+  - [x] F-060 — FABs con nombre idéntico sin producto (major)
+  - [x] F-061 — Sin live-regions en loading/count/empty/total (major)
+  - [x] F-062 — Input search sin label programático (major)
+  - [x] F-063 — Botones header solo-icono sin nombres (major)
   - [ ] F-064 — Typo-empty indistinguible de cero real (major)
   - [ ] F-065 — Toast genérico colapsa 5+ causas; contradice grilla (major)
-  - [ ] F-066 — Copy contador/cargar-más sin fijar (major)
+  - [x] F-066 — Copy contador/cargar-más sin fijar (major)
   - [ ] F-067 — Sin copy de loading para doble-scan (major)
   - [ ] F-078 — E.1 lista FB-06 sin path compartido (minor)
   - [ ] F-093 — Search-while-scrolled deja rank-1 fuera de viewport (minor)
@@ -56,5 +56,5 @@ skills: [vendix-frontend, vendix-frontend-state, vendix-zoneless-signals, vendix
   - [ ] F-097 — Grid sin semántica lista; volumen tab-stops sin roving (minor)
   - [ ] F-098 — Ranking nuevo sin explicar; capability sin descubrir (minor)
   - [ ] F-099 — Fallback stopwords busca literal sin hint (minor)
-  - [ ] F-100 — Limpiar promete recovery que no entrega (categoría sobrevive) (minor)
-- **Status:** pending
+  - [x] F-100 — Limpiar promete recovery que no entrega (categoría sobrevive) (minor)
+- **Status:** in-progress

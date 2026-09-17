@@ -3,7 +3,7 @@ import { Observable, of, throwError } from 'rxjs';
 import { delay, map, catchError } from 'rxjs/operators';
 import { signal } from '@angular/core';
 import { toObservable } from '@angular/core/rxjs-interop';
-import { HttpClient, HttpParams } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpParams } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
@@ -16,6 +16,7 @@ import {
   StockSourcingSuggestionResponse,
 } from '../models/sourcing.model';
 import { PRODUCT_SAVE_ERROR_MAP } from '../../products/utils/product-save-requirements';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 
 /**
  * Promotional descriptor surfaced on POS product cards. Mirrors the backend
@@ -214,12 +215,51 @@ export interface SearchFilters {
   best_selling_first?: boolean;
 }
 
+/**
+ * CP-pos-smart-search · E.1 — espejo frontend de `SearchRankMeta` (backend:
+ * `common/responses/response.interface.ts`, contrato ADR-08). Viaja en
+ * `meta.search` solo en listados con `search`; ausente en el resto.
+ */
+export interface SearchRankMeta {
+  rank_mode: 'ranked' | 'unranked_scan_cap' | 'unranked_error' | 'legacy';
+  layer: 'legacy' | 'l1' | 'l2' | 'trigram';
+  degraded: boolean;
+}
+
+/**
+ * CP-pos-smart-search · E.1 — error estructurado de `searchProducts`.
+ * Conserva la causa (transporte vs HTTP vs envelope `success:false`) para
+ * que la UI mensaje por causa (F-065) en vez de colapsar todo a un toast
+ * genérico que contradice la grilla.
+ */
+export interface PosProductsLoadError {
+  message: string;
+  /** Status HTTP; 0 = fallo de transporte (red caída/timeout/DNS, ERR-13). */
+  status: number;
+  /** `error_code` del backend cuando viaja en el envelope. */
+  code?: string;
+}
+
 export interface SearchResult {
   products: Product[];
   total: number;
   page: number;
   pageSize: number;
   totalPages: number;
+  /** Meta de ranking (ADR-08); null cuando el backend no lo envía. */
+  searchMeta: SearchRankMeta | null;
+}
+
+/** Type-guard para re-lanzar sin re-mapear errores ya estructurados. */
+export function isPosProductsLoadError(
+  value: unknown,
+): value is PosProductsLoadError {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate['message'] === 'string' &&
+    typeof candidate['status'] === 'number'
+  );
 }
 
 @Injectable({
@@ -323,9 +363,15 @@ export class PosProductService {
     page: number = 1,
     pageSize: number = 20,
   ): Observable<SearchResult> {
+    // E.1 (F-037) — clamp defensivo: un off-by-one jamás envía ?page=0 ni
+    // limit=0 (el DTO no tiene @Min y Prisma muere → ERR-06 silencioso).
+    const safePage = Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
+    const safePageSize = Number.isFinite(pageSize)
+      ? Math.max(1, Math.floor(pageSize))
+      : 20;
     const query: any = {
-      page,
-      limit: pageSize,
+      page: safePage,
+      limit: safePageSize,
       state: 'active',
     };
 
@@ -389,33 +435,46 @@ export class PosProductService {
 
     return this.http.get<any>(this.apiUrl, { params }).pipe(
       map((response) => {
+        // E.1 (F-036) — un envelope `success:false` (ERR-06/ERR-12) es un
+        // FALLO, no una lista vacía: se lanza para que el path de error
+        // (toast/banner + retry, items intactos) actúe en vez de pintar
+        // textos ERR-01 engañosos.
+        if (response?.success === false) {
+          throw this.errorFromEnvelope(response);
+        }
+
         // Uniform way to extract data and pagination
         let productsResult = [];
         let total = 0;
-        let currentPage = page;
-        let limitNum = pageSize;
+        let currentPage = safePage;
+        let limitNum = safePageSize;
 
         // Check for the success wrapper
         const responseData = response.success ? response.data : response;
 
         if (Array.isArray(responseData)) {
+          // E.1 (F-023) — el backend devuelve `{success,data:[...],meta}`:
+          // `total` es `meta.total` (45), NO el largo de la página (20), o
+          // un "cargar más" gateado en `total>loaded` nunca renderiza.
           productsResult = responseData;
-          total = productsResult.length;
+          total = response.meta?.total ?? productsResult.length;
+          currentPage = response.meta?.page ?? safePage;
+          limitNum = response.meta?.limit ?? safePageSize;
         } else if (responseData && Array.isArray(responseData.data)) {
           // Format { data: [...], pagination: {...} } or { data: [...], meta: {...} }
           productsResult = responseData.data;
           const pagination =
             responseData.pagination || responseData.meta || response.meta || {};
           total = pagination.total || productsResult.length;
-          currentPage = pagination.page || page;
-          limitNum = pagination.limit || pageSize;
+          currentPage = pagination.page || safePage;
+          limitNum = pagination.limit || safePageSize;
         } else if (responseData) {
           // Fallback if data is directly in response.data but success check passed
           productsResult = Array.isArray(responseData) ? responseData : [];
           total =
             response.meta?.total || response.total || productsResult.length;
-          currentPage = response.meta?.page || response.page || page;
-          limitNum = response.meta?.limit || response.limit || pageSize;
+          currentPage = response.meta?.page || response.page || safePage;
+          limitNum = response.meta?.limit || response.limit || safePageSize;
         }
 
         const totalPages = Math.ceil(total / limitNum);
@@ -427,29 +486,132 @@ export class PosProductService {
           page: currentPage,
           pageSize: limitNum,
           totalPages,
+          searchMeta: this.extractSearchMeta(response),
         };
       }),
-      catchError((error: any) => {
+      catchError((error: unknown) => {
         console.error('PosProductService Error:', error);
-        let errorMessage = 'Error al cargar productos';
-
-        if (error.error?.message) {
-          errorMessage = error.error.message;
-        } else if (error.status === 400) {
-          errorMessage = 'Datos inválidos proporcionados';
-        } else if (error.status === 401) {
-          errorMessage = 'Acceso no autorizado';
-        } else if (error.status === 403) {
-          errorMessage = 'Permisos insuficientes';
-        } else if (error.status === 404) {
-          errorMessage = 'Producto no encontrado';
-        } else if (error.status >= 500) {
-          errorMessage = 'Error del servidor. Por favor intenta más tarde';
+        // E.1 review fix — `HttpErrorResponse` TAMBIÉN tiene `message`+`status`
+        // y el guard de abajo lo dejaba pasar crudo ("Http failure response
+        // for https://..." ante el cajero). El transporte SIEMPRE se mapea;
+        // el guard solo deja pasar lo que el `map` anterior ya estructuró.
+        if (error instanceof HttpErrorResponse) {
+          return throwError(() => this.errorFromHttp(error));
         }
-
-        return throwError(() => errorMessage);
+        if (isPosProductsLoadError(error)) {
+          return throwError(() => error);
+        }
+        return throwError(() => this.errorFromHttp(error));
       }),
     );
+  }
+
+  /**
+   * E.1 (ADR-08) — extrae `meta.search` validando forma. Null ante payloads
+   * legacy/cacheados sin el contrato o con valores desconocidos.
+   */
+  private extractSearchMeta(response: unknown): SearchRankMeta | null {
+    if (typeof response !== 'object' || response === null) return null;
+    const search = (response as { meta?: { search?: unknown } }).meta?.search;
+    if (typeof search !== 'object' || search === null) return null;
+    const candidate = search as Partial<SearchRankMeta>;
+    const rankModes: SearchRankMeta['rank_mode'][] = [
+      'ranked',
+      'unranked_scan_cap',
+      'unranked_error',
+      'legacy',
+    ];
+    const layers: SearchRankMeta['layer'][] = [
+      'legacy',
+      'l1',
+      'l2',
+      'trigram',
+    ];
+    if (
+      !rankModes.includes(candidate.rank_mode as SearchRankMeta['rank_mode']) ||
+      !layers.includes(candidate.layer as SearchRankMeta['layer'])
+    ) {
+      return null;
+    }
+    return {
+      rank_mode: candidate.rank_mode as SearchRankMeta['rank_mode'],
+      layer: candidate.layer as SearchRankMeta['layer'],
+      degraded: candidate.degraded === true,
+    };
+  }
+
+  /**
+   * E.1 (F-036/F-065) — convierte un envelope `success:false` (HTTP 200 con
+   * el fallo en el body: ERR-06/ERR-12) a error estructurado con causa.
+   */
+  private errorFromEnvelope(response: unknown): PosProductsLoadError {
+    const body =
+      (typeof response === 'object' && response !== null
+        ? (response as Record<string, unknown>)
+        : {}) ?? {};
+    const message =
+      typeof body['message'] === 'string' && body['message'].length > 0
+        ? body['message']
+        : 'Error al cargar productos';
+    const code =
+      typeof body['error_code'] === 'string' ? body['error_code'] : undefined;
+    const status =
+      typeof body['statusCode'] === 'number' ? body['statusCode'] : 200;
+    return code ? { message, status, code } : { message, status };
+  }
+
+  /**
+   * E.1 (F-065) — mapea un fallo HTTP/transporte a error estructurado con
+   * mensaje por causa. El componente decide superficie (banner vs toast).
+   */
+  private errorFromHttp(error: unknown): PosProductsLoadError {
+    const asRecord =
+      typeof error === 'object' && error !== null
+        ? (error as Record<string, unknown>)
+        : {};
+    const status = typeof asRecord['status'] === 'number' ? asRecord['status'] : 0;
+    const nested =
+      typeof asRecord['error'] === 'object' && asRecord['error'] !== null
+        ? (asRecord['error'] as Record<string, unknown>)
+        : {};
+    // E.1 review fix (vendix-error-handling) — el copy backend sale SIEMPRE
+    // de `parseApiError` (canned por error_code o default seguro), jamás del
+    // `message` crudo: un 429 sin código llegaba al banner como
+    // "Http failure response for https://..." (URL interna + jerga en inglés
+    // ante el cajero). Sin error_code, manda la tabla por causa de abajo.
+    const parsed = parseApiError(error);
+    const backendMessage = parsed.errorCode ? parsed.userMessage : null;
+    const code =
+      typeof nested['error_code'] === 'string'
+        ? nested['error_code']
+        : undefined;
+
+    let message: string;
+    if (backendMessage) {
+      message = backendMessage;
+    } else if (status === 0) {
+      message = 'Sin conexión. Revisa tu red e intenta de nuevo.';
+    } else if (status === 400) {
+      message = 'Datos inválidos proporcionados';
+    } else if (status === 401) {
+      message = 'Tu sesión venció. Vuelve a iniciar sesión.';
+    } else if (status === 403) {
+      message = 'Permisos insuficientes';
+    } else if (status === 404) {
+      message = 'Producto no encontrado';
+    } else if (status === 429) {
+      message = 'Demasiadas solicitudes. Espera unos segundos e intenta de nuevo.';
+    } else if (status >= 500) {
+      message = 'Error del servidor. Por favor intenta más tarde';
+    } else {
+      message = 'Error al cargar productos';
+    }
+    // Cinturón: aunque cambie parseApiError, boilerplate de transporte o URLs
+    // jamás llegan al cajero.
+    if (/^Http failure/i.test(message) || /https?:\/\//.test(message)) {
+      message = 'Error al cargar productos';
+    }
+    return code ? { message, status, code } : { message, status };
   }
 
   private transformProducts(products: any[]): any[] {
@@ -812,6 +974,7 @@ export class PosProductService {
           page,
           pageSize: limitNum,
           totalPages,
+          searchMeta: this.extractSearchMeta(response),
         };
       }),
       catchError((error: any) => {
