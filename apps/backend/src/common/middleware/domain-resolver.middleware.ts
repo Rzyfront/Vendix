@@ -4,6 +4,17 @@ import { Cache } from 'cache-manager';
 import { Request, Response, NextFunction } from 'express';
 import { PublicDomainsService } from '../../domains/public/domains/public-domains.service';
 
+/**
+ * D.3 (F-042) — Entero positivo estricto: solo dígitos (sin `+`, `-`, `.`,
+ * espacios ni exponentes), > 0 y entero seguro. `Number()` a secas acepta
+ * `'3.5'`, `'0x10'` o `'1e3'`; acá no.
+ */
+export function isValidTenantId(value: string): boolean {
+  if (!/^\d+$/.test(value)) return false;
+  const n = Number(value);
+  return Number.isSafeInteger(n) && n > 0;
+}
+
 @Injectable()
 export class DomainResolverMiddleware implements NestMiddleware {
   private readonly logger = new Logger(DomainResolverMiddleware.name);
@@ -23,17 +34,43 @@ export class DomainResolverMiddleware implements NestMiddleware {
 
     const hostname = this.extractHostname(req);
     const x_store_id_header = req.headers['x-store-id'] || req.query.store_id;
-    const x_store_id = Array.isArray(x_store_id_header)
-      ? x_store_id_header[0]
-      : x_store_id_header;
+    // D.3 (F-042): el tenant viaja fuera del ValidationPipe ⇒ validación
+    // explícita fail-fast. Presente-pero-inválido → 400 (nunca scope fault
+    // silencioso); ausente/vacío → cae a resolución por hostname (intacto).
+    // Array (`?store_id=1&store_id=2`, header repetido) u objeto (query
+    // extendido `?store_id[a]=1`) → 400: ambiguo / no-escalar.
+    // OJO: respuesta directa, NUNCA throw — un throw en middleware async no
+    // pasa por AllExceptionsFilter en Express 4 (rejection sin handler).
+    // El envelope replica el del filtro (statusCode/error_code/message/...).
+    let x_store_id = '';
+    if (x_store_id_header !== undefined && x_store_id_header !== '') {
+      const candidate =
+        typeof x_store_id_header === 'string'
+          ? x_store_id_header.trim()
+          : Array.isArray(x_store_id_header)
+            ? x_store_id_header.join(',')
+            : '[object]';
+      if (!isValidTenantId(candidate)) {
+        res.status(400).json({
+          statusCode: 400,
+          error_code: 'SYS_VALIDATION_001',
+          message: 'Invalid x-store-id: must be a single positive integer',
+          timestamp: new Date().toISOString(),
+          path: req.originalUrl,
+        });
+        return;
+      }
+      x_store_id = candidate;
+    }
 
     this.logger.log(
       `Resolving domain for hostname: ${hostname} (header/query store-id: ${x_store_id})`,
     );
 
     try {
-      // Prioridad 1: x-store-id header o query param
-      if (x_store_id && !isNaN(Number(x_store_id)) && Number(x_store_id) > 0) {
+      // Prioridad 1: x-store-id header o query param (ya validado arriba:
+      // '' ⇒ ausente, otro valor ⇒ entero positivo).
+      if (x_store_id !== '') {
         const store_id = Number(x_store_id);
         const store_cache_key = `domain:store:${store_id}`;
         const cached_store = await this.cache.get<{

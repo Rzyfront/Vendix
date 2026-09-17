@@ -189,7 +189,7 @@
         </app-button>
       }
       @if (t.status === 'pending') {
-        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating()">
+        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating() || !canCancelTicket()" [attr.title]="canCancelTicket() ? null : cancelDisabledReason">
           <app-icon slot="icon" name="x" [size]="14" /> Cancelar
         </app-button>
         <app-button
@@ -202,14 +202,14 @@
           <app-icon slot="icon" name="play" [size]="14" /> Iniciar
         </app-button>
       } @else if (t.status === 'in_preparation') {
-        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating()">
+        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating() || !canCancelTicket()" [attr.title]="canCancelTicket() ? null : cancelDisabledReason">
           <app-icon slot="icon" name="x" [size]="14" /> Cancelar
         </app-button>
         <app-button variant="success" (clicked)="onReady()" [disabled]="isMutating()" [loading]="isMutating()">
           <app-icon slot="icon" name="check" [size]="14" /> Listo
         </app-button>
       } @else if (t.status === 'ready') {
-        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating()">
+        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating() || !canCancelTicket()" [attr.title]="canCancelTicket() ? null : cancelDisabledReason">
           <app-icon slot="icon" name="x" [size]="14" /> Cancelar
         </app-button>
         <!--

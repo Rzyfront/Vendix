@@ -305,6 +305,10 @@ export interface PaginatedResponse<T> {
     page: number;
     limit: number;
     total_pages: number;
+    // D.3 (F-077): tokens aplicados por el rank público (tope 4) + señal de
+    // truncado para el hint UI. Opcionales: otros endpoints no los emiten.
+    applied_tokens?: string[];
+    tokens_truncated?: boolean;
   };
 }
 
@@ -428,7 +432,10 @@ export class CatalogService {
   ): Observable<PaginatedResponse<EcommerceProduct>> {
     let params = new HttpParams();
 
-    if (query.search) params = params.set('search', query.search);
+    // D.3 (F-024, ERR-16): clamp 200 client-side — el backend responde 400
+    // sobre 200 chars y el tipeo jamás debe dispararlo. Punto único: cubre
+    // autocomplete, página de catálogo y todos los llamadores.
+    if (query.search) params = params.set('search', query.search.slice(0, 200));
     if (query.ids) params = params.set('ids', query.ids);
     if (query.category_id)
       params = params.set('category_id', query.category_id.toString());

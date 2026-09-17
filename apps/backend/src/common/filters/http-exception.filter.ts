@@ -69,6 +69,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
     } else if (exception instanceof HttpException) {
       const resp = exception.getResponse() as any;
       if (resp?.error_code) errorCode = resp.error_code;
+      // D.3 (ERR-22): el ThrottlerGuard de fábrica lanza 429 sin error_code.
+      // Solo se etiqueta cuando nadie puso código (los 429 de dominio son
+      // VendixHttpException y van por la rama de arriba, intactos).
+      if (!errorCode && status === HttpStatus.TOO_MANY_REQUESTS) {
+        errorCode = ErrorCodes.RATE_LIMIT_001.code;
+      }
       details = resp?.details;
 
       // QUI-606: si el exceptionFactory del ValidationPipe global (en

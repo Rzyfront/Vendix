@@ -15,6 +15,8 @@ export class StorePrismaService extends BasePrismaService {
     'categories',
     'tax_categories',
     'products',
+    // E.4 (F-069) — telemetría CTR append-only: `store_id` propio NOT NULL.
+    'pos_search_selections',
     'tax_rates',
     'orders',
     'store_payment_methods',
@@ -896,6 +898,11 @@ export class StorePrismaService extends BasePrismaService {
 
   get products() {
     return this.scoped_client.products;
+  }
+
+  // E.4 (F-069) — log CTR-por-posición (scoped: lecturas/escrituras por tienda).
+  get pos_search_selections() {
+    return this.scoped_client.pos_search_selections;
   }
 
   get tax_rates() {

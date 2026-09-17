@@ -77,6 +77,7 @@ export class AnalyticsShellComponent {
     '/admin/analytics/sales/by-category': '/admin/reports/sales/sales-by-category',
     '/admin/analytics/sales/by-customer': '/admin/reports/sales/sales-by-customer',
     '/admin/analytics/sales/by-payment': '/admin/reports/sales/sales-by-payment',
+    '/admin/analytics/sales/by-user': '/admin/reports/sales/sales-by-user',
     '/admin/analytics/sales/trends': '/admin/reports/sales/sales-trends',
     // Inventory
     '/admin/analytics/inventory/overview': '/admin/reports/inventory/inventory-overview',
@@ -138,13 +139,12 @@ export class AnalyticsShellComponent {
     const child = this.activeChildComponent;
     if (!child) return;
 
-    // 1. Preferred contract: child implements Refreshable
-    if (this.isRefreshable(child)) {
-      child.refresh();
-      return;
-    }
+    // Los hijos Refreshable ya recargan vía el effect de `refreshSignal`
+    // (disparado arriba con triggerRefresh()); llamarlos aquí duplicaría
+    // la carga. Solo quedan los fallbacks legacy sin suscripción.
+    if (this.isRefreshable(child)) return;
 
-    // 2. Fallbacks for unmigrated legacy analytics components
+    // Fallbacks for unmigrated legacy analytics components
     if (typeof child.loadData === 'function') {
       child.loadData();
     } else if (typeof child.loadChartData === 'function') {

@@ -71,14 +71,11 @@ export const ProductService = {
       include_inactive: query?.include_inactive,
       pos_optimized: query?.pos_optimized,
       include_variants: query?.include_variants,
-      // Paridad web `pos-product-search.component` (min/max price, sort,
-      // in-stock). Backend actual puede ignorarlos (DTO no los declara);
-      // el cliente aplica fallback local en `pos/index.tsx`.
-      min_price: query?.min_price,
-      max_price: query?.max_price,
-      in_stock: query?.in_stock,
-      sort_by: query?.sort_by,
-      sort_order: query?.sort_order,
+      // E.3 (F-025): min_price/max_price/in_stock/sort_by/sort_order NO se
+      // envían — ProductQueryDto no los declara y el pipe global es
+      // forbidNonWhitelisted (enviarlos ⇒ 400 + grid vacía). Siguen en el
+      // tipo ProductQuery porque el fallback local de `pos/index.tsx` los
+      // aplica en cliente; acá se hace strip antes de enviar.
     };
     const res = await apiClient.get(`${Endpoints.STORE.PRODUCTS.LIST}${buildQuery(params)}`);
     return unwrapPaginated<Product>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
@@ -118,17 +115,24 @@ export const ProductService = {
     return unwrap<ProductStats>(res);
   },
 
-  async search(query: string, limit = 20): Promise<PaginatedResponse<Product>> {
+  async search(
+    query: string,
+    limit = 20,
+    page = 1,
+  ): Promise<PaginatedResponse<Product>> {
+    // E.3 (F-059): `page` para el load-more del POS (rank-25+ alcanzable).
+    // Solo keys whitelisted en ProductQueryDto (mismo endpoint que list).
     const res = await apiClient.get(
       `${Endpoints.STORE.PRODUCTS.SEARCH}${buildQuery({
         search: query,
         limit,
+        page,
         state: 'active',
         include_variants: true,
         pos_optimized: true,
       })}`,
     );
-    return unwrapPaginated<Product>(res, { page: 1, limit });
+    return unwrapPaginated<Product>(res, { page, limit });
   },
 
   async getVariants(productId: number): Promise<ProductVariant[]> {

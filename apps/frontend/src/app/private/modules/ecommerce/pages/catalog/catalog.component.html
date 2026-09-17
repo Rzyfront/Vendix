@@ -26,6 +26,11 @@
           Productos ({{ total_products() }})
         }
       </h2>
+      @if (tokens_truncated()) {
+        <p class="truncation-hint" role="status">
+          Mostrando resultados para “{{ applied_tokens().join(' ') }}”.
+        </p>
+      }
 
       <div class="catalog-controls">
         <app-selector

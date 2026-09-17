@@ -26,144 +26,205 @@ import { ProductsService } from '../services/products.service';
   template: `
     <app-modal
       [(isOpen)]="isOpen"
-      title="Mejorar imagen con IA"
-      subtitle="Genera una nueva versión a partir de la foto actual"
+      [title]="modalTitle()"
+      [subtitle]="modalSubtitle()"
       size="lg"
       (cancel)="close()"
     >
       <div class="space-y-4">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="space-y-2">
+        @if (mode() === 'enhance') {
+          <div
+            class="grid gap-4"
+            [class.grid-cols-1]="!isGenerating() && !generatedImageUrl() && !errorMessage()"
+            [class.md:grid-cols-2]="isGenerating() || generatedImageUrl() || errorMessage()"
+          >
             <div
-              class="flex items-center gap-2 text-sm font-semibold text-gray-700"
+              class="space-y-2"
+              [class.max-w-xs]="!isGenerating() && !generatedImageUrl() && !errorMessage()"
+              [class.mx-auto]="!isGenerating() && !generatedImageUrl() && !errorMessage()"
             >
-              <app-icon name="image" size="16"></app-icon>
-              Imagen actual
+              <div
+                class="flex items-center gap-2 text-sm font-semibold text-gray-700"
+              >
+                <app-icon name="image" size="16"></app-icon>
+                Imagen actual
+              </div>
+              <div
+                class="aspect-square rounded-xl border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center"
+              >
+                @if (sourceImageUrl(); as sourceUrl) {
+                  <img
+                    [src]="sourceUrl"
+                    alt="Imagen actual"
+                    class="h-full w-full object-contain bg-surface p-3"
+                  />
+                } @else {
+                  <div class="text-sm text-gray-400">Sin imagen</div>
+                }
+              </div>
             </div>
-            <div
-              class="aspect-square rounded-xl border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center"
-            >
-              @if (sourceImageUrl(); as sourceUrl) {
-                <img
-                  [src]="sourceUrl"
-                  alt="Imagen actual"
-                  class="h-full w-full object-contain bg-surface p-3"
-                />
-              } @else {
-                <div class="text-sm text-gray-400">Sin imagen</div>
-              }
-            </div>
-          </div>
 
-          <div class="space-y-2">
-            <div
-              class="flex items-center gap-2 text-sm font-semibold text-gray-700"
-            >
-              <app-icon name="sparkles" size="16"></app-icon>
-              Resultado IA
-            </div>
-            <div
-              class="ai-result-stage aspect-square rounded-xl border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center"
-              [class.is-generating]="isGenerating()"
-              [class.is-error]="!!errorMessage()"
-            >
-              @if (generatedImageUrl(); as generatedUrl) {
-                <img
-                  [src]="generatedUrl"
-                  alt="Imagen generada con IA"
-                  class="relative z-[2] h-full w-full object-contain bg-surface p-3"
-                />
-              } @else if (isGenerating()) {
-                <div class="ai-result-stage__placeholder">
-                  <div class="ai-holo-grid"></div>
-                  <div class="ai-holo-aurora"></div>
-                  <div class="ai-sparkle ai-sparkle--a"></div>
-                  <div class="ai-sparkle ai-sparkle--b"></div>
-                  <div class="ai-sparkle ai-sparkle--c"></div>
-                  <div class="ai-sparkle ai-sparkle--d"></div>
-                  <div class="ai-sparkle ai-sparkle--e"></div>
-                  <div class="ai-result-stage__halo"></div>
-                  <div class="ai-result-stage__icon">
-                    <app-icon name="sparkles" size="38"></app-icon>
-                  </div>
-                  <p class="ai-result-stage__caption">
-                    {{ generationMessage() }}
-                  </p>
+            @if (isGenerating() || generatedImageUrl() || errorMessage()) {
+              <div class="space-y-2">
+                <div
+                  class="flex items-center gap-2 text-sm font-semibold text-gray-700"
+                >
+                  <app-icon name="sparkles" size="16"></app-icon>
+                  Resultado IA
                 </div>
-                <div class="ai-result-stage__shimmer"></div>
-                <div class="ai-result-stage__scan"></div>
-                <div class="ai-result-stage__prism"></div>
-              } @else if (errorMessage(); as error) {
-                <div class="ai-result-stage__error-state">
-                  <div class="ai-result-stage__error-icon">
-                    <app-icon name="alert-triangle" size="30"></app-icon>
-                  </div>
-                  <p class="ai-result-stage__error-title">
-                    No se pudo mejorar la imagen
-                  </p>
-                  <p class="ai-result-stage__error-text">{{ error }}</p>
-                  <app-button
-                    variant="outline-danger"
-                    size="sm"
-                    (clicked)="retryGeneration()"
-                    [disabled]="!canRetry()"
-                    customClasses="!rounded-lg"
-                  >
-                    <app-icon
-                      slot="icon"
-                      name="refresh-cw"
-                      size="14"
-                    ></app-icon>
-                    Reintentar
-                  </app-button>
+                <div
+                  class="ai-result-stage aspect-square rounded-xl border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center"
+                  [class.is-generating]="isGenerating()"
+                  [class.is-error]="!!errorMessage()"
+                >
+                  @if (generatedImageUrl(); as generatedUrl) {
+                    <img
+                      [src]="generatedUrl"
+                      alt="Imagen generada con IA"
+                      class="relative z-[2] h-full w-full object-contain bg-surface p-3"
+                    />
+                  } @else if (isGenerating()) {
+                    <div class="ai-result-stage__placeholder">
+                      <div class="ai-holo-grid"></div>
+                      <div class="ai-holo-aurora"></div>
+                      <div class="ai-sparkle ai-sparkle--a"></div>
+                      <div class="ai-sparkle ai-sparkle--b"></div>
+                      <div class="ai-sparkle ai-sparkle--c"></div>
+                      <div class="ai-sparkle ai-sparkle--d"></div>
+                      <div class="ai-sparkle ai-sparkle--e"></div>
+                      <div class="ai-result-stage__halo"></div>
+                      <div class="ai-result-stage__icon">
+                        <app-icon name="sparkles" size="38"></app-icon>
+                      </div>
+                      <p class="ai-result-stage__caption">
+                        {{ generationMessage() }}
+                      </p>
+                    </div>
+                    <div class="ai-result-stage__shimmer"></div>
+                    <div class="ai-result-stage__scan"></div>
+                    <div class="ai-result-stage__prism"></div>
+                  } @else if (errorMessage(); as error) {
+                    <div class="ai-result-stage__error-state">
+                      <div class="ai-result-stage__error-icon">
+                        <app-icon name="alert-triangle" size="30"></app-icon>
+                      </div>
+                      <p class="ai-result-stage__error-title">
+                        No se pudo mejorar la imagen
+                      </p>
+                      <p class="ai-result-stage__error-text">{{ error }}</p>
+                      <app-button
+                        variant="outline-danger"
+                        size="sm"
+                        (clicked)="retryGeneration()"
+                        [disabled]="!canRetry()"
+                        customClasses="!rounded-lg"
+                      >
+                        <app-icon
+                          slot="icon"
+                          name="refresh-cw"
+                          size="14"
+                        ></app-icon>
+                        Reintentar
+                      </app-button>
+                    </div>
+                  }
                 </div>
-              } @else {
-                <div class="px-5 text-center">
-                  <app-icon
-                    name="sparkles"
-                    size="28"
-                    class="text-gray-300 mx-auto"
-                  ></app-icon>
-                  <p class="mt-2 text-sm text-gray-500">
-                    Escribe la mejora y genera una nueva versión.
-                  </p>
-                </div>
-              }
-            </div>
+              </div>
+            }
           </div>
-        </div>
+        } @else {
+          @if (isGenerating() || generatedImageUrl() || errorMessage()) {
+            <div class="space-y-2 max-w-sm mx-auto">
+              <div
+                class="flex items-center gap-2 text-sm font-semibold text-gray-700"
+              >
+                <app-icon name="sparkles" size="16"></app-icon>
+                Resultado IA
+              </div>
+              <div
+                class="ai-result-stage aspect-square rounded-xl border border-gray-200 bg-gray-50 overflow-hidden flex items-center justify-center"
+                [class.is-generating]="isGenerating()"
+                [class.is-error]="!!errorMessage()"
+              >
+                @if (generatedImageUrl(); as generatedUrl) {
+                  <img
+                    [src]="generatedUrl"
+                    alt="Imagen generada con IA"
+                    class="relative z-[2] h-full w-full object-contain bg-surface p-3"
+                  />
+                } @else if (isGenerating()) {
+                  <div class="ai-result-stage__placeholder">
+                    <div class="ai-holo-grid"></div>
+                    <div class="ai-holo-aurora"></div>
+                    <div class="ai-sparkle ai-sparkle--a"></div>
+                    <div class="ai-sparkle ai-sparkle--b"></div>
+                    <div class="ai-sparkle ai-sparkle--c"></div>
+                    <div class="ai-sparkle ai-sparkle--d"></div>
+                    <div class="ai-sparkle ai-sparkle--e"></div>
+                    <div class="ai-result-stage__halo"></div>
+                    <div class="ai-result-stage__icon">
+                      <app-icon name="sparkles" size="38"></app-icon>
+                    </div>
+                    <p class="ai-result-stage__caption">
+                      {{ generationMessage() }}
+                    </p>
+                  </div>
+                  <div class="ai-result-stage__shimmer"></div>
+                  <div class="ai-result-stage__scan"></div>
+                  <div class="ai-result-stage__prism"></div>
+                } @else if (errorMessage(); as error) {
+                  <div class="ai-result-stage__error-state">
+                    <div class="ai-result-stage__error-icon">
+                      <app-icon name="alert-triangle" size="30"></app-icon>
+                    </div>
+                    <p class="ai-result-stage__error-title">
+                      No se pudo generar la imagen
+                    </p>
+                    <p class="ai-result-stage__error-text">{{ error }}</p>
+                    <app-button
+                      variant="outline-danger"
+                      size="sm"
+                      (clicked)="retryGeneration()"
+                      [disabled]="!canRetry()"
+                      customClasses="!rounded-lg"
+                    >
+                      <app-icon
+                        slot="icon"
+                        name="refresh-cw"
+                        size="14"
+                      ></app-icon>
+                      Reintentar
+                    </app-button>
+                  </div>
+                }
+              </div>
+            </div>
+          }
+        }
 
         <div class="space-y-2">
           <label class="text-sm font-semibold text-gray-700">
-            ¿Qué quieres mejorar?
+            {{ mode() === 'generate' ? '¿Qué imagen quieres crear?' : '¿Qué quieres mejorar?' }}
           </label>
           <textarea
             class="block w-full min-h-[96px] rounded-xl border border-gray-200 bg-surface px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 disabled:opacity-60"
-            placeholder="Ej. mejora la iluminación, deja el fondo blanco y haz que el producto se vea más nítido"
+            [placeholder]="mode() === 'generate' ? 'Ej. Botella de perfume sobre fondo de mármol blanco con iluminación suave de estudio...' : 'Ej. mejora la iluminación, deja el fondo blanco y haz que el producto se vea más nítido'"
             [value]="prompt()"
             [disabled]="isGenerating()"
             (input)="prompt.set($any($event.target).value)"
           ></textarea>
-          <div
-            class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-          >
+          @if (generatedImageUrl()) {
+            <div class="flex items-center gap-1.5 text-xs text-primary-600 font-medium">
+              <app-icon name="sparkles" size="13" class="shrink-0"></app-icon>
+              <span>¿No te convenció el resultado? Modifica la instrucción y pulsa <strong>Generar</strong> para probar otra versión.</span>
+            </div>
+          } @else {
             <p class="text-xs text-gray-500">
-              La IA mantiene la imagen original como referencia y devuelve una
-              alternativa editable antes de guardar.
+              {{ mode() === 'generate'
+                ? 'La IA generará una foto comercial cuadrada (1:1) optimizada para catálogo, POS y tienda virtual.'
+                : 'La IA mantiene la imagen original como referencia y devuelve una alternativa editable antes de guardar.' }}
             </p>
-            <app-button
-              variant="primary"
-              size="sm"
-              (clicked)="generate()"
-              [loading]="isGenerating()"
-              [showTextWhileLoading]="true"
-              [disabled]="!canGenerate()"
-              customClasses="!rounded-lg"
-            >
-              <app-icon slot="icon" name="sparkles" size="15"></app-icon>
-              Generar
-            </app-button>
-          </div>
+          }
         </div>
 
         @if (errorMessage(); as error) {
@@ -177,7 +238,9 @@ import { ProductsService } from '../services/products.service';
                 class="mt-0.5 shrink-0"
               ></app-icon>
               <div>
-                <p class="font-semibold">La imagen original no cambió.</p>
+                <p class="font-semibold">
+                  {{ mode() === 'generate' ? 'No se pudo completar la generación.' : 'La imagen original no cambió.' }}
+                </p>
                 <p>{{ error }}</p>
               </div>
             </div>
@@ -202,40 +265,77 @@ import { ProductsService } from '../services/products.service';
           </div>
         }
 
-        @if (generatedImageUrl() && remainingSlots() <= 0) {
+        @if (generatedImageUrl() && remainingSlots() <= 0 && mode() === 'enhance') {
           <div
             class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
           >
-            Ya tienes 5 imágenes. Puedes reemplazar la actual o dejar la
-            anterior.
+            Ya tienes 5 imágenes. Puedes reemplazar la actual o dejar la anterior.
           </div>
         }
       </div>
 
-      <div slot="footer" class="flex flex-wrap justify-end gap-2">
-        <app-button
-          variant="outline"
-          (clicked)="close()"
-          [disabled]="isGenerating()"
-        >
-          Dejar anterior
-        </app-button>
-        <app-button
-          variant="outline"
-          (clicked)="keepBoth()"
-          [disabled]="
-            !generatedImageUrl() || remainingSlots() <= 0 || isGenerating()
-          "
-        >
-          Conservar ambas
-        </app-button>
-        <app-button
-          variant="primary"
-          (clicked)="replaceOriginal()"
-          [disabled]="!generatedImageUrl() || isGenerating()"
-        >
-          Reemplazar
-        </app-button>
+      <div slot="footer" class="flex flex-wrap items-center justify-between gap-2 w-full">
+        <div>
+          @if (mode() === 'enhance') {
+            <app-button
+              variant="outline"
+              (clicked)="leaveOriginal()"
+              [disabled]="isGenerating()"
+            >
+              Dejar anterior
+            </app-button>
+          } @else {
+            <app-button
+              variant="outline"
+              (clicked)="close()"
+              [disabled]="isGenerating()"
+            >
+              Cancelar
+            </app-button>
+          }
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <app-button
+            [variant]="!generatedImageUrl() ? 'primary' : 'outline'"
+            (clicked)="generate()"
+            [loading]="isGenerating()"
+            [showTextWhileLoading]="true"
+            [disabled]="!canGenerate()"
+          >
+            <app-icon slot="icon" name="sparkles" size="15"></app-icon>
+            Generar
+          </app-button>
+
+          @if (generatedImageUrl()) {
+            @if (mode() === 'enhance') {
+              <app-button
+                variant="outline"
+                (clicked)="keepBoth()"
+                [disabled]="remainingSlots() <= 0 || isGenerating()"
+              >
+                Conservar ambas
+              </app-button>
+              <app-button
+                variant="primary"
+                (clicked)="replaceOriginal()"
+                [disabled]="isGenerating()"
+              >
+                <app-icon slot="icon" name="check" size="15"></app-icon>
+                Reemplazar
+              </app-button>
+            } @else {
+              <app-button
+                variant="primary"
+                (clicked)="confirmGenerated()"
+                [disabled]="remainingSlots() <= 0 || isGenerating()"
+              >
+                <app-icon slot="icon" name="check" size="15"></app-icon>
+                Agregar imagen
+              </app-button>
+            }
+          }
+        </div>
       </div>
     </app-modal>
   `,
@@ -619,15 +719,23 @@ export class ProductImageAiEnhanceModalComponent {
   private readonly productsService = inject(ProductsService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
-  private readonly generationSteps = [
+  private readonly enhanceSteps = [
     'Preparando la imagen de referencia...',
     'Analizando luz, fondo y encuadre...',
     'Aplicando la mejora con IA...',
     'Refinando detalles comerciales...',
     'Esperando la versión final...',
   ];
+  private readonly generateSteps = [
+    'Interpretando la descripción comercial...',
+    'Componiendo la escena en formato 1:1...',
+    'Generando iluminación y textura de producto...',
+    'Aplicando acabado de catálogo...',
+    'Esperando la versión final...',
+  ];
   private generationIntervalId: ReturnType<typeof setInterval> | null = null;
 
+  readonly mode = input<'enhance' | 'generate'>('enhance');
   readonly isOpen = model(false);
   readonly sourceImageUrl = input<string | null>(null);
   readonly productName = input('');
@@ -637,21 +745,35 @@ export class ProductImageAiEnhanceModalComponent {
 
   readonly replace = output<string>();
   readonly keep = output<string>();
+  readonly generated = output<string>();
+  readonly leave = output<void>();
+
+  readonly modalTitle = computed(() =>
+    this.mode() === 'generate'
+      ? 'Generar imagen con IA'
+      : 'Mejorar imagen con IA',
+  );
+  readonly modalSubtitle = computed(() =>
+    this.mode() === 'generate'
+      ? 'Crea una imagen comercial desde cero describiendo tu producto'
+      : 'Usa inteligencia artificial para perfeccionar la foto de tu producto',
+  );
 
   readonly prompt = signal('');
   readonly generatedImageUrl = signal<string | null>(null);
   readonly revisedPrompt = signal<string | null>(null);
   readonly errorMessage = signal<string | null>(null);
   readonly isGenerating = signal(false);
-  readonly generationMessage = signal(this.generationSteps[0]);
+  readonly generationMessage = signal(this.enhanceSteps[0]);
   readonly generationStepIndex = signal(0);
 
   readonly canGenerate = computed(() => {
-    return (
-      !!this.sourceImageUrl() &&
-      this.prompt().trim().length >= 3 &&
-      !this.isGenerating()
-    );
+    const hasPrompt = this.prompt().trim().length >= 3;
+    if (this.isGenerating()) return false;
+    if (this.mode() === 'enhance') {
+      return !!this.sourceImageUrl() && hasPrompt;
+    }
+    return hasPrompt;
   });
   readonly canRetry = computed(() => {
     return !!this.errorMessage() && this.canGenerate();
@@ -670,54 +792,98 @@ export class ProductImageAiEnhanceModalComponent {
   generate(): void {
     if (!this.canGenerate()) return;
 
-    const imageUrl = this.sourceImageUrl();
-    if (!imageUrl) return;
+    if (this.mode() === 'enhance') {
+      const imageUrl = this.sourceImageUrl();
+      if (!imageUrl) return;
 
-    this.isGenerating.set(true);
-    this.errorMessage.set(null);
-    this.generatedImageUrl.set(null);
-    this.revisedPrompt.set(null);
-    this.startGenerationEffects();
+      this.isGenerating.set(true);
+      this.errorMessage.set(null);
+      this.generatedImageUrl.set(null);
+      this.revisedPrompt.set(null);
+      this.startGenerationEffects();
 
-    this.productsService
-      .enhanceProductImage({
-        image_url: imageUrl,
-        prompt: this.prompt().trim(),
-        product_name: this.productName(),
-        product_type: this.productType(),
-        description: this.description(),
-      })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => {
-          if (!result?.image_url) {
-            this.failGeneration(
-              'La IA terminó sin devolver una imagen. Intenta con una instrucción más específica.',
+      this.productsService
+        .enhanceProductImage({
+          image_url: imageUrl,
+          prompt: this.prompt().trim(),
+          product_name: this.productName(),
+          product_type: this.productType(),
+          description: this.description(),
+        })
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (result) => {
+            if (!result?.image_url) {
+              this.failGeneration(
+                'La IA terminó sin devolver una imagen. Intenta con una instrucción más específica.',
+              );
+              return;
+            }
+
+            this.stopGenerationEffects();
+            this.generatedImageUrl.set(result.image_url);
+            this.revisedPrompt.set(result.revised_prompt || null);
+            this.generationMessage.set('Imagen lista.');
+            this.isGenerating.set(false);
+            this.toastService.success('Imagen mejorada correctamente');
+          },
+          error: (error) => {
+            const message = this.resolveGenerationError(error);
+            this.failGeneration(message);
+            this.toastService.error(
+              message,
+              'No se pudo mejorar la imagen',
+              3500,
             );
-            return;
-          }
+          },
+        });
+    } else {
+      this.isGenerating.set(true);
+      this.errorMessage.set(null);
+      this.generatedImageUrl.set(null);
+      this.revisedPrompt.set(null);
+      this.startGenerationEffects();
 
-          this.stopGenerationEffects();
-          this.generatedImageUrl.set(result.image_url);
-          this.revisedPrompt.set(result.revised_prompt || null);
-          this.generationMessage.set('Imagen lista.');
-          this.isGenerating.set(false);
-          this.toastService.success('Imagen generada correctamente');
-        },
-        error: (error) => {
-          const message = this.resolveGenerationError(error);
-          this.failGeneration(message);
-          this.toastService.error(
-            message,
-            'No se pudo mejorar la imagen',
-            3500,
-          );
-        },
-      });
+      this.productsService
+        .generateProductImage({
+          prompt: this.prompt().trim(),
+          aspect_ratio: '1:1',
+          product_name: this.productName(),
+          product_type: this.productType(),
+          description: this.description(),
+        })
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (result) => {
+            if (!result?.image_url) {
+              this.failGeneration(
+                'La IA terminó sin devolver una imagen. Intenta con una instrucción más específica.',
+              );
+              return;
+            }
+
+            this.stopGenerationEffects();
+            this.generatedImageUrl.set(result.image_url);
+            this.revisedPrompt.set(result.revised_prompt || null);
+            this.generationMessage.set('Imagen lista.');
+            this.isGenerating.set(false);
+            this.toastService.success('Imagen generada correctamente');
+          },
+          error: (error) => {
+            const message = this.resolveGenerationError(error);
+            this.failGeneration(message);
+            this.toastService.error(
+              message,
+              'No se pudo generar la imagen',
+              3500,
+            );
+          },
+        });
+    }
   }
 
   retryGeneration(): void {
-    if (!this.canRetry()) return;
+    if (!this.canGenerate()) return;
     this.generate();
   }
 
@@ -735,6 +901,18 @@ export class ProductImageAiEnhanceModalComponent {
     this.close();
   }
 
+  confirmGenerated(): void {
+    const generated = this.generatedImageUrl();
+    if (!generated) return;
+    this.generated.emit(generated);
+    this.close();
+  }
+
+  leaveOriginal(): void {
+    this.leave.emit();
+    this.close();
+  }
+
   close(): void {
     this.isOpen.set(false);
   }
@@ -747,18 +925,23 @@ export class ProductImageAiEnhanceModalComponent {
     this.errorMessage.set(null);
     this.isGenerating.set(false);
     this.generationStepIndex.set(0);
-    this.generationMessage.set(this.generationSteps[0]);
+    this.generationMessage.set(this.getCurrentSteps()[0]);
+  }
+
+  private getCurrentSteps(): string[] {
+    return this.mode() === 'generate' ? this.generateSteps : this.enhanceSteps;
   }
 
   private startGenerationEffects(): void {
     this.stopGenerationEffects();
+    const steps = this.getCurrentSteps();
     this.generationStepIndex.set(0);
-    this.generationMessage.set(this.generationSteps[0]);
+    this.generationMessage.set(steps[0]);
     this.generationIntervalId = setInterval(() => {
       const nextIndex =
-        (this.generationStepIndex() + 1) % this.generationSteps.length;
+        (this.generationStepIndex() + 1) % steps.length;
       this.generationStepIndex.set(nextIndex);
-      this.generationMessage.set(this.generationSteps[nextIndex]);
+      this.generationMessage.set(steps[nextIndex]);
     }, 1800);
   }
 
@@ -773,14 +956,14 @@ export class ProductImageAiEnhanceModalComponent {
     this.generatedImageUrl.set(null);
     this.revisedPrompt.set(null);
     this.errorMessage.set(message);
-    this.generationMessage.set('No se pudo generar la imagen.');
+    this.generationMessage.set('No se pudo procesar la imagen.');
     this.isGenerating.set(false);
   }
 
   private resolveGenerationError(error: unknown): string {
     const message = extractApiErrorMessage(error);
     if (!message || message === 'Error desconocido') {
-      return 'No se pudo generar la imagen. Revisa la conexión o intenta con otra instrucción.';
+      return 'No se pudo procesar la imagen. Revisa la conexión o intenta con otra instrucción.';
     }
 
     return message;

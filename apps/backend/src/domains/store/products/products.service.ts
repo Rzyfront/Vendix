@@ -6,6 +6,7 @@ import {
   ConflictException,
   BadRequestException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
@@ -71,6 +72,8 @@ import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import {
   GenerateProductDescriptionDto,
   GenerateProductImageEnhancementDto,
+  GenerateProductImageDto,
+  LogSearchSelectionDto,
 } from './dto';
 import {
   resolvePosStockScope,
@@ -85,6 +88,45 @@ import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service'
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { SettingsService } from '../settings/settings.service';
+// B.1 — cutover por capability (A.0) + tokenizado/ensamblaje canónicos
+// (A.1, F-016). El `.ts` del path es puro (sin imports): cero riesgo de
+// ciclo con settings.
+import { PosSearchPathService } from '../settings/pos-smart-search/pos-search-path.service';
+import type {
+  PosSearchPath,
+  PosSearchResolution,
+} from '../settings/pos-smart-search/pos-search-path';
+import { snapshotSearchPath } from '../settings/pos-smart-search/pos-search-path';
+import {
+  buildTokenAndFieldOr,
+  isSmartSearchActive,
+  normalizeSearchText,
+  tokenizeInternal,
+} from '@common/utils/search-text.util';
+// B.2 — orquestación rank (A.2) + re-score con variantes + meta ADR-08.
+import {
+  compareSearchRank,
+  rankedIdsPage,
+  type SearchRankKey,
+} from '@common/utils/search-score.util';
+import {
+  scoreProductSearchRow,
+  type ProductSearchRow,
+} from './services/product-search-relevance.util';
+import {
+  observeSearchLatency,
+  recordSearchDegraded,
+} from './services/product-search-metrics';
+import {
+  buildTrigramCountQuery,
+  buildTrigramRankedQuery,
+  TRIGRAM_SLOW_LOG_MS,
+  TRIGRAM_STATEMENT_TIMEOUT_MS,
+  type TrigramFilterSet,
+} from './services/product-search-trigram.util';
+import type { SearchRankMeta } from '@common/responses/response.interface';
+import { createHash } from 'node:crypto';
+import type { SearchTextFieldMap } from '@common/utils/search-text.util';
 import type {
   ActiveProductPromotion,
   ActivePromotionProductInput,
@@ -98,6 +140,41 @@ import type {
  * respuesta viene con `capped: true` y la UI debe decirlo explícitamente.
  */
 export const MAX_PRODUCT_IDS = 1000;
+
+/**
+ * B.1 (ADR-02) — campos buscables de `GET /store/products` + `/ids`.
+ * Escalares raíz + `product_variants` (name/sku): cada token del AND puede
+ * matchear en campo distinto, incluso en variantes de filas distintas.
+ * Solo B.1 lo declara; D.1/D.2/D.3 declaran el suyo (el LOOP vive en A.1).
+ */
+const POS_PRODUCT_SEARCH_FIELDS: SearchTextFieldMap = {
+  scalar: ['name', 'description', 'sku'],
+  relations: { product_variants: ['name', 'sku'] },
+};
+
+/**
+ * B.2 (F-046) — id-list rankeada cacheada en Redis. Solo ids + total: la forma
+ * de cada fila la aplica la hidratación (mismo include/mismo map que legacy),
+ * así que el caché nunca congela shapes. TTL 45s, expiración como única
+ * invalidación (un producto nuevo tarda ≤TTL en aparecer rankeado).
+ */
+interface SmartSearchRankCacheEntry {
+  readonly ids: readonly number[];
+  readonly total: number;
+}
+
+/**
+ * B.2 — resultado del intento rank: ids de LA página + total del conjunto
+ * rankeado pre-slice (ese total reemplaza al `count`, F-005).
+ */
+interface SmartSearchRankOutcome {
+  readonly pageIds: number[];
+  readonly total: number;
+  readonly fromCache: boolean;
+  readonly candidates: number;
+  readonly msCache: number;
+  readonly msScanRank: number;
+}
 
 /**
  * CP-PURCHASE-TRANSPARENCY D.4 — una línea del castigo de inventario que
@@ -235,6 +312,10 @@ export class ProductsService {
     // Ranking de más vendidos del POS: se cachea 24 h por tienda para que la
     // agregación sobre `order_items` no se pague en cada carga de la grilla.
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    // B.1 (A.0) — cutover del path smart (capability × kill-switch).
+    // `@Optional()`: ausente (harness de specs sin provider) ⇒ `undefined`
+    // ⇒ path legacy (fail-closed). En prod `SettingsModule` siempre lo provee.
+    @Optional() private readonly searchPath?: PosSearchPathService,
   ) {}
 
   /**
@@ -476,6 +557,65 @@ export class ProductsService {
         referenceImages: [{ url: referenceImage, detail: 'high' }],
       },
     );
+
+    if (!response.success || !response.imageBase64) {
+      throw new VendixHttpException(ErrorCodes.AI_REQUEST_001);
+    }
+
+    const imageUrl = response.imageBase64.startsWith('data:image/')
+      ? response.imageBase64
+      : `data:image/png;base64,${response.imageBase64}`;
+
+    return {
+      image_url: imageUrl,
+      revised_prompt: response.revisedPrompt,
+      model: response.model,
+    };
+  }
+
+  async generateImage(dto: GenerateProductImageDto) {
+    const productTypeLabel =
+      dto.product_type === 'service' ? 'servicio' : 'producto';
+    const variables: Record<string, string> = {
+      prompt: dto.prompt.trim(),
+      product_name: dto.product_name || '',
+      product_type: productTypeLabel,
+      description: dto.description || '',
+      context: JSON.stringify(dto.extra_context || {}),
+    };
+
+    let response;
+    try {
+      response = await this.ai_engine.runImage(
+        'product_image_generator',
+        variables,
+        {
+          action: 'generate',
+          quality: 'high',
+          outputFormat: 'png',
+          size: '1024x1024',
+        },
+      );
+    } catch (err) {
+      if (
+        err instanceof VendixHttpException &&
+        err.errorCode === ErrorCodes.AI_APP_001.code
+      ) {
+        variables['requested_improvement'] = dto.prompt.trim();
+        response = await this.ai_engine.runImage(
+          'product_image_enhancer',
+          variables,
+          {
+            action: 'generate',
+            quality: 'high',
+            outputFormat: 'png',
+            size: '1024x1024',
+          },
+        );
+      } else {
+        throw err;
+      }
+    }
 
     if (!response.success || !response.imageBase64) {
       throw new VendixHttpException(ErrorCodes.AI_REQUEST_001);
@@ -1348,6 +1488,46 @@ export class ProductsService {
   }
 
   /**
+   * B.1 (F-016, ADR-02) — rama search: WRAP, no replace (F-075).
+   *
+   * Smart ⇔ `isSmartSearchActive` (A.1, predicado ÚNICO que B.2 reutiliza
+   * para el rank): cutover smart ∧ tokeniza a ≥1 token ∧ sin fold de
+   * acentos. Entonces `buildTokenAndFieldOr` (A.1) ensambla AND×OR sobre
+   * `POS_PRODUCT_SEARCH_FIELDS` — cada token en ≥1 campo.
+   *
+   * Legacy (OR de frase intacto, byte-identico al pre-B.1) sobrevive como:
+   *   1) fallback stopwords/acentos — query que tokeniza a [] (`de la`) o
+   *      con vocales acentuadas (`café`, finding #2) ⇒ frase legacy;
+   *   2) path legacy — kill-switch, specs sin provider o throw ⇒ listado
+   *      idéntico al legacy (FB-08/FB-09).
+   *
+   * `search⊗barcode` excluyentes (DB-01): con barcode esta rama ni se evalúa
+   * (el spread `search && !barcode` del llamador lo garantiza).
+   */
+  private buildSearchCondition(
+    search: string,
+    smartAllowed?: boolean | null,
+  ): Prisma.productsWhereInput {
+    if (isSmartSearchActive(search, smartAllowed ?? false)) {
+      const tokens = tokenizeInternal(search);
+      if (tokens.length > 0) {
+        // Único `as` en la costura (A.1): `common/` no importa Prisma.
+        return buildTokenAndFieldOr(
+          tokens,
+          POS_PRODUCT_SEARCH_FIELDS,
+        ) as Prisma.productsWhereInput;
+      }
+    }
+    return {
+      OR: [
+        { name: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { sku: { contains: search, mode: 'insensitive' } },
+      ],
+    };
+  }
+
+  /**
    * Construye el `where` del catálogo de productos a partir de
    * `ProductQueryDto`. Fuente ÚNICA de la traducción filtro → Prisma: la
    * consumen `findAll()` (listado paginado) y `findIds()` (materialización de
@@ -1356,8 +1536,15 @@ export class ProductsService {
    *
    * El scope por tienda lo inyecta `StorePrismaService`; aquí no se resuelve
    * tenant a mano.
+   *
+   * B.1: `smartAllowed` falso ⇒ rama search legacy (fail-closed). `findAll`
+   * y `findIds` comparten `resolveSmartSearchFor` + `buildProductWhere` +
+   * predicado ⇒ `findAll`≡`findIds` (DB-17).
    */
-  private buildProductWhere(query: ProductQueryDto): Prisma.productsWhereInput {
+  private buildProductWhere(
+    query: ProductQueryDto,
+    smartAllowed?: boolean | null,
+  ): Prisma.productsWhereInput {
     const {
       search,
       state,
@@ -1414,14 +1601,15 @@ export class ProductsService {
           },
         ],
       }),
+      // B.1 (ADR-02): wrap — smart AND×OR, o frase legacy completa cuando
+      // el gate lo decide (stopwords, kill-switch, o query con vocales
+      // acentuadas/ç que el fold del tokenizer volvería inmatcheable en
+      // `contains` — re-auditoría PR #817 finding #2, paridad probada en
+      // vivo). `!barcode` conserva la precedencia exacta del barcode
+      // (DB-01, FB-02).
       ...(search &&
-        !barcode && {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { description: { contains: search, mode: 'insensitive' } },
-            { sku: { contains: search, mode: 'insensitive' } },
-          ],
-        }),
+        !barcode &&
+        this.buildSearchCondition(search, smartAllowed)),
       ...(brand_id && { brand_id }),
       ...(category_id && {
         product_categories: {
@@ -1461,7 +1649,54 @@ export class ProductsService {
   async findIds(
     query: ProductQueryDto,
   ): Promise<{ ids: number[]; total: number; capped: boolean }> {
-    const where = this.buildProductWhere(query);
+    // B.1: MISMO where que findAll (DB-17) — cutover resuelto igual, UNA
+    // sola vez (el path decide where + raw trigram abajo).
+    const context = RequestContextService.getContext();
+    const smartSearch = await this.resolveSmartSearchFor(
+      query,
+      context?.store_id,
+    );
+    const where = this.buildProductWhere(query, smartSearch.smartAllowed);
+
+    // C.3 (DB-17): con texto + path trigram, el conjunto lo define el raw
+    // (acentos incluidos: `cafe`⊃`Café`). El findMany/count Prisma NO vería
+    // esas filas ⇒ /ids discreparía del listado. Solo con tienda en contexto
+    // (sin store, legacy como siempre: cero cambio para llamadas sin request).
+    // Fail-open a legacy ante throw operativo (F-085); Forbidden propaga.
+    const { search, barcode } = query;
+    const storeId = context?.store_id;
+    const tokens =
+      search && !barcode ? tokenizeInternal(search) : ([] as string[]);
+    if (
+      search &&
+      !barcode &&
+      storeId &&
+      smartSearch.path === 'trigram' &&
+      tokens.length > 0
+    ) {
+      try {
+        const outcome = await this.searchIdsRankedTrigram({
+          search,
+          tokens,
+          storeId,
+          query,
+          limit: MAX_PRODUCT_IDS,
+          skip: 0,
+        });
+        return {
+          ids: outcome.pageIds,
+          total: outcome.total,
+          capped: outcome.total > MAX_PRODUCT_IDS,
+        };
+      } catch (error) {
+        if (error instanceof ForbiddenException) throw error;
+        this.logger.warn(
+          `[PosSmartSearch] findIds trigram→legacy store=${storeId} ` +
+            `qhash=${this.hashSearchQuery(search)}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
 
     const [rows, total] = await Promise.all([
       this.prisma.products.findMany({
@@ -1563,6 +1798,41 @@ export class ProductsService {
    * catálogo gigantesco costaría más que el beneficio de la prioridad.
    */
   private static readonly BEST_SELLING_SCAN_CAP = 5000;
+
+  /**
+   * B.2 (ADR-03) — Tope de filas que el rank en memoria escanea. Por encima,
+   * el listado cae al `orderBy` legacy con warn + counter + `meta.search`
+   * (ERR-17), nunca a grilla vacía. 2000 y no 5000 como best-selling: la light
+   * trae texto (name/description/sku/barcode, F-017), no 3 escalares, así que
+   * el costo wire/memoria por fila es mayor; 2000 cubre el catálogo típico de
+   * tienda con holgura y mantiene el sort <10ms.
+   */
+  private static readonly SMART_SEARCH_SCAN_CAP = 2000;
+
+  /** B.2 (F-046) — TTL de la id-list rankeada: 45s ∈ [30s, 60s]. */
+  private static readonly SMART_SEARCH_CACHE_TTL_MS = 45_000;
+
+  /**
+   * B.2 (F-068) — sobre este total la línea estructurada sube de debug a warn.
+   * 300ms = umbral de revisit de ADR-03 para staging con catálogos reales.
+   */
+  private static readonly SMART_SEARCH_SLOW_MS = 300;
+
+  /**
+   * B.2 — override del scan-cap SOLO para simulacros over-cap (staging/test):
+   * entero >0 o se ignora. Prod no lo define ⇒ rige el cap fijo.
+   */
+  private static readonly SMART_SEARCH_SCAN_CAP_ENV =
+    'POS_SMART_SEARCH_SCAN_CAP';
+
+  private resolveSmartSearchScanCap(): number {
+    const raw = process.env[ProductsService.SMART_SEARCH_SCAN_CAP_ENV];
+    if (raw !== undefined) {
+      const parsed = Number.parseInt(raw, 10);
+      if (Number.isInteger(parsed) && parsed > 0) return parsed;
+    }
+    return ProductsService.SMART_SEARCH_SCAN_CAP;
+  }
 
   /**
    * Ranking de productos más vendidos de la tienda en curso, como
@@ -1709,10 +1979,468 @@ export class ProductsService {
     return ordered.slice(skip, skip + limit).map((row: any) => Number(row.id));
   }
 
+  /**
+   * B.2 (A.0) — cutover capability×kill-switch para la rama rank. Devuelve
+   * la resolución completa + `smartAllowed` (para `buildProductWhere`: true
+   * ⇔ path ≠ legacy). Never-throw: sin search, con barcode, sin store, sin
+   * provider o con throw ⇒ legacy (fail-closed, grid intacta). `findAll` y
+   * `findIds` lo comparten (mismo conjunto, DB-17); el rank solo vive en
+   * `findAll` (a `findIds` el orden le es irrelevante: select-all).
+   */
+  private async resolveSmartSearchFor(
+    query: ProductQueryDto,
+    storeId?: number,
+  ): Promise<PosSearchResolution & { smartAllowed: boolean }> {
+    const legacy = {
+      path: 'legacy' as PosSearchPath,
+      trigramCapable: false,
+      killSwitch: false,
+      smartAllowed: false,
+    };
+    try {
+      if (!query.search || query.barcode) return legacy;
+      if (!storeId || !this.searchPath) return legacy;
+      const resolution = await this.searchPath.resolveSearchPathFor();
+      return {
+        ...resolution,
+        smartAllowed: resolution.path !== 'legacy',
+      };
+    } catch {
+      return legacy;
+    }
+  }
+
+  /**
+   * B.2 (F-068) — sha256-12 de la query normalizada: correlaciona requests sin
+   * loguear texto libre del usuario.
+   */
+  private hashSearchQuery(search: string): string {
+    try {
+      return createHash('sha256')
+        .update(normalizeSearchText(search))
+        .digest('hex')
+        .slice(0, 12);
+    } catch {
+      return 'unhashable';
+    }
+  }
+
+  /**
+   * B.2 (F-046) — clave de la id-list rankeada: (store, query-norm, filter-hash).
+   * Solo entran campos que cambian el CONJUNTO (el `where`); forma (variantes,
+   * stock) y página NO: el caché guarda ids, la hidratación aplica la forma y
+   * cada página slicea la misma lista. C.3 debe versionar esta clave (mismo
+   * nombre + sufijo de motor) para no mezclar órdenes memoria vs SQL.
+   */
+  private buildSmartSearchCacheKey(
+    storeId: number,
+    search: string,
+    query: ProductQueryDto,
+  ): string {
+    const qhash = this.hashSearchQuery(search);
+    const filter = [
+      query.state ?? '',
+      query.brand_id ?? '',
+      query.category_id ?? '',
+      query.track_inventory ?? '',
+      query.product_type ?? '',
+      query.requires_booking ?? '',
+      query.is_sellable ?? '',
+      query.is_batch_produced ?? '',
+      query.is_ingredient ?? '',
+      query.include_inactive ?? '',
+      query.pos_optimized ?? '',
+      Array.isArray(query.ids) ? [...query.ids].sort((a, b) => a - b).join(',') : '',
+    ].join('|');
+    let fhash = 'nofilter';
+    try {
+      fhash = createHash('sha256').update(filter).digest('hex').slice(0, 12);
+    } catch {
+      fhash = 'unhashable';
+    }
+    return `products:smartsearch:${storeId}:${qhash}:${fhash}`;
+  }
+
+  /**
+   * B.2 (F-046) — valida la entrada del caché: basura ⇒ miss (re-scan), nunca
+   * throw ni ids rotos a la hidratación.
+   */
+  private readSmartSearchCache(value: unknown): SmartSearchRankCacheEntry | null {
+    try {
+      if (typeof value !== 'object' || value === null) return null;
+      const entry = value as { ids?: unknown; total?: unknown };
+      if (!Array.isArray(entry.ids) || typeof entry.total !== 'number') {
+        return null;
+      }
+      if (
+        !entry.ids.every(
+          (id): id is number => typeof id === 'number' && Number.isFinite(id),
+        )
+      ) {
+        return null;
+      }
+      return { ids: entry.ids, total: entry.total };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * B.2 — intento rank completo: caché → scan-cap → rank → slice (A.2).
+   *
+   * - Hit: sin scan y sin count (página 2 no re-escanea, F-046).
+   * - Miss: `rankedIdsPage` con light producto-only (F-017: id + texto para
+   *   scorizar + featured/created_at para el tiebreak; NUNCA variantes anchas,
+   *   F-044). El delegate `score` captura las claves para reconstruir la
+   *   id-list COMPLETA y cachearla sin re-scorar (rankedIdsPage solo devuelve
+   *   la página).
+   * - El delegate `hydrate` NO hace I/O a propósito: la hidratación real ocurre
+   *   UNA vez, abajo, en el `findMany` compartido con el include completo que
+   *   ambas ramas ya usan (F-076) — hidratar acá pagaría un round-trip extra
+   *   por encima del presupuesto F-005 (≤2/keystroke: light + hydrate).
+   * - Over-cap ⇒ `null`: el llamador degrada a `orderBy` legacy (ADR-03).
+   * - Throw de delegates ⇒ propaga: el llamador degrada (F-034), jamás grilla
+   *   vacía. Solo el caché es best-effort interno (get roto ⇒ miss + warn;
+   *   set roto ⇒ warn, el request igual sale rankeado).
+   */
+  private async resolveSmartRankedIdsPage(args: {
+    where: Prisma.productsWhereInput;
+    search: string;
+    tokens: readonly string[];
+    storeId: number;
+    query: ProductQueryDto;
+    page: number;
+    limit: number;
+    skip: number;
+    scanCap: number;
+  }): Promise<SmartSearchRankOutcome | null> {
+    const { where, search, tokens, storeId, query, page, limit, skip, scanCap } =
+      args;
+    const key = this.buildSmartSearchCacheKey(storeId, search, query);
+
+    const cacheStart = Date.now();
+    let cached: SmartSearchRankCacheEntry | null = null;
+    try {
+      cached = this.readSmartSearchCache(
+        await this.cache.get<SmartSearchRankCacheEntry>(key),
+      );
+    } catch (error) {
+      this.logger.warn(
+        `[PosSmartSearch] cache read failed → miss key=${key} store=${storeId}: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+      cached = null;
+    }
+    const msCache = Date.now() - cacheStart;
+    if (cached) {
+      return {
+        pageIds: cached.ids.slice(skip, skip + limit),
+        total: cached.total,
+        fromCache: true,
+        candidates: cached.total,
+        msCache,
+        msScanRank: 0,
+      };
+    }
+
+    const captured = new Map<ProductSearchRow, SearchRankKey>();
+    const scanStart = Date.now();
+    // Generics explícitos: la inferencia cruzada scan⇄score degrada
+    // `Candidate` a `unknown`; el select de la light satisface
+    // `ProductSearchRow` (id + texto + featured/created_at, sin variantes).
+    const ranked = await rankedIdsPage<
+      Prisma.productsWhereInput,
+      ProductSearchRow,
+      { id: number }
+    >(where, page, limit, {
+      scanCap,
+      scan: (sameWhere, take) =>
+        this.prisma.products.findMany({
+          where: sameWhere,
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            sku: true,
+            barcode: true,
+            is_featured: true,
+            created_at: true,
+          },
+          take,
+        }),
+      score: (candidate) => {
+        const rankKey = scoreProductSearchRow(tokens, candidate, search);
+        captured.set(candidate, rankKey);
+        return rankKey;
+      },
+      hydrate: (sameWhere, ids) =>
+        Promise.resolve(ids.map((id) => ({ id }))),
+      getId: (row) => row.id,
+    });
+    const msScanRank = Date.now() - scanStart;
+    if (ranked === null) return null;
+
+    const fullRankedIds = [...captured.entries()]
+      .sort((left, right) => compareSearchRank(left[1], right[1]))
+      .map(([candidate]) => candidate.id);
+    const total = ranked.totalCandidates;
+    try {
+      await this.cache.set(
+        key,
+        { ids: fullRankedIds, total } satisfies SmartSearchRankCacheEntry,
+        ProductsService.SMART_SEARCH_CACHE_TTL_MS,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `[PosSmartSearch] cache write failed key=${key} store=${storeId}: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return {
+      pageIds: ranked.rows.map((row) => row.id),
+      total,
+      fromCache: false,
+      candidates: total,
+      msCache,
+      msScanRank,
+    };
+  }
+
+  /**
+   * C.3 (ADR-04) — ids rankeados vía raw trigram scopeado. Mismo contrato de
+   * salida que `resolveSmartRankedIdsPage` (ids de LA página + total del
+   * COUNT twin): el llamador hidrata y pagina igual en ambas ramas.
+   *
+   * - F-004 fail-closed: store_id SOLO de ALS directo
+   *   (`asyncLocalStorage.getStore()`, jamás `getContext()` con su fallback
+   *   estático) e IGUAL al del caller; cualquier otra cosa ⇒ Forbidden (que
+   *   el llamador re-lanza, nunca degrada: seguridad no hace fail-open).
+   * - F-030: `$queryRawUnsafe` con placeholders $1..$n del builder puro; cero
+   *   `${}` de input (gate en spec + grep).
+   * - F-070/F-090: `SET LOCAL statement_timeout` dentro de transacción
+   *   interactiva + slow-log sobre el presupuesto E.2 + histograma.
+   * - F-085: cualquier throw NO-seguridad propaga al catch del llamador, que
+   *   degrada a `orderBy` legacy con meta genérica (cero texto del driver al
+   *   cliente) + warn server-side.
+   * - B.2 nota: `request_id` viaja como comment SQL (sanitizado a
+   *   `[a-zA-Z0-9-]`; inválido ⇒ sin comment, jamás roto).
+   */
+  private async searchIdsRankedTrigram(args: {
+    search: string;
+    tokens: readonly string[];
+    storeId: number;
+    query: ProductQueryDto;
+    limit: number;
+    skip: number;
+  }): Promise<SmartSearchRankOutcome> {
+    const { search, tokens, storeId: callerStoreId, query, limit, skip } =
+      args;
+    const alsStore =
+      RequestContextService.asyncLocalStorage.getStore()?.store_id;
+    if (
+      typeof alsStore !== 'number' ||
+      !Number.isInteger(alsStore) ||
+      alsStore <= 0 ||
+      alsStore !== callerStoreId
+    ) {
+      throw new ForbiddenException(
+        'Store context required for ranked search',
+      );
+    }
+    const storeId = alsStore;
+    const filters: TrigramFilterSet = {
+      state: query.state ?? null,
+      includeInactive: query.include_inactive ?? null,
+      // Re-auditoría PR #817: sin esto el recall trigram ignoraba el
+      // effectiveState=ACTIVE del POS (total inflado + páginas cortas).
+      posOptimized: query.pos_optimized ?? null,
+      brandId: query.brand_id ?? null,
+      categoryId: query.category_id ?? null,
+      trackInventory: query.track_inventory ?? null,
+      productType: query.product_type ?? null,
+      requiresBooking: query.requires_booking ?? null,
+      isSellable: query.is_sellable ?? null,
+      isBatchProduced: query.is_batch_produced ?? null,
+      isIngredient: query.is_ingredient ?? undefined,
+      ids: query.ids ?? null,
+    };
+    const ranked = buildTrigramRankedQuery(
+      storeId,
+      tokens,
+      filters,
+      search,
+      limit,
+      skip,
+    );
+    const counted = buildTrigramCountQuery(storeId, tokens, filters);
+    const requestId =
+      RequestContextService.asyncLocalStorage.getStore()?.request_id;
+    const comment =
+      typeof requestId === 'string' &&
+      /^[a-zA-Z0-9-]{1,64}$/.test(requestId)
+        ? `/* req:${requestId} */ `
+        : '';
+    const base = this.prisma.withoutScope() as unknown as {
+      $transaction: <T>(
+        fn: (tx: {
+          $executeRawUnsafe: (sql: string) => Promise<unknown>;
+          $queryRawUnsafe: <R>(sql: string, ...params: unknown[]) => Promise<R>;
+        }) => Promise<T>,
+      ) => Promise<T>;
+    };
+    const start = Date.now();
+    const { pageIds, total } = await base.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SET LOCAL statement_timeout = '${TRIGRAM_STATEMENT_TIMEOUT_MS}ms'`,
+      );
+      const rows = await tx.$queryRawUnsafe<{ id: number }[]>(
+        `${comment}${ranked.sql}`,
+        ...ranked.params,
+      );
+      const totals = await tx.$queryRawUnsafe<{ total: number }[]>(
+        `${comment}${counted.sql}`,
+        ...counted.params,
+      );
+      return {
+        pageIds: Array.isArray(rows)
+          ? rows
+              .map((row) => Number(row?.id))
+              .filter(
+                (id) => Number.isInteger(id) && (id as number) > 0,
+              )
+          : [],
+        total:
+          Array.isArray(totals) &&
+          typeof totals[0]?.total === 'number' &&
+          Number.isFinite(totals[0].total)
+            ? Math.max(0, Math.trunc(totals[0].total))
+            : 0,
+      };
+    });
+    const msScanRank = Date.now() - start;
+    observeSearchLatency('trigram', 'ranked', msScanRank);
+    if (msScanRank > TRIGRAM_SLOW_LOG_MS) {
+      this.logger.warn(
+        `[PosSmartSearch] slow trigram store=${storeId} ` +
+          `qhash=${this.hashSearchQuery(search)} tokens=${tokens.length} ` +
+          `ms=${msScanRank} rows=${pageIds.length} total=${total}`,
+      );
+    }
+    return {
+      pageIds,
+      total,
+      fromCache: false,
+      candidates: total,
+      msCache: 0,
+      msScanRank,
+    };
+  }
+
+  /**
+   * B.2 (F-068) — UNA línea estructurada por request con `search`: request_id,
+   * store, query-hash, tokens, ms por etapa, candidatos, rank_mode + snapshot
+   * del cutover (A.0). Debug por defecto; warn si degradado o sobre presupuesto
+   * (300ms). Never-throw: el log no rompe el request.
+   *
+   * Nota: `request_id` como comment SQL no aplica al path ORM (Prisma no
+   * inyecta comments en `findMany`); C.3 lo suma en el raw SQL.
+   */
+  private logSmartSearchLine(args: {
+    search: string;
+    tokens: readonly string[];
+    storeId?: number;
+    path: PosSearchPath;
+    trigramCapable: boolean;
+    killSwitch: boolean;
+    rankMode: SearchRankMeta['rank_mode'];
+    degraded: boolean;
+    fromCache: boolean;
+    candidates: number;
+    total: number;
+    msPath: number;
+    msCache: number;
+    msScanRank: number;
+    msFetch: number;
+    msRescore: number;
+    msTotal: number;
+  }): void {
+    try {
+      const line = {
+        request_id: RequestContextService.getRequestId() ?? null,
+        store: args.storeId ?? null,
+        qhash: this.hashSearchQuery(args.search),
+        tokens: [...args.tokens],
+        token_count: args.tokens.length,
+        ms_path: args.msPath,
+        ms_cache: args.msCache,
+        ms_scan_rank: args.msScanRank,
+        ms_fetch: args.msFetch,
+        ms_rescore: args.msRescore,
+        ms_total: args.msTotal,
+        candidates: args.candidates,
+        total: args.total,
+        from_cache: args.fromCache,
+        rank_mode: args.rankMode,
+        ...snapshotSearchPath(
+          args.path,
+          args.trigramCapable,
+          args.killSwitch,
+        ),
+        degraded: args.degraded,
+      };
+      const payload = `[PosSmartSearch] ${JSON.stringify(line)}`;
+      if (
+        args.degraded ||
+        args.msTotal > ProductsService.SMART_SEARCH_SLOW_MS
+      ) {
+        this.logger.warn(payload);
+      } else {
+        this.logger.debug(payload);
+      }
+    } catch {
+      // El log nunca rompe el request.
+    }
+  }
+
+  /**
+   * E.4 (F-069) — registra 1 selección del buscador (CTR-por-posición).
+   *
+   * Append-only, tenant-scoped desde contexto (store_id/user_id NUNCA del
+   * body). No lee productos: inserta la telemetría validada por DTO y
+   * devuelve el id. El emitter es fire-and-forget: un fallo acá jamás debe
+   * romper una venta (el cliente traga el error).
+   */
+  async logSearchSelection(dto: LogSearchSelectionDto) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    if (!storeId) {
+      throw new VendixHttpException(
+        ErrorCodes.AUTH_STORE_001,
+        'Store context required to log search selections',
+      );
+    }
+    const row = await this.prisma.pos_search_selections.create({
+      data: {
+        store_id: storeId,
+        user_id: context?.user_id ?? null,
+        query_hash: dto.query_hash,
+        position: dto.position,
+        product_id: dto.product_id,
+        result_count: dto.result_count,
+        rank_mode: dto.rank_mode,
+        flags: dto.flags ?? undefined,
+        surface: dto.surface ?? undefined,
+      },
+      select: { id: true },
+    });
+    return { id: row.id };
+  }
+
   async findAll(query: ProductQueryDto) {
     const {
       page = 1,
       limit = 10,
+      search,
       pos_optimized,
       barcode,
       include_stock,
@@ -1721,6 +2449,8 @@ export class ProductsService {
       best_selling_first,
     } = query;
     const skip = (page - 1) * limit;
+    // B.2 (F-068) — base del ms_total de la línea estructurada.
+    const requestStart = Date.now();
 
     // Obtener contexto para aplicar scope automático
     const context = RequestContextService.getContext();
@@ -1729,12 +2459,34 @@ export class ProductsService {
     // QUI-727 (A.1) / ADR-10 — proyección por rol: `cocina` no ve dinero.
     const isCocina = this.isKitchenRole();
 
-    const where = this.buildProductWhere(query);
+    // B.2 (A.0): cutover capability×kill-switch — smartAllowed para el
+    // where + path para el gate del rank. Fail-closed a legacy.
+    const pathStart = Date.now();
+    const smartSearch = await this.resolveSmartSearchFor(
+      query,
+      context?.store_id,
+    );
+    const msPath = Date.now() - pathStart;
+    const where = this.buildProductWhere(query, smartSearch.smartAllowed);
 
+    // B.2 (F-089): settings en single-flight por request — antes se leían 2
+    // veces con search+pos_optimized (resolvePosScope + Promise.all); ahora
+    // una promesa compartida alimenta ambos consumos.
+    const settingsPromise = this.loadMergedSettings();
+    // B.2 review fix — handler pegado a la creación, SIN awaits en medio: si
+    // los settings rechazan durante el intento rank (o best-selling), una
+    // promesa sin handler es unhandledRejection (Node default = throw =
+    // crash del proceso). Con esto, el fallo llega ordenado al runFetch.
+    // (F-034: si son los settings los que lanzan, se propaga sin warn/counter
+    // espurios ni re-fetch — no hay rank al que culpar.)
+    let settingsFailed = false;
+    void settingsPromise.catch(() => {
+      settingsFailed = true;
+    });
     // Resolve POS stock scope so we can constrain the stock_levels includes at
     // the Prisma layer (server-side filtering) instead of post-filtering rows.
     const posStockScope: ResolvedInventoryScope | null = pos_optimized
-      ? await this.resolvePosScope()
+      ? await this.resolvePosScope(settingsPromise)
       : null;
     // QUI-559: the POS must only display stock it can actually charge. The
     // filter is the configured scope INTERSECTED with the store's sellable
@@ -1753,29 +2505,149 @@ export class ProductsService {
     // denormalized cross-location aggregate.
     const includeStockEffective = pos_optimized ? true : include_stock;
 
+    // B.2 review fix (F-013) — tokens ANTES del gate: el rank exige lo mismo
+    // que el where (`isSmartSearchActive`: cutover smart ∧ ≥1 token). Sin esto,
+    // `search=e` o `de la` (0 tokens) entraban al rank con score degenerado
+    // (todo empates) y `meta.search` mentía `ranked` sobre un conjunto legacy.
+    const smartTokens: readonly string[] = search
+      ? tokenizeInternal(search)
+      : [];
+    // B.2 (F-001/F-018/F-022) — rank textual para TODO caller con
+    // `search && !barcode` cuando el cutover dice l2. `trigram` también entra
+    // acá: C.3 lo cablea después y esta rama es su punto de inserción (mismo
+    // contrato `meta.search`, distinto motor). Con search, best_selling queda
+    // suprimido (rank textual primario; featured vive como boost/tiebreak
+    // dentro del score, no como orderBy) — también en degradado: sobre el cap
+    // manda el `orderBy` de abajo, sin segundo rank peleando en silencio.
+    const useSmartRank =
+      !!search &&
+      !barcode &&
+      !!context?.store_id &&
+      smartTokens.length > 0 &&
+      (smartSearch.path === 'l2' || smartSearch.path === 'trigram');
+    const scanCap = this.resolveSmartSearchScanCap();
+    // B.2 (F-045) — el DTO no pone @Max (bulk legitima límites grandes), así
+    // que el path rank clampdea el slice al scan-cap: `limit=99999` hidrata
+    // ≤cap filas, nunca OOM. Specs en B.3.
+    const rankLimit = Math.min(limit, scanCap);
+
+    // B.2 (F-012/F-034/ERR-17) — fail-open TOTAL: over-cap o CUALQUIER throw
+    // del intento rank (light/rank/slice) cae al `orderBy` legacy con warn +
+    // counter + `meta.search` (hydrate y re-sort tienen su propio fallback
+    // abajo). La grilla nunca se vacía por el rank.
+    let rankOutcome: SmartSearchRankOutcome | null = null;
+    let rankMode: SearchRankMeta['rank_mode'] = 'legacy';
+    let rankDegraded = false;
+    if (useSmartRank && search && context?.store_id) {
+      const storeId = context.store_id;
+      try {
+        // C.3 (ADR-04): path trigram ⇒ raw scopeado; L2 ⇒ rank en memoria.
+        // Mismo contrato SmartSearchRankOutcome en ambas ramas.
+        const outcome =
+          smartSearch.path === 'trigram'
+            ? await this.searchIdsRankedTrigram({
+                search,
+                tokens: smartTokens,
+                storeId,
+                query,
+                limit: rankLimit,
+                skip,
+              })
+            : await this.resolveSmartRankedIdsPage({
+                where,
+                search,
+                tokens: smartTokens,
+                storeId,
+                query,
+                page,
+                limit: rankLimit,
+                skip,
+                scanCap,
+              });
+        if (outcome === null) {
+          rankDegraded = true;
+          rankMode = 'unranked_scan_cap';
+          recordSearchDegraded('scan_cap', storeId);
+          observeSearchLatency(smartSearch.path, rankMode, 0);
+          this.logger.warn(
+            `[PosSmartSearch] degraded reason=scan_cap store=${storeId} ` +
+              `qhash=${this.hashSearchQuery(search)} tokens=${smartTokens.length} ` +
+              `cap=${scanCap} path=${smartSearch.path}`,
+          );
+        } else {
+          rankOutcome = outcome;
+          rankMode = 'ranked';
+          if (smartSearch.path === 'l2') {
+            observeSearchLatency('l2', rankMode, outcome.msScanRank);
+          }
+        }
+      } catch (error) {
+        // C.3 (F-004): Forbidden de scope JAMÁS degrada — seguridad no hace
+        // fail-open. Solo errores operativos caen al orderBy legacy (F-085:
+        // meta genérica al cliente, texto del driver solo server-side).
+        if (error instanceof ForbiddenException) throw error;
+        rankDegraded = true;
+        rankMode = 'unranked_error';
+        rankOutcome = null;
+        recordSearchDegraded('rank_error', storeId);
+        observeSearchLatency(smartSearch.path, rankMode, 0);
+        this.logger.warn(
+          `[PosSmartSearch] degraded reason=rank_error store=${storeId} ` +
+            `qhash=${this.hashSearchQuery(search)} tokens=${smartTokens.length} ` +
+            `path=${smartSearch.path}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     // Prioridad de la grilla del POS: destacados → más vendidos → resto.
     // Sólo se activa con el flag explícito; devuelve `null` (y no cuesta nada)
     // cuando la tienda no tiene ventas rankeadas o el catálogo es demasiado
     // grande para ordenarlo en memoria, en cuyo caso manda el `orderBy` de
     // Prisma de abajo y la pantalla nunca queda vacía.
-    const bestSellingPageIds = best_selling_first
-      ? await this.resolveBestSellingPageIds(
-          where,
-          skip,
-          limit,
-          featured_first === true,
-        )
-      : null;
+    // B.2: suprimido con search rankeado (ver regla de composición arriba).
+    const bestSellingPageIds =
+      !useSmartRank && best_selling_first
+        ? await this.resolveBestSellingPageIds(
+            where,
+            skip,
+            limit,
+            featured_first === true,
+          )
+        : null;
+    // Ids de la página ya resueltos por un rank externo (uno u otro, nunca
+    // ambos): la hidratación de abajo solo trae esas filas. `let` porque el
+    // fail-open de hydrate (F-034) lo anula al re-hidratar en legacy.
+    let pageIds = rankOutcome?.pageIds ?? bestSellingPageIds;
 
-    const [products, total, settings] = await Promise.all([
-      this.prisma.products.findMany({
+    // C.3 — base del hydrate SIN predicado de texto: en path trigram los ids
+    // ya vienen filtrados por texto desde el raw (acentos incluidos);
+    // re-aplicar el AND×OR smart de Prisma (sin unaccent) vaciaría la página.
+    // Solo se nudea el texto (AND/OR lo produce únicamente la condición de
+    // búsqueda); los escalares se conservan como segunda cerradura.
+    const { AND: _omitTextAnd, OR: _omitTextOr, ...hydrateBaseNoText } =
+      where as Record<string, unknown>;
+    // B.2 (F-034) — args del hydrate como builder: el path rank lo invoca con
+    // los ids de la página y, si ESE hydrate lanza, el fallback lo re-invoca
+    // sin ids (`orderBy` legacy, mismo include/mismo map, F-076). `satisfies`
+    // conserva el tipado preciso del include para el payload de abajo.
+    const hydrateArgs = (ids: number[] | null) =>
+      ({
         // Con la página ya resuelta por ranking, el recorte lo hizo el orden en
         // memoria: aquí sólo se hidratan esos ids (sin skip/take, que volverían
         // a paginar sobre un conjunto ya paginado).
-        where: bestSellingPageIds
-          ? { ...where, id: { in: bestSellingPageIds } }
+        // C.3: el nudeo de texto aplica SOLO con rankOutcome trigram (el rank
+        // exige !barcode; sin outcome —best-sellers, fallbacks— `where`
+        // intacto para no alterar ningún otro camino).
+        where: ids
+          ? {
+              ...(rankOutcome && smartSearch.path === 'trigram'
+                ? (hydrateBaseNoText as typeof where)
+                : where),
+              id: { in: ids },
+            }
           : where,
-        ...(bestSellingPageIds ? {} : { skip, take: limit }),
+        ...(ids ? {} : { skip, take: limit }),
         include: {
           stores: {
             select: {
@@ -1888,23 +2760,131 @@ export class ProductsService {
         orderBy: featured_first
           ? [{ is_featured: 'desc' }, { created_at: 'desc' }]
           : { created_at: 'desc' },
-      }),
-      this.prisma.products.count({ where }),
-      this.loadMergedSettings(),
-    ]);
+      }) satisfies Prisma.productsFindManyArgs;
+
+    // B.2 (F-005) — con rank, el total ES el conjunto rankeado pre-slice: se
+    // omite el `count` (2º seq-scan) y el keystroke queda en ≤2 round-trips
+    // (light + hydrate).
+    const fetchStart = Date.now();
+    const runFetch = (ids: number[] | null, total: Promise<number>) =>
+      Promise.all([
+        this.prisma.products.findMany(hydrateArgs(ids)),
+        total,
+        settingsPromise,
+      ]);
+    // B.2 (F-068) — snapshot para la línea estructurada: sobrevive al degrade
+    // de hydrate (rankOutcome se anula abajo pero la línea conserva ms/cands).
+    const rankStats = rankOutcome;
+    let fetched: Awaited<ReturnType<typeof runFetch>>;
+    if (rankOutcome && search && context?.store_id) {
+      const storeId: number = context.store_id;
+      try {
+        fetched = await runFetch(pageIds, Promise.resolve(rankOutcome.total));
+      } catch (error) {
+        if (settingsFailed) throw error;
+        // B.2 (F-034/ERR-17) — el hydrate acotado a la página rankeada lanzó:
+        // se re-hidrata con el `orderBy` legacy (nunca grilla vacía por el
+        // rank) con warn + counter + `meta.search`. Si el legacy TAMBIÉN
+        // lanza, el error propaga: falla sistémica, no del rank.
+        rankDegraded = true;
+        rankMode = 'unranked_error';
+        recordSearchDegraded('rank_error', storeId);
+        this.logger.warn(
+          `[PosSmartSearch] degraded reason=hydrate_error store=${storeId} ` +
+            `qhash=${this.hashSearchQuery(search)} tokens=${smartTokens.length} ` +
+            `path=${smartSearch.path}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+        rankOutcome = null;
+        pageIds = null;
+        fetched = await runFetch(null, this.prisma.products.count({ where }));
+      }
+    } else {
+      fetched = await runFetch(
+        pageIds,
+        this.prisma.products.count({ where }),
+      );
+    }
+    const [productsRaw, countedTotal, settings] = fetched;
+    const msFetch = Date.now() - fetchStart;
+    const total = rankOutcome ? rankOutcome.total : countedTotal;
+    let products = productsRaw;
 
     // Prisma devuelve el `id: { in: [...] }` en su propio orden: se restaura el
-    // que calculó el ranking (destacados → más vendidos → newest).
-    if (bestSellingPageIds) {
-      const position = new Map(
-        bestSellingPageIds.map((id, index) => [id, index]),
-      );
+    // que calculó el ranking (destacados → más vendidos → newest, o relevancia
+    // textual en el path rank).
+    if (pageIds) {
+      const position = new Map(pageIds.map((id, index) => [id, index]));
       products.sort(
         (a: any, b: any) =>
           (position.get(Number(a.id)) ?? Number.MAX_SAFE_INTEGER) -
           (position.get(Number(b.id)) ?? Number.MAX_SAFE_INTEGER),
       );
     }
+
+    // B.2 (F-044) — tier-2: la light no trae variantes; las filas hidratadas
+    // sí. Re-score de LA página (texto producto + mejor variante) + re-sort.
+    // Edge documentado: un match solo-variante bajo el corte de tier-1 no
+    // sube a la página (Fase B lo cubre con match nativo en SQL).
+    // B.2 (F-083/ERR-18) — hydrate-miss concurrente (archivado entre light e
+    // hydrate): las filas que no llegaron simplemente no están; página corta
+    // con total honesto, sin error, sin retry. No "arreglar" a 500.
+    let msRescore = 0;
+    if (rankOutcome && search) {
+      const rescoreStart = Date.now();
+      try {
+        const scored = products.map((row) => ({
+          row,
+          key: scoreProductSearchRow(
+            smartTokens,
+            {
+              id: row.id,
+              name: row.name,
+              description: row.description,
+              sku: row.sku,
+              barcode: row.barcode,
+              is_featured: row.is_featured,
+              created_at: row.created_at,
+              product_variants: (row.product_variants ?? []).map(
+                (variant) => ({
+                  id: variant.id,
+                  name: variant.name,
+                  sku: variant.sku,
+                  barcode: variant.barcode,
+                }),
+              ),
+            },
+            search,
+          ),
+        }));
+        scored.sort((left, right) => compareSearchRank(left.key, right.key));
+        products = scored.map((entry) => entry.row);
+      } catch (error) {
+        // B.2 (F-034) — el re-score tier-2 lanzó: `products` conserva el orden
+        // tier-1 (ya restaurado arriba), así que el modo sigue siendo `ranked`
+        // pero degradado (sin refinamiento de variantes) + warn + counter.
+        // Nunca grilla vacía, nunca throw al llamador.
+        rankDegraded = true;
+        recordSearchDegraded('rank_error', context?.store_id);
+        this.logger.warn(
+          `[PosSmartSearch] degraded reason=rescore_error store=${context?.store_id ?? 0} ` +
+            `qhash=${this.hashSearchQuery(search)} tokens=${smartTokens.length} ` +
+            `path=${smartSearch.path}: ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      msRescore = Date.now() - rescoreStart;
+    }
+
+    // B.2 (ADR-08) — `meta.search` solo en respuestas con `search`; sin search
+    // es `undefined` y el envelope queda idéntico al de siempre.
+    const searchMeta: SearchRankMeta | undefined = search
+      ? {
+          rank_mode: rankMode,
+          layer: smartSearch.path,
+          degraded: rankDegraded,
+        }
+      : undefined;
 
     // Resolve active auto-apply promotions for every product in the listing
     // (batch query). Cards use the promotional unit price computed off the
@@ -2089,6 +3069,29 @@ export class ProductsService {
       const data = isCocina
         ? productsWithSignedImages.map((p) => this.stripCocinaMoney(p))
         : productsWithSignedImages;
+      // B.2 (F-068) — línea estructurada (una por search; misma llamada en la
+      // rama admin: el return difiere pero la observación es una sola).
+      if (search) {
+        this.logSmartSearchLine({
+          search,
+          tokens: smartTokens,
+          storeId: context?.store_id,
+          path: smartSearch.path,
+          trigramCapable: smartSearch.trigramCapable,
+          killSwitch: smartSearch.killSwitch,
+          rankMode,
+          degraded: rankDegraded,
+          fromCache: rankStats?.fromCache ?? false,
+          candidates: rankStats?.candidates ?? 0,
+          total,
+          msPath,
+          msCache: rankStats?.msCache ?? 0,
+          msScanRank: rankStats?.msScanRank ?? 0,
+          msFetch,
+          msRescore,
+          msTotal: Date.now() - requestStart,
+        });
+      }
       return {
         data,
         meta: {
@@ -2096,6 +3099,7 @@ export class ProductsService {
           page,
           limit,
           totalPages: Math.ceil(total / limit),
+          search: searchMeta,
         },
       };
     }
@@ -2277,6 +3281,28 @@ export class ProductsService {
     const data = isCocina
       ? productsWithStock.map((p) => this.stripCocinaMoney(p))
       : productsWithStock;
+    // B.2 (F-068) — línea estructurada por search (ver rama pos_optimized).
+    if (search) {
+      this.logSmartSearchLine({
+        search,
+        tokens: smartTokens,
+        storeId: context?.store_id,
+        path: smartSearch.path,
+        trigramCapable: smartSearch.trigramCapable,
+        killSwitch: smartSearch.killSwitch,
+        rankMode,
+        degraded: rankDegraded,
+        fromCache: rankStats?.fromCache ?? false,
+        candidates: rankStats?.candidates ?? 0,
+        total,
+        msPath,
+        msCache: rankStats?.msCache ?? 0,
+        msScanRank: rankStats?.msScanRank ?? 0,
+        msFetch,
+        msRescore,
+        msTotal: Date.now() - requestStart,
+      });
+    }
     return {
       data,
       meta: {
@@ -2284,6 +3310,7 @@ export class ProductsService {
         page,
         limit,
         totalPages: Math.ceil(total / limit),
+        search: searchMeta,
       },
     };
   }
@@ -4993,10 +6020,15 @@ export class ProductsService {
     return resolveLineTotals(basePrice, extractTypedRates(product)).total;
   }
 
-  private async resolvePosScope(): Promise<ResolvedInventoryScope> {
+  private async resolvePosScope(
+    // B.2 (F-089) — single-flight opcional: `findAll` pasa su promesa de
+    // settings para no leer `store_settings` 2 veces por request. Ausente ⇒
+    // comportamiento de siempre (único otro llamador: ninguno hoy).
+    settingsPromise?: Promise<StoreSettings>,
+  ): Promise<ResolvedInventoryScope> {
     const [store, settings] = await Promise.all([
       this.loadStoreScopeRef(),
-      this.loadMergedSettings(),
+      settingsPromise ?? this.loadMergedSettings(),
     ]);
     return resolvePosStockScope(store, settings);
   }
