@@ -74,8 +74,10 @@ export class ResponseService {
     // B.2 (ADR-08): opcional y aditivo — el resto de llamadores no lo pasa
     // y su `meta` queda idéntica a la de siempre.
     search?: SearchRankMeta,
+    // QUI-551: metadatos extra aditivos (ej. { truncated }) — merge #794.
+    extraMeta?: Record<string, any>,
   ): PaginatedResponse<T> {
-    const meta = createPaginationMeta(total, page, limit);
+    const meta = { ...createPaginationMeta(total, page, limit), ...extraMeta };
 
     return {
       success: true,

@@ -131,6 +131,7 @@ export class ReportsShellComponent {
     'sales-by-category': '/admin/analytics/sales/by-category',
     'sales-by-customer': '/admin/analytics/sales/by-customer',
     'sales-by-payment': '/admin/analytics/sales/by-payment',
+    'sales-by-user': '/admin/analytics/sales/by-user',
     'sales-trends': '/admin/analytics/sales/trends',
     // Inventory
     'inventory-overview': '/admin/analytics/inventory/overview',
