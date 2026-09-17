@@ -30,6 +30,7 @@ export interface HelpArticle {
   category: Pick<HelpCategory, 'id' | 'name' | 'slug' | 'icon'>;
   module?: string;
   tags: string[];
+  keywords?: string[];
   cover_image_url?: string;
   view_count: number;
   is_featured: boolean;

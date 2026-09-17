@@ -1,6 +1,6 @@
 import { Component, inject, signal, DestroyRef } from '@angular/core';
 
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
@@ -15,17 +15,29 @@ import { HelpArticleCardComponent } from './components/help-article-card/help-ar
   selector: 'app-help-center',
   standalone: true,
   imports: [
+    RouterModule,
     FormsModule,
     IconComponent,
     SpinnerComponent,
-    HelpArticleCardComponent
-],
+    HelpArticleCardComponent,
+  ],
   template: `
     <div class="help-center-container">
       <!-- Header -->
-      <div class="help-header">
-        <h2 class="help-title">Centro de Ayuda</h2>
-        <p class="help-subtitle">Encuentra respuestas, tutoriales y guías para aprovechar Vendix al máximo</p>
+      <div class="help-header flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="help-title">Centro de Ayuda</h2>
+          <p class="help-subtitle">Encuentra respuestas, tutoriales y guías para aprovechar Vendix al máximo</p>
+        </div>
+
+        <a
+          routerLink="/admin/help/videos"
+          class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary/10 hover:bg-primary/15 text-primary text-xs font-semibold border border-primary/20 transition-all self-start sm:self-auto group no-underline"
+        >
+          <app-icon name="video" [size]="16" class="text-primary group-hover:scale-110 transition-transform"></app-icon>
+          <span>Videos de Capacitación</span>
+          <app-icon name="arrow-right" [size]="14"></app-icon>
+        </a>
       </div>
     
       <!-- Search Bar -->

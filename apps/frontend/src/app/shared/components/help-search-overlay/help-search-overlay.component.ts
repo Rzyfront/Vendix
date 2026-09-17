@@ -107,6 +107,19 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
             <span>Escribe al menos 2 caracteres para buscar</span>
           </div>
         }
+
+        <!-- Footer shortcut to Videos -->
+        <div class="spotlight-footer">
+          <span>¿Buscas tutoriales prácticos?</span>
+          <button
+            type="button"
+            (click)="goToVideos()"
+            class="spotlight-video-btn"
+          >
+            <app-icon name="video" [size]="14"></app-icon>
+            <span>Ver videos de capacitación</span>
+          </button>
+        </div>
       </div>
     </dialog>
     `,
@@ -302,6 +315,37 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
       color: var(--color-text-tertiary, #9ca3af);
       font-size: 0.8125rem;
     }
+
+    /* Footer */
+    .spotlight-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.625rem 1rem;
+      background: var(--color-background, #f9fafb);
+      border-top: 1px solid var(--color-border, #e5e7eb);
+      font-size: 0.75rem;
+      color: var(--color-text-tertiary, #9ca3af);
+    }
+
+    .spotlight-video-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.375rem;
+      color: var(--color-primary, #3b82f6);
+      font-weight: 500;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+      font-size: 0.75rem;
+      transition: opacity 0.15s;
+    }
+
+    .spotlight-video-btn:hover {
+      opacity: 0.8;
+      text-decoration: underline;
+    }
   `] })
 export class HelpSearchOverlayComponent {
   private helpCenterService = inject(HelpCenterService);
@@ -403,6 +447,11 @@ export class HelpSearchOverlayComponent {
   selectResult(article: HelpArticle): void {
     this.close();
     this.router.navigate(['/admin/help/center', article.slug]);
+  }
+
+  goToVideos(): void {
+    this.close();
+    this.router.navigate(['/admin/help/videos']);
   }
 
   private search(q: string): void {

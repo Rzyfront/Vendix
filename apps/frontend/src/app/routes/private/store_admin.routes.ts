@@ -778,7 +778,26 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.HelpCenterComponent,
               ),
           },
+          {
+            path: 'videos',
+            loadComponent: () =>
+              import('../../private/modules/store/help/video-library/video-feed.component').then(
+                (c) => c.VideoFeedComponent,
+              ),
+          },
+          {
+            path: 'videos/watch/:slug',
+            loadComponent: () =>
+              import('../../private/modules/store/help/video-library/pages/video-watch/video-watch.component').then(
+                (c) => c.VideoWatchComponent,
+              ),
+          },
         ],
+      },
+      {
+        path: 'videos',
+        redirectTo: 'help/videos',
+        pathMatch: 'full',
       },
       // Expenses Routes
       {
