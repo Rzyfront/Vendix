@@ -115,6 +115,20 @@ describe('StockTransfersService — searchTransferableProducts (D.2)', () => {
     expect(args.take).toBe(10);
   });
 
+  it('query acentuada + flag on ⇒ legacy (paridad, finding #2)', async () => {
+    mockPrisma.products.findMany.mockResolvedValue([]);
+
+    await service.searchTransferableProducts('café tubo', 7, 9, 10);
+
+    // `café`→`cafe` plegado no matchea en `contains`: frase verbatim.
+    const args = mockPrisma.products.findMany.mock.calls[0][0];
+    expect(args.where.AND).toBeUndefined();
+    expect(args.where.OR).toEqual([
+      { name: { contains: 'café tubo', mode: 'insensitive' } },
+      { sku: { contains: 'café tubo', mode: 'insensitive' } },
+    ]);
+  });
+
   it('sin tienda / flags down ⇒ legacy (fail-open)', async () => {
     mockPrisma.products.findMany.mockResolvedValue([row({ id: 1 })]);
 

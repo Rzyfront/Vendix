@@ -1144,6 +1144,28 @@ describe('CatalogService public smart search (D.3)', () => {
     expect(result.data).toHaveLength(1);
   });
 
+  it('query acentuada + flag on ⇒ OR-frase legacy (paridad, finding #2)', async () => {
+    prisma.products.findMany.mockResolvedValue([listedProduct(7)]);
+    prisma.products.count.mockResolvedValue(1);
+
+    const result = await service.getProducts({
+      search: 'café sello',
+      page: 1,
+      limit: 10,
+    } as any);
+
+    // `café`→`cafe` plegado no matchea en `contains`: frase verbatim.
+    const args = prisma.products.findMany.mock.calls[0][0];
+    expect(args.where.AND).toBeUndefined();
+    expect(args.where.OR).toEqual([
+      { name: { contains: 'café sello', mode: 'insensitive' } },
+      { description: { contains: 'café sello', mode: 'insensitive' } },
+      { sku: { contains: 'café sello', mode: 'insensitive' } },
+    ]);
+    expect(result.meta.applied_tokens).toEqual(['cafe', 'sello']);
+    expect(result.data).toHaveLength(1);
+  });
+
   it('sobre scan-cap: fail-open a legacy (OR-frase)', async () => {
     const big = Array.from({ length: 201 }, (_, i) => ({
       id: 1000 + i,

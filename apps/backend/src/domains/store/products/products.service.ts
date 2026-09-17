@@ -1559,9 +1559,12 @@ export class ProductsService {
           },
         ],
       }),
-      // B.1 (ADR-02): wrap — smart AND×OR con OR legacy vivo adentro
-      // (fallback stopwords + path L1-off). `!barcode` conserva la
-      // precedencia exacta del barcode (DB-01, FB-02).
+      // B.1 (ADR-02): wrap — smart AND×OR, o frase legacy completa cuando
+      // el gate lo decide (stopwords, flags off, o query con vocales
+      // acentuadas/ç que el fold del tokenizer volvería inmatcheable en
+      // `contains` — re-auditoría PR #817 finding #2, paridad probada en
+      // vivo). `!barcode` conserva la precedencia exacta del barcode
+      // (DB-01, FB-02).
       ...(search && !barcode && this.buildSearchCondition(search, flags)),
       ...(brand_id && { brand_id }),
       ...(category_id && {
@@ -2195,6 +2198,9 @@ export class ProductsService {
     const filters: TrigramFilterSet = {
       state: query.state ?? null,
       includeInactive: query.include_inactive ?? null,
+      // Re-auditoría PR #817: sin esto el recall trigram ignoraba el
+      // effectiveState=ACTIVE del POS (total inflado + páginas cortas).
+      posOptimized: query.pos_optimized ?? null,
       brandId: query.brand_id ?? null,
       categoryId: query.category_id ?? null,
       trackInventory: query.track_inventory ?? null,

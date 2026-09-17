@@ -19,6 +19,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../shared/services/stock-level-manager.service';
 import {
   buildTokenAndFieldOr,
+  isSearchAccentFolded,
   tokenizeInternal,
   type SearchTextFieldMap,
 } from '@common/utils/search-text.util';
@@ -766,7 +767,13 @@ export class InventoryAdjustmentsService {
     limit = 10,
   ) {
     const tokens = tokenizeInternal(search);
-    if (tokens.length > 0 && (await this.isSmartAdjustSearchOn())) {
+    // Re-auditoría PR #817 (finding #2): query acentuada → legacy (tokens
+    // plegados inmatcheables en `contains`), igual que el POS.
+    if (
+      tokens.length > 0 &&
+      !isSearchAccentFolded(search) &&
+      (await this.isSmartAdjustSearchOn())
+    ) {
       try {
         return await this.searchAdjustableProductsRanked(
           tokens,

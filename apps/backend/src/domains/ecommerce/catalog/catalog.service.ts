@@ -27,6 +27,7 @@ import type {
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 import {
   buildTokenAndFieldOr,
+  isSearchAccentFolded,
   tokenizeInternal,
   tokenizePublic,
   type SearchTextFieldMap,
@@ -158,8 +159,12 @@ export class CatalogService {
     const tokens_truncated =
       applied_tokens.length > 0 &&
       tokenizeInternal(rawSearch).length > applied_tokens.length;
+    // Re-auditoría PR #817 (finding #2): query acentuada → OR legacy del
+    // where base (los tokens plegados no matchean en `contains`).
     const smartSearch =
-      applied_tokens.length > 0 && (await this.isSmartCatalogSearchOn());
+      applied_tokens.length > 0 &&
+      !isSearchAccentFolded(rawSearch) &&
+      (await this.isSmartCatalogSearchOn());
 
     // D.3 (F-047): caché corta de búsqueda (store + query-norm + page +
     // flag-l1 en la llave). Hit ⇒ sin DB; miss/caída ⇒ se computa.

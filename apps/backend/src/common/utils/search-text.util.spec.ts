@@ -146,6 +146,29 @@ describe('search-text.util (CP-pos-smart-search A.1)', () => {
       expect(isSmartSearchActive('cafe', undefined)).toBe(false);
     });
 
+    it('query con vocal acentuada/ç → false (paridad legacy, finding #2)', () => {
+      // El tokenizer pliega café→cafe pero `contains` es accent-sensitive:
+      // sin este fallback, `café`→`Café` devolvía 0 en L1/L2 (legacy: 1).
+      for (const q of [
+        'café',
+        'CAFÉ MOLIDO',
+        'qué como',
+        'coração',
+        'façade',
+        'é', // e + U+0301 descompuesto: también pliega
+      ]) {
+        expect(isSmartSearchActive(q, on)).toBe(false);
+      }
+    });
+
+    it('ñ/Ñ y símbolos NO disparan el fallback (recall smart correcto)', () => {
+      // ñ preservada por el tokenizer (F-079); símbolos→espacio benefician
+      // al AND (cafe-especial matchea "Cafe Especial").
+      for (const q of ['niño', 'NIÑO DIOS', 'cafe-especial', 'cafe 100%']) {
+        expect(isSmartSearchActive(q, on)).toBe(true);
+      }
+    });
+
     it('findAll≡findIds: where y rank deciden idéntico por caller', () => {
       // Ambos consumen el MISMO predicado con los MISMOS args: la decisión
       // no puede partirse (set nuevo + orden viejo) por pos_optimized.

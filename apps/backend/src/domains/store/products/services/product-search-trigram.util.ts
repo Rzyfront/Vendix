@@ -64,13 +64,20 @@ export class TrigramFilterError extends Error {
 
 /**
  * Subconjunto de ProductQueryDto que el raw debe respetar (F-028). Espeja
- * `buildProductWhere`: state/include_inactive, brand, category, flags,
- * tri-estado is_ingredient (undefined = sin filtro) e ids masivos.
+ * `buildProductWhere`: state/include_inactive/pos_optimized, brand, category,
+ * flags, tri-estado is_ingredient (undefined = sin filtro) e ids masivos.
  * `search`/`barcode` no viajan: el caller ya garantizó search∧¬barcode.
  */
 export interface TrigramFilterSet {
   readonly state?: string | null;
   readonly includeInactive?: boolean | null;
+  /**
+   * Re-auditoría PR #817 — `pos_optimized` SÍ filtra estado en
+   * `buildProductWhere` (→ ACTIVE, con precedencia sobre include_inactive).
+   * Sin este espejo el recall trigram incluía inactivos que el hydrate
+   * (segunda cerradura) podaba ⇒ total inflado + páginas cortas en el POS.
+   */
+  readonly posOptimized?: boolean | null;
   readonly brandId?: number | null;
   readonly categoryId?: number | null;
   readonly trackInventory?: boolean | null;
@@ -163,6 +170,10 @@ export function buildTrigramFilterClauses(
       throw new TrigramFilterError(`state inválido: ${String(f.state)}`);
     }
     clauses.push(`p.state = ${acc.push(f.state)}::product_state_enum`);
+  } else if (f.posOptimized === true) {
+    // Espejo effectiveState=ACTIVE (buildProductWhere: pos_optimized gana a
+    // include_inactive). Param, no literal: la numeración $n del twin intacta.
+    clauses.push(`p.state = ${acc.push('active')}::product_state_enum`);
   } else if (f.includeInactive === true) {
     // Sin predicado: incluye todo (espejo effectiveState=undefined).
   } else {

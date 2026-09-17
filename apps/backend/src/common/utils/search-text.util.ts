@@ -255,6 +255,19 @@ export interface SmartSearchGateFlags {
  * porque ambos comparten `buildProductWhere` + este predicado (DB-17).
  *
  * Total never-throw: flags nulos/raros → `false` (fail-closed a legacy).
+ *
+ * Re-auditoría PR #817 (finding #2, paridad legacy): el `where` smart
+ * tokeniza ANTES de golpear Prisma y el tokenizer pliega acentos
+ * (`café`→`cafe`), pero `contains` es accent-sensitive ⇒ una query
+ * acentuada que legacy SÍ matcheaba (`café`→`Café`) devolvía 0 en L1/L2
+ * (probado en vivo: legacy total=1, L2 total=0). Por eso las vocales
+ * acentuadas + ç caen al `where` legacy (recall idéntico a prod; el rank
+ * L2 sigue ordenando ese conjunto porque el scorer pliega ambos lados).
+ * ñ/Ñ quedan FUERA a propósito: el tokenizer las preserva (F-079), así
+ * que su recall smart es correcto y no se degrada a frase legacy.
+ * La detección NO es una clase manual: replica el fold del tokenizer
+ * (lower + NFD + strip U+0300–U+036F, ñ protegida) y compara — si el fold
+ * muta alguna letra, `contains` no puede matchearla y toca legacy.
  */
 export function isSmartSearchActive(
   query: unknown,
@@ -267,7 +280,30 @@ export function isSmartSearchActive(
     const anyTierOn =
       flags.l1 === true || flags.l2 === true || flags.trigram === true;
     if (!anyTierOn) return false;
+    if (isSearchAccentFolded(query)) {
+      return false;
+    }
     return tokenizeInternal(query).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Re-auditoría PR #817 — `true` si el fold del tokenizer muta alguna letra
+ * de la query (vocal acentuada, ç, …). ñ/Ñ protegidas igual que en
+ * `normalizeSearchText`: su recall smart es correcto. Símbolos/emoji no
+ * disparan: su fold (→espacio) BENEFICIA al AND tokenizado.
+ *
+ * Público para D.1/D.2/D.3: esas superficies gatean con su propio
+ * `isSmart*On` + `tokens.length` (no consumen `isSmartSearchActive`), así
+ * que replican la guarda anti-acentos con este predicado.
+ */
+export function isSearchAccentFolded(query: unknown): boolean {
+  try {
+    if (typeof query !== 'string' || query.length === 0) return false;
+    const lower = query.toLowerCase().split('ñ').join(ENE_PLACEHOLDER);
+    return lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '') !== lower;
   } catch {
     return false;
   }

@@ -238,6 +238,47 @@ describe('product-search-trigram (C.3)', () => {
       }
     });
 
+    it('posOptimized → ACTIVE; precedencia state > pos_optimized > include_inactive', () => {
+      const pos = buildTrigramRankedQuery(
+        1,
+        ['cafe'],
+        { posOptimized: true },
+        'cafe',
+        20,
+        0,
+      );
+      expect(extractWhereClause(pos.sql)).toContain('p.state = $');
+      expect(pos.params).toContain('active');
+      // pos_optimized gana a include_inactive (espejo buildProductWhere).
+      const posPlusAll = extractWhereClause(
+        buildTrigramRankedQuery(
+          1,
+          ['cafe'],
+          { posOptimized: true, includeInactive: true },
+          'cafe',
+          20,
+          0,
+        ).sql,
+      );
+      expect(posPlusAll).toContain('p.state = $');
+      // state explícito gana a pos_optimized.
+      const explicit = buildTrigramRankedQuery(
+        1,
+        ['cafe'],
+        { state: 'inactive', posOptimized: true },
+        'cafe',
+        20,
+        0,
+      );
+      expect(explicit.params).toContain('inactive');
+      expect(explicit.params).not.toContain('active');
+      // COUNT twin hereda el mismo predicado (total honesto en el POS).
+      const counted = extractWhereClause(
+        buildTrigramCountQuery(1, ['cafe'], { posOptimized: true }).sql,
+      );
+      expect(counted).toContain('p.state = $');
+    });
+
     it('isIngredient tri-estado: undefined = sin filtro', () => {
       const where = extractWhereClause(
         buildTrigramRankedQuery(

@@ -2220,7 +2220,7 @@ describe('ProductsService', () => {
       mockPrismaService.products.count.mockResolvedValue(0);
 
       const result = await service.findAll({
-        search: 'café chocolate',
+        search: 'cafe chocolate',
         page: 1,
         limit: 10,
       });
@@ -2229,7 +2229,7 @@ describe('ProductsService', () => {
       // Un AND por token (ADR-02); el OR legacy de frase desaparece.
       expect(where.AND).toHaveLength(2);
       expect(where.OR).toBeUndefined();
-      // Tokens normalizados (unaccent): 'café'→'cafe'.
+      // Tokens normalizados (lower + símbolos→espacio).
       expect(where.AND[0].OR).toContainEqual({
         name: { contains: 'cafe', mode: 'insensitive' },
       });
@@ -2250,6 +2250,33 @@ describe('ProductsService', () => {
       });
       // L1 = recall nuevo, orden legacy by design (el rank es L2).
       expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(1);
+      expect(result.meta.search).toEqual({
+        rank_mode: 'legacy',
+        layer: 'l1',
+        degraded: false,
+      });
+    });
+
+    it('flags on (l1) + query acentuada → frase legacy (paridad, finding #2)', async () => {
+      primeSearchPath(FLAGS_L1, 'l1');
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+
+      const result = await service.findAll({
+        search: 'café chocolate',
+        page: 1,
+        limit: 10,
+      });
+
+      // `café`→`cafe` en el tokenizer volvería el AND inmatcheable en
+      // `contains` (accent-sensitive): legacy byte-idéntico a prod.
+      const where = mockPrismaService.products.findMany.mock.calls[0][0].where;
+      expect(where.AND).toBeUndefined();
+      expect(where.OR).toEqual([
+        { name: { contains: 'café chocolate', mode: 'insensitive' } },
+        { description: { contains: 'café chocolate', mode: 'insensitive' } },
+        { sku: { contains: 'café chocolate', mode: 'insensitive' } },
+      ]);
       expect(result.meta.search).toEqual({
         rank_mode: 'legacy',
         layer: 'l1',

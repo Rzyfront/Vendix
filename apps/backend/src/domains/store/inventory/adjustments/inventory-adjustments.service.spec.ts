@@ -110,6 +110,20 @@ describe('InventoryAdjustmentsService — searchAdjustableProducts (D.1)', () =>
     expect(args.take).toBe(10);
   });
 
+  it('query acentuada + flag on ⇒ legacy (paridad, finding #2)', async () => {
+    mockPrisma.stock_levels.findMany.mockResolvedValue([]);
+
+    await service.searchAdjustableProducts('café tubo', 7, 10);
+
+    const args = mockPrisma.stock_levels.findMany.mock.calls[0][0];
+    expect(args.where.products.AND).toBeUndefined();
+    expect(args.where.products.OR).toEqual([
+      { name: { contains: 'café tubo', mode: 'insensitive' } },
+      { sku: { contains: 'café tubo', mode: 'insensitive' } },
+      { barcode: { contains: 'café tubo', mode: 'insensitive' } },
+    ]);
+  });
+
   it('sin tienda / flags down / throw ⇒ legacy (fail-open)', async () => {
     mockPrisma.stock_levels.findMany.mockResolvedValue([row({ id: 1 })]);
 
