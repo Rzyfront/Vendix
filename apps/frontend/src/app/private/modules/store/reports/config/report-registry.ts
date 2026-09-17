@@ -946,6 +946,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     requiresDateRange: false,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
+    serverPagination: true,
     trackKey: 'id',
     columns: [
       { key: 'document_number', header: 'ID de Órdenes', type: 'text' },

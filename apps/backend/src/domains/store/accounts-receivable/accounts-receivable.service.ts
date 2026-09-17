@@ -284,7 +284,12 @@ export class AccountsReceivableService {
               data: {
                 amount_paid: Math.round(newPaid * 100) / 100,
                 remaining_balance: Math.round(Math.max(newBal, 0) * 100) / 100,
-                state: newBal <= 0.01 ? 'paid' : 'partial',
+                state:
+                  newBal <= 0.01
+                    ? 'paid'
+                    : inst.state === 'overdue'
+                      ? 'overdue'
+                      : 'partial',
                 paid_at: newBal <= 0.01 ? new Date() : null,
               },
             });
