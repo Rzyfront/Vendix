@@ -252,6 +252,7 @@ export class SplitOrderService {
     order: {
       id: number;
       store_id: number;
+      created_by_user_id?: number | null;
       customer_id: number | null;
       currency: string | null;
       channel: string;
