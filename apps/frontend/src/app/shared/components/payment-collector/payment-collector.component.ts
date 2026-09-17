@@ -356,11 +356,50 @@ export class PaymentCollectorComponent implements OnInit {
   ]);
 
   readonly installmentOptions = computed(() =>
-    (this.installments() ?? []).map((inst: any) => ({
-      value: Number(inst?.id ?? inst?.installment_id ?? 0),
-      label: String(inst?.label ?? inst?.due_date ?? `Cuota ${inst?.number ?? inst?.id ?? ''}`),
-      amount: Number(inst?.amount ?? 0),
-    })),
+    (this.installments() ?? []).map((inst: any, index: number) => {
+      const id = Number(inst?.id ?? inst?.installment_id ?? 0);
+      const st = String(inst?.state ?? inst?.status ?? '').toLowerCase();
+      const isPaid = st === 'paid' || Boolean(inst?.paid_at);
+      const isForgiven = st === 'forgiven';
+      const isPartial = st === 'partial';
+      const disabled = isPaid || isForgiven;
+
+      let label = inst?.label;
+      if (!label) {
+        const num = inst?.installment_number ?? inst?.number ?? index + 1;
+        const parts: string[] = [`Cuota ${num}`];
+
+        const dateStr = this.formatInstallmentDate(inst?.due_date ?? inst?.date);
+        if (dateStr) {
+          parts.push(dateStr);
+        }
+
+        const rawAmount =
+          inst?.remaining_balance != null && Number(inst.remaining_balance) > 0
+            ? Number(inst.remaining_balance)
+            : Number(inst?.amount ?? 0);
+
+        const formattedAmount = this.currencyFormat.format(rawAmount);
+
+        let amountText = `(${formattedAmount})`;
+        if (isPaid) {
+          amountText = `(${formattedAmount} - Pagada)`;
+        } else if (isForgiven) {
+          amountText = `(${formattedAmount} - Condonada)`;
+        } else if (isPartial) {
+          amountText = `(${formattedAmount} pendiente)`;
+        }
+
+        label = `${parts.join(' - ')} ${amountText}`;
+      }
+
+      return {
+        value: id,
+        label,
+        amount: Number(inst?.amount ?? 0),
+        disabled,
+      };
+    }),
   );
 
   // ── Derived amounts ──────────────────────────────────────────────────────
@@ -778,6 +817,22 @@ export class PaymentCollectorComponent implements OnInit {
     return (method.icon as IconName) || (resolvePaymentIcon(String(method.type)) as IconName);
   }
 
+  formatInstallmentDate(rawDate?: string | Date | null): string {
+    if (!rawDate) return '';
+    try {
+      const d = new Date(rawDate);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleDateString('es-CO', {
+        timeZone: 'UTC',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+    } catch {
+      return '';
+    }
+  }
+
   onInstallmentChange(value: string): void {
     const id = Number(value);
     const valid = Number.isFinite(id) && id > 0;
@@ -789,7 +844,11 @@ export class PaymentCollectorComponent implements OnInit {
         (i: any) => Number(i?.id ?? i?.installment_id) === id,
       );
       const bal = inst ? Number(inst.remaining_balance ?? inst.amount ?? 0) : 0;
-      if (bal > 0) this.amountOverrideControl.setValue(bal);
+      if (bal > 0) {
+        this.amountOverrideControl.setValue(bal);
+      }
+    } else if (!valid && this.config().allowAmountOverride) {
+      this.amountOverrideControl.setValue(null);
     }
   }
 
