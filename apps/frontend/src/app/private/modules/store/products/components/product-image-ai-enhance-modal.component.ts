@@ -213,11 +213,18 @@ import { ProductsService } from '../services/products.service';
             [disabled]="isGenerating()"
             (input)="prompt.set($any($event.target).value)"
           ></textarea>
-          <p class="text-xs text-gray-500">
-            {{ mode() === 'generate'
-              ? 'La IA generará una foto comercial cuadrada (1:1) optimizada para catálogo, POS y tienda virtual.'
-              : 'La IA mantiene la imagen original como referencia y devuelve una alternativa editable antes de guardar.' }}
-          </p>
+          @if (generatedImageUrl()) {
+            <div class="flex items-center gap-1.5 text-xs text-primary-600 font-medium">
+              <app-icon name="sparkles" size="13" class="shrink-0"></app-icon>
+              <span>¿No te convenció el resultado? Modifica la instrucción y pulsa <strong>Generar</strong> para probar otra versión.</span>
+            </div>
+          } @else {
+            <p class="text-xs text-gray-500">
+              {{ mode() === 'generate'
+                ? 'La IA generará una foto comercial cuadrada (1:1) optimizada para catálogo, POS y tienda virtual.'
+                : 'La IA mantiene la imagen original como referencia y devuelve una alternativa editable antes de guardar.' }}
+            </p>
+          }
         </div>
 
         @if (errorMessage(); as error) {
@@ -267,26 +274,8 @@ import { ProductsService } from '../services/products.service';
         }
       </div>
 
-      <div slot="footer" class="flex flex-wrap justify-end gap-2">
-        @if (!generatedImageUrl()) {
-          <app-button
-            variant="outline"
-            (clicked)="close()"
-            [disabled]="isGenerating()"
-          >
-            Cancelar
-          </app-button>
-          <app-button
-            variant="primary"
-            (clicked)="generate()"
-            [loading]="isGenerating()"
-            [showTextWhileLoading]="true"
-            [disabled]="!canGenerate()"
-          >
-            <app-icon slot="icon" name="sparkles" size="15"></app-icon>
-            Generar
-          </app-button>
-        } @else {
+      <div slot="footer" class="flex flex-wrap items-center justify-between gap-2 w-full">
+        <div>
           @if (mode() === 'enhance') {
             <app-button
               variant="outline"
@@ -294,28 +283,6 @@ import { ProductsService } from '../services/products.service';
               [disabled]="isGenerating()"
             >
               Dejar anterior
-            </app-button>
-            <app-button
-              variant="outline"
-              (clicked)="retryGeneration()"
-              [disabled]="isGenerating() || !canGenerate()"
-            >
-              <app-icon slot="icon" name="sparkles" size="14"></app-icon>
-              Generar de nuevo
-            </app-button>
-            <app-button
-              variant="outline"
-              (clicked)="keepBoth()"
-              [disabled]="remainingSlots() <= 0 || isGenerating()"
-            >
-              Conservar ambas
-            </app-button>
-            <app-button
-              variant="primary"
-              (clicked)="replaceOriginal()"
-              [disabled]="isGenerating()"
-            >
-              Reemplazar
             </app-button>
           } @else {
             <app-button
@@ -325,24 +292,50 @@ import { ProductsService } from '../services/products.service';
             >
               Cancelar
             </app-button>
-            <app-button
-              variant="outline"
-              (clicked)="retryGeneration()"
-              [disabled]="isGenerating() || !canGenerate()"
-            >
-              <app-icon slot="icon" name="sparkles" size="14"></app-icon>
-              Generar de nuevo
-            </app-button>
-            <app-button
-              variant="primary"
-              (clicked)="confirmGenerated()"
-              [disabled]="remainingSlots() <= 0 || isGenerating()"
-            >
-              <app-icon slot="icon" name="check" size="15"></app-icon>
-              Agregar imagen
-            </app-button>
           }
-        }
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <app-button
+            [variant]="!generatedImageUrl() ? 'primary' : 'outline'"
+            (clicked)="generate()"
+            [loading]="isGenerating()"
+            [showTextWhileLoading]="true"
+            [disabled]="!canGenerate()"
+          >
+            <app-icon slot="icon" name="sparkles" size="15"></app-icon>
+            Generar
+          </app-button>
+
+          @if (generatedImageUrl()) {
+            @if (mode() === 'enhance') {
+              <app-button
+                variant="outline"
+                (clicked)="keepBoth()"
+                [disabled]="remainingSlots() <= 0 || isGenerating()"
+              >
+                Conservar ambas
+              </app-button>
+              <app-button
+                variant="primary"
+                (clicked)="replaceOriginal()"
+                [disabled]="isGenerating()"
+              >
+                <app-icon slot="icon" name="check" size="15"></app-icon>
+                Reemplazar
+              </app-button>
+            } @else {
+              <app-button
+                variant="primary"
+                (clicked)="confirmGenerated()"
+                [disabled]="remainingSlots() <= 0 || isGenerating()"
+              >
+                <app-icon slot="icon" name="check" size="15"></app-icon>
+                Agregar imagen
+              </app-button>
+            }
+          }
+        </div>
       </div>
     </app-modal>
   `,
