@@ -43,10 +43,23 @@ export const AI_MODEL_TYPES: readonly AIModelType[] = [
   'transcription',
 ] as const;
 
+export const AI_IMAGE_GENERATION_MODES = [
+  'auto',
+  'chat_completions',
+  'images_api',
+  'standard',
+] as const;
+
+export type AIImageGenerationMode =
+  (typeof AI_IMAGE_GENERATION_MODES)[number];
+
 /**
- * Embedding keys managed by the superadmin config modal (B.2,
- * CP-embeddings-openrouter; consumed by OpenAICompatibleProvider
- * `settings?.embedding_model` / `settings?.encoding_format`).
+ * Settings keys managed by the superadmin config modal and type-checked on
+ * write. Embeddings (B.2, CP-embeddings-openrouter) are consumed by
+ * OpenAICompatibleProvider `settings?.embedding_model` /
+ * `settings?.encoding_format`; the image keys drive its transport routing;
+ * `capabilities` lists the extra model types of a multimodal config beyond
+ * its primary `model_type` column (displayed as the Multimodal badge).
  *
  * `settings` stays an open bag: any other key (thinking, pricing,
  * temperature, ...) passes through to storage untouched. A strict nested
@@ -58,6 +71,9 @@ export interface AIConfigSettings {
   embedding_model?: string;
   dimensions?: number;
   encoding_format?: string;
+  image_generation_mode?: AIImageGenerationMode;
+  image_model?: string;
+  capabilities?: AIModelType[];
   [key: string]: any;
 }
 
@@ -65,6 +81,24 @@ function isNonEmptyString(value: unknown, maxLength: number): boolean {
   return (
     typeof value === 'string' && value.length > 0 && value.length <= maxLength
   );
+}
+
+function isCapabilitiesArray(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8) {
+    return false;
+  }
+  const seen = new Set<unknown>();
+  for (const entry of value) {
+    if (
+      typeof entry !== 'string' ||
+      !(AI_MODEL_TYPES as readonly unknown[]).includes(entry) ||
+      seen.has(entry)
+    ) {
+      return false;
+    }
+    seen.add(entry);
+  }
+  return true;
 }
 
 @ValidatorConstraint({ name: 'AIConfigSettingsKeys', async: false })
@@ -97,14 +131,37 @@ export class AIConfigSettingsKeysConstraint
     ) {
       return false;
     }
+    if (
+      settings.image_generation_mode !== undefined &&
+      !(AI_IMAGE_GENERATION_MODES as readonly unknown[]).includes(
+        settings.image_generation_mode,
+      )
+    ) {
+      return false;
+    }
+    if (
+      settings.image_model !== undefined &&
+      !isNonEmptyString(settings.image_model, 255)
+    ) {
+      return false;
+    }
+    if (
+      settings.capabilities !== undefined &&
+      !isCapabilitiesArray(settings.capabilities)
+    ) {
+      return false;
+    }
     return true;
   }
 
   defaultMessage(args: ValidationArguments): string {
     return (
-      `${args.property} has an invalid embedding key: embedding_model and ` +
+      `${args.property} has an invalid key: embedding_model and ` +
       `encoding_format must be non-empty strings, dimensions must be a ` +
-      `positive integer`
+      `positive integer, image_generation_mode must be one of ` +
+      `${AI_IMAGE_GENERATION_MODES.join(', ')}, image_model must be a ` +
+      `non-empty string, capabilities must be an array of 1-8 unique ` +
+      `model types`
     );
   }
 }

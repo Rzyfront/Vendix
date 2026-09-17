@@ -3750,6 +3750,36 @@ export class OrderDetailsPageComponent {
       });
   }
 
+  // ─── Gating por permiso (gestión avanzada = admin/encargado) ──────
+  /**
+   * Gestión avanzada de cocina = admin/encargado: sin el permiso, el botón
+   * queda visible pero deshabilitado con motivo (patrón
+   * `deliverDisabledReason` del KDS), nunca un 403 por sorpresa. Roles con
+   * permiso ven cero cambios. El predicado de negocio (`canResendOrderItem`)
+   * no se toca: el permiso se gatea en el llamador.
+   */
+  readonly canUseKitchenResend = computed(() =>
+    this.hasNamedPermission('store:kitchen_fire:resend'),
+  );
+  readonly resendDisabledReason =
+    'Solo un encargado puede reenviar platos a cocina';
+  readonly canUseReverseDelivered = computed(() =>
+    this.hasNamedPermission('store:orders:order_flow:cancel_delivered'),
+  );
+  readonly reverseDisabledReason =
+    'Solo un encargado puede reversar entregas';
+
+  /** Patrón `hasPermission` de `pos-cart.component.ts` (con bypass super_admin). */
+  private hasNamedPermission(permission: string): boolean {
+    const permissions = this.authFacade.userPermissions();
+    const roles = this.authFacade.userRoles();
+    return (
+      permissions.includes(permission) ||
+      roles.includes('super_admin') ||
+      roles.includes('SUPER_ADMIN')
+    );
+  }
+
   // ─── QUI-762 — reenviar un plato a cocina ─────────────────────────
   /**
    * Espejo del predicado `KITCHEN_FIRE_NOT_RESENDABLE` del backend.
@@ -3768,7 +3798,7 @@ export class OrderDetailsPageComponent {
 
   /** Abre el modal con el ítem elegido. */
   openResendModal(item: OrderItem): void {
-    if (!this.canResend(item)) return;
+    if (!this.canResend(item) || !this.canUseKitchenResend()) return;
     this.resendItemId.set(item.id);
   }
 
@@ -3984,9 +4014,10 @@ export class OrderDetailsPageComponent {
   readonly reversingItemId = signal<number | null>(null);
 
   /**
-   * Ofrece "Reversar" a TODO ítem entregado no cancelado. Sin gate de
-   * permiso en el frontend: si el rol no tiene el permiso, el backend
-   * responde 403 y se muestra el toast correspondiente.
+   * Ofrece "Reversar" a TODO ítem entregado no cancelado. El permiso
+   * (`store:orders:order_flow:cancel_delivered`) se gatea en el llamador:
+   * sin él, el botón queda visible pero deshabilitado con motivo en vez de
+   * ofrecer un 403 por sorpresa.
    */
   canReverseDeliveredItem(item: OrderItem): boolean {
     return !!item.delivered_at && !item.cancelled_at;
@@ -4003,7 +4034,8 @@ export class OrderDetailsPageComponent {
    * Tras éxito, toast + refreshOrder() (patrón de `deliverItem`).
    */
   reverseDeliveredItem(item: OrderItem): void {
-    if (!this.canReverseDeliveredItem(item)) return;
+    if (!this.canReverseDeliveredItem(item) || !this.canUseReverseDelivered())
+      return;
     const orderId = this.order()?.id;
     if (!orderId) return;
     this.dialogService

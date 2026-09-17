@@ -75,6 +75,19 @@ export interface SalesByCustomer {
   last_order_date: string | null;
 }
 
+// Sales by User (Seller)
+export interface SalesByUser {
+  id: string;
+  user_id: number | null;
+  user_name: string;
+  user_email: string;
+  orders_count: number;
+  items_sold: number;
+  grand_total: number;
+  avg_order: number;
+  last_order_date: string | null;
+}
+
 // Sales by Channel
 export interface SalesByChannel {
   channel: string;

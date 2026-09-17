@@ -45,6 +45,15 @@ export interface ProductImageEnhancementRequest {
   extra_context?: Record<string, any>;
 }
 
+export interface ProductImageGenerationRequest {
+  prompt: string;
+  aspect_ratio?: string;
+  product_name?: string;
+  product_type?: 'physical' | 'service';
+  description?: string;
+  extra_context?: Record<string, any>;
+}
+
 export interface ProductImageEnhancementResult {
   image_url: string;
   revised_prompt?: string;
@@ -378,6 +387,24 @@ export class ProductsService {
       .post<
         ApiResponse<ProductImageEnhancementResult>
       >(`${this.apiUrl}/store/products/enhance-image`, data)
+      .pipe(
+        map((response) => {
+          if (!response?.success || !response.data?.image_url) {
+            throw response;
+          }
+
+          return response.data;
+        }),
+      );
+  }
+
+  generateProductImage(
+    data: ProductImageGenerationRequest,
+  ): Observable<ProductImageEnhancementResult> {
+    return this.http
+      .post<
+        ApiResponse<ProductImageEnhancementResult>
+      >(`${this.apiUrl}/store/products/generate-image`, data)
       .pipe(
         map((response) => {
           if (!response?.success || !response.data?.image_url) {

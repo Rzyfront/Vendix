@@ -8,6 +8,7 @@ import { InventoryTransactionsModule } from '../transactions/inventory-transacti
 import { PrismaModule } from '../../../../prisma/prisma.module';
 import { StockLevelManager } from '../shared/services/stock-level-manager.service';
 import { ResponseModule } from '@common/responses/response.module';
+import { SettingsModule } from '../../settings/settings.module';
 
 @Module({
   controllers: [InventoryAdjustmentsController],
@@ -22,6 +23,7 @@ import { ResponseModule } from '@common/responses/response.module';
     PrismaModule,
     EventEmitterModule,
     ResponseModule,
+    SettingsModule,
   ],
   exports: [InventoryAdjustmentsService],
 })

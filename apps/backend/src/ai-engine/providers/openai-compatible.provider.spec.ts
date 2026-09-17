@@ -660,4 +660,214 @@ describe('OpenAICompatibleProvider', () => {
       );
     });
   });
+
+  describe('OpenRouter images API', () => {
+    const originalFetch = global.fetch;
+    let fetchMock: jest.Mock;
+
+    const pngB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEA';
+    const chatRedirect404 =
+      '404 meta/muse-image is an image generation model and cannot be ' +
+      'used with the chat/completions endpoint. Use the /api/v1/images ' +
+      'endpoint instead.';
+
+    const imageProvider = (
+      baseUrl: string,
+      settings: Record<string, any> = {},
+      modelId = 'meta/muse-image',
+    ) =>
+      new OpenAICompatibleProvider({
+        provider: 'Custom',
+        sdkType: 'openai_compatible',
+        apiKey: 'test-key',
+        modelId,
+        baseUrl,
+        modelType: 'image',
+        settings: { model_type: 'image', ...settings },
+      });
+
+    beforeEach(() => {
+      fetchMock = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          model: 'meta/muse-image',
+          data: [{ b64_json: pngB64, media_type: 'image/png' }],
+        }),
+      });
+      global.fetch = fetchMock as any;
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+      jest.restoreAllMocks();
+    });
+
+    it('posts {model, prompt} to the configured /images URL', async () => {
+      const provider = imageProvider('https://openrouter.ai/api/v1', {
+        image_generation_mode: 'images_api',
+      });
+
+      const response = await provider.generateImage('a calm lake');
+
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://openrouter.ai/api/v1/images');
+      expect(JSON.parse(init.body)).toEqual({
+        model: 'meta/muse-image',
+        prompt: 'a calm lake',
+      });
+      expect(response).toMatchObject({
+        success: true,
+        model: 'meta/muse-image',
+      });
+      expect(response.imageBase64).toBe(`data:image/png;base64,${pngB64}`);
+    });
+
+    it('uses a pasted full /images URL verbatim instead of doubling the path', async () => {
+      const provider = imageProvider('https://openrouter.ai/api/v1/images', {
+        image_generation_mode: 'images_api',
+      });
+
+      await provider.generateImage('a calm lake');
+
+      const [url] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://openrouter.ai/api/v1/images');
+      // The SDK still needs a root, derived — never replacing the raw call.
+      expect((provider as any).client.baseURL).toBe(
+        'https://openrouter.ai/api/v1',
+      );
+    });
+
+    it('falls back from the chat 404 to /images in auto mode', async () => {
+      const provider = imageProvider('https://openrouter.ai/api/v1');
+      jest
+        .spyOn((provider as any).client.chat.completions, 'create')
+        .mockRejectedValueOnce(new Error(chatRedirect404));
+
+      const response = await provider.generateImage('a calm lake');
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        'https://openrouter.ai/api/v1/images',
+      );
+      expect(response.success).toBe(true);
+    });
+
+    it('does not fall back when the operator pinned chat explicitly', async () => {
+      const provider = imageProvider('https://openrouter.ai/api/v1', {
+        image_generation_mode: 'chat_completions',
+      });
+      jest
+        .spyOn((provider as any).client.chat.completions, 'create')
+        .mockRejectedValueOnce(new Error(chatRedirect404));
+
+      const response = await provider.generateImage('a calm lake');
+
+      expect(response).toMatchObject({
+        success: false,
+        error: chatRedirect404,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('does not fall back on other chat failures', async () => {
+      const provider = imageProvider('https://openrouter.ai/api/v1');
+      jest
+        .spyOn((provider as any).client.chat.completions, 'create')
+        .mockRejectedValueOnce(new Error('401 Unauthorized'));
+
+      const response = await provider.generateImage('a calm lake');
+
+      expect(response).toMatchObject({
+        success: false,
+        error: '401 Unauthorized',
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('resolves the standard transport to the configured model, not gpt-image-1', async () => {
+      const provider = imageProvider('https://api.openai.com/v1', {});
+      const generate = jest
+        .spyOn((provider as any).client.images, 'generate')
+        .mockResolvedValue({
+          data: [{ b64_json: 'abc' }],
+          model: 'meta/muse-image',
+        } as any);
+
+      await provider.generateImage('a calm lake');
+
+      expect(generate).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'meta/muse-image' }),
+      );
+    });
+
+    it('keeps the gpt-image-1 default for non-image configs (legacy image apps on text default)', async () => {
+      // The image apps ship with no image_model in metadata and usually no
+      // pinned config, so they run on the text default — which historically
+      // generated with gpt-image-1. That default must survive this change.
+      const provider = new OpenAICompatibleProvider({
+        provider: 'OpenAI',
+        sdkType: 'openai_compatible',
+        apiKey: 'test-key',
+        modelId: 'gpt-4o-mini',
+        baseUrl: 'https://api.openai.com/v1',
+        modelType: 'text',
+        settings: { model_type: 'text' },
+      });
+      const generate = jest
+        .spyOn((provider as any).client.images, 'generate')
+        .mockResolvedValue({
+          data: [{ b64_json: 'abc' }],
+          model: 'gpt-image-1',
+        } as any);
+
+      await provider.generateImage('a calm lake');
+
+      expect(generate).toHaveBeenCalledWith(
+        expect.objectContaining({ model: 'gpt-image-1' }),
+      );
+    });
+
+    it('sniffs the mime type when the response carries no media_type', async () => {
+      const provider = imageProvider('https://openrouter.ai/api/v1', {
+        image_generation_mode: 'images_api',
+      });
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: [{ b64_json: pngB64 }] }),
+      });
+
+      const response = await provider.generateImage('a calm lake');
+
+      expect(response.imageBase64).toBe(`data:image/png;base64,${pngB64}`);
+    });
+
+    it('downloads url responses instead of returning a remote pointer', async () => {
+      const provider = imageProvider('https://openrouter.ai/api/v1', {
+        image_generation_mode: 'images_api',
+      });
+      const bytes = Buffer.from('fake-png-bytes');
+      fetchMock
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            data: [{ url: 'https://cdn.openrouter.ai/img/1.png' }],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          arrayBuffer: async () => bytes,
+          headers: { get: () => 'image/png' },
+        });
+
+      const response = await provider.generateImage('a calm lake');
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1][0]).toBe(
+        'https://cdn.openrouter.ai/img/1.png',
+      );
+      expect(response.imageBase64).toBe(
+        `data:image/png;base64,${bytes.toString('base64')}`,
+      );
+    });
+  });
 });

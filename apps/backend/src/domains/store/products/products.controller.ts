@@ -24,7 +24,9 @@ import {
   ProductQueryDto,
   GenerateProductDescriptionDto,
   GenerateProductImageEnhancementDto,
+  GenerateProductImageDto,
   UpdateProductPromotionsDto,
+  LogSearchSelectionDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -76,6 +78,28 @@ export class ProductsController {
 
   @ApiOperation({
     summary:
+      'Generar con IA una imagen de producto a partir de descripción y contexto',
+  })
+  @Post('generate-image')
+  @Permissions('store:products:create', 'store:products:update')
+  async generateImage(@Body() dto: GenerateProductImageDto) {
+    const result = await this.productsService.generateImage(dto);
+    return this.responseService.success(result, 'Imagen generada exitosamente');
+  }
+
+  @ApiOperation({
+    summary:
+      'Registrar una selección del buscador (telemetría CTR-por-posición, E.4)',
+  })
+  @Post('search-selections')
+  @Permissions('store:products:read')
+  async logSearchSelection(@Body() dto: LogSearchSelectionDto) {
+    const result = await this.productsService.logSearchSelection(dto);
+    return this.responseService.created(result, 'Selección registrada');
+  }
+
+  @ApiOperation({
+    summary:
       'Crear un producto: nombre, precios, costo, impuestos, categorías, marca, unidades de medida, stock inicial y variantes',
   })
   @Post()
@@ -116,12 +140,16 @@ export class ProductsController {
     try {
       const result = await this.productsService.findAll(query);
       if (result.data && result.meta) {
+        // B.2 (ADR-08): `meta.search` solo viaja con `search`. El spread
+        // condicional preserva la llamada de 5 args cuando no hay search
+        // (contrato que fijan los specs existentes; B.3 los extiende).
         return this.responseService.paginated(
           result.data,
           result.meta.total,
           result.meta.page,
           result.meta.limit,
           'Productos obtenidos exitosamente',
+          ...(result.meta.search ? [result.meta.search] : []),
         );
       }
       return this.responseService.success(
@@ -129,6 +157,11 @@ export class ProductsController {
         'Productos obtenidos exitosamente',
       );
     } catch (error) {
+      // B.1 (F-003, patrón `create()`): deja propagar las excepciones tipadas
+      // Vendix al AllExceptionsFilter para conservar status + error_code +
+      // details; sin esto, todo throw nuevo (tokenizer, rank, hydrate) caía
+      // a 200 `success:false` sin código: grilla vacía silenciosa.
+      if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al obtener los productos',
         error.response?.message || error.message,

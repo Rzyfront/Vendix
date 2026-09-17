@@ -109,6 +109,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding or editing a customer shipping address | `vendix-address-geocoding` |
 | Adding or editing per-industry module rules | `vendix-panel-ui` |
 | Adding or modifying notification types | `vendix-notifications-system` |
+| Adding tokenized multi-field search to a module | `vendix-smart-search` |
 | Adding tool-use to AI features | `vendix-ai-agent-tools` |
 | Adding/removing workspaces | `vendix-monorepo-workspaces` |
 | After creating/modifying a skill | `skill-sync` |
@@ -255,6 +256,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing or creating frontend web code | `vendix-frontend` |
 | Editing payroll calculation, IBC, FSP, exoneration, or integral salary logic | `vendix-payroll` |
 | Editing recipes, BOM explosion, or sub-recipe production orders | `vendix-restaurant-ops` |
+| Editing search cutover, rank weights, or trigram SQL | `vendix-smart-search` |
 | Editing tables, table sessions, or order split logic | `vendix-restaurant-ops` |
 | Editing the route PDF builder (pdf-export.service.ts) | `vendix-dispatch-routes` |
 | Editing the route flow (dispatch, settle, release-stop, close, void) | `vendix-dispatch-routes` |
@@ -306,6 +308,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Linking a PR to its Linear issue when opening a PR to develop | `git-workflow` |
 | Linking a Vexi attachment to the record it originated | `vendix-vexi-agent` |
 | Listing Vendix issues in Linear | `linear-issues` |
+| Making search accent-insensitive (cafe finds Café) | `vendix-smart-search` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
 | Mapping PILA novelties ING/RET/VSP/LMA/IGE/VAC/IRL | `vendix-pila-flatfile` |
@@ -343,6 +346,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Purging or deleting old plan files | `purge-plans` |
 | Querying analytics by date range or bucketing a time series | `vendix-analytics-metrics` |
 | Querying by date ranges in backend | `vendix-date-timezone` |
+| Ranking search results by relevance | `vendix-smart-search` |
 | Rate-limiting by calendar period (not sliding window) | `vendix-redis-quota` |
 | Re-developing solutions identified by a code review below 80% | `pr-code-review` |
 | Reaching the app via the local vhost vendix.com instead of localhost | `how-to-test` |
@@ -353,6 +357,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Registering a component as a VexiUiHost | `vendix-vexi-agent` |
 | Releasing to prod by merging develop into main and moving tickets to In Review | `git-workflow` |
 | Removing a frontend envelope unwrapper that reads success === false | `vendix-error-handling` |
+| Replicating the POS smart-search pattern to another entity | `vendix-smart-search` |
 | Reporting QA results with charts and a critical/urgent section | `qa-report` |
 | Reserving or releasing stock | `vendix-inventory-stock` |
 | Resolving a knowledge gap by creating or updating a skill | `skill-creator` |
