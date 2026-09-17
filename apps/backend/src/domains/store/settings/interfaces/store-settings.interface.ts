@@ -573,6 +573,9 @@ export interface StoreSettings {
   // Vexi - the AI assistant's master switch
   vexi?: VexiSettings;
 
+  // CP-pos-smart-search A.0 — Tier-1 flags del motor de búsqueda del POS.
+  pos_smart_search?: PosSmartSearchSettings;
+
   // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & display settings
   promotions?: PromotionsSettings;
 
@@ -617,6 +620,31 @@ export interface VexiSettings {
    * the panel toggles chat ⇄ voice at runtime regardless of which engine answers.
    */
   voice_engine?: 'realtime' | 'pipeline';
+}
+
+/**
+ * CP-pos-smart-search · A.0 — Tier-1 flags per-store del motor de búsqueda
+ * inteligente del POS (ADR-07).
+ *
+ * Todo default `false`: cada tienda opta deliberadamente, peldaño por
+ * peldaño (l1 → l2 → trigram). Cualquier valor ausente o no-`true` se lee
+ * como off (`coerceSearchFlags`); el kill-switch global Tier-0
+ * (`POS_SMART_SEARCH_OFF`) fuerza legacy por encima de estos flags.
+ *
+ * Escribible por `PATCH /store/settings`. Para que siga siéndolo, la sección
+ * tiene que estar en LOS DOS sitios: `KNOWN_SECTIONS` (`settings.service.ts`)
+ * y la propiedad `pos_smart_search` de `UpdateSettingsDto` (tipada como
+ * `PosSmartSearchSettingsDto`). Faltando cualquiera de las dos, el PATCH se
+ * pierde respondiendo 200 igual — el fallo silencioso que ya sufrieron
+ * `vexi`, `availability` y `receipts.printing` (F-006).
+ */
+export interface PosSmartSearchSettings {
+  /** Fase A recall: where tokenizado AND×OR (B.1). */
+  l1?: boolean;
+  /** Fase A rank: scoring en memoria; implica L1 (B.2). */
+  l2?: boolean;
+  /** Fase B nativo: pg_trgm + unaccent + GIN, solo ∧ capability (C.3). */
+  trigram?: boolean;
 }
 
 export interface GeneralSettings {

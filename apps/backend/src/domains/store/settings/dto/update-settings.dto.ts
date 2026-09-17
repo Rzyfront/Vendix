@@ -17,6 +17,7 @@ import {
   RestaurantSettingsDto,
   MembershipSettingsDto,
   VexiSettingsDto,
+  PosSmartSearchSettingsDto,
   InvoicingSettingsDto,
   PanelUISettingsDto,
   AccountingFlowsSettingsDto,
@@ -131,6 +132,12 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => VexiSettingsDto)
   vexi?: VexiSettingsDto;
+
+  @ApiProperty({ type: PosSmartSearchSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PosSmartSearchSettingsDto)
+  pos_smart_search?: PosSmartSearchSettingsDto;
 
   @ApiProperty({ type: InvoicingSettingsDto, required: false })
   @IsOptional()
