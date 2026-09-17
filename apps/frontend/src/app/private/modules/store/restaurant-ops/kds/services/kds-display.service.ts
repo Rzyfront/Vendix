@@ -10,8 +10,8 @@ export const KDS_TICKET_SIZES: ReadonlyArray<{
   zoom: number;
 }> = [
   { id: 'normal', label: 'Normal', zoom: 1 },
-  { id: 'grande', label: 'Grande', zoom: 1.15 },
-  { id: 'muy-grande', label: 'Muy grande', zoom: 1.3 },
+  { id: 'grande', label: 'Grande', zoom: 1.35 },
+  { id: 'muy-grande', label: 'Muy grande', zoom: 1.7 },
 ];
 
 /**

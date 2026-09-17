@@ -1,0 +1,86 @@
+# Contexto de build de la RAÍZ del repo.
+#
+# Lo usa un solo build: el servicio `frontend` de `docker-compose.yml` (perfil
+# `docker-fe`), que pasó a `context: .` para que el alias `@money-kernel` de
+# `apps/frontend/tsconfig.json` —que apunta a `../backend/src/common/money-kernel`—
+# resuelva dentro de la imagen.
+#
+# Docker lee el `.dockerignore` de la RAÍZ DEL CONTEXTO, no el del directorio
+# del Dockerfile: al mover el contexto, `apps/frontend/.dockerignore` dejó de
+# aplicar y el contexto pasó de ~5 MB a 6,4 GB. Este archivo lo devuelve a lo
+# que el build necesita de verdad: `apps/frontend/` y el money-kernel.
+#
+# NO afecta al backend: `deploy-backend-ec2.yml` hace `cd apps/backend` antes
+# del `docker build .`, así que su contexto sigue siendo `apps/backend/` y su
+# propio `apps/backend/.dockerignore`.
+
+# --- Dependencias y artefactos de build (se reinstalan dentro de la imagen) ---
+**/node_modules
+**/dist
+**/.angular
+**/coverage
+**/build
+**/.next
+**/tmp
+
+# --- Historia de git (129 MB, ninguna etapa del build la lee) ---
+.git
+.gitignore
+.github
+
+# --- Workspaces que este build no compila ---
+apps/mobile
+apps/backend/*
+!apps/backend/src
+apps/backend/src/*
+!apps/backend/src/common
+apps/backend/src/common/*
+!apps/backend/src/common/money-kernel
+
+# --- Documentación y planes (docs/ está gitignored y pesa 25 MB) ---
+docs
+*.md
+!apps/frontend/**/*.md
+
+# --- Configuración y cachés de agentes / herramientas de desarrollo ---
+# `.muse` sola pesa 637 MB y `.opencode` 201 MB: son cachés locales, no entran
+# a ninguna imagen. Medido con `du -sh .[!.]*` el 2026-09-16.
+.muse
+.opencode
+.claude
+.agent
+.agents
+.mavis
+.expo
+.engram
+.linear
+.playwright-mcp
+.buildcheck
+.cursor
+.windsurf
+.audit-permissions.json
+playwright-report
+test-results
+skills
+scripts
+keys
+ssl
+bruno
+entregables
+docs_internal
+*.png
+
+# --- Secretos y entornos: nunca entran a una imagen ---
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pem
+**/*.key
+
+# --- Ruido local ---
+**/.DS_Store
+**/*.log
+**/npm-debug.log*
+**/.vscode
+**/.idea
+conversation-*.txt

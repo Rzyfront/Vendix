@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, throwError } from 'rxjs';
+import { Observable, Subject, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import {
@@ -14,6 +14,7 @@ import {
   UpdateRecipeDto,
   CreateRecipeItemDto,
   UpdateRecipeItemDto,
+  ReplaceRecipeItemDto,
   RecipeQuery,
   RecipeItem,
 } from '../interfaces';
@@ -67,6 +68,12 @@ export class RecipesService {
   private readonly apiUrl = environment.apiUrl;
   private readonly basePath = '/store/recipes';
   private http = inject(HttpClient);
+
+  readonly recipeChanged$ = new Subject<{
+    recipeId?: number;
+    productId?: number;
+    variantId?: number | null;
+  }>();
 
   // ─── Recipe CRUD ────────────────────────────────────────────────────────
 
@@ -143,6 +150,11 @@ export class RecipesService {
               (res as { message?: string }).message ?? 'Error desconocido';
             throw new Error(message);
           }
+          this.recipeChanged$.next({
+            recipeId: res.data?.id,
+            productId: res.data?.product_id,
+            variantId: res.data?.product_variant_id,
+          });
           return res.data;
         }),
         catchError(this.handleMutationError),
@@ -156,7 +168,14 @@ export class RecipesService {
         dto,
       )
       .pipe(
-        map((res) => res.data),
+        map((res) => {
+          this.recipeChanged$.next({
+            recipeId: res.data?.id,
+            productId: res.data?.product_id,
+            variantId: res.data?.product_variant_id,
+          });
+          return res.data;
+        }),
         catchError(this.handleMutationError),
       );
   }
@@ -164,7 +183,12 @@ export class RecipesService {
   remove(id: number): Observable<void> {
     return this.http
       .delete<void>(`${this.apiUrl}${this.basePath}/${id}`)
-      .pipe(catchError(this.handleError));
+      .pipe(
+        map(() => {
+          this.recipeChanged$.next({ recipeId: id });
+        }),
+        catchError(this.handleError),
+      );
   }
 
   restore(id: number): Observable<Recipe> {
@@ -174,7 +198,14 @@ export class RecipesService {
         {},
       )
       .pipe(
-        map((res) => res.data),
+        map((res) => {
+          this.recipeChanged$.next({
+            recipeId: res.data?.id,
+            productId: res.data?.product_id,
+            variantId: res.data?.product_variant_id,
+          });
+          return res.data;
+        }),
         catchError(this.handleMutationError),
       );
   }
@@ -191,10 +222,42 @@ export class RecipesService {
       .delete<{ deleted: boolean }>(
         `${this.apiUrl}${this.basePath}/${id}/hard`,
       )
-      .pipe(catchError(this.handleMutationError));
+      .pipe(
+        map((res) => {
+          this.recipeChanged$.next({ recipeId: id });
+          return res;
+        }),
+        catchError(this.handleMutationError),
+      );
   }
 
   // ─── Items ─────────────────────────────────────────────────────────────
+
+  /**
+   * Atomically replaces all component items of a recipe in a single transactional request.
+   */
+  replaceItems(
+    recipeId: number,
+    items: ReplaceRecipeItemDto[],
+  ): Observable<RecipeItem[]> {
+    return this.http
+      .put<ApiResponse<RecipeItem[]>>(
+        `${this.apiUrl}${this.basePath}/${recipeId}/items`,
+        { items },
+      )
+      .pipe(
+        map((res) => {
+          if (res?.success === false) {
+            const message =
+              (res as { message?: string }).message ?? 'Error desconocido';
+            throw new Error(message);
+          }
+          this.recipeChanged$.next({ recipeId });
+          return res.data;
+        }),
+        catchError(this.handleMutationError),
+      );
+  }
 
   addItem(recipeId: number, dto: CreateRecipeItemDto): Observable<RecipeItem> {
     return this.http

@@ -7,6 +7,7 @@ import { ReceiptsSettingsForm } from '../components/receipts-settings-form/recei
 import { PromotionsSettingsForm } from '../components/promotions-settings-form/promotions-settings-form.component';
 import { SettingsSectionComponent } from '../components/settings-section/settings-section.component';
 import { GeneralSettingsStore } from '../services/general-settings.store';
+import { PosInvoicingSettingsSection } from '../../fiscal/pos-invoicing-settings.section';
 
 /**
  * Pestaña «Venta»: cómo se cobra y qué documento sale impreso.
@@ -24,6 +25,7 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
     PosSettingsForm,
     ReceiptsSettingsForm,
     PromotionsSettingsForm,
+    PosInvoicingSettingsSection,
   ],
   template: `
     <div class="settings-page">
@@ -64,6 +66,13 @@ import { GeneralSettingsStore } from '../services/general-settings.store';
           [settingsLoaded]="store.settingsLoaded()"
           (settingsChange)="store.onSectionChange('pos', $event)" />
       </app-settings-section>
+
+      <!-- Emisión automática de factura — sección unificada de los dos
+           carriles (mostrador + tienda en línea). Trae su propio
+           app-settings-section por dentro: no se envuelve en otro.
+           SIN COMILLAS INVERSAS: este comentario vive dentro del template
+           literal, y una comilla inversa acá lo parte en dos. -->
+      <app-pos-invoicing-settings-section></app-pos-invoicing-settings-section>
 
       <!-- Recibos y Facturación — el título depende del estado real de emisión
            (GET dian-config/emission-status), no de que el wizard fiscal esté

@@ -19,7 +19,19 @@
     // `app/core/lib/page-geometry.ts` importe su JSON hermano
     // (`page-geometry.json`) bajo `moduleResolution: bundler`.
     // Mobile ya hereda esta flag de expo/tsconfig.base.
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    // Duplicado deliberado del `paths` de `tsconfig.json` (ADR-16, kernel de
+    // dinero compartido con backend): este archivo NO tiene `"extends"` — es
+    // standalone y es el `tsConfig` real que usan `ng build`/`ng serve`
+    // (`angular.json` → builder `@angular/build:application`). Si el `paths`
+    // sólo viviera en `tsconfig.json`, el build de producción no lo vería —
+    // sólo `tsconfig.spec.json` (que sí hace `"extends": "./tsconfig.json"`)
+    // se beneficiaría. Ver comentario largo en `tsconfig.json` para el resto
+    // del razonamiento (por qué sin `baseUrl` y por qué el `.ts` directo).
+    "paths": {
+      "@money-kernel": ["../backend/src/common/money-kernel/index.ts"],
+      "@money-kernel/*": ["../backend/src/common/money-kernel/*"]
+    }
   },
   "files": ["src/main.ts", "src/main.server.ts"],
   "include": ["src/**/*.ts", "src/**/*.d.ts"],

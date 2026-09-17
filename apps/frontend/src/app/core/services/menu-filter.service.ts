@@ -580,7 +580,14 @@ export class MenuFilterService {
       }
 
       // Case 2: Item has a module key mapping (filter by panel_ui)
-      const moduleKey = this.moduleKeyMap[item.label];
+      // `panelUiKey` (explicit, per-item) wins over the label-based
+      // `moduleKeyMap` lookup — same precedence as `moduleKeysFor()` below,
+      // used by `diagnose()`. Needed when two sibling items share a label
+      // (e.g. two "Despachos" entries, one under Analíticas and one under
+      // Reportes) so a flat label→key map cannot tell them apart. Existing
+      // items never set `panelUiKey`, so this is a no-op for the rest of
+      // the sidebar.
+      const moduleKey = item.panelUiKey || this.moduleKeyMap[item.label];
       if (moduleKey) {
         // Only include if this specific module (or any key in array) is visible
         if (this.isModuleKeyVisible(moduleKey, visibleModules)) {

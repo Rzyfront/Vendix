@@ -49,7 +49,13 @@ interface DispatchItemRow {
   /** Pending quantity available to dispatch (currently the full ordered qty). */
   pending_quantity: number;
   unit_price: number;
-  total_price: number;
+  // F-004 (C.8, blocker) — este campo existía pero nunca se leía (ni en el
+  // template ni en `totalToDispatch()`, que recalcula `qty × unit_price` por
+  // su cuenta): se eliminó en vez de "arreglarlo", porque su valor
+  // (`final_total_price ?? total_price`) mezclaba BRUTO con NETO en la misma
+  // fila (`final_unit_price ?? unit_price` de arriba SÍ es bruto) sin que
+  // nada consumiera esa inconsistencia — dejarlo habría sido una trampa para
+  // el próximo lector que asumiera que sí se usa.
 }
 
 type RouteMode = 'none' | 'existing' | 'new';
@@ -317,7 +323,6 @@ export class GenerateDispatchWizardComponent {
         // Contexto de venta: el wizard muestra el valor de la mercancía al
         // precio del cliente (display-only; el DTO solo envía ids+cantidades).
         unit_price: Number(it.final_unit_price ?? it.unit_price) || 0,
-        total_price: Number(it.final_total_price ?? it.total_price) || 0,
       }));
     this.itemRows.set(rows);
     // Default each line to its full pending quantity.

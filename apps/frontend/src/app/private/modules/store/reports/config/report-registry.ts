@@ -11,7 +11,7 @@ export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'financial', label: 'Financiero', description: 'Reportes de gastos, perdidas y ganancias, caja y cuentas por pagar', icon: 'wallet', color: 'var(--color-destructive)' },
   { id: 'accounting', label: 'Contabilidad', description: 'Reportes contables: balance de prueba, balance general, libro mayor e impuestos', icon: 'scale', color: 'var(--color-info)' },
   { id: 'payroll', label: 'Nómina', description: 'Reportes de nómina: resumen por período, detalle por empleado y provisiones laborales', icon: 'banknote', color: 'var(--color-primary)' },
-  { id: 'dispatch', label: 'Despachos', description: 'Reportes de remisiones, planillas y vehículos de reparto', icon: 'truck', color: 'var(--color-warning)' },
+  { id: 'dispatch', label: 'Despachos', description: 'Reportes de remisiones, planillas y vehículos de reparto', icon: 'truck', color: 'var(--color-warning)', panelUiKey: 'reports_dispatch' },
 ];
 
 export const REPORT_DEFINITIONS: ReportDefinition[] = [
@@ -1400,6 +1400,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'customer_name', header: 'Cliente', type: 'text' },
       { key: 'emission_date', header: 'Fecha Emisión', type: 'date' },
       { key: 'grand_total', header: 'Total', type: 'currency', footer: 'sum' },
+      { key: 'metodo_pago', header: 'Método de Pago', type: 'text' },
     ],
     exportFilename: 'remisiones_despacho',
     stats: [

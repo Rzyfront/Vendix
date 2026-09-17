@@ -4,7 +4,7 @@ import { Injectable, Logger } from '@nestjs/common';
  * Current schema version for store_settings JSON.
  * Bump when adding a new migration entry to MIGRATIONS.
  */
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 export interface SettingsMigration {
   from: number;
@@ -73,6 +73,45 @@ export const MIGRATIONS: SettingsMigration[] = [
           sort_order: 60,
         };
       }
+      return raw;
+    },
+  },
+  {
+    from: 3,
+    to: 4,
+    apply: (raw: any) => {
+      // El interruptor `receipts.auto_issue_invoice` quedó MUDO: se declaraba
+      // en DTO/defaults/interfaz y se pintaba en la UI, pero ningún lector lo
+      // consultaba jamás — el comerciante lo apagaba y la factura se seguía
+      // emitiendo igual. El control real vive en `invoicing.{pos,ecommerce}.
+      // auto_emit`. Aquí trasladamos la intención YA REGISTRADA por el
+      // comerciante (sólo el caso explícito `false`; `true` o ausente es el
+      // comportamiento histórico y no amerita sembrar nada) sin pisar un valor
+      // que ya haya sido fijado a mano en Caja u otra pantalla: si `auto_emit`
+      // ya es un booleano, esa decisión explícita manda sobre la migración.
+      if (raw?.receipts?.auto_issue_invoice === false) {
+        raw.invoicing = raw.invoicing ?? {};
+        raw.invoicing.pos = raw.invoicing.pos ?? {};
+        raw.invoicing.ecommerce = raw.invoicing.ecommerce ?? {};
+        if (typeof raw.invoicing.pos.auto_emit !== 'boolean') {
+          raw.invoicing.pos.auto_emit = false;
+        }
+        if (typeof raw.invoicing.ecommerce.auto_emit !== 'boolean') {
+          raw.invoicing.ecommerce.auto_emit = false;
+        }
+      }
+
+      // Retirar las claves mudas del JSON: verificado, cero consumidores en
+      // todo el monorepo — sólo vivían en DTO/defaults/interfaz y en el
+      // formulario de UI que se retira junto con ellas. `invoice_copies` NO
+      // se toca: sí tiene lectores reales (impresión de copias de factura en
+      // frontend y mobile) y borrarla rompería esa entrega física.
+      if (raw?.receipts) {
+        delete raw.receipts.auto_issue_invoice;
+        delete raw.receipts.send_invoice_email;
+        delete raw.receipts.deliver_printed;
+      }
+
       return raw;
     },
   },

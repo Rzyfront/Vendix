@@ -58,6 +58,7 @@ export class DunningService {
       page = 1,
       limit = 10,
       state,
+      status,
       organization_id,
       search,
       sort_by = 'created_at',
@@ -66,11 +67,18 @@ export class DunningService {
 
     const skip = (page - 1) * Number(limit);
     const where: Prisma.store_subscriptionsWhereInput = {
-      state: { in: ['grace_soft', 'grace_hard', 'suspended', 'blocked'] },
+      state: { in: ['grace_soft', 'grace_hard', 'suspended', 'blocked', 'pending_payment'] },
     };
 
-    if (state) {
-      where.state = state as any;
+    const resolvedState = state || status;
+    if (resolvedState) {
+      if (resolvedState === 'grace') {
+        where.state = { in: ['grace_soft', 'grace_hard'] };
+      } else if (resolvedState === 'suspended') {
+        where.state = { in: ['suspended', 'blocked'] };
+      } else {
+        where.state = resolvedState as any;
+      }
     }
 
     if (organization_id) {
@@ -91,7 +99,7 @@ export class DunningService {
         take: Number(limit),
         orderBy: { [sort_by]: sort_order },
         include: {
-          plan: { select: { id: true, code: true, name: true } },
+          plan: { select: { id: true, code: true, name: true, billing_cycle: true } },
           store: {
             select: {
               id: true,
@@ -129,19 +137,36 @@ export class DunningService {
   }
 
   async getStats() {
-    const [graceSoft, graceHard, suspended, blocked] = await Promise.all([
+    const [graceSoft, graceHard, suspended, blocked, pendingPayment, overdueInvoices] = await Promise.all([
       this.prisma.store_subscriptions.count({ where: { state: 'grace_soft' } }),
       this.prisma.store_subscriptions.count({ where: { state: 'grace_hard' } }),
       this.prisma.store_subscriptions.count({ where: { state: 'suspended' } }),
       this.prisma.store_subscriptions.count({ where: { state: 'blocked' } }),
+      this.prisma.store_subscriptions.count({ where: { state: 'pending_payment' } }),
+      this.prisma.subscription_invoices.aggregate({
+        where: {
+          state: 'overdue',
+          store_subscription: {
+            state: { in: ['grace_soft', 'grace_hard', 'suspended', 'blocked', 'pending_payment'] },
+          },
+        },
+        _sum: { total: true },
+      }),
     ]);
+
+    const totalOverdue = overdueInvoices._sum.total
+      ? Number(overdueInvoices._sum.total)
+      : 0;
 
     return {
       grace_soft: graceSoft,
       grace_hard: graceHard,
+      grace: graceSoft + graceHard,
       suspended,
       blocked,
-      total: graceSoft + graceHard + suspended + blocked,
+      pending_payment: pendingPayment,
+      total: graceSoft + graceHard + suspended + blocked + pendingPayment,
+      total_overdue: totalOverdue,
     };
   }
 

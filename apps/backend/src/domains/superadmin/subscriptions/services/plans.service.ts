@@ -1,7 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import {
+  AI_FEATURE_KEYS,
+  isAIFeatureKey,
+} from '../../../store/subscriptions/types/access.types';
+import { AIToolRegistry } from '../../../../ai-engine/tools/ai-tool-registry';
 import {
   CreatePlanDto,
   UpdatePlanDto,
@@ -11,7 +16,147 @@ import {
 
 @Injectable()
 export class PlansService {
-  constructor(private readonly prisma: GlobalPrismaService) {}
+  /**
+   * F6 — `toolRegistry` es opcional a propósito: `AIEngineModule` es `@Global()`
+   * y en producción siempre resuelve, pero los specs unitarios históricos
+   * construyen el servicio con `new PlansService(prisma)` y deben seguir
+   * compilando. Sin registry, cualquier `tools_allowed` declarado se rechaza
+   * (fail-closed): no se puede probar el enlace, así que no se puede guardar.
+   */
+  constructor(
+    private readonly prisma: GlobalPrismaService,
+    @Optional() private readonly toolRegistry?: AIToolRegistry,
+  ) {}
+
+  /**
+   * F6 — Go/no-go del plan contra el catálogo vivo del Engine.
+   *
+   * Reglas (todas → 400 `SUBSCRIPTION_VALIDATION`, nunca 500 crudo):
+   *  1. Cada key superior de `ai_feature_flags` debe ser una categoría IA
+   *     canónica (el mismo dominio que `ai_engine_applications`
+   *     usa en `ai_feature_category`) o un allowlist conocido
+   *     (`agents_allowed` / `tools_allowed`). Una key desconocida es una
+   *     referencia rota: el gate nunca la evaluaría.
+   *  2. Cada entrada de `agents_allowed` (nivel superior o anidada en la
+   *     config de una feature, p. ej. `tool_agents.agents_allowed`) debe
+   *     existir como `key` en `ai_agents`.
+   *  3. Cada entrada de `tools_allowed` debe existir en el `AIToolRegistry`
+   *     (resolución por nombre canónico, igual que el filtro F3 del turno).
+   *     Sin excepciones para `'*'`: el runtime F3 hace intersección exacta,
+   *     así que `'*'` hoy no habilita nada — guardarlo sería fosilizar una
+   *     referencia que no resuelve.
+   *
+   * Los refs se validen estén o no habilitadas las features: un typo con el
+   * switch apagado rompería igual al encenderlo. Sin tablas nuevas: solo
+   * lecturas a `ai_agents` + registry en memoria.
+   */
+  private async assertAIFlagsLinked(flags: unknown): Promise<void> {
+    if (flags === undefined || flags === null) return;
+    if (typeof flags !== 'object' || Array.isArray(flags)) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_VALIDATION,
+        'ai_feature_flags must be an object keyed by AI feature category',
+        { field: 'ai_feature_flags' },
+      );
+    }
+
+    const raw = flags as Record<string, unknown>;
+    const knownCategories = new Set<string>(AI_FEATURE_KEYS as readonly string[]);
+    const allowlistFields = new Set(['agents_allowed', 'tools_allowed']);
+
+    const unknownKeys = Object.keys(raw).filter(
+      (key) => !knownCategories.has(key) && !allowlistFields.has(key),
+    );
+    if (unknownKeys.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_VALIDATION,
+        `Plan references unknown AI feature categories: ${unknownKeys.join(', ')}`,
+        {
+          field: 'ai_feature_flags',
+          unknown_keys: unknownKeys,
+          valid_categories: [...knownCategories],
+        },
+      );
+    }
+
+    const agentKeys = new Set<string>();
+    const toolNames = new Set<string>();
+
+    const collectAllowlist = (holder: Record<string, unknown>, path: string) => {
+      for (const field of allowlistFields) {
+        const value = holder[field];
+        if (value === undefined) continue;
+        const location = path ? `ai_feature_flags.${path}.${field}` : `ai_feature_flags.${field}`;
+        if (
+          !Array.isArray(value) ||
+          value.some((item) => typeof item !== 'string' || item.length === 0)
+        ) {
+          throw new VendixHttpException(
+            ErrorCodes.SUBSCRIPTION_VALIDATION,
+            `Plan declares malformed '${location}': expected a non-empty string array`,
+            { field: location },
+          );
+        }
+        for (const item of value as string[]) {
+          (field === 'agents_allowed' ? agentKeys : toolNames).add(item);
+        }
+      }
+    };
+
+    collectAllowlist(raw, '');
+    for (const key of Object.keys(raw)) {
+      if (!isAIFeatureKey(key)) continue;
+      const config = (raw as Record<string, unknown>)[key];
+      if (config !== null && typeof config === 'object' && !Array.isArray(config)) {
+        collectAllowlist(config as Record<string, unknown>, key);
+      }
+    }
+
+    if (agentKeys.size > 0) {
+      const wanted = [...agentKeys];
+      // Prisma real siempre expone `ai_agents`; el fallback solo existe para
+      // mocks unitarios incompletos: sin accessor no se puede probar el
+      // enlace, así que todo lo declarado se trata como roto (fail-closed).
+      // Los errores reales de DB no se tragan: propagan como 500.
+      const agentAccessor = (
+        this.prisma as unknown as {
+          ai_agents?: {
+            findMany: (args: unknown) => Promise<{ key: string }[]>;
+          };
+        }
+      ).ai_agents;
+      const rows = agentAccessor
+        ? await agentAccessor.findMany({
+            where: { key: { in: wanted } },
+            select: { key: true },
+          })
+        : [];
+      const existing = new Set(rows.map((row) => row.key));
+      const missing = wanted.filter((key) => !existing.has(key));
+      if (missing.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_VALIDATION,
+          `Plan references unknown AI agents: ${missing.join(', ')}`,
+          { field: 'ai_feature_flags.agents_allowed', unknown_agents: missing },
+        );
+      }
+    }
+
+    if (toolNames.size > 0) {
+      const wanted = [...toolNames];
+      const missing = wanted.filter((name) => {
+        if (!this.toolRegistry) return true;
+        return !this.toolRegistry.get(this.toolRegistry.canonicalName(name));
+      });
+      if (missing.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_VALIDATION,
+          `Plan references unknown AI tools: ${missing.join(', ')}`,
+          { field: 'ai_feature_flags.tools_allowed', unknown_tools: missing },
+        );
+      }
+    }
+  }
 
   private normalizeRedemptionCode(value: string | null | undefined) {
     if (value === undefined) return undefined;
@@ -100,6 +245,10 @@ export class PlansService {
   }
 
   async create(dto: CreatePlanDto) {
+    // F6 — el plan no se persiste si declara categorías, agentes o tools que
+    // no existen en el catálogo vivo (400, antes de cualquier write).
+    await this.assertAIFlagsLinked(dto.ai_feature_flags);
+
     if (Array.isArray(dto.pricings) && dto.pricings.length > 0) {
       return this.createMultiCycle(dto);
     }
@@ -434,6 +583,12 @@ export class PlansService {
 
     if (!existing) {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    }
+
+    // F6 — solo se valida lo que el caller envía: si no toca flags, las filas
+    // legadas con refs viejas siguen editables en el resto de campos.
+    if (dto.ai_feature_flags !== undefined) {
+      await this.assertAIFlagsLinked(dto.ai_feature_flags);
     }
 
     if (dto.code && dto.code !== existing.code) {

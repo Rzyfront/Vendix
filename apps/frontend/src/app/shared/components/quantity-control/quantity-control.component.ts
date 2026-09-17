@@ -41,14 +41,15 @@ export interface QuantityClampEvent {
         [class.px-2.5]="size() === 'sm'"
         [class.px-3]="size() === 'md'"
         [class.px-4]="size() === 'lg'"
-        class="hover:bg-muted h-full flex items-center justify-center shrink-0 text-text-secondary transition-colors"
+        class="qc-step h-full flex items-center justify-center shrink-0 transition-colors text-[var(--color-error-600)] bg-[rgba(var(--color-error-rgb),0.10)] hover:bg-[rgba(var(--color-error-rgb),0.22)] disabled:text-text-secondary disabled:bg-transparent"
         (click)="decrease()"
         type="button"
+        aria-label="Disminuir cantidad"
         [disabled]="disabled() || loading() || displayValue <= min()"
         >
         <app-icon [name]="'minus'" [size]="iconSize"></app-icon>
       </button>
-    
+
       @if (editable()) {
         <input
           [class.w-12]="size() === 'sm'"
@@ -58,6 +59,7 @@ export interface QuantityClampEvent {
           type="text"
           inputmode="numeric"
           pattern="[0-9]*"
+          aria-label="Cantidad"
           [ngModel]="displayValue"
           (ngModelChange)="onInputChange($event)"
           (blur)="onBlur()"
@@ -82,9 +84,10 @@ export interface QuantityClampEvent {
         [class.px-2.5]="size() === 'sm'"
         [class.px-3]="size() === 'md'"
         [class.px-4]="size() === 'lg'"
-        class="hover:bg-muted h-full flex items-center justify-center shrink-0 text-text-secondary transition-colors"
+        class="qc-step h-full flex items-center justify-center shrink-0 transition-colors text-[var(--color-success-600)] bg-[rgba(var(--color-success-rgb),0.12)] hover:bg-[rgba(var(--color-success-rgb),0.24)] disabled:text-text-secondary disabled:bg-transparent"
         (click)="increase()"
         type="button"
+        aria-label="Aumentar cantidad"
         [disabled]="disabled() || loading() || isAtMax()"
         >
         <app-icon [name]="'plus'" [size]="iconSize"></app-icon>

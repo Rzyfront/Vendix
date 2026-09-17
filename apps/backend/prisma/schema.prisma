@@ -5285,7 +5285,7 @@ model ai_engine_applications {
   retry_config        Json?
   is_active           Boolean            @default(true)
   metadata            Json?
-  ai_feature_category String?            @db.VarChar(32)
+  ai_feature_category String             @default("text_generation") @db.VarChar(32)
   created_at          DateTime?          @default(now()) @db.Timestamp(6)
   updated_at          DateTime?          @default(now()) @db.Timestamp(6)
 
@@ -5294,6 +5294,45 @@ model ai_engine_applications {
   @@index([config_id])
   @@index([ai_feature_category])
   @@index([model_type])
+}
+
+/// Agente conversacional configurable (F4).
+///
+/// Vexi es una fila más (`key = 'vexi'`); crear un segundo agente es insertar
+/// una fila, sin deploy. El turno del chat (`ai-chat.service`) resuelve
+/// `agent_key` (por mensaje, o `metadata.agent_key` de la conversación) y
+/// enruta al loop con la config de la fila; sin agente el comportamiento es
+/// el de hoy.
+///
+/// `app_key` NO es FK a propósito: las apps se borran desde su propio CRUD y
+/// una FK bloquearía ese borrado o encadenaría efectos. La existencia se
+/// valida en el servicio (`AIAgentsService`) con `AI_APP_001`.
+///
+/// `allowed_tools` vacío significa "sin filtro adicional": el turno ve la
+/// intersección de permisos del caller y `tools_allowed` del plan (F3). Solo
+/// una lista no vacía acota más. (Es `String[]` no-nulo porque Prisma no
+/// admite listas opcionales; el loop (`AIAgentService.runAgentStream`) trata
+/// un filtro vacío como ausente, así que `[]` y "sin filtro" coinciden.)
+///
+/// `requires_confirmation_default` queda almacenado y documentado pero sin
+/// enforcement en F4: el circuito de confirmación sigue siendo por
+/// herramienta (`requiresConfirmation` del registry).
+model ai_agents {
+  id                            Int       @id @default(autoincrement())
+  key                           String    @unique @db.VarChar(80)
+  name                          String    @db.VarChar(255)
+  description                   String?   @db.Text
+  app_key                       String?   @db.VarChar(100)
+  system_prompt                 String?   @db.Text
+  allowed_tools                 String[]                  @default([])
+  max_iterations                Int?
+  requires_confirmation_default Boolean   @default(false)
+  is_active                     Boolean   @default(true)
+  created_at                    DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                    DateTime? @default(now()) @db.Timestamp(6)
+
+  @@index([is_active])
+  @@index([app_key])
 }
 
 model ai_engine_logs {

@@ -845,6 +845,36 @@ describe('FinancialAnalyticsService', () => {
       // Position reduces to: 190 − 0 − 0 + 0 = 190
       expect(result.net_vat_position).toBe(190);
     });
+
+    it('F-117: taxRows derives taxable_amount by dividing by the FRACTION tax_rate (Decimal(6,5), e.g. 0.19) — never by tax_rate/100', async () => {
+      // order_item_taxes.tax_rate is Decimal(6,5): it stores 0.19, not 19.
+      // Dividing by (tax_rate / 100) divides by 0.0019 instead of 0.19 and
+      // inflates the taxable base 100x. The SQL text sent to $queryRaw is the
+      // contract here — same inspection pattern as
+      // customers-analytics.service.spec.ts (Prisma.sql `.strings` fragments).
+      prisma.$queryRaw.mockResolvedValueOnce([]);
+      prisma.$queryRaw.mockResolvedValueOnce([
+        { taxable_revenue: '0.000', exempt_revenue: '0.000' },
+      ]);
+      prisma.refunds.aggregate.mockResolvedValue({ _sum: { tax_refund: 0 } });
+
+      await service.getTaxSummary(QUERY as any);
+
+      const calls = prisma.$queryRaw.mock.calls.map((c) => {
+        const arg = c[0] as any;
+        if (Array.isArray(arg?.strings)) return arg.strings.join(' ');
+        return String(arg);
+      });
+      const taxRowsSql = calls.find((s) => s.includes('taxable_amount'));
+      expect(taxRowsSql).toBeDefined();
+      // The bad formula divided by `(oit.tax_rate / 100)` — must be gone.
+      expect(taxRowsSql).not.toMatch(/tax_rate\s*\/\s*100/);
+      // The correct formula divides the summed tax by the raw fraction.
+      expect(taxRowsSql).toMatch(/SUM\(oit\.tax_amount\)\s*\/\s*oit\.tax_rate/);
+      // F-117 also requires excluding cancelled items — revenueRows already
+      // did; taxRows was the one query missing it.
+      expect(taxRowsSql).toMatch(/oi\.cancelled_at IS NULL/);
+    });
   });
 
   describe('getTaxSummaryForExport', () => {

@@ -41,7 +41,9 @@ export interface Product {
   name: string;
   sku: string;
   price: number;
-  final_price: number;
+  // F-221 — calculado de lectura (ver `vendix-calculated-pricing`): el payload
+  // puede no traerlo y entonces la clave queda ausente, nunca fabricada.
+  final_price?: number;
   cost?: number;
   is_on_sale?: boolean;
   sale_price?: number | null;
@@ -198,6 +200,18 @@ export interface SearchFilters {
    * scoped products query; the POS sends it explicitly for clarity.
    */
   is_sellable?: boolean;
+  /**
+   * Orden por defecto de la grilla del POS: antepone los productos marcados
+   * como destacados (`is_featured`). Sólo se envía en la carga sin búsqueda ni
+   * filtros — con un filtro activo manda el filtro, no este orden.
+   */
+  featured_first?: boolean;
+  /**
+   * Segundo criterio del orden por defecto: los más vendidos de los últimos 30
+   * días. Con `featured_first` produce destacados → más vendidos → resto; sin
+   * destacados en la tienda, la grilla queda ordenada por ventas.
+   */
+  best_selling_first?: boolean;
 }
 
 export interface SearchResult {
@@ -358,6 +372,17 @@ export class PosProductService {
 
     if (filters.is_sellable !== undefined) {
       query.is_sellable = filters.is_sellable ? 'true' : 'false';
+    }
+
+    // Orden por defecto de la grilla (destacados → más vendidos). Se serializa
+    // como string: el DTO del backend lo lee crudo con `@Transform`, así que
+    // `'false'` se respeta como falso en vez de coaccionarse a `true`.
+    if (filters.featured_first !== undefined) {
+      query.featured_first = filters.featured_first ? 'true' : 'false';
+    }
+
+    if (filters.best_selling_first !== undefined) {
+      query.best_selling_first = filters.best_selling_first ? 'true' : 'false';
     }
 
     const params = this.buildParams(query);
@@ -538,9 +563,14 @@ export class PosProductService {
         name: product.name || '',
         sku: product.sku || '',
         price: parseFloat(product.base_price || product.price || 0),
-        final_price: parseFloat(
-          product.final_price || product.base_price || product.price || 0,
-        ),
+        // F-221 — no fabricar `final_price`: el `||` convertía la ausencia en
+        // el NETO (`base_price`) y lo declaraba como BRUTO editado (-19 %).
+        // Si el payload no lo trae, la clave queda ausente y el catálogo manda
+        // (`resolveCatalogFinalUnitPrice` en el carrito, `catalogFinalPrice`
+        // en el backend).
+        ...(product.final_price != null && Number(product.final_price) > 0
+          ? { final_price: Number(product.final_price) }
+          : {}),
         active_promotion: activePromotion,
         allow_pos_price_override: product.allow_pos_price_override === true,
         cost: product.cost_price ? parseFloat(product.cost_price) : undefined,

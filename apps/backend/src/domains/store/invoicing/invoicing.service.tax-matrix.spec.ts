@@ -3,6 +3,7 @@ import {
   aggregateOrderTaxes,
   InvoicingService,
   needsOrderLineTaxSplit,
+  normalizeInvoiceTaxRate,
   orderTaxFractionToInvoiceRate,
 } from './invoicing.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
@@ -684,5 +685,192 @@ describe('InvoicingService · matriz fiscal createFromOrder+split+prevalidador',
       expect(orderTaxFractionToInvoiceRate(0.007, 'ica')).not.toBe(0.7);
       expect(orderTaxFractionToInvoiceRate(0.007, 'ica')).toBe(7);
     });
+  });
+
+  describe('normalizeInvoiceTaxRate — F-212, el escritor deja de poder persistir la fracción de IVA', () => {
+    it('IVA fracción (0.19) sin tax_rate_id resoluble se escala a porcentaje (19)', () => {
+      expect(normalizeInvoiceTaxRate(0.19, 'iva').toNumber()).toBe(19);
+    });
+
+    it('IVA fracción (0.05) también se escala — no es un caso especial de 19', () => {
+      expect(normalizeInvoiceTaxRate(0.05, 'iva').toNumber()).toBe(5);
+    });
+
+    it('sin tax_type (default contractual iva) también se escala', () => {
+      expect(normalizeInvoiceTaxRate(0.19, undefined).toNumber()).toBe(19);
+      expect(normalizeInvoiceTaxRate(0.19, null).toNumber()).toBe(19);
+    });
+
+    it('IVA ya en porcentaje (19) no se toca', () => {
+      expect(normalizeInvoiceTaxRate(19, 'iva').toNumber()).toBe(19);
+    });
+
+    it('IVA en 0 (exento) no se toca — el umbral es estrictamente > 0', () => {
+      expect(normalizeInvoiceTaxRate(0, 'iva').toNumber()).toBe(0);
+    });
+
+    it('IVA en el borde exacto (1) no se toca — el umbral es estrictamente < 1', () => {
+      expect(normalizeInvoiceTaxRate(1, 'iva').toNumber()).toBe(1);
+    });
+
+    it.each([
+      ['ica', 0.4],
+      ['ica', 0.966],
+      ['reteica', 0.007],
+      ['withholding', 0.1],
+      ['inc', 0.5],
+    ])(
+      'NO toca tarifas sub-1%% de tipos distintos de IVA (%s %s) — el ICA municipal colombiano SÍ tiene tarifas legítimas ahí',
+      (tax_type, rate) => {
+        expect(normalizeInvoiceTaxRate(rate, tax_type).toNumber()).toBe(rate);
+      },
+    );
+
+    it('REGRESIÓN F-212: la nota de crédito 170 heredó 0.19 de la factura 67 — la próxima vez que ese camino escriba, sale en 19', () => {
+      // El camino real es `!known` en `applyTaxCatalogToLine` (tax_rate_id no
+      // resuelve contra el catálogo) → `buildInvoiceTaxCreateInput`. Aquí se
+      // fija sólo el desambiguador puro; el camino completo lo cubre la
+      // matriz fiscal de más arriba con el motor real.
+      expect(normalizeInvoiceTaxRate(0.19, 'iva').toNumber()).not.toBe(0.19);
+      expect(normalizeInvoiceTaxRate(0.19, 'iva').toNumber()).toBe(19);
+    });
+
+    it('acepta el tax_rate como string sin perder precisión (forma en la que llega desde el motor)', () => {
+      expect(normalizeInvoiceTaxRate('0.19', 'iva').toNumber()).toBe(19);
+    });
+  });
+});
+
+/**
+ * `aggregateOrderTaxes` — POBLACIÓN 3 (F-090, eje de código de F-053).
+ *
+ * `aggregateOrderTaxes` recorre `item.order_item_taxes || []`: una línea SIN
+ * filas no aporta nada, sea cual sea la razón de que no tenga filas. Eso
+ * confunde DOS poblaciones opuestas bajo un solo veredicto:
+ *
+ *   1. exenta correcta — escalar `tax_amount_item` en 0, cero filas.
+ *   3. escalar > 0 y CERO filas — nace de carriles que el inventario del
+ *      plan no contó (pasarela de pago, split de cuenta, kitchen-fire): la
+ *      línea aporta impuesto en su escalar pero `invoiceTaxRows` sale vacío
+ *      igual que la exenta, y nada lo señalaba.
+ *
+ * Estos specs fijan que `tax_scalar_without_breakdown` discrimina las dos
+ * (y que la población 2 —con desglose— nunca cuenta, tenga o no escalar
+ * coincidente), y que agregar la señal NO mueve un byte del resultado
+ * aritmético ya existente (`header_rows`, `order_line_taxes`,
+ * `distinct_group_count`).
+ */
+describe('aggregateOrderTaxes — tax_scalar_without_breakdown (población 3, F-090/F-053)', () => {
+  it('(1) línea exenta correcta: escalar en 0 y sin filas ⇒ conteo 0', () => {
+    const result = aggregateOrderTaxes([
+      { total_price: 30000, tax_amount_item: 0, order_item_taxes: [] },
+    ]);
+    expect(result.tax_scalar_without_breakdown).toEqual({
+      count: 0,
+      line_indexes: [],
+    });
+  });
+
+  it('(2) línea con desglose ⇒ conteo 0, aunque el escalar sea > 0', () => {
+    const result = aggregateOrderTaxes([
+      {
+        total_price: 100000,
+        tax_amount_item: 19000,
+        order_item_taxes: [
+          {
+            tax_name: 'IVA',
+            tax_rate: 0.19,
+            tax_type: 'iva',
+            tax_amount: 19000,
+            is_inclusive: false,
+            tax_rate_id: IVA_ID,
+          },
+        ],
+      },
+    ]);
+    expect(result.tax_scalar_without_breakdown).toEqual({
+      count: 0,
+      line_indexes: [],
+    });
+  });
+
+  it('(3) línea con escalar > 0 y CERO filas ⇒ conteo 1 y el índice correcto', () => {
+    const result = aggregateOrderTaxes([
+      // índice 0: exenta correcta, no debe contar.
+      { total_price: 30000, tax_amount_item: 0, order_item_taxes: [] },
+      // índice 1: población 3 — el caso que F-090 dice invisible hoy.
+      { total_price: 100000, tax_amount_item: 19000, order_item_taxes: [] },
+      // índice 2: con desglose, tampoco cuenta.
+      {
+        total_price: 90000,
+        tax_amount_item: 7200,
+        order_item_taxes: [
+          {
+            tax_name: 'INC',
+            tax_rate: 0.08,
+            tax_type: 'inc',
+            tax_amount: 7200,
+            is_inclusive: false,
+            tax_rate_id: INC_ID,
+          },
+        ],
+      },
+    ]);
+    expect(result.tax_scalar_without_breakdown).toEqual({
+      count: 1,
+      line_indexes: [1],
+    });
+  });
+
+  it('(4) no-regresión aritmética: la misma entrada mixta produce header_rows y distinct_group_count idénticos con y sin el campo nuevo presente', () => {
+    // Misma forma en ambas listas —sólo cambia si declaran `tax_amount_item`—
+    // para que la comparación no pueda colarse por otra diferencia.
+    const linesWithoutScalarField = [
+      {
+        total_price: 100000,
+        order_item_taxes: [
+          {
+            tax_name: 'IVA',
+            tax_rate: 0.19,
+            tax_type: 'iva',
+            tax_amount: 19000,
+            is_inclusive: false,
+            tax_rate_id: IVA_ID,
+          },
+        ],
+      },
+      {
+        total_price: 90000,
+        order_item_taxes: [
+          {
+            tax_name: 'INC',
+            tax_rate: 0.08,
+            tax_type: 'inc',
+            tax_amount: 7200,
+            is_inclusive: false,
+            tax_rate_id: INC_ID,
+          },
+        ],
+      },
+      // Línea exenta, sin el campo nuevo declarado en absoluto (llamador
+      // legado): el comportamiento no puede depender de que exista.
+      { total_price: 50000, order_item_taxes: [] },
+    ];
+    const linesWithScalarField = [
+      { ...linesWithoutScalarField[0], tax_amount_item: 19000 },
+      { ...linesWithoutScalarField[1], tax_amount_item: 7200 },
+      { ...linesWithoutScalarField[2], tax_amount_item: 0 },
+    ];
+
+    const withoutScalarField = aggregateOrderTaxes(linesWithoutScalarField);
+    const withScalarField = aggregateOrderTaxes(linesWithScalarField);
+
+    expect(withScalarField.header_rows).toEqual(withoutScalarField.header_rows);
+    expect(withScalarField.order_line_taxes).toEqual(
+      withoutScalarField.order_line_taxes,
+    );
+    expect(withScalarField.distinct_group_count).toBe(
+      withoutScalarField.distinct_group_count,
+    );
   });
 });

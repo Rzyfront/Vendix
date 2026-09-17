@@ -55,8 +55,17 @@ function makeOrder(overrides: {
       document_number: '900123456',
       document_type: 'NIT',
     },
+    // `ORDER_PAYMENT_MEANS_INCLUDE` lee los pagos con `include` (no `select`),
+    // así que Prisma devuelve TODOS los escalares de `payments` — `state` entre
+    // ellos — y su `where: { state: 'succeeded' }` garantiza que toda fila que
+    // llegue al mapper traiga ese valor. El mock lo declara porque el contrato
+    // compartido vuelve a filtrar por estado A PROPÓSITO: una función que sólo
+    // es correcta cuando el llamador ya filtró bien es una trampa. Antes de
+    // `ORDER_PAYMENT_MEANS_INCLUDE` el mapper leía `payments[0]` sin mirar el
+    // estado, y por eso este mock podía omitirlo.
     payments: [
       {
+        state: 'succeeded',
         paid_at: new Date('2026-07-08T15:31:00.000Z'),
         store_payment_method: {
           display_name: 'Efectivo',

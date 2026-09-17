@@ -841,7 +841,10 @@ export class ItemPickerStepComponent {
         }
       }
     }
-    const taxAmount = price * (taxRate / 100);
+    // `tax_amount_unit` es POR UNIDAD: precio unitario × tarifa, sin cantidad.
+    // `totals` lo multiplica por `dispatched_quantity`, así que componerlo acá
+    // lo contaría dos veces en cuanto el usuario suba la cantidad.
+    const taxAmountUnit = price * (taxRate / 100);
 
     const item: WizardItem = {
       product_id: Number(product.id),
@@ -855,7 +858,7 @@ export class ItemPickerStepComponent {
       dispatched_quantity: 1,
       unit_price: price,
       discount_amount: 0,
-      tax_amount: taxAmount,
+      tax_amount_unit: taxAmountUnit,
     };
 
     this.wizardService.addItem(item);
@@ -1123,7 +1126,7 @@ export class ItemPickerStepComponent {
       dispatched_quantity: qty,
       unit_price: price,
       discount_amount: 0,
-      tax_amount: 0,
+      tax_amount_unit: 0,
     });
   }
 
@@ -1233,7 +1236,7 @@ export class ItemPickerStepComponent {
       dispatched_quantity: qty,
       unit_price: price,
       discount_amount: 0,
-      tax_amount: 0,
+      tax_amount_unit: 0,
     };
   }
 

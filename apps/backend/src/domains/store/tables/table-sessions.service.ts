@@ -16,8 +16,12 @@ import { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import {
   groupRatesByProductId,
   resolveOrderLineFinals,
+  resolveLineUnits,
+  roundMoney2,
   TypedTaxRate,
 } from '../taxes/utils/final-price.util';
+import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
+import { resolvePriceUnitScale } from '../products/services/price-unit.util';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 
 /**
@@ -679,11 +683,25 @@ export class TableSessionsService {
         is_sellable: true,
         product_type: true,
         track_inventory: true,
+        // QUI-648 / ADR-08 commit 5 (F-038/F-080) — escala de precio del
+        // catálogo, para snapshotear `price_unit_quantity` en la línea igual
+        // que `buildOrderItemSnapshot`. Ausente hasta ahora: la línea de
+        // mesa nunca declaraba su propia escala.
+        price_unit_quantity: true,
         // ERR-07 — basta saber SI el producto tiene variantes, no cuáles.
         // `take: 1` evita traer el catálogo completo de variantes por línea.
         product_variants: { select: { id: true }, take: 1 },
       },
     });
+    // F-038/F-050/F-093/F-094 (ADR-08 commit 5) — UN batch de
+    // `product_tax_assignments`, ANTES de abrir la transacción (F-094 punto 1:
+    // el fix original hacía esta consulta -o algo peor- por LÍNEA dentro del
+    // `$transaction`, sobre un endpoint `@OptionalAuth` sin cota de tamaño).
+    // Con esto `addItems` dejó de escribir `tax_amount_item = NULL` — el
+    // defecto de origen de ADR-08 (base inflada + IVA 0 en inclusivos, IVA
+    // ausente en exclusivos).
+    const taxRowsByProductId =
+      await this.resolveFullTaxRowsByProductId(productIds);
     type ProductRow = (typeof products)[number];
     const productMap = new Map<number, ProductRow>(
       products.map((p: ProductRow) => [p.id, p]),
@@ -719,6 +737,9 @@ export class TableSessionsService {
     }
 
     // 2. Persist lines + re-derive totals in a single transaction.
+    // F-094 punto 2 — timeout/maxWait explícitos (default 5 s): mismo valor
+    // que `payments.service.ts:1769` para el mismo tipo de transacción con
+    // trabajo variable por línea (N ítems, exclusiones, KDS).
     await this.prisma.$transaction(async (tx) => {
       // CP-POLLO-ARABE-727 C.4 — validación ERR-15 ANTES del bucle, en UN solo
       // `findMany` (no un findFirst por ítem — presión de pool, ver A.7). Una
@@ -774,13 +795,48 @@ export class TableSessionsService {
         const overridePrice = Number(
           (variant?.price_override as number | null | undefined) ?? NaN,
         );
-        const unitPrice =
+        const catalogUnitPrice =
           salePrice > 0
             ? salePrice
             : Number.isFinite(overridePrice) && overridePrice > 0
               ? (overridePrice as number)
               : Number(product.base_price ?? 0);
-        const totalPrice = unitPrice * item.quantity;
+
+        // ADR-08 commit 5 (F-038/F-042/F-050/F-093) — el precio del catálogo
+        // (`catalogUnitPrice`) es el precio FINAL publicado, igual que
+        // `catalogUnitPrice`/`catalogFinalPrice` en `payments.service.ts`: se
+        // despeja UNA vez sobre él, sin invertir (no hay override en la mesa,
+        // ADR-08 punto 1) y se persiste la BASE, no el bruto. Antes de este
+        // cambio `unit_price` guardaba el precio publicado tal cual: correcto
+        // para exclusivo, pero base INFLADA para inclusivo, y en ambos casos
+        // `tax_amount_item` quedaba NULL (IVA 0 en la cuenta abierta).
+        const priceUnitQuantity = resolvePriceUnitScale(
+          product.price_unit_quantity,
+        );
+        const lineUnits = resolveLineUnits({
+          quantity: item.quantity,
+          price_unit_quantity: priceUnitQuantity,
+        });
+        const rows = taxRowsByProductId.get(item.product_id) ?? [];
+        const resolved = resolveLineTotals(catalogUnitPrice, rows);
+        const unitBase = resolved.base;
+        const totalPrice = roundMoney2(unitBase * lineUnits);
+        // Misma convención que `buildOrderItemSnapshot` (payments.service.ts):
+        // `tax_amount_item` es POR UNIDAD de precio (nunca por línea) salvo
+        // línea de peso — la mesa no captura peso, así que siempre es la rama
+        // por-unidad. El lector del cierre (`applyPosPaymentToTableSession`) y
+        // el de la cuenta abierta (más abajo, F-050) YA multiplican por
+        // `resolveLineUnits`/`resolvePriceUnits`; escribir acá el total de
+        // línea en vez del por-unidad haría que ambos lectores lo cobraran
+        // dos veces.
+        const taxAmountItem = roundMoney2(resolved.total_tax_amount);
+        const taxRate =
+          Math.round((resolved.total_rate + Number.EPSILON) * 100000) /
+          100000;
+        // F-093 — la normalización escribe `final_unit_price` explícito
+        // (antes quedaba NULL): es el bruto por unidad que ADR-06 declara
+        // fuente única de verdad para las superficies comerciales.
+        const finalUnitPrice = roundMoney2(resolved.total);
 
         const createdItem = await tx.order_items.create({
           data: {
@@ -789,8 +845,16 @@ export class TableSessionsService {
             product_variant_id: item.product_variant_id ?? null,
             product_name: product.name,
             quantity: item.quantity,
-            unit_price: new Prisma.Decimal(unitPrice),
+            unit_price: new Prisma.Decimal(unitBase),
             total_price: new Prisma.Decimal(totalPrice),
+            tax_rate: new Prisma.Decimal(taxRate),
+            tax_amount_item: new Prisma.Decimal(taxAmountItem),
+            final_unit_price: new Prisma.Decimal(finalUnitPrice),
+            // QUI-648 — escala snapshot: `null` es "una unidad de stock = una
+            // unidad de precio" (todo el catálogo histórico), igual criterio
+            // que `buildOrderItemSnapshot`.
+            price_unit_quantity:
+              priceUnitQuantity > 1 ? priceUnitQuantity : null,
             item_type: product.product_type ?? 'physical',
             cost_price: null,
             is_price_overridden: false,
@@ -806,6 +870,32 @@ export class TableSessionsService {
             // propaga `order_items.notes` a `kitchen_ticket_items.notes`.
             notes: item.notes?.trim() || null,
             updated_at: new Date(),
+            // F-038/F-042/F-048 — se crea SIEMPRE que haya tasas, incluida la
+            // fila con `amount=0` si el catálogo no tiene asignación de
+            // impuesto: sin esto el cierre (`applyPosPaymentToTableSession`)
+            // y el propio lector de la cuenta abierta (abajo) no tienen de
+            // dónde leer el desglose y la línea vuelve a depender del
+            // multiplicador crudo, que es justo lo que F-042 señala como
+            // reinterpretable si la cascada de `is_inclusive` cambia después.
+            ...(rows.length > 0
+              ? {
+                  order_item_taxes: {
+                    create: rows.map((row, index) => ({
+                      tax_rate_id: row.tax_rate_id,
+                      tax_name: row.name,
+                      tax_rate:
+                        Math.round((row.rate + Number.EPSILON) * 100000) /
+                        100000,
+                      tax_amount: roundMoney2(
+                        resolved.taxes[index].amount * lineUnits,
+                      ),
+                      tax_type: row.tax_type ?? 'iva',
+                      is_compound: false,
+                      is_inclusive: row.is_inclusive ?? false,
+                    })),
+                  },
+                }
+              : {}),
           },
         });
 
@@ -836,18 +926,50 @@ export class TableSessionsService {
       //    open check we keep tax=0 (handled at fire or at pay) and
       //    discount=0 (applied at payment time). Shipping is N/A for
       //    dine-in.
+      // Filtra cancelados: el seam compartido (`OrderFlowService.cancelOrderItem`)
+      // marca `cancelled_at` y NO pone `total_price`/`tax_amount_item` a cero
+      // (su propio recálculo de cabecera filtra `cancelled_at IS NULL`,
+      // `order-flow.service.ts:2019`) — sin el mismo filtro acá, la próxima
+      // línea agregada resucitaba el importe de un ítem ya cancelado.
       const allItems = await tx.order_items.findMany({
-        where: { order_id: session.order_id },
-        select: { total_price: true, tax_amount_item: true },
+        where: { order_id: session.order_id, cancelled_at: null },
+        select: {
+          total_price: true,
+          tax_amount_item: true,
+          quantity: true,
+          weight: true,
+          price_unit_quantity: true,
+          order_item_taxes: { select: { tax_amount: true } },
+        },
       });
       const subtotal = allItems.reduce(
         (acc, it) => acc + Number(it.total_price),
         0,
       );
-      const tax = allItems.reduce(
-        (acc, it) => acc + Number(it.tax_amount_item ?? 0),
-        0,
-      );
+      // F-050 — mismo multiplicador que el cierre de mesa
+      // (`applyPosPaymentToTableSession`, payments.service.ts): `tax_amount_item`
+      // es POR UNIDAD de precio (QUI-648), no por línea. Sumarlo crudo — el
+      // desajuste que ADR-08 no mencionaba — mostraba MENOS IVA del que el
+      // cierre cobra en cuanto `quantity/price_unit_quantity > 1`. Prioridad:
+      // `order_item_taxes` (ya es el total de línea, el fix de arriba lo
+      // escribe) y sólo si la línea no tiene desglose (pre-fix, `tax_amount_item`
+      // sigue NULL) cae al escalar histórico — que para esas líneas da 0,
+      // igual que hoy, sin empeorarlas ni fingir un IVA que nadie calculó.
+      const tax = allItems.reduce((acc, it) => {
+        const nestedTaxes = it.order_item_taxes ?? [];
+        if (nestedTaxes.length > 0) {
+          return (
+            acc +
+            nestedTaxes.reduce((s, t) => s + Number(t.tax_amount || 0), 0)
+          );
+        }
+        const multiplier = resolveLineUnits({
+          quantity: it.quantity,
+          weight: it.weight,
+          price_unit_quantity: it.price_unit_quantity,
+        });
+        return acc + Number(it.tax_amount_item ?? 0) * multiplier;
+      }, 0);
 
       await tx.orders.update({
         where: { id: session.order_id },
@@ -858,7 +980,7 @@ export class TableSessionsService {
           updated_at: new Date(),
         },
       });
-    });
+    }, { timeout: 20_000, maxWait: 5_000 });
 
     this.logger.log(
       `Items appended: session=${sessionId} order=${session.order_id} lines=${dto.items.length}`,
@@ -1729,6 +1851,16 @@ export class TableSessionsService {
                 quantity: true,
                 unit_price: true,
                 total_price: true,
+                // C.12 — el serializador canonico lee el multiplicador de
+                // la propia linea (peso + escala); sin proyectarlos la
+                // cuenta QR-mesa hereda el multiplicador viejo (F-202).
+                weight: true,
+                price_unit_quantity: true,
+                // F-151 — marcador ADR-08 (`null` = línea pre-ADR-08 con
+                // `unit_price` ya bruto). Sin proyectarlo,
+                // `resolveOrderLineFinals` no puede distinguir la línea vieja
+                // de la nueva y re-aplica tasas sobre un bruto ya resuelto.
+                tax_amount_item: true,
                 inventory_consumed_at_fire: true,
                 // CP-POLLO-ARABE-727 F.1 Round 4 (C.4) — insumos para derivar
                 // `variant_label` con el mismo criterio de
@@ -1834,7 +1966,18 @@ export class TableSessionsService {
             : [];
         finalsByItemId.set(
           it.id,
-          resolveOrderLineFinals(Number(it.unit_price), it.quantity, rates),
+          resolveOrderLineFinals(
+            {
+              unit_price: it.unit_price,
+              quantity: it.quantity,
+              weight: it.weight,
+              price_unit_quantity: it.price_unit_quantity,
+              // F-151 — con esto pasado, `null` (línea pre-ADR-08) desactiva
+              // el re-cálculo y evita el bruto × 1,19 en tasas exclusivas.
+              tax_amount_item: it.tax_amount_item,
+            },
+            rates,
+          ),
         );
       }
     }
@@ -2486,5 +2629,67 @@ export class TableSessionsService {
       },
     });
     return groupRatesByProductId(rows as any);
+  }
+
+  /**
+   * ADR-08 commit 5 (F-038/F-042/F-048/F-050/F-093/F-094) — UN batch (no
+   * N+1, F-094 punto 1) de `product_tax_assignments`, pero a diferencia de
+   * `resolveLineRatesByProductId` (display-only, solo `{rate, is_inclusive}`)
+   * conserva `tax_rate_id`/`name`/`tax_type`: `addItems` los necesita para
+   * crear las filas `order_item_taxes` (DB-08), que la sombra de `findOne`
+   * nunca escribe. Misma agrupación por producto y misma precedencia de
+   * `is_inclusive` (asignación → categoría → primera tasa → false) que
+   * `TaxesService.calculateProductTaxes` — no se reimplementa el despeje en
+   * sí, sólo el armado de filas; `resolveLineTotals` (importado, puro) hace
+   * la cuenta igual que el resto del dominio (F-003).
+   */
+  private async resolveFullTaxRowsByProductId(
+    productIds: number[],
+  ): Promise<
+    Map<number, Array<TypedTaxRate & { tax_rate_id: number; name: string; tax_type: string }>>
+  > {
+    const out = new Map<
+      number,
+      Array<TypedTaxRate & { tax_rate_id: number; name: string; tax_type: string }>
+    >();
+    const ids = [...new Set(productIds)];
+    if (ids.length === 0) return out;
+    const assignments = await this.prisma.product_tax_assignments.findMany({
+      where: { product_id: { in: ids } },
+      include: {
+        tax_categories: { include: { tax_rates: true } },
+      },
+    });
+    for (const assignment of assignments as Array<{
+      product_id: number;
+      is_inclusive?: boolean | null;
+      tax_categories?: {
+        tax_type?: string | null;
+        tax_rates?: Array<{
+          id: number;
+          name: string;
+          rate: Prisma.Decimal | number;
+          is_inclusive?: boolean | null;
+        } | null> | null;
+      } | null;
+    }>) {
+      const rates = assignment.tax_categories?.tax_rates ?? [];
+      if (rates.length === 0) continue;
+      const taxType = assignment.tax_categories?.tax_type ?? 'iva';
+      const assignmentInclusive = assignment.is_inclusive ?? undefined;
+      const list = out.get(assignment.product_id) ?? [];
+      for (const rate of rates) {
+        if (rate == null) continue;
+        list.push({
+          tax_rate_id: rate.id,
+          name: rate.name,
+          rate: Number(rate.rate),
+          tax_type: taxType,
+          is_inclusive: assignmentInclusive ?? rate.is_inclusive ?? false,
+        });
+      }
+      out.set(assignment.product_id, list);
+    }
+    return out;
   }
 }

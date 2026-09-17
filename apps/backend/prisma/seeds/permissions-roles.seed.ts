@@ -548,6 +548,24 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/kitchen-fire/tickets/:id',
       method: 'PATCH',
     },
+    // Permisos finos de cancelación y reenvío de comandas/tickets KDS —
+    // owner/admin (/manager por catch-all `store:`) los heredan
+    // automáticamente; waiter/kitchen/cashier/carrier usan listas explícitas
+    // y quedan en deny-by-default (no se agregan ahí).
+    {
+      name: 'store:kitchen_fire:cancel',
+      description:
+        'Cancelar ticket de cocina (comanda) — solo owner/admin (revierte sin re-consumir inventario)',
+      path: '/api/store/kitchen-fire/tickets/:id/cancel',
+      method: 'POST',
+    },
+    {
+      name: 'store:kitchen_fire:resend',
+      description:
+        'Rehacer/reenviar comanda a cocina (respeta decision reuse/waste) — solo owner/admin',
+      path: '/api/store/kitchen-fire/resend',
+      method: 'POST',
+    },
 
     // Tables (mesas) + Table Sessions (cuenta abierta) — Restaurant Suite — Fase E
     {
@@ -2696,6 +2714,17 @@ export async function seedPermissionsAndRoles(
       name: 'store:orders:order_flow:reactivate',
       description: 'Reactivate a previously cancelled order',
       path: '/api/store/orders/:orderId/flow/reactivate',
+      method: 'POST',
+    },
+    // 1060 paso 2 — reversa de entrega de ítem (restock/merma). Permiso
+    // propio (no hereda `order_flow:create`): reversar mueve inventario o
+    // declara merma, así que solo cashier/admin/owner. waiter/employee usan
+    // listas explícitas y quedan en deny-by-default (no se agregan ahí).
+    {
+      name: 'store:orders:order_flow:cancel_delivered',
+      description:
+        'Reversar entrega de ítem entregado (restock a inventario o merma auditada) — solo cashier/admin/owner',
+      path: '/api/store/orders/:orderId/flow/items/:orderItemId/cancel-delivered',
       method: 'POST',
     },
     {
@@ -4944,6 +4973,9 @@ export async function seedPermissionsAndRoles(
       // 'store:orders:order_flow:create', so list these explicitly.
       p.name === 'store:orders:order_flow:create' ||
       p.name === 'store:orders:order_flow:read' ||
+      // 1060 paso 2 — reversa de entrega (restock/merma): el cajero la
+      // necesita para corregir entregas; waiter/employee quedan fuera.
+      p.name === 'store:orders:order_flow:cancel_delivered' ||
       // Cupones - leer y validar
       p.name.includes('store:coupons:read') ||
       p.name.includes('store:coupons:read:one') ||

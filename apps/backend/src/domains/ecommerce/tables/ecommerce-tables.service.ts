@@ -26,6 +26,10 @@ import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.ty
 import { S3Service } from '@common/services/s3.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { AddItemsToTableSessionDto } from '../../store/tables/dto';
+// C.7 (CP-pos-exclusive-tax-double-charge, ADR-12) — mismo resolvedor que
+// usan los providers del gateway de impresión para las superficies
+// `@OptionalAuth` (sin usuario del que leer el estado fiscal).
+import { resolvePrintsVatBreakdownForPrint } from '../../store/print-formats/services/print-vat-breakdown.resolver';
 import {
   CallWaiterDto,
   IdentifyTableDto,
@@ -117,6 +121,24 @@ export interface BillItemView {
   unit_price: number;
   total: number;
   /**
+   * C.8 (R-1, F-077 partial) — campos ADITIVOS: `unit_price`/`total` de
+   * arriba NO cambian de magnitud (siguen en BASE). Derivados en lectura
+   * con el fallback de ADR-06 (`final_unit_price ?? (unit_price +
+   * tax_amount_item / line_units)`) — este endpoint nunca escribe
+   * `final_unit_price`, así que el fallback es el camino normal.
+   */
+  unit_price_gross: number;
+  line_total_gross: number;
+  /**
+   * C.7 (CP-pos-exclusive-tax-double-charge, ADR-07/ADR-12) — aditivo,
+   * derivado igual que `line_total_gross` de arriba: `line_total_gross -
+   * total`. Es el impuesto de la línea completa (no por unidad), coherente
+   * con `total` (BASE) y `line_total_gross` (bruto) — cierra el hueco por
+   * el que el pie del panel QR-mesa quedaba huérfano por construcción
+   * (§5.3: sin este dato no hay con qué explicar la diferencia).
+   */
+  tax_amount: number;
+  /**
    * Diner-facing thumbnail: the variant's denormalized image when the line
    * is a variant, else the product's primary image (lowest `sort_order`),
    * else `null`.
@@ -135,12 +157,31 @@ export interface BillView {
   order_id: number;
   items: BillItemView[];
   subtotal: number;
+  /**
+   * C.8 (F-077 partial, major) — aditivo. `subtotal` (arriba) y
+   * `grand_total` (abajo) divergen exactamente en este monto cuando la
+   * línea es exclusiva; sin este campo la diferencia queda huérfana en el
+   * documento con el que el comensal anónimo decide pagar (ADR-07). Cierre
+   * PARCIAL de F-077: expone el dato; el rótulo de pie en el storefront no
+   * está en los `Resources` de este paso (ningún archivo de
+   * `store-ecommerce`/`table-banner` frontend fue asignado a C.8).
+   */
+  tax_amount: number;
   grand_total: number;
   /** Sum of applied (succeeded) payments against this order. */
   total_paid: number;
   /** Outstanding amount the diner still owes (`grand_total − total_paid`). */
   balance_due: number;
   currency: string;
+  /**
+   * C.7 (ADR-12) — gate fiscal del documento, resuelto por
+   * `resolvePrintsVatBreakdownForPrint` (fail-closed). Gobierna en el
+   * storefront si `subtotal`/`tax_amount` se muestran juntos (regla
+   * anti-huérfana §5.3): sin responsabilidad de IVA declarada, o sin el
+   * área fiscal `invoicing` activa, viaja en `false` y el panel no
+   * desglosa impuesto aunque `tax_amount` sea positivo.
+   */
+  prints_vat_breakdown: boolean;
 }
 
 /**
@@ -874,8 +915,28 @@ export class EcommerceTablesService {
         // live balance from `grand_total − total_paid` (the same formula
         // bumpOrderBalanceInTx uses) instead of reading it directly.
         remaining_balance: true,
+        // C.7 (CP-pos-exclusive-tax-double-charge, ADR-12) — insumos de
+        // `resolvePrintsVatBreakdownForPrint`, misma forma que los providers
+        // del gateway de impresión. La cuenta QR-mesa es `@OptionalAuth`: no
+        // hay usuario del que leer el estado fiscal, así que viaja resuelto
+        // en el payload.
+        stores: {
+          select: {
+            store_settings: { select: { settings: true } },
+            organizations: {
+              select: {
+                fiscal_scope: true,
+                organization_settings: { select: { settings: true } },
+              },
+            },
+          },
+        },
       },
     });
+    const printsVatBreakdown = resolvePrintsVatBreakdownForPrint(
+      orderRow?.stores?.organizations,
+      orderRow?.stores,
+    );
 
     // Diner-safe line projection. `findOne` (the staff session view) does NOT
     // carry per-item images, and we must not enrich that shared view. Instead
@@ -891,6 +952,11 @@ export class EcommerceTablesService {
         quantity: true,
         unit_price: true,
         total_price: true,
+        // C.8 — sólo para derivar `unit_price_gross`/`line_total_gross`
+        // (ADR-06 fallback en lectura). No cambia el resto del select.
+        final_unit_price: true,
+        tax_amount_item: true,
+        price_unit_quantity: true,
         variant_image_url: true,
         products: {
           select: {
@@ -920,11 +986,31 @@ export class EcommerceTablesService {
         const signedImageUrl = rawImageUrl
           ? ((await this.s3Service.signUrl(rawImageUrl)) ?? null)
           : null;
+        // C.8 (ADR-06 fallback en lectura): `final_unit_price ?? (unit_price
+        // + COALESCE(tax_amount_item,0) / line_units)`. `getBill` nunca
+        // escribe `final_unit_price` (F-005), así que este fallback es el
+        // camino normal, no la excepción.
+        const netUnit = Number(it.unit_price);
+        const netTotal = Number(it.total_price);
+        const lineUnits = Number(it.price_unit_quantity ?? it.quantity ?? 1) || 1;
+        const grossUnit =
+          it.final_unit_price != null
+            ? Number(it.final_unit_price)
+            : netUnit + Number(it.tax_amount_item ?? 0) / lineUnits;
+        const multiplier = netUnit !== 0 ? netTotal / netUnit : Number(it.quantity ?? 0);
+        const lineTotalGross = Math.round(grossUnit * multiplier * 100) / 100;
         return {
           name: it.product_name,
           quantity: it.quantity,
-          unit_price: Number(it.unit_price),
-          total: Number(it.total_price),
+          unit_price: netUnit,
+          total: netTotal,
+          unit_price_gross: Math.round(grossUnit * 100) / 100,
+          line_total_gross: lineTotalGross,
+          // C.7 — misma derivación en lectura que `line_total_gross`/ADR-06:
+          // el impuesto de la línea es la diferencia entre el bruto ya
+          // calculado arriba y la base (`total`). Nunca negativo por
+          // redondeo (tasa 0% ⇒ grossUnit === netUnit ⇒ 0).
+          tax_amount: Math.max(Math.round((lineTotalGross - netTotal) * 100) / 100, 0),
           image_url: signedImageUrl,
         };
       }),
@@ -940,10 +1026,12 @@ export class EcommerceTablesService {
       order_id: session.order_id,
       items,
       subtotal: Number(order?.subtotal_amount ?? 0),
+      tax_amount: Number((order as any)?.tax_amount ?? 0),
       grand_total: Number(order?.grand_total ?? 0),
       total_paid: totalPaid,
       balance_due: balanceDue,
       currency: orderRow?.currency ?? 'COP',
+      prints_vat_breakdown: printsVatBreakdown,
     };
   }
 
@@ -1008,9 +1096,15 @@ export class EcommerceTablesService {
       }
     }
 
-    await this.dispatchStaffNotification(
+    // Entrega GENERAL (decisión del dueño): el llamado llega a TODO el
+    // staff, no solo al mesero asignado. Se usa `createAndBroadcast` en vez
+    // de `dispatchStaffNotification` a propósito: el envío dirigido
+    // (`sendToUser`) solo escribe en el subject por-usuario y jamás llega al
+    // subject por-tienda que alimentan el stream staff del plano y la campana
+    // general — por eso la mesa nunca destellaba cuando tenía meseros
+    // asignados. El broadcast alimenta campana + toast + destello para todos.
+    await this.notificationsService.createAndBroadcast(
       store_id,
-      table.id,
       'table_call_waiter',
       'Llamado de mesero',
       `Mesa ${table.name} solicita atención`,
@@ -1022,8 +1116,8 @@ export class EcommerceTablesService {
         note: note ?? null,
         customer_id: customerId,
         customer_name: customerName,
+        public_token: token,
       },
-      token,
     );
 
     this.logger.log(

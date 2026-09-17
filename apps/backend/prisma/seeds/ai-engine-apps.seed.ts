@@ -23,6 +23,7 @@ export async function seedAIEngineApps(
   const apps = [
     {
       key: 'invoice_ocr',
+      ai_feature_category: 'async_queue',
       name: 'Escaner de Facturas de Compra',
       description:
         'Extrae datos estructurados de imagenes de facturas de compra usando vision AI',
@@ -125,6 +126,7 @@ RULES:
     },
     {
       key: 'invoice_ocr_ingredient',
+      ai_feature_category: 'async_queue',
       name: 'Escaner de Facturas — Insumos (UoM)',
       description:
         'Variante de invoice_ocr para órdenes de insumo. Devuelve los mismos campos de retail + presentation / pack_size / uom_hint para sugerir la unidad de compra y de stock al usuario en el modal POP.',
@@ -230,6 +232,7 @@ RULES:
       // del recibo/transferencia y pre-rellena los campos del formulario.
       // Salida JSON estricta consumida por el processor `payment-receipt-scan`.
       key: 'payment_receipt_ocr',
+      ai_feature_category: 'async_queue',
       name: 'Escaner de Comprobantes de Pago (POP)',
       description:
         'Extrae datos de comprobantes de pago (transferencias, recibos, vouchers) para pre-rellenar el modal "Registrar Pago" de órdenes de compra.',
@@ -266,6 +269,7 @@ RULES:
     },
     {
       key: 'expense_invoice_ocr',
+      ai_feature_category: 'async_queue',
       name: 'Escaner de Facturas de Gasto',
       description:
         'Extrae datos estructurados de facturas de gasto (expense receipts) usando vision AI para pre-llenar el registro de gastos con desglose de items',
@@ -320,6 +324,7 @@ RULES:
     },
     {
       key: 'inventory_count_ocr',
+      ai_feature_category: 'async_queue',
       name: 'Escaner de Reconteo de Inventario',
       description:
         'Extrae los ítems contados de una hoja de reconteo de inventario (físico, escrita a mano o impresa) usando vision AI para pre-llenar el ajuste de stock',
@@ -366,6 +371,7 @@ REGLAS:
     },
         {
       key: 'rut_scanner',
+      ai_feature_category: 'async_queue',
       name: 'Escaner de RUT (Identidad Fiscal)',
       description:
         'Extrae datos fiscales colombianos normalizados de un documento RUT (imagen o PDF) usando vision AI',
@@ -421,6 +427,7 @@ RULES:
     },
     {
       key: 'dian_resolution_scanner',
+      ai_feature_category: 'async_queue',
       name: 'Escaner de Resolución DIAN (Numeración de Facturación)',
       description:
         'Extrae prefijo, número, fechas de vigencia, rango autorizado y clave técnica de una resolución de numeración DIAN (imagen o PDF) usando vision AI',
@@ -485,6 +492,7 @@ RULES:
     },
     {
       key: 'dian_habilitation_scanner',
+      ai_feature_category: 'async_queue',
       name: 'Escaner de Habilitación DIAN (Software + Set de Pruebas)',
       description:
         'Extrae SoftwareID, PIN, TestSetId, NIT y la resolución de pruebas desde 1-3 documentos de la habilitación DIAN (imagen o PDF) usando vision AI, para pre-llenar el formulario de configuración DIAN',
@@ -563,6 +571,7 @@ RULES:
     },
     {
       key: 'route_sheet_ocr',
+      ai_feature_category: 'async_queue',
       name: 'Escaner de Planilla de Ruta (Recaudo DSD)',
       description:
         'Extrae las entregas y recaudos por parada de una planilla de ruta de despacho llenada a mano (imagen o PDF) usando vision AI',
@@ -610,6 +619,7 @@ RULES:
     },
     {
       key: 'member_roster_ocr',
+      ai_feature_category: 'async_queue',
       name: 'Escáner de Padrón de Socios (Carga Masiva)',
       description:
         'Extrae socios y planes desde cualquier documento para carga masiva',
@@ -701,6 +711,7 @@ RULES:
     },
     {
       key: 'cash_register_closing_summary',
+      ai_feature_category: 'text_generation',
       name: 'Resumen IA de Cierre de Caja',
       description:
         'Genera un resumen narrativo del cierre de caja basado en los movimientos de la sesion',
@@ -740,6 +751,7 @@ Todos los montos del resumen DEBEN usar {{currency_symbol}} y/o la sigla {{curre
     },
     {
       key: 'consultation_prediagnosis',
+      ai_feature_category: 'text_generation',
       name: 'Prediagnóstico de Consulta',
       description:
         'Genera prediagnóstico previo a consulta basado en formulario de precarga e historial del paciente',
@@ -781,6 +793,7 @@ ESTRUCTURA:
     },
     {
       key: 'customer_history_summary',
+      ai_feature_category: 'text_generation',
       name: 'Resumen de Historial del Cliente',
       description:
         'Genera resumen consolidado del historial de consultas de un cliente',
@@ -1069,6 +1082,7 @@ Genera una nueva version comercial de la MISMA imagen, manteniendo el sujeto rec
     },
     {
       key: 'marketing_ad_prompt_specialist',
+      ai_feature_category: 'text_generation',
       name: 'Especialista de Prompts para Anuncios',
       description:
         'Convierte briefs simples de tienda en prompts profesionales para flyers, banners e historias',
@@ -1135,6 +1149,7 @@ Devuelve SOLO este JSON:
     },
     {
       key: 'marketing_ad_post_copywriter',
+      ai_feature_category: 'text_generation',
       name: 'Copywriter de Posts de Anuncios',
       description:
         'Genera texto publicable para anuncios creados en el modulo de marketing',
@@ -1326,6 +1341,7 @@ Devuelve SOLO este JSON:
       // actualizar este prompt (y solo aplica a instalaciones nuevas — el
       // seed nunca sobrescribe prompts editados).
       key: 'crm_landing_generator',
+      ai_feature_category: 'text_generation',
       name: 'CRM Landing Generator',
       description:
         'Genera la estructura JSON de bloques de la landing page por defecto del módulo CRM a partir de la configuración del negocio',
@@ -1412,6 +1428,17 @@ Genera el JSON de la landing page por defecto siguiendo el esquema exacto del sy
       // is a system-owned column, not user-tunable.
       if (existing.model_type !== app.model_type) {
         updates.model_type = app.model_type;
+      }
+
+      // Backfill ai_feature_category on rows that predate F1 (NULL). Like
+      // model_type it is system-owned for metering, but an operator-edited
+      // value via the admin panel is preserved: only NULL is filled, never
+      // overwritten.
+      if (
+        (existing.ai_feature_category as string | null) == null &&
+        (app as any).ai_feature_category
+      ) {
+        updates.ai_feature_category = (app as any).ai_feature_category;
       }
 
       // Prompts (system_prompt / prompt_template) are NEVER reconciled here:

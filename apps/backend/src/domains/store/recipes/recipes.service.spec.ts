@@ -97,7 +97,20 @@ describe('RecipesService — cycle detection & explosion', () => {
       findMany: jest.fn().mockImplementation(({ where }: any) => {
         if (where?.recipe_id === undefined) return Promise.resolve([]);
         const list = (recipeTree.items[where.recipe_id] || []).map(
-          (cpid: number) => ({ component_product_id: cpid }),
+          (cpid: number, idx: number) => ({
+            id: idx + 1,
+            recipe_id: where.recipe_id,
+            component_product_id: cpid,
+            quantity: 1,
+            component_product: {
+              id: cpid,
+              name: `Producto ${cpid}`,
+              sku: `SKU-${cpid}`,
+              stock_unit: 'unidad',
+              is_ingredient: true,
+              is_sellable: true,
+            },
+          }),
         );
         return Promise.resolve(list);
       }),
@@ -110,6 +123,7 @@ describe('RecipesService — cycle detection & explosion', () => {
         ...data,
       })),
       delete: jest.fn().mockResolvedValue({ id: 1 }),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
     };
 
     products = {
@@ -124,6 +138,19 @@ describe('RecipesService — cycle detection & explosion', () => {
         }
         return Promise.resolve(null);
       }),
+      findMany: jest.fn().mockImplementation(({ where }: any) => {
+        if (where?.id?.in !== undefined) {
+          return Promise.resolve(
+            where.id.in.map((id: number) => ({
+              id,
+              store_id: STORE_ID,
+              is_sellable: true,
+              is_ingredient: false,
+            })),
+          );
+        }
+        return Promise.resolve([]);
+      }),
     };
 
     // Un insumo NO puede tener variantes: `recipe_items` sólo guarda
@@ -137,6 +164,14 @@ describe('RecipesService — cycle detection & explosion', () => {
     variants = {
       count: jest.fn().mockResolvedValue(0),
       findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+    };
+
+    const tx = {
+      recipes,
+      recipe_items: items,
+      products,
+      product_variants: variants,
     };
 
     return {
@@ -144,6 +179,9 @@ describe('RecipesService — cycle detection & explosion', () => {
       recipe_items: items,
       products,
       product_variants: variants,
+      $transaction: jest.fn().mockImplementation((cb: any) =>
+        typeof cb === 'function' ? cb(tx) : Promise.resolve(cb),
+      ),
     };
   };
 
@@ -386,6 +424,208 @@ describe('RecipesService — cycle detection & explosion', () => {
       expect(lines).toHaveLength(1);
       expect(lines[0].component_product_id).toBe(42);
       expect(lines[0].quantity).toBe(1); // 1 unit per 1 yield, 0% waste
+    });
+  });
+
+  describe('replaceItems — reconciliación atómica BOM', () => {
+    it('rechaza con RECIPE_ITEM_INVALID_QUANTITY si algún insumo tiene cantidad <= 0', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [2] },
+      });
+
+      await expect(
+        service.replaceItems(10, [
+          { component_product_id: 2, quantity: 0 },
+        ]),
+      ).rejects.toMatchObject({
+        errorCode: 'RECIPE_ITEM_INVALID_QUANTITY',
+      });
+    });
+
+    it('rechaza con RECIPE_SELF_REFERENCE si algún insumo es el producto yield de la receta', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [] },
+      });
+
+      await expect(
+        service.replaceItems(10, [
+          { component_product_id: 1, quantity: 2 },
+        ]),
+      ).rejects.toMatchObject({
+        errorCode: 'RECIPE_SELF_REFERENCE',
+      });
+    });
+
+    it('rechaza con RECIPE_ITEM_DUP si hay componentes duplicados en la lista', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [] },
+      });
+
+      await expect(
+        service.replaceItems(10, [
+          { component_product_id: 2, quantity: 1 },
+          { component_product_id: 2, quantity: 3 },
+        ]),
+      ).rejects.toMatchObject({
+        errorCode: 'RECIPE_ITEM_DUP',
+      });
+    });
+
+    it('rechaza con RECIPE_ITEM_DUP si hay ids duplicados en la lista', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [2, 3] },
+      });
+
+      await expect(
+        service.replaceItems(10, [
+          { id: 1, component_product_id: 2, quantity: 1 },
+          { id: 1, component_product_id: 3, quantity: 3 },
+        ]),
+      ).rejects.toMatchObject({
+        errorCode: 'RECIPE_ITEM_DUP',
+      });
+    });
+
+    it('rechaza con RECIPE_COMPONENT_NOT_FOUND si un componente no pertenece a la tienda', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [] },
+      });
+      products.findFirst.mockResolvedValueOnce(null); // not found
+
+      await expect(
+        service.replaceItems(10, [
+          { component_product_id: 999, quantity: 2 },
+        ]),
+      ).rejects.toMatchObject({
+        errorCode: 'RECIPE_COMPONENT_NOT_FOUND',
+      });
+    });
+
+    it('rechaza con RECIPE_COMPONENT_HAS_VARIANTS si un componente tiene variantes', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [] },
+      });
+      variants.count.mockResolvedValueOnce(2);
+
+      await expect(
+        service.replaceItems(10, [
+          { component_product_id: 2, quantity: 2 },
+        ]),
+      ).rejects.toMatchObject({
+        errorCode: 'RECIPE_COMPONENT_HAS_VARIANTS',
+      });
+    });
+
+    it('rechaza con RECIPE_CYCLE_DETECTED si agregar un componente cierra un ciclo', async () => {
+      // Recipe A (yield 1, id 10) y Recipe B (yield 2, id 20)
+      // B ya tiene A como componente (2 -> 1).
+      // Intentar que A tenga B como componente (1 -> 2) cerraría el ciclo 1 -> 2 -> 1.
+      const service = await buildService({
+        ownRecipe: { 1: 10, 2: 20 },
+        items: { 10: [], 20: [1] },
+      });
+
+      await expect(
+        service.replaceItems(10, [
+          { component_product_id: 2, quantity: 1 },
+        ]),
+      ).rejects.toMatchObject({
+        errorCode: 'RECIPE_CYCLE_DETECTED',
+      });
+    });
+
+    it('rechaza con RECIPE_ITEM_NOT_FOUND si se pasa un item.id que no pertenece a la receta', async () => {
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [2] }, // has item with id 1
+      });
+
+      await expect(
+        service.replaceItems(10, [
+          { id: 999, component_product_id: 2, quantity: 1 },
+        ]),
+      ).rejects.toMatchObject({
+        errorCode: 'RECIPE_ITEM_NOT_FOUND',
+      });
+    });
+
+    it('sincroniza atómicamente: borra insumos removidos, actualiza existentes in-place y crea nuevos en una transacción', async () => {
+      // Receta 10 tiene inicialmente dos insumos: id 1 (comp 2) e id 2 (comp 3)
+      const service = await buildService({
+        ownRecipe: { 1: 10 },
+        items: { 10: [2, 3] },
+      });
+
+      // Se remueve id 2 (comp 3), se actualiza id 1 (cambia componente a 4 y cantidad a 2.5), y se agrega nuevo comp 5
+      const payload = [
+        {
+          id: 1,
+          component_product_id: 4,
+          quantity: 2.5,
+          waste_percent: 10,
+          waste_mode: 'percent' as const,
+          is_optional: true,
+        },
+        {
+          component_product_id: 5,
+          quantity: 1,
+          waste_mode: 'absolute' as const,
+          waste_absolute: 0.2,
+        },
+      ];
+
+      items.deleteMany.mockClear();
+      items.update.mockClear();
+      items.create.mockClear();
+      recipes.update.mockClear();
+
+      const result = await service.replaceItems(10, payload);
+
+      // 1. Borra los omitidos (id 2)
+      expect(items.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: [2] }, recipe_id: 10 },
+      });
+
+      // 2. Actualiza existentes in-place (id 1 recibe component_product_id 4)
+      expect(items.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 1 },
+          data: expect.objectContaining({
+            component_product_id: 4,
+            quantity: expect.anything(),
+            waste_percent: expect.anything(),
+            waste_mode: 'percent',
+            is_optional: true,
+          }),
+        }),
+      );
+
+      // 3. Crea nuevos insumos (comp 5)
+      expect(items.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            recipe_id: 10,
+            component_product_id: 5,
+            waste_mode: 'absolute',
+            is_optional: false,
+          }),
+        }),
+      );
+
+      // 4. Actualiza updated_at de la receta
+      expect(recipes.update).toHaveBeenCalledWith({
+        where: { id: 10 },
+        data: { updated_at: expect.any(Date) },
+      });
+
+      expect(result).toMatchObject({ id: 10 });
+      expect(Array.isArray(result.items)).toBe(true);
     });
   });
 });
