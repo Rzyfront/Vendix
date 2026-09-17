@@ -2,7 +2,7 @@
 id: E.3
 title: "Mobile POS search parity"
 phase: E
-status: pending
+status: done
 owner: none
 updated: 2026-09-17
 contracts: [FB-14, ERR-01, ERR-02]
@@ -23,10 +23,11 @@ skills: [mobile-dev]
 - **Verification:**
   - `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $T" "$API/store/products?search=cafe&state=active" | grep 200`
 - **Acceptance checklist:**
-  - [ ] Filtro precio activo → HTTP 200 (keys strip antes de enviar)
-  - [ ] Load-more + contador; cero re-sort local del rank backend
-  - [ ] Comentarios whitelist:false corregidos (3 sitios)
-  - [ ] Rank-25 alcanzable en móvil igual que web
-  - [ ] F-025 — FB-14 field-of-more móvil: min_price→400 (major)
-  - [ ] F-059 — Mobile POS sin paso UI (major)
-- **Status:** pending
+  - [x] Filtro precio activo → HTTP 200 (keys strip antes de enviar)
+  - [x] Load-more + contador; cero re-sort local del rank backend
+  - [x] Comentarios whitelist:false corregidos (3 sitios)
+  - [x] Rank-25 alcanzable en móvil igual que web
+  - [x] F-025 — FB-14 field-of-more móvil: min_price→400 (major)
+  - [x] F-059 — Mobile POS sin paso UI (major)
+- **Status:** done
+- **Evidence:** evidence/E.3-mobile-pos.md (specs 4/4 + tsc limpio + vivo 200/400-contraste + p2 total 87).
