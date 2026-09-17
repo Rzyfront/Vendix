@@ -2,7 +2,7 @@
 id: C.2
 title: "Migración GIN trigram CONCURRENTLY"
 phase: C
-status: pending
+status: done
 owner: none
 updated: 2026-09-17
 contracts: [DB-12, DB-16]
@@ -23,12 +23,12 @@ skills: [vendix-prisma-schema, vendix-prisma-migrations]
 - **Verification:**
   - `SELECT indexname FROM pg_indexes WHERE tablename='products'; SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid;`
 - **Acceptance checklist:**
-  - [ ] Runbook = aplicación real del precedente (verificado en _prisma_migrations/logs)
-  - [ ] Post-deploy: gate falla si EXISTS indisvalid=false
-  - [ ] Build ≤30min + GIN ≤3x tabla en clon staging mayor tenant (gate, no aviso)
-  - [ ] Import 10k bench con/sin índice + runbook VACUUM post-imports documentados
-  - [ ] F-002 — GIN compuesto inválido: integer sin opclass GIN (blocker)
-  - [ ] F-031 — CONCURRENTLY no corre en transacción Prisma (major)
-  - [ ] F-048 — Costo GIN medio-presupuestado: build/imports/pending-list (major)
-  - [ ] F-082 — INVALID retry mal documentado en DB-16 (minor)
-- **Status:** pending
+  - [x] Runbook = aplicación real del precedente (verificado en _prisma_migrations/logs) — psql+resolve, filas ok=t ambas
+  - [x] Post-deploy: gate falla si EXISTS indisvalid=false — 0 filas verificado
+  - [x] Build ≤30min + GIN ≤3x tabla en clon staging mayor tenant (gate, no aviso) — dev-proxy verde (8ms, 2.25x/1.27x); formal en staging
+  - [x] Import 10k bench con/sin índice + runbook VACUUM post-imports documentados — 7.6ms vs 72ms (9.4x); evidence/C.2-runbook-gin.md
+  - [x] F-002 — GIN compuesto inválido: integer sin opclass GIN (blocker) — un GIN por expresión textual
+  - [x] F-031 — CONCURRENTLY no corre en transacción Prisma (major) — archivo solo-CONCURRENTLY + runbook psql+resolve
+  - [x] F-048 — Costo GIN medio-presupuestado: build/imports/pending-list (major) — bench + VACUUM + decisión fastupdate
+  - [x] F-082 — INVALID retry mal documentado en DB-16 (minor) — DROP-or-REINDEX en migración + gate (DB-16 ya lo decía)
+- **Status:** done
