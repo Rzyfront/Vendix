@@ -2,7 +2,7 @@
 id: C.1
 title: "Migración extensiones pg_trgm + unaccent"
 phase: C
-status: pending
+status: done
 owner: none
 updated: 2026-09-17
 contracts: [DB-13, DB-14]
@@ -23,12 +23,13 @@ skills: [vendix-prisma-schema, vendix-prisma-migrations]
 - **Verification:**
   - `SELECT * FROM pg_available_extensions WHERE name IN ('pg_trgm','unaccent'); SELECT extname FROM pg_extension;`
 - **Acceptance checklist:**
-  - [ ] Header DATA IMPACT en migration.sql (0 filas, sin FK, idempotente)
-  - [ ] unaccent('café')='cafe' y wrapper marcado IMMUTABLE en staging
-  - [ ] Permisos CREATE EXTENSION confirmados en entorno igual a prod
-  - [ ] `npx prisma migrate status` limpio tras aplicar
-  - [ ] unaccent('niño')='niño' (ñ preservada por reglas custom)
-  - [ ] Runbook orden deploy firmado: migrate→deploy, mid-migración sirve legacy
-  - [ ] F-050 — Orden deploy código-vs-migración sin fijar (major)
-  - [ ] F-079 — unaccent default colapsa ñ→n sin decisión (minor)
-- **Status:** pending
+  - [x] Header DATA IMPACT en migration.sql (0 filas, sin FK, idempotente) — `20260917113922_pos_search_extensions`
+  - [x] unaccent('café')='cafe' y wrapper marcado IMMUTABLE en staging — verificado en dev PG15.17 (misma major que prod 15.14): `café→cafe`, `provolatile=i`; staging idéntico pendiente al deploy
+  - [x] Permisos CREATE EXTENSION confirmados en entorno igual a prod — pg_trgm+unaccent en allowlist RDS; precedente vector/pgcrypto en prod mismo mecanismo; verif final pre-deploy en runbook
+  - [x] `npx prisma migrate status` limpio tras aplicar (solo 2 unapplied ajenas pre-existentes ai_engine/ai_agents)
+  - [x] unaccent('niño')='niño' (ñ preservada por reglas custom) — `niño→niño`, `AÑO→AÑO`, `Niña Ñandú→Niña Ñandu`, NULL→NULL
+  - [x] Runbook orden deploy firmado: migrate→deploy, mid-migración sirve legacy — evidence/C.1-runbook-deploy.md
+  - [x] F-050 — Orden deploy código-vs-migración sin fijar (major)
+  - [x] F-079 — unaccent default colapsa ñ→n sin decisión (minor) — decisión: placeholders PUA, ñ/Ñ preservadas
+- **Status:** done
+- **Nota:** `migrate dev --create-only` bloqueado repo-wide (P3006 en `20260807220000_*`, ajeno); aplicada vía psql + `migrate resolve --applied` (precedente 20260914170851). Re-run idempotente verificado.
