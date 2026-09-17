@@ -21,6 +21,9 @@ import {
   AIEngineConfig,
   AIModelType,
   CreateAIConfigDto,
+  IMAGE_GENERATION_MODE_LABELS,
+  IMAGE_GENERATION_MODES,
+  ImageGenerationMode,
   MODEL_TYPES,
   MODEL_TYPE_LABELS,
   NOISE_REDUCTION_LABELS,
@@ -131,13 +134,13 @@ import {
             placeholder="https://api.example.com/v1"
             [control]="form.get('base_url')"
             [disabled]="isSubmitting()"
-            helpText="Dejar vacio para usar la URL oficial del SDK"
+            helpText="Si la escribes se usa completa y tal cual (puedes pegar el endpoint completo, ej. …/v1/images). Vacia = URL sugerida del proveedor."
           ></app-input>
 
           <!-- Model Type -->
           <div class="space-y-1">
             <app-selector
-              label="Tipo de modelo"
+              label="Tipo de modelo principal"
               [options]="modelTypeOptions"
               [formControl]="$any(form.get('model_type'))"
               [disabled]="isSubmitting()"
@@ -147,6 +150,48 @@ import {
               embeddings, etc.). Se valida contra el tipo de cada aplicacion.
             </p>
           </div>
+
+          <!-- Extra capabilities (multimodal) -->
+          <div class="space-y-2">
+            <span class="text-xs font-medium text-text-secondary uppercase tracking-wide">
+              Capacidades adicionales (multimodal)
+            </span>
+            <div class="flex flex-wrap gap-x-5 gap-y-2">
+              @for (opt of capabilityOptions(); track opt.value) {
+                <label class="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    class="rounded border-gray-300 text-primary focus:ring-primary"
+                    [checked]="hasCapability(opt.value)"
+                    (change)="toggleCapability(opt.value)"
+                    [disabled]="isSubmitting()"
+                  />
+                  <span class="text-sm text-text-primary">{{ opt.label }}</span>
+                </label>
+              }
+            </div>
+            <p class="text-xs text-text-secondary">
+              Para modelos que sirven más de un tipo (ej. texto + imagen). Con
+              al menos una marcada, la config muestra el badge Multimodal.
+            </p>
+          </div>
+
+          <!-- Image transport -->
+          @if (isImage()) {
+            <div class="space-y-1">
+              <app-selector
+                label="Transporte de imagen"
+                [options]="imageModeOptions"
+                [formControl]="$any(form.get('image_generation_mode'))"
+                [disabled]="isSubmitting()"
+              ></app-selector>
+              <p class="text-xs text-text-secondary">
+                Automático prueba chat primero y reintenta en /images solo ante
+                el 404 que lo exige. Un valor explícito se respeta al pie de la
+                letra, sin reintentos en otro transporte.
+              </p>
+            </div>
+          }
 
           <!-- API Key -->
           <app-input
@@ -438,6 +483,11 @@ export class AIEngineConfigModalComponent implements OnChanges {
     label: MODEL_TYPE_LABELS[value],
   }));
 
+  imageModeOptions: SelectorOption[] = IMAGE_GENERATION_MODES.map((value) => ({
+    value,
+    label: IMAGE_GENERATION_MODE_LABELS[value],
+  }));
+
   voiceOptions: SelectorOption[] = REALTIME_VOICES.map((value) => ({
     value,
     label: value,
@@ -465,9 +515,34 @@ export class AIEngineConfigModalComponent implements OnChanges {
   // Zoneless. Mismo patron que `ai-engine-app-modal`.
   private currentModelType = signal<AIModelType>('text');
   private currentTurnDetection = signal<string>('');
+  private extraCapabilities = signal<AIModelType[]>([]);
 
   isAudio = computed(() => this.currentModelType() === 'audio');
   isEmbedding = computed(() => this.currentModelType() === 'embedding');
+  isImage = computed(
+    () =>
+      this.currentModelType() === 'image' ||
+      this.extraCapabilities().includes('image'),
+  );
+
+  capabilityOptions = computed<SelectorOption[]>(() =>
+    MODEL_TYPES.filter((t) => t !== this.currentModelType()).map((value) => ({
+      value,
+      label: MODEL_TYPE_LABELS[value],
+    })),
+  );
+
+  hasCapability(type: string): boolean {
+    return this.extraCapabilities().includes(type as AIModelType);
+  }
+
+  toggleCapability(type: string): void {
+    const t = type as AIModelType;
+    if (t === this.currentModelType()) return;
+    this.extraCapabilities.update((list) =>
+      list.includes(t) ? list.filter((x) => x !== t) : [...list, t],
+    );
+  }
   isServerVad = computed(() => this.currentTurnDetection() === 'server_vad');
   hasTurnDetection = computed(() => {
     const value = this.currentTurnDetection();
@@ -481,6 +556,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
     model_id: ['', [Validators.required, Validators.maxLength(100)]],
     base_url: [''],
     model_type: ['text' as AIModelType, [Validators.required]],
+    image_generation_mode: ['auto' as ImageGenerationMode],
     api_key_ref: [''],
     temperature: [null],
     max_tokens: [null],
@@ -544,7 +620,12 @@ export class AIEngineConfigModalComponent implements OnChanges {
       .get('model_type')
       ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((modelType: AIModelType | null) => {
-        this.currentModelType.set(modelType || 'text');
+        const next = modelType || 'text';
+        this.currentModelType.set(next);
+        // Un tipo no puede ser primario y capacidad extra a la vez.
+        this.extraCapabilities.update((list) =>
+          list.filter((t) => t !== next),
+        );
 
         // Una config de audio no puede ser el default global: el backend lo
         // rechaza con AI_CONFIG_003. Se limpia aqui para que el operador no
@@ -574,6 +655,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
         model_id: c.model_id,
         base_url: c.base_url || '',
         model_type: c.model_type || c.settings?.model_type || this.inferModelType(c),
+        image_generation_mode: c.settings?.image_generation_mode ?? 'auto',
         api_key_ref: '',
         temperature: c.settings?.temperature ?? null,
         max_tokens: c.settings?.maxTokens ?? null,
@@ -583,6 +665,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
         ...this.embeddingFormValues(c),
         ...this.audioFormValues(c),
       });
+      this.syncExtraCapabilities(c);
       this.syncAudioSignals();
     } else if (this.isOpen() && this.prefill()) {
       const p = this.prefill()!;
@@ -593,6 +676,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
         model_id: p.model_id,
         base_url: p.base_url || '',
         model_type: p.model_type || p.settings?.model_type || this.inferModelType(p),
+        image_generation_mode: p.settings?.image_generation_mode ?? 'auto',
         api_key_ref: '',
         temperature: p.settings?.temperature ?? null,
         max_tokens: p.settings?.maxTokens ?? null,
@@ -602,6 +686,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
         ...this.embeddingFormValues(p),
         ...this.audioFormValues(p),
       });
+      this.syncExtraCapabilities(p);
       this.syncAudioSignals();
     } else if (this.isOpen() && !this.config()) {
       this.resetForm();
@@ -641,7 +726,13 @@ export class AIEngineConfigModalComponent implements OnChanges {
     };
 
     const baseUrl = typeof raw.base_url === 'string' ? raw.base_url.trim() : '';
-    this.applyModelTypeSettings(settings, settings['model_type'], baseUrl, raw);
+    this.applyModelTypeSettings(
+      settings,
+      settings['model_type'],
+      baseUrl,
+      raw,
+      this.extraCapabilities(),
+    );
 
     if (baseUrl) {
       data.base_url = baseUrl;
@@ -676,6 +767,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
       model_id: '',
       base_url: '',
       model_type: 'text',
+      image_generation_mode: 'auto',
       api_key_ref: '',
       temperature: null,
       max_tokens: null,
@@ -695,7 +787,32 @@ export class AIEngineConfigModalComponent implements OnChanges {
     });
     this.suggestedModels.set([]);
     this.modelOptions.set([]);
+    this.extraCapabilities.set([]);
     this.syncAudioSignals();
+  }
+
+  /**
+   * Carga las capacidades extra desde `settings.capabilities`, normalizadas:
+   * solo tipos válidos, sin duplicados y sin el primario. El formulario es una
+   * instancia reutilizada, así que una config de un solo tipo debe limpiar las
+   * capacidades de la multimodal que se editó antes.
+   */
+  private syncExtraCapabilities(config: AIEngineConfig): void {
+    const primary =
+      (this.form.get('model_type')?.value as AIModelType) || 'text';
+    const caps = config.settings?.capabilities;
+    this.extraCapabilities.set(
+      Array.isArray(caps)
+        ? [
+            ...new Set(
+              caps.filter(
+                (t): t is AIModelType =>
+                  MODEL_TYPES.includes(t) && t !== primary,
+              ),
+            ),
+          ]
+        : [],
+    );
   }
 
   /**
@@ -761,7 +878,12 @@ export class AIEngineConfigModalComponent implements OnChanges {
       modelId.includes('image') ||
       modelId.includes('imagine') ||
       modelId.includes('seedream') ||
-      modelId.includes('dall-e')
+      modelId.includes('dall-e') ||
+      modelId.includes('muse') ||
+      modelId.includes('flux') ||
+      modelId.includes('imagen') ||
+      modelId.includes('diffusion') ||
+      modelId.includes('recraft')
     ) {
       return 'image';
     }
@@ -784,11 +906,15 @@ export class AIEngineConfigModalComponent implements OnChanges {
     modelType: AIModelType,
     baseUrl: string,
     raw: Record<string, any>,
+    extraCapabilities: AIModelType[],
   ): void {
     this.applyAudioSettings(settings, modelType, raw);
     this.applyEmbeddingSettings(settings, modelType, baseUrl, raw);
+    this.applyCapabilitiesSettings(settings, modelType, extraCapabilities);
 
-    if (modelType !== 'image') {
+    const hasImage =
+      modelType === 'image' || extraCapabilities.includes('image');
+    if (!hasImage) {
       delete settings['image_generation_mode'];
       delete settings['image_endpoint'];
       delete settings['image_model'];
@@ -796,11 +922,42 @@ export class AIEngineConfigModalComponent implements OnChanges {
       return;
     }
 
-    if (baseUrl.includes('openrouter.ai')) {
-      settings['image_generation_mode'] = 'chat_completions';
+    // Elección explícita del operador, nunca inferida del host: una URL
+    // pegada se usa verbatim y el default es auto.
+    const mode = (raw['image_generation_mode'] ||
+      'auto') as ImageGenerationMode;
+    settings['image_generation_mode'] = mode;
+    if (mode === 'chat_completions') {
       settings['modalities'] = ['image'];
+    } else {
+      delete settings['modalities'];
     }
     delete settings['encoding_format'];
+  }
+
+  /**
+   * Escribe o limpia las capacidades extra del modelo multimodal.
+   *
+   * Se limpian cuando la config vuelve a un solo tipo por la misma razón que
+   * las claves de imagen/audio: no deben reaparecer si nadie las lee.
+   */
+  private applyCapabilitiesSettings(
+    settings: Record<string, any>,
+    modelType: AIModelType,
+    extraCapabilities: AIModelType[],
+  ): void {
+    const normalized = [
+      ...new Set(
+        extraCapabilities.filter(
+          (t) => MODEL_TYPES.includes(t) && t !== modelType,
+        ),
+      ),
+    ];
+    if (normalized.length > 0) {
+      settings['capabilities'] = normalized;
+    } else {
+      delete settings['capabilities'];
+    }
   }
 
   /**

@@ -119,15 +119,30 @@ export class OpenAICompatibleProvider implements AIProvider {
   ): Promise<AIImageResponse> {
     try {
       if (this.usesChatModalitiesImageGeneration()) {
-        return await this.generateImageWithChatModalities(prompt, options);
+        const viaChat = await this.tryChatModalitiesImage(prompt, options);
+        if (viaChat.success || !this.shouldFallbackToImagesApi(viaChat.error)) {
+          return viaChat;
+        }
+        return await this.generateImageWithOpenRouterImages(prompt, options);
       }
 
       if (options?.referenceImages?.length) {
         return await this.generateImageWithResponses(prompt, options);
       }
 
+      if (this.shouldUseOpenRouterImagesApi()) {
+        return await this.generateImageWithOpenRouterImages(prompt, options);
+      }
+
+      // `config.modelId` before the OpenAI default: on a model_type=image
+      // config the configured model IS the image model (meta/muse-image, …),
+      // and the caller usually passes no model — resolving to gpt-image-1
+      // would test and bill the wrong model while reporting success.
       const model =
-        options?.model || this.config.settings?.image_model || 'gpt-image-1';
+        options?.model ||
+        this.config.settings?.image_model ||
+        this.config.modelId ||
+        'gpt-image-1';
       const response = await this.client.images.generate({
         prompt,
         model,
@@ -970,30 +985,95 @@ export class OpenAICompatibleProvider implements AIProvider {
           model,
         };
 
-        const response = await this.generateImageWithChatModalities(
-          prompt,
-          options,
-        );
+        const response = await this.tryChatModalitiesImage(prompt, options);
 
-        if (!response.success || !response.imageBase64) {
+        if (response.success && response.imageBase64) {
           yield {
-            type: 'error',
-            error: response.error || 'Image model did not return data',
+            type: 'completed',
+            imageBase64: response.imageBase64,
+            usage: response.usage,
+            model: response.model,
+            revisedPrompt: response.revisedPrompt,
+          };
+          yield {
+            type: 'done',
+            usage: response.usage,
+            model: response.model,
           };
           return;
         }
 
+        // Same auto fallback as the non-streaming path: pure image models
+        // answer chat with the /images redirect.
+        if (this.shouldFallbackToImagesApi(response.error)) {
+          yield {
+            type: 'progress',
+            message: 'Reintentando en el endpoint de imágenes',
+            model,
+          };
+          try {
+            const retry = await this.generateImageWithOpenRouterImages(
+              prompt,
+              options,
+            );
+            if (retry.success && retry.imageBase64) {
+              yield {
+                type: 'completed',
+                imageBase64: retry.imageBase64,
+                usage: retry.usage,
+                model: retry.model,
+                revisedPrompt: retry.revisedPrompt,
+              };
+              yield {
+                type: 'done',
+                usage: retry.usage,
+                model: retry.model,
+              };
+            } else {
+              yield {
+                type: 'error',
+                error: retry.error || 'Image model did not return data',
+              };
+            }
+          } catch (error: any) {
+            yield {
+              type: 'error',
+              error: error?.message || 'Image request failed',
+            };
+          }
+          return;
+        }
+
+        yield {
+          type: 'error',
+          error: response.error || 'Image model did not return data',
+        };
+        return;
+      }
+
+      if (this.shouldUseOpenRouterImagesApi()) {
+        const viaImages = await this.generateImageWithOpenRouterImages(
+          prompt,
+          options,
+        );
+        if (!viaImages.success || !viaImages.imageBase64) {
+          yield {
+            type: 'error',
+            error: viaImages.error || 'Image model did not return data',
+          };
+          return;
+        }
         yield {
           type: 'completed',
-          imageBase64: response.imageBase64,
-          usage: response.usage,
-          model: response.model,
-          revisedPrompt: response.revisedPrompt,
+          imageBase64: viaImages.imageBase64,
+          usage: viaImages.usage,
+          model: viaImages.model,
+          revisedPrompt: viaImages.revisedPrompt,
         };
         yield {
           type: 'done',
-          usage: response.usage,
-          model: response.model,
+          usage: viaImages.usage,
+          model: viaImages.model,
         };
         return;
       }
@@ -1004,7 +1084,10 @@ export class OpenAICompatibleProvider implements AIProvider {
       }
 
       const model =
-        options?.model || this.config.settings?.image_model || 'gpt-image-1';
+        options?.model ||
+        this.config.settings?.image_model ||
+        this.config.modelId ||
+        'gpt-image-1';
       yield {
         type: 'progress',
         message: 'Preparando generación de imagen',
@@ -1134,6 +1217,152 @@ export class OpenAICompatibleProvider implements AIProvider {
       usage: this.mapChatUsage(response.usage),
       error: imageBase64 ? undefined : 'Image model did not return data',
     };
+  }
+
+  /**
+   * Chat transport wrapped as data: the SDK throws on HTTP errors, but the
+   * auto-mode fallback below needs to inspect the failure — a throw would
+   * skip it and surface a transport the operator never chose.
+   */
+  private async tryChatModalitiesImage(
+    prompt: string,
+    options?: AIImageRequestOptions,
+  ): Promise<AIImageResponse> {
+    try {
+      return await this.generateImageWithChatModalities(prompt, options);
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error?.message || 'Chat-modalities image request failed',
+      };
+    }
+  }
+
+  /**
+   * OpenRouter Unified Image API: `POST {apiRoot}/images` with
+   * `{ model, prompt }` — the exact contract from their docs:
+   *
+   *   curl https://openrouter.ai/api/v1/images \
+   *     -H "Authorization: Bearer $KEY" \
+   *     -d '{"model": "meta/muse-image", "prompt": "..."}'
+   *
+   * This is the ONLY transport for pure image models such as
+   * `meta/muse-image`, which answer `/chat/completions` with a 404
+   * redirecting here. The URL derives from the operator's configured base
+   * URL — a pasted full `…/v1/images` endpoint is used verbatim — and the
+   * default host only fills in for an empty base URL, never overrides one.
+   */
+  private async generateImageWithOpenRouterImages(
+    prompt: string,
+    options?: AIImageRequestOptions,
+  ): Promise<AIImageResponse> {
+    const model =
+      options?.model ||
+      this.config.settings?.image_model ||
+      this.config.modelId;
+
+    const body: Record<string, any> = { model, prompt };
+    const providerPrefs =
+      this.config.settings?.provider_preferences ||
+      this.config.settings?.provider;
+    if (providerPrefs) {
+      body.provider = providerPrefs;
+    }
+
+    const response = await this.postJson<any>('/images', body);
+    const datum = response?.data?.[0] as any;
+    const imageBase64 = await this.extractOpenRouterImage(datum);
+
+    return {
+      success: !!imageBase64,
+      imageBase64,
+      revisedPrompt: datum?.revised_prompt,
+      model: response?.model || model,
+      usage: this.mapImageUsage(response?.usage),
+      error: imageBase64
+        ? undefined
+        : this.describeEmptyImagesResponse(response),
+    };
+  }
+
+  private async extractOpenRouterImage(
+    datum: any,
+  ): Promise<string | undefined> {
+    if (!datum) return undefined;
+
+    if (typeof datum.b64_json === 'string' && datum.b64_json) {
+      return this.prefixBase64Image(datum.b64_json, datum.media_type);
+    }
+
+    const url = datum.url || datum.image_url?.url;
+    if (typeof url === 'string' && url) {
+      return this.imageUrlToBase64(url);
+    }
+
+    return undefined;
+  }
+
+  private prefixBase64Image(b64: string, mediaType?: unknown): string {
+    if (b64.startsWith('data:image/')) return b64;
+    const mime =
+      typeof mediaType === 'string' && mediaType.startsWith('image/')
+        ? mediaType
+        : this.sniffImageMime(b64);
+    return `data:${mime};base64,${b64}`;
+  }
+
+  /**
+   * Magic-byte sniff so a bare `b64_json` payload still renders when the
+   * response carries no `media_type`. PNG is the default, not a guess at the
+   * content: every image model in the catalog can emit it.
+   */
+  private sniffImageMime(b64: string): string {
+    try {
+      const head = Buffer.from(b64.slice(0, 24), 'base64');
+      if (
+        head.length >= 8 &&
+        head[0] === 0x89 &&
+        head[1] === 0x50 &&
+        head[2] === 0x4e &&
+        head[3] === 0x47
+      ) {
+        return 'image/png';
+      }
+      if (
+        head.length >= 3 &&
+        head[0] === 0xff &&
+        head[1] === 0xd8 &&
+        head[2] === 0xff
+      ) {
+        return 'image/jpeg';
+      }
+      if (
+        head.length >= 6 &&
+        head[0] === 0x47 &&
+        head[1] === 0x49 &&
+        head[2] === 0x46
+      ) {
+        return 'image/gif';
+      }
+      if (
+        head.length >= 12 &&
+        head.toString('ascii', 0, 4) === 'RIFF' &&
+        head.toString('ascii', 8, 12) === 'WEBP'
+      ) {
+        return 'image/webp';
+      }
+    } catch {
+      // Fall through to the default: a padding error must not fail the image.
+    }
+    return 'image/png';
+  }
+
+  private describeEmptyImagesResponse(response: any): string {
+    const keys =
+      response && typeof response === 'object'
+        ? Object.keys(response).join(', ') || 'none'
+        : 'non-object';
+    return `Image model did not return data (response fields: ${keys})`;
   }
 
   private async *generateImageWithResponsesStream(
@@ -1562,15 +1791,71 @@ export class OpenAICompatibleProvider implements AIProvider {
     } as any;
   }
 
+  /**
+   * Operator-chosen image transport. `auto` (absent or any unknown value)
+   * preserves the historical routing; an explicit value is never
+   * second-guessed — no fallback, no host sniffing.
+   */
+  private resolveImageMode():
+    | 'auto'
+    | 'chat_completions'
+    | 'images_api'
+    | 'standard' {
+    const mode = this.config.settings?.image_generation_mode;
+    if (
+      mode === 'chat_completions' ||
+      mode === 'images_api' ||
+      mode === 'standard'
+    ) {
+      return mode;
+    }
+    return 'auto';
+  }
+
+  private shouldUseOpenRouterImagesApi(): boolean {
+    return (
+      this.getModelType() === 'image' &&
+      this.resolveImageMode() === 'images_api' &&
+      this.isOpenRouterConfig()
+    );
+  }
+
+  /**
+   * Auto-mode fallback: pure OpenRouter image models (meta/muse-image,
+   * FLUX, …) are served ONLY on `POST /api/v1/images` and answer the chat
+   * transport with a 404 naming that endpoint. Hybrids (Gemini/GPT image)
+   * keep working on chat, so chat stays first and only this exact redirect
+   * retries elsewhere — every other chat failure is returned as-is.
+   */
+  private shouldFallbackToImagesApi(error?: string): boolean {
+    if (
+      !error ||
+      this.resolveImageMode() !== 'auto' ||
+      !this.isOpenRouterConfig()
+    ) {
+      return false;
+    }
+    return /cannot be used with[^.]*chat\/completions/i.test(error);
+  }
+
   private usesChatModalitiesImageGeneration(): boolean {
     if (this.getModelType() !== 'image') {
       return false;
     }
 
+    const mode = this.resolveImageMode();
+    if (mode === 'chat_completions') {
+      return true;
+    }
+    if (mode === 'images_api' || mode === 'standard') {
+      return false;
+    }
+
+    // auto: an explicit modalities opt-in, else the historical default of
+    // routing OpenRouter image configs through chat first (with fallback).
     return (
-      this.config.settings?.image_generation_mode === 'chat_completions' ||
       this.config.settings?.image_endpoint === 'chat_completions' ||
-      this.config.settings?.modalities?.includes?.('image') ||
+      this.config.settings?.modalities?.includes?.('image') === true ||
       this.isOpenRouterConfig()
     );
   }
@@ -1640,6 +1925,10 @@ export class OpenAICompatibleProvider implements AIProvider {
     for (const suffix of [
       '/chat/completions',
       '/images/generations',
+      // The OpenRouter Unified Image API endpoint. Listed after the longer
+      // OpenAI one: a pasted full `…/v1/images` URL must still derive a
+      // working SDK root, while raw capability calls use it verbatim.
+      '/images',
       '/responses',
       '/embeddings',
       '/videos',
@@ -1663,6 +1952,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     for (const suffix of [
       '/chat/completions',
       '/images/generations',
+      '/images',
       '/responses',
       '/embeddings',
       '/videos',
