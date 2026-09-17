@@ -58,6 +58,7 @@
         @for (cell of cells(); track trackByTableId($index, cell)) {
           <div
             class="table-cell"
+            [class.is-calling]="cell.isCalling"
             [class.is-occupied]="cell.isOccupied"
             [class.is-available]="cell.displayStatus === 'available'"
             [class.is-reserved]="cell.displayStatus === 'reserved'"

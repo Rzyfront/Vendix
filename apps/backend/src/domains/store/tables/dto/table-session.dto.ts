@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsBoolean,
@@ -174,6 +175,14 @@ export class TransferTableSessionDto {
 export class AddItemsToTableSessionDto {
   @IsArray()
   @ArrayMinSize(1)
+  // F-094 punto 3 — sin cota, un comensal anónimo con token de mesa válido
+  // (@OptionalAuth) puede POSTear un array sin límite: cada línea abre su
+  // propia conexión de tasas dentro de la `$transaction` (ver
+  // `TableSessionsService.addItems`), y con `L` grande se agota el
+  // `timeout` de la transacción antes que el pool. 100 cubre con margen
+  // cualquier pedido real de mesa (el POS retail usa el mismo tope en
+  // `bulk-orders.dto.ts`/`batch-create-adjustments.dto.ts`).
+  @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => TableSessionAddItemDto)
   items!: TableSessionAddItemDto[];

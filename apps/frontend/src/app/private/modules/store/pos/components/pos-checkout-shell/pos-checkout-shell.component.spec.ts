@@ -1,5 +1,5 @@
 import { Component, Directive, Pipe, PipeTransform, WritableSignal, input, output, runInInjectionContext, signal } from '@angular/core';
-import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ReactiveFormsModule } from '@angular/forms';
 import { of } from 'rxjs';
@@ -94,6 +94,9 @@ class PaymentStub {
   readonly editingOrderId = input<number | null>(null);
   readonly autoExecute = input(true);
   readonly amountOverride = input<number | null>(null);
+  // La plantilla del shell enlaza `[takeawayOrder]` (`:79`) y el doble no lo
+  // declaraba: NG0303 al primer `detectChanges()`, que tumbaba las 20 pruebas.
+  readonly takeawayOrder = input(false);
   readonly paymentCompleted = output<unknown>();
   readonly paymentReady = output<unknown>();
   readonly amountConfirmed = output<void>();
@@ -372,16 +375,21 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     expect(prevented).toBeFalse();
   });
 
-  it('apertura (false→true) enfoca el panel del paso activo', fakeAsync(() => {
+  // La app es ZONELESS: `zone.js/testing` no se carga, asi que `fakeAsync()`
+  // lanza «zone-testing.js is needed for the fakeAsync() test helper» — y como
+  // `fakeAsync(...)` se evalua al CARGAR el archivo (es el argumento de `it`),
+  // ese throw tumbaba las diez pruebas del archivo, no solo esta. El
+  // equivalente zoneless de `tick()` es `await fixture.whenStable()`.
+  it('apertura (false→true) enfoca el panel del paso activo', async () => {
     fixture.componentRef.setInput('isOpen', false);
     fixture.detectChanges();
-    tick();
+    await fixture.whenStable();
     const focus = spyOn(component as unknown as { focusActiveStepSoon: () => void }, 'focusActiveStepSoon');
     fixture.componentRef.setInput('isOpen', true);
     fixture.detectChanges();
-    tick();
+    await fixture.whenStable();
     expect(focus).toHaveBeenCalledTimes(1);
-  }));
+  });
 
   it('evento ya consumido (radiogroup Tipo) no navega doble', () => {
     const next = spyOn(component, 'attemptNextStep');
@@ -472,6 +480,138 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     stub.needsTableFlag = false;
     advance.advanceConsumo();
     expect(component.currentStep()).toBe(1);
+  });
+
+  it(`Para llevar estampa is_takeaway al anexar a mesa`, () => {
+    restaurantMode.set(true);
+    const stub = TestBed.runInInjectionContext(() => new ConsumoStub());
+    stub.fulfillmentMode = 'entrega';
+    (stub as any).effectiveTableId = () => null;
+    Object.defineProperty(component, 'consumoStep', {
+      value: () => stub,
+      configurable: true,
+    });
+    fixture.detectChanges();
+    expect(component.isTakeawayOrder()).toBeTrue();
+
+    fixture.componentRef.setInput('cartState', {
+      items: [
+        {
+          itemType: 'product',
+          product: { id: 7, name: 'Pollo' },
+          quantity: 1,
+          unitPrice: 10000,
+          finalPrice: 10000,
+          totalPrice: 10000,
+          taxAmount: 0,
+        },
+      ],
+    } as any);
+    fixture.detectChanges();
+
+    const sent: unknown[] = [];
+    (integrationMock as any).addItemsToTableSession = (
+      _sessionId: number,
+      items: unknown[],
+    ) => {
+      sent.push(items);
+      return of({ order: { id: 11, order_items: [] } });
+    };
+    (integrationMock as any).maybeFireKitchen = () => of(null);
+    (component as any).toastService = {
+      success: () => {},
+      warning: () => {},
+      error: () => {},
+    };
+    (component as any).cartService = { clearCart: () => of({}) };
+
+    (
+      component as unknown as {
+        appendToTableAndFire: (state: any, session: any) => void;
+      }
+    ).appendToTableAndFire(component.cartState() as any, {
+      id: 3,
+      order_id: 11,
+    });
+
+    expect(sent.length).toBe(1);
+    expect((sent[0] as any[])[0]).toEqual(
+      jasmine.objectContaining({ product_id: 7, is_takeaway: true }),
+    );
+  });
+
+  it(`Consumo en mesa no marca takeaway salvo línea explícita`, () => {
+    restaurantMode.set(true);
+    const stub = TestBed.runInInjectionContext(() => new ConsumoStub());
+    stub.fulfillmentMode = 'consumo';
+    (stub as any).effectiveTableId = () => 5;
+    Object.defineProperty(component, 'consumoStep', {
+      value: () => stub,
+      configurable: true,
+    });
+    fixture.detectChanges();
+    expect(component.isTakeawayOrder()).toBeFalse();
+
+    fixture.componentRef.setInput('cartState', {
+      items: [
+        {
+          itemType: 'product',
+          product: { id: 9, name: 'Bandeja' },
+          quantity: 2,
+          unitPrice: 15000,
+          finalPrice: 15000,
+          totalPrice: 30000,
+          taxAmount: 0,
+        },
+        {
+          itemType: 'product',
+          product: { id: 10, name: 'Jugo' },
+          quantity: 1,
+          unitPrice: 5000,
+          finalPrice: 5000,
+          totalPrice: 5000,
+          taxAmount: 0,
+          isTakeaway: true,
+        },
+      ],
+    } as any);
+    fixture.detectChanges();
+
+    const sent: unknown[] = [];
+    (integrationMock as any).addItemsToTableSession = (
+      _sessionId: number,
+      items: unknown[],
+    ) => {
+      sent.push(items);
+      return of({ order: { id: 12, order_items: [] } });
+    };
+    (integrationMock as any).maybeFireKitchen = () => of(null);
+    (component as any).toastService = {
+      success: () => {},
+      warning: () => {},
+      error: () => {},
+    };
+    (component as any).cartService = { clearCart: () => of({}) };
+
+    (
+      component as unknown as {
+        appendToTableAndFire: (state: any, session: any) => void;
+      }
+    ).appendToTableAndFire(component.cartState() as any, {
+      id: 4,
+      order_id: 12,
+    });
+
+    expect(sent.length).toBe(1);
+    const lines = sent[0] as any[];
+    expect(lines[0]).toEqual({
+      product_id: 9,
+      quantity: 2,
+      product_variant_id: undefined,
+    });
+    expect(lines[1]).toEqual(
+      jasmine.objectContaining({ product_id: 10, is_takeaway: true }),
+    );
   });
 });
 

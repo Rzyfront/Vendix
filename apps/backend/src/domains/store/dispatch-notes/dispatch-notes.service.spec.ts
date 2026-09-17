@@ -144,15 +144,16 @@ describe('DispatchNotesService — flete (shipping_cost) en la remisión', () =>
         items: [{ order_item_id: 10, dispatched_quantity: 2 }],
       } as any);
 
-      // subtotal = 1000 * 2 = 2000 ; discount = 0 ; tax = 190 ; flete = 500
-      // grand_total = 2000 - 0 + 190 + 500 = 2690
+      // subtotal = 1000 * 2 = 2000 ; discount = 0 ; tax = 190 × 2 = 380
+      // (impuesto TOTAL de línea, hallazgo 1a) ; flete = 500
+      // grand_total = 2000 - 0 + 380 + 500 = 2880
       expect(capturedCreateData.subtotal_amount).toBe(2000);
-      expect(capturedCreateData.tax_amount).toBe(190);
+      expect(capturedCreateData.tax_amount).toBe(380);
       expect(capturedCreateData.shipping_cost).toBe(SHIPPING);
-      expect(capturedCreateData.grand_total).toBe(2690);
+      expect(capturedCreateData.grand_total).toBe(2880);
 
       // grand_total devuelto también incluye el flete.
-      expect(result.grand_total).toBe(2690);
+      expect(result.grand_total).toBe(2880);
       expect(result.shipping_cost).toBe(SHIPPING);
     });
 

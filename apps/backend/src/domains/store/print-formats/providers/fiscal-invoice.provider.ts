@@ -15,6 +15,11 @@ import {
 } from './fiscal-document-print.mapper';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
 import { amountToSpanishWords } from '@common/utils/amount-in-words.util';
+// C.2 (CP-pos-exclusive-tax-double-charge, ADR-12) — G-03: factura fiscal
+// declara `money_basis: 'taxable_base'` y propaga el gate de C.1 usando
+// `invoice.organization`/`invoice.store`, ya en memoria vía
+// `FISCAL_DOCUMENT_PRINT_INCLUDE`.
+import { resolvePrintsVatBreakdownForPrint } from '../services/print-vat-breakdown.resolver';
 
 @Injectable()
 export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
@@ -66,6 +71,11 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
       acceptedLabel: 'Aprobada por DIAN',
       pendingLabel: 'Pendiente',
       signedLogoUrl,
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: resolvePrintsVatBreakdownForPrint(
+        invoice.organization,
+        invoice.store,
+      ),
     });
   }
 
@@ -116,6 +126,10 @@ export class FiscalInvoiceDataProvider implements IDocumentDataProvider {
         resolution_valid_from: '2026-01-15',
         resolution_valid_to: '2027-01-15',
       },
+      // C.2 (ADR-12) — muestra en `'taxable_base'`, paridad con
+      // `fetchDocumentData`.
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: true,
       items: [
         {
           index: 1,

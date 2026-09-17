@@ -830,3 +830,146 @@ describe('DispatchNoteEventsListener — handleReceived → recepción de OC por
     expect(entry!.options?.suppressErrors).toBe(false);
   });
 });
+
+/**
+ * Entrega de la remisión ⇒ entrega de las LÍNEAS de la orden.
+ *
+ * Antes, el despacho movía el ESTADO de la orden (reconciliador) pero dejaba
+ * `order_items.delivered_at` en NULL: una orden "Entregada" cuyos items
+ * figuraban como no entregados. El listener ahora sella el hecho por línea
+ * antes de reconciliar, y lo hace igual para la remisión suelta y para la
+ * parada de planilla de ruta (ambas emiten `dispatch_note.delivered`).
+ */
+describe('DispatchNoteEventsListener — handleDelivered → sello de order_items.delivered_at', () => {
+  let listener: DispatchNoteEventsListener;
+  let prismaMock: any;
+  let orderFlowMock: any;
+
+  const note = {
+    id: 900,
+    dispatch_number: 'REM-1',
+    store_id: 100,
+    sales_order_id: null,
+    order_id: 7777,
+    dispatch_location_id: 10,
+    dispatch_note_items: [
+      {
+        id: 1,
+        product_id: 1,
+        product_variant_id: null,
+        location_id: 10,
+        dispatched_quantity: 5,
+      },
+    ],
+  };
+
+  /**
+   * @param pending  líneas de la orden sin entregar (delivered_at null)
+   * @param notes    remisiones activas de la orden (para decidir completa/parcial)
+   */
+  const arrange = (pending: any[], notes: any[]) => {
+    prismaMock = {
+      dispatch_notes: {
+        findFirst: jest.fn().mockResolvedValue(note),
+        findMany: jest.fn().mockResolvedValue(notes),
+      },
+      withoutScope: jest.fn(() => prismaMock),
+      stock_reservations: { count: jest.fn().mockResolvedValue(0) },
+      orders: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      sales_orders: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue({}),
+      },
+      order_items: {
+        findMany: jest.fn().mockResolvedValue(pending),
+        updateMany: jest.fn().mockResolvedValue({ count: pending.length }),
+      },
+    };
+    orderFlowMock = { reconcileOrderFromDispatch: jest.fn().mockResolvedValue(undefined) };
+
+    listener = new DispatchNoteEventsListener(
+      prismaMock as unknown as StorePrismaService,
+      {
+        updateStock: jest.fn().mockResolvedValue({}),
+        releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
+        reserveStock: jest.fn().mockResolvedValue(undefined),
+      } as unknown as StockLevelManager,
+      {
+        commitDispatchDelivery: jest
+          .fn()
+          .mockResolvedValue({ totalCost: 0, committedItemCount: 1 }),
+      } as unknown as OrderStockCommitService,
+      undefined,
+      undefined,
+      undefined,
+      orderFlowMock,
+    );
+  };
+
+  const fire = () =>
+    listener.handleDelivered({
+      dispatch_note_id: 900,
+      dispatch_number: 'REM-1',
+      store_id: 100,
+      sales_order_id: null,
+      order_id: 7777,
+    } as any);
+
+  it('(q) orden completa: sella TODA línea sin entregar, incluida la que nunca viajó en la remisión', async () => {
+    arrange(
+      [
+        { id: 11, product_id: 1, product_variant_id: null },
+        // Plato preparado que no va en la remisión: si la orden salió completa,
+        // el cliente lo recibió igual.
+        { id: 12, product_id: 99, product_variant_id: null },
+      ],
+      [{ status: 'delivered' }],
+    );
+
+    await fire();
+
+    expect(prismaMock.order_items.updateMany).toHaveBeenCalledTimes(1);
+    const arg = prismaMock.order_items.updateMany.mock.calls[0][0];
+    expect(arg.where.id.in.sort()).toEqual([11, 12]);
+    // Idempotencia: sólo sella donde está NULL — un re-disparo no mueve la fecha.
+    expect(arg.where.delivered_at).toBeNull();
+    expect(arg.data.delivered_at).toBeInstanceOf(Date);
+  });
+
+  it('(r) despacho parcial: sólo sella las líneas que viajan en ESTA remisión', async () => {
+    arrange(
+      [
+        { id: 11, product_id: 1, product_variant_id: null },
+        { id: 12, product_id: 99, product_variant_id: null },
+      ],
+      // Queda una remisión confirmada sin entregar ⇒ la orden NO salió completa.
+      [{ status: 'delivered' }, { status: 'confirmed' }],
+    );
+
+    await fire();
+
+    const arg = prismaMock.order_items.updateMany.mock.calls[0][0];
+    expect(arg.where.id.in).toEqual([11]);
+  });
+
+  it('(s) nada pendiente: no escribe (idempotente ante re-disparo del evento)', async () => {
+    arrange([], [{ status: 'delivered' }]);
+
+    await fire();
+
+    expect(prismaMock.order_items.updateMany).not.toHaveBeenCalled();
+    // El reconciliador sí corre igual: el estado de la orden no depende del sello.
+    expect(orderFlowMock.reconcileOrderFromDispatch).toHaveBeenCalledWith(7777, 100);
+  });
+
+  it('(t) un fallo al sellar NO impide reconciliar el estado de la orden', async () => {
+    arrange([{ id: 11, product_id: 1, product_variant_id: null }], [{ status: 'delivered' }]);
+    prismaMock.order_items.updateMany.mockRejectedValue(new Error('db caída'));
+
+    await expect(fire()).resolves.toBeUndefined();
+    expect(orderFlowMock.reconcileOrderFromDispatch).toHaveBeenCalledWith(7777, 100);
+  });
+});

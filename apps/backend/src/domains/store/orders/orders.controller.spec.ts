@@ -7,6 +7,7 @@ import { OrderEtaService } from './services/order-eta.service';
 import { SettingsService } from '../settings/settings.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
+import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import { ResponseService } from '@common/responses/response.service';
 import { CreateOrderDto, UpdateOrderDto, OrderQueryDto } from './dto';
 import { order_state_enum } from '@prisma/client';
@@ -58,6 +59,12 @@ describe('OrdersController', () => {
         { provide: SettingsService, useValue: {} },
         { provide: StorePrismaService, useValue: {} },
         { provide: EcommercePrismaService, useValue: {} },
+        // F-164 — `NotificationsSseService` entró al constructor (índice 8)
+        // con `3aa1960ed` (@Sse('orders/stream')) y este spec nunca recibió
+        // el provider: Nest fallaba en `Test.createTestingModule` antes de
+        // correr un solo test. Stub vacío: ningún test de este archivo
+        // ejercita el stream SSE.
+        { provide: NotificationsSseService, useValue: {} },
       ],
     }).compile();
 
@@ -290,13 +297,24 @@ describe('OrdersController', () => {
 
     it('should handle errors when fetching order by id', async () => {
       const orderId = 999;
+      // F-164 — este test quedó invisible desde `3aa1960ed` (DI rota, todo
+      // el archivo fallaba en `compile()`). Al arreglar la DI queda expuesto
+      // un segundo desface, previo e independiente: el catch de `findOne`
+      // (CP-POS-SVC-PERF-001 / Bugfix) distingue a propósito `VendixHttpException`
+      // (mensaje curado, pasa tal cual) de cualquier otro `Error` (nunca
+      // filtra el mensaje crudo — responde 500 genérico + código estable
+      // `INTERNAL_ORDER_LOAD_001`) para no filtrar stack traces / mensajes
+      // internos de Prisma al cliente. Un `new Error('Order not found')`
+      // plano cae por la segunda rama, no por la primera — la expectativa
+      // vieja (400 con el mensaje del error) asumía que el mensaje pasaba
+      // directo, contrato que el bugfix de seguridad ya reemplazó.
       const error = new Error('Order not found');
 
       const errorResponse = {
         success: false as const,
-        message: 'Error al obtener la orden',
-        error: 'Order not found',
-        statusCode: 400,
+        message: 'No se pudo cargar la orden. Intenta de nuevo.',
+        error: 'INTERNAL_ORDER_LOAD_001',
+        statusCode: 500,
         timestamp: '2024-01-01T00:00:00.000Z',
       };
 
@@ -308,9 +326,10 @@ describe('OrdersController', () => {
       expect(result).toEqual(errorResponse);
       expect(mockOrdersService.findOne).toHaveBeenCalledWith(orderId);
       expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Order not found',
-        'Order not found',
-        400,
+        'No se pudo cargar la orden. Intenta de nuevo.',
+        'INTERNAL_ORDER_LOAD_001',
+        500,
+        'INTERNAL_ORDER_LOAD_001',
       );
     });
   });

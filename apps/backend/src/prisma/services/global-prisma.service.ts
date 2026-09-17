@@ -375,6 +375,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.ai_engine_applications;
   }
 
+  get ai_agents() {
+    return this.baseClient.ai_agents;
+  }
+
   get ai_engine_logs() {
     return this.baseClient.ai_engine_logs;
   }

@@ -215,6 +215,24 @@
   color: var(--color-text-secondary);
 }
 
+/* ── Confirmaciones (activar / desactivar / borrar) ─────────────────── */
+
+.confirm-text {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--color-text-primary);
+}
+
+.confirm-name {
+  font-weight: 700;
+}
+
+.confirm-warn {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
 /* ── Detalle del turno ──────────────────────────────────────────────── */
 
 .detail-head {

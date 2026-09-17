@@ -137,6 +137,8 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'orders_dispatch_routes',
     'dispatch_fleet',
     'settings_shipping',
+    'analytics_dispatch',
+    'reports_dispatch',
   ],
   manufacturing: [
     'restaurant_ops',
@@ -148,6 +150,8 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'orders_dispatch_routes',
     'dispatch_fleet',
     'settings_shipping',
+    'analytics_dispatch',
+    'reports_dispatch',
   ],
   service: [
     'restaurant_ops',
@@ -158,6 +162,8 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'orders_dispatch_routes',
     'dispatch_fleet',
     'settings_shipping',
+    'analytics_dispatch',
+    'reports_dispatch',
   ],
   gym: [
     'restaurant_ops',
@@ -168,6 +174,8 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'orders_dispatch_routes',
     'dispatch_fleet',
     'settings_shipping',
+    'analytics_dispatch',
+    'reports_dispatch',
   ],
   // Construcción ejecuta obras por contrato: necesita inventario de materiales,
   // compras, proveedores, facturación (AIU 1372) y contabilidad. Lo que no
@@ -192,6 +200,8 @@ export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
     'orders_dispatch_routes',
     'dispatch_fleet',
     'settings_shipping',
+    'analytics_dispatch',
+    'reports_dispatch',
   ],
 };
 

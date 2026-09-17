@@ -88,6 +88,8 @@ describe('CheckoutService - promotions and coupons', () => {
   let taxesService: any;
   let settingsService: any;
   let cartService: any;
+  let invoicingService: any;
+  let fiscalStatusService: any;
 
   const STORE_ID = 1;
   const USER_ID = 42;
@@ -142,6 +144,27 @@ describe('CheckoutService - promotions and coupons', () => {
 
     cartService = {
       clearCart: jest.fn().mockResolvedValue({ success: true }),
+      // `checkout()` y `whatsappCheckout()` marcan el carrito como convertido
+      // (`checkout.service.ts:1842` y `:2513`) desde QUI-628. El doble nunca
+      // se actualizó, así que la llamada reventaba con "is not a function" y
+      // tumbaba la promesa antes de llegar a cualquier `expect` del camino
+      // autenticado. No es parte de la compuerta de emisión: es el arnés
+      // poniéndose al día con el servicio que dice medir.
+      markCartConverted: jest.fn().mockResolvedValue(undefined),
+    };
+
+    // Paso 4 (unificación auto-emisión ecommerce): default `auto_emit: true`
+    // preserva el comportamiento previo a la compuerta para todos los tests
+    // existentes que no lo sobrescriben.
+    invoicingService = {
+      createFromOrder: jest.fn(),
+      getEcommerceInvoicingSettings: jest
+        .fn()
+        .mockResolvedValue({ auto_emit: true }),
+    };
+
+    fiscalStatusService = {
+      getStoreInvoicingState: jest.fn().mockResolvedValue('INACTIVE'),
     };
 
     // ecommerce-scoped prisma: only the operations checkout uses.
@@ -290,7 +313,7 @@ describe('CheckoutService - promotions and coupons', () => {
               .mockResolvedValue({ id: 1, token: 'tok-guest' }),
           },
         },
-        { provide: InvoicingService, useValue: { createFromOrder: jest.fn() } },
+        { provide: InvoicingService, useValue: invoicingService },
         {
           provide: OperatingScopeService,
           useValue: {
@@ -298,12 +321,7 @@ describe('CheckoutService - promotions and coupons', () => {
             findCentralWarehouse: jest.fn().mockResolvedValue(null),
           },
         },
-        {
-          provide: FiscalStatusService,
-          useValue: {
-            getStoreInvoicingState: jest.fn().mockResolvedValue('INACTIVE'),
-          },
-        },
+        { provide: FiscalStatusService, useValue: fiscalStatusService },
         { provide: S3Service, useValue: { signUrl: jest.fn(), uploadFile: jest.fn(), getPresignedUrl: jest.fn().mockResolvedValue(null) } },
         {
           provide: S3PathHelper,
@@ -333,12 +351,25 @@ describe('CheckoutService - promotions and coupons', () => {
         // Rotura preexistente (commit multi-tarifa 28012c4d2): el servicio
         // exige StorefrontPriceService y el spec no lo proveía → el módulo
         // ni siquiera instanciaba. Mock con precio base del producto.
+        //
+        // EL CAMPO ES `base_price`, NO `price`. La primera versión de este
+        // mock leía `product?.price`, que NINGÚN fixture define: devolvía 0 y
+        // el cero se propagaba a `subtotal_amount`, `grand_total` y
+        // `items[].unit_price`, tumbando los 6 tests de promociones con
+        // «Expected: 10000, Received: 0». El mock replica la misma precedencia
+        // que la vitrina: oferta vigente si la hay, si no el precio base.
         {
           provide: StorefrontPriceService,
           useValue: {
-            resolveLine: jest.fn(({ product }: any) => ({
-              net_unit_price: Number(product?.price ?? 0),
-              gross_unit_price: Number(product?.price ?? 0),
+            resolveLine: jest.fn(({ product }: any) => {
+              const unitPrice = Number(
+                product?.is_on_sale && product?.sale_price != null
+                  ? product.sale_price
+                  : (product?.base_price ?? product?.price ?? 0),
+              );
+              return {
+              net_unit_price: unitPrice,
+              gross_unit_price: unitPrice,
               compare_at_price: null,
               tax_rate: 0,
               applied_price_tier_id: null,
@@ -346,7 +377,8 @@ describe('CheckoutService - promotions and coupons', () => {
               pack_size: 1,
               stock_units_consumed: null,
               source: 'spec',
-            })),
+              };
+            }),
           },
         },
         {
@@ -662,6 +694,64 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(promotionEngine.applyPromotion).not.toHaveBeenCalled();
       expect(couponsService.registerUse).not.toHaveBeenCalled();
     });
+
+    // Paso 4 — compuerta invoicing.ecommerce.auto_emit en
+    // createInvoiceIfConfigured(). Las tres pruebas de abajo requieren
+    // `getStoreInvoicingState: 'ACTIVE'` porque el default del describe es
+    // 'INACTIVE' (el método corta ahí antes de llegar a la compuerta).
+    it('skips auto-issuing an invoice when invoicing.ecommerce.auto_emit is false, and the order still succeeds', async () => {
+      mockOrderCreate(10000);
+      fiscalStatusService.getStoreInvoicingState.mockResolvedValue('ACTIVE');
+      invoicingService.getEcommerceInvoicingSettings.mockResolvedValue({
+        auto_emit: false,
+      });
+
+      const result: any = await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+      } as any);
+
+      expect(invoicingService.createFromOrder).not.toHaveBeenCalled();
+      expect(result.invoice_id).toBeNull();
+      // El checkout no puede romperse por no facturar: el pedido existe igual.
+      expect(result.order_id).toBe(1);
+    });
+
+    it('auto-issues an invoice when invoicing.ecommerce.auto_emit is true (unchanged default behavior)', async () => {
+      mockOrderCreate(10000);
+      fiscalStatusService.getStoreInvoicingState.mockResolvedValue('ACTIVE');
+      invoicingService.getEcommerceInvoicingSettings.mockResolvedValue({
+        auto_emit: true,
+      });
+      storePrisma.invoice_resolutions.findFirst.mockResolvedValue({ id: 1 });
+      storePrisma.dian_configurations.findFirst.mockResolvedValue({ id: 1 });
+      invoicingService.createFromOrder.mockResolvedValue({ id: 555 });
+
+      const result: any = await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+      } as any);
+
+      expect(invoicingService.createFromOrder).toHaveBeenCalledWith(1);
+      expect(result.invoice_id).toBe(555);
+    });
+
+    it('returns the existing invoice id (not null) on idempotent replay even when auto_emit is off', async () => {
+      mockOrderCreate(10000);
+      fiscalStatusService.getStoreInvoicingState.mockResolvedValue('ACTIVE');
+      invoicingService.getEcommerceInvoicingSettings.mockResolvedValue({
+        auto_emit: false,
+      });
+      storePrisma.invoices.findFirst.mockResolvedValue({ id: 777 });
+
+      const result: any = await service.checkout({
+        payment_method_id: 7,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+      } as any);
+
+      expect(invoicingService.createFromOrder).not.toHaveBeenCalled();
+      expect(result.invoice_id).toBe(777);
+    });
   });
 
   describe('whatsappCheckout() — promotions share the same source of truth', () => {
@@ -783,11 +873,16 @@ describe('CheckoutService - promotions and coupons', () => {
       for (const shippingType of [undefined, 'pickup', 'own_fleet']) {
         jest.clearAllMocks();
         await service.getPaymentMethods(shippingType);
+        // El `AND` viaja DENTRO de `where`, no en la raíz del argumento. La
+        // aserción original lo buscaba en la raíz y fallaba aunque la
+        // exclusión de `cash` estuviera presente y correcta.
         expect(prisma.store_payment_methods.findMany).toHaveBeenCalledWith(
           expect.objectContaining({
-            AND: expect.arrayContaining([
-              { system_payment_method: { type: { not: 'cash' } } },
-            ]),
+            where: expect.objectContaining({
+              AND: expect.arrayContaining([
+                { system_payment_method: { type: { not: 'cash' } } },
+              ]),
+            }),
           }),
         );
       }

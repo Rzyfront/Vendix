@@ -1,4 +1,5 @@
 import {
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -6,6 +7,12 @@ import {
   BadRequestException,
   ForbiddenException,
 } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache } from 'cache-manager';
+// El ranking de "más vendidos" NO define su propio criterio de venta: reutiliza
+// el contrato compartido de analítica para que la grilla del POS, los reportes
+// y los dashboards cuenten exactamente las mismas órdenes.
+import { COMPLETED_SALE_STATES } from '../analytics/analytics-metrics.contract';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import {
@@ -225,6 +232,9 @@ export class ProductsService {
     // producto que quedan FUERA del alcance de la tienda. Ver
     // `buildArchiveWriteOffPlan`.
     private readonly globalPrisma: GlobalPrismaService,
+    // Ranking de más vendidos del POS: se cachea 24 h por tienda para que la
+    // agregación sobre `order_items` no se pague en cada carga de la grilla.
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
   /**
@@ -1529,6 +1539,176 @@ export class ProductsService {
     return rest;
   }
 
+  /**
+   * Ventana del ranking de más vendidos. 30 días es lo que ya usa la cascada
+   * de destacados del storefront (`catalog.service.getFeaturedWithFill`); se
+   * conserva para que la tienda no vea dos "top de ventas" distintos según la
+   * pantalla.
+   */
+  private static readonly BEST_SELLING_WINDOW_DAYS = 30;
+
+  /**
+   * Tamaño del ranking cacheado. La grilla del POS muestra una página de ~20;
+   * 200 cubre con holgura el arranque y varias páginas de scroll sin traer el
+   * catálogo entero desde la agregación.
+   */
+  private static readonly BEST_SELLING_RANK_SIZE = 200;
+
+  /** TTL del ranking: 24 h (mismo valor que el ranking del storefront). */
+  private static readonly BEST_SELLING_TTL_MS = 86_400_000;
+
+  /**
+   * Tope de filas que se escanean para reordenar por ventas. Por encima de
+   * esto el listado cae al orden barato de Prisma: ordenar en memoria un
+   * catálogo gigantesco costaría más que el beneficio de la prioridad.
+   */
+  private static readonly BEST_SELLING_SCAN_CAP = 5000;
+
+  /**
+   * Ranking de productos más vendidos de la tienda en curso, como
+   * `Map<product_id, posición>` (0 = el que más unidades movió).
+   *
+   * Coste real: UNA agregación `groupBy` sobre `order_items` por tienda cada
+   * 24 h — el resto de cargas del POS leen Redis. No requiere columna nueva ni
+   * migración: nada se materializa en la base.
+   *
+   * El scope de `StorePrismaService` ya inyecta `orders.store_id` sobre
+   * `order_items`; el filtro de estado va por una clave distinta, así que
+   * `mergeScopedWhere` conserva ambos (el scope viaja a `AND` si colisiona).
+   *
+   * Nunca lanza: si Redis o la agregación fallan, devuelve un mapa vacío y el
+   * listado degrada al orden anterior en vez de dejar la grilla del POS vacía.
+   */
+  private async resolveBestSellingRank(): Promise<Map<number, number>> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) return new Map();
+
+    const cacheKey = `products:bestselling:${store_id}`;
+    let rankedIds: number[] | null = null;
+
+    try {
+      rankedIds = (await this.cache.get<number[]>(cacheKey)) ?? null;
+    } catch {
+      rankedIds = null;
+    }
+
+    if (!rankedIds) {
+      try {
+        const since = new Date();
+        since.setDate(
+          since.getDate() - ProductsService.BEST_SELLING_WINDOW_DAYS,
+        );
+
+        const rows = await this.prisma.order_items.groupBy({
+          by: ['product_id'],
+          where: {
+            created_at: { gte: since },
+            orders: { state: { in: [...COMPLETED_SALE_STATES] } },
+          },
+          _sum: { quantity: true },
+          orderBy: { _sum: { quantity: 'desc' } },
+          take: ProductsService.BEST_SELLING_RANK_SIZE,
+        });
+
+        rankedIds = rows
+          .filter((row: any) => row.product_id !== null)
+          .map((row: any) => Number(row.product_id));
+
+        try {
+          await this.cache.set(
+            cacheKey,
+            rankedIds,
+            ProductsService.BEST_SELLING_TTL_MS,
+          );
+        } catch (error) {
+          // Fail open: el ranking ya calculado sigue sirviendo a esta petición.
+          // Se avisa igual porque un fallo permanente de escritura degrada el
+          // flag a "una agregación por carga del POS", que es justo lo que la
+          // caché existe para evitar.
+          this.logger.warn(
+            `No se pudo cachear el ranking de más vendidos (${cacheKey}): ${
+              (error as Error)?.message ?? error
+            }`,
+          );
+        }
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo calcular el ranking de más vendidos para la tienda ${store_id}: ${
+            (error as Error)?.message ?? error
+          }`,
+        );
+        return new Map();
+      }
+    }
+
+    // `rankedIds` queda asignado dentro del `try`, y el control flow de TS no
+    // propaga esa asignación fuera del try/catch (TS18047). El `?? []` es el
+    // estrechamiento explícito: en runtime el catch ya retornó antes de llegar
+    // aquí, así que la lista vacía nunca se usa.
+    return new Map((rankedIds ?? []).map((id, index) => [id, index]));
+  }
+
+  /**
+   * Resuelve los ids de UNA página del listado aplicando la prioridad que pide
+   * el POS: destacados primero, más vendidos después, y el resto por
+   * `created_at desc`.
+   *
+   * Se hace en dos pasos porque Prisma no sabe ordenar por un ranking externo:
+   *   1) una consulta ligera (`id`, `is_featured`, `created_at`) sobre el MISMO
+   *      `where` del listado — sin includes, sin dinero, sin stock;
+   *   2) el orden en memoria y el recorte de la página.
+   * Después el llamador hidrata sólo esos ids con el `include` completo.
+   *
+   * Devuelve `null` cuando no hay nada que reordenar (sin ranking, o catálogo
+   * por encima del tope de escaneo): en ese caso el listado usa el `orderBy`
+   * de Prisma de siempre y no se paga ninguna consulta extra de más.
+   */
+  private async resolveBestSellingPageIds(
+    where: any,
+    skip: number,
+    limit: number,
+    featured_first: boolean,
+  ): Promise<number[] | null> {
+    const rank = await this.resolveBestSellingRank();
+    if (rank.size === 0) return null;
+
+    // El `take` se ordena igual que el listado sin el flag, así que si el
+    // catálogo supera el tope lo que se conserva son los destacados y lo más
+    // reciente — nunca un corte arbitrario.
+    const candidates = await this.prisma.products.findMany({
+      where,
+      select: { id: true, is_featured: true, created_at: true },
+      orderBy: featured_first
+        ? [{ is_featured: 'desc' }, { created_at: 'desc' }]
+        : [{ created_at: 'desc' }],
+      take: ProductsService.BEST_SELLING_SCAN_CAP + 1,
+    });
+
+    if (candidates.length > ProductsService.BEST_SELLING_SCAN_CAP) {
+      return null;
+    }
+
+    const rankOf = (id: number) => rank.get(id) ?? Number.MAX_SAFE_INTEGER;
+
+    const ordered = candidates.slice().sort((a: any, b: any) => {
+      if (featured_first) {
+        const featuredA = a.is_featured === true ? 0 : 1;
+        const featuredB = b.is_featured === true ? 0 : 1;
+        if (featuredA !== featuredB) return featuredA - featuredB;
+      }
+      const rankA = rankOf(Number(a.id));
+      const rankB = rankOf(Number(b.id));
+      if (rankA !== rankB) return rankA - rankB;
+      const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      if (timeA !== timeB) return timeB - timeA;
+      return Number(b.id) - Number(a.id);
+    });
+
+    return ordered.slice(skip, skip + limit).map((row: any) => Number(row.id));
+  }
+
   async findAll(query: ProductQueryDto) {
     const {
       page = 1,
@@ -1537,6 +1717,8 @@ export class ProductsService {
       barcode,
       include_stock,
       include_variants,
+      featured_first,
+      best_selling_first,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -1571,11 +1753,29 @@ export class ProductsService {
     // denormalized cross-location aggregate.
     const includeStockEffective = pos_optimized ? true : include_stock;
 
+    // Prioridad de la grilla del POS: destacados → más vendidos → resto.
+    // Sólo se activa con el flag explícito; devuelve `null` (y no cuesta nada)
+    // cuando la tienda no tiene ventas rankeadas o el catálogo es demasiado
+    // grande para ordenarlo en memoria, en cuyo caso manda el `orderBy` de
+    // Prisma de abajo y la pantalla nunca queda vacía.
+    const bestSellingPageIds = best_selling_first
+      ? await this.resolveBestSellingPageIds(
+          where,
+          skip,
+          limit,
+          featured_first === true,
+        )
+      : null;
+
     const [products, total, settings] = await Promise.all([
       this.prisma.products.findMany({
-        where,
-        skip,
-        take: limit,
+        // Con la página ya resuelta por ranking, el recorte lo hizo el orden en
+        // memoria: aquí sólo se hidratan esos ids (sin skip/take, que volverían
+        // a paginar sobre un conjunto ya paginado).
+        where: bestSellingPageIds
+          ? { ...where, id: { in: bestSellingPageIds } }
+          : where,
+        ...(bestSellingPageIds ? {} : { skip, take: limit }),
         include: {
           stores: {
             select: {
@@ -1682,11 +1882,29 @@ export class ProductsService {
             },
           },
         },
-        orderBy: { created_at: 'desc' },
+        // featured_first antepone is_featured; created_at desc siempre queda
+        // como desempate para que el orden sea estable entre lotes cuando el
+        // frontend pagina por scroll (mismo criterio sin el flag).
+        orderBy: featured_first
+          ? [{ is_featured: 'desc' }, { created_at: 'desc' }]
+          : { created_at: 'desc' },
       }),
       this.prisma.products.count({ where }),
       this.loadMergedSettings(),
     ]);
+
+    // Prisma devuelve el `id: { in: [...] }` en su propio orden: se restaura el
+    // que calculó el ranking (destacados → más vendidos → newest).
+    if (bestSellingPageIds) {
+      const position = new Map(
+        bestSellingPageIds.map((id, index) => [id, index]),
+      );
+      products.sort(
+        (a: any, b: any) =>
+          (position.get(Number(a.id)) ?? Number.MAX_SAFE_INTEGER) -
+          (position.get(Number(b.id)) ?? Number.MAX_SAFE_INTEGER),
+      );
+    }
 
     // Resolve active auto-apply promotions for every product in the listing
     // (batch query). Cards use the promotional unit price computed off the

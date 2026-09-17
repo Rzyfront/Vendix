@@ -8,6 +8,8 @@ import { LayawayRemindersJob } from './layaway-reminders.job';
 import { DepreciationMonthlyJob } from './depreciation-monthly.job';
 import { DataRetentionJob } from './data-retention.job';
 import { CertificateExpiryAlertJob } from './certificate-expiry-alert.job';
+import { AccountingEntryFailuresAlertJob } from './accounting-entry-failures-alert.job';
+import { PosLineGrossInvariantAuditJob } from './pos-line-gross-invariant-audit.job';
 import { DomainProvisioningJob } from './domain-provisioning.job';
 import { InvoiceRetryJob } from './invoice-retry.job';
 import { DianTestSetRepollJob } from './dian-test-set-repoll.job';
@@ -96,6 +98,8 @@ import { ResponseModule } from '../common/responses/response.module';
     DepreciationMonthlyJob,
     DataRetentionJob,
     CertificateExpiryAlertJob,
+    AccountingEntryFailuresAlertJob,
+    PosLineGrossInvariantAuditJob,
     DomainProvisioningJob,
     InvoiceRetryJob,
     DianTestSetRepollJob,

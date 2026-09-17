@@ -20,7 +20,7 @@ if (ok) process.exit(0);
 
 console.error(`
   Node ${process.versions.node} no esta en la matriz de Angular 20.
-  Soportado: 20.19+, 22.12+ o 24.x     (este repo fija 22 en .nvmrc)
+  Soportado: 20.19+, 22.12+ o 24.x     (este repo fija 24 en .nvmrc)
 
   Ejecutable en uso: ${process.execPath}
 
@@ -29,6 +29,6 @@ console.error(`
 
       nvm use
       export PATH="$NVM_BIN:$PATH"
-      node -v          # debe decir v22.x
+      node -v          # debe decir v24.x
 `);
 process.exit(1);

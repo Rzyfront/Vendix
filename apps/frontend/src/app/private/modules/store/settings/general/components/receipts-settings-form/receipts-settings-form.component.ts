@@ -34,11 +34,8 @@ export interface ReceiptsSettings {
   receipt_header?: string;
   receipt_footer: string;
   /** Electronic-invoicing block — see `core/models/store-settings.interface`. */
-  auto_issue_invoice?: boolean;
   invoice_copies?: number;
-  send_invoice_email?: boolean;
   print_pos_ticket?: boolean;
-  deliver_printed?: boolean;
   invoice_format?: PrintFormat;
   pos_ticket_format?: PrintFormat;
   pos_ticket_copies?: number;
@@ -225,10 +222,7 @@ export class ReceiptsSettingsForm {
     email_receipt: new FormControl(false),
     receipt_header: new FormControl(''),
     receipt_footer: new FormControl('¡Gracias por su compra!'),
-    auto_issue_invoice: new FormControl(true),
-    send_invoice_email: new FormControl(true),
     print_pos_ticket: new FormControl(false),
-    deliver_printed: new FormControl(false),
     print_dispatch_ticket_enabled: new FormControl(true),
     print_dispatch_ticket_auto_with_pos: new FormControl(false),
     print_dispatch_ticket_auto_on_postventa: new FormControl(false),
@@ -257,14 +251,6 @@ export class ReceiptsSettingsForm {
 
   /** El explicativo legal arranca colapsado: es de consulta, no de trabajo. */
   readonly legalNoticeOpen = signal(false);
-
-  /**
-   * Warning shown when the merchant just turned the email off. The invoice must
-   * be DELIVERED to the buyer in physical or electronic form, so leaving both
-   * channels off is not a valid configuration — `onFieldChange` turns the
-   * printed hand-off on rather than silently saving an unlawful setup.
-   */
-  readonly deliveryFallbackApplied = signal(false);
 
   /**
    * `pos.auto_print_receipt` lives in the POS block, so it is edited through its
@@ -315,17 +301,8 @@ export class ReceiptsSettingsForm {
   get receiptFooterControl() {
     return this.form.get('receipt_footer') as FormControl;
   }
-  get autoIssueInvoiceControl() {
-    return this.form.get('auto_issue_invoice') as FormControl;
-  }
-  get sendInvoiceEmailControl() {
-    return this.form.get('send_invoice_email') as FormControl;
-  }
   get printPosTicketControl() {
     return this.form.get('print_pos_ticket') as FormControl;
-  }
-  get deliverPrintedControl() {
-    return this.form.get('deliver_printed') as FormControl;
   }
   get printDispatchTicketEnabledControl() {
     return this.form.get('print_dispatch_ticket_enabled') as FormControl;
@@ -370,7 +347,6 @@ export class ReceiptsSettingsForm {
   onFieldChange() {
     if (!this.form.valid) return;
 
-    this.enforceDeliveryChannel();
     this.settingsChange.emit(this.form.value);
   }
 
@@ -445,29 +421,5 @@ export class ReceiptsSettingsForm {
       URL.revokeObjectURL(url);
       this.previewUrl.set(null);
     }
-  }
-
-  /**
-   * Keeps at least one delivery channel on once the store is live. Emailing the
-   * invoice is not legally mandatory in itself — DELIVERING it is, in physical
-   * or electronic form — so turning the email off is fine as long as the printed
-   * copy takes over.
-   */
-  private enforceDeliveryChannel(): void {
-    if (!this.isLive()) {
-      this.deliveryFallbackApplied.set(false);
-      return;
-    }
-
-    const emailOn = !!this.sendInvoiceEmailControl.value;
-    const printedOn = !!this.deliverPrintedControl.value;
-
-    if (!emailOn && !printedOn) {
-      this.deliverPrintedControl.setValue(true, { emitEvent: false });
-      this.deliveryFallbackApplied.set(true);
-      return;
-    }
-
-    this.deliveryFallbackApplied.set(false);
   }
 }

@@ -12,6 +12,7 @@ import { PurchasesAnalyticsService } from './services/purchases-analytics.servic
 import { ReviewsAnalyticsService } from './services/reviews-analytics.service';
 import { DispatchAnalyticsService } from './services/dispatch-analytics.service';
 import {
+  DispatchAnalyticsQueryDto,
   DispatchPlanillasQueryDto,
   DispatchRemisionesQueryDto,
   DispatchVehiculosQueryDto,
@@ -1268,6 +1269,7 @@ export class AnalyticsController {
       { key: 'reasignada', header: 'Reasignada', type: 'text' },
       { key: 'parada_estado', header: 'Estado Parada', type: 'text' },
       { key: 'is_prepaid', header: 'Prepaga', type: 'text' },
+      { key: 'metodo_pago', header: 'Método de Pago', type: 'text' },
       { key: 'delivered_at', header: 'Entrega', type: 'date' },
     ];
 
@@ -1378,6 +1380,42 @@ export class AnalyticsController {
     await this.emitReport(res, 'vehiculos_despacho', tz, [
       this.toSheet('Vehículos', columns, sheetRows, tz),
     ]);
+  }
+
+  // ==================== DISPATCH ANALYTICS (KPIs) ====================
+  // PLAN-analytics-despachos-2026-09-12 Paso 3. Mismo permiso que el resto
+  // del módulo (`store:analytics:read`) — no se crea un permiso nuevo.
+
+  @Get('dispatch/summary')
+  @Permissions('store:analytics:read')
+  async getDispatchSummary(@Query() query: DispatchAnalyticsQueryDto) {
+    const result =
+      await this.dispatch_analytics_service.getDispatchSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('dispatch/trends')
+  @Permissions('store:analytics:read')
+  async getDispatchTrends(@Query() query: DispatchAnalyticsQueryDto) {
+    const result =
+      await this.dispatch_analytics_service.getDispatchTrends(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('dispatch/fulfillment')
+  @Permissions('store:analytics:read')
+  async getDispatchFulfillment(@Query() query: DispatchAnalyticsQueryDto) {
+    const result =
+      await this.dispatch_analytics_service.getDispatchFulfillment(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('dispatch/collections')
+  @Permissions('store:analytics:read')
+  async getDispatchCollections(@Query() query: DispatchAnalyticsQueryDto) {
+    const result =
+      await this.dispatch_analytics_service.getDispatchCollections(query);
+    return this.response_service.success(result);
   }
 }
 

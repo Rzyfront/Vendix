@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: '24'
   AWS_REGION: us-east-1
   S3_BUCKET: vendix-online-frontend
   CLOUDFRONT_DISTRIBUTION_ID: E1I27OYFJX7VYJ

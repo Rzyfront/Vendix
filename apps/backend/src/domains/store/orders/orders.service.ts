@@ -31,6 +31,7 @@ import { ShippingCalculatorService } from '../shipping/shipping-calculator.servi
 import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
 import {
   groupRatesByProductId,
+  resolveLineUnits,
   resolveOrderLineFinals,
 } from '../taxes/utils/final-price.util';
 import { resolvePackSize } from '../products/services/packaging.util';
@@ -46,6 +47,8 @@ import { OrderFlowService } from './order-flow/order-flow.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { AuditService, AuditAction, AuditResource } from '@common/audit/audit.service';
+// F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
+import { differsByAtLeastCents } from '@common/money-kernel';
 
 /**
  * Tasas de un producto con impuesto, resueltas en batch desde
@@ -506,7 +509,16 @@ export class OrdersService {
                         : undefined,
                     catalog_unit_price: item.catalog_unit_price,
                     catalog_final_price: item.catalog_final_price,
-                    final_unit_price: item.final_unit_price ?? item.unit_price,
+                    // F-006 (major, C.8): honra el override explícito; en su
+                    // ausencia deriva el bruto server-side con las tasas del
+                    // catálogo (mismas ya resueltas arriba en
+                    // `lineTaxByProductId`) en vez de degradar al NETO.
+                    final_unit_price:
+                      item.final_unit_price ??
+                      this.resolveFinalUnitPriceServerSide(
+                        item,
+                        lineTaxByProductId,
+                      ),
                     is_price_overridden:
                       item.is_price_overridden ??
                       Boolean(item.price_override_reason),
@@ -1055,9 +1067,9 @@ export class OrdersService {
 
     // Final con impuesto por línea (display-only, aditivo): `unit_price`
     // persistido resuelto con las tasas del producto (UN batch, no N+1) +
-    // ese valor × cantidad (2 dec). Mismo criterio que la vista de mesa, para
-    // que ambas pantallas muestren lo mismo. Deriva en memoria (no persiste):
-    // sombrea la columna `final_unit_price` solo en la respuesta.
+    // ese valor × `line_units` (2 dec). Mismo criterio que la vista de mesa,
+    // para que ambas pantallas muestren lo mismo. Deriva en memoria (no
+    // persiste): sombrea la columna `final_unit_price` solo en la respuesta.
     // Cocina NO recibe finales (ADR-10): su payload sale como hoy.
     if (order.order_items?.length && !this.isKitchenRole()) {
       const productIds = [
@@ -1084,12 +1096,31 @@ export class OrdersService {
             ? (ratesByProductId.get(item.product_id) ?? [])
             : [];
         const finals = resolveOrderLineFinals(
-          Number(item.unit_price),
-          item.quantity,
+          {
+            unit_price: item.unit_price,
+            quantity: item.quantity,
+            weight: item.weight,
+            price_unit_quantity: item.price_unit_quantity,
+            // F-151 — el marcador de procedencia de ADR-08. Una línea
+            // anterior a la normalización tiene `tax_amount_item` NULL y
+            // guarda el precio PUBLICADO en `unit_price`; volver a aplicarle
+            // una tasa exclusiva la mostraría inflada un 19%. El helper lo
+            // detecta y devuelve el `unit_price` tal cual. El `include` de
+            // arriba trae todos los escalares de `order_items`, así que el
+            // campo ya viene: no hace falta ampliar ninguna proyección.
+            tax_amount_item: item.tax_amount_item,
+          },
           rates,
         );
         item.final_unit_price = finals.final_unit_price;
         item.final_total_price = finals.final_total_price;
+        // C.8 (R-1, ADR-12 principle applied to este payload): campos
+        // ADITIVOS con nombre explícito de magnitud para que un lector
+        // NUEVO no tenga que conocer el alias histórico `final_*`.
+        // `unit_price`/`total_price` no se tocan — un lector viejo sigue
+        // viendo exactamente lo de siempre.
+        item.unit_price_gross = finals.final_unit_price;
+        item.line_total_gross = finals.final_total_price;
       }
     }
 
@@ -1231,14 +1262,39 @@ export class OrdersService {
           : order_delivery_type_enum.home_delivery;
     }
 
-    // Recalculate grand_total if shipping_cost changes
+    // Recalculate grand_total if shipping_cost changes.
+    //
+    // F-086 punto (b) — a esta fórmula le faltaban DOS términos frente a los
+    // dos carriles POS que ya la calculan bien (venta directa
+    // `payments.service.ts` y cierre de mesa, ambos:
+    // `Math.max(0, subtotal + tax − descuento + envío + propina)`):
+    //
+    //  1. La propina (`tip_amount`). Sin ella, reabrir el editor y guardar
+    //     sólo un cambio de envío sobre una orden POS con propina le borraba
+    //     la propina del `grand_total` mientras `orders.tip_amount` seguía
+    //     intacta: el pago ya cobrado queda por encima del nuevo total y el
+    //     asiento contable pierde el CR del pasivo custodio de la propina.
+    //     `UpdateOrderDto` no declara `tip_amount` hoy (el `whitelist` del
+    //     ValidationPipe rechazaría el campo si llegara), así que el término
+    //     sale SIEMPRE de la orden persistida; el `(updateOrderDto as
+    //     any).tip_amount ?? …` deja el cálculo listo para el día en que el
+    //     DTO sí la exponga, sin que nadie tenga que volver a tocar esta
+    //     fórmula.
+    //  2. El clamp `Math.max(0, …)`. Sin él, un cupón del 100% puede dejar
+    //     el paréntesis en negativo y romper la invariante de cabecera I-6
+    //     (`grand_total = max(0, subtotal + tax − descuento + envío +
+    //     propina)`).
     if (updateOrderDto.shipping_cost !== undefined) {
       const subtotal = Number(order.subtotal_amount);
       const tax = Number(order.tax_amount);
       const discount = Number(order.discount_amount);
       const shipping = Number(updateOrderDto.shipping_cost);
-      (updateOrderDto as any).grand_total =
-        subtotal + tax - discount + shipping;
+      const tip = Number(
+        (updateOrderDto as any).tip_amount ?? order.tip_amount ?? 0,
+      );
+      (updateOrderDto as any).grand_total = roundMoney(
+        Math.max(0, subtotal + tax - discount + shipping + tip),
+      );
     }
 
     const updatedOrder = await this.prisma.orders.update({
@@ -1393,12 +1449,35 @@ export class OrdersService {
     const grandTotal =
       dto.total_amount ?? subtotal + taxAmount - discountAmount;
 
+    // F-006 (major, C.8) — 2º de los 3 sitios que el hallazgo nombra: batch
+    // de tasas por catálogo (mismo patrón que `updateOrderFromEditor`) para
+    // que `final_unit_price` derive el bruto server-side en vez de degradar
+    // al NETO cuando el cliente no manda el override explícito.
+    const updateItemsProductIds = [
+      ...new Set(
+        dto.items
+          .map((it) => (it.product_id != null ? Number(it.product_id) : null))
+          .filter((pid): pid is number => pid != null),
+      ),
+    ];
+    const updateItemsRatesByProductId =
+      updateItemsProductIds.length > 0
+        ? await this.resolveLineTaxesForOrder(updateItemsProductIds)
+        : new Map<number, ResolvedLineTax[]>();
+
     return this.prisma.$transaction(async (tx) => {
       // ERR-07 / DB-14 — invariante "prepared + variantes exige variante".
       // Único enforcement centralizado (mismo helper que `create` y
       // `updateOrderFromEditor`); si queda duplicado en dos sitios,
       // vuelve a divergir como ya pasó (Round 3 minor #15).
       await assertVariantRequiredForPrepared(tx, dto.items);
+
+      // F-035/F-047 (C.8): antes de tocar una sola fila, rechazar si la
+      // orden ya tiene desglose fiscal persistido — el `deleteMany` de más
+      // abajo lanzaría P2003 crudo (ver docblock de
+      // `assertNoPersistedTaxBreakdown`). Se corre ANTES de liberar
+      // reservas para no dejar ningún efecto secundario detrás de un 409.
+      await this.assertNoPersistedTaxBreakdown(tx, id);
 
       // Release old reservations before deleting items
       const existingOrder = await tx.orders.findUnique({
@@ -1431,6 +1510,15 @@ export class OrdersService {
       }
 
       // Delete existing items
+      //
+      // F-035/F-047 (C.8, cerrado con guard): este `deleteMany` sigue sin
+      // borrar antes `order_item_taxes` (FK `order_item_taxes_order_item_id_fkey`,
+      // requerida, sin `onDelete`) — recrear el desglose fiscal server-side
+      // es un cambio de negocio que cae fuera de una guarda puntual. Lo que
+      // SÍ cambió: `assertNoPersistedTaxBreakdown` (arriba) ya rechazó la
+      // petición con 409 `ORD_EDIT_TAX_BREAKDOWN_LOCKED_001` si la orden
+      // tenía desglose — este `deleteMany` sólo se alcanza para órdenes SIN
+      // `order_item_taxes`, donde no hay FK que viole.
       await tx.order_items.deleteMany({
         where: { order_id: id },
       });
@@ -1441,8 +1529,17 @@ export class OrdersService {
         .filter((v): v is number => typeof v === 'number');
       const variantImageById = new Map<number, string | null>();
       if (variantIds.length) {
+        // F-079 (minor, C.8): mismo fix que `updateOrderFromEditor` (Round 1
+        // BLOCKER #3, ver más abajo `products: { store_id: storeId }`) — sin
+        // el filtro por tienda, un `product_variant_id` de OTRA tienda
+        // satisfacía la búsqueda y su imagen terminaba mezclada en la fila de
+        // nuestra tienda (tirilla, remisión y cuenta QR). No mueve dinero; sí
+        // cruza tenant.
         const variants = await tx.product_variants.findMany({
-          where: { id: { in: Array.from(new Set(variantIds)) } },
+          where: {
+            id: { in: Array.from(new Set(variantIds)) },
+            products: { store_id: order.store_id },
+          },
           include: { product_images: true },
         });
         for (const v of variants) {
@@ -1476,7 +1573,16 @@ export class OrdersService {
             tax_amount_item: item.tax_amount_item,
             catalog_unit_price: item.catalog_unit_price,
             catalog_final_price: item.catalog_final_price,
-            final_unit_price: item.final_unit_price ?? item.unit_price,
+            // F-006 (major, C.8): honra el override explícito; en su
+            // ausencia deriva el bruto server-side con las tasas del
+            // catálogo (`updateItemsRatesByProductId`, batch resuelto arriba)
+            // en vez de degradar al NETO.
+            final_unit_price:
+              item.final_unit_price ??
+              this.resolveFinalUnitPriceServerSide(
+                item,
+                updateItemsRatesByProductId,
+              ),
             is_price_overridden:
               item.is_price_overridden ??
               Boolean(item.price_override_reason),
@@ -1948,7 +2054,7 @@ export class OrdersService {
 
     if (
       dto.shipping_cost !== undefined &&
-      Math.abs(dto.shipping_cost - shippingCost) > 0.01
+      differsByAtLeastCents(dto.shipping_cost, shippingCost, 2)
     ) {
       throw new VendixHttpException(
         ErrorCodes.ORD_EDIT_INVALID_SHIPPING_001,
@@ -2092,33 +2198,79 @@ export class OrdersService {
       couponDiscount = 0;
     }
 
-    // 11) Totales server-owned. Subtotal = Σ items.final_unit_price × qty;
-    //     tax_amount se respeta del DTO recalculado por `normalizePriceUnitLines`;
-    //     discount = promotionDiscount + couponDiscount.
+    // 11) Totales server-owned — ADR-05 (reescrito 2026-09-13, F-003/F-075
+    //     blockers). El subtotal se compone desde la BASE (`unit_price`), no
+    //     desde el bruto (`final_unit_price ?? unit_price`): sumar el
+    //     impuesto encima de un bruto duplicaba el IVA en la cabecera
+    //     (doble conteo estructural, F-003 blocker). Y el impuesto se
+    //     recalcula server-side con la tarifa que el CATÁLOGO resuelve para
+    //     líneas con `product_id` — `tax_amount_item` del DTO deja de decidir
+    //     la cabecera para esas líneas (F-003: dos constructores web lo
+    //     mandan por línea, dos por unidad; ninguna unidad es fiable). Las
+    //     líneas SIN producto (custom/servicio manual) no tienen catálogo del
+    //     que resolver una tasa: conservan `tax_amount_item` tal como hacía
+    //     el editor antes de este cambio — cero regresión para esa
+    //     población, sólo se corrige el multiplicador (ver abajo).
+    const editorProductIds = [
+      ...new Set(
+        dto.items
+          .map((it) => (it.product_id != null ? Number(it.product_id) : null))
+          .filter((id): id is number => id != null),
+      ),
+    ];
+    const editorRatesByProductId =
+      editorProductIds.length > 0
+        ? groupRatesByProductId(
+            (await this.prisma.product_tax_assignments.findMany({
+              where: { product_id: { in: editorProductIds } },
+              include: {
+                tax_categories: { include: { tax_rates: true } },
+              },
+            })) as any,
+          )
+        : new Map();
+    // F-006 (major, C.8 — cerrado en los 3 sitios): reusado por el bloque de
+    // persistencia de abajo para que `final_unit_price` NO degrade a NETO
+    // cuando el cliente no lo manda explícito. Los otros dos sitios que
+    // F-006 nombra (`create`, `updateOrderItems`) usan el mismo cálculo vía
+    // `resolveFinalUnitPriceServerSide` (helper compartido, ver más abajo en
+    // este archivo).
+    const perUnitGrossByIndex: number[] = [];
     let recalculatedSubtotal = 0;
     let recalculatedTax = 0;
     for (let i = 0; i < dto.items.length; i++) {
       const item = dto.items[i];
-      const unitBase = Number(item.final_unit_price ?? item.unit_price ?? 0);
+      const unitBase = Number(item.unit_price ?? 0);
       const quantity = Number(item.quantity || 0);
       // Multi-tarifa + packSize: si la línea tenía scale (price_units),
-      // `normalizePriceUnitLines` ya aplicó el delta. Usamos el `total_price`
-      // del DTO cuando viene, o recalculamos desde `final_unit_price × priceUnits`.
+      // `normalizePriceUnitLines` ya aplicó el delta. F-012/F-037 (blocker):
+      // subtotal e impuesto DEBEN usar el MISMO multiplicador de línea — antes
+      // el subtotal usaba `priceUnitsQty` y el impuesto `quantity`; en una
+      // línea con escala (`price_unit_quantity ≠ 1`) eso desincronizaba el
+      // IVA hasta 1.000×.
       const priceUnitsQty =
         priceUnits.priceUnitByIndex[i] ?? quantity;
       const lineTotal = roundMoney(unitBase * priceUnitsQty);
       recalculatedSubtotal = roundMoney(recalculatedSubtotal + lineTotal);
-      // CP-POS-CREAR-EDITAR-COBRAR-001 — F.2 · Round 2 BLOCKER F16.
-      // `tax_amount_item` is a PER-UNIT snapshot. The previous version
-      // summed it directly into `recalculatedTax`, which silently
-      // under-counted the tax for any line with `quantity > 1` — an
-      // editor that just bumped quantities would persist a tax_amount
-      // that didn't match the order_item rows the same editor just
-      // wrote. Match the POS pattern (`pos-payment.service.ts:148-151`)
-      // and multiply by `quantity` so the totals reconcile.
+
+      let perUnitTax: number;
+      if (item.product_id != null) {
+        const rates = editorRatesByProductId.get(Number(item.product_id)) ?? [];
+        // Mismo helper que la sombra de `findOne` (`resolveOrderLineFinals`):
+        // resuelve el bruto por unidad con las tasas vigentes del producto.
+        // `quantity=1` es un valor mudo — `final_unit_price` no depende de él.
+        const perUnitGross = resolveOrderLineFinals(
+          { unit_price: unitBase, quantity: 1 },
+          rates,
+        ).final_unit_price;
+        perUnitTax = roundMoney(perUnitGross - unitBase);
+        perUnitGrossByIndex[i] = perUnitGross;
+      } else {
+        perUnitTax = Number(item.tax_amount_item || 0);
+        perUnitGrossByIndex[i] = roundMoney(unitBase + perUnitTax);
+      }
       recalculatedTax = roundMoney(
-        recalculatedTax +
-          Number(item.tax_amount_item || 0) * quantity,
+        recalculatedTax + perUnitTax * priceUnitsQty,
       );
     }
     if (priceUnits.adjusted > 0) {
@@ -2128,11 +2280,16 @@ export class OrdersService {
       recalculatedTax = roundMoney(recalculatedTax + priceUnits.taxDelta);
     }
     const discountAmount = roundMoney(promotionDiscount + couponDiscount);
-    const grandTotal = roundMoney(
-      recalculatedSubtotal +
-        recalculatedTax -
-        discountAmount +
-        (dto.shipping_cost ?? shippingCost),
+    // F-081 (blocker): paridad con los dos carriles POS (`payments.service.ts`
+    // `:3263`/`:3736`), que sí clampan a 0 — el editor no lo hacía.
+    const grandTotal = Math.max(
+      0,
+      roundMoney(
+        recalculatedSubtotal +
+          recalculatedTax -
+          discountAmount +
+          (dto.shipping_cost ?? shippingCost),
+      ),
     );
 
     // 12) Stock validation se ejecuta DENTRO de la transacción. Para
@@ -2296,6 +2453,13 @@ export class OrdersService {
         );
       }
 
+      // F-035/F-047 (C.8): mismo guard que `updateOrderItems` — rechazar
+      // ANTES de tocar una sola fila si la orden ya tiene desglose fiscal
+      // persistido (ver docblock de `assertNoPersistedTaxBreakdown`). El
+      // claim ya se ganó arriba, así que esto corre dentro de la MISMA
+      // transacción que hará el `deleteMany` de items más abajo.
+      await this.assertNoPersistedTaxBreakdown(tx, orderId);
+
       // 13b) Reservas de stock (sólo si NO es draft). Se liberan las
       //      activas ANTES de reservar las nuevas.
       if (!isDraft) {
@@ -2356,6 +2520,14 @@ export class OrdersService {
         previousByKey.set(key, prev as any);
       }
 
+      // F-035/F-047 (C.8, cerrado con guard — mismo hueco que
+      // `updateOrderItems` § arriba en este archivo): `order_item_taxes` no
+      // tiene `onDelete` en su FK a `order_items`, así que este `deleteMany`
+      // lanzaría P2003 en cualquier orden que ya tenga desglose fiscal. La
+      // guarda `assertNoPersistedTaxBreakdown` (13a-bis, arriba) ya rechazó
+      // la petición con 409 antes de llegar aquí si la orden lo tenía —
+      // este `deleteMany` sólo se alcanza para órdenes SIN
+      // `order_item_taxes`.
       await tx.order_items.deleteMany({ where: { order_id: orderId } });
 
       const variantIds = dto.items
@@ -2470,7 +2642,18 @@ export class OrdersService {
               mergedCatalogFinal !== null && mergedCatalogFinal !== undefined
                 ? (mergedCatalogFinal as any)
                 : item.final_unit_price ?? item.unit_price,
-            final_unit_price: item.final_unit_price ?? item.unit_price,
+            // F-006 (major, parcial — sólo este sitio de los 3 que nombra el
+            // hallazgo): antes degradaba a NETO (`?? item.unit_price`) cuando
+            // el cliente no mandaba `final_unit_price` explícito. Ahora
+            // honra el explícito (override del carril de órdenes) y, en su
+            // ausencia, deriva el bruto server-side con las MISMAS tasas ya
+            // resueltas para el impuesto de cabecera (`perUnitGrossByIndex`,
+            // calculado arriba en el mismo loop) — nunca recalcula sobre un
+            // override ya presente.
+            final_unit_price:
+              item.final_unit_price ??
+              perUnitGrossByIndex[index] ??
+              item.unit_price,
             is_price_overridden:
               item.is_price_overridden ??
               Boolean(item.price_override_reason),
@@ -2896,7 +3079,7 @@ export class OrdersService {
       });
 
       // 13h) Hidratar respuesta completa dentro de la misma transacción.
-      return tx.orders.findFirst({
+      const hydrated = await tx.orders.findFirst({
         where: { id: orderId },
         include: {
           stores: {
@@ -3014,57 +3197,68 @@ export class OrdersService {
           },
         },
       });
-    });
 
-    // 14) Coherencia: si la fila devuelta no coincide con la actualización,
-    //     no devolver éxito falso. `ORD_EDIT_RESPONSE_MISMATCH_001` es 500
-    //     porque es un fallo interno del servicio.
-    //
-    //     Round 1 MAJOR #7: el chequeo original sólo cubría subtotal y
-    //     grand_total. Eso deja escapar divergencias en tax_amount,
-    //     discount_amount, shipping_cost, coupon_id o coupon_code —
-    //     exactamente los campos que el backend recalcula y que la UI
-    //     muestra. Ampliamos la comparación y exponemos los deltas en
-    //     `details` para que la timeline sea depurable sin abrir SQL.
-    const expectedCouponCode = requestedCode || null;
-    if (
-      !result ||
-      Number(result.subtotal_amount) !== recalculatedSubtotal ||
-      Number(result.tax_amount) !== recalculatedTax ||
-      Number(result.discount_amount) !== discountAmount ||
-      Number(result.shipping_cost) !==
-        (dto.shipping_cost ?? shippingCost) ||
-      Number(result.grand_total) !== grandTotal ||
-      (result.coupon_id ?? null) !== (couponId ?? null) ||
-      (result.coupon_code ?? null) !== (expectedCouponCode ?? null)
-    ) {
-      throw new VendixHttpException(
-        ErrorCodes.ORD_EDIT_RESPONSE_MISMATCH_001,
-        undefined,
-        {
-          expected: {
-            subtotal: recalculatedSubtotal,
-            tax_amount: recalculatedTax,
-            discount_amount: discountAmount,
-            shipping_cost: dto.shipping_cost ?? shippingCost,
-            grand_total: grandTotal,
-            coupon_id: couponId ?? null,
-            coupon_code: expectedCouponCode,
+      // F-068 (major, C.8) — este chequeo vivía DESPUÉS de que
+      // `$transaction(...)` resolviera (es decir, ya comprometido): un
+      // mismatch lanzaba `ORD_EDIT_RESPONSE_MISMATCH_001` con la orden YA
+      // GUARDADA, y el copy del frontend le decía al cajero que "sólo falló
+      // la recarga" — invitándolo a reeditar y guardar otra vez algo que ya
+      // se había guardado. Además comparaba `hydrated` (leído DENTRO de la
+      // misma transacción que acababa de escribir esos mismos valores)
+      // contra las variables que el propio código calculó: sin un trigger o
+      // una escritura concurrente de por medio, no podía fallar — "compara
+      // una variable consigo misma" (F-068).
+      //
+      // Ahora corre AQUÍ, ANTES de que el callback retorne: si lanza,
+      // Prisma revierte TODA la transacción (incluida la actualización de
+      // `orders` de 13g) y la orden queda intacta — el cajero puede
+      // reintentar sabiendo que nada cambió. `ORD_EDIT_TOTALS_ROLLBACK_001`
+      // (409) reemplaza al 500 post-commit para este camino; se conserva el
+      // resto de la lógica de comparación (Round 1 MAJOR #7: cubre
+      // subtotal, tax_amount, discount_amount, shipping_cost, grand_total,
+      // coupon_id y coupon_code, con los deltas en `details`).
+      const expectedCouponCode = requestedCode || null;
+      if (
+        !hydrated ||
+        Number(hydrated.subtotal_amount) !== recalculatedSubtotal ||
+        Number(hydrated.tax_amount) !== recalculatedTax ||
+        Number(hydrated.discount_amount) !== discountAmount ||
+        Number(hydrated.shipping_cost) !==
+          (dto.shipping_cost ?? shippingCost) ||
+        Number(hydrated.grand_total) !== grandTotal ||
+        (hydrated.coupon_id ?? null) !== (couponId ?? null) ||
+        (hydrated.coupon_code ?? null) !== (expectedCouponCode ?? null)
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_EDIT_TOTALS_ROLLBACK_001,
+          undefined,
+          {
+            expected: {
+              subtotal: recalculatedSubtotal,
+              tax_amount: recalculatedTax,
+              discount_amount: discountAmount,
+              shipping_cost: dto.shipping_cost ?? shippingCost,
+              grand_total: grandTotal,
+              coupon_id: couponId ?? null,
+              coupon_code: expectedCouponCode,
+            },
+            actual: hydrated
+              ? {
+                  subtotal: Number(hydrated.subtotal_amount),
+                  tax_amount: Number(hydrated.tax_amount),
+                  discount_amount: Number(hydrated.discount_amount),
+                  shipping_cost: Number(hydrated.shipping_cost),
+                  grand_total: Number(hydrated.grand_total),
+                  coupon_id: hydrated.coupon_id ?? null,
+                  coupon_code: hydrated.coupon_code ?? null,
+                }
+              : null,
           },
-          actual: result
-            ? {
-                subtotal: Number(result.subtotal_amount),
-                tax_amount: Number(result.tax_amount),
-                discount_amount: Number(result.discount_amount),
-                shipping_cost: Number(result.shipping_cost),
-                grand_total: Number(result.grand_total),
-                coupon_id: result.coupon_id ?? null,
-                coupon_code: result.coupon_code ?? null,
-              }
-            : null,
-        },
-      );
-    }
+        );
+      }
+
+      return hydrated;
+    });
 
     // 15) Firma las imágenes S3.
     await this.signOrderItemImages(result);
@@ -3640,6 +3834,82 @@ export class OrdersService {
   }
 
   /**
+   * F-006 (major, C.8) — honra el `final_unit_price` explícito del carril de
+   * órdenes (el override negociado) y sólo DERIVA el bruto server-side
+   * cuando el cliente no lo manda. Antes los sitios de `create` y
+   * `updateOrderItems` degradaban en silencio a `?? item.unit_price` (el
+   * NETO) cuando faltaba el explícito — el editor (`updateOrderFromEditor`)
+   * ya deriva correctamente desde catálogo (`perUnitGrossByIndex`); este
+   * helper replica el MISMO cálculo (`resolveOrderLineFinals`, F-202) para
+   * los otros dos sitios de persistencia sin reimplementar la fórmula.
+   *
+   * Sin `product_id` (línea custom/servicio) no hay catálogo del que
+   * resolver una tasa: se conserva `unit_price` tal cual (cero regresión,
+   * mismo criterio que el editor para esas líneas).
+   */
+  private resolveFinalUnitPriceServerSide(
+    item: { product_id?: number | null; unit_price: unknown },
+    ratesByProductId: Map<number, ResolvedLineTax[]>,
+  ): number {
+    const unitPrice = Number(item.unit_price ?? 0);
+    if (item.product_id == null) return unitPrice;
+    const resolved = ratesByProductId.get(Number(item.product_id)) ?? [];
+    const typedRates = resolved.map((r) => ({
+      rate: Number(r.rate),
+      is_inclusive: r.is_inclusive,
+    }));
+    return resolveOrderLineFinals(
+      { unit_price: unitPrice, quantity: 1 },
+      typedRates,
+    ).final_unit_price;
+  }
+
+  /**
+   * F-035 (major) / F-047 (blocker), C.8 — `updateOrderItems` y
+   * `updateOrderFromEditor` reemplazan las líneas de una orden con
+   * `order_items.deleteMany` + recreación; ese `deleteMany` NO borra antes
+   * `order_item_taxes` (FK `order_item_taxes_order_item_id_fkey`, requerida,
+   * sin `onDelete`). Verificado empíricamente (`BEGIN … ROLLBACK` en
+   * `vendix_db`, F-035): el `deleteMany` lanza P2003 crudo, no pierde filas
+   * en silencio — pero un P2003 crudo es un 500 sin código de negocio
+   * (exactamente lo que ERR-07 del registro del plan señala).
+   *
+   * Recrear el desglose fiscal server-side tras el reemplazo (borrar OIT
+   * antes, recrearlas por línea con tasas resueltas del catálogo) es un
+   * cambio de negocio de mayor alcance que una guarda puntual puede
+   * justificar — fuera de lo que este método resuelve. Lo que SÍ resuelve:
+   * en vez de que el cajero reciba un 500 con un stack de Postgres a mitad
+   * de una transacción, la operación se rechaza ANTES de tocar una sola
+   * fila, con un código explícito (`ORD_EDIT_TAX_BREAKDOWN_LOCKED_001`,
+   * 409) que dice qué pasó y por qué.
+   *
+   * Alcance deliberadamente angosto: sólo mira `order_item_taxes`, NO
+   * `inventory_transactions` (que tiene la MISMA FK sin `onDelete` y puede
+   * disparar el mismo P2003 — verificado en `vendix_db`, 27/244 órdenes
+   * editables tienen alguna, casi todas `type='stock_in'`). Bloquear por esa
+   * segunda causa habría afectado ~11% de las órdenes editables hoy —
+   * blast radius de un orden de magnitud mayor que el de `order_item_taxes`
+   * (1/244) y no lo pide ninguno de los dos hallazgos que este guard cierra;
+   * queda consignado como riesgo residual, no arreglado aquí.
+   */
+  private async assertNoPersistedTaxBreakdown(
+    tx: { order_item_taxes: { findFirst: (args: any) => Promise<any> } },
+    orderId: number,
+  ): Promise<void> {
+    const existing = await tx.order_item_taxes.findFirst({
+      where: { order_items: { order_id: orderId } },
+      select: { id: true },
+    });
+    if (existing) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_EDIT_TAX_BREAKDOWN_LOCKED_001,
+        undefined,
+        { order_id: orderId },
+      );
+    }
+  }
+
+  /**
    * Construye el payload `order_item_taxes: { create: [...] }` para anidar
    * dentro de `order_items.create`. Espeja checkout.service.ts (~1422,
    * ~2070) y payments.service.ts (~2791).
@@ -3665,6 +3935,35 @@ export class OrdersService {
     const taxAmount = Number(item.tax_amount_item ?? 0);
     if (taxAmount <= 0) return undefined;
 
+    // F-044/F-046: `tax_amount_item` es POR UNIDAD DE PRECIO (canon C-2),
+    // pero la fila `order_item_taxes` respalda la LÍNEA completa: se escala
+    // por `line_units` (peso, escala o cantidad).
+    //
+    // F-207 (cerrado): la rama de peso escalaba ×1 en vez de ×peso, alegando
+    // que la cabecera (`orders.tax_amount`, `createOrderDto.tax_amount`)
+    // llegaba como "Σ TAI cruda" y que escalar solo el OIT rompería I-5
+    // (`orders.tax_amount = Σ order_item_taxes.tax_amount`). Medido: FALSO.
+    // El único emisor web de este carril (`pos-cart.service.ts:calculateSummary`)
+    // arma la cabecera como `Σ item.taxAmount` — el impuesto TOTAL de cada
+    // línea, ya multiplicado por `resolveLineUnits(item)` (peso incluido,
+    // `line-units.util.ts:88-93`) — y solo DESPUÉS lo divide por ese mismo
+    // multiplicador para producir el `tax_amount_item` por unidad
+    // (`pos-cart.service.ts:1092-1096`, `mapCartItemForPos`). Con ×1 en el
+    // backend, `Σ order_item_taxes` quedaba en `tax_amount_item` (impuesto
+    // total / peso) mientras la cabecera ya traía el impuesto total: I-5
+    // estaba ROTA para toda línea por peso, no protegida. ×peso la restaura,
+    // y además iguala lo que el carril de cobro cobra de verdad
+    // (`payments.service.ts:getPosLineUnits`, misma cascada peso⇒escala⇒qty).
+    // Se reusa el multiplicador canónico compartido con `resolveOrderLineFinals`
+    // (mismo archivo, misma línea) en vez de reimplementarlo — así el bruto
+    // (`final_total_price`/`line_total_gross`, C.12) y el desglose fiscal
+    // (esta función) nunca vuelven a divergir en su multiplicador.
+    const lineUnits = resolveLineUnits({
+      quantity: item.quantity,
+      weight: (item as any).weight,
+      price_unit_quantity: (item as any).price_unit_quantity,
+    });
+
     if (resolved && resolved.length > 0) {
       const amounts = splitTaxSnapshotAcrossRates(
         taxAmount,
@@ -3675,7 +3974,9 @@ export class OrdersService {
           tax_rate_id: row.id,
           tax_name: row.name,
           tax_rate: new Prisma.Decimal(row.rate as any),
-          tax_amount: new Prisma.Decimal(amounts[index]),
+          tax_amount: new Prisma.Decimal(
+            roundMoney(amounts[index] * lineUnits),
+          ),
           tax_type: (row.tax_type ?? 'iva') as any,
           is_compound: row.is_compound ?? false,
           is_inclusive: row.is_inclusive ?? false,
@@ -3687,7 +3988,9 @@ export class OrdersService {
     // snapshot del DTO con defaults conservadores para que el tiquete
     // muestre la línea de IVA en vez de salir en blanco. Sin asignación no
     // hay verdad inclusiva: la fila es agregada (ERR-03: sin tasa no se
-    // decide impuesto, nunca se lanza).
+    // decide impuesto, nunca se lanza). F-044: también se escala a la línea
+    // (`tax_rate_id: null` la sigue marcando como fallback, distinguible de
+    // una fila resuelta contra catálogo).
     return {
       create: [
         {
@@ -3696,7 +3999,7 @@ export class OrdersService {
           tax_rate: new Prisma.Decimal(
             item.tax_rate != null ? item.tax_rate : 0,
           ),
-          tax_amount: new Prisma.Decimal(item.tax_amount_item as any),
+          tax_amount: new Prisma.Decimal(roundMoney(taxAmount * lineUnits)),
           tax_type: 'iva' as const,
           is_compound: false,
           is_inclusive: false,

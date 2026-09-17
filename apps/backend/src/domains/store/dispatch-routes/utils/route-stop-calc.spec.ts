@@ -43,6 +43,52 @@ describe('resolveIsPrepaid (safe default = COD)', () => {
       resolveIsPrepaid({ needs_collection: null, invoice: { payment_date: null } }),
     ).toBe(false);
   });
+
+  // ── El saldo vivo manda sobre la bandera congelada ───────────────────────
+  // `needs_collection` se congela al crear la remisión y nadie la reescribe.
+  // Si el cliente paga después, la parada exigía recaudo sobre una orden ya
+  // saldada (doble cobro). Estos casos fijan la nueva precedencia.
+
+  it('marks a COD note as prepaid once its order balance reaches zero', () => {
+    expect(
+      resolveIsPrepaid({
+        needs_collection: true,
+        order: { remaining_balance: 0 },
+      }),
+    ).toBe(true);
+  });
+
+  it('tolerates a one-cent residual as fully paid (mismo umbral que OrderFlowService)', () => {
+    expect(
+      resolveIsPrepaid({
+        needs_collection: true,
+        order: { remaining_balance: '0.01' },
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps a COD note with a live balance as NOT prepaid (contra entrega intacto)', () => {
+    expect(
+      resolveIsPrepaid({
+        needs_collection: true,
+        order: { remaining_balance: 150000 },
+      }),
+    ).toBe(false);
+    // Sin needs_collection tampoco: el saldo positivo es suficiente.
+    expect(
+      resolveIsPrepaid({
+        needs_collection: null,
+        order: { remaining_balance: '0.02' },
+      }),
+    ).toBe(false);
+  });
+
+  it('falls back to needs_collection when the order carries no balance signal', () => {
+    expect(
+      resolveIsPrepaid({ needs_collection: true, order: { remaining_balance: null } }),
+    ).toBe(false);
+    expect(resolveIsPrepaid({ needs_collection: true, order: null })).toBe(false);
+  });
 });
 
 describe('aggregateRouteTotals (live route aggregates)', () => {

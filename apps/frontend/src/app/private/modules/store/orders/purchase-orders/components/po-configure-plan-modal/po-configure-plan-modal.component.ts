@@ -31,6 +31,13 @@ import {
   ConfigurePaymentPlanMode,
   PurchaseOrdersService,
 } from '../../../../inventory/services/purchase-orders.service';
+// F-225 (ADR-16): mismo kernel de dinero que `pos-cart.service.ts` — ver
+// `apps/frontend/tsconfig.app.json` (`paths`). `Math.abs(a - b) <= 0.01`
+// tolera EXACTAMENTE 1 centavo (aprueba con 0 o 1 centavo de diferencia);
+// la traducción fiel es `!differsByAtLeastCents(a, b, 2)` (NO diferir en 2
+// o más centavos), no el umbral por defecto (1). Cambiar este umbral rompe
+// planes de cuotas en producción.
+import { differsByAtLeastCents } from '@money-kernel/money-compare';
 
 const MODES: Array<{
   value: ConfigurePaymentPlanMode;
@@ -438,7 +445,7 @@ export class PoConfigurePlanModalComponent {
 
   readonly installmentsBalanced = computed<boolean>(
     () =>
-      Math.abs(this.installmentsTotal() - this.pendingBalance()) <= 0.01 &&
+      !differsByAtLeastCents(this.installmentsTotal(), this.pendingBalance(), 2) &&
       this.installmentsArray.controls.length > 0,
   );
 
@@ -483,7 +490,7 @@ export class PoConfigurePlanModalComponent {
         if (!date || date < today) return false;
         if (!(amount >= 0.01)) return false;
       }
-      return Math.abs(this.installmentsTotal() - total) <= 0.01;
+      return !differsByAtLeastCents(this.installmentsTotal(), total, 2);
     }
     return false;
   });

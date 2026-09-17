@@ -33,6 +33,8 @@ import {
   DEFAULT_STORE_TIMEZONE,
 } from '@common/utils/store-timezone.util';
 import { AccountsPayableService } from '../../accounts-payable/accounts-payable.service';
+// F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
+import { differsByAtLeastCents } from '@common/money-kernel';
 import { toTitleCase } from '@common/utils/format.util';
 import { generateSlug } from '@common/utils/slug.util';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
@@ -4320,12 +4322,15 @@ export class PurchaseOrdersService {
     // fires `support_document.accepted` (which would post 5195 + full 2205).
     try {
       if (result.vat_responsible && result.all_items_received && store_id != null) {
+        // F-214 — el desglose por tarifa sale del catálogo de cada línea
+        // (`purchase_order_items.tax_rate`), nunca de un cociente entre
+        // agregados de cabecera. Ver `buildPurchaseTaxGroups`.
+        const tax_groups = this.buildPurchaseTaxGroups(
+          result.updated_po.purchase_order_items,
+        );
         const iva_amount =
           Math.round(
-            result.updated_po.purchase_order_items.reduce(
-              (sum, i) => sum + Number(i.deductible_tax_amount ?? 0),
-              0,
-            ) * 100,
+            tax_groups.reduce((sum, g) => sum + g.tax_amount, 0) * 100,
           ) / 100;
         const net_amount = Number(result.order_subtotal || 0);
 
@@ -4343,6 +4348,7 @@ export class PurchaseOrdersService {
             accounting_entity_id,
             net_amount,
             iva_amount,
+            tax_groups,
             user_id: RequestContextService.getUserId(),
           });
 
@@ -4394,6 +4400,10 @@ export class PurchaseOrdersService {
    *   `findFirst` reuses an existing row; a concurrent unique violation (P2002)
    *   is caught and the winning row is returned — so there is never more than
    *   one document per purchase.
+   * - F-214: `invoice_taxes` gets ONE row per `tax_groups` entry (one per
+   *   tarifa real del catálogo de línea), never a single row with a rate
+   *   derived from `iva_amount / net_amount` — ese cociente diluye la tarifa
+   *   apenas hay una línea exenta, tarifas mixtas o IVA capitalizado.
    */
   private async materializeVatDocument(params: {
     purchase_order_id: number;
@@ -4406,6 +4416,12 @@ export class PurchaseOrdersService {
     accounting_entity_id: number;
     net_amount: number;
     iva_amount: number;
+    /** F-214 — desglose por tarifa real, una fila de `invoice_taxes` por grupo. */
+    tax_groups: Array<{
+      tax_rate: number;
+      taxable_amount: number;
+      tax_amount: number;
+    }>;
     user_id?: number;
   }): Promise<{ id: number } | null> {
     const invoice_type = invoice_type_enum.support_document;
@@ -4432,7 +4448,6 @@ export class PurchaseOrdersService {
     const net = Math.round(params.net_amount * 100) / 100;
     const iva = Math.round(params.iva_amount * 100) / 100;
     const total = Math.round((net + iva) * 100) / 100;
-    const tax_rate = net > 0 ? Math.round((iva / net) * 10000) / 100 : 0;
 
     try {
       const invoice = await this.prisma.invoices.create({
@@ -4457,16 +4472,16 @@ export class PurchaseOrdersService {
           issue_date,
           created_by_user_id: params.user_id,
           notes: `F2: reconocimiento IVA descontable — PO #${params.purchase_order_id} (${params.order_number})`,
+          // F-214 — una fila por tarifa real (`tax_groups`), NUNCA una tarifa
+          // efectiva derivada de iva/neto: ver `buildPurchaseTaxGroups`.
           invoice_taxes: {
-            create: [
-              {
-                tax_name: 'IVA',
-                tax_rate,
-                taxable_amount: net,
-                tax_amount: iva,
-                tax_type: tax_type_enum.iva,
-              },
-            ],
+            create: params.tax_groups.map((group) => ({
+              tax_name: 'IVA',
+              tax_rate: group.tax_rate,
+              taxable_amount: group.taxable_amount,
+              tax_amount: group.tax_amount,
+              tax_type: tax_type_enum.iva,
+            })),
           },
         },
         select: { id: true },
@@ -4491,6 +4506,75 @@ export class PurchaseOrdersService {
       }
       throw error;
     }
+  }
+
+  /**
+   * F-214 — agrupa las líneas de la orden por su tarifa de catálogo
+   * (`purchase_order_items.tax_rate`) para que `materializeVatDocument` emita
+   * UNA fila de `invoice_taxes` por tarifa real, en vez de derivar una tarifa
+   * efectiva del cociente `iva_amount / net_amount` de cabecera. Ese cociente
+   * es el defecto medido en producción: una línea exenta infla el
+   * denominador sin aportar al numerador y el resultado (17,92 %, 0,04 %) no
+   * existe en ningún catálogo tributario colombiano (evidencia F-214).
+   *
+   * `taxable_amount` por línea usa `quantity_ordered × unit_cost` — la misma
+   * base que ya usa `order_subtotal` (el neto de cabecera histórico) — porque
+   * este método solo se invoca cuando `result.all_items_received` es true:
+   * en ese punto lo ordenado ya fue recibido en su totalidad, así que ambas
+   * cantidades coinciden y la suma de los grupos reconstruye exactamente el
+   * neto de cabecera. `tax_amount` por línea es `deductible_tax_amount`, ya
+   * sellado por F1 al recibir — nunca se recalcula aquí.
+   *
+   * Caso borde — línea SIN tarifa asignada (`tax_rate IS NULL`, 43 % de las
+   * líneas medidas en producción): no hay forma de saber si esa línea es
+   * exenta (0 %), grava a alguna tarifa vigente, o simplemente nunca se
+   * configuró — inferir 0 % en silencio sería inventar una clasificación
+   * fiscal igual que el defecto que este método reemplaza. Por eso se falla
+   * cerrado: se aborta TODA la materialización del documento soporte (el
+   * `catch` del llamador lo registra y no bloquea la recepción) en vez de
+   * escribir un desglose con una tarifa adivinada. Un documento soporte no
+   * materializado es recuperable; uno materializado con una tarifa
+   * inexistente y ya `validated` ante la DIAN, no.
+   */
+  private buildPurchaseTaxGroups(
+    items: Array<{
+      tax_rate: Prisma.Decimal | number | string | null;
+      quantity_ordered: number;
+      unit_cost: Prisma.Decimal | number | string | null;
+      deductible_tax_amount: Prisma.Decimal | number | string | null;
+    }>,
+  ): Array<{ tax_rate: number; taxable_amount: number; tax_amount: number }> {
+    const groups = new Map<
+      number,
+      { taxable_amount: number; tax_amount: number }
+    >();
+
+    for (const item of items) {
+      if (item.tax_rate == null) {
+        throw new Error(
+          'F-214: línea de compra sin tax_rate asignado — no hay tarifa de ' +
+            'catálogo a la que atribuir su base; se aborta la ' +
+            'materialización del documento soporte en vez de inventar una ' +
+            'tarifa.',
+        );
+      }
+
+      const rate = Math.round(Number(item.tax_rate) * 100) / 100;
+      const taxableAmount =
+        Number(item.quantity_ordered ?? 0) * Number(item.unit_cost ?? 0);
+      const taxAmount = Number(item.deductible_tax_amount ?? 0);
+
+      const current = groups.get(rate) ?? { taxable_amount: 0, tax_amount: 0 };
+      current.taxable_amount =
+        Math.round((current.taxable_amount + taxableAmount) * 100) / 100;
+      current.tax_amount =
+        Math.round((current.tax_amount + taxAmount) * 100) / 100;
+      groups.set(rate, current);
+    }
+
+    return Array.from(groups.entries())
+      .map(([tax_rate, totals]) => ({ tax_rate, ...totals }))
+      .sort((a, b) => b.tax_rate - a.tax_rate);
   }
 
   // ===== Receptions =====
@@ -5717,7 +5801,9 @@ export class PurchaseOrdersService {
         );
       }
       const sum = installments.reduce((s, i) => s + Number(i.amount), 0);
-      if (Math.abs(sum - totalAmount) > 0.01) {
+      // F-222: MISMO umbral que el `> 0.01` original (tolera 1 centavo), pero
+      // medido en centavos enteros: `>= 2` ¢. Ver ADR-16.
+      if (differsByAtLeastCents(sum, totalAmount, 2)) {
         throw new VendixHttpException(
           ErrorCodes.PO_PAYMENT_005,
           `La suma de cuotas ${sum} no coincide con el total ${totalAmount}.`,

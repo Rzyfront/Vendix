@@ -154,7 +154,14 @@ describe('FiscalInvoicePdfRenderService — paridad numérica HTML↔PDF y pdf_b
 
   it('el HTML compuesto muestra las cifras pareadas: subtotal, retención, total y letras', () => {
     const composer = new PrintLayoutComposerService(new PrintTemplateCompilerService());
-    const model = mapFiscalDocumentToPrintData(fila);
+    // F-209 (C.3): el emisor real declara su base monetaria — `fiscal-invoice`
+    // y `pos-electronic-invoice` pasan ambos campos. Componer sin declararlos
+    // cae al default `prints_vat_breakdown: false` del mapper y mide el
+    // contrato anterior a la regla anti-huerfana.
+    const model = mapFiscalDocumentToPrintData(fila, {
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: true,
+    });
     const html = composer.compose(definition, model);
 
     expect(html).toContain('$100.000'); // subtotal
@@ -164,6 +171,21 @@ describe('FiscalInvoicePdfRenderService — paridad numérica HTML↔PDF y pdf_b
     expect(html).toContain('$119.000'); // total
     expect(html).toContain(model.totals.grand_total_in_words!);
     expect(html).toContain('cufe-real-de-la-fila');
+  });
+
+  it('sin desglose de IVA no imprime Subtotal ni IVA huerfanos, pero si el total', () => {
+    const composer = new PrintLayoutComposerService(new PrintTemplateCompilerService());
+    const model = mapFiscalDocumentToPrintData(fila, {
+      money_basis: 'taxable_base',
+      prints_vat_breakdown: false,
+    });
+    const html = composer.compose(definition, model);
+
+    // La regla anti-huerfana de C.3: una base gravable sin su impuesto al lado
+    // es una cifra que el lector no puede cuadrar. O van las dos, o ninguna.
+    expect(html).not.toContain('$100.000'); // subtotal
+    expect(html).not.toContain('$19.000'); // IVA
+    expect(html).toContain('$119.000'); // el total siempre se imprime
   });
 
   describe('renderBuffer — Buffer real bajo demanda, sin persistir nada', () => {

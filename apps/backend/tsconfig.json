@@ -12,6 +12,19 @@
     "baseUrl": "./",
     "paths": {
       "@common/*": ["src/common/*"]
+      // ADR-16 (CP-pos-exclusive-tax-double-charge): el kernel único de
+      // aritmética de dinero vive en `src/common/money-kernel/` y se importa
+      // como `@common/money-kernel` — el alias que YA existía. NO es un
+      // paquete npm aparte, a propósito: `apps/backend` se construye con
+      // contexto Docker `./apps/backend` (`deploy-backend-ec2.yml` hace
+      // `cd apps/backend && docker build .`), así que nada fuera de este
+      // directorio existe dentro de la imagen; y `nest build` reescribe los
+      // `paths` a rutas relativas, de modo que mapear hacia `../../libs`
+      // sacaba el `rootDir` inferido hasta la raíz del repo y emitía
+      // `dist/apps/backend/src/main.js` en vez de `dist/src/main.js`, que es
+      // la ruta exacta del `CMD` del Dockerfile. `apps/frontend` consumirá
+      // ESTAS MISMAS FUENTES por su propio `paths` (Angular empaqueta con
+      // esbuild: no queda ningún especificador en tiempo de ejecución).
     },
     "incremental": true,
     "skipLibCheck": true,

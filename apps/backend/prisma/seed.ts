@@ -21,6 +21,7 @@ import { seedIcaMunicipalRates } from './seeds/ica-municipal-rates.seed';
 import { seedWithholdingTax } from './seeds/withholding-tax.seed';
 import { seedFiscalRuleSets } from './seeds/fiscal-rule-sets.seed';
 import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
+import { seedAIAgents } from './seeds/ai-agents.seed';
 import { seedPayrollSystemDefaults } from './seeds/payroll-system-defaults.seed';
 import { seedSubscriptionPlans } from './seeds/subscription-plans.seed';
 import { seedSubscriptionPlansProduction } from './seeds/subscription-plans-production.seed';
@@ -161,6 +162,11 @@ const seedModules = [
     name: 'AI Engine Applications',
     fn: seedAIEngineApps,
     description: 'Default AI application definitions (invoice OCR, etc.)',
+  },
+  {
+    name: 'AI Agents',
+    fn: seedAIAgents,
+    description: 'Configurable agent catalog (vexi default row)',
   },
   {
     name: 'Payroll System Defaults',

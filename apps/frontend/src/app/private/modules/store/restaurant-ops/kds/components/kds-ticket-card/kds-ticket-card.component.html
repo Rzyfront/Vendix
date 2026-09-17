@@ -214,13 +214,21 @@
         Cancelar
       </app-button>
     } @else if (ticket().status === 'ready') {
+      <!--
+        Takeaway-only KDS: "Entregar" se habilita solo para tickets
+        todo-para-llevar (ver `allTakeaway`); el resto lo sigue registrando
+        el mesero o el cajero (POS / cuenta de mesa). El boton se deja
+        VISIBLE para que la cocina vea que el ticket quedo listo y a la
+        espera. El backend valida con su propia guarda.
+      -->
       <app-button
         variant="primary"
         size="xsm"
         [fullWidth]="true"
         (clicked)="onDeliver()"
-        [disabled]="isMutating()"
+        [disabled]="isMutating() || !allTakeaway()"
         [loading]="isMutating()"
+        [attr.title]="deliverDisabledReason()"
       >
         <app-icon slot="icon" name="check-circle" [size]="14" />
         Entregar

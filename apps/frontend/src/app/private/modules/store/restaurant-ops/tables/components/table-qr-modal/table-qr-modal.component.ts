@@ -19,6 +19,7 @@ import {
 } from '../../../../../../../shared/components/index';
 import { Table, TableQrResponse } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
+import { TableQrPrintService } from '../../services/table-qr-print.service';
 
 /**
  * Modal que muestra el código QR de una mesa para que el operador
@@ -27,8 +28,9 @@ import { TablesService } from '../../services/tables.service';
  * por el backend.
  *
  * Patrón zoneless: signals (`signal`/`computed`/`input`/`output`),
- * `@if` en template, sin NgZone/markForCheck. La impresión replica
- * el patrón iframe de `PosTicketService.printHTML`.
+ * `@if` en template, sin NgZone/markForCheck. La impresión NO se
+ * compone aquí: se delega en `TableQrPrintService`, el emisor único
+ * del cartel A4 de marca.
  */
 @Component({
   selector: 'app-table-qr-modal',
@@ -45,6 +47,7 @@ import { TablesService } from '../../services/tables.service';
 })
 export class TableQrModalComponent {
   private readonly tablesService = inject(TablesService);
+  private readonly qrPrint = inject(TableQrPrintService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -101,28 +104,24 @@ export class TableQrModalComponent {
   }
 
   /**
-   * Imprime el QR actual vía un iframe oculto (patrón de
-   * `PosTicketService.printHTML`). Genera un documento A4 centrado con
-   * el nombre de la mesa, el QR y la URL pública.
+   * Imprime el cartel A4 de marca de esta mesa delegando en
+   * `TableQrPrintService`, el emisor único. Se mantiene el early-return:
+   * sin mesa o sin QR cargado no hay nada que mandar al papel.
    */
   onPrint(): void {
     const t = this.table();
-    const dataUrl = this.qrDataUrl();
-    const url = this.publicUrl();
-    if (!t || !dataUrl || !url) return;
+    const qr = this.qr();
+    if (!t || !qr) return;
 
-    const html = `
-      <div style="font-family: Arial, sans-serif; text-align: center; padding: 24px;">
-        <h2 style="margin: 0 0 8px 0; font-size: 22px;">${this.escapeHtml(t.name)}</h2>
-        ${t.zone ? `<p style="margin: 0 0 16px 0; font-size: 14px; color: #555;">Zona: ${this.escapeHtml(t.zone)}</p>` : ''}
-        <img src="${dataUrl}" style="width: 280px; height: 280px; margin: 16px auto;" />
-        <p style="margin: 16px 0 4px 0; font-size: 13px; font-weight: 600;">Escanea para ver la carta y pedir</p>
-        <p style="margin: 4px 0 0 0; font-size: 11px; color: #666; word-break: break-all;">${this.escapeHtml(url)}</p>
-      </div>
-    `;
-    this.printHTML(html);
+    this.qrPrint.printOne(t, qr).catch(() => {
+      this.toastService.error('No se pudo imprimir el QR de la mesa');
+    });
   }
 
+  /**
+   * @deprecated El emisor único es `TableQrPrintService`. Este método ya no
+   * tiene llamadores; se conserva por la regla del repo de no borrar código.
+   */
   private printHTML(html: string): void {
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
@@ -156,6 +155,10 @@ export class TableQrModalComponent {
     setTimeout(() => iframe.remove(), 1000);
   }
 
+  /**
+   * @deprecated El escape lo hace ahora `TableQrPrintService`. Sin llamadores;
+   * se conserva por la regla del repo de no borrar código.
+   */
   private escapeHtml(s: string): string {
     return s
       .replace(/&/g, '&amp;')

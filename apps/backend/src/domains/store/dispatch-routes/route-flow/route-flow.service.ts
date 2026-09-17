@@ -27,11 +27,14 @@ import {
   aggregateRouteTotals,
   deriveStopIsPrepaid,
 } from '../utils/route-stop-calc';
+import { computeCashCollected } from '../../analytics/analytics-metrics.contract';
 import {
   PRINT_DEFAULTS,
   type PrintDocumentConfig,
   type PrintingSettings,
 } from '../../settings/interfaces/store-settings.interface';
+// F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
+import { differsByAtLeastCents } from '@common/money-kernel';
 
 const ROUTE_INCLUDE = {
   vehicle: true,
@@ -665,6 +668,13 @@ export class RouteFlowService {
     // also enforces this in the settle modal but the backend is the source
     // of truth — a retenedor with no withholding line item would leave the
     // fiscal accounting unbalanced.
+    //
+    // NO aplica a una parada prepagada: la retención se practica sobre el pago,
+    // y ese pago ya ocurrió fuera de la ruta (con su propia retención, si la
+    // hubo). Exigir aquí un desglose sería exigir recaudo sobre una orden
+    // saldada — el modal de liquidación ya oculta los campos cuando la parada
+    // es prepaga (`isWithholdingAgent() && !isPrepaid()`), así que sin esta
+    // condición el backend rechazaba con 400 lo que la UI dejaba confirmar.
     const isWithholdingAgent = !!stop.dispatch_note.customer?.is_withholding_agent;
     const withholdingAmount = Number(dto.withholding_amount || 0);
     const breakdown = dto.withholding_breakdown as
@@ -674,7 +684,7 @@ export class RouteFlowService {
       Number(breakdown?.retefuente || 0) +
       Number(breakdown?.reteiva || 0) +
       Number(breakdown?.reteica || 0);
-    if (isWithholdingAgent && dto.result === 'delivered') {
+    if (isWithholdingAgent && dto.result === 'delivered' && !stopIsPrepaid) {
       if (withholdingAmount <= 0 || !breakdown || breakdownSum <= 0) {
         throw new BadRequestException(
           `El cliente es agente retenedor: la liquidación requiere un desglose de retención (retefuente / reteiva / reteica) con suma > 0.`,
@@ -682,7 +692,9 @@ export class RouteFlowService {
       }
       // Allow a 1-cent rounding tolerance on the breakdown sum vs the
       // declared withholding_amount.
-      if (Math.abs(breakdownSum - withholdingAmount) > 0.01) {
+      // F-222: MISMO umbral que el `> 0.01` original (tolera 1 centavo), pero
+      // medido en centavos enteros: `>= 2` ¢. Ver ADR-16.
+      if (differsByAtLeastCents(breakdownSum, withholdingAmount, 2)) {
         throw new BadRequestException(
           `El desglose de retención (${breakdownSum}) no coincide con el monto retenido (${withholdingAmount}).`,
         );
@@ -698,7 +710,12 @@ export class RouteFlowService {
     const total_paid = collected + anticipo;
 
     if (dto.result === 'delivered') {
-      // Must cover full net (or be prepaid)
+      // El cobro debe cubrir el neto completo — salvo que la parada esté
+      // prepagada, en cuyo caso el dinero ya entró antes del despacho y exigir
+      // recaudo aquí lo cobraría dos veces. `stopIsPrepaid` es DERIVADO del
+      // saldo vivo de la orden (ver `resolveIsPrepaid`), no de la bandera
+      // congelada de la remisión: una orden pagada después de armar la planilla
+      // entra por aquí con recaudo 0 y se entrega sin error.
       if (!stopIsPrepaid && total_paid + withholding < net) {
         throw new BadRequestException(
           `Suma de collected + anticipo + withholding (${total_paid + withholding}) es menor que el total de la remisión (${net})`,
@@ -1130,13 +1147,10 @@ export class RouteFlowService {
     // We treat as cash any collected_amount on a non-prepaid stop whose
     // payment_method is null/'cash' (the conservative default for COD DSD).
     // Stops paid via transfer/card are excluded from the cash reconciliation.
-    const cash_collected = route.stops
-      .filter((s) => !s.is_prepaid)
-      .filter((s) => !s.payment_method || s.payment_method === 'cash')
-      .reduce(
-        (sum, s) => sum + Number(s.collected_amount || 0) + Number(s.anticipo_amount || 0),
-        0,
-      );
+    // Formula centralized in the analytics contract (single source of truth,
+    // PLAN-analytics-despachos-2026-09-12 Paso 1) — same result, byte-for-byte
+    // (see the parity test in analytics-metrics.contract.spec.ts).
+    const cash_collected = computeCashCollected(route.stops);
     const cash_variance = declared_cash - cash_collected;
 
     const updated = await this.prisma.$transaction(async (tx) => {

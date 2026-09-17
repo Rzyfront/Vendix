@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { AILoggingService } from '../../../ai-engine/ai-logging.service';
 import { AIAgentService } from '../../../ai-engine/ai-agent.service';
@@ -83,6 +84,21 @@ const PENDING_CONFIRMATION_BLOCK = (operation: string) =>
  */
 export type ChatStreamFrame = AIStreamChunk | VexiVoiceFrame;
 
+/**
+ * Fila de `ai_agents` tal como la consume el turno (F4).
+ *
+ * Sin agente (`null`) el turno sigue el camino exacto de hoy: `app_key` de la
+ * conversación o `'chat_assistant'`, rama por `metadata.agent_enabled` de la
+ * app. La fila `vexi` del seed replica ese default, no lo sustituye.
+ */
+interface ResolvedChatAgent {
+  key: string;
+  app_key: string | null;
+  system_prompt: string | null;
+  allowed_tools: string[];
+  max_iterations: number | null;
+}
+
 @Injectable()
 export class AIChatService {
   private readonly logger = new Logger(AIChatService.name);
@@ -90,6 +106,11 @@ export class AIChatService {
 
   constructor(
     private readonly prisma: StorePrismaService,
+    // Global y no scoped: `ai_agents` es catálogo del sistema, sin
+    // `store_id`; el scoping por tienda lo sigue aplicando `prisma`
+    // (StorePrismaService) en conversaciones y mensajes. `PrismaModule` ya
+    // está importado en `AIChatModule`, así que no hay cambio de módulo.
+    private readonly globalPrisma: GlobalPrismaService,
     private readonly aiEngine: AIEngineService,
     private readonly aiLogging: AILoggingService,
     private readonly aiAgent: AIAgentService,
@@ -113,6 +134,22 @@ export class AIChatService {
       throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
     }
 
+    // F4: el agente se fija acá y viaja en `metadata` (columna nueva evitada
+    // a propósito). Falla rápido ante un typo: una conversación atada a un
+    // agente inexistente contestaría como Vexi sin avisar.
+    // Excepción Nest plana (no `ErrorCodes`): el catálogo de errores está
+    // fuera del scope F4 y no tiene código de agente.
+    if (dto.agent_key) {
+      const agent = await this.globalPrisma.ai_agents.findUnique({
+        where: { key: dto.agent_key },
+      });
+      if (!agent || !agent.is_active) {
+        throw new BadRequestException(
+          `AI agent '${dto.agent_key}' does not exist or is inactive`,
+        );
+      }
+    }
+
     const conversation = await this.prisma.ai_conversations.create({
       data: {
         organization_id: context.organization_id,
@@ -120,6 +157,9 @@ export class AIChatService {
         title: dto.title || null,
         app_key: dto.app_key || null,
         status: 'active',
+        ...(dto.agent_key && {
+          metadata: { agent_key: dto.agent_key },
+        }),
       },
     });
 
@@ -222,13 +262,20 @@ export class AIChatService {
     // Build context window
     const contextMessages = this.buildContextWindow(conversation, dto.content);
 
+    // F4: el override por mensaje gana sobre el agente de la conversación.
+    const chatAgent = await this.resolveChatAgent(
+      dto.agent_key ?? this.conversationAgentKey(conversation),
+    );
+
     // Call AI Engine
-    const appKey = conversation.app_key || 'chat_assistant';
+    const appKey =
+      chatAgent?.app_key || conversation.app_key || 'chat_assistant';
 
     // Check if agent mode is enabled for this app
     const app = await this.aiEngine.getApplication(appKey).catch(() => null);
     const agentEnabled =
-      app?.metadata && (app.metadata as any).agent_enabled === true;
+      chatAgent !== null ||
+      (app?.metadata && (app.metadata as any).agent_enabled === true);
 
     let responseContent = '';
     let tokensUsed = 0;
@@ -240,9 +287,11 @@ export class AIChatService {
       // engine reads it from the database and interpolates it with the store
       // snapshot. Passing the raw string here would send an uninterpolated
       // duplicate and every `{{placeholder}}` would reach the model verbatim.
+      // (Con agente y sin app enlazada —ni en la fila ni en la conversación—,
+      // `resolveAgentLoopArgs` omite `app_key` y el prompt propio sí viaja.)
       const agentResult = await this.aiAgent.runAgent({
         goal: dto.content,
-        app_key: appKey,
+        ...this.resolveAgentLoopArgs(chatAgent, conversation),
         messages: this.buildContextWindow(conversation),
         variables: await this.vexiContext.buildSnapshot(),
       });
@@ -443,11 +492,19 @@ export class AIChatService {
     // model treats those results as ground truth.
     await this.uiChannel.registerTurn(streamId, userId);
 
-    const appKey = conversation.app_key || 'chat_assistant';
+    // F4: en SSE no hay DTO por mensaje (el intent solo trae `content`), así
+    // que el agente sale de `metadata.agent_key` de la conversación.
+    const chatAgent = await this.resolveChatAgent(
+      this.conversationAgentKey(conversation),
+    );
+
+    const appKey =
+      chatAgent?.app_key || conversation.app_key || 'chat_assistant';
 
     const app = await this.aiEngine.getApplication(appKey).catch(() => null);
     const agentEnabled =
-      app?.metadata && (app.metadata as any).agent_enabled === true;
+      chatAgent !== null ||
+      (app?.metadata && (app.metadata as any).agent_enabled === true);
 
     let fullContent = '';
     let totalTokens = 0;
@@ -473,7 +530,7 @@ export class AIChatService {
       // over SSE. It now runs the identical loop, narrating each tool call.
       const agentStream = this.aiAgent.runAgentStream({
         goal: intent.content,
-        app_key: appKey,
+        ...this.resolveAgentLoopArgs(chatAgent, conversation),
         // El mismo flag que enciende la síntesis enciende el registro hablado.
         // Derivarlo del intent y no de un ajuste de tienda es lo que mantiene los
         // dos en fase: si se dicta, se responde para ser oído — y si el mismo
@@ -699,6 +756,107 @@ export class AIChatService {
       where: { id },
       data: { title, updated_at: new Date() },
     });
+  }
+
+  /**
+   * `agent_key` fijado en la creación, guardado en `metadata` (F4). Se lee
+   * defensivo: `metadata` es `Json?` libre y puede traer cualquier forma de
+   * escrituras viejas o ediciones manuales.
+   */
+  private conversationAgentKey(
+    conversation: ConversationWithMessages,
+  ): string | null {
+    const raw = (conversation.metadata as Record<string, unknown> | null)
+      ?.agent_key;
+    return typeof raw === 'string' && raw.trim() ? raw : null;
+  }
+
+  /**
+   * Resuelve la fila de `ai_agents` para el turno, o `null` cuando no hay
+   * agente (camino exacto de hoy).
+   *
+   * Una key desconocida o inactiva NO rompe el turno: warn + fallback. Acá la
+   * resiliencia gana sobre el fallo rápido porque el turno ya existe y el
+   * usuario está esperando respuesta (en `createConversation` sí se falla
+   * rápido, porque ahí todavía no hay nada que romper). Un agente borrado o
+   * desactivado a mitad de una conversación larga vuelve a ser Vexi en vez de
+   * dejar el hilo muerto.
+   */
+  private async resolveChatAgent(
+    agentKey: string | null,
+  ): Promise<ResolvedChatAgent | null> {
+    if (!agentKey) return null;
+    // Defensivo ante desincronía deploy/migración (ver
+    // `prisma/assert-schema-columns.js`: un deploy puede arrancar con la base
+    // sin la tabla `ai_agents`): sin catálogo no hay agente, pero el turno
+    // sigue contestando como hoy en vez de 500.
+    let row;
+    try {
+      row = await this.globalPrisma.ai_agents.findUnique({
+        where: { key: agentKey },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `AI agent lookup failed for '${agentKey}' — falling back to default turn behavior: ${(err as Error).message}`,
+      );
+      return null;
+    }
+    if (!row || !row.is_active) {
+      this.logger.warn(
+        `AI agent '${agentKey}' not found or inactive — falling back to default turn behavior`,
+      );
+      return null;
+    }
+    if (row.app_key && row.system_prompt) {
+      this.logger.warn(
+        `AI agent '${agentKey}' defines both app_key and system_prompt — the app owns the prompt and system_prompt is ignored`,
+      );
+    }
+    return {
+      key: row.key,
+      app_key: row.app_key,
+      system_prompt: row.system_prompt,
+      allowed_tools: row.allowed_tools ?? [],
+      max_iterations: row.max_iterations,
+    };
+  }
+
+  /**
+   * Argumentos del loop (`runAgent` / `runAgentStream`) para el turno.
+   *
+   * Sin agente devuelve EXACTAMENTE lo que el turno pasaba antes
+   * (`{ app_key }`), para que el fallback no derive ni un parámetro.
+   * Con agente:
+   * - `app_key`: el de la fila, o el de la conversación, o `'chat_assistant'`.
+   * - `system_prompt` propio solo cuando NADIE enlazó app (ni fila ni
+   *   conversación): con `app_key` el engine lee el prompt de la fila de la
+   *   app e ignoraría este (contrato de `AIAgentService`), así que pasarlo
+   *   sería prometer algo que no se cumple.
+   * - `allowed_tools` no vacío como filtro adicional sobre el plan (F3); el
+   *   loop lo intersecta con permisos del caller y `tools_allowed`.
+   * - `max_iterations` de la fila cuando está definido.
+   */
+  private resolveAgentLoopArgs(
+    agent: ResolvedChatAgent | null,
+    conversation: ConversationWithMessages,
+  ): {
+    app_key?: string;
+    system_prompt?: string;
+    tools?: string[];
+    max_iterations?: number;
+  } {
+    const appKey =
+      agent?.app_key || conversation.app_key || 'chat_assistant';
+    if (!agent) {
+      return { app_key: appKey };
+    }
+    const tools =
+      agent.allowed_tools.length > 0 ? agent.allowed_tools : undefined;
+    const max_iterations = agent.max_iterations ?? undefined;
+    if (!agent.app_key && !conversation.app_key && agent.system_prompt) {
+      return { system_prompt: agent.system_prompt, tools, max_iterations };
+    }
+    return { app_key: appKey, tools, max_iterations };
   }
 
   /**

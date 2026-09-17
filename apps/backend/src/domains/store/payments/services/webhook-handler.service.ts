@@ -6,7 +6,11 @@ import {
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Prisma } from '@prisma/client';
+import {
+  Prisma,
+  order_channel_enum,
+  order_delivery_type_enum,
+} from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import * as crypto from 'crypto';
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
@@ -484,16 +488,34 @@ export class WebhookHandlerService {
       // line per type: IVA → 2408, INC → 2436, ICA → 241205). Mirrors the
       // POS path in `payments.service.ts` so the listener payload is
       // shape-compatible regardless of origin.
+      //
+      // F-111 (CP-pos-exclusive-tax-double-charge) — mismo tratamiento que
+      // `payments.service.ts`: se trae `total_price` de la línea y
+      // `tax_rate` (ya fracción, `Decimal(6,5)`, no dividir) de cada
+      // impuesto para que `buildTaxBreakdown` pueda armar la compuerta de
+      // detección de `AutoEntryService.resolveTaxLines`.
       const orderItemsWithTaxes = await client.order_items.findMany({
         where: { order_id: order.id },
         select: {
+          total_price: true,
+          // `is_inclusive` no se lee: `total_price` ya es el NETO en
+          // ambas ramas del escritor. Ver el comentario extenso en
+          // `payments.service.ts`.
           order_item_taxes: {
-            select: { tax_type: true, tax_amount: true },
+            select: { tax_type: true, tax_amount: true, tax_rate: true },
           },
         },
       });
       const tax_breakdown = buildTaxBreakdown(
-        orderItemsWithTaxes.flatMap((i) => i.order_item_taxes || []),
+        orderItemsWithTaxes.flatMap((item) =>
+          (item.order_item_taxes || []).map((tax) => ({
+            ...tax,
+            // F-111 — misma regla documentada en `payments.service.ts`: la
+            // base de cada impuesto de la línea es el `total_price` completo
+            // de esa línea.
+            taxable_amount: Number(item.total_price || 0),
+          })),
+        ),
       );
 
       const systemPaymentMethod =
@@ -652,7 +674,11 @@ export class WebhookHandlerService {
           // A.3 CP-facturacion-fixes (ADR-03): web auto-send on payment
           // confirmation, parity with POS auto_emit. Best-effort inside the
           // store context: never throws into the confirmation path.
-          await this.autoSendOrderInvoice(orderId);
+          await this.autoSendOrderInvoice(
+            orderId,
+            order.channel,
+            order.delivery_type,
+          );
         },
       );
       this.logger.log(
@@ -677,7 +703,11 @@ export class WebhookHandlerService {
    * nothing; on any error the invoice is reread — a concurrent manual send that
    * accepted it meanwhile clears the flag instead of raising a false alarm.
    */
-  private async autoSendOrderInvoice(orderId: number): Promise<void> {
+  private async autoSendOrderInvoice(
+    orderId: number,
+    channel: order_channel_enum,
+    deliveryType: order_delivery_type_enum,
+  ): Promise<void> {
     try {
       const invoice = await this.prisma.invoices.findFirst({
         where: { order_id: orderId, invoice_type: 'sales_invoice' },
@@ -689,6 +719,37 @@ export class WebhookHandlerService {
         await this.clearFiscalAlert(orderId);
         return;
       }
+
+      // Compuerta de auto-emisión: el carril lo decide DÓNDE se consume la
+      // venta, no el medio de pago ni el tipo de pedido. `pos` es siempre
+      // mostrador; `dine_in` también, aunque el `channel` sea `ecommerce`
+      // porque una mesa abierta por QR nace con channel:'ecommerce' +
+      // delivery_type:'dine_in' (table-sessions.service.ts) para que los
+      // reportes distingan la cuenta iniciada por QR de la iniciada en caja.
+      // El comensal está en el local y lo cobra el mesero: sin la mitad
+      // `dine_in` aquí, apagar "tienda en línea" dejaría sin facturar las
+      // mesas de un restaurante entero.
+      const isCounterLane =
+        channel === order_channel_enum.pos ||
+        deliveryType === order_delivery_type_enum.dine_in;
+      const invoicingSettings = isCounterLane
+        ? await this.invoicing.getPosInvoicingSettings()
+        : await this.invoicing.getEcommerceInvoicingSettings();
+
+      if (!invoicingSettings.auto_emit) {
+        // Apagado a propósito por el comerciante: no es un fallo, así que NO
+        // se marca fiscal_alert_code. La factura queda en draft, disponible
+        // para envío manual desde Facturación Electrónica.
+        this.logger.log(
+          `Orden ${orderId}: envío automático de factura omitido (carril ${
+            isCounterLane ? 'mostrador' : 'tienda en línea'
+          }, invoicing.${
+            isCounterLane ? 'pos' : 'ecommerce'
+          }.auto_emit=false); factura #${invoice.id} queda en borrador para envío manual.`,
+        );
+        return;
+      }
+
       const eligibility =
         await this.invoicing.getElectronicEmissionEligibility();
       if (!eligibility.eligible) {

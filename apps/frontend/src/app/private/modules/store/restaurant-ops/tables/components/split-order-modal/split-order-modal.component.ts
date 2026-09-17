@@ -28,6 +28,11 @@ import {
   SplitMode,
   TableSessionOrderItem,
 } from '../../interfaces';
+// F-225 (ADR-16): mismo kernel de dinero que `pos-cart.service.ts` — ver
+// `apps/frontend/tsconfig.app.json` (`paths`). `Math.abs(a - b) < 0.01`
+// exige diferencia CERO centavos (no tolera ni 1); la traducción fiel es
+// `!differsByAtLeastCents(a, b, 1)` (umbral por defecto), no `2`.
+import { differsByAtLeastCents } from '@money-kernel/money-compare';
 
 type TabId = 'items' | 'amount';
 
@@ -101,13 +106,21 @@ export class SplitOrderModalComponent {
     this.customAmounts().reduce((a, v) => a + (Number(v) || 0), 0),
   );
 
-  /** Tolerance (in currency units) for the custom-amount sum check. */
-  private readonly SUM_TOLERANCE = 0.01;
+  /**
+   * Umbral (en centavos enteros) de `differsByAtLeastCents` para el chequeo
+   * de suma: `1` reproduce el `< 0.01` original — exige 0 centavos de
+   * diferencia (match exacto), no tolera ni 1.
+   */
+  private readonly SUM_TOLERANCE_CENTS = 1;
 
   readonly customSumMatches = computed(() => {
     const total = this.orderTotal();
     if (!total) return false;
-    return Math.abs(this.customSum() - total) < this.SUM_TOLERANCE;
+    return !differsByAtLeastCents(
+      this.customSum(),
+      total,
+      this.SUM_TOLERANCE_CENTS,
+    );
   });
 
   /**

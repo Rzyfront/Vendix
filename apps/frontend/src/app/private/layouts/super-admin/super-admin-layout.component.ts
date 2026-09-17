@@ -222,6 +222,7 @@ export class SuperAdminLayoutComponent {
     '/super-admin/monitoring': 'Monitoreo del Servidor',
     '/super-admin/organizations': 'Organizaciones',
     '/super-admin/stores': 'Tiendas',
+    '/super-admin/stores/activity': 'Actividad de Tiendas',
     '/super-admin/users': 'Usuarios',
     '/super-admin/roles': 'Roles',
     '/super-admin/payment-methods': 'Métodos de Pago',
@@ -306,6 +307,14 @@ export class SuperAdminLayoutComponent {
             label: 'Tiendas',
             icon: 'circle',
             route: '/super-admin/stores',
+          },
+          // Ranking de actividad por tienda. Menú estático del layout
+          // super-admin: sin llave en PANEL_UI_FALLBACK ni APP_MODULES,
+          // visible a todo super-admin autenticado.
+          {
+            label: 'Actividad',
+            icon: 'circle',
+            route: '/super-admin/stores/activity',
           },
         ],
       },

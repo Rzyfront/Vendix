@@ -398,6 +398,122 @@ export class DispatchNoteEventsListener {
     }
   }
 
+  /**
+   * La ENTREGA de la remisión es el hecho de servicio de la ORDEN.
+   *
+   * Desde QUI-652 la entrega de cada línea vive en `order_items.delivered_at`,
+   * independiente del ticket de cocina. Pero ese sello sólo lo escribían dos
+   * caminos: el KDS (al marcar el plato entregado) y el seam manual
+   * `OrderFlowService.deliverOrderItem`. El despacho —remisión suelta o parada
+   * de planilla de ruta— movía el ESTADO de la orden y dejaba las líneas sin
+   * sellar: una orden "Entregada" cuyos items seguían figurando como no
+   * entregados. Entregar un item al domiciliario y entregar la orden al cliente
+   * son hechos distintos, y el segundo lo cierra este flujo.
+   *
+   * Cubre los dos emisores de `dispatch_note.delivered` (el flujo directo y
+   * `RouteFlowService.markDispatchNoteDeliveredInTx`), así que planilla de ruta
+   * y entrega directa sellan igual sin duplicar la regla.
+   *
+   * Alcance:
+   *   - Orden COMPLETA (todas las remisiones activas entregadas/facturadas):
+   *     se sella TODA línea sin entregar y sin cancelar. Incluye las que nunca
+   *     viajaron en una remisión (un plato preparado, una bebida) — si la orden
+   *     salió completa, el cliente las recibió.
+   *   - Despacho PARCIAL: sólo las líneas que viajan en ESTA remisión.
+   *     `dispatch_note_items` no guarda `order_item_id`, así que se emparejan
+   *     por producto+variante reclamando cada fila UNA sola vez, el mismo
+   *     criterio con el que `OrderStockCommitService` marca
+   *     `inventory_committed`. Sin el claim-once, dos líneas del mismo producto
+   *     se llevarían la misma fila dos veces.
+   *
+   * NO aplica la compuerta de cocina de `deliverOrderItem` (exigir
+   * `kitchen_ticket_items.status === 'ready'`): esa compuerta protege el gesto
+   * del mesero —no sirvas un plato que cocina no terminó—, no el hecho del
+   * despacho. Acá la mercancía YA salió físicamente con el domiciliario; negar
+   * el sello dejaría la contradicción que este puente corrige.
+   *
+   * Idempotente por `delivered_at: null` en la `where`: la primera entrega es
+   * la que ocurrió, un re-disparo del evento nunca mueve la fecha adelante.
+   */
+  private async stampOrderItemsDeliveredFromDispatch(dispatch_note: {
+    id: number;
+    order_id: number | null;
+    store_id: number;
+    dispatch_note_items: {
+      product_id: number | null;
+      product_variant_id: number | null;
+    }[];
+  }): Promise<void> {
+    if (!dispatch_note.order_id) return;
+
+    // El listener corre POST-COMMIT, fuera del request: se fija el tenant a
+    // mano (order.store_id) en vez de depender del scope de contexto.
+    const db = this.prisma.withoutScope();
+    const order_id = dispatch_note.order_id;
+    const store_id = dispatch_note.store_id;
+
+    const pending = await db.order_items.findMany({
+      where: {
+        order_id,
+        orders: { store_id },
+        delivered_at: null,
+        cancelled_at: null,
+      },
+      select: { id: true, product_id: true, product_variant_id: true },
+    });
+    if (pending.length === 0) return;
+
+    const notes = await db.dispatch_notes.findMany({
+      where: { order_id, store_id, status: { not: 'voided' } },
+      select: { status: true },
+    });
+    const allFulfilled =
+      notes.length > 0 &&
+      notes.every((n) => n.status === 'delivered' || n.status === 'invoiced');
+
+    let targetIds: number[];
+    if (allFulfilled) {
+      targetIds = pending.map((it) => it.id);
+    } else {
+      const claimed = new Set<number>();
+      targetIds = [];
+      for (const line of dispatch_note.dispatch_note_items || []) {
+        if (line.product_id == null) continue;
+        const match = pending.find(
+          (it) =>
+            !claimed.has(it.id) &&
+            it.product_id === line.product_id &&
+            (it.product_variant_id ?? null) ===
+              (line.product_variant_id ?? null),
+        );
+        if (match) {
+          claimed.add(match.id);
+          targetIds.push(match.id);
+        }
+      }
+    }
+    if (targetIds.length === 0) return;
+
+    const now = new Date();
+    const userId = RequestContextService.getUserId() ?? null;
+    const res = await db.order_items.updateMany({
+      where: { id: { in: targetIds }, delivered_at: null },
+      data: {
+        delivered_at: now,
+        delivered_by_user_id: userId,
+        updated_at: now,
+      },
+    });
+
+    if (res.count > 0) {
+      this.logger.log(
+        `[delivered] Order #${order_id}: ${res.count} item(s) marked delivered by dispatch note #${dispatch_note.id} (${
+          allFulfilled ? 'orden completa' : 'despacho parcial'
+        })`,
+      );
+    }
+  }
+
   // ─── DELIVERED ──────────────────────────────────────────────
   @OnEvent('dispatch_note.delivered')
   async handleDelivered(event: DispatchNoteEvent) {
@@ -516,6 +632,17 @@ export class DispatchNoteEventsListener {
           );
         }
       } else if (dispatch_note.order_id && this.orderFlowService) {
+        // La ENTREGA de la orden precede a su reconciliación de estado: primero
+        // se sella el hecho por línea (`order_items.delivered_at`), después el
+        // reconciliador deriva el estado del documento. Best-effort, igual que
+        // el reconciliador: un fallo al sellar no puede romper la liquidación.
+        try {
+          await this.stampOrderItemsDeliveredFromDispatch(dispatch_note);
+        } catch (err) {
+          this.logger.error(
+            `[delivered] Failed to stamp delivered order items of order #${dispatch_note.order_id}: ${err.message}`,
+          );
+        }
         try {
           await this.orderFlowService.reconcileOrderFromDispatch(
             dispatch_note.order_id,

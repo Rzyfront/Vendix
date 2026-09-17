@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import type { KdsSession, KdsStation } from '../../interfaces';
 
 /**
@@ -21,7 +22,7 @@ import type { KdsSession, KdsStation } from '../../interfaces';
 @Component({
   selector: 'app-kds-session-status-bar',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [CommonModule, IconComponent, ButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (session(); as s) {
@@ -156,13 +157,39 @@ import type { KdsSession, KdsStation } from '../../interfaces';
     } @else {
       <div class="kds-bar kds-bar--closed">
         <app-icon name="lock" [size]="14" />
-        <span>
+        <span class="kds-bar__closed-text">
           Sin turno abierto
           @if (station(); as st) {
             en <strong>{{ st.name }}</strong>
           }
-          — se pedirá al gestionar el primer ticket
+          — inícialo para gestionar los tickets
         </span>
+
+        <!--
+          Apertura EXPLÍCITA del turno. Antes la barra prometía que el turno
+          "se pediría al gestionar el primer ticket": la apertura colgaba del
+          gesto de tocar un ticket y el operador terminaba con un turno abierto
+          que no había decidido abrir. De esa sesión cuelga el consumo firmado
+          del fire con su costo, así que abrirla es un acto propio, no un
+          efecto colateral. Este botón es el ÚNICO camino de apertura.
+
+          canStartSession en false (tienda sin estación activa) lo deja
+          visible pero deshabilitado: un control ausente no distingue "no
+          puedes" de "no cargó" — misma razón por la que esta barra no
+          desaparece cuando no hay turno.
+        -->
+        <app-button
+          variant="primary"
+          size="sm"
+          [disabled]="!canStartSession()"
+          [loading]="startingSession()"
+          [showTextWhileLoading]="true"
+          ariaLabel="Iniciar turno en esta estación"
+          (clicked)="startSessionClicked.emit()"
+        >
+          <app-icon slot="icon" name="play" [size]="14" />
+          Iniciar turno
+        </app-button>
 
         <!--
           La salida va TAMBIÉN en esta rama: sin turno abierto y a pantalla completa
@@ -261,6 +288,18 @@ import type { KdsSession, KdsStation } from '../../interfaces';
         display: inline-flex;
         align-items: center;
         gap: 0.25rem;
+      }
+
+      /* El texto es lo unico que puede encogerse en la fila: sin min-width 0
+         un flex item no baja de su ancho de contenido y, en 360px, empujaria el
+         boton fuera de la barra en vez de envolver a la linea siguiente. */
+      .kds-bar__closed-text {
+        flex: 1 1 auto;
+        min-width: 0;
+        /* Un nombre de estacion largo sin espacios (CHARCUTERIA-CALIENTE-2) es
+           una sola palabra: sin esto no parte y saca la fila del ancho del
+           telefono, que es donde se usa el tablero. */
+        overflow-wrap: anywhere;
       }
 
       .kds-bar__sep {
@@ -362,6 +401,20 @@ export class KdsSessionStatusBarComponent {
    *  botón "Tomar control" sólo si esto coincide con `heldByOther`. */
   readonly canForceTake = input(false);
 
+  /**
+   * ¿Hay estación seleccionada sobre la que abrir turno? El padre pasa
+   * `selectedStationId() !== null`. En false el botón se deshabilita en vez
+   * de ocultarse.
+   */
+  readonly canStartSession = input(true);
+  /**
+   * Petición de apertura en vuelo. Alimenta el `[loading]` del botón para que
+   * el operador no dispare dos aperturas — la segunda chocaría con el índice
+   * único parcial `kds_sessions_one_open_per_kds` y volvería como
+   * KDS_SESSION_ALREADY_OPEN sin que él haya hecho nada raro.
+   */
+  readonly startingSession = input(false);
+
   readonly closeClicked = output<void>();
   readonly detailClicked = output<void>();
   readonly exitFullscreenClicked = output<void>();
@@ -371,6 +424,12 @@ export class KdsSessionStatusBarComponent {
    * condición del selector se vuelva a cumplir.
    */
   readonly changeStationClicked = output<void>();
+  /**
+   * El operador pide abrir turno en la estación seleccionada. El padre invoca
+   * `KdsStationsService.openSessionFor(selectedStationId)` — la misma vía que
+   * usaba el gate acoplado al ticket, que ya no abre nada.
+   */
+  readonly startSessionClicked = output<void>();
   /** QUI-XXX: el caller privilegiado pide el control de la estación ajena.
    *  El backend cierra la sesión ajena y abre una nueva para el caller,
    *  en una sola transacción. El padre invoca `stationsService.forceTake()`. */
