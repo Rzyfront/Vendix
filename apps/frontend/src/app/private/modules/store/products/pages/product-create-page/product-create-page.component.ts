@@ -1290,11 +1290,13 @@ export class ProductCreatePageComponent {
   readonly isImageAiEnhanceModalOpen = signal(false);
   readonly aiEnhanceImageUrl = signal<string | null>(null);
   readonly aiEnhanceImageIndex = signal<number | null>(null);
+  readonly aiModalMode = signal<'enhance' | 'generate'>('enhance');
 
   // Variant image modals state (paridad con producto base)
   readonly isVariantImageModalOpen = signal(false);
   readonly isVariantImageEditModalOpen = signal(false);
   readonly isVariantAiModalOpen = signal(false);
+  readonly variantAiModalMode = signal<'enhance' | 'generate'>('enhance');
   readonly editingVariantIndex = signal<number | null>(null);
   readonly editingVariantImageUrl = computed<string | null>(() => {
     const idx = this.editingVariantIndex();
@@ -2859,8 +2861,38 @@ export class ProductCreatePageComponent {
       this.toastService.warning('La variante no tiene imagen para mejorar');
       return;
     }
+    this.variantAiModalMode.set('enhance');
     this.editingVariantIndex.set(idx);
     this.isVariantAiModalOpen.set(true);
+  }
+
+  openVariantImageAiGenerator(idx?: number): void {
+    const targetIdx = idx ?? this.editingVariantIndex();
+    if (targetIdx !== null && targetIdx !== undefined) {
+      this.editingVariantIndex.set(targetIdx);
+    }
+    this.isVariantImageModalOpen.set(false);
+    this.variantAiModalMode.set('generate');
+    this.isVariantAiModalOpen.set(true);
+  }
+
+  onVariantAiGenerated(newImageUrl: string): void {
+    const idx = this.editingVariantIndex();
+    if (idx === null) {
+      this.isVariantAiModalOpen.set(false);
+      return;
+    }
+    const variant = this.generatedVariants[idx];
+    if (!variant) {
+      this.isVariantAiModalOpen.set(false);
+      return;
+    }
+    variant.image_url = newImageUrl;
+    variant.image_file = undefined;
+    variant.image_id = undefined;
+    this.generatedVariants = [...this.generatedVariants];
+    this.isVariantAiModalOpen.set(false);
+    this.toastService.success('Imagen generada agregada a la variante');
   }
 
   onVariantImagesAdded(images: string[]): void {
@@ -3317,9 +3349,34 @@ export class ProductCreatePageComponent {
       return;
     }
 
+    this.aiModalMode.set('enhance');
     this.aiEnhanceImageUrl.set(sourceUrl);
     this.aiEnhanceImageIndex.set(index);
     this.isImageAiEnhanceModalOpen.set(true);
+  }
+
+  openProductImageAiGenerator(): void {
+    if (this.imageUrls.length >= 5) {
+      this.toastService.warning('Límite de 5 imágenes alcanzado');
+      return;
+    }
+    this.isImageSourceModalOpen.set(false);
+    this.aiModalMode.set('generate');
+    this.aiEnhanceImageUrl.set(null);
+    this.aiEnhanceImageIndex.set(null);
+    this.isImageAiEnhanceModalOpen.set(true);
+  }
+
+  onAiImageGenerated(dataUrl: string): void {
+    if (this.imageUrls.length >= 5) {
+      this.toastService.warning('Límite de 5 imágenes alcanzado');
+      return;
+    }
+    this.imageUrls.push(dataUrl);
+    this.imageIds.push(null);
+    this.activeImageIndex = this.imageUrls.length - 1;
+    this.markImagesTouched();
+    this.toastService.success('Imagen generada con IA agregada');
   }
 
   onImagesFromModal(urls: string[]): void {

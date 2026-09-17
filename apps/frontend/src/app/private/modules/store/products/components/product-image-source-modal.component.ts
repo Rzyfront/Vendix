@@ -4,6 +4,7 @@ import { ImageSourceModalComponent } from '../../../../../shared/components';
 
 type ImageModalMode = 'add' | 'edit';
 type ImageTarget = 'product' | 'variant';
+type AspectRatio = 'free' | '1:1' | '4:3' | '3:2' | '16:9' | '4:5' | '9:16';
 
 /**
  * Wrapper delgado sobre `app-image-source-modal` (compartido).
@@ -14,10 +15,8 @@ type ImageTarget = 'product' | 'variant';
  * el componente compartido; aquí solo se hace passthrough de inputs/outputs.
  *
  * - `target === 'variant'` se mapea a `singleImage` del compartido.
- * - `allowAiEnhance` se mapea a la presencia de un `aiEnhanceHandler` (la tarjeta
- *   de IA del compartido solo se muestra cuando hay handler). El handler es un
- *   no-op (`of(dataUrl)`) porque la funcionalidad sigue siendo un placeholder
- *   deshabilitado.
+ * - `defaultAspect` por defecto es '1:1' para productos.
+ * - `allowAiEnhance` activa la opción de generación con IA.
  */
 @Component({
   selector: 'app-product-image-source-modal',
@@ -29,10 +28,12 @@ type ImageTarget = 'product' | 'variant';
       [singleImage]="target() === 'variant'"
       [remainingSlots]="remainingSlots()"
       [mode]="mode()"
+      [defaultAspect]="defaultAspect()"
       [sourceImageUrl]="sourceImageUrl()"
       [aiEnhanceHandler]="enhanceHandler()"
       (imagesAdded)="imagesAdded.emit($event)"
       (imageEdited)="imageEdited.emit($event)"
+      (requestAiGenerate)="requestAiGenerate.emit()"
     ></app-image-source-modal>
   `,
 })
@@ -41,10 +42,12 @@ export class ProductImageSourceModalComponent {
   readonly target = input<ImageTarget>('product');
   readonly remainingSlots = input<number>(5);
   readonly mode = input<ImageModalMode>('add');
+  readonly defaultAspect = input<AspectRatio>('1:1');
   readonly allowAiEnhance = input<boolean>(true);
   readonly sourceImageUrl = input<string | null>(null);
   readonly imagesAdded = output<string[]>();
   readonly imageEdited = output<string>();
+  readonly requestAiGenerate = output<void>();
 
   private readonly noopEnhance = (dataUrl: string): Observable<string> =>
     of(dataUrl);

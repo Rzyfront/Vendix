@@ -24,6 +24,7 @@ import {
   ProductQueryDto,
   GenerateProductDescriptionDto,
   GenerateProductImageEnhancementDto,
+  GenerateProductImageDto,
   UpdateProductPromotionsDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -72,6 +73,17 @@ export class ProductsController {
   async enhanceImage(@Body() dto: GenerateProductImageEnhancementDto) {
     const result = await this.productsService.enhanceImage(dto);
     return this.responseService.success(result, 'Imagen mejorada exitosamente');
+  }
+
+  @ApiOperation({
+    summary:
+      'Generar con IA una imagen de producto a partir de descripción y contexto',
+  })
+  @Post('generate-image')
+  @Permissions('store:products:create', 'store:products:update')
+  async generateImage(@Body() dto: GenerateProductImageDto) {
+    const result = await this.productsService.generateImage(dto);
+    return this.responseService.success(result, 'Imagen generada exitosamente');
   }
 
   @ApiOperation({

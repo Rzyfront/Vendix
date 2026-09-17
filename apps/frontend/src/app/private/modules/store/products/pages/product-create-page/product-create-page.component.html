@@ -4109,11 +4109,13 @@
   [sourceImageUrl]="imageEditSourceUrl()"
   (imagesAdded)="onImagesFromModal($event)"
   (imageEdited)="onImageEdited($event)"
+  (requestAiGenerate)="openProductImageAiGenerator()"
 ></app-product-image-source-modal>
 
 <app-product-image-ai-enhance-modal
   [isOpen]="isImageAiEnhanceModalOpen()"
   (isOpenChange)="isImageAiEnhanceModalOpen.set($event)"
+  [mode]="aiModalMode()"
   [sourceImageUrl]="aiEnhanceImageUrl()"
   [productName]="productForm.get('name')?.value || ''"
   [productType]="isService ? 'service' : 'physical'"
@@ -4121,6 +4123,7 @@
   [remainingSlots]="remainingImageSlots()"
   (replace)="onAiImageReplace($event)"
   (keep)="onAiImageKeepBoth($event)"
+  (generated)="onAiImageGenerated($event)"
 ></app-product-image-ai-enhance-modal>
 
 <!-- Variant Image Modals (paridad con producto base) -->
@@ -4131,6 +4134,7 @@
   [remainingSlots]="1"
   [mode]="'add'"
   (imagesAdded)="onVariantImagesAdded($event)"
+  (requestAiGenerate)="openVariantImageAiGenerator()"
 ></app-product-image-source-modal>
 
 <app-product-image-source-modal
@@ -4146,6 +4150,7 @@
 <app-product-image-ai-enhance-modal
   [isOpen]="isVariantAiModalOpen()"
   (isOpenChange)="isVariantAiModalOpen.set($event)"
+  [mode]="variantAiModalMode()"
   [sourceImageUrl]="editingVariantImageUrl()"
   [productName]="productForm.get('name')?.value || ''"
   [productType]="isService ? 'service' : 'physical'"
@@ -4153,6 +4158,7 @@
   [remainingSlots]="1"
   (replace)="onVariantAiReplace($event)"
   (keep)="onVariantAiKeep($event)"
+  (generated)="onVariantAiGenerated($event)"
 ></app-product-image-ai-enhance-modal>
 
 <!-- ─── QUI-431: Gestor completo de números de serie (modal LG) ──────── -->
