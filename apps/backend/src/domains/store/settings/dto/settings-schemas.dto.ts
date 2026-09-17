@@ -1769,47 +1769,6 @@ export class VexiSettingsDto {
   voice_engine?: 'realtime' | 'pipeline';
 }
 
-/**
- * CP-pos-smart-search · A.0 — Tier-1 flags del motor de búsqueda del POS.
- *
- * Va declarado acá **y** en `KNOWN_SECTIONS` (`settings.service.ts`): sin la
- * propiedad en `UpdateSettingsDto` el `ValidationPipe` (`whitelist: true`) la
- * borra, y sin la entrada en la lista el sanitizador la descarta respondiendo
- * 200 igual (F-006). Los tres opcionales porque cada toggle viaja solo en su
- * propio PATCH y `updateSettings` mezcla por clave (como `vexi`).
- */
-export class PosSmartSearchSettingsDto {
-  @ApiProperty({
-    example: true,
-    required: false,
-    description:
-      'Fase A recall: where tokenizado AND×OR sobre name/sku (B.1). Orden legacy by design hasta L2.',
-  })
-  @IsOptional()
-  @IsBoolean()
-  l1?: boolean;
-
-  @ApiProperty({
-    example: true,
-    required: false,
-    description:
-      'Fase A rank: scoring en memoria sobre el recall L1 (B.2). Implica L1.',
-  })
-  @IsOptional()
-  @IsBoolean()
-  l2?: boolean;
-
-  @ApiProperty({
-    example: false,
-    required: false,
-    description:
-      'Fase B nativo: raw SQL sobre pg_trgm + unaccent + GIN (C.3). Solo efectivo con capability; sin ella cae a L2/L1/legacy con warn.',
-  })
-  @IsOptional()
-  @IsBoolean()
-  trigram?: boolean;
-}
-
 export class PromotionsSettingsDto {
   @ApiProperty({
     example: 'winner_takes_all',

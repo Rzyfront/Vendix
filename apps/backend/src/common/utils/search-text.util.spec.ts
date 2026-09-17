@@ -120,30 +120,23 @@ describe('search-text.util (CP-pos-smart-search A.1)', () => {
   });
 
   describe('isSmartSearchActive (F-013)', () => {
-    const on = { l1: true, l2: false, trigram: false };
-    const off = { l1: false, l2: false, trigram: false };
-
-    it('cualquier tier on + tokens → true', () => {
-      expect(isSmartSearchActive('cafe', on)).toBe(true);
-      expect(
-        isSmartSearchActive('cafe', { l1: false, l2: true, trigram: false }),
-      ).toBe(true);
-      expect(
-        isSmartSearchActive('cafe', { l1: false, l2: false, trigram: true }),
-      ).toBe(true);
+    it('cutover smart + tokens → true', () => {
+      expect(isSmartSearchActive('cafe', true)).toBe(true);
+      expect(isSmartSearchActive('cafe leche', true)).toBe(true);
     });
 
-    it('flags off → false aunque haya tokens', () => {
-      expect(isSmartSearchActive('cafe leche', off)).toBe(false);
+    it('cutover legacy → false aunque haya tokens', () => {
+      expect(isSmartSearchActive('cafe leche', false)).toBe(false);
     });
 
     it('query solo-stopwords → false (fallback legacy)', () => {
-      expect(isSmartSearchActive('de la', on)).toBe(false);
+      expect(isSmartSearchActive('de la', true)).toBe(false);
     });
 
-    it('flags nulos/raros → false (fail-closed)', () => {
+    it('smartAllowed nulo/ausente → false (fail-closed)', () => {
       expect(isSmartSearchActive('cafe', null)).toBe(false);
       expect(isSmartSearchActive('cafe', undefined)).toBe(false);
+      expect(isSmartSearchActive('cafe')).toBe(false);
     });
 
     it('query con vocal acentuada/ç → false (paridad legacy, finding #2)', () => {
@@ -157,7 +150,7 @@ describe('search-text.util (CP-pos-smart-search A.1)', () => {
         'façade',
         'é', // e + U+0301 descompuesto: también pliega
       ]) {
-        expect(isSmartSearchActive(q, on)).toBe(false);
+        expect(isSmartSearchActive(q, true)).toBe(false);
       }
     });
 
@@ -165,7 +158,7 @@ describe('search-text.util (CP-pos-smart-search A.1)', () => {
       // ñ preservada por el tokenizer (F-079); símbolos→espacio benefician
       // al AND (cafe-especial matchea "Cafe Especial").
       for (const q of ['niño', 'NIÑO DIOS', 'cafe-especial', 'cafe 100%']) {
-        expect(isSmartSearchActive(q, on)).toBe(true);
+        expect(isSmartSearchActive(q, true)).toBe(true);
       }
     });
 
@@ -178,8 +171,8 @@ describe('search-text.util (CP-pos-smart-search A.1)', () => {
         { query: '' },
       ];
       for (const caller of callers) {
-        const whereDecision = isSmartSearchActive(caller.query, on);
-        const rankDecision = isSmartSearchActive(caller.query, on);
+        const whereDecision = isSmartSearchActive(caller.query, true);
+        const rankDecision = isSmartSearchActive(caller.query, true);
         expect(rankDecision).toBe(whereDecision);
       }
     });
@@ -286,9 +279,8 @@ describe('search-text.util (CP-pos-smart-search A.1)', () => {
     });
 
     it.each(adversarial)('%s: predicado y builder definidos', (_name, input) => {
-      expect(() =>
-        isSmartSearchActive(input, { l1: true, l2: false, trigram: false }),
-      ).not.toThrow();
+      expect(() => isSmartSearchActive(input, true)).not.toThrow();
+      expect(() => isSmartSearchActive(input, false)).not.toThrow();
       expect(() =>
         buildTokenAndFieldOr(tokenizeInternal(input), {
           scalar: ['name'],

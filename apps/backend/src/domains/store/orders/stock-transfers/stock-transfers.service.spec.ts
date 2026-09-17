@@ -4,7 +4,7 @@
  * Flag on: where AND×OR sobre raíz `products` (mismo helper A.1) + rank en
  * memoria (mismo A.2); `stock_levels.some` @origen intacto; shape
  * `{id,name,sku,stock_at_origin,stock_at_destination}` idéntico al legacy.
- * Flag off / sin tienda / throw / sobre scan-cap ⇒ legacy (fail-open).
+ * Kill-switch / throw / sobre scan-cap ⇒ legacy (fail-open).
  */
 import { StockTransfersService } from './stock-transfers.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -13,7 +13,7 @@ describe('StockTransfersService — searchTransferableProducts (D.2)', () => {
   const mockPrisma = {
     products: { findMany: jest.fn() },
   };
-  const mockSearchFlags = { resolveSearchFlags: jest.fn() };
+  const mockSearchPath = { isKillSwitchOn: jest.fn() };
   let service: StockTransfersService;
 
   const sl = (location_id: number, on_hand: number) => ({
@@ -37,17 +37,13 @@ describe('StockTransfersService — searchTransferableProducts (D.2)', () => {
       {} as any,
       {} as any,
       {} as any,
-      mockSearchFlags as any,
+      mockSearchPath as any,
     );
     jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(3);
-    mockSearchFlags.resolveSearchFlags.mockResolvedValue({
-      l1: true,
-      l2: true,
-      trigram: false,
-    });
+    mockSearchPath.isKillSwitchOn.mockReturnValue(false);
   });
 
-  it('flag on: where tokenizado AND×OR + some@origen intacto', async () => {
+  it('smart: where tokenizado AND×OR + some@origen intacto', async () => {
     mockPrisma.products.findMany.mockResolvedValue([
       row({ id: 1 }),
       row({ id: 2, name: 'Tubo Cafe 3/4', sku: 'X' }),
@@ -96,12 +92,8 @@ describe('StockTransfersService — searchTransferableProducts (D.2)', () => {
     ]);
   });
 
-  it('flag off: contains legacy byte-idéntico (OR frase + some@origen)', async () => {
-    mockSearchFlags.resolveSearchFlags.mockResolvedValue({
-      l1: false,
-      l2: false,
-      trigram: false,
-    });
+  it('kill-switch: contains legacy byte-idéntico (OR frase + some@origen)', async () => {
+    mockSearchPath.isKillSwitchOn.mockReturnValue(true);
     mockPrisma.products.findMany.mockResolvedValue([]);
 
     await service.searchTransferableProducts('cafe tubo', 7, 9, 10);
@@ -115,7 +107,7 @@ describe('StockTransfersService — searchTransferableProducts (D.2)', () => {
     expect(args.take).toBe(10);
   });
 
-  it('query acentuada + flag on ⇒ legacy (paridad, finding #2)', async () => {
+  it('query acentuada + smart ⇒ legacy (paridad, finding #2)', async () => {
     mockPrisma.products.findMany.mockResolvedValue([]);
 
     await service.searchTransferableProducts('café tubo', 7, 9, 10);
@@ -129,19 +121,20 @@ describe('StockTransfersService — searchTransferableProducts (D.2)', () => {
     ]);
   });
 
-  it('sin tienda / flags down ⇒ legacy (fail-open)', async () => {
+  it('kill-switch on / throw ⇒ legacy (fail-open)', async () => {
     mockPrisma.products.findMany.mockResolvedValue([row({ id: 1 })]);
 
-    jest
-      .spyOn(RequestContextService, 'getStoreId')
-      .mockReturnValue(undefined);
+    // Kill on.
+    mockSearchPath.isKillSwitchOn.mockReturnValue(true);
     await service.searchTransferableProducts('tubo', 7, 9, 10);
     expect(
       mockPrisma.products.findMany.mock.calls[0][0].where.OR,
     ).toHaveLength(2);
 
-    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(3);
-    mockSearchFlags.resolveSearchFlags.mockRejectedValue(new Error('down'));
+    // Kill-switch down (throw).
+    mockSearchPath.isKillSwitchOn.mockImplementation(() => {
+      throw new Error('down');
+    });
     await service.searchTransferableProducts('tubo', 7, 9, 10);
     expect(
       mockPrisma.products.findMany.mock.calls[1][0].where.OR,

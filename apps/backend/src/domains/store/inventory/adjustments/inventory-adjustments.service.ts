@@ -27,7 +27,7 @@ import {
   rankedIdsPage,
   scoreTokens,
 } from '@common/utils/search-score.util';
-import { PosSearchFlagsService } from '../../settings/pos-smart-search/pos-search-flags.service';
+import { PosSearchPathService } from '../../settings/pos-smart-search/pos-search-path.service';
 import { Prisma } from '@prisma/client';
 
 /**
@@ -155,7 +155,7 @@ export class InventoryAdjustmentsService {
     private prisma: StorePrismaService,
     private stockLevelManager: StockLevelManager,
     private eventEmitter: EventEmitter2,
-    private searchFlags: PosSearchFlagsService,
+    private searchPath: PosSearchPathService,
   ) {}
 
   /**
@@ -751,9 +751,9 @@ export class InventoryAdjustmentsService {
   /**
    * D.1 (CP-pos-smart-search) — picker de ajustes con L1+L2 heredado.
    *
-   * Con flag `l1` on: where tokenizado AND×OR (mismo helper A.1, nestPath
-   * `products:`) + rank en memoria vía `rankedIdsPage` (mismo A.2). Con flag
-   * off, sin tienda en contexto, sin tokens o sobre scan-cap: el contains
+   * Where tokenizado AND×OR (mismo helper A.1, nestPath `products:`) + rank
+   * en memoria vía `rankedIdsPage` (mismo A.2). Con kill-switch, sin
+   * tokens o sobre scan-cap: el contains
    * legacy de abajo, byte-idéntico (fail-open; conteo físico no admite
    * parecido ⇒ sin rescate difuso: el ranking ORDENA, jamás filtra).
    *
@@ -792,10 +792,8 @@ export class InventoryAdjustmentsService {
 
   private async isSmartAdjustSearchOn(): Promise<boolean> {
     try {
-      const storeId = RequestContextService.getStoreId();
-      if (!storeId || !this.searchFlags) return false;
-      const flags = await this.searchFlags.resolveSearchFlags(storeId);
-      return flags.l1 === true;
+      if (!this.searchPath) return false;
+      return !this.searchPath.isKillSwitchOn();
     } catch {
       return false;
     }

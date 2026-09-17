@@ -223,38 +223,19 @@ export function escapeLike(input: unknown): string {
 }
 
 /**
- * Flags mínimos para el gate. Estructural a propósito: `PosSearchFlags`
- * de A.0 es asignable sin que `common/` importe el dominio settings.
- */
-export interface SmartSearchGateFlags {
-  l1: boolean;
-  l2: boolean;
-  trigram: boolean;
-}
-
-/**
- * Predicado ÚNICO wrap-vs-legacy (F-013). Lo consumen el where (B.1/D.x) y
- * el rank (B.2) con los mismos argumentos: imposible que el conjunto y el
- * orden diverjan por caller.
+ * Predicado ÚNICO wrap-vs-legacy (F-013). Lo consumen el where (B.1) y el
+ * rank (B.2) con los mismos argumentos: imposible que el conjunto y el
+ * orden diverjan por caller. D.1/D.2/D.3 gatean con su propio `isSmart*On`
+ * (kill-switch) + `isSearchAccentFolded`.
  *
- * Activo ⇔ (algún tier explícitamente on) ∧ (tokeniza a ≥1 token).
- * Query solo-stopwords → `false` → fallback a frase legacy (ADR-02).
+ * Activo ⇔ smartAllowed ∧ (tokeniza a ≥1 token) ∧ (sin fold de acentos).
+ * Query solo-stopwords o acentuada → `false` → fallback a frase legacy.
  *
- * Tabla de decisión por caller (flags iguales ⇒ misma decisión):
+ * `smartAllowed` lo resuelve el caller vía cutover (path ≠ legacy);
+ * `pos_optimized` deliberadamente NO es input. `findAll`≡`findIds` porque
+ * ambos comparten `buildProductWhere` + este predicado (DB-17).
  *
- * | Caller              | pos_optimized | L1 on + tokens | Decisión |
- * |---------------------|---------------|----------------|----------|
- * | POS web/móvil       | sí            | sí             | smart    |
- * | Admin listado       | no            | sí             | smart    |
- * | Bulk / findIds      | no            | sí             | smart    |
- * | Vexi / restaurante  | no            | sí             | smart    |
- * | Cualquiera          | –             | no (off/vacío) | legacy   |
- *
- * `pos_optimized` deliberadamente NO es input: gatear el rank por él pero
- * el where por flags partía set-nuevo/orden-viejo. `findAll`≡`findIds`
- * porque ambos comparten `buildProductWhere` + este predicado (DB-17).
- *
- * Total never-throw: flags nulos/raros → `false` (fail-closed a legacy).
+ * Total never-throw: input raro → `false` (fail-closed a legacy).
  *
  * Re-auditoría PR #817 (finding #2, paridad legacy): el `where` smart
  * tokeniza ANTES de golpear Prisma y el tokenizer pliega acentos
@@ -265,21 +246,13 @@ export interface SmartSearchGateFlags {
  * L2 sigue ordenando ese conjunto porque el scorer pliega ambos lados).
  * ñ/Ñ quedan FUERA a propósito: el tokenizer las preserva (F-079), así
  * que su recall smart es correcto y no se degrada a frase legacy.
- * La detección NO es una clase manual: replica el fold del tokenizer
- * (lower + NFD + strip U+0300–U+036F, ñ protegida) y compara — si el fold
- * muta alguna letra, `contains` no puede matchearla y toca legacy.
  */
 export function isSmartSearchActive(
   query: unknown,
-  flags: SmartSearchGateFlags | null | undefined,
+  smartAllowed?: boolean | null,
 ): boolean {
   try {
-    if (typeof flags !== 'object' || flags === null || Array.isArray(flags)) {
-      return false;
-    }
-    const anyTierOn =
-      flags.l1 === true || flags.l2 === true || flags.trigram === true;
-    if (!anyTierOn) return false;
+    if (smartAllowed !== true) return false;
     if (isSearchAccentFolded(query)) {
       return false;
     }

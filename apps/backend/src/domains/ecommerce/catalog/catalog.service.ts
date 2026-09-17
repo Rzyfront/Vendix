@@ -36,7 +36,7 @@ import {
   rankedIdsPage,
   scoreTokens,
 } from '@common/utils/search-score.util';
-import { PosSearchFlagsService } from '../../store/settings/pos-smart-search/pos-search-flags.service';
+import { PosSearchPathService } from '../../store/settings/pos-smart-search/pos-search-path.service';
 
 /**
  * D.3 — Set de recall del buscador público: PARIDAD con el OR legacy
@@ -58,7 +58,7 @@ const CATALOG_SEARCH_MIN_LENGTH = 2;
 
 /**
  * D.3 (F-047) — TTL de la caché de búsqueda pública (store + query-norm +
- * page + flag-l1). Corta a propósito: promociones/disponibilidad derivan
+ * page + bit smart). Corta a propósito: promociones/disponibilidad derivan
  * cada 20s como máximo; absorbe ráfagas de autocomplete del mismo visitante.
  */
 const CATALOG_SEARCH_CACHE_TTL_MS = 20_000;
@@ -95,7 +95,7 @@ export class CatalogService {
     private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
     // D.3 — heredero L1 del motor POS (fail-open: down ⇒ legacy).
-    private readonly searchFlags: PosSearchFlagsService,
+    private readonly searchPath: PosSearchPathService,
   ) {}
 
   /**
@@ -167,7 +167,7 @@ export class CatalogService {
       (await this.isSmartCatalogSearchOn());
 
     // D.3 (F-047): caché corta de búsqueda (store + query-norm + page +
-    // flag-l1 en la llave). Hit ⇒ sin DB; miss/caída ⇒ se computa.
+    // bit smart en la llave). Hit ⇒ sin DB; miss/caída ⇒ se computa.
     const searchCacheKey = searchActive
       ? this.buildSearchCacheKey(store_id, query, smartSearch)
       : null;
@@ -189,7 +189,7 @@ export class CatalogService {
     const brandIds = this.mergeIdFilters(brand_id, brand_ids);
 
     // D.3 — El where base SIEMPRE lleva el OR-frase legacy verbatim: es el
-    // fail-open (flag off, sin tokens, sobre scan-cap o throw). La rama
+    // fail-open (kill-switch, sin tokens, sobre scan-cap o throw). La rama
     // rankeada deriva su propio where (tokenizado) sin mutar este.
     if (searchActive) {
       where.OR = [
@@ -625,16 +625,13 @@ export class CatalogService {
   }
 
   /**
-   * D.3 — Heredero L1 del motor POS. `false` ante cualquier duda (sin flags,
-   * flag off, throw) ⇒ OR legacy. Nunca lanza.
+   * D.3 — Heredero smart del motor POS. `false` ante cualquier duda (sin
+   * provider, kill-switch, throw) ⇒ OR legacy. Nunca lanza.
    */
   private async isSmartCatalogSearchOn(): Promise<boolean> {
     try {
-      if (!this.searchFlags) return false;
-      const storeId = RequestContextService.getStoreId();
-      if (!storeId) return false;
-      const flags = await this.searchFlags.resolveSearchFlags(storeId);
-      return flags.l1 === true;
+      if (!this.searchPath) return false;
+      return !this.searchPath.isKillSwitchOn();
     } catch {
       return false;
     }
@@ -735,9 +732,9 @@ export class CatalogService {
   }
 
   /**
-   * D.3 (F-047) — Llave de caché: store + bit-l1 + sha256 de la query
-   * normalizada (todos los filtros que alteran el resultado). El bit-l1
-   * evita servir rankeado con flag off y viceversa ante un toggle.
+   * D.3 (F-047) — Llave de caché: store + bit smart + sha256 de la query
+   * normalizada (todos los filtros que alteran el resultado). El bit smart
+   * evita servir rankeado con kill-switch on y viceversa ante un toggle.
    */
   private buildSearchCacheKey(
     store_id: number,

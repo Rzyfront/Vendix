@@ -22,7 +22,7 @@ import { SettingsService } from '../settings/settings.service';
 import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service';
 import { InventoryAdjustmentsService } from '../inventory/adjustments/inventory-adjustments.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
-import { PosSearchFlagsService } from '../settings/pos-smart-search/pos-search-flags.service';
+import { PosSearchPathService } from '../settings/pos-smart-search/pos-search-path.service';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import {
   CreateProductDto,
@@ -261,11 +261,11 @@ describe('ProductsService', () => {
     },
   };
 
-  // B.3 — el @Optional() de `searchFlags` ya no es la única red: el harness
-  // provee el servicio mockeado (default-off) y cada test smart lo programa.
-  const mockSearchFlags = {
-    resolveSearchFlags: jest.fn(),
+  // B.3 — el @Optional() de `searchPath` ya no es la única red: el harness
+  // provee el servicio mockeado (default legacy) y cada test smart lo programa.
+  const mockSearchPath = {
     resolveSearchPathFor: jest.fn(),
+    isKillSwitchOn: jest.fn().mockReturnValue(false),
   };
 
   // B.3 — extraído a const para poder programar hits/miss per-store.
@@ -363,10 +363,10 @@ describe('ProductsService', () => {
           provide: CACHE_MANAGER,
           useValue: mockCacheManager,
         },
-        // B.3 — flags Tier-1 mockeados (default-off en el beforeEach).
+        // B.3 — cutover mockeado (default legacy en el beforeEach).
         {
-          provide: PosSearchFlagsService,
-          useValue: mockSearchFlags,
+          provide: PosSearchPathService,
+          useValue: mockSearchPath,
         },
       ],
     }).compile();
@@ -388,18 +388,12 @@ describe('ProductsService', () => {
     // antes de llegar a la regla que el test quiere probar.
     mockPrismaService.stock_levels.findMany.mockResolvedValue([]);
     mockGlobalPrisma.stock_levels.findMany.mockResolvedValue([]);
-    // B.3 — default-off: sin programar, el harness resuelve legacy (mismo
+    // B.3 — default legacy: sin programar, el harness resuelve legacy (mismo
     // comportamiento que cuando el provider no existía).
-    mockSearchFlags.resolveSearchFlags.mockResolvedValue({
-      l1: false,
-      l2: false,
-      trigram: false,
-    });
-    mockSearchFlags.resolveSearchPathFor.mockResolvedValue({
-      flags: { l1: false, l2: false, trigram: false },
+    mockSearchPath.resolveSearchPathFor.mockResolvedValue({
+      path: 'legacy',
       trigramCapable: false,
       killSwitch: false,
-      path: 'legacy',
     });
   });
 
@@ -669,7 +663,7 @@ describe('ProductsService', () => {
         expect.objectContaining({ id: 2, name: 'Test Product 2' }),
       );
       // B.3 (ADR-08) — con `search` el meta trae `search` aunque el path sea
-      // legacy: el query del test trae search:'test' y los flags van off.
+      // legacy: el harness defaultea el cutover a legacy.
       expect(result.meta).toEqual({
         total: 2,
         page: 1,
@@ -2116,17 +2110,14 @@ describe('ProductsService', () => {
   // scorer: estos specs son oráculo independiente del wiring B.2.
   // ===========================================================================
   describe('POS SMART SEARCH (B.1/B.2 — CP-pos-smart-search)', () => {
-    const FLAGS_OFF = { l1: false, l2: false, trigram: false };
-    const FLAGS_L1 = { l1: true, l2: false, trigram: false };
-    const FLAGS_L2 = { l1: true, l2: true, trigram: false };
-
-    const primeSearchPath = (flags: typeof FLAGS_OFF, path: string) => {
-      mockSearchFlags.resolveSearchFlags.mockResolvedValue(flags);
-      mockSearchFlags.resolveSearchPathFor.mockResolvedValue({
-        flags,
-        trigramCapable: false,
-        killSwitch: false,
+    const primeSearchPath = (
+      path: string,
+      over: { capable?: boolean; kill?: boolean } = {},
+    ) => {
+      mockSearchPath.resolveSearchPathFor.mockResolvedValue({
         path,
+        trigramCapable: over.capable ?? path === 'trigram',
+        killSwitch: over.kill ?? false,
       });
     };
 
@@ -2210,12 +2201,12 @@ describe('ProductsService', () => {
       // Cada test smart parte de legacy + miss: mockResolvedValue persiste
       // entre tests (clearAllMocks no lo borra) y un l2 de un test anterior
       // contaminaría al siguiente.
-      primeSearchPath(FLAGS_OFF, 'legacy');
+      primeSearchPath('legacy');
       mockCacheManager.get.mockResolvedValue(null);
     });
 
-    it('flags on (l1) + mult-token → AND×OR con tokens normalizados, orden legacy', async () => {
-      primeSearchPath(FLAGS_L1, 'l1');
+    it('path l1 + mult-token → AND×OR con tokens normalizados, orden legacy', async () => {
+      primeSearchPath('l1');
       mockPrismaService.products.findMany.mockResolvedValue([]);
       mockPrismaService.products.count.mockResolvedValue(0);
 
@@ -2257,8 +2248,8 @@ describe('ProductsService', () => {
       });
     });
 
-    it('flags on (l1) + query acentuada → frase legacy (paridad, finding #2)', async () => {
-      primeSearchPath(FLAGS_L1, 'l1');
+    it('path l1 + query acentuada → frase legacy (paridad, finding #2)', async () => {
+      primeSearchPath('l1');
       mockPrismaService.products.findMany.mockResolvedValue([]);
       mockPrismaService.products.count.mockResolvedValue(0);
 
@@ -2284,8 +2275,8 @@ describe('ProductsService', () => {
       });
     });
 
-    it('flags off + mult-token → OR de frase legacy intacto (fail-closed)', async () => {
-      primeSearchPath(FLAGS_OFF, 'legacy');
+    it('path legacy + mult-token → OR de frase legacy intacto (fail-closed)', async () => {
+      primeSearchPath('legacy');
       mockPrismaService.products.findMany.mockResolvedValue([]);
       mockPrismaService.products.count.mockResolvedValue(0);
 
@@ -2310,7 +2301,7 @@ describe('ProductsService', () => {
     });
 
     it('rank-1: el exacto en nombre gana al parcial featured + skip-count (F-005)', async () => {
-      primeSearchPath(FLAGS_L2, 'l2');
+      primeSearchPath('l2');
       // Pesos: name word 40, description word 15, fullCoverage 15,
       // allInPrimary 25. A: 40+40+15+25=120. B: 15+0=15 (coverage 1, sin
       // bonus). 120 > 15 ⇒ A primero aunque B sea featured.
@@ -2383,7 +2374,7 @@ describe('ProductsService', () => {
     });
 
     it('featured desempat: a igual score/coverage gana featured', async () => {
-      primeSearchPath(FLAGS_L2, 'l2');
+      primeSearchPath('l2');
       // 'cafe' vs name 'Café' (exacto 120) + fullCoverage 15 + allInPrimary
       // 25 = 160 en ambas; coverage 1 en ambas ⇒ decide featured.
       const created = new Date('2024-06-01T00:00:00.000Z');
@@ -2425,7 +2416,7 @@ describe('ProductsService', () => {
     });
 
     it('orden determinista: input invertido → mismo orden; id DESC cierra', async () => {
-      primeSearchPath(FLAGS_L2, 'l2');
+      primeSearchPath('l2');
       // Gemelas en todo (160/1/no-featured/mismo created_at): solo queda el
       // id DESC. Sort estable + id ⇒ sin flips entre llamadas.
       const created = new Date('2024-06-01T00:00:00.000Z');
@@ -2447,7 +2438,7 @@ describe('ProductsService', () => {
     });
 
     it('cache hit: página 2 no re-escanea ni cuenta (F-046)', async () => {
-      primeSearchPath(FLAGS_L2, 'l2');
+      primeSearchPath('l2');
       mockCacheManager.get.mockResolvedValueOnce({
         ids: [11, 22, 33, 44, 55],
         total: 5,
@@ -2498,7 +2489,7 @@ describe('ProductsService', () => {
       const prev = process.env[envKey];
       process.env[envKey] = '3';
       try {
-        primeSearchPath(FLAGS_L2, 'l2');
+        primeSearchPath('l2');
         const light = [1, 2, 3, 4].map((id) =>
           lightRow({ id, name: `Café ${id}` }),
         );
@@ -2546,7 +2537,7 @@ describe('ProductsService', () => {
     });
 
     it('hydrate lanza → re-fetch legacy + meta unranked_error (fail-open)', async () => {
-      primeSearchPath(FLAGS_L2, 'l2');
+      primeSearchPath('l2');
       const light = [
         lightRow({ id: 11, name: 'Café molido', sku: 'CAF-MOL-001' }),
         lightRow({
@@ -2602,9 +2593,9 @@ describe('ProductsService', () => {
       expect(mockPrismaService.products.count).toHaveBeenCalledTimes(1);
     });
 
-    it('flags rechazan → legacy fail-closed (cutover never-throw)', async () => {
-      mockSearchFlags.resolveSearchPathFor.mockRejectedValueOnce(
-        new Error('flags down'),
+    it('cutover rechaza → legacy fail-closed (never-throw)', async () => {
+      mockSearchPath.resolveSearchPathFor.mockRejectedValueOnce(
+        new Error('cutover down'),
       );
       mockPrismaService.products.findMany.mockResolvedValue([]);
       mockPrismaService.products.count.mockResolvedValue(0);
@@ -2633,7 +2624,7 @@ describe('ProductsService', () => {
     // ---- GATE tokens>0 (B.2/F-013): 1-char/stopwords ⇒ legacy -------------
 
     it("search 1-char 'e' + l2 → legacy, sin rank ni caché", async () => {
-      primeSearchPath(FLAGS_L2, 'l2');
+      primeSearchPath('l2');
       mockPrismaService.products.findMany.mockResolvedValue([]);
       mockPrismaService.products.count.mockResolvedValue(0);
 
@@ -2664,7 +2655,7 @@ describe('ProductsService', () => {
     });
 
     it("search solo-stopwords 'de la' + l2 → fallback frase legacy", async () => {
-      primeSearchPath(FLAGS_L2, 'l2');
+      primeSearchPath('l2');
       mockPrismaService.products.findMany.mockResolvedValue([]);
       mockPrismaService.products.count.mockResolvedValue(0);
 
@@ -2746,8 +2737,8 @@ describe('ProductsService', () => {
         },
       ]);
       expect(where.AND).toBeUndefined();
-      // La rama barcode no toca flags ni rank.
-      expect(mockSearchFlags.resolveSearchPathFor).not.toHaveBeenCalled();
+      // La rama barcode no toca cutover ni rank.
+      expect(mockSearchPath.resolveSearchPathFor).not.toHaveBeenCalled();
       expect(mockCacheManager.get).not.toHaveBeenCalled();
       expect(result.meta.search).toBeUndefined();
       // Fixture intacto: la variante mapea con su barcode y el tier escaneado
@@ -2764,7 +2755,7 @@ describe('ProductsService', () => {
     });
 
     it('search⊗barcode: con barcode, search se anula (DB-01)', async () => {
-      primeSearchPath(FLAGS_L2, 'l2');
+      primeSearchPath('l2');
       mockPrismaService.products.findMany.mockResolvedValue([]);
       mockPrismaService.products.count.mockResolvedValue(0);
 
@@ -2787,7 +2778,7 @@ describe('ProductsService', () => {
       ]);
       expect(where.AND).toBeUndefined();
       expect(JSON.stringify(where)).not.toContain('cafe');
-      expect(mockSearchFlags.resolveSearchPathFor).not.toHaveBeenCalled();
+      expect(mockSearchPath.resolveSearchPathFor).not.toHaveBeenCalled();
       expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(1);
       // Hay search, pero barcode fuerza legacy en ambos ejes.
       expect(result.meta.search).toEqual({
@@ -2880,7 +2871,7 @@ describe('ProductsService', () => {
     // ---- findIds PARIDAD DE CONJUNTO (DB-17) ---------------------------------
 
     it('findIds usa el mismo where smart que findAll (select-all exacto)', async () => {
-      primeSearchPath(FLAGS_L1, 'l1');
+      primeSearchPath('l1');
       mockPrismaService.products.findMany.mockResolvedValue([]);
       mockPrismaService.products.count.mockResolvedValue(0);
       const query = {
@@ -2895,8 +2886,7 @@ describe('ProductsService', () => {
 
       mockPrismaService.products.findMany.mockClear();
       mockPrismaService.products.count.mockClear();
-      mockSearchFlags.resolveSearchPathFor.mockClear();
-      mockSearchFlags.resolveSearchFlags.mockClear();
+      mockSearchPath.resolveSearchPathFor.mockClear();
 
       const ids = await service.findIds(query);
       const whereFindIds =
@@ -2905,20 +2895,19 @@ describe('ProductsService', () => {
       // Mismo conjunto: "seleccionar todo" opera sobre lo que se ve.
       expect(whereFindIds).toEqual(whereFindAll);
       expect(ids).toEqual({ ids: [], total: 0, capped: false });
-      // C.3: findIds SÍ resuelve path (1 vez, cacheado) para decidir raw
-      // (trigram, acentos) vs ORM. En l1 cae al ORM con el where idéntico.
-      expect(mockSearchFlags.resolveSearchFlags).toHaveBeenCalledTimes(1);
-      expect(mockSearchFlags.resolveSearchPathFor).toHaveBeenCalledTimes(1);
+      // findIds resuelve el cutover UNA vez (el path decide where + raw).
+      // En l1 cae al ORM con el where idéntico.
+      expect(mockSearchPath.resolveSearchPathFor).toHaveBeenCalledTimes(1);
     });
 
     // ---- TENANT NEGATIVO (DB-11) ----------------------------------------------
 
-    it('flags y caché del rank van por la tienda del contexto', async () => {
+    it('cutover global + caché del rank por tienda del contexto', async () => {
       jest
         .spyOn(RequestContextService, 'getContext')
         .mockReturnValue({ store_id: 2, organization_id: 1, user_id: 9 } as any);
       jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(2);
-      primeSearchPath(FLAGS_L2, 'l2');
+      primeSearchPath('l2');
       routeScanHydrate(
         [lightRow({ id: 9, name: 'Café' })],
         new Map([[9, fullRow({ id: 9, name: 'Café' })]]),
@@ -2926,7 +2915,7 @@ describe('ProductsService', () => {
 
       await service.findAll({ search: 'cafe', page: 1, limit: 10 });
 
-      expect(mockSearchFlags.resolveSearchPathFor).toHaveBeenCalledWith(2);
+      expect(mockSearchPath.resolveSearchPathFor).toHaveBeenCalledWith();
       expect(mockCacheManager.set).toHaveBeenCalledWith(
         expect.stringMatching(/^products:smartsearch:2:/),
         expect.anything(),
@@ -2936,9 +2925,9 @@ describe('ProductsService', () => {
 
     it('tienda B≁A: la id-list rankeada de B nunca sirve a A', async () => {
       // Las filas las escopa StorePrismaService (DB-11, cubierto por sus
-      // specs); aquí se fija que la CAPA RANK tampoco cruza tiendas: flags y
-      // caché van por store_id, y un hit de B es miss para A.
-      primeSearchPath(FLAGS_L2, 'l2');
+      // specs); aquí se fija que la CAPA RANK tampoco cruza tiendas: el cutover
+      // es global pero la caché va por store_id: un hit de B es miss para A.
+      primeSearchPath('l2');
       mockCacheManager.get.mockImplementation((key: string) =>
         Promise.resolve(
           key.includes(':2:') ? { ids: [99], total: 1 } : null,
@@ -2987,15 +2976,14 @@ describe('ProductsService', () => {
 
     // ---- META.SEARCH AUSENTE + ERR-06 (documentación) --------------------------
 
-    it('sin search → meta.search ausente y flags ni se resuelven', async () => {
+    it('sin search → meta.search ausente y cutover ni se resuelve', async () => {
       mockPrismaService.products.findMany.mockResolvedValue([]);
       mockPrismaService.products.count.mockResolvedValue(0);
 
       const result = await service.findAll({ page: 1, limit: 10 });
 
       expect(result.meta.search).toBeUndefined();
-      expect(mockSearchFlags.resolveSearchPathFor).not.toHaveBeenCalled();
-      expect(mockSearchFlags.resolveSearchFlags).not.toHaveBeenCalled();
+      expect(mockSearchPath.resolveSearchPathFor).not.toHaveBeenCalled();
       expect(mockCacheManager.get).not.toHaveBeenCalled();
     });
 
@@ -3019,7 +3007,6 @@ describe('ProductsService', () => {
   });
 
   describe('POS SMART SEARCH TRIGRAM (C.3 — CP-pos-smart-search)', () => {
-    const FLAGS_TRI = { l1: true, l2: true, trigram: true };
     const CTX_1 = {
       store_id: 1,
       organization_id: 1,
@@ -3028,12 +3015,10 @@ describe('ProductsService', () => {
     } as any;
 
     const primeTrigram = () => {
-      mockSearchFlags.resolveSearchFlags.mockResolvedValue(FLAGS_TRI);
-      mockSearchFlags.resolveSearchPathFor.mockResolvedValue({
-        flags: FLAGS_TRI,
+      mockSearchPath.resolveSearchPathFor.mockResolvedValue({
+        path: 'trigram',
         trigramCapable: true,
         killSwitch: false,
-        path: 'trigram',
       });
       mockCacheManager.get.mockResolvedValue(null);
     };

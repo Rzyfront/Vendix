@@ -7,7 +7,7 @@ import { PriceResolverService } from '../../store/products/services/price-resolv
 import { StorefrontPriceService } from '../shared/services/storefront-price.service';
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
-import { PosSearchFlagsService } from '../../store/settings/pos-smart-search/pos-search-flags.service';
+import { PosSearchPathService } from '../../store/settings/pos-smart-search/pos-search-path.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { CatalogService } from './catalog.service';
 
@@ -101,7 +101,7 @@ describe('CatalogService reviews', () => {
           },
         },
         { provide: CACHE_MANAGER, useValue: { get: jest.fn(), set: jest.fn() } },
-        { provide: PosSearchFlagsService, useValue: { resolveSearchFlags: jest.fn().mockResolvedValue({ l1: false, l2: false, trigram: false }) } },
+        { provide: PosSearchPathService, useValue: { isKillSwitchOn: jest.fn().mockReturnValue(false) } },
       ],
     }).compile();
 
@@ -242,7 +242,7 @@ describe('CatalogService active promotions on listing', () => {
           },
         },
         { provide: CACHE_MANAGER, useValue: { get: jest.fn(), set: jest.fn() } },
-        { provide: PosSearchFlagsService, useValue: { resolveSearchFlags: jest.fn().mockResolvedValue({ l1: false, l2: false, trigram: false }) } },
+        { provide: PosSearchPathService, useValue: { isKillSwitchOn: jest.fn().mockReturnValue(false) } },
       ],
     }).compile();
 
@@ -485,7 +485,7 @@ describe('CatalogService featured fill cascade', () => {
           },
         },
         { provide: CACHE_MANAGER, useValue: cache },
-        { provide: PosSearchFlagsService, useValue: { resolveSearchFlags: jest.fn().mockResolvedValue({ l1: false, l2: false, trigram: false }) } },
+        { provide: PosSearchPathService, useValue: { isKillSwitchOn: jest.fn().mockReturnValue(false) } },
       ],
     }).compile();
 
@@ -786,7 +786,7 @@ describe('CatalogService available_sale_units (QUI-648 fase 2b)', () => {
           },
         },
         { provide: CACHE_MANAGER, useValue: { get: jest.fn(), set: jest.fn() } },
-        { provide: PosSearchFlagsService, useValue: { resolveSearchFlags: jest.fn().mockResolvedValue({ l1: false, l2: false, trigram: false }) } },
+        { provide: PosSearchPathService, useValue: { isKillSwitchOn: jest.fn().mockReturnValue(false) } },
       ],
     }).compile();
 
@@ -936,7 +936,7 @@ describe('CatalogService public smart search (D.3)', () => {
   let service: CatalogService;
   let prisma: any;
   let cache: { get: jest.Mock; set: jest.Mock };
-  let searchFlags: { resolveSearchFlags: jest.Mock };
+  let searchPath: { isKillSwitchOn: jest.Mock };
   let storeIdSpy: jest.SpyInstance;
 
   const listedProduct = (id: number, over: Record<string, any> = {}) => ({
@@ -980,10 +980,8 @@ describe('CatalogService public smart search (D.3)', () => {
       product_categories: { findMany: jest.fn().mockResolvedValue([]) },
     };
     cache = { get: jest.fn().mockResolvedValue(null), set: jest.fn() };
-    searchFlags = {
-      resolveSearchFlags: jest
-        .fn()
-        .mockResolvedValue({ l1: true, l2: true, trigram: false }),
+    searchPath = {
+      isKillSwitchOn: jest.fn().mockReturnValue(false),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -1020,7 +1018,7 @@ describe('CatalogService public smart search (D.3)', () => {
           },
         },
         { provide: CACHE_MANAGER, useValue: cache },
-        { provide: PosSearchFlagsService, useValue: searchFlags },
+        { provide: PosSearchPathService, useValue: searchPath },
       ],
     }).compile();
 
@@ -1034,7 +1032,7 @@ describe('CatalogService public smart search (D.3)', () => {
     storeIdSpy.mockRestore();
   });
 
-  it('flag on: where AND×OR name/description/sku + orden relevancia', async () => {
+  it('smart: where AND×OR name/description/sku + orden relevancia', async () => {
     const scan = [
       {
         id: 1,
@@ -1114,12 +1112,8 @@ describe('CatalogService public smart search (D.3)', () => {
     expect(prisma.products.findMany).toHaveBeenCalledTimes(1);
   });
 
-  it('flag off: OR-frase legacy verbatim + orderBy alta-reciente (override)', async () => {
-    searchFlags.resolveSearchFlags.mockResolvedValue({
-      l1: false,
-      l2: false,
-      trigram: false,
-    });
+  it('kill-switch: OR-frase legacy verbatim + orderBy alta-reciente (override)', async () => {
+    searchPath.isKillSwitchOn.mockReturnValue(true);
     prisma.products.findMany.mockResolvedValue([listedProduct(7)]);
     prisma.products.count.mockResolvedValue(1);
 
@@ -1144,7 +1138,7 @@ describe('CatalogService public smart search (D.3)', () => {
     expect(result.data).toHaveLength(1);
   });
 
-  it('query acentuada + flag on ⇒ OR-frase legacy (paridad, finding #2)', async () => {
+  it('query acentuada + smart ⇒ OR-frase legacy (paridad, finding #2)', async () => {
     prisma.products.findMany.mockResolvedValue([listedProduct(7)]);
     prisma.products.count.mockResolvedValue(1);
 
@@ -1204,7 +1198,7 @@ describe('CatalogService public smart search (D.3)', () => {
     });
     expect(prisma.products.findMany).not.toHaveBeenCalled();
     expect(prisma.store_settings.findFirst).not.toHaveBeenCalled();
-    expect(searchFlags.resolveSearchFlags).not.toHaveBeenCalled();
+    expect(searchPath.isKillSwitchOn).not.toHaveBeenCalled();
   });
 
   it('sin search: legacy intacto, meta aplicada vacía', async () => {
@@ -1218,7 +1212,7 @@ describe('CatalogService public smart search (D.3)', () => {
     expect(args.where.AND).toBeUndefined();
     expect(result.meta.applied_tokens).toEqual([]);
     expect(result.meta.tokens_truncated).toBe(false);
-    expect(searchFlags.resolveSearchFlags).not.toHaveBeenCalled();
+    expect(searchPath.isKillSwitchOn).not.toHaveBeenCalled();
   });
 
   it('sin tenant: 404 AUTH_STORE_001, sin queries (F-038)', async () => {
@@ -1253,11 +1247,7 @@ describe('CatalogService public smart search (D.3)', () => {
   });
 
   it('allowlist pública: la card jamás expone costos/tax interno/márgenes (F-038)', async () => {
-    searchFlags.resolveSearchFlags.mockResolvedValue({
-      l1: false,
-      l2: false,
-      trigram: false,
-    });
+    searchPath.isKillSwitchOn.mockReturnValue(true);
     prisma.products.findMany.mockResolvedValue([
       listedProduct(11, {
         // Señuelos admin: aunque viajen en la fila, el mapper no los expone.

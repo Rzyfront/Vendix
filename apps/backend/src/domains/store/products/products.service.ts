@@ -87,17 +87,15 @@ import { AutoEntryService } from '../accounting/auto-entries/auto-entry.service'
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { SettingsService } from '../settings/settings.service';
-// B.1 — gate L1 (A.0) + tokenizado/ensamblaje canónicos (A.1, F-016). El
-// `.ts` de flags es puro (sin imports): cero riesgo de ciclo con settings.
-import { PosSearchFlagsService } from '../settings/pos-smart-search/pos-search-flags.service';
+// B.1 — cutover por capability (A.0) + tokenizado/ensamblaje canónicos
+// (A.1, F-016). El `.ts` del path es puro (sin imports): cero riesgo de
+// ciclo con settings.
+import { PosSearchPathService } from '../settings/pos-smart-search/pos-search-path.service';
 import type {
-  PosSearchFlags,
   PosSearchPath,
-} from '../settings/pos-smart-search/pos-search-flags';
-import {
-  POS_SEARCH_FLAGS_DEFAULT,
-  snapshotSearchFlags,
-} from '../settings/pos-smart-search/pos-search-flags';
+  PosSearchResolution,
+} from '../settings/pos-smart-search/pos-search-path';
+import { snapshotSearchPath } from '../settings/pos-smart-search/pos-search-path';
 import {
   buildTokenAndFieldOr,
   isSmartSearchActive,
@@ -313,10 +311,10 @@ export class ProductsService {
     // Ranking de más vendidos del POS: se cachea 24 h por tienda para que la
     // agregación sobre `order_items` no se pague en cada carga de la grilla.
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
-    // B.1 (A.0) — flags Tier-1 del path smart. `@Optional()`: ausente (harness
-    // de specs sin provider, B.3 lo provee) ⇒ `undefined` ⇒ path legacy
-    // (fail-closed). En prod `SettingsModule` siempre lo provee.
-    @Optional() private readonly searchFlags?: PosSearchFlagsService,
+    // B.1 (A.0) — cutover del path smart (capability × kill-switch).
+    // `@Optional()`: ausente (harness de specs sin provider) ⇒ `undefined`
+    // ⇒ path legacy (fail-closed). En prod `SettingsModule` siempre lo provee.
+    @Optional() private readonly searchPath?: PosSearchPathService,
   ) {}
 
   /**
@@ -1433,24 +1431,24 @@ export class ProductsService {
    * B.1 (F-016, ADR-02) — rama search: WRAP, no replace (F-075).
    *
    * Smart ⇔ `isSmartSearchActive` (A.1, predicado ÚNICO que B.2 reutiliza
-   * para el rank): algún tier on ∧ tokeniza a ≥1 token. Entonces
-   * `buildTokenAndFieldOr` (A.1) ensambla AND×OR sobre
+   * para el rank): cutover smart ∧ tokeniza a ≥1 token ∧ sin fold de
+   * acentos. Entonces `buildTokenAndFieldOr` (A.1) ensambla AND×OR sobre
    * `POS_PRODUCT_SEARCH_FIELDS` — cada token en ≥1 campo.
    *
    * Legacy (OR de frase intacto, byte-identico al pre-B.1) sobrevive como:
-   *   1) fallback stopwords — query solo-stopwords (`de la`) tokeniza a []
-   *      ⇒ frase legacy contains (ERR-20, semántica pineada en err.md);
-   *   2) path L1-off — flags off/ausentes (kill-switch, flag-down, specs sin
-   *      provider) ⇒ listado idéntico al legacy (FB-08/FB-09).
+   *   1) fallback stopwords/acentos — query que tokeniza a [] (`de la`) o
+   *      con vocales acentuadas (`café`, finding #2) ⇒ frase legacy;
+   *   2) path legacy — kill-switch, specs sin provider o throw ⇒ listado
+   *      idéntico al legacy (FB-08/FB-09).
    *
    * `search⊗barcode` excluyentes (DB-01): con barcode esta rama ni se evalúa
    * (el spread `search && !barcode` del llamador lo garantiza).
    */
   private buildSearchCondition(
     search: string,
-    flags?: PosSearchFlags | null,
+    smartAllowed?: boolean | null,
   ): Prisma.productsWhereInput {
-    if (isSmartSearchActive(search, flags ?? null)) {
+    if (isSmartSearchActive(search, smartAllowed ?? false)) {
       const tokens = tokenizeInternal(search);
       if (tokens.length > 0) {
         // Único `as` en la costura (A.1): `common/` no importa Prisma.
@@ -1470,22 +1468,6 @@ export class ProductsService {
   }
 
   /**
-   * B.1 (A.0) — resuelve los flags Tier-1 solo cuando la rama search puede
-   * usarlos (`search` presente ∧ sin `barcode`, que la anula). Never-throw
-   * hacia el llamador: servicio ausente o sin `store_id` ⇒ `undefined` ⇒
-   * path legacy (fail-closed). `resolveSearchFlags` ya es never-throw
-   * (flag-down ⇒ default-off + warn, ERR-19).
-   */
-  private async resolveSearchFlagsFor(
-    query: ProductQueryDto,
-    storeId?: number,
-  ): Promise<PosSearchFlags | undefined> {
-    if (!query.search || query.barcode) return undefined;
-    if (!storeId || !this.searchFlags) return undefined;
-    return this.searchFlags.resolveSearchFlags(storeId);
-  }
-
-  /**
    * Construye el `where` del catálogo de productos a partir de
    * `ProductQueryDto`. Fuente ÚNICA de la traducción filtro → Prisma: la
    * consumen `findAll()` (listado paginado) y `findIds()` (materialización de
@@ -1495,13 +1477,13 @@ export class ProductsService {
    * El scope por tienda lo inyecta `StorePrismaService`; aquí no se resuelve
    * tenant a mano.
    *
-   * B.1: `flags` ausente ⇒ rama search legacy (fail-closed). `findAll` y
-   * `findIds` lo resuelven vía `resolveSearchFlagsFor`: ambos comparten
-   * `buildProductWhere` + predicado ⇒ `findAll`≡`findIds` (DB-17).
+   * B.1: `smartAllowed` falso ⇒ rama search legacy (fail-closed). `findAll`
+   * y `findIds` comparten `resolveSmartSearchFor` + `buildProductWhere` +
+   * predicado ⇒ `findAll`≡`findIds` (DB-17).
    */
   private buildProductWhere(
     query: ProductQueryDto,
-    flags?: PosSearchFlags | null,
+    smartAllowed?: boolean | null,
   ): Prisma.productsWhereInput {
     const {
       search,
@@ -1560,12 +1542,14 @@ export class ProductsService {
         ],
       }),
       // B.1 (ADR-02): wrap — smart AND×OR, o frase legacy completa cuando
-      // el gate lo decide (stopwords, flags off, o query con vocales
+      // el gate lo decide (stopwords, kill-switch, o query con vocales
       // acentuadas/ç que el fold del tokenizer volvería inmatcheable en
       // `contains` — re-auditoría PR #817 finding #2, paridad probada en
       // vivo). `!barcode` conserva la precedencia exacta del barcode
       // (DB-01, FB-02).
-      ...(search && !barcode && this.buildSearchCondition(search, flags)),
+      ...(search &&
+        !barcode &&
+        this.buildSearchCondition(search, smartAllowed)),
       ...(brand_id && { brand_id }),
       ...(category_id && {
         product_categories: {
@@ -1605,13 +1589,14 @@ export class ProductsService {
   async findIds(
     query: ProductQueryDto,
   ): Promise<{ ids: number[]; total: number; capped: boolean }> {
-    // B.1: MISMO where que findAll (DB-17) — flags resueltos igual.
+    // B.1: MISMO where que findAll (DB-17) — cutover resuelto igual, UNA
+    // sola vez (el path decide where + raw trigram abajo).
     const context = RequestContextService.getContext();
-    const searchFlags = await this.resolveSearchFlagsFor(
+    const smartSearch = await this.resolveSmartSearchFor(
       query,
       context?.store_id,
     );
-    const where = this.buildProductWhere(query, searchFlags);
+    const where = this.buildProductWhere(query, smartSearch.smartAllowed);
 
     // C.3 (DB-17): con texto + path trigram, el conjunto lo define el raw
     // (acentos incluidos: `cafe`⊃`Café`). El findMany/count Prisma NO vería
@@ -1619,27 +1604,30 @@ export class ProductsService {
     // (sin store, legacy como siempre: cero cambio para llamadas sin request).
     // Fail-open a legacy ante throw operativo (F-085); Forbidden propaga.
     const { search, barcode } = query;
-    if (search && !barcode && context?.store_id && this.searchFlags) {
-      const storeId = context.store_id;
+    const storeId = context?.store_id;
+    const tokens =
+      search && !barcode ? tokenizeInternal(search) : ([] as string[]);
+    if (
+      search &&
+      !barcode &&
+      storeId &&
+      smartSearch.path === 'trigram' &&
+      tokens.length > 0
+    ) {
       try {
-        const resolution =
-          await this.searchFlags.resolveSearchPathFor(storeId);
-        const tokens = tokenizeInternal(search);
-        if (resolution.path === 'trigram' && tokens.length > 0) {
-          const outcome = await this.searchIdsRankedTrigram({
-            search,
-            tokens,
-            storeId,
-            query,
-            limit: MAX_PRODUCT_IDS,
-            skip: 0,
-          });
-          return {
-            ids: outcome.pageIds,
-            total: outcome.total,
-            capped: outcome.total > MAX_PRODUCT_IDS,
-          };
-        }
+        const outcome = await this.searchIdsRankedTrigram({
+          search,
+          tokens,
+          storeId,
+          query,
+          limit: MAX_PRODUCT_IDS,
+          skip: 0,
+        });
+        return {
+          ids: outcome.pageIds,
+          total: outcome.total,
+          capped: outcome.total > MAX_PRODUCT_IDS,
+        };
       } catch (error) {
         if (error instanceof ForbiddenException) throw error;
         this.logger.warn(
@@ -1932,26 +1920,31 @@ export class ProductsService {
   }
 
   /**
-   * B.2 (A.0) — cutover flag×capability para la rama rank. Devuelve flags
-   * (para `buildProductWhere`, donde L2⇒L1 vía `isSmartSearchActive`) + path
-   * (para el gate `l2|trigram` del rank). Never-throw: sin search, con
-   * barcode, sin store, sin provider o con throw ⇒ legacy (fail-closed, grid
-   * intacta). `findIds` NO lo usa: hereda el where (mismo conjunto, DB-17) y
-   * el orden le es irrelevante (select-all) — no duplica el rank.
+   * B.2 (A.0) — cutover capability×kill-switch para la rama rank. Devuelve
+   * la resolución completa + `smartAllowed` (para `buildProductWhere`: true
+   * ⇔ path ≠ legacy). Never-throw: sin search, con barcode, sin store, sin
+   * provider o con throw ⇒ legacy (fail-closed, grid intacta). `findAll` y
+   * `findIds` lo comparten (mismo conjunto, DB-17); el rank solo vive en
+   * `findAll` (a `findIds` el orden le es irrelevante: select-all).
    */
   private async resolveSmartSearchFor(
     query: ProductQueryDto,
     storeId?: number,
-  ): Promise<{ flags: PosSearchFlags | undefined; path: PosSearchPath }> {
+  ): Promise<PosSearchResolution & { smartAllowed: boolean }> {
     const legacy = {
-      flags: undefined as PosSearchFlags | undefined,
       path: 'legacy' as PosSearchPath,
+      trigramCapable: false,
+      killSwitch: false,
+      smartAllowed: false,
     };
     try {
       if (!query.search || query.barcode) return legacy;
-      if (!storeId || !this.searchFlags) return legacy;
-      const resolution = await this.searchFlags.resolveSearchPathFor(storeId);
-      return { flags: resolution.flags, path: resolution.path };
+      if (!storeId || !this.searchPath) return legacy;
+      const resolution = await this.searchPath.resolveSearchPathFor();
+      return {
+        ...resolution,
+        smartAllowed: resolution.path !== 'legacy',
+      };
     } catch {
       return legacy;
     }
@@ -2286,7 +2279,7 @@ export class ProductsService {
   /**
    * B.2 (F-068) — UNA línea estructurada por request con `search`: request_id,
    * store, query-hash, tokens, ms por etapa, candidatos, rank_mode + snapshot
-   * de flags (A.0). Debug por defecto; warn si degradado o sobre presupuesto
+   * del cutover (A.0). Debug por defecto; warn si degradado o sobre presupuesto
    * (300ms). Never-throw: el log no rompe el request.
    *
    * Nota: `request_id` como comment SQL no aplica al path ORM (Prisma no
@@ -2296,14 +2289,15 @@ export class ProductsService {
     search: string;
     tokens: readonly string[];
     storeId?: number;
-    flags: PosSearchFlags | undefined;
     path: PosSearchPath;
+    trigramCapable: boolean;
+    killSwitch: boolean;
     rankMode: SearchRankMeta['rank_mode'];
     degraded: boolean;
     fromCache: boolean;
     candidates: number;
     total: number;
-    msFlags: number;
+    msPath: number;
     msCache: number;
     msScanRank: number;
     msFetch: number;
@@ -2317,7 +2311,7 @@ export class ProductsService {
         qhash: this.hashSearchQuery(args.search),
         tokens: [...args.tokens],
         token_count: args.tokens.length,
-        ms_flags: args.msFlags,
+        ms_path: args.msPath,
         ms_cache: args.msCache,
         ms_scan_rank: args.msScanRank,
         ms_fetch: args.msFetch,
@@ -2327,9 +2321,10 @@ export class ProductsService {
         total: args.total,
         from_cache: args.fromCache,
         rank_mode: args.rankMode,
-        ...snapshotSearchFlags(
-          args.flags ?? { ...POS_SEARCH_FLAGS_DEFAULT },
+        ...snapshotSearchPath(
           args.path,
+          args.trigramCapable,
+          args.killSwitch,
         ),
         degraded: args.degraded,
       };
@@ -2404,15 +2399,15 @@ export class ProductsService {
     // QUI-727 (A.1) / ADR-10 — proyección por rol: `cocina` no ve dinero.
     const isCocina = this.isKitchenRole();
 
-    // B.2 (A.0): cutover flag×capability — flags para el where (donde L2⇒L1)
-    // + path para el gate del rank. Fail-closed a legacy.
-    const flagsStart = Date.now();
+    // B.2 (A.0): cutover capability×kill-switch — smartAllowed para el
+    // where + path para el gate del rank. Fail-closed a legacy.
+    const pathStart = Date.now();
     const smartSearch = await this.resolveSmartSearchFor(
       query,
       context?.store_id,
     );
-    const msFlags = Date.now() - flagsStart;
-    const where = this.buildProductWhere(query, smartSearch.flags);
+    const msPath = Date.now() - pathStart;
+    const where = this.buildProductWhere(query, smartSearch.smartAllowed);
 
     // B.2 (F-089): settings en single-flight por request — antes se leían 2
     // veces con search+pos_optimized (resolvePosScope + Promise.all); ahora
@@ -2451,7 +2446,7 @@ export class ProductsService {
     const includeStockEffective = pos_optimized ? true : include_stock;
 
     // B.2 review fix (F-013) — tokens ANTES del gate: el rank exige lo mismo
-    // que el where (`isSmartSearchActive`: tier on ∧ ≥1 token). Sin esto,
+    // que el where (`isSmartSearchActive`: cutover smart ∧ ≥1 token). Sin esto,
     // `search=e` o `de la` (0 tokens) entraban al rank con score degenerado
     // (todo empates) y `meta.search` mentía `ranked` sobre un conjunto legacy.
     const smartTokens: readonly string[] = search
@@ -3021,14 +3016,15 @@ export class ProductsService {
           search,
           tokens: smartTokens,
           storeId: context?.store_id,
-          flags: smartSearch.flags,
           path: smartSearch.path,
+          trigramCapable: smartSearch.trigramCapable,
+          killSwitch: smartSearch.killSwitch,
           rankMode,
           degraded: rankDegraded,
           fromCache: rankStats?.fromCache ?? false,
           candidates: rankStats?.candidates ?? 0,
           total,
-          msFlags,
+          msPath,
           msCache: rankStats?.msCache ?? 0,
           msScanRank: rankStats?.msScanRank ?? 0,
           msFetch,
@@ -3231,14 +3227,15 @@ export class ProductsService {
         search,
         tokens: smartTokens,
         storeId: context?.store_id,
-        flags: smartSearch.flags,
         path: smartSearch.path,
+        trigramCapable: smartSearch.trigramCapable,
+        killSwitch: smartSearch.killSwitch,
         rankMode,
         degraded: rankDegraded,
         fromCache: rankStats?.fromCache ?? false,
         candidates: rankStats?.candidates ?? 0,
         total,
-        msFlags,
+        msPath,
         msCache: rankStats?.msCache ?? 0,
         msScanRank: rankStats?.msScanRank ?? 0,
         msFetch,

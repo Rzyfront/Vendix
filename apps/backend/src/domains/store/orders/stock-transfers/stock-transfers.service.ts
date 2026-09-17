@@ -18,7 +18,7 @@ import {
   rankedIdsPage,
   scoreTokens,
 } from '../../../../common/utils/search-score.util';
-import { PosSearchFlagsService } from '../../settings/pos-smart-search/pos-search-flags.service';
+import { PosSearchPathService } from '../../settings/pos-smart-search/pos-search-path.service';
 import { Prisma } from '@prisma/client';
 import { CreateTransferDto } from './dto/create-transfer.dto';
 import { UpdateTransferDto } from './dto/update-transfer.dto';
@@ -73,7 +73,7 @@ export class StockTransfersService {
     private stockLevelManager: StockLevelManager,
     private readonly event_emitter: EventEmitter2,
     private readonly operatingScopeService: OperatingScopeService,
-    private readonly searchFlags: PosSearchFlagsService,
+    private readonly searchPath: PosSearchPathService,
   ) {}
 
   private async validateTransferScope(
@@ -886,9 +886,9 @@ export class StockTransfersService {
   /**
    * D.2 (CP-pos-smart-search) — picker de traslados con L1+L2 heredado.
    *
-   * Con flag `l1` on: where tokenizado AND×OR (mismo helper A.1, raíz
-   * `products`) + rank en memoria (mismo A.2); `stock_levels.some` @origen
-   * intacto. Con flag off, sin tienda, sin tokens, sobre scan-cap o throw:
+   * Where tokenizado AND×OR (mismo helper A.1, raíz `products`) + rank en
+   * memoria (mismo A.2); `stock_levels.some` @origen intacto. Con
+   * kill-switch, sin tokens, sobre scan-cap o throw:
    * el contains legacy, byte-idéntico (fail-open, sin rescate difuso).
    * Shape `{success,data[]}` del controller intacto: aquí no se toca.
    *
@@ -934,10 +934,8 @@ export class StockTransfersService {
 
   private async isSmartTransferSearchOn(): Promise<boolean> {
     try {
-      const storeId = RequestContextService.getStoreId();
-      if (!storeId || !this.searchFlags) return false;
-      const flags = await this.searchFlags.resolveSearchFlags(storeId);
-      return flags.l1 === true;
+      if (!this.searchPath) return false;
+      return !this.searchPath.isKillSwitchOn();
     } catch {
       return false;
     }

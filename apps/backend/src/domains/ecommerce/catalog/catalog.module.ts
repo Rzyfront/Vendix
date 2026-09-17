@@ -16,7 +16,7 @@ import { SettingsModule } from '../../store/settings/settings.module';
     MenusModule,
     // StorefrontPriceService: fuente unica del precio publicado.
     StorefrontSharedModule,
-    // D.3 — PosSearchFlagsService (heredero L1); SettingsModule no importa
+    // D.3 — PosSearchPathService (cutover smart); SettingsModule no importa
     // CatalogModule ⇒ sin ciclo.
     SettingsModule,
   ],

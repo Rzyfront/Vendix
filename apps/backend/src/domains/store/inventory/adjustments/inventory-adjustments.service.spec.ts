@@ -3,7 +3,7 @@
  *
  * Flag on: where AND×OR nestado bajo `products:` (mismo helper A.1) +
  * rank en memoria (mismo A.2); location_id y product_variant_id intactos;
- * shape idéntico al legacy. Flag off / sin tienda / throw ⇒ legacy.
+ * shape idéntico al legacy. Kill-switch / throw ⇒ legacy.
  */
 import { InventoryAdjustmentsService } from './inventory-adjustments.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -12,7 +12,7 @@ describe('InventoryAdjustmentsService — searchAdjustableProducts (D.1)', () =>
   const mockPrisma = {
     stock_levels: { findMany: jest.fn() },
   };
-  const mockSearchFlags = { resolveSearchFlags: jest.fn() };
+  const mockSearchPath = { isKillSwitchOn: jest.fn() };
   let service: InventoryAdjustmentsService;
 
   const row = (over: Record<string, any>) => ({
@@ -36,19 +36,15 @@ describe('InventoryAdjustmentsService — searchAdjustableProducts (D.1)', () =>
       mockPrisma as any,
       {} as any,
       {} as any,
-      mockSearchFlags as any,
+      mockSearchPath as any,
     );
     jest
       .spyOn(RequestContextService, 'getStoreId')
       .mockReturnValue(3);
-    mockSearchFlags.resolveSearchFlags.mockResolvedValue({
-      l1: true,
-      l2: true,
-      trigram: false,
-    });
+    mockSearchPath.isKillSwitchOn.mockReturnValue(false);
   });
 
-  it('flag on: where tokenizado AND×OR bajo products: + location intacto', async () => {
+  it('smart: where tokenizado AND×OR bajo products: + location intacto', async () => {
     mockPrisma.stock_levels.findMany.mockResolvedValue([
       row({ id: 1 }),
       row({ id: 2, products: { name: 'Tubo Cafe 3/4', sku: 'X' } }),
@@ -91,12 +87,8 @@ describe('InventoryAdjustmentsService — searchAdjustableProducts (D.1)', () =>
     ]);
   });
 
-  it('flag off: contains legacy byte-idéntico (OR frase)', async () => {
-    mockSearchFlags.resolveSearchFlags.mockResolvedValue({
-      l1: false,
-      l2: false,
-      trigram: false,
-    });
+  it('kill-switch: contains legacy byte-idéntico (OR frase)', async () => {
+    mockSearchPath.isKillSwitchOn.mockReturnValue(true);
     mockPrisma.stock_levels.findMany.mockResolvedValue([]);
 
     await service.searchAdjustableProducts('cafe tubo', 7, 10);
@@ -110,7 +102,7 @@ describe('InventoryAdjustmentsService — searchAdjustableProducts (D.1)', () =>
     expect(args.take).toBe(10);
   });
 
-  it('query acentuada + flag on ⇒ legacy (paridad, finding #2)', async () => {
+  it('query acentuada + smart ⇒ legacy (paridad, finding #2)', async () => {
     mockPrisma.stock_levels.findMany.mockResolvedValue([]);
 
     await service.searchAdjustableProducts('café tubo', 7, 10);
@@ -124,19 +116,20 @@ describe('InventoryAdjustmentsService — searchAdjustableProducts (D.1)', () =>
     ]);
   });
 
-  it('sin tienda / flags down / throw ⇒ legacy (fail-open)', async () => {
+  it('kill-switch on / throw ⇒ legacy (fail-open)', async () => {
     mockPrisma.stock_levels.findMany.mockResolvedValue([row({ id: 1 })]);
 
-    // Sin tienda.
-    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(undefined);
+    // Kill on.
+    mockSearchPath.isKillSwitchOn.mockReturnValue(true);
     await service.searchAdjustableProducts('tubo', 7, 10);
     expect(
       mockPrisma.stock_levels.findMany.mock.calls[0][0].where.products.OR,
     ).toHaveLength(3);
 
-    // Flags down.
-    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(3);
-    mockSearchFlags.resolveSearchFlags.mockRejectedValue(new Error('down'));
+    // Kill-switch down (throw).
+    mockSearchPath.isKillSwitchOn.mockImplementation(() => {
+      throw new Error('down');
+    });
     await service.searchAdjustableProducts('tubo', 7, 10);
     expect(
       mockPrisma.stock_levels.findMany.mock.calls[1][0].where.products.OR,

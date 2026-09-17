@@ -523,16 +523,6 @@ export function getDefaultStoreSettings(): StoreSettings {
       voice_engine: 'pipeline',
     },
 
-    // CP-pos-smart-search A.0 — Tier-1 flags, default off (F-006, F-035).
-    // Sin migrador: la sección es puramente aditiva y
-    // `mergeStoreSettingsWithDefaults` la rellena para las tiendas que la
-    // anteceden; ningún shape legacy necesita normalización.
-    pos_smart_search: {
-      l1: false,
-      l2: false,
-      trigram: false,
-    },
-
     // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & UI
     promotions: {
       evaluation_strategy: 'winner_takes_all',

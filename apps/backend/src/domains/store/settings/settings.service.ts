@@ -30,8 +30,6 @@ import {
   mergeStoreSettingsWithDefaults,
 } from './defaults/default-store-settings';
 import { SettingsMigratorService } from './migrations/settings-migrator.service';
-import { PosSearchFlagsService } from './pos-smart-search/pos-search-flags.service';
-import { coerceSearchFlags } from './pos-smart-search/pos-search-flags';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import {
@@ -94,10 +92,6 @@ export const KNOWN_SECTIONS = [
   // drops `{ vexi: { enabled: false } }` before validation and the endpoint
   // answers 200 with the old value — a switch that silently refuses to move.
   'vexi',
-  // CP-pos-smart-search A.0 — Tier-1 flags `{ l1, l2, trigram }`. Sin esta
-  // entrada el sanitizador descarta el toggle respondiendo 200 con el valor
-  // viejo: un rollout que parece avanzar y nunca enciende (F-006).
-  'pos_smart_search',
   // Promotions - Evaluation strategy (winner_takes_all vs stacking_groups) & UI
   'promotions',
   // `app` is intentionally accepted here because the service maps it to
@@ -122,11 +116,6 @@ export class SettingsService {
     @Inject(forwardRef(() => SessionsService))
     private sessionsService: SessionsService,
     private pwaCache: PwaCacheService,
-    // CP-pos-smart-search A.0 — opcional SOLO para no romper harnesses que
-    // construyen el servicio a mano (p. ej. settings.service.spec.ts QUI-560):
-    // en el módulo real Nest siempre lo inyecta (mismo módulo, sin ciclo).
-    // Cada uso va con `?.` por esa razón.
-    private searchFlags?: PosSearchFlagsService,
   ) {}
 
   /**
@@ -611,17 +600,6 @@ export class SettingsService {
       };
     }
 
-    // CP-pos-smart-search A.0 — `pos_smart_search` también se mezcla por clave:
-    // cada toggle viaja solo (`{ pos_smart_search: { l2: true } }`) y el
-    // reemplazo de sección del bucle genérico borraría los otros dos flags.
-    // Apagar L2 jamás debe apagar L1 de rebote en el mismo PATCH.
-    if (dto.pos_smart_search !== undefined) {
-      (updatedSettings as any).pos_smart_search = {
-        ...((currentSettings as any).pos_smart_search ?? {}),
-        ...dto.pos_smart_search,
-      };
-    }
-
     // `invoicing` también se mezcla por clave, y una clave MÁS ADENTRO que
     // `vexi`, porque su contenido está anidado dos niveles: la sección sólo
     // contiene `aiu`, y `aiu` contiene cuatro parámetros que la pantalla fiscal
@@ -801,30 +779,8 @@ export class SettingsService {
       await this.pwaCache.invalidateStore(store_id);
     }
 
-    // CP-pos-smart-search A.0 — el PATCH trajo toggles: invalidar el caché de
-    // flags (F-051; esta instancia de inmediato, las demás en ≤TTL) y auditar
-    // cada flag que cambió (F-071). Fuera del try de abajo a propósito: la
-    // invalidación es memoria local y no lanza; el audit va dentro porque
-    // `auditToggles` delega en `AuditService.log`, que ya es never-throw,
-    // pero el bloque igual lo blinda como al resto de la auditoría.
-    if (dto.pos_smart_search !== undefined) {
-      this.searchFlags?.invalidateStore(store_id);
-    }
-
     // Registrar auditoría de actualización de settings
     try {
-      if (dto.pos_smart_search !== undefined) {
-        await this.searchFlags?.auditToggles({
-          userId: user_id!,
-          storeId: store_id,
-          organizationId: context?.organization_id ?? undefined,
-          before: coerceSearchFlags(
-            (oldValues as StoreSettings).pos_smart_search,
-          ),
-          after: coerceSearchFlags(updatedSettings.pos_smart_search),
-        });
-      }
-
       // Solo guardar las secciones que cambiaron (no todo el objeto de settings)
       const changedSections: Record<string, any> = {};
       for (const key of Object.keys(dto)) {
@@ -892,10 +848,6 @@ export class SettingsService {
       },
     });
 
-    // CP-pos-smart-search A.0 — reset reescribe TODAS las secciones: los flags
-    // cacheados quedan rancios sin esta invalidación (F-051).
-    this.searchFlags?.invalidateStore(store_id);
-
     return this.getSettings();
   }
 
@@ -961,10 +913,6 @@ export class SettingsService {
         settings,
       },
     });
-
-    // CP-pos-smart-search A.0 — la plantilla reescribe TODAS las secciones:
-    // invalidar flags cacheados (F-051).
-    this.searchFlags?.invalidateStore(store_id);
 
     return settings;
   }
