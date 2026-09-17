@@ -108,6 +108,10 @@ export class CatalogComponent implements OnInit {
   readonly current_page = signal(1);
   readonly total_pages = signal(1);
   readonly total_products = signal(0);
+  // D.3 (F-077): tokens aplicados por el rank público (tope 4) + hint de
+  // truncado cuando la query trae más palabras de las rankeadas.
+  readonly applied_tokens = signal<string[]>([]);
+  readonly tokens_truncated = signal(false);
   readonly limit = signal(12);
   readonly catalog_settings = signal<CatalogSettings>(DEFAULT_CATALOG_SETTINGS);
   readonly shipping_badge_enabled = signal(false);
@@ -398,6 +402,10 @@ export class CatalogComponent implements OnInit {
           this.total_products.set(response.meta.total);
           this.total_pages.set(response.meta.total_pages);
           this.current_page.set(response.meta.page);
+          this.applied_tokens.set(response.meta.applied_tokens ?? []);
+          this.tokens_truncated.set(
+            response.meta.tokens_truncated ?? false,
+          );
           this.is_loading.set(false);
         },
         error: () => {

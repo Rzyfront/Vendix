@@ -4,6 +4,7 @@ import {
   ErrorResponse,
   PaginatedResponse,
   PaginationMeta,
+  SearchRankMeta,
   createPaginationMeta,
 } from './response.interface';
 
@@ -70,6 +71,9 @@ export class ResponseService {
     page: number,
     limit: number,
     message: string = 'Data retrieved successfully',
+    // B.2 (ADR-08): opcional y aditivo — el resto de llamadores no lo pasa
+    // y su `meta` queda idéntica a la de siempre.
+    search?: SearchRankMeta,
   ): PaginatedResponse<T> {
     const meta = createPaginationMeta(total, page, limit);
 
@@ -77,7 +81,7 @@ export class ResponseService {
       success: true,
       message,
       data,
-      meta,
+      meta: search ? { ...meta, search } : meta,
     };
   }
 

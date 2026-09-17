@@ -222,6 +222,59 @@ describe('ProductsController', () => {
 
       expect(service.findAll).toHaveBeenCalledWith(searchQuery);
     });
+
+    it('B.3 (ADR-08): pasa meta.search al envelope paginado cuando hay search', async () => {
+      const searchMeta = {
+        rank_mode: 'ranked',
+        layer: 'l2',
+        degraded: false,
+      } as const;
+      const mockResponse = {
+        data: [{ id: 1, name: 'Café molido' }],
+        meta: { total: 1, page: 1, limit: 10, search: searchMeta },
+      };
+      mockProductsService.findAll.mockResolvedValue(mockResponse);
+      mockResponseService.paginated.mockReturnValue({
+        success: true,
+        data: mockResponse.data,
+        meta: { ...mockResponse.meta, totalPages: 1 },
+      });
+
+      const result = await controller.findAll(
+        { search: 'cafe', page: 1, limit: 10 },
+        mockRequest,
+      );
+
+      // Sexto arg: el spread condicional del controller.
+      expect(responseService.paginated).toHaveBeenCalledWith(
+        mockResponse.data,
+        1,
+        1,
+        10,
+        'Productos obtenidos exitosamente',
+        searchMeta,
+      );
+      expect((result as any).meta.search).toEqual(searchMeta);
+    });
+
+    it('B.3 (ADR-08): sin meta.search preserva la llamada de 5 args', async () => {
+      const mockResponse = {
+        data: [],
+        meta: { total: 0, page: 1, limit: 10 },
+      };
+      mockProductsService.findAll.mockResolvedValue(mockResponse);
+
+      await controller.findAll({ page: 1, limit: 10 }, mockRequest);
+
+      expect(responseService.paginated).toHaveBeenCalledWith(
+        [],
+        0,
+        1,
+        10,
+        'Productos obtenidos exitosamente',
+      );
+      expect(mockResponseService.paginated.mock.calls[0]).toHaveLength(5);
+    });
   });
 
   describe('GET PRODUCT BY ID', () => {
@@ -539,6 +592,54 @@ describe('ProductsController', () => {
         'Insufficient permissions',
         403,
       );
+    });
+
+    it('B.3 (F-003): el rechazo tipado de findAll se PROPAGA — nunca 200 success:false', async () => {
+      // Sin el rethrow, todo throw nuevo del path smart (tokenizer, rank,
+      // hydrate) caía a `responseService.error()`: grilla vacía silenciosa
+      // sin error_code. El AllExceptionsFilter conserva status + código.
+      const rejection = new VendixHttpException(
+        ErrorCodes.PROD_FIND_001,
+        'Producto no encontrado',
+      );
+      mockProductsService.findAll.mockRejectedValue(rejection);
+
+      await expect(
+        controller.findAll({ search: 'cafe' }, mockRequest),
+      ).rejects.toThrow(rejection);
+      expect(responseService.error).not.toHaveBeenCalled();
+    });
+
+    it('ERR-06: page=-1 documenta 200 success:false (NO cambiar)', async () => {
+      // Contrato CONGELADO en Fase A, no bug a corregir aquí: page/limit<=0
+      // pasa el DTO (sin @Min), Prisma rechaza skip/take con un error
+      // GENÉRICO (no tipado), y este catch lo convierte en sobre
+      // success:false con HTTP 200 — la grilla muestra vacío silencioso con
+      // los textos de ERR-01. Ver el companion en
+      // products.service.spec.ts (el servicio propaga, no traga).
+      const prismaError = new Error(
+        'Invalid `prisma.products.findMany()` invocation: Argument `skip` must be greater than or equal to 0.',
+      );
+      mockProductsService.findAll.mockRejectedValue(prismaError);
+      mockResponseService.error.mockReturnValue({
+        success: false,
+        message: prismaError.message,
+        error: prismaError.message,
+        statusCode: 400,
+        timestamp: new Date().toISOString(),
+      });
+
+      const result = await controller.findAll(
+        { page: -1, limit: 10 },
+        mockRequest,
+      );
+
+      expect(responseService.error).toHaveBeenCalledWith(
+        prismaError.message,
+        prismaError.message,
+        400,
+      );
+      expect(result.success).toBe(false);
     });
   });
 
