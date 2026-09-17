@@ -20,6 +20,7 @@ import {
 import { generateSlug } from '@common/utils/slug.util';
 import { toTitleCase } from '@common/utils/format.util';
 import { Prisma } from '@prisma/client';
+import { parseMoneyCell } from '@common/money-kernel';
 import { buildReportBuffer } from '@common/reports/report-builder';
 import type { ReportColumn } from '@common/reports/report-column.types';
 import * as XLSX from 'xlsx';
@@ -53,6 +54,36 @@ export class ProductsBulkService {
     'requires_serial_numbers',
     'requires_batch_tracking',
   ]);
+
+  // Campos monetarios: se parsean tolerando símbolos de moneda, separador de
+  // miles y coma decimal (QUI-846). El resto de columnas numéricas conserva
+  // `parseFloat` porque su formato no lleva símbolos de moneda.
+  private readonly MONEY_CELL_FIELDS = new Set([
+    'base_price',
+    'cost_price',
+    'sale_price',
+  ]);
+
+  private readonly NUMERIC_CELL_FIELDS = new Set([
+    'stock_quantity',
+    'weight',
+    'profit_margin',
+    'service_duration_minutes',
+    'buffer_minutes',
+    'preparation_time_minutes',
+    'min_stock_level',
+    'max_stock_level',
+    'reorder_point',
+    'reorder_quantity',
+    'consultation_template_id',
+    'preconsultation_template_id',
+  ]);
+
+  // Propiedad reservada que `parseFile` adjunta a la fila cuando una celda de
+  // precio venía con texto (no vacía) y no se pudo interpretar como número.
+  // `analyzeProducts` la convierte en error de fila; nunca se persiste.
+  private readonly CELL_ERRORS_KEY = '__cell_errors';
+
   private readonly CATALOG_ONLY_IGNORED_FIELD_LABELS: Record<string, string> = {
     stock_quantity: 'Cantidad inicial',
     stock_by_location: 'Stock por ubicación',
@@ -261,7 +292,11 @@ export class ProductsBulkService {
    */
   parseFile(buffer: Buffer): any[] {
     try {
-      const workbook = XLSX.read(buffer, { type: 'buffer' });
+      // `raw: true` sólo cambia el parseo de CSV: evita que SheetJS coaccione
+      // "5.000" a `5` (o "$ 5.000" a `5`) antes de que el parser de dinero lo
+      // vea. En .xlsx no tiene efecto: las celdas numéricas siguen siendo
+      // números y las de texto, texto.
+      const workbook = XLSX.read(buffer, { type: 'buffer', raw: true });
       const sheetName = workbook.SheetNames[0];
       const worksheet = workbook.Sheets[sheetName];
 
@@ -325,25 +360,34 @@ export class ProductsBulkService {
               return;
             }
 
-            if (
-              [
-                'base_price',
-                'cost_price',
-                'stock_quantity',
-                'weight',
-                'sale_price',
-                'profit_margin',
-                'service_duration_minutes',
-                'buffer_minutes',
-                'preparation_time_minutes',
-                'min_stock_level',
-                'max_stock_level',
-                'reorder_point',
-                'reorder_quantity',
-                'consultation_template_id',
-                'preconsultation_template_id',
-              ].includes(key)
-            ) {
+            if (this.MONEY_CELL_FIELDS.has(key)) {
+              const parsed = parseMoneyCell(val);
+              if (parsed === null) {
+                // Celda con texto que no es un número (p. ej. "cinco mil",
+                // "N/A"): no se descarta en silencio. Queda marcada para que
+                // la previsualización y la escritura rechacen la fila en vez
+                // de persistir un precio 0 (QUI-846).
+                const label =
+                  key === 'base_price'
+                    ? 'El precio de venta'
+                    : key === 'sale_price'
+                      ? 'El precio de oferta'
+                      : 'El precio de compra';
+                const cellErrors = product[this.CELL_ERRORS_KEY] ?? [];
+                cellErrors.push({
+                  code: 'INVALID_PRICE',
+                  message: `${label} no es un número válido. Escribe solo dígitos y separadores, por ejemplo 5000 o 5.000.`,
+                  field: key,
+                });
+                product[this.CELL_ERRORS_KEY] = cellErrors;
+              } else {
+                product[key] = parsed;
+              }
+              hasData = true;
+              return;
+            }
+
+            if (this.NUMERIC_CELL_FIELDS.has(key)) {
               const num = parseFloat(strVal);
               if (!isNaN(num)) {
                 product[key] = num;
@@ -568,12 +612,17 @@ export class ProductsBulkService {
     for (let i = 0; i < products.length; i++) {
       const product = { ...products[i] };
       const ignoredCatalogFields = this.stripCatalogOnlyIgnoredFields(product);
+      const cellErrors: { code: string; message: string; field?: string }[] =
+        Array.isArray(product[this.CELL_ERRORS_KEY])
+          ? product[this.CELL_ERRORS_KEY]
+          : [];
+      const parsedBasePrice = parseMoneyCell(product.base_price);
       const item: BulkProductAnalysisItemDto = {
         row_number: i + 2, // +2 because row 1 is header, data starts at row 2
         name: product.name || '',
         sku: product.sku || '',
         product_type: 'physical',
-        base_price: parseFloat(product.base_price) || 0,
+        base_price: parsedBasePrice ?? 0,
         cost_price: 0,
         stock_quantity: 0,
         track_inventory: undefined,
@@ -640,16 +689,27 @@ export class ProductsBulkService {
           field: 'sku',
         });
       }
-      if (item.base_price < 0) {
+      // Celda de precio con texto no numérico: error de fila (no se degrada a
+      // un warning que dejaría pasar el producto con precio 0).
+      for (const cellError of cellErrors) {
+        item.errors.push(cellError);
+      }
+
+      const hasPriceCellError = cellErrors.some((e) => e.field === 'base_price');
+      if (!hasPriceCellError && parsedBasePrice === null) {
+        item.errors.push({
+          code: 'MISSING_PRICE',
+          message:
+            'El precio de venta es obligatorio: la columna "Precio Venta" está vacía.',
+          field: 'base_price',
+        });
+      } else if (parsedBasePrice !== null && parsedBasePrice < 0) {
         item.errors.push({
           code: 'INVALID_PRICE',
           message: 'Precio de venta no puede ser negativo',
           field: 'base_price',
         });
-      }
-
-      // Check for no sell price
-      if (item.base_price === 0) {
+      } else if (parsedBasePrice === 0) {
         item.warnings.push({
           code: 'NO_PRICE_SPECIFIED',
           message: 'No se especificó precio de venta',
@@ -2071,8 +2131,20 @@ export class ProductsBulkService {
   ): Promise<void> {
     if (!product.name) throw new BadRequestException('Nombre es requerido');
     if (!product.sku) throw new BadRequestException('SKU es requerido');
-    if (product.base_price < 0)
+
+    // El precio es la razón de ser del producto: si la celda no se pudo
+    // interpretar como número, la fila se rechaza. Permitir `undefined` aquí
+    // persistía el default 0 de la base de datos (QUI-846).
+    const basePrice = parseMoneyCell(product.base_price);
+    if (basePrice === null) {
+      throw new BadRequestException(
+        'El precio de venta es obligatorio y debe ser un número válido (ej. 5000 o 5.000)',
+      );
+    }
+    if (basePrice < 0) {
       throw new BadRequestException('Precio base debe ser positivo');
+    }
+    (product as any).base_price = basePrice;
 
     // IDs de marca y categoría ya deberían ser numéricos aquí tras el pre-procesamiento.
     // Tolerante: si la marca no existe o no pertenece al store, se sube el producto sin marca.

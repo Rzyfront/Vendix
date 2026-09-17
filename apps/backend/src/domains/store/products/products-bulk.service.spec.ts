@@ -54,9 +54,11 @@ describe('ProductsBulkService', () => {
     },
     brands: {
       findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     categories: {
       findFirst: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([]),
     },
     tax_categories: {
       findMany: jest.fn(),
@@ -826,6 +828,84 @@ describe('ProductsBulkService', () => {
       const fallbackCall =
         mockPrismaService.products.findMany.mock.calls[1][0];
       expect(fallbackCall.include).toBeUndefined();
+    });
+  });
+
+  // QUI-846: la plantilla guardaba el precio como texto y `parseFloat`
+  // descartaba en silencio cualquier celda con símbolo o separador de miles,
+  // dejando el producto creado con el default 0 de la DB. Ahora el parser de
+  // dinero interpreta el formato local y una celda inválida/vacía se reporta
+  // como error de fila en lugar de convertirse en precio 0.
+  describe('parseFile — precio de carga masiva (QUI-846)', () => {
+    const csv = (rows: string[]) =>
+      Buffer.from(['Nombre,SKU,Precio Venta', ...rows].join('\n'));
+
+    it('interpreta un precio con símbolo y separador de miles en celda de texto', () => {
+      const [row] = service.parseFile(csv(['Prod,PROD-1,"$ 5.000"']));
+      expect((row as any).base_price).toBe(5000);
+    });
+
+    it('interpreta "5.000" como cinco mil, no como cinco', () => {
+      const [row] = service.parseFile(csv(['Prod,PROD-1,5.000']));
+      expect((row as any).base_price).toBe(5000);
+    });
+
+    it('interpreta el formato colombiano 5.000,50', () => {
+      const [row] = service.parseFile(csv(['Prod,PROD-1,"5.000,50"']));
+      expect((row as any).base_price).toBe(5000.5);
+    });
+
+    it('deja el precio sin setear y registra el error cuando la celda no es numérica', () => {
+      const [row] = service.parseFile(csv(['Prod,PROD-1,N/A']));
+      expect((row as any).base_price).toBeUndefined();
+      expect((row as any).__cell_errors).toEqual([
+        expect.objectContaining({ field: 'base_price', code: 'INVALID_PRICE' }),
+      ]);
+    });
+
+    it('no registra error cuando la celda de precio está vacía', () => {
+      const [row] = service.parseFile(csv(['Prod,PROD-1,']));
+      expect((row as any).base_price).toBeUndefined();
+      expect((row as any).__cell_errors).toBeUndefined();
+    });
+  });
+
+  describe('analyzeProducts — precio (QUI-846)', () => {
+    beforeEach(() => {
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+    });
+
+    const analyze = (rows: string[]) =>
+      service.analyzeProducts(
+        Buffer.from(['Nombre,SKU,Precio Venta', ...rows].join('\n')),
+        mockUser,
+      );
+
+    it('marca la fila como error cuando el precio no es numérico', async () => {
+      const result = await analyze(['Prod,PROD-1,N/A']);
+      const item = result.products[0];
+      expect(item.status).toBe('error');
+      expect(
+        item.errors.map((e) => (e as { code: string }).code),
+      ).toContain('INVALID_PRICE');
+      expect(result.ready).toBe(0);
+      expect(result.with_errors).toBe(1);
+    });
+
+    it('marca la fila como error cuando falta el precio', async () => {
+      const result = await analyze(['Prod,PROD-1,']);
+      const item = result.products[0];
+      expect(item.status).toBe('error');
+      expect(
+        item.errors.map((e) => (e as { code: string }).code),
+      ).toContain('MISSING_PRICE');
+    });
+
+    it('acepta y normaliza un precio con separador de miles', async () => {
+      const result = await analyze(['Prod,PROD-1,"5.000"']);
+      const item = result.products[0];
+      expect(item.base_price).toBe(5000);
+      expect(item.status).toBe('ready');
     });
   });
 });
