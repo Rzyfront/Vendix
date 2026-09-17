@@ -14,6 +14,7 @@ import {
   ParseIntPipe,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
@@ -117,6 +118,12 @@ export class VideoLibraryAdminController {
     FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }),
   )
   async uploadThumbnail(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new VendixHttpException(ErrorCodes.MEDIA_FILE_REQUIRED_001);
+    }
+    if (!file.mimetype.startsWith('image/')) {
+      throw new VendixHttpException(ErrorCodes.MEDIA_FILE_TYPE_001);
+    }
     const data = await this.videoLibraryAdminService.uploadThumbnail(file);
     return this.responseService.success(data, 'Miniatura subida exitosamente');
   }
