@@ -504,28 +504,38 @@ export class ProductsService {
       context: JSON.stringify(dto.extra_context || {}),
     };
 
-    let appKey = 'product_image_generator';
-    const appExists = await this.prisma.ai_engine_applications.findUnique({
-      where: { key: appKey },
-      select: { id: true, is_active: true },
-    });
-
-    if (!appExists || !appExists.is_active) {
-      // Fallback a product_image_enhancer en modo generate si no está sembrado en el entorno
-      appKey = 'product_image_enhancer';
-      variables['requested_improvement'] = dto.prompt.trim();
+    let response;
+    try {
+      response = await this.ai_engine.runImage(
+        'product_image_generator',
+        variables,
+        {
+          action: 'generate',
+          quality: 'high',
+          outputFormat: 'png',
+          size: '1024x1024',
+        },
+      );
+    } catch (err) {
+      if (
+        err instanceof VendixHttpException &&
+        err.errorCode === ErrorCodes.AI_APP_001.code
+      ) {
+        variables['requested_improvement'] = dto.prompt.trim();
+        response = await this.ai_engine.runImage(
+          'product_image_enhancer',
+          variables,
+          {
+            action: 'generate',
+            quality: 'high',
+            outputFormat: 'png',
+            size: '1024x1024',
+          },
+        );
+      } else {
+        throw err;
+      }
     }
-
-    const response = await this.ai_engine.runImage(
-      appKey,
-      variables,
-      {
-        action: 'generate',
-        quality: 'high',
-        outputFormat: 'png',
-        size: '1024x1024',
-      },
-    );
 
     if (!response.success || !response.imageBase64) {
       throw new VendixHttpException(ErrorCodes.AI_REQUEST_001);

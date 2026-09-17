@@ -2296,6 +2296,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "e5b3b323",
+      "created_by": "dmin",
+      "created_at": "2026-09-17T15:52:31Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }
