@@ -2,7 +2,7 @@
 id: A.1
 title: "Helper search-text.util.ts + specs"
 phase: A
-status: pending
+status: done
 owner: none
 updated: 2026-09-17
 contracts: [ERR-15]
@@ -23,13 +23,13 @@ skills: [vendix-backend, vendix-naming-conventions]
 - **Verification:**
   - `npm run buildcheck:test -- src/common/utils/search-text.util.spec.ts`
 - **Acceptance checklist:**
-  - [ ] normalizeSearchText('CAFÉ  Negro.') → 'cafe negro'
-  - [ ] tokenizeSearch('café con chocolate') → ['cafe','chocolate'] (stopword fuera)
-  - [ ] tokenizeSearch('de la') → [] (activa fallback legacy en B.1)
-  - [ ] Spec cubre símbolos (-_/().), dedupe y tope 6 tokens
-  - [ ] isSmartSearchActive decide wrap/legacy por caller (spec findAll≡findIds)
-  - [ ] Probes surrogate/null/emoji/500chars: 200 definido, cero throws (ERR-15)
-  - [ ] F-013 — Sin predicado único isSmartSearchActive (major)
-  - [ ] F-015 — Ensamblaje AND×OR sin hogar compartido (major)
-  - [ ] F-032 — Tokenizer puede lanzar con input adversarial (major)
-- **Status:** pending
+  - [x] normalizeSearchText('CAFÉ  Negro.') → 'cafe negro'
+  - [x] tokenizeSearch('café con chocolate') → ['cafe','chocolate'] (stopword fuera)
+  - [x] tokenizeSearch('de la') → [] (activa fallback legacy en B.1)
+  - [x] Spec cubre símbolos (-_/().), dedupe y tope 6 tokens
+  - [x] isSmartSearchActive decide wrap/legacy por caller (spec findAll≡findIds)
+  - [x] Probes surrogate/null/emoji/500chars: 200 definido, cero throws (ERR-15)
+  - [x] F-013 — Sin predicado único isSmartSearchActive (major)
+  - [x] F-015 — Ensamblaje AND×OR sin hogar compartido (major)
+  - [x] F-032 — Tokenizer puede lanzar con input adversarial (major)
+- **Status:** done
