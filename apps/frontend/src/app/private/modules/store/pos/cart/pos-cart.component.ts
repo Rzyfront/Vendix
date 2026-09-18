@@ -88,7 +88,7 @@ import {
               Carrito Actual
             </h2>
             <p
-              class="text-xs text-text-secondary mt-0.5"
+              class="text-xs text-neutral-600 mt-0.5"
               aria-live="polite"
               aria-atomic="true"
             >
@@ -124,7 +124,7 @@ import {
               [class]="
                 hasStaffNote()
                   ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
-                  : 'text-text-secondary border-border/80 hover:text-text-primary hover:bg-muted/40'
+                  : 'text-neutral-600 border-border/80 hover:text-text-primary hover:bg-muted/40'
               "
               aria-label="Nota de la orden"
             >
@@ -150,7 +150,7 @@ import {
             </div>
             <div class="flex-1 min-w-0">
               <p
-                class="text-[11px] text-text-secondary font-medium leading-none mb-0.5"
+                class="text-[11px] text-neutral-600 font-medium leading-none mb-0.5"
               >
                 Cliente
               </p>
@@ -158,7 +158,7 @@ import {
                 {{ cartState().customer?.name }}
               </p>
               @if (cartState().customer?.document_number) {
-                <p class="text-[11px] text-text-secondary truncate">
+                <p class="text-[11px] text-neutral-600 truncate">
                   {{ cartState().customer?.document_type }}
                   {{ cartState().customer?.document_number }}
                 </p>
@@ -197,13 +197,13 @@ import {
               <app-icon
                 name="shopping-cart"
                 [size]="24"
-                class="text-muted"
+                class="text-neutral-600"
               ></app-icon>
             </div>
             <h3 class="text-sm font-semibold text-text-primary mb-1">
               {{ emptyCartTitle }}
             </h3>
-            <p class="text-[11px] text-text-secondary">
+            <p class="text-[11px] text-neutral-600">
               {{ emptyCartHint }}
             </p>
           </div>
@@ -234,7 +234,7 @@ import {
                   }
                   @if (!item.variant_image_url && !item.product.image_url && !item.product.image) {
                     <div
-                      class="absolute inset-0 flex items-center justify-center text-text-secondary"
+                      class="absolute inset-0 flex items-center justify-center text-neutral-600"
                     >
                       <app-icon name="image" [size]="14"></app-icon>
                     </div>
@@ -286,7 +286,7 @@ import {
                         [class]="
                           item.notes
                             ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
-                            : 'text-text-secondary border-border/80 hover:text-text-primary hover:bg-muted/40'
+                            : 'text-neutral-600 border-border/80 hover:text-text-primary hover:bg-muted/40'
                         "
                         [attr.aria-label]="
                           (item.notes ? 'Editar nota de ' : 'Agregar nota a ') +
@@ -330,7 +330,7 @@ import {
                   }
                   @if (item.itemType === 'custom' || item.description) {
                     <p
-                      class="text-[10px] text-text-secondary truncate leading-tight"
+                      class="text-[10px] text-neutral-600 truncate leading-tight"
                     >
                       {{ item.itemType === 'custom' ? 'Ítem personalizado' : item.description }}
                     </p>
@@ -405,7 +405,7 @@ import {
                          POR QUÉ (la misma frase del editor de producto). -->
                     @if (saleConfigHints()[item.id]; as hint) {
                       <p
-                        class="mt-1 text-[10px] text-text-muted leading-tight truncate"
+                        class="mt-1 text-[10px] text-neutral-600 leading-tight truncate"
                         [title]="hint.detail"
                       >
                         {{ hint.headline }}
@@ -607,13 +607,13 @@ import {
              'aria-atomic' sin cambiar el layout ni el copy existente. -->
         <div class="px-3 py-3 bg-muted/20" aria-live="polite" aria-atomic="true">
           <div class="space-y-1.5 mb-4">
-            <div class="flex justify-between text-xs text-text-secondary">
+            <div class="flex justify-between text-xs text-neutral-600">
               <span>Subtotal</span>
               <span class="font-medium">{{
                 formatCurrency(summary().subtotal || 0)
               }}</span>
             </div>
-            <div class="flex justify-between text-xs text-text-secondary">
+            <div class="flex justify-between text-xs text-neutral-600">
               <span>Impuestos</span>
               <span class="font-medium">{{
                 formatCurrency(summary().taxAmount || 0)
@@ -627,7 +627,7 @@ import {
               cuando hay retención resuelta (> 0).
             -->
             @if (withholdingAmount() > 0) {
-              <div class="flex justify-between text-xs text-text-secondary">
+              <div class="flex justify-between text-xs text-neutral-600">
                 <span class="flex items-center gap-1">
                   <app-icon name="minus" [size]="12" class="text-amber-600"></app-icon>
                   Retención
@@ -717,7 +717,7 @@ import {
                           <button
                             type="button"
                             (click)="removePromoDiscount(disc.id)"
-                            class="p-0.5 rounded text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            class="p-0.5 rounded text-neutral-600 hover:text-destructive hover:bg-destructive/10 transition-colors"
                             title="Eliminar promoción"
                             aria-label="Eliminar promoción"
                           >
@@ -787,7 +787,7 @@ import {
                       <button
                         type="button"
                         (click)="removeCoupon()"
-                        class="p-0.5 rounded text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        class="p-0.5 rounded text-neutral-600 hover:text-destructive hover:bg-destructive/10 transition-colors"
                         title="Eliminar cupón"
                         aria-label="Eliminar cupón"
                       >
@@ -802,7 +802,7 @@ import {
                       [(ngModel)]="couponCode"
                       placeholder="¿Tienes cupón o código promo?"
                       aria-label="Código de cupón"
-                      class="coupon-input flex-1 px-2 py-1.5 text-xs rounded-md border border-border bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 uppercase"
+                      class="coupon-input flex-1 px-2 py-1.5 text-xs rounded-md border border-border bg-surface text-text-primary placeholder:text-neutral-600 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 uppercase"
                       (keydown.enter)="applyCoupon()"
                     />
                     <button
@@ -838,7 +838,7 @@ import {
             -->
             @if (getPromotionDiscounts().length > 0 || getAppliedCoupon()) {
               <div
-                class="flex items-center gap-1 text-[10px] text-text-secondary/80 italic mt-1"
+                class="flex items-center gap-1 text-[10px] text-neutral-600 italic mt-1"
                 title="Los totales finales se confirman al procesar el pago"
               >
                 <app-icon name="info" [size]="10"></app-icon>
@@ -1008,13 +1008,13 @@ import {
           maxlength="500"
           rows="4"
           placeholder="Instrucción interna para el equipo, no se envía al cliente"
-          class="w-full px-3 py-2 text-sm border border-border bg-surface rounded-md text-text-primary placeholder:text-text-secondary/60 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none"
+          class="w-full px-3 py-2 text-sm border border-border bg-surface rounded-md text-text-primary placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none"
         ></textarea>
         <div class="flex items-center justify-between">
-          <span class="text-[11px] text-text-secondary">
+          <span class="text-[11px] text-neutral-600">
             Instrucción interna para el equipo, no se envía al cliente.
           </span>
-          <span class="text-[11px] text-text-secondary">
+          <span class="text-[11px] text-neutral-600">
             {{ (cartState().notes || '').length }}/500
           </span>
         </div>
@@ -1056,13 +1056,13 @@ import {
           maxlength="200"
           rows="2"
           placeholder="Notas para cocina (ej. sin cebolla, término medio). Opcional."
-          class="w-full px-3 py-2 text-sm border border-border bg-surface rounded-md text-text-primary placeholder:text-text-secondary/60 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none"
+          class="w-full px-3 py-2 text-sm border border-border bg-surface rounded-md text-text-primary placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none"
         ></textarea>
         <div class="flex items-center justify-between">
-          <span class="text-[11px] text-text-secondary">
+          <span class="text-[11px] text-neutral-600">
             Opcional — se envía a cocina y a la comanda del KDS.
           </span>
-          <span class="text-[11px] text-text-secondary">
+          <span class="text-[11px] text-neutral-600">
             {{ (itemNoteDraft() || '').length }}/200
           </span>
         </div>
@@ -1192,14 +1192,16 @@ import {
         cursor: not-allowed;
       }
 
+      /* Stitch paso 11 — CTA sobre success-700 (~5:1 con blanco, AA);
+         blanco sobre primary #2ecc71 daba 2.10:1 y fallaba AA. */
       .checkout-btn {
         width: 100%;
         padding: 14px;
-        background: var(--color-primary);
+        background: var(--color-success-700);
         color: var(--color-text-on-primary);
         font-size: 15px;
         font-weight: 700;
-        box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
+        box-shadow: 0 4px 12px rgba(var(--color-success-700-rgb), 0.3);
       }
 
       .checkout-btn:hover:not(:disabled) {
@@ -1207,18 +1209,20 @@ import {
         transform: translateY(-1px);
       }
 
+      /* Stitch paso 11 — gradiente 700→800: ambos extremos pasan AA
+         con texto blanco (5.02 y 7.13:1); success→primary fallaba (~2.2:1). */
       .cobrar-btn {
         width: 100%;
         padding: 14px;
         background: linear-gradient(
           135deg,
-          var(--color-success, #16a34a) 0%,
-          var(--color-primary) 100%
+          var(--color-success-700) 0%,
+          var(--color-success-800) 100%
         );
         color: var(--color-text-on-primary);
         font-size: 15px;
         font-weight: 700;
-        box-shadow: 0 4px 14px rgba(34, 197, 94, 0.32);
+        box-shadow: 0 4px 14px rgba(var(--color-success-700-rgb), 0.32);
       }
 
       .cobrar-btn:hover:not(:disabled) {
@@ -1234,7 +1238,7 @@ import {
       .save-btn {
         background: var(--color-muted);
         border: 1px solid var(--color-border);
-        color: var(--color-text-secondary);
+        color: var(--color-neutral-600);
       }
 
       .save-btn:hover:not(:disabled) {
@@ -1248,10 +1252,11 @@ import {
 
 
 
+      /* Stitch paso 11 — sólido success-700 (AA con blanco); el
+         opacity 0.85 sobre primary aclaraba el fondo y fallaba AA. */
       .shipping-btn {
-        background: var(--color-primary);
+        background: var(--color-success-700);
         color: var(--color-text-on-primary);
-        opacity: 0.85;
       }
 
       .custom-item-btn {
@@ -1265,7 +1270,7 @@ import {
       }
 
       .shipping-btn:hover:not(:disabled) {
-        opacity: 1;
+        background: var(--color-success-800);
       }
 
       /* ── System AI tooltip (same pattern as ai-generate-btn) ── */

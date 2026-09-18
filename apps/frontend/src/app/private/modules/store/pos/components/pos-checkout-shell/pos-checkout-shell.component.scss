@@ -71,7 +71,7 @@
 .progress-bar-label {
   font-size: 12px;
   font-weight: 500;
-  color: var(--color-text-muted);
+  color: var(--color-neutral-600);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -88,7 +88,7 @@
 }
 
 .progress-item.done .progress-bar-label {
-  color: var(--color-text-secondary);
+  color: var(--color-neutral-600);
 }
 
 .progress-total {
@@ -104,7 +104,7 @@
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
-  color: var(--color-text-muted);
+  color: var(--color-neutral-600);
   white-space: nowrap;
 }
 
@@ -219,7 +219,7 @@
 }
 
 .summary-toggle-lead {
-  color: var(--color-text-muted);
+  color: var(--color-neutral-600);
   flex-shrink: 0;
 }
 
@@ -242,7 +242,7 @@
 }
 
 .summary-toggle-icon {
-  color: var(--color-text-muted);
+  color: var(--color-neutral-600);
   flex-shrink: 0;
   transition: transform 0.2s ease;
 }
@@ -677,7 +677,7 @@
 }
 
 .sale-type-btn app-icon {
-  color: var(--color-text-muted);
+  color: var(--color-neutral-600);
   flex-shrink: 0;
 }
 
@@ -778,7 +778,7 @@
   padding: 14px 12px;
   border: none;
   background: transparent;
-  color: var(--color-text-secondary);
+  color: var(--color-neutral-600);
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
@@ -799,12 +799,12 @@
   padding: 0 24px;
   border: none;
   border-radius: 12px;
-  background: var(--color-primary);
+  background: var(--color-success-700);
   color: #fff;
   font-size: 16px;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
+  box-shadow: 0 4px 12px rgba(var(--color-success-700-rgb), 0.3);
   transition:
     filter 0.2s,
     transform 0.1s;
@@ -943,6 +943,8 @@
   cursor: not-allowed;
 }
 
+/* Stitch paso 11 — CTA sobre success-700 (~5:1 con blanco, AA);
+   blanco sobre primary #2ecc71 daba 2.10:1 y fallaba AA. */
 .btn-confirm {
   display: flex;
   align-items: center;
@@ -950,7 +952,7 @@
   gap: 8px;
   min-height: 44px;
   padding: 14px 24px;
-  background: var(--color-primary);
+  background: var(--color-success-700);
   color: white;
   border: none;
   border-radius: 12px;
@@ -958,7 +960,7 @@
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
+  box-shadow: 0 4px 12px rgba(var(--color-success-700-rgb), 0.3);
 }
 
 .btn-confirm:hover:not(:disabled) {

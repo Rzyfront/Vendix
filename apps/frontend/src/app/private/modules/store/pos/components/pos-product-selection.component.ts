@@ -271,7 +271,7 @@ function isMultiTokenQuery(query: string): boolean {
         <!-- E.1 — hint stopwords (F-099/ERR-20): la query solo trae palabras
              comunes y el backend cae al fallback frase-legacy. -->
         @if (showStopwordsHint()) {
-          <p class="mt-2 text-xs text-text-secondary" role="note">
+          <p class="mt-2 text-xs text-neutral-600" role="note">
             Palabras muy comunes: prueba con palabras del producto, ej. 'aceite
             casa'.
           </p>
@@ -311,7 +311,7 @@ function isMultiTokenQuery(query: string): boolean {
              búsqueda enseña el ranking ("mejores coincidencias primero"). -->
         @if (counterText()) {
           <div
-            class="mt-2 flex items-center justify-between gap-2 text-xs text-text-secondary"
+            class="mt-2 flex items-center justify-between gap-2 text-xs text-neutral-600"
           >
             <span>{{ counterText() }}</span>
             @if (isSearchActive() && filteredProducts().length > 0) {
@@ -339,7 +339,7 @@ function isMultiTokenQuery(query: string): boolean {
             <div
               class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
-            <p class="mt-2 text-text-secondary">Cargando productos...</p>
+            <p class="mt-2 text-neutral-600">Cargando productos...</p>
           </div>
         }
 
@@ -394,7 +394,7 @@ function isMultiTokenQuery(query: string): boolean {
             <h3 class="text-lg font-semibold text-text-primary mb-2">
               {{ getEmptyStateTitle() }}
             </h3>
-            <p class="text-sm text-text-secondary mb-4 max-w-xs mx-auto">
+            <p class="text-sm text-neutral-600 mb-4 max-w-xs mx-auto">
               {{ getEmptyStateDescription() }}
             </p>
             <!-- E.1 (F-100) — la acción cumple lo que promete: con filtros
@@ -546,7 +546,7 @@ function isMultiTokenQuery(query: string): boolean {
                   <!-- Weight Product Badge -->
                   @if (product.pricing_type === 'weight') {
                     <div
-                      class="absolute bottom-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-blue-600/80 border border-white/10 flex items-center gap-1"
+                      class="absolute bottom-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold bg-blue-700 border border-white/10 flex items-center gap-1"
                     >
                       <app-icon
                         name="scale"
@@ -616,13 +616,13 @@ function isMultiTokenQuery(query: string): boolean {
                             {{ promotionalPrice(product) | currency }}
                             @if (product.pricing_type === 'weight') {
                               <span
-                                class="text-[10px] font-normal text-text-secondary"
+                                class="text-[10px] font-normal text-neutral-600"
                                 >/{{ defaultWeightUnit() }}</span
                               >
                             }
                           </span>
                           <span
-                            class="text-[10px] sm:text-xs text-text-muted line-through"
+                            class="text-[10px] sm:text-xs text-neutral-600 line-through"
                           >
                             {{ product.final_price | currency }}
                           </span>
@@ -634,7 +634,7 @@ function isMultiTokenQuery(query: string): boolean {
                           {{ product.final_price | currency }}
                           @if (product.pricing_type === 'weight') {
                             <span
-                              class="text-[10px] font-normal text-text-secondary"
+                              class="text-[10px] font-normal text-neutral-600"
                               >/{{ defaultWeightUnit() }}</span
                             >
                           }
@@ -646,7 +646,7 @@ function isMultiTokenQuery(query: string): boolean {
                            (resueltos por PriceTierCacheService en el carrito);
                            la grilla lo senala sin duplicar la resolucion. -->
                       @if (product.has_multiple_price_tiers === true) {
-                        <span class="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-[var(--color-success-100)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-success-700)]">
+                        <span class="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-[var(--color-success-100)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-success-800)]">
                           <app-icon name="tags" [size]="10"></app-icon>
                           Precios por nivel
                         </span>
@@ -681,7 +681,7 @@ function isMultiTokenQuery(query: string): boolean {
                sigue visible; el cajero nunca ve flash a vacío. -->
           @if (searching()) {
             <div
-              class="sticky top-2 z-[5] mx-auto mt-2 w-fit flex items-center gap-2 rounded-full border border-border bg-surface/95 px-3 py-1.5 text-xs text-text-secondary shadow-card"
+              class="sticky top-2 z-[5] mx-auto mt-2 w-fit flex items-center gap-2 rounded-full border border-border bg-surface/95 px-3 py-1.5 text-xs text-neutral-600 shadow-card"
               role="status"
             >
               <span
@@ -702,7 +702,7 @@ function isMultiTokenQuery(query: string): boolean {
               <button
                 #loadMoreButton
                 type="button"
-                class="w-full rounded-[10px] border border-primary/40 bg-surface px-4 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary-light disabled:cursor-wait disabled:opacity-70"
+                class="w-full rounded-[10px] border border-primary/40 bg-surface px-4 py-3 text-sm font-medium text-green-800 transition-colors hover:bg-[var(--color-primary-light)] disabled:cursor-wait disabled:opacity-70"
                 [disabled]="loadingMore()"
                 [attr.aria-busy]="loadingMore()"
                 [attr.aria-label]="loadMoreText()"
@@ -713,7 +713,7 @@ function isMultiTokenQuery(query: string): boolean {
             </div>
           } @else if (showTerminalLine()) {
             <p
-              class="mt-3 pb-1 text-center text-xs text-text-secondary"
+              class="mt-3 pb-1 text-center text-xs text-neutral-600"
               role="status"
             >
               {{ terminalText() }}
@@ -1841,9 +1841,11 @@ export class PosProductSelectionComponent {
 
   getCategoryClass(category: any): string {
     const baseClass =
-      'border-border bg-surface text-text-secondary hover:border-primary hover:text-primary hover:bg-primary-light transition-colors';
+      'border-border bg-surface text-neutral-600 hover:border-primary hover:text-primary hover:bg-[var(--color-primary-light)] transition-colors';
     const selectedClass =
-      'border-primary bg-primary-light text-primary shadow-card';
+      // Stitch paso 11 — bg-primary-light no existe en tailwind.config (compilaba
+      // a nada); forma arbitraria para que el estado seleccionado tenga fondo.
+      'border-primary bg-[var(--color-primary-light)] text-primary shadow-card';
 
     return this.selectedCategory()?.id === category.id
       ? selectedClass
@@ -1906,7 +1908,8 @@ export class PosProductSelectionComponent {
    */
   getAddButtonClass(product: any): string {
     void product;
-    return 'add-fab absolute bottom-2 right-2 z-[2] w-8 h-8 rounded-full flex items-center justify-center bg-[var(--color-primary)] text-[var(--color-text-on-primary)] hover:brightness-110';
+    // Stitch paso 11 — fondo success-700 (contraste no-texto ≥3:1); primary fallaba.
+    return 'add-fab absolute bottom-2 right-2 z-[2] w-8 h-8 rounded-full flex items-center justify-center bg-[var(--color-success-700)] text-[var(--color-text-on-primary)] hover:brightness-110';
   }
 
   async onAddToCart(product: any): Promise<void> {

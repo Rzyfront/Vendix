@@ -33,6 +33,7 @@
   }
 }
 
+// Stitch paso 11 — fondo success-700 (AA con blanco); primary fallaba.
 .panel-count {
   display: inline-flex;
   align-items: center;
@@ -41,7 +42,7 @@
   height: 24px;
   padding: 0 8px;
   border-radius: var(--radius-pill);
-  background: var(--color-primary);
+  background: var(--color-success-700);
   color: var(--color-text-on-primary);
   font-size: 12px;
   font-weight: 700;

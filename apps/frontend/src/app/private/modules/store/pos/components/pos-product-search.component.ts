@@ -265,7 +265,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
       .search-icon {
         position: absolute;
         left: 12px;
-        color: var(--color-text-secondary);
+        color: var(--color-neutral-600);
         z-index: 1;
         display: inline-flex;
       }
@@ -297,7 +297,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
         justify-content: center;
         background: none;
         border: none;
-        color: var(--color-text-secondary);
+        color: var(--color-neutral-600);
         cursor: pointer;
         padding: 4px;
         border-radius: 8px;
@@ -329,14 +329,17 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
         position: relative;
       }
 
-      .filter-toggle-btn:hover {
+      /* Stitch paso 11 — el hover no aplica sobre .active (texto blanco
+         sobre fondo oscuro; pintarlo text-primary lo haría ilegible). */
+      .filter-toggle-btn:hover:not(.active) {
         border-color: var(--color-primary);
         color: var(--color-text-primary);
       }
 
+      /* Stitch paso 11 — fondo success-700 (AA con blanco); primary fallaba. */
       .filter-toggle-btn.active {
-        background-color: var(--color-primary);
-        border-color: var(--color-primary);
+        background-color: var(--color-success-700);
+        border-color: var(--color-success-700);
         color: var(--color-text-on-primary);
       }
 
@@ -427,8 +430,9 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
         transition: all 0.3s ease;
       }
 
+      /* Stitch paso 11 — fondo success-700 (AA con blanco); primary fallaba. */
       .btn-primary {
-        background-color: var(--color-primary);
+        background-color: var(--color-success-700);
         color: var(--color-text-on-primary);
       }
 
@@ -481,7 +485,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
       }
 
       .suggestion-item app-icon {
-        color: var(--color-text-secondary);
+        color: var(--color-neutral-600);
         display: inline-flex;
       }
 

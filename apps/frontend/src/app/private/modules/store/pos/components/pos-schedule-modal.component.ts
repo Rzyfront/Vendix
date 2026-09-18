@@ -83,7 +83,7 @@ import type { BusinessHours } from '../../../../../core/models/store-settings.in
               </span>
               @if (day.key === todayKey()) {
                 <span
-                  class="text-[10px] font-bold text-[var(--color-text-on-primary)] bg-[var(--color-primary)] px-1.5 py-0.5 rounded-md uppercase tracking-wider"
+                  class="text-[10px] font-bold text-[var(--color-text-on-primary)] bg-[var(--color-success-700)] px-1.5 py-0.5 rounded-md uppercase tracking-wider"
                   >Hoy</span
                 >
               }

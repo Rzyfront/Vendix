@@ -103,7 +103,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
         </div>
         <button
           type="button"
-          class="absolute top-4 right-4 min-w-11 min-h-11 flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all duration-200 p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-text-muted)]/20 focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2"
+          class="absolute top-4 right-4 min-w-11 min-h-11 flex items-center justify-center text-[var(--color-neutral-600)] hover:text-[var(--color-text-primary)] transition-all duration-200 p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-neutral-600)]/20 focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2"
           (click)="onModalClosed()"
           aria-label="Cerrar modal"
           >
@@ -154,7 +154,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               >
               Cola
               @if (queueEntries().length > 0) {
-                <span class="ml-1 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-[var(--color-primary)] rounded-full">
+                <span class="ml-1 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-[var(--color-success-700)] rounded-full">
                   {{ queueEntries().length }}
                 </span>
               }
@@ -203,12 +203,12 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                       <p class="font-medium text-[var(--color-text-primary)]">
                         {{ lr.first_name }} {{ lr.last_name }}
                       </p>
-                      <p class="text-sm text-[var(--color-text-secondary)]">{{ lr.email }}</p>
-                      <p class="text-xs text-[var(--color-text-muted)]">
+                      <p class="text-sm text-[var(--color-neutral-600)]">{{ lr.email }}</p>
+                      <p class="text-xs text-[var(--color-neutral-600)]">
                         {{ lr.document_type || 'Doc' }}: {{ lr.document_number }}
                       </p>
                     </div>
-                    <app-button variant="primary" size="sm" (clicked)="selectCustomer(lr)">
+                    <app-button variant="primary" size="sm" customClasses="min-h-[44px]" (clicked)="selectCustomer(lr)">
                       Seleccionar
                     </app-button>
                   </div>
@@ -217,10 +217,10 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               <!-- Lookup Result: Not Found -->
               @if (lookupPerformed() && !lookupResult() && !lookupLoading()) {
                 <div class="mt-3 text-center">
-                  <p class="text-sm text-[var(--color-text-secondary)] mb-2">
+                  <p class="text-sm text-[var(--color-neutral-600)] mb-2">
                     No se encontró cliente con este documento
                   </p>
-                  <app-button variant="outline" size="sm" (clicked)="createFromLookup()">
+                  <app-button variant="outline" size="sm" customClasses="min-h-[44px]" (clicked)="createFromLookup()">
                     <app-icon name="user-plus" [size]="16" slot="icon" ></app-icon>
                     Crear con este documento
                   </app-button>
@@ -233,7 +233,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 <div class="w-full border-t border-[var(--color-border)]"></div>
               </div>
               <div class="relative flex justify-center text-sm">
-                <span class="px-2 bg-[var(--color-surface)] text-[var(--color-text-muted)]">o buscar por nombre</span>
+                <span class="px-2 bg-[var(--color-surface)] text-[var(--color-neutral-600)]">o buscar por nombre</span>
               </div>
             </div>
             <app-inputsearch
@@ -244,7 +244,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             <!-- Search Results -->
             @if (searchResults().length > 0) {
               <div class="space-y-2">
-                <h3 class="text-sm font-medium text-[var(--color-text-secondary)]">
+                <h3 class="text-sm font-medium text-[var(--color-neutral-600)]">
                   Resultados de búsqueda:
                 </h3>
                 <div class="max-h-48 overflow-y-auto space-y-2">
@@ -260,12 +260,12 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                           <p class="font-medium text-[var(--color-text-primary)]">
                             {{ customer.first_name }} {{ customer.last_name }}
                           </p>
-                          <p class="text-sm text-[var(--color-text-secondary)]">
+                          <p class="text-sm text-[var(--color-neutral-600)]">
                             {{ customer.email }}
                           </p>
                           @if (customer.document_number) {
                             <p
-                              class="text-xs text-[var(--color-text-muted)]"
+                              class="text-xs text-[var(--color-neutral-600)]"
                               >
                               {{ customer.document_type || 'Doc' }}: {{ customer.document_number }}
                             </p>
@@ -274,7 +274,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                         <app-icon
                           name="chevron-right"
                           [size]="16"
-                          color="var(--color-text-secondary)"
+                          color="var(--color-neutral-600)"
                         ></app-icon>
                       </div>
                     </button>
@@ -290,10 +290,10 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 <app-icon
                   name="user-x"
                   [size]="48"
-                  color="var(--color-text-muted)"
+                  color="var(--color-neutral-600)"
                   class="mx-auto mb-4"
                 ></app-icon>
-                <p class="text-[var(--color-text-secondary)] mb-4">
+                <p class="text-[var(--color-neutral-600)] mb-4">
                   No se encontraron clientes con esos criterios
                 </p>
                 <app-button
@@ -311,12 +311,13 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               <div
                 class="text-center py-4 border-t border-[var(--color-border)]"
                 >
-                <p class="text-sm text-[var(--color-text-secondary)] mb-2">
+                <p class="text-sm text-[var(--color-neutral-600)] mb-2">
                   ¿No quieres buscar?
                 </p>
                 <app-button
                   variant="outline"
                   size="sm"
+                  customClasses="min-h-[44px]"
                   (clicked)="switchToCreateMode()"
                   >
                   <app-icon name="user-plus" [size]="16" slot="icon" ></app-icon>
@@ -502,7 +503,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                             {{ entry.document_type }}: {{ entry.document_number }}
                           </p>
                           @if (entry.status === 'selected') {
-                            <span class="inline-flex items-center px-2 py-0.5 text-xs font-bold text-white bg-[var(--color-primary)] rounded-full">
+                            <span class="inline-flex items-center px-2 py-0.5 text-xs font-bold text-white bg-[var(--color-success-700)] rounded-full">
                               Seleccionado
                             </span>
                           }

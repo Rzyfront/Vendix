@@ -150,7 +150,7 @@ import {
                           class="shrink-0 px-1.5 py-0.5 rounded flex items-center gap-1 border transition-colors text-[10px] font-semibold"
                           [class]="item.notes
                             ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
-                            : 'text-text-secondary border-border/80 hover:text-text-primary hover:bg-muted/40'"
+                            : 'text-neutral-600 border-border/80 hover:text-text-primary hover:bg-muted/40'"
                           [attr.aria-label]="(item.notes ? 'Editar nota de ' : 'Agregar nota a ') + item.product.name"
                           [title]="(item.notes ? 'Editar nota' : 'Agregar nota para cocina') + ': ' + item.product.name"
                           (click)="openItemNote(item)"
@@ -435,13 +435,13 @@ import {
               maxlength="200"
               rows="2"
               placeholder="Notas para cocina (ej. sin cebolla, término medio). Opcional."
-              class="w-full px-3 py-2 text-sm border border-border bg-surface rounded-md text-text-primary placeholder:text-text-secondary/60 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none"
+              class="w-full px-3 py-2 text-sm border border-border bg-surface rounded-md text-text-primary placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none"
             ></textarea>
             <div class="flex items-center justify-between">
-              <span class="text-[11px] text-text-secondary">
+              <span class="text-[11px] text-neutral-600">
                 Opcional — se envía a cocina y a la comanda del KDS.
               </span>
-              <span class="text-[11px] text-text-secondary">
+              <span class="text-[11px] text-neutral-600">
                 {{ (itemNoteDraft() || '').length }}/200
               </span>
             </div>
@@ -565,7 +565,7 @@ import {
 
       .item-count {
         font-weight: 500;
-        color: var(--color-text-secondary);
+        color: var(--color-neutral-600);
       }
 
       .clear-btn {
@@ -586,7 +586,7 @@ import {
       }
 
       .clear-btn:disabled {
-        color: var(--color-text-muted);
+        color: var(--color-neutral-600);
         cursor: not-allowed;
       }
 
@@ -616,7 +616,7 @@ import {
         display: flex;
         align-items: center;
         justify-content: center;
-        color: var(--color-text-muted);
+        color: var(--color-neutral-600);
         margin-bottom: 16px;
       }
 
@@ -629,7 +629,7 @@ import {
 
       .empty-hint {
         font-size: 14px;
-        color: var(--color-text-secondary);
+        color: var(--color-neutral-600);
         margin: 0;
       }
 
@@ -694,7 +694,7 @@ import {
         display: flex;
         align-items: center;
         justify-content: center;
-        color: var(--color-text-muted);
+        color: var(--color-neutral-600);
       }
 
       .item-info {
@@ -757,7 +757,7 @@ import {
 
       .item-description {
         margin: 2px 0 0;
-        color: var(--color-text-secondary);
+        color: var(--color-neutral-600);
         font-size: 11px;
         line-height: 1.25;
         display: -webkit-box;
@@ -768,7 +768,7 @@ import {
 
       .item-sku {
         font-size: 11px;
-        color: var(--color-text-muted);
+        color: var(--color-neutral-600);
         font-family: monospace;
       }
 
@@ -777,7 +777,7 @@ import {
         margin: 4px 0 0;
         font-size: 10px;
         line-height: 1.25;
-        color: var(--color-text-muted);
+        color: var(--color-neutral-600);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -785,7 +785,7 @@ import {
 
       .item-unit-price {
         font-size: 12px;
-        color: var(--color-text-secondary);
+        color: var(--color-neutral-600);
       }
 
       .item-tax-badge,
@@ -874,7 +874,7 @@ import {
         min-height: 44px;
         border: none;
         background: transparent;
-        color: var(--color-text-muted);
+        color: var(--color-neutral-600);
         cursor: pointer;
         border-radius: 6px;
         display: flex;
@@ -974,7 +974,7 @@ import {
         justify-content: space-between;
         align-items: center;
         font-size: 14px;
-        color: var(--color-text-secondary);
+        color: var(--color-neutral-600);
         padding: 4px 0;
       }
 
@@ -1080,24 +1080,28 @@ import {
         background: rgba(var(--color-primary-rgb), 0.05);
       }
 
+      /* Stitch paso 11 — CTA sobre success-700 (~5:1 con blanco, AA);
+         blanco sobre primary #2ecc71 daba 2.10:1 y fallaba AA. */
       .checkout-btn {
-        background: var(--color-primary);
+        background: var(--color-success-700);
         color: var(--color-text-on-primary);
         font-weight: 700;
-        box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
+        box-shadow: 0 4px 12px rgba(var(--color-success-700-rgb), 0.3);
       }
 
       .checkout-btn:hover:not(:disabled) {
-        filter: brightness(1.1);
+        filter: brightness(1.05);
       }
 
+      /* Stitch paso 11 — gradiente 700→800: ambos extremos pasan AA
+         con texto blanco (5.02 y 7.13:1); success→primary fallaba (~2.2:1). */
       .cobrar-btn {
         background: linear-gradient(
           135deg,
-          var(--color-success, #16a34a) 0%,
-          var(--color-primary) 100%
+          var(--color-success-700) 0%,
+          var(--color-success-800) 100%
         );
-        box-shadow: 0 4px 14px rgba(34, 197, 94, 0.32);
+        box-shadow: 0 4px 14px rgba(var(--color-success-700-rgb), 0.32);
       }
 
       .cobrar-btn:focus-visible {
