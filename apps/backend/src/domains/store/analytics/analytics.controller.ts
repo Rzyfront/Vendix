@@ -206,7 +206,37 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getSalesByChannel(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByChannel(query);
-    return this.response_service.success(result);
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
+  }
+
+  @Get('sales/by-channel/export')
+  @Permissions('store:analytics:read')
+  async exportSalesByChannel(
+    @Query() query: SalesAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const result =
+      await this.sales_analytics_service.getSalesByChannelForExport(query);
+
+    const channelColumns: ReportColumn[] = [
+      { key: 'display_name', header: 'Canal', type: 'text' },
+      { key: 'order_count', header: 'Órdenes', type: 'number' },
+      { key: 'revenue', header: 'Ingresos', type: 'currency' },
+      { key: 'percentage', header: '% Participación', type: 'number' },
+    ];
+
+    await this.emitReport(res, 'ventas_por_canal', tz, [
+      this.toSheet('Por canal', channelColumns, result, tz),
+    ]);
   }
 
   @Get('sales/export')
