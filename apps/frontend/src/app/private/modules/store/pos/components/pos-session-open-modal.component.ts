@@ -37,42 +37,33 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
       (cancel)="onCancel()"
       [size]="'md'"
       [showCloseButton]="true"
+      [dialog]="true"
       title="Abrir Caja"
       subtitle="Selecciona una caja e ingresa el monto de apertura"
     >
       <!-- Header icon -->
-      <div
-        slot="header"
-        class="w-10 h-10 rounded-[var(--radius-lg)] bg-green-100 flex items-center justify-center flex-shrink-0"
-      >
-        <app-icon
-          name="unlock"
-          [size]="20"
-          class="text-green-600"
-        ></app-icon>
+      <div slot="header" class="so-header-icon">
+        <app-icon name="unlock" [size]="20"></app-icon>
       </div>
 
       <!-- Body -->
       @if (loading()) {
-        <div class="flex justify-center py-12">
-          <div
-            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
+        <div class="so-loading">
+          <div class="so-spinner"></div>
         </div>
       } @else {
-        <div class="space-y-5">
-          <form [formGroup]="form" class="space-y-4">
+        <div class="so-body">
+          <form [formGroup]="form" class="so-form">
             <!-- Cash Register Selection -->
             <div>
-              <label
-                class="block text-sm font-medium text-text-primary mb-1.5"
-              >
+              <label class="so-label" for="so-register">
                 Caja Registradora
-                <span class="text-destructive">*</span>
+                <span class="so-required" aria-hidden="true">*</span>
               </label>
               <select
+                id="so-register"
                 formControlName="cash_register_id"
-                class="w-full px-3 py-2.5 rounded-lg border border-border bg-surface text-text-primary text-sm focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"
+                class="so-select"
                 (change)="onRegisterSelected()"
               >
                 <option [ngValue]="null" disabled>Seleccionar caja...</option>
@@ -86,7 +77,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
                 }
               </select>
               @if (registers().length === 0) {
-                <p class="text-xs text-destructive mt-1">
+                <p class="so-empty">
                   No hay cajas registradoras disponibles. Crea una desde
                   Configuración.
                 </p>
@@ -109,15 +100,13 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
           </form>
 
           <!-- Info tip -->
-          <div
-            class="bg-primary/5 border border-primary/20 p-4 rounded-xl flex gap-3 text-sm text-text-secondary"
-          >
+          <div class="so-tip">
             <app-icon
               name="info"
               [size]="18"
-              class="text-primary mt-0.5 flex-shrink-0"
+              class="so-tip-icon"
             ></app-icon>
-            <p>
+            <p class="so-tip-text">
               El monto de apertura se usará para calcular la diferencia
               (sobrante/faltante) al cerrar la caja.
             </p>
@@ -126,7 +115,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
       }
 
       <!-- Footer -->
-      <div slot="footer" class="flex justify-end gap-2">
+      <div slot="footer" class="so-footer">
         <app-button variant="secondary" size="md" (clicked)="onCancel()">
           Cancelar
         </app-button>
@@ -146,6 +135,120 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
       </div>
     </app-modal>
   `,
+  styles: [`
+    /* Stitch paso 7 — apertura de caja: icono success sólido, tip informativo
+       en neutral-600 (text-secondary falla AA), select con target 44px y
+       foco 3px primary (lenguaje pasos 2-6). */
+    .so-header-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: var(--color-success-50);
+      color: var(--color-success-700);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .so-loading {
+      display: flex;
+      justify-content: center;
+      padding: 48px 0;
+    }
+
+    .so-spinner {
+      width: 32px;
+      height: 32px;
+      border-radius: 999px;
+      border-bottom: 2px solid var(--color-primary);
+      animation: so-spin 0.8s linear infinite;
+    }
+
+    @keyframes so-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .so-spinner { animation: none; }
+    }
+
+    .so-body {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .so-form {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .so-label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--color-text-primary);
+      margin-bottom: 6px;
+    }
+
+    .so-required {
+      color: var(--color-error-700);
+    }
+
+    .so-select {
+      width: 100%;
+      min-height: 44px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      color: var(--color-text-primary);
+      font-size: 14px;
+      transition: border-color 0.2s ease;
+    }
+
+    .so-select:focus-visible {
+      outline: 3px solid var(--color-primary);
+      outline-offset: 2px;
+      border-color: var(--color-primary);
+    }
+
+    .so-empty {
+      font-size: 12px;
+      color: var(--color-error-700);
+      margin: 4px 0 0;
+    }
+
+    .so-tip {
+      display: flex;
+      gap: 12px;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid var(--color-info-200);
+      background: var(--color-info-50);
+      font-size: 14px;
+    }
+
+    .so-tip-icon {
+      color: var(--color-info-700);
+      margin-top: 2px;
+      flex-shrink: 0;
+    }
+
+    .so-tip-text {
+      color: var(--color-neutral-600);
+      margin: 0;
+      line-height: 1.5;
+    }
+
+    .so-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+  `],
 })
 export class PosSessionOpenModalComponent {
   private destroyRef = inject(DestroyRef);
