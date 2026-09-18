@@ -27,12 +27,16 @@ import {
 import { Product } from './pos-product.service';
 
 /**
- * STALE (huérfano verificado, paso 1 plan POS-stitch, 2026-09-17):
+ * STALE — SELLO DEFINITIVO (paso 10 plan POS-stitch, 2026-09-18):
  * `grep -rn "PosIntegrationService" apps/frontend/src/app --include=*.ts | grep -v spec`
- * devuelve solo este archivo. Ningún componente/servicio del POS lo inyecta;
- * la integración viva pasa por `pos-api.service.ts` + servicios dedicados
- * (`pos-order.service.ts`, `pos-customer.service.ts`, etc.).
- * NO rediseñar, NO importar desde código nuevo (ver paso 10 del plan).
+ * devuelve solo este archivo (autorreferencia). Ningún componente/servicio
+ * del POS lo inyecta; la integración viva pasa por `pos-api.service.ts` +
+ * servicios dedicados (`pos-order.service.ts`, `pos-customer.service.ts`,
+ * etc.) y el puente restaurante vive en
+ * `pos-restaurant-integration.service.ts`.
+ * REGLA DE NO-IMPORTACIÓN: ningún componente o servicio nuevo puede
+ * importar `PosIntegrationService`. NO rediseñar, NO extender, NO revivir:
+ * se conserva solo como referencia histórica hasta su eliminación.
  */
 @Injectable({
   providedIn: 'root',
