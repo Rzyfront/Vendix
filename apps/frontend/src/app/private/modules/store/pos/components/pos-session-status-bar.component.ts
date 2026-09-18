@@ -12,7 +12,62 @@ import { CashRegisterSession } from '../services/pos-cash-register.service';
   standalone: true,
   imports: [DatePipe, IconComponent],
   template: `
-    @if (session()?.status === 'open') {
+    @if (variant() === 'compact') {
+      @if (session()?.status === 'open') {
+        <div class="sbc-strip">
+          <div
+            class="sbc-pill"
+            [title]="(session()!.register?.name || 'Caja principal') + ' · ' + (session()!.opened_at | date:'shortTime')"
+          >
+            <span class="sbc-dot" aria-hidden="true"></span>
+            <span class="sbc-name">{{ session()!.register?.name || 'Caja principal' }}</span>
+            <span class="sbc-time">&middot; {{ session()!.opened_at | date:'shortTime' }}</span>
+          </div>
+          <div class="sbc-actions">
+            <button
+              type="button"
+              (click)="detailClicked.emit()"
+              class="sbc-btn sbc-btn-history"
+              aria-label="Historial y arqueo de caja"
+              title="Historial y arqueo de caja"
+            >
+              <app-icon name="receipt" [size]="16"></app-icon>
+            </button>
+            <button
+              type="button"
+              (click)="movementClicked.emit()"
+              class="sbc-btn sbc-btn-move"
+              aria-label="Movimiento de efectivo"
+              title="Movimiento de efectivo"
+            >
+              <span class="sbc-move-prefix" aria-hidden="true">+/-</span>
+              <span>Movimiento</span>
+            </button>
+            <button
+              type="button"
+              (click)="closeClicked.emit()"
+              class="sbc-btn sbc-btn-close"
+              aria-label="Cerrar turno de caja"
+              title="Cerrar turno de caja"
+            >
+              <app-icon name="lock" [size]="14"></app-icon>
+              <span>Cerrar</span>
+            </button>
+          </div>
+        </div>
+      } @else if (showOpenButton()) {
+        <button
+          type="button"
+          (click)="openClicked.emit()"
+          class="sbc-open-btn"
+          aria-label="Abrir sesion de caja"
+        >
+          <app-icon name="lock" [size]="14"></app-icon>
+          <span class="sbc-open-btn-idle">Sin caja</span>
+          <span class="sbc-open-btn-cta">Abrir</span>
+        </button>
+      }
+    } @else if (session()?.status === 'open') {
       <div class="sb-open">
         <!-- Pulsing alive indicator -->
         <span class="sb-dot" aria-hidden="true">
@@ -268,11 +323,167 @@ import { CashRegisterSession } from '../services/pos-cash-register.service';
       text-decoration-color: var(--color-warning-500);
       text-underline-offset: 2px;
     }
+
+    /* PSVERSION0001 paso 4 — variante compacta: tira de caja Stitch sobre
+       el ticket (d25526af: pildora blanca + dot verde, botones Historial,
+       Movimiento +/-, Cerrar). Misma data, mismos outputs: sync cero. */
+    .sbc-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+      padding: 6px 8px;
+      background: var(--color-muted, #f8fafc);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .sbc-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      min-height: 36px;
+      min-width: 0;
+      flex: 1 1 auto;
+      background: var(--color-surface, #ffffff);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      box-shadow: var(--shadow-2xs, 0 1px 2px rgb(0 0 0 / 0.05));
+    }
+
+    .sbc-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--color-success-500);
+      box-shadow: 0 0 0 2px var(--color-success-100);
+      flex-shrink: 0;
+    }
+
+    .sbc-name {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--color-text-primary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .sbc-time {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--color-neutral-600, #5c6672);
+      white-space: nowrap;
+    }
+
+    .sbc-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .sbc-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      min-height: 32px;
+      padding: 4px 6px;
+      border-radius: 8px;
+      border: 1px solid var(--color-border);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: var(--shadow-2xs, 0 1px 2px rgb(0 0 0 / 0.05));
+      transition: background-color 0.2s ease, transform 0.15s ease;
+    }
+
+    .sbc-btn:active {
+      transform: scale(0.95);
+    }
+
+    .sbc-btn:focus-visible {
+      outline: 3px solid var(--color-primary);
+      outline-offset: 2px;
+    }
+
+    .sbc-btn-history {
+      background: var(--color-surface, #ffffff);
+      color: var(--color-success-700);
+      border-color: var(--color-success-200);
+    }
+
+    .sbc-btn-history:hover {
+      background: var(--color-success-50);
+    }
+
+    .sbc-btn-move {
+      background: var(--color-surface, #ffffff);
+      color: var(--color-text-primary);
+    }
+
+    .sbc-btn-move:hover {
+      background: var(--color-muted, #f1f5f9);
+    }
+
+    .sbc-move-prefix {
+      color: var(--color-success-600);
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .sbc-btn-close {
+      background: var(--color-error-50);
+      border-color: var(--color-error-200);
+      color: var(--color-error-700);
+    }
+
+    .sbc-btn-close:hover {
+      background: var(--color-error-100);
+    }
+
+    .sbc-open-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 12px;
+      min-height: 44px;
+      background: var(--color-warning-50);
+      border-bottom: 1px solid var(--color-warning-200);
+      color: var(--color-warning-800);
+      font-size: 14px;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+    }
+
+    .sbc-open-btn:hover {
+      background: var(--color-warning-100);
+    }
+
+    .sbc-open-btn:focus-visible {
+      outline: 3px solid var(--color-primary);
+      outline-offset: -3px;
+    }
+
+    .sbc-open-btn-idle {
+      font-weight: 500;
+    }
+
+    .sbc-open-btn-cta {
+      font-weight: 600;
+      text-decoration: underline;
+      text-decoration-color: var(--color-warning-500);
+      text-underline-offset: 2px;
+    }
   `],
 })
 export class PosSessionStatusBarComponent {
   readonly session = input<CashRegisterSession | null>(null);
   readonly showOpenButton = input<boolean>(true);
+  readonly variant = input<'default' | 'compact'>('default');
   readonly openClicked = output<void>();
   readonly closeClicked = output<void>();
   readonly movementClicked = output<void>();

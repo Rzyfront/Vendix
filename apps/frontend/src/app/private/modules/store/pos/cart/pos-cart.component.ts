@@ -10,6 +10,8 @@ import {
   PromotionTierProgress } from '../services/pos-cart.service';
 import { AddCustomItemRequest, CartDiscount } from '../models/cart.model';
 import { PosCustomItemModalComponent } from '../components/pos-custom-item-modal/pos-custom-item-modal.component';
+import { PosSessionStatusBarComponent } from '../components/pos-session-status-bar.component';
+import { PosCashRegisterService } from '../services/pos-cash-register.service';
 import { BookingSchedulerModalComponent } from '../../../../../shared/components/booking-scheduler-modal/booking-scheduler-modal.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
@@ -61,11 +63,31 @@ import {
     PriceTierSelectorComponent,
     PosCustomItemModalComponent,
     BookingSchedulerModalComponent,
+    PosSessionStatusBarComponent,
   ],
   template: `
     <div
       class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border overflow-hidden"
     >
+      <!--
+        PSVERSION0001 paso 4 — tira de caja Stitch sobre el ticket. Segunda
+        instancia (compacta) de la status-bar: lee la misma señal
+        activeSession del servicio que la instancia del header, sync cero.
+        Los 4 outputs se re-emiten al shell POS, dueño de los modales.
+      -->
+      @if (cashRegisterEnabled()) {
+        <div class="flex-none">
+          <app-pos-session-status-bar
+            variant="compact"
+            [session]="cashRegisterService.activeSession()"
+            [showOpenButton]="true"
+            (openClicked)="cashOpenClicked.emit()"
+            (closeClicked)="cashCloseClicked.emit()"
+            (movementClicked)="cashMovementClicked.emit()"
+            (detailClicked)="cashDetailClicked.emit()"
+          ></app-pos-session-status-bar>
+        </div>
+      }
       <!-- Cart Header & Summary Section (Fixed at top) -->
       <div class="flex-none bg-surface border-b border-border shadow-sm">
         <!--
@@ -1325,6 +1347,8 @@ import {
 export class PosCartComponent {
   private destroyRef = inject(DestroyRef);
 private cartService = inject(PosCartService);
+  /** PSVERSION0001 paso 4 — solo lectura de activeSession() para la tira. */
+  readonly cashRegisterService = inject(PosCashRegisterService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
@@ -1446,6 +1470,19 @@ private cartService = inject(PosCartService);
    */
   readonly readyToPayOrder = input<unknown>(null);
   readonly isCharging = input<boolean>(false);
+  /**
+   * PSVERSION0001 paso 4 — el shell POS pasa su señal cashRegisterEnabled;
+   * la tira solo se pinta cuando la feature de caja está activa en tienda.
+   */
+  readonly cashRegisterEnabled = input<boolean>(false);
+  /**
+   * PSVERSION0001 paso 4 — re-emisión de los 4 outputs de la tira de caja
+   * hacia el shell POS, que es el dueño de los modales de sesión.
+   */
+  readonly cashOpenClicked = output<void>();
+  readonly cashCloseClicked = output<void>();
+  readonly cashMovementClicked = output<void>();
+  readonly cashDetailClicked = output<void>();
   readonly create = output<void>();
   /**
    * CP-POS-CREAR-EDITAR-COBRAR-001 — direct save-draft (skip the checkout
