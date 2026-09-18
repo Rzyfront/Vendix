@@ -75,7 +75,10 @@ import {
   PosProductVariant,
 } from './services/pos-product.service';
 import { PosCustomerModalComponent } from './components/pos-customer-modal.component';
-import { PosCheckoutShellComponent } from './components/pos-checkout-shell/pos-checkout-shell.component';
+import {
+  PosCheckoutShellComponent,
+  type EntregaChoice,
+} from './components/pos-checkout-shell/pos-checkout-shell.component';
 import { PosOrderConfirmationComponent } from './components/pos-order-confirmation.component';
 import { PosCartComponent } from './cart/pos-cart.component';
 import { PosMobileFooterComponent } from './components/pos-mobile-footer.component';
@@ -178,7 +181,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     OrderPaymentModalComponent,
   ],
   template: `
-    <div class="flex flex-col overflow-hidden pos-container">
+    <div class="flex flex-col overflow-hidden pos-container border-t border-border">
       <!--
         A/B TEST (2026-06): bloque de stats del POS (app-pos-stats) ocultado como
         prueba A/B. Antes mostraba las stats en desktop fuera de los modos
@@ -192,319 +195,210 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       -->
 
 
-      <!-- Main POS Interface -->
+      <!-- Main POS Interface: Two flush columns directly at root (Stitch favorite design) -->
       <div
-        class="flex-1 flex flex-col bg-surface rounded-card shadow-card border border-border min-h-0 overflow-hidden"
+        class="flex-1 flex flex-col lg:flex-row bg-slate-50 min-h-0 overflow-hidden w-full h-full relative"
       >
-        <!-- Header -->
-        <div
-          class="flex-none px-4 lg:px-6 py-2 lg:py-2.5 border-b border-border pos-header relative z-30"
-        >
-          <div class="flex justify-between items-center" style="gap: 0.75rem;">
-            <!-- Left: Logo + Title + Turno + Cajero (Stitch PSVERSION0001 paso 1) -->
-            <div class="flex items-center gap-2 min-w-0">
+        @if (isOutOfHours() && !canBypassSchedule()) {
+          <!-- Out of hours overlay -->
+          <div
+            class="absolute inset-0 z-40 bg-surface/90 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <app-card
+              class="max-w-md w-full shadow-xl border-border"
+              [padding]="true"
+            >
               <div
-                class="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 shrink-0"
+                class="flex flex-col items-center text-center py-6 px-4 gap-4"
               >
-                <app-icon
-                  name="shopping-bag"
-                  [size]="isMobile() ? 20 : 24"
-                ></app-icon>
-              </div>
-              <div class="flex items-center gap-2 min-w-0">
-                <h1
-                  class="font-bold text-slate-800 text-lg leading-none truncate shrink-0"
-                >
-                  @if (isQuotationMode()) {
-                    <span>Modo Cotización</span>
-                  } @else if (isLayawayMode()) {
-                    <span>Modo Plan Separé</span>
-                  } @else if (isEditMode()) {
-                    <span>Editando Orden #{{ editingOrderNumber() }}</span>
-                  } @else {
-                    <span>Vendix POS</span>
-                  }
-                </h1>
-                <span class="hidden sm:block leading-none shrink-0">
-                  @if (isQuotationMode()) {
-                    <app-badge variant="primary" size="xs"
-                      >Crear cotización</app-badge
-                    >
-                  } @else if (isLayawayMode()) {
-                    <app-badge variant="warning" size="xs"
-                      >Crear plan separé</app-badge
-                    >
-                  } @else if (isEditMode()) {
-                    <app-badge variant="warning" size="xs"
-                      >Modificar items de la orden</app-badge
-                    >
-                  }
-                </span>
-                @if (activeSession()) {
-                  <span
-                    class="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold px-2 py-1 rounded-full shrink-0 hidden sm:inline-flex items-center gap-1.5"
-                  >
-                    <span
-                      class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"
-                    ></span
-                    >Turno Activo
-                  </span>
-                } @else {
-                  <span
-                    class="bg-slate-100 text-slate-600 border border-slate-200 text-xs font-semibold px-2 py-1 rounded-full shrink-0 hidden sm:inline-flex items-center gap-1.5"
-                  >
-                    <span
-                      class="w-2 h-2 rounded-full bg-slate-400"
-                    ></span
-                    >Sin turno
-                  </span>
-                }
                 <div
-                  class="hidden md:flex items-center gap-1.5 ml-1 pl-2 border-l border-slate-200 text-xs overflow-hidden shrink-0"
+                  class="w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center text-destructive mb-2"
                 >
+                  <app-icon name="clock" [size]="40"></app-icon>
+                </div>
+                <h2 class="text-2xl font-bold text-text-primary">
+                  POS Fuera de Horario
+                </h2>
+                <p class="text-text-secondary text-sm leading-relaxed">
+                  {{
+                    outOfHoursMessage() ||
+                      'El punto de venta está fuera del horario de atención configurado. No se podrán realizar ventas hasta dentro del horario establecido.'
+                  }}
+                </p>
+
+                @if (nextOpenTime()) {
                   <div
-                    class="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold text-[10px] flex items-center justify-center shrink-0 border border-emerald-200"
+                    class="bg-primary/5 border border-primary/20 rounded-xl p-4 w-full mt-2 flex flex-col items-center"
                   >
-                    {{ cashierInitials() }}
+                    <span
+                      class="text-xs text-text-secondary font-medium uppercase tracking-wider mb-1"
+                      >Próxima apertura</span
+                    >
+                    <span class="text-lg font-bold text-primary">{{
+                      nextOpenTime()
+                    }}</span>
                   </div>
-                  <span class="font-medium text-slate-500 shrink-0">Cajero:</span>
-                  <span
-                    class="font-semibold text-slate-800 truncate min-w-0 max-w-[120px]"
-                    [title]="cashierFullTitle()"
-                    >{{ cashierName() }}</span
+                }
+
+                <div
+                  class="flex flex-col w-full gap-3 mt-6 pt-6 border-t border-border"
+                >
+                  <p class="text-xs text-text-secondary mb-1">
+                    ¿Necesitas modificar los horarios?
+                  </p>
+                  <app-button
+                    variant="primary"
+                    class="w-full"
+                    (clicked)="goToSettings()"
                   >
-                  <span
-                    class="hidden 2xl:inline text-slate-400 font-normal whitespace-nowrap shrink-0"
-                    [title]="cashierFullTitle()"
-                    >({{ cashierRoleLabel() }}@if (cashierTerminal()) {
-                      · {{ cashierTerminal() }}
-                    })</span
+                    <app-icon
+                      name="settings"
+                      [size]="18"
+                      slot="icon"
+                    ></app-icon>
+                    Configuración de POS y Horarios
+                  </app-button>
+                  <app-button
+                    variant="outline"
+                    class="w-full"
+                    (clicked)="goToDashboard()"
                   >
+                    Volver al Dashboard
+                  </app-button>
                 </div>
               </div>
-            </div>
-
-            <!-- Right: Customer + Schedule + Cash Register -->
-            <div class="flex items-center gap-2 xl:gap-3">
-              <!-- Mobile/Tablet/Small desktop: Compact dropdown -->
-              <div class="flex xl:hidden">
-                <app-pos-header-dropdown
-                  [customer]="selectedCustomer()"
-                  [scheduleEnabled]="enableScheduleValidation()"
-                  [isWithinHours]="!isActuallyOutOfHours()"
-                  [isDayClosed]="isTodayClosed"
-                  [todayHours]="todaySchedule"
-                  [cashSession]="activeSession()"
-                  [showCashOpenButton]="cashRegisterEnabled()"
-                  (customerClicked)="onOpenCustomerModal()"
-                  (clearCustomer)="onClearCustomer()"
-                  (scheduleClicked)="showScheduleModal.set(true)"
-                  (cashOpenClicked)="showSessionOpenModal.set(true)"
-                  (cashCloseClicked)="showSessionCloseModal.set(true)"
-                  (cashMovementClicked)="showCashMovementModal.set(true)"
-                  (cashDetailClicked)="showSessionDetailModal.set(true)"
-                ></app-pos-header-dropdown>
-              </div>
-
-              <!-- Desktop: Full expanded view -->
-              <div class="hidden xl:flex items-center gap-2 xl:gap-3">
-                <!-- Customer Badge -->
-                @if (selectedCustomer()) {
-                  <div
-                    class="group flex items-center gap-2 px-2.5 py-1.5 bg-gradient-to-r from-primary-light/50 to-primary-light/30 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
-                    (click)="onOpenCustomerModal()"
-                  >
-                    <div
-                      class="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
-                    >
-                      <app-icon name="user" [size]="14"></app-icon>
-                    </div>
-                    <div class="flex flex-col min-w-0">
-                      <span
-                        class="font-semibold text-text-primary text-sm leading-none truncate"
-                        [title]="selectedCustomer()?.name"
-                        >{{ selectedCustomer()?.name }}</span
-                      >
-                      <span
-                        class="hidden 2xl:block text-xs text-text-secondary leading-none truncate mt-0.5"
-                        [title]="selectedCustomer()?.email"
-                        >{{ selectedCustomer()?.email }}</span
-                      >
-                    </div>
-                    <div
-                      class="w-5 h-5 rounded-full hover:bg-surface/60 flex items-center justify-center transition-colors flex-shrink-0"
-                      (click)="$event.stopPropagation(); onClearCustomer()"
-                    >
-                      <app-icon
-                        name="x"
-                        [size]="12"
-                        class="text-text-secondary group-hover:text-destructive transition-colors"
-                      ></app-icon>
-                    </div>
-                  </div>
-                }
-
-                <!-- Schedule Indicator -->
-                @if (enableScheduleValidation()) {
-                  <app-pos-schedule-indicator
-                    [isWithinHours]="!isActuallyOutOfHours()"
-                    [todayHours]="todaySchedule"
-                    [isDayClosed]="isTodayClosed"
-                    [enabled]="enableScheduleValidation()"
-                    (clicked)="showScheduleModal.set(true)"
-                  ></app-pos-schedule-indicator>
-                }
-
-                @if (cashRegisterEnabled()) {
-                  <app-pos-session-status-bar
-                    [session]="activeSession()"
-                    [showOpenButton]="true"
-                    (openClicked)="showSessionOpenModal.set(true)"
-                    (closeClicked)="showSessionCloseModal.set(true)"
-                    (movementClicked)="showCashMovementModal.set(true)"
-                    (detailClicked)="showSessionDetailModal.set(true)"
-                  ></app-pos-session-status-bar>
-                }
-              </div>
-            </div>
-          </div>
-        </div>
-
-        @if (activeSession()?.register?.location) {
-          <div
-            class="flex-none px-4 lg:px-6 py-1 bg-blue-50 border-b border-blue-100 text-xs text-blue-600"
-          >
-            Descontando de: {{ activeSession()!.register!.location!.name }}
+            </app-card>
           </div>
         }
 
-        <!-- Main Content Grid -->
-        <div
-          class="flex-1 flex flex-col p-3 lg:p-6 min-h-0 overflow-hidden pos-main-content relative"
-        >
-          @if (isOutOfHours() && !canBypassSchedule()) {
-            <!-- Out of hours overlay -->
-            <div
-              class="absolute inset-0 z-40 bg-surface/90 backdrop-blur-sm flex items-center justify-center p-4"
-            >
-              <app-card
-                class="max-w-md w-full shadow-xl border-border"
-                [padding]="true"
-              >
-                <div
-                  class="flex flex-col items-center text-center py-6 px-4 gap-4"
-                >
-                  <div
-                    class="w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center text-destructive mb-2"
-                  >
-                    <app-icon name="clock" [size]="40"></app-icon>
-                  </div>
-                  <h2 class="text-2xl font-bold text-text-primary">
-                    POS Fuera de Horario
+        <!-- DESKTOP LEFT COLUMN: Catalog Area (Stitch CenterCatalog) -->
+        <div class="hidden lg:flex flex-1 min-h-0 min-w-0 overflow-hidden h-full flex-col bg-slate-50">
+          <!-- Catalog Header (Stitch CenterCatalog) -->
+          <div class="bg-white border-b border-slate-200/80 shrink-0 shadow-2xs py-2.5 px-4">
+            <div class="flex items-center justify-between gap-4 flex-nowrap py-0.5">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0 shadow-2xs">
+                  <app-icon name="shopping-bag" [size]="20"></app-icon>
+                </div>
+                <div class="flex items-center gap-3 min-w-0">
+                  <h2 class="text-lg font-bold text-slate-800 leading-none truncate">
+                    @if (isQuotationMode()) {
+                      Cotización
+                    } @else if (isLayawayMode()) {
+                      Separado
+                    } @else {
+                      Punto de Venta
+                    }
                   </h2>
-                  <p class="text-text-secondary text-sm leading-relaxed">
-                    {{
-                      outOfHoursMessage() ||
-                        'El punto de venta está fuera del horario de atención configurado. No se podrán realizar ventas hasta dentro del horario establecido.'
-                    }}
-                  </p>
-
-                  @if (nextOpenTime()) {
+                  @if (activeSession()) {
+                    <span class="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold px-2.5 py-0.5 rounded-full shrink-0 flex items-center gap-1.5">
+                      <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>Turno Activo
+                    </span>
+                  } @else {
+                    <span class="bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold px-2.5 py-0.5 rounded-full shrink-0 flex items-center gap-1.5">
+                      <span class="w-2 h-2 rounded-full bg-amber-500"></span>Sin turno
+                    </span>
+                  }
+                  @if (cashierName()) {
                     <div
-                      class="bg-primary/5 border border-primary/20 rounded-xl p-4 w-full mt-2 flex flex-col items-center"
+                      class="hidden md:flex items-center gap-2 ml-1 pl-3 border-l border-slate-200 text-xs text-slate-600 truncate"
+                      [title]="cashierFullTitle()"
                     >
-                      <span
-                        class="text-xs text-text-secondary font-medium uppercase tracking-wider mb-1"
-                        >Próxima apertura</span
-                      >
-                      <span class="text-lg font-bold text-primary">{{
-                        nextOpenTime()
-                      }}</span>
+                      <div class="w-5 h-5 rounded-full bg-primary/10 text-primary font-bold text-[10px] flex items-center justify-center shrink-0 border border-primary/20">
+                        {{ cashierInitials() }}
+                      </div>
+                      <span class="font-medium text-slate-500">Cajero:</span>
+                      <span class="font-semibold text-slate-800 truncate max-w-[140px]">{{ cashierName() }}</span>
+                      <span class="text-slate-400 font-normal">({{ cashierRoleLabel() }})</span>
                     </div>
                   }
-
-                  <div
-                    class="flex flex-col w-full gap-3 mt-6 pt-6 border-t border-border"
-                  >
-                    <p class="text-xs text-text-secondary mb-1">
-                      ¿Necesitas modificar los horarios?
-                    </p>
-                    <app-button
-                      variant="primary"
-                      class="w-full"
-                      (clicked)="goToSettings()"
-                    >
-                      <app-icon
-                        name="settings"
-                        [size]="18"
-                        slot="icon"
-                      ></app-icon>
-                      Configuración de POS y Horarios
-                    </app-button>
-                    <app-button
-                      variant="outline"
-                      class="w-full"
-                      (clicked)="goToDashboard()"
-                    >
-                      Volver al Dashboard
-                    </app-button>
-                  </div>
                 </div>
-              </app-card>
-            </div>
-          }
-
-          <!-- Desktop: Flex layout with sidebar cart -->
-          <div class="hidden lg:flex gap-6 flex-1 min-h-0 overflow-hidden">
-            <!-- Products Area (Left Side - 2/3) -->
-            <div class="flex-[2] min-h-0 min-w-0 overflow-hidden">
-              <app-pos-product-selection
-                class="h-full block"
-                [refreshTrigger]="productRefreshCounter()"
-                [selectedCustomer]="selectedCustomer()"
-                [queueEnabled]="queueEnabled()"
-                [queueCount]="queueCount()"
-                [canCreateCustomItems]="canCreateCustomItems()"
-                (productSelected)="onProductSelected($event)"
-                (productAddedToCart)="onProductAddedToCart($event)"
-                (bookingRequired)="onBookingRequired($event)"
-                (openCustomerModal)="onOpenCustomerModal()"
-                (openQueueModal)="onOpenQueueModal()"
-                (openCustomItemModal)="openCustomItemModal()"
-              ></app-pos-product-selection>
-            </div>
-
-            <!-- Cart Area (Right Side - 1/3) -->
-            <div class="flex-1 min-h-0 min-w-0 overflow-hidden">
-              <app-pos-cart
-                class="h-full block"
-                [isEditMode]="isEditMode()"
-                [isQuotationMode]="isQuotationMode()"
-                [isLayawayMode]="isLayawayMode()"
-                [readyToPayOrder]="readyToPayOrder()"
-                [isCharging]="isCharging()"
-                [cashRegisterEnabled]="cashRegisterEnabled()"
-                (cashOpenClicked)="showSessionOpenModal.set(true)"
-                (cashCloseClicked)="showSessionCloseModal.set(true)"
-                (cashMovementClicked)="showCashMovementModal.set(true)"
-                (cashDetailClicked)="showSessionDetailModal.set(true)"
-                (create)="onOpenCreateModal()"
-                (saveDraft)="onSaveDraft()"
-                (shipping)="onShipping()"
-                (checkout)="onCheckout()"
-                (charge)="onCharge()"
-                (quote)="onQuote()"
-                (layaway)="onLayaway()"
-                (customerSelected)="onCustomerSelected($event)"
-                (bookingsChanged)="onBookingsChanged($event)"
-                (openCustomerModal)="onOpenCustomerModal()"
-                (clearCustomer)="onClearCustomer()"
-                ></app-pos-cart>
+              </div>
             </div>
           </div>
 
-          <!-- Mobile: Full width products only -->
-          <div class="lg:hidden flex-1 min-h-0 pb-20">
+          <app-pos-product-selection
+            class="flex-1 min-h-0 block"
+            [refreshTrigger]="productRefreshCounter()"
+            [selectedCustomer]="selectedCustomer()"
+            [queueEnabled]="queueEnabled()"
+            [queueCount]="queueCount()"
+            [canCreateCustomItems]="canCreateCustomItems()"
+            (productSelected)="onProductSelected($event)"
+            (productAddedToCart)="onProductAddedToCart($event)"
+            (bookingRequired)="onBookingRequired($event)"
+            (openCustomerModal)="onOpenCustomerModal()"
+            (openQueueModal)="onOpenQueueModal()"
+            (openCustomItemModal)="openCustomItemModal()"
+          ></app-pos-product-selection>
+        </div>
+
+        <!-- DESKTOP RIGHT COLUMN: Cart Area (Starts 100% at the top of the outlet! Stitch RightTicketCart) -->
+        <div class="hidden lg:block w-96 xl:w-[410px] flex-none min-h-0 h-full overflow-hidden">
+          <app-pos-cart
+            class="h-full block"
+            [isEditMode]="isEditMode()"
+            [isQuotationMode]="isQuotationMode()"
+            [isLayawayMode]="isLayawayMode()"
+            [readyToPayOrder]="readyToPayOrder()"
+            [isCharging]="isCharging()"
+            [cashRegisterEnabled]="cashRegisterEnabled()"
+            (cashOpenClicked)="showSessionOpenModal.set(true)"
+            (cashCloseClicked)="showSessionCloseModal.set(true)"
+            (cashMovementClicked)="showCashMovementModal.set(true)"
+            (detailClicked)="showSessionDetailModal.set(true)"
+            (create)="onOpenCreateModal()"
+            (saveDraft)="onSaveDraft()"
+            (checkout)="onCheckout()"
+            (charge)="onCharge()"
+            (quote)="onQuote()"
+            (layaway)="onLayaway()"
+            (customerSelected)="onCustomerSelected($event)"
+            (bookingsChanged)="onBookingsChanged($event)"
+            (openCustomerModal)="onOpenCustomerModal()"
+            (clearCustomer)="onClearCustomer()"
+          ></app-pos-cart>
+        </div>
+
+        <!-- Mobile Layout: Header + Products + Bottom drawer trigger -->
+        <div class="lg:hidden flex-1 flex flex-col min-h-0 pb-20 w-full h-full">
+          <!-- Mobile Header with compact dropdown -->
+          <div
+            class="flex-none px-3 py-2 bg-white border-b border-slate-200/80 pos-header relative z-30 shrink-0 flex justify-between items-center"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <div
+                class="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 shrink-0"
+              >
+                <app-icon name="shopping-bag" [size]="18"></app-icon>
+              </div>
+              <h1 class="font-bold text-slate-800 text-base leading-none truncate">
+                Vendix POS
+              </h1>
+              @if (activeSession()) {
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              }
+            </div>
+            <app-pos-header-dropdown
+              [customer]="selectedCustomer()"
+              [scheduleEnabled]="enableScheduleValidation()"
+              [isWithinHours]="!isActuallyOutOfHours()"
+              [isDayClosed]="isTodayClosed"
+              [todayHours]="todaySchedule"
+              [cashSession]="activeSession()"
+              [showCashOpenButton]="cashRegisterEnabled()"
+              (customerClicked)="onOpenCustomerModal()"
+              (clearCustomer)="onClearCustomer()"
+              (scheduleClicked)="showScheduleModal.set(true)"
+              (cashOpenClicked)="showSessionOpenModal.set(true)"
+              (cashCloseClicked)="showSessionCloseModal.set(true)"
+              (cashMovementClicked)="showCashMovementModal.set(true)"
+              (cashDetailClicked)="showSessionDetailModal.set(true)"
+            ></app-pos-header-dropdown>
+          </div>
+
+          <!-- Mobile Products -->
+          <div class="flex-1 min-h-0">
             <app-pos-product-selection
               class="h-full block"
               [refreshTrigger]="productRefreshCounter()"
@@ -536,7 +430,6 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           (customItem)="openCustomItemModal()"
           (create)="onOpenCreateModal()"
           (saveDraft)="onSaveDraft()"
-          (shipping)="onShipping()"
           (checkout)="onCheckout()"
           (charge)="onCharge()"
           (quote)="onQuote()"
@@ -561,7 +454,6 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (clearCart)="onClearCart()"
         (create)="onOpenCreateModal()"
         (saveDraft)="onSaveDraft()"
-        (shipping)="onShippingFromModal()"
         (checkout)="onCheckoutFromModal()"
         (charge)="onCharge()"
       ></app-pos-cart-modal>
@@ -613,7 +505,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       <app-pos-checkout-shell
         [isOpen]="showCheckoutModal()"
         [cartState]="cartState()"
-        [checkoutIntent]="checkoutIntent()"
+        [initialEntrega]="initialEntrega()"
         [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
         [tableId]="restaurantIntegration.currentTableSession()?.table_id ?? null"
         [mode]="checkoutMode()"
@@ -754,12 +646,19 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
   styles: [
     `
       :host {
-        display: block;
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 0%;
+        width: 100%;
         height: 100%;
+        min-height: 0;
         overflow: hidden;
       }
       .pos-container {
+        width: 100%;
         height: 100%;
+        min-height: 0;
+        border-top: 1px solid var(--color-border);
       }
 
       /* iOS-style blur header */
@@ -1063,11 +962,11 @@ export class PosComponent {
 
   /**
    * Fase 5·B3: SHELL unificado de checkout (stepper) — único punto de entrada
-   * del cobro. Cubre cobro sin envío ('pickup'), delivery y "Guardar borrador"
+   * del cobro. Cubre cobro sin envío, delivery y "Guardar borrador"
    * desde el footer; los 3 modales viejos ya fueron retirados.
    */
   showCheckoutModal = signal(false);
-  checkoutIntent = signal<'pickup' | 'delivery'>('pickup');
+  readonly initialEntrega = signal<EntregaChoice>('llevar');
   /** Fulfillment type chosen for the current payment. Mirrors the
    *  payment-modal selector so the parent can react when the modal closes. */
   paymentFulfillment = signal<'consumo' | 'entrega' | null>(null);
@@ -1784,14 +1683,14 @@ export class PosComponent {
     // gate + saveDraft call; the parent just opens it. The (checkoutCompleted)
     // output stays reserved for the flow-pay path that Cobrar drives.
     this.mode.set('create-draft');
-    this.checkoutIntent.set('pickup');
+    this.initialEntrega.set('llevar');
     this.showCheckoutModal.set(true);
   }
 
   /**
    * Fase 5·B3: the "Crear orden / Guardar borrador" flow now lives inside
-   * the checkout shell footer. This entrypoint just opens the shell in
-   * pickup intent; the shell owns the create flow (retail draft /
+   * the checkout shell footer. This entrypoint just opens the shell;
+   * the shell owns the create flow (retail draft /
    * restaurant counter draft / append-to-table) and the KDS fire, and
    * clears the cart on success.
    */
@@ -1805,7 +1704,7 @@ export class PosComponent {
     // the flow-pay path; the draft path emits `(draftSaved)` and never opens
     // a payment collector.
     this.mode.set('create-draft');
-    this.checkoutIntent.set('pickup');
+    this.initialEntrega.set('llevar');
     this.showCheckoutModal.set(true);
   }
 
@@ -2265,16 +2164,17 @@ export class PosComponent {
     // validar") is removed in favour of the shell handler.
     if (this.isEditMode()) {
       this.mode.set('edit');
-      this.checkoutIntent.set('pickup');
+      const initialChoice: EntregaChoice =
+        this.editingOrder()?.delivery_type === 'home_delivery' ? 'enviar' : 'llevar';
+      this.initialEntrega.set(initialChoice);
       this.showCheckoutModal.set(true);
       return;
     }
 
-    // Fase 5·B3: el checkout sin envío ('pickup') pasa por el SHELL con
-    // stepper — único checkout del POS. mode='create-payment' so the shell
-    // skips Actualizar and shows only the Cobro CTA.
+    // Fase 5·B3: el checkout pasa por el SHELL con stepper — único checkout del POS.
+    // mode='create-payment' so the shell skips Actualizar and shows only the Cobro CTA.
     this.mode.set('create-payment');
-    this.checkoutIntent.set('pickup');
+    this.initialEntrega.set('llevar');
     this.showCheckoutModal.set(true);
   }
 
@@ -2321,7 +2221,9 @@ export class PosComponent {
     // the legacy OrderPaymentModalComponent for non-edit flows.
     if (this.isEditMode()) {
       this.mode.set('edit');
-      this.checkoutIntent.set('pickup');
+      const initialChoice: EntregaChoice =
+        this.editingOrder()?.delivery_type === 'home_delivery' ? 'enviar' : 'llevar';
+      this.initialEntrega.set(initialChoice);
       this.showCheckoutModal.set(true);
       return;
     }
@@ -2727,7 +2629,7 @@ export class PosComponent {
       this.editingOrder.set(null);
       this.readyToPayOrder.set(null);
       this.mode.set('create-draft');
-      this.checkoutIntent.set('pickup');
+      this.initialEntrega.set('llevar');
     }
 
     // CP-DTLP Phase E.2 / QUI-764 — encadenar tiquete de despacho
@@ -2769,7 +2671,7 @@ export class PosComponent {
     this.currentOrderNumber.set(null);
     this.readyToPayOrder.set(null);
     this.mode.set('create-draft');
-    this.checkoutIntent.set('pickup');
+    this.initialEntrega.set('llevar');
     this.showCheckoutModal.set(false);
 
     // Drop the `editOrder` query param too so a browser refresh on the same
@@ -3575,28 +3477,6 @@ export class PosComponent {
   onCheckoutFromModal(): void {
     this.showCartModal.set(false);
     this.onCheckout();
-  }
-
-  // Shipping Modal Methods
-  onShipping(): void {
-    if (!this.cartState() || this.isEmpty) {
-      this.toastService.warning(EMPTY_CART_MESSAGE);
-      return;
-    }
-    // Fase 5·B3: el flujo DELIVERY vive en el shell con stepper (único checkout).
-    this.checkoutIntent.set('delivery');
-    // CP-POS-ENVIO-REGRESSION-001: el shell default a 'create-draft' y su steps()
-    // short-circuita a [Cliente] cuando mode==='create-draft'. Sin esto, Envío y
-    // Cobro desaparecen. mode='create-payment' desbloquea la rama delivery de
-    // steps() que retorna [Cliente, Envío, Cobro]. Espejo del patrón pickup
-    // (onCheckout línea ~1863).
-    this.mode.set('create-payment');
-    this.showCheckoutModal.set(true);
-  }
-
-  onShippingFromModal(): void {
-    this.showCartModal.set(false);
-    this.onShipping();
   }
 
   onShippingCompleted(shippingData: any): void {

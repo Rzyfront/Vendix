@@ -361,15 +361,6 @@ import {
               <app-icon name="clipboard-list" [size]="18"></app-icon>
               <span>{{ isEditMode() ? 'Actualizar' : 'Guardar' }}</span>
             </button>
-            <button
-              type="button"
-              class="action-btn shipping-btn"
-              (click)="shipping.emit()"
-              [disabled]="!cartState()?.items?.length"
-              >
-              <app-icon name="truck" [size]="18"></app-icon>
-              <span>Envío</span>
-            </button>
           </div>
           <!--
             CP-POS-CREAR-EDITAR-COBRAR-001 — main CTA stays Cobrar. The
@@ -1026,7 +1017,7 @@ import {
 
       .modal-actions-row {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr;
         gap: 10px;
       }
 
@@ -1070,15 +1061,7 @@ import {
         border-color: var(--color-text-secondary);
       }
 
-      .shipping-btn {
-        background: var(--color-surface);
-        border: 1px solid rgba(var(--color-primary-rgb), 0.5);
-        color: var(--color-primary);
-      }
 
-      .shipping-btn:hover:not(:disabled) {
-        background: rgba(var(--color-primary-rgb), 0.05);
-      }
 
       /* Stitch paso 11 — CTA sobre success-700 (~5:1 con blanco, AA);
          blanco sobre primary #2ecc71 daba 2.10:1 y fallaba AA. */
@@ -1168,7 +1151,6 @@ export class PosCartModalComponent {
    * step. The Cobrar button uses the full shell wizard.
    */
   readonly saveDraft = output<void>();
-  readonly shipping = output<void>();
   readonly checkout = output<void>();
   readonly charge = output<void>();
 

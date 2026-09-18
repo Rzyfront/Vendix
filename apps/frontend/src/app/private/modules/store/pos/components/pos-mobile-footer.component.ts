@@ -86,14 +86,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             <app-icon name="clipboard-list" [size]="16"></app-icon>
             <span>{{ isEditMode() ? 'Actualizar' : 'Guardar' }}</span>
           </button>
-          <button
-            class="action-btn shipping-btn"
-            (click)="shipping.emit()"
-            [disabled]="itemCount() === 0"
-            >
-            <app-icon name="truck" [size]="16"></app-icon>
-            <span>Envío</span>
-          </button>
         </div>
         <!--
           Row 3 — Primary CTA stays Cobrar. The previous label
@@ -269,7 +261,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       /* Row 2: Actions */
       .actions-row {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
       }
 
@@ -323,16 +315,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       .save-btn:hover:not(:disabled) {
         background: var(--color-muted);
         border-color: var(--color-text-secondary);
-      }
-
-      .shipping-btn {
-        background: var(--color-surface);
-        border: 1px solid rgba(var(--color-primary-rgb), 0.5);
-        color: var(--color-primary);
-      }
-
-      .shipping-btn:hover:not(:disabled) {
-        background: rgba(var(--color-primary-rgb), 0.05);
       }
 
       .checkout-btn {
@@ -420,7 +402,6 @@ export class PosMobileFooterComponent {
    * step. The Cobrar button uses the full shell wizard.
    */
   readonly saveDraft = output<void>();
-  readonly shipping = output<void>();
   readonly checkout = output<void>();
   readonly charge = output<void>();
   readonly quote = output<void>();

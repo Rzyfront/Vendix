@@ -455,3 +455,26 @@
 .config-flash-warning {
   animation: configFlashWarning 1.2s ease-out;
 }
+
+/* ── Dirección de entrega ────────────────────────────── */
+.address-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.addr-required-badge {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--color-warning-700);
+  color: #fff;
+}
+
+.addr-required-badge--error {
+  background: var(--color-error-600);
+  color: #fff;
+}

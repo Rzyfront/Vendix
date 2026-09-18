@@ -56,16 +56,24 @@ import { CashRegisterSession } from '../services/pos-cash-register.service';
           </div>
         </div>
       } @else if (showOpenButton()) {
-        <button
-          type="button"
-          (click)="openClicked.emit()"
-          class="sbc-open-btn"
-          aria-label="Abrir sesion de caja"
-        >
-          <app-icon name="lock" [size]="14"></app-icon>
-          <span class="sbc-open-btn-idle">Sin caja</span>
-          <span class="sbc-open-btn-cta">Abrir</span>
-        </button>
+        <div class="sbc-strip">
+          <div class="sbc-pill-closed">
+            <span class="sbc-dot-closed" aria-hidden="true"></span>
+            <span class="sbc-name-closed">Sin turno</span>
+          </div>
+          <div class="sbc-actions">
+            <button
+              type="button"
+              (click)="openClicked.emit()"
+              class="sbc-btn sbc-btn-open-cta"
+              aria-label="Abrir turno de caja"
+              title="Abrir turno de caja"
+            >
+              <app-icon name="unlock" [size]="13"></app-icon>
+              <span>Abrir</span>
+            </button>
+          </div>
+        </div>
       }
     } @else if (session()?.status === 'open') {
       <div class="sb-open">
@@ -456,40 +464,44 @@ import { CashRegisterSession } from '../services/pos-cash-register.service';
       background: var(--color-error-100);
     }
 
-    .sbc-open-btn {
-      display: flex;
+    .sbc-pill-closed {
+      display: inline-flex;
       align-items: center;
-      justify-content: center;
-      gap: 8px;
-      width: 100%;
-      padding: 12px;
-      min-height: 44px;
-      background: var(--color-warning-50);
-      border-bottom: 1px solid var(--color-warning-200);
-      color: var(--color-warning-800);
-      font-size: 14px;
-      cursor: pointer;
-      transition: background-color 0.2s ease;
+      gap: 6px;
+      padding: 4px 10px;
+      background: #fff1f2;
+      border: 1px solid #fecdd3;
+      border-radius: 12px;
+      box-shadow: var(--shadow-2xs, 0 1px 2px rgb(0 0 0 / 0.05));
     }
 
-    .sbc-open-btn:hover {
-      background: var(--color-warning-100);
+    .sbc-dot-closed {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #f43f5e;
+      flex-shrink: 0;
     }
 
-    .sbc-open-btn:focus-visible {
-      outline: 3px solid var(--color-primary);
-      outline-offset: -3px;
-    }
-
-    .sbc-open-btn-idle {
-      font-weight: 500;
-    }
-
-    .sbc-open-btn-cta {
+    .sbc-name-closed {
+      font-size: 12px;
       font-weight: 600;
-      text-decoration: underline;
-      text-decoration-color: var(--color-warning-500);
-      text-underline-offset: 2px;
+      color: #be123c;
+      white-space: nowrap;
+    }
+
+    .sbc-btn-open-cta {
+      background: var(--color-primary);
+      border-color: var(--color-primary);
+      color: var(--color-text-on-primary, #ffffff);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 8px;
+    }
+
+    .sbc-btn-open-cta:hover {
+      opacity: 0.92;
     }
   `],
 })

@@ -159,6 +159,7 @@ export class PosPaymentStepComponent implements OnInit {
    * charge; null → falls back to the cart total.
    */
   readonly amountOverride = input<number | null>(null);
+  readonly paymentResetKey = input<number>(0);
 
   // ── Outputs (same contract the legacy interface emitted) ─────────────────
   readonly paymentCompleted = output<any>();
@@ -352,6 +353,21 @@ export class PosPaymentStepComponent implements OnInit {
    */
   private readonly advancePending = signal<boolean>(false);
   private advancePendingTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  goToSubStep(index: number): void {
+    this.collector()?.goToSubStep(index);
+  }
+
+  attemptPrevSubStep(): boolean {
+    const c = this.collector();
+    if (!c) return false;
+    const cur = c.subStep();
+    if (cur > 0) {
+      c.goToSubStep(cur - 1);
+      return true;
+    }
+    return false;
+  }
 
   /**
    * Footer "Siguiente" driver for the stepped Cobro sub-wizard (pickup flows,

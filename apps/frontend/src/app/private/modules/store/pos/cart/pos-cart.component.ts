@@ -68,7 +68,7 @@ import {
   ],
   template: `
     <div
-      class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border overflow-hidden"
+      class="h-full flex flex-col bg-white border-l border-slate-200 overflow-hidden w-full"
     >
       <!--
         PSVERSION0001 paso 4 — tira de caja Stitch sobre el ticket. Segunda
@@ -90,70 +90,83 @@ import {
         </div>
       }
       <!-- Cart Header & Summary Section (Fixed at top) -->
-      <div class="flex-none bg-surface border-b border-border shadow-sm">
+      <div class="flex-none bg-white border-b border-slate-200/80 shadow-2xs">
         <!--
           Stitch paso 3 — cabecera del panel "Carrito Actual": título,
-          conteo de ítems y acciones (Vaciar con confirmación via
+          conteo de ítems y acciones (Pre-cuenta, Vaciar con confirmación via
           clearCart(), Nota interna). Solo presentación: handlers intactos.
         -->
         <div
-          class="px-5 py-3 border-b border-border/50 flex items-center justify-between gap-2"
+          class="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2"
         >
-          <div class="min-w-0">
-            <h2
-              class="text-base font-bold text-text-primary flex items-center gap-2"
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div
+              class="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0 shadow-2xs"
             >
-              <app-icon
-                name="shopping-cart"
-                [size]="18"
-                class="text-primary"
-              ></app-icon>
-              Carrito Actual
-            </h2>
-            <p
-              class="text-xs text-neutral-600 mt-0.5"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              {{ cartState().items.length }}
-              {{ cartState().items.length === 1 ? 'ítem' : 'ítems' }}
-            </p>
+              <app-icon name="shopping-cart" [size]="16"></app-icon>
+            </div>
+            <div class="min-w-0 leading-tight">
+              <h2 class="text-base font-bold text-slate-900 leading-tight truncate">
+                Carrito Actual
+              </h2>
+              <span
+                class="text-xs text-primary font-semibold"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                {{ cartState().items.length }}
+                {{ cartState().items.length === 1 ? 'ítem seleccionado' : 'ítems seleccionados' }}
+              </span>
+            </div>
           </div>
 
-          <div class="flex items-center gap-1.5">
-            <!-- Vaciar carrito (desktop): el modal móvil ya lo tiene; el
-                 sidebar no lo exponía. Reusa clearCart() con confirmación. -->
+          <!-- Acciones Carrito Compactas (Stitch PSVERSION0001: h-8, iconos 14px, espaciado fino) -->
+          <div class="flex items-center gap-1.5 shrink-0">
+            <!-- Vaciar carrito: rose-50, rose-600, h-8 -->
             @if (!isEmpty()) {
               <button
                 type="button"
                 (click)="clearCart()"
-                class="cart-header-btn px-2.5 rounded-lg flex items-center gap-1.5 transition-colors border text-xs font-semibold shadow-2xs text-red-600 border-red-200 bg-red-50/80 hover:bg-red-100"
+                class="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg border border-rose-200/70 transition-colors h-8 cursor-pointer shadow-2xs"
                 aria-label="Vaciar carrito"
-                title="Vaciar carrito"
+                title="Vaciar carrito actual"
               >
                 <app-icon name="trash-2" [size]="14"></app-icon>
                 <span>Vaciar</span>
               </button>
             }
-            <!--
-              Staff-only order note. Small state icon-button: gray when empty,
-              green when a note exists. Opens a modal to edit it. The note is
-              internal (set at creation), never shown to the customer.
-            -->
+
+            <!-- Nota general: slate-100 o primary si tiene nota, h-8 -->
             <button
               type="button"
               (click)="orderNoteModalOpen.set(true)"
-              class="cart-header-btn staff-note-btn relative px-2.5 rounded-lg flex items-center gap-1.5 transition-colors border text-xs font-semibold shadow-2xs"
+              class="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-lg transition-colors h-8 cursor-pointer shadow-2xs border"
               [class]="
                 hasStaffNote()
-                  ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
-                  : 'text-neutral-600 border-border/80 hover:text-text-primary hover:bg-muted/40'
+                  ? 'text-primary bg-primary/10 border-primary/20 hover:bg-primary/20'
+                  : 'text-slate-600 bg-slate-100 hover:bg-slate-200 border-slate-200/80'
               "
               aria-label="Nota de la orden"
+              title="Nota general del pedido"
             >
               <app-icon name="notebook-pen" [size]="14"></app-icon>
               <span>Nota</span>
             </button>
+
+            <!-- Pre-cuenta: icono de impresora compacto h-8 en blue-50 -->
+            @if (!isEmpty()) {
+              <button
+                type="button"
+                (click)="printPreCuenta()"
+                [disabled]="preCuentaPrinting()"
+                [attr.aria-busy]="preCuentaPrinting() ? 'true' : null"
+                class="flex items-center justify-center h-8 px-2.5 py-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200/60 rounded-lg transition-colors cursor-pointer shadow-2xs disabled:opacity-50"
+                title="Pre-cuenta"
+                aria-label="Imprimir pre-cuenta"
+              >
+                <app-icon name="printer" [size]="14"></app-icon>
+              </button>
+            }
           </div>
         </div>
 
@@ -170,7 +183,7 @@ import {
             >
               <div class="flex items-center gap-2.5 min-w-0">
                 <div
-                  class="w-8 h-8 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold text-xs flex items-center justify-center shrink-0 shadow-xs"
+                  class="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 text-primary font-bold text-xs flex items-center justify-center shrink-0 shadow-xs"
                   aria-hidden="true"
                 >
                   {{ customerInitials(customer) }}
@@ -209,20 +222,20 @@ import {
                 <button
                   type="button"
                   (click)="openCustomerModal.emit()"
-                  class="cart-line-btn p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg transition-all"
+                  class="w-6 h-6 flex items-center justify-center text-slate-500 hover:text-primary hover:bg-white border border-transparent hover:border-slate-200 rounded-md transition-all cursor-pointer"
                   title="Cambiar cliente"
                   [attr.aria-label]="'Cambiar cliente ' + customer.name"
                 >
-                  <app-icon name="pencil" [size]="14"></app-icon>
+                  <app-icon name="pencil" [size]="13"></app-icon>
                 </button>
                 <button
                   type="button"
                   (click)="clearCustomer.emit()"
-                  class="cart-line-btn p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200/70 rounded-lg transition-all"
+                  class="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200/70 rounded-md transition-all cursor-pointer"
                   title="Quitar cliente"
                   [attr.aria-label]="'Quitar cliente ' + customer.name"
                 >
-                  <app-icon name="x" [size]="14"></app-icon>
+                  <app-icon name="x" [size]="13"></app-icon>
                 </button>
               </div>
             </div>
@@ -243,7 +256,7 @@ import {
         conserva miniatura, nombre, badges de tier/impuesto, stepper y total.
       -->
       <div
-        class="flex-1 overflow-y-auto p-4 bg-bg/30"
+        class="flex-1 overflow-y-auto p-4 bg-slate-50/40 min-h-0"
         role="list"
         aria-label="Ítems del carrito"
       >
@@ -279,7 +292,7 @@ import {
           tier-selector, hints, scheduler y booking intactos.
         -->
         @if (!isEmpty()) {
-          <div class="space-y-3">
+          <div class="space-y-2">
             @for (
               item of cartState().items;
               track trackByItemId($index, item)
@@ -287,237 +300,219 @@ import {
               <div
                 role="listitem"
                 data-purpose="cart-item"
-                class="group p-3 bg-slate-50 border border-slate-200/80 rounded-2xl flex flex-col gap-2.5 hover:border-emerald-300 transition-colors"
+                class="group p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl flex flex-col gap-1.5 hover:border-primary/40 transition-colors"
               >
-                <div class="flex items-start gap-3">
-                  <!-- Product Image -->
-                <div
-                  class="w-12 h-12 shrink-0 bg-white rounded-xl overflow-hidden relative border border-slate-200"
-                >
-                  @if (item.variant_image_url || item.product.image_url || item.product.image) {
-                    <img
-                      [src]="item.variant_image_url || item.product.image_url || item.product.image"
-                      [alt]="item.product.name"
-                      class="absolute inset-0 w-full h-full object-cover"
-                      (error)="handleImageError($event)"
-                    />
-                  }
-                  @if (!item.variant_image_url && !item.product.image_url && !item.product.image) {
-                    <div
-                      class="absolute inset-0 flex items-center justify-center text-neutral-600"
-                    >
-                      <app-icon name="image" [size]="14"></app-icon>
-                    </div>
-                  }
-                </div>
-                <!-- Item Info -->
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-start justify-between gap-1">
-                    <div class="flex items-center gap-1.5 min-w-0">
-                      <h4
-                        class="text-sm font-bold text-slate-900 truncate"
-                      >
-                        {{ item.product.name }}
-                      </h4>
-                      <!-- CP-POS-SVC-PERF-001 / C.3 — calendar icon on
-                           service/prepared items opens the scheduler modal
-                           so the cashier can pick staff + day + time before
-                           Actualizar / Cobrar. Replaces the absent
-                           scheduling UI of the prior release. -->
-                      @if (
-                        item.product.product_type === 'service' ||
-                        item.product.product_type === 'prepared'
-                      ) {
-                        <button
-                          type="button"
-                          class="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-violet-600 hover:bg-violet-50 border border-violet-200 transition-colors"
-                          [attr.aria-label]="
-                            (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
-                            item.product.name
-                          "
-                          [title]="
-                            (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
-                            item.product.name
-                          "
-                          (click)="openScheduler(item)"
-                        >
-                          <app-icon name="calendar" [size]="12"></app-icon>
-                        </button>
-                      }
-                    </div>
-                    <!--
-                      PSVERSION0001 paso 5 — papelera Stitch arriba-derecha
-                      (antes: columna de acciones de la grilla). Mismo handler
-                      removeFromCart; el botón de editar ítem personalizado se
-                      conserva a su izquierda con canEditItemPrice intacto.
-                    -->
-                    <div class="flex items-start gap-1 shrink-0">
-                      @if (item.itemType === 'custom' && canEditItemPrice(item)) {
-                        <button
-                          type="button"
-                          (click)="editItemPrice(item)"
-                          class="cart-line-btn p-1 rounded text-primary hover:bg-primary/15 border border-primary/30 bg-primary/5 transition-colors shadow-2xs"
-                          title="Editar ítem personalizado"
-                          [attr.aria-label]="'Editar ítem personalizado ' + item.product.name"
-                        >
-                          <app-icon name="pencil" [size]="13"></app-icon>
-                        </button>
-                      }
-                      <button
-                        type="button"
-                        (click)="removeFromCart(item.id)"
-                        class="cart-line-btn p-1.5 rounded-lg text-rose-500 hover:text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200/70 transition-colors shadow-xs"
-                        title="Eliminar producto"
-                        [attr.aria-label]="'Eliminar ' + item.product.name + ' del carrito'"
-                      >
-                        <app-icon name="trash-2" [size]="16"></app-icon>
-                      </button>
-                    </div>
-                  </div>
-                  @if (item.variant_display_name) {
-                    <p
-                      class="text-[10px] text-primary font-medium truncate leading-tight"
-                    >
-                      {{ item.variant_display_name }}
-                    </p>
-                  }
-                  @if (item.itemType === 'custom' || item.description) {
-                    <p
-                      class="text-[10px] text-neutral-600 truncate leading-tight"
-                    >
-                      {{ item.itemType === 'custom' ? 'Ítem personalizado' : item.description }}
-                    </p>
-                  }
-                  <div class="flex items-center gap-2 mt-0.5 flex-wrap">
-                    <!-- F-137 (C.9, major — revisión 2026-09-14): 'text-text-muted'
-                         (10px) rinde 3,27:1, bajo el mínimo AA (4,5:1) que el
-                         propio repo se exige (skills/vendix-ui-ux/SKILL.md:51)
-                         para una cifra que decide un cobro (la base gravable).
-                         '#5C6672' es el mismo tono que theme.service.ts:437 ya
-                         valida en ~4,6:1; se sube además a 12px. -->
-                    <span class="text-xs text-[#5C6672]">
-                      Base: {{ formatCurrency(item.unitPrice)
-                      }}{{ unitPriceSuffix(item) }}
-                      <!--
-                        PSVERSION0001 paso 5 — "(Descuento -$Y)" Stitch. Solo
-                        cuando la línea tiene rebaja real (override hacia abajo
-                        vs originalFinalPrice); emerald-700 en vez del 600 del
-                        mockup para conservar AA sobre slate-50.
-                      -->
-                      @if (getItemDiscountAmount(item) > 0) {
-                        <span class="text-emerald-700 font-semibold"
-                          >(Descuento -{{
-                            formatCurrency(getItemDiscountAmount(item))
-                          }})</span
-                        >
-                      }
-                    </span>
-                    @if (item.is_weight_product && item.weight) {
-                      <span
-                        class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-semibold bg-blue-100 text-blue-800"
-                      >
-                        {{ item.weight }} {{ item.weight_unit || 'kg' }}
-                      </span>
+                <div class="flex items-start gap-2.5">
+                  <!-- Product Image (Compact 40x40) -->
+                  <div
+                    class="w-10 h-10 shrink-0 bg-white rounded-lg overflow-hidden relative border border-slate-200"
+                  >
+                    @if (item.variant_image_url || item.product.image_url || item.product.image) {
+                      <img
+                        [src]="item.variant_image_url || item.product.image_url || item.product.image"
+                        [alt]="item.product.name"
+                        class="absolute inset-0 w-full h-full object-cover"
+                        (error)="handleImageError($event)"
+                      />
                     }
-                    @if (getItemTaxAmount(item) > 0) {
-                      <!-- F-139: el diseño y el guion E2E-1 paso 3 piden ver
-                           "+IVA $988.000" en pantalla; el badge sólo pintaba
-                           el signo y el importe, sin la palabra "IVA" — un
-                           lector de pantalla lo anunciaba como "más 988.000
-                           pesos" sin decir de qué. Rótulo visible + aria-label
-                           explícito, y tamaño por encima de 9px. -->
-                      <span
-                        class="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800"
-                        [attr.aria-label]="'IVA de la línea: ' + formatCurrency(getItemTaxAmount(item))"
+                    @if (!item.variant_image_url && !item.product.image_url && !item.product.image) {
+                      <div
+                        class="absolute inset-0 flex items-center justify-center text-neutral-600"
                       >
-                        +IVA {{ formatCurrency(getItemTaxAmount(item)) }}
-                      </span>
-                    }
-                    @if (item.isPriceOverridden) {
-                      <span
-                        class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-purple-100 text-purple-800"
-                      >
-                        precio editado
-                      </span>
-                    }
-                    @if (item.applied_price_tier_id && item.applied_price_tier_name) {
-                      <span
-                        class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-800"
-                        [title]="'Tarifa aplicada: ' + item.applied_price_tier_name"
-                      >
-                        {{ item.applied_price_tier_name }}
-                      </span>
-                    }
-                    @if (isPackageLine(item)) {
-                      <span
-                        class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-blue-50 text-blue-700"
-                        [title]="'Empaque de ' + item.units_per_package + ' unidades'"
-                      >
-                        Caja ×{{ item.units_per_package }}
-                      </span>
+                        <app-icon name="image" [size]="12"></app-icon>
+                      </div>
                     }
                   </div>
-                  @if (canShowTierSelector(item)) {
-                    <div class="mt-1.5">
-                      <app-price-tier-selector
-                        [tiers]="visibleTiersForItem(item)"
-                        [selectedTierId]="item.applied_price_tier_id ?? null"
-                        [unitsPerPackage]="item.units_per_package ?? null"
-                        (selectedTierIdChange)="onTierChange(item, $event)"
-                      ></app-price-tier-selector>
+                  <!-- Item Info -->
+                  <div class="flex-1 min-w-0">
+                    <!-- Line 1: Title + Variant badge + Actions -->
+                    <div class="flex items-center justify-between gap-1">
+                      <div class="flex items-center gap-1.5 min-w-0 flex-wrap">
+                        <h4
+                          class="text-xs font-bold text-slate-900 truncate leading-tight"
+                        >
+                          {{ item.product.name }}
+                        </h4>
+                        @if (item.variant_display_name) {
+                          <span
+                            class="text-[10px] font-semibold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.2 rounded shrink-0 leading-tight"
+                          >
+                            {{ item.variant_display_name }}
+                          </span>
+                        }
+                        @if (item.itemType === 'custom') {
+                          <span
+                            class="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded shrink-0 leading-tight"
+                          >
+                            Personalizado
+                          </span>
+                        }
+                        @if (
+                          item.product.product_type === 'service' ||
+                          item.product.product_type === 'prepared'
+                        ) {
+                          <button
+                            type="button"
+                            class="shrink-0 w-5 h-5 rounded flex items-center justify-center text-violet-600 hover:bg-violet-50 border border-violet-200 transition-colors cursor-pointer"
+                            [attr.aria-label]="
+                              (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
+                              item.product.name
+                            "
+                            [title]="
+                              (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
+                              item.product.name
+                            "
+                            (click)="openScheduler(item)"
+                          >
+                            <app-icon name="calendar" [size]="11"></app-icon>
+                          </button>
+                        }
+
+                        <!-- Botón discreto + Nota al lado del icono de calendario / título cuando NO tiene nota -->
+                        @if (!item.notes) {
+                          <button
+                            type="button"
+                            (click)="openItemNote(item)"
+                            class="inline-flex items-center gap-0.5 text-[10px] font-medium text-slate-400 hover:text-slate-700 hover:bg-white px-1.5 py-0.5 rounded border border-transparent hover:border-slate-200 transition-colors cursor-pointer shrink-0 leading-none"
+                            [attr.aria-label]="'Agregar nota a ' + item.product.name"
+                            title="Agregar nota"
+                          >
+                            <app-icon name="plus" [size]="10"></app-icon>
+                            <span>Nota</span>
+                          </button>
+                        }
+                      </div>
+
+                      <div class="flex items-center gap-1 shrink-0">
+                        @if (item.itemType === 'custom' && canEditItemPrice(item)) {
+                          <button
+                            type="button"
+                            (click)="editItemPrice(item)"
+                            class="w-6 h-6 flex items-center justify-center rounded text-primary hover:bg-primary/15 border border-primary/30 bg-primary/5 transition-colors shadow-2xs"
+                            title="Editar ítem personalizado"
+                            [attr.aria-label]="'Editar ítem personalizado ' + item.product.name"
+                          >
+                            <app-icon name="pencil" [size]="12"></app-icon>
+                          </button>
+                        }
+                        <button
+                          type="button"
+                          (click)="removeFromCart(item.id)"
+                          class="w-6 h-6 flex items-center justify-center rounded-md text-rose-500 hover:text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200/70 transition-colors shadow-2xs cursor-pointer"
+                          title="Eliminar producto"
+                          [attr.aria-label]="'Eliminar ' + item.product.name + ' del carrito'"
+                        >
+                          <app-icon name="trash-2" [size]="13"></app-icon>
+                        </button>
+                      </div>
                     </div>
-                  } @else {
-                    <!-- QUI-648: sin selector de presentación, la línea dice
-                         POR QUÉ (la misma frase del editor de producto). -->
-                    @if (saleConfigHints()[item.id]; as hint) {
+
+                    @if (item.description && item.itemType !== 'custom') {
                       <p
-                        class="mt-1 text-[10px] text-neutral-600 leading-tight truncate"
-                        [title]="hint.detail"
+                        class="text-[10px] text-neutral-500 truncate leading-tight mt-0.5"
                       >
-                        {{ hint.headline }}
+                        {{ item.description }}
                       </p>
                     }
-                  }
-                  <!--
-                    PSVERSION0001 paso 5 — chip de nota Stitch UNIVERSAL: la nota
-                    por línea (flujo QUI-787 intacto: openItemNote + modal +
-                    clearItemNote) se extiende de solo-service/prepared a TODOS
-                    los ítems. Con nota muestra el texto truncado (edita); sin
-                    nota muestra "+ Agregar Nota". Reemplaza el botón "Nota"
-                    service/prepared y el chip amarillo legacy.
-                  -->
-                  <div class="flex items-center gap-1.5 mt-1">
-                    @if (item.notes) {
-                      <button
-                        type="button"
-                        (click)="openItemNote(item)"
-                        class="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded-md hover:bg-slate-50 max-w-full min-w-0 transition-colors"
-                        [attr.aria-label]="'Editar nota de ' + item.product.name"
-                        [title]="'Nota para cocina: ' + item.notes"
-                      >
-                        <app-icon name="pencil" [size]="12" class="text-slate-400 shrink-0"></app-icon>
-                        <span class="truncate min-w-0">{{ item.notes }}</span>
-                      </button>
+
+                    <!-- Line 2: Base price, discount & badges (left), Note chip (if has notes) -->
+                    <div class="flex items-center justify-between gap-1 mt-1 text-xs">
+                      <div class="flex items-center gap-1.5 flex-wrap min-w-0">
+                        <span class="text-[11px] text-[#5C6672] leading-none">
+                          Base: {{ formatCurrency(item.unitPrice)
+                          }}{{ unitPriceSuffix(item) }}
+                          @if (getItemDiscountAmount(item) > 0) {
+                            <span class="text-primary font-semibold ml-0.5"
+                              >(-{{
+                                formatCurrency(getItemDiscountAmount(item))
+                              }})</span
+                            >
+                          }
+                        </span>
+                        @if (item.is_weight_product && item.weight) {
+                          <span
+                            class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-semibold bg-blue-100 text-blue-800 leading-none"
+                          >
+                            {{ item.weight }} {{ item.weight_unit || 'kg' }}
+                          </span>
+                        }
+                        @if (getItemTaxAmount(item) > 0) {
+                          <span
+                            class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-medium bg-orange-100 text-orange-800 leading-none"
+                            [attr.aria-label]="'IVA de la línea: ' + formatCurrency(getItemTaxAmount(item))"
+                          >
+                            +IVA {{ formatCurrency(getItemTaxAmount(item)) }}
+                          </span>
+                        }
+                        @if (item.isPriceOverridden) {
+                          <span
+                            class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-medium bg-purple-100 text-purple-800 leading-none"
+                          >
+                            editado
+                          </span>
+                        }
+                        @if (item.applied_price_tier_id && item.applied_price_tier_name) {
+                          <span
+                            class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 leading-none"
+                            [title]="'Tarifa aplicada: ' + item.applied_price_tier_name"
+                          >
+                            {{ item.applied_price_tier_name }}
+                          </span>
+                        }
+                        @if (isPackageLine(item)) {
+                          <span
+                            class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-medium bg-blue-50 text-blue-700 leading-none"
+                            [title]="'Empaque de ' + item.units_per_package + ' unidades'"
+                          >
+                            ×{{ item.units_per_package }}
+                          </span>
+                        }
+                      </div>
+
+                      <!-- Si SÍ tiene nota: chip con texto al lado de base / derecha -->
+                      @if (item.notes) {
+                        <div class="shrink-0">
+                          <button
+                            type="button"
+                            (click)="openItemNote(item)"
+                            class="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-700 bg-white border border-slate-200/90 px-1.5 py-0.5 rounded-md hover:bg-slate-50 max-w-[130px] transition-colors shadow-2xs cursor-pointer"
+                            [attr.aria-label]="'Editar nota de ' + item.product.name"
+                            [title]="'Nota para cocina: ' + item.notes"
+                          >
+                            <app-icon name="pencil" [size]="10" class="text-slate-400 shrink-0"></app-icon>
+                            <span class="truncate min-w-0">{{ item.notes }}</span>
+                          </button>
+                        </div>
+                      }
+                    </div>
+
+                    @if (canShowTierSelector(item)) {
+                      <div class="mt-1">
+                        <app-price-tier-selector
+                          [tiers]="visibleTiersForItem(item)"
+                          [selectedTierId]="item.applied_price_tier_id ?? null"
+                          [unitsPerPackage]="item.units_per_package ?? null"
+                          (selectedTierIdChange)="onTierChange(item, $event)"
+                        ></app-price-tier-selector>
+                      </div>
                     } @else {
-                      <button
-                        type="button"
-                        (click)="openItemNote(item)"
-                        class="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded-md transition-colors"
-                        [attr.aria-label]="'Agregar nota a ' + item.product.name"
-                        [title]="'Agregar nota: ' + item.product.name"
-                      >
-                        + Agregar Nota
-                      </button>
+                      @if (saleConfigHints()[item.id]; as hint) {
+                        <p
+                          class="mt-0.5 text-[10px] text-neutral-600 leading-tight truncate"
+                          [title]="hint.detail"
+                        >
+                          {{ hint.headline }}
+                        </p>
+                      }
                     }
                   </div>
                 </div>
-              </div>
 
                 <!-- CP-POS-SVC-BOOKING-001: Booking summary badge for service line items -->
                 @if (schedulerFor(item.id) || item.booking; as b) {
-                  <div class="flex items-center justify-between gap-1.5 p-2 rounded-md bg-violet-50 border border-violet-200 text-[11px] text-violet-900">
+                  <div class="flex items-center justify-between gap-1.5 px-2 py-1 rounded-md bg-violet-50 border border-violet-200 text-[10px] text-violet-900 mt-0.5">
                     <div class="flex items-center gap-1.5 min-w-0">
-                      <app-icon name="calendar-check" [size]="14" class="text-violet-600 shrink-0"></app-icon>
+                      <app-icon name="calendar-check" [size]="12" class="text-violet-600 shrink-0"></app-icon>
                       <div class="truncate">
                         <span class="font-bold">{{ b.date }}</span>
                         <span class="mx-1 opacity-70">|</span>
@@ -525,45 +520,35 @@ import {
                         @if (b.provider_name) {
                           <span class="ml-1 text-violet-700 font-semibold truncate">({{ b.provider_name }})</span>
                         }
-                        <span
-                          class="ml-1.5 px-1 py-0.5 rounded text-[9px] font-bold inline-block"
-                          [class]="b.service_location_type === 'home' ? 'bg-amber-100 text-amber-800' : 'bg-violet-200/70 text-violet-800'"
-                        >
-                          {{ b.service_location_type === 'home' ? 'A domicilio' : 'En tienda' }}
-                        </span>
                       </div>
                     </div>
                     <button
                       type="button"
                       (click)="openScheduler(item)"
-                      class="px-2 py-0.5 rounded text-[10px] font-bold text-violet-700 hover:bg-violet-200/50 border border-violet-300 transition-colors shrink-0"
+                      class="px-1.5 py-0.2 rounded text-[9px] font-bold text-violet-700 hover:bg-violet-200/50 border border-violet-300 transition-colors shrink-0"
                     >
                       Re-agendar
                     </button>
                   </div>
                 } @else if (item.product.product_type === 'service' || item.product.requires_booking) {
-                  <div class="flex items-center justify-between gap-1.5 p-2 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
+                  <div class="flex items-center justify-between gap-1.5 px-2 py-1 rounded-md bg-amber-50 border border-amber-200 text-[10px] text-amber-900 mt-0.5">
                     <div class="flex items-center gap-1.5 min-w-0">
-                      <app-icon name="alert-circle" [size]="14" class="text-amber-600 shrink-0"></app-icon>
+                      <app-icon name="alert-circle" [size]="12" class="text-amber-600 shrink-0"></app-icon>
                       <span class="font-medium truncate">Servicio sin horario asignado</span>
                     </div>
                     <button
                       type="button"
                       (click)="openScheduler(item)"
-                      class="px-2 py-0.5 rounded bg-amber-200 hover:bg-amber-300 text-amber-900 text-[10px] font-bold shrink-0 transition-colors"
+                      class="px-1.5 py-0.2 rounded bg-amber-200 hover:bg-amber-300 text-amber-900 text-[9px] font-bold shrink-0 transition-colors"
                     >
                       Agendar
                     </button>
                   </div>
                 }
 
-                <!--
-                  PSVERSION0001 paso 5 — divisor Stitch + stepper sm blanco +
-                  total extrabold. Handlers intactos (editWeight,
-                  editSaleQuantity, updateQuantity, valueClamped).
-                -->
+                <!-- Line 3: Stepper + Total Price -->
                 <div
-                  class="flex items-center justify-between pt-1 border-t border-slate-200/60"
+                  class="flex items-center justify-between pt-1 border-t border-slate-200/60 mt-0.5"
                 >
                   <div class="flex items-center gap-2 min-w-0">
                     <!-- Weight products: show clickable weight badge instead of quantity control -->
@@ -689,11 +674,11 @@ import {
              se recalculan por acción del cajero (cambio de cantidad, cupón,
              etc.) y no se anunciaban a lectores de pantalla. 'aria-live' +
              'aria-atomic' sin cambiar el layout ni el copy existente. -->
-        <div class="px-3 py-3 bg-muted/20" aria-live="polite" aria-atomic="true">
-          <div class="space-y-1.5 mb-4">
-            <div class="flex justify-between text-xs text-neutral-600">
+        <div class="px-3 py-2 bg-muted/20" aria-live="polite" aria-atomic="true">
+          <div class="space-y-0.5 mb-2">
+            <div class="flex justify-between text-xs leading-tight text-neutral-600">
               <span>Subtotal</span>
-              <span class="font-medium">{{
+              <span class="font-medium text-neutral-800">{{
                 formatCurrency(summary().subtotal || 0)
               }}</span>
             </div>
@@ -703,16 +688,16 @@ import {
               solo cuando hay descuento real (> 0).
             -->
             @if (summary().discountAmount > 0) {
-              <div class="flex justify-between text-xs">
+              <div class="flex justify-between text-xs leading-tight">
                 <span class="text-neutral-600">Descuento aplicado</span>
                 <span class="font-bold text-rose-600"
                   >-{{ formatCurrency(summary().discountAmount) }}</span
                 >
               </div>
             }
-            <div class="flex justify-between text-xs text-neutral-600">
+            <div class="flex justify-between text-xs leading-tight text-neutral-600">
               <span>Impuestos</span>
-              <span class="font-medium">{{
+              <span class="font-medium text-neutral-800">{{
                 formatCurrency(summary().taxAmount || 0)
               }}</span>
             </div>
@@ -724,9 +709,9 @@ import {
               cuando hay retención resuelta (> 0).
             -->
             @if (withholdingAmount() > 0) {
-              <div class="flex justify-between text-xs text-neutral-600">
+              <div class="flex justify-between text-xs leading-tight text-neutral-600">
                 <span class="flex items-center gap-1">
-                  <app-icon name="minus" [size]="12" class="text-amber-600"></app-icon>
+                  <app-icon name="minus" [size]="11" class="text-amber-600"></app-icon>
                   Retención
                 </span>
                 <span class="font-medium text-amber-700"
@@ -735,22 +720,22 @@ import {
               </div>
             }
 
-            <!-- Promotions & Coupons (hidden in quotation mode) -->
+            <!-- Promotions Applied & Tier Progress (hidden in quotation mode) -->
             @if (!isQuotationMode() && !isLayawayMode()) {
               <!-- Promotions Applied -->
               @if (getPromotionDiscounts().length > 0) {
-                <div class="pt-1.5 border-t border-border/30">
-                  <div class="flex items-center gap-1.5 mb-1">
+                <div class="pt-1 border-t border-border/30">
+                  <div class="flex items-center gap-1.5 mb-0.5">
                     <app-icon
                       name="tag"
-                      [size]="12"
+                      [size]="11"
                       class="text-green-600"
                     ></app-icon>
                     <span class="text-[11px] font-semibold text-green-700"
                       >Promociones aplicadas</span
                     >
                     <span
-                      class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-100 text-green-700 text-[9px] font-bold"
+                      class="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-green-100 text-green-700 text-[8px] font-bold"
                     >
                       {{ getPromotionDiscounts().length }}
                     </span>
@@ -759,14 +744,14 @@ import {
                     <div class="flex items-start justify-between gap-2 py-0.5">
                       <div class="min-w-0 flex-1">
                         <div class="flex items-baseline gap-1 min-w-0 flex-wrap">
-                          <span class="text-[11px] text-green-700 truncate">{{
+                          <span class="text-[10px] text-green-700 truncate">{{
                             disc.description
                           }}</span>
                           @if (formatAffectedProducts(disc.affected_products); as
                             affectedLabel) {
                             @if (affectedLabel) {
                               <span
-                                class="text-[10px] text-green-600/80"
+                                class="text-[9px] text-green-600/80"
                                 [title]="'Aplicada a: ' + affectedLabel"
                                 >[{{ affectedLabel }}]</span
                               >
@@ -807,7 +792,7 @@ import {
                         </div>
                       </div>
                       <div class="flex items-center gap-1 shrink-0">
-                        <span class="text-[11px] font-medium text-green-700"
+                        <span class="text-[10px] font-medium text-green-700"
                           >-{{ formatCurrency(disc.amount) }}</span
                         >
                         @if (!disc.is_auto_applied) {
@@ -834,17 +819,17 @@ import {
                 (promotion_quantity_tiers) — no extra backend call.
               -->
               @if (promotionTierProgress().length > 0) {
-                <div class="pt-1.5 border-t border-border/30 space-y-1">
+                <div class="pt-1 border-t border-border/30 space-y-0.5">
                   @for (
                     progress of promotionTierProgress();
                     track progress.promotion_id
                   ) {
                     <div
-                      class="flex items-start gap-1.5 text-[10px] leading-tight text-primary"
+                      class="flex items-start gap-1 text-[9px] leading-tight text-primary"
                     >
                       <app-icon
                         name="trending-up"
-                        [size]="11"
+                        [size]="10"
                         class="mt-0.5 shrink-0 text-primary"
                       ></app-icon>
                       <span>
@@ -862,82 +847,52 @@ import {
                   }
                 </div>
               }
-
-              <!-- Coupon Code Input / Applied Coupon -->
-              <div class="pt-1.5 border-t border-border/30">
-                @if (getAppliedCoupon(); as coupon) {
-                  <div class="flex items-center justify-between py-0.5">
-                    <div class="flex items-center gap-1.5">
-                      <app-icon
-                        name="ticket"
-                        [size]="12"
-                        class="text-primary"
-                      ></app-icon>
-                      <span class="text-[11px] font-semibold text-primary">{{
-                        coupon.coupon_code
-                      }}</span>
-                    </div>
-                    <div class="flex items-center gap-1">
-                      <span class="text-[11px] font-medium text-green-700"
-                        >-{{ formatCurrency(getCouponDiscountAmount()) }}</span
-                      >
-                      <button
-                        type="button"
-                        (click)="removeCoupon()"
-                        class="p-0.5 rounded text-neutral-600 hover:text-destructive hover:bg-destructive/10 transition-colors"
-                        title="Eliminar cupón"
-                        aria-label="Eliminar cupón"
-                      >
-                        <app-icon name="x" [size]="10"></app-icon>
-                      </button>
-                    </div>
-                  </div>
-                } @else {
-                  <div class="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      [(ngModel)]="couponCode"
-                      placeholder="¿Tienes cupón o código promo?"
-                      aria-label="Código de cupón"
-                      class="coupon-input flex-1 px-2 py-1.5 text-xs rounded-md border border-border bg-surface text-text-primary placeholder:text-neutral-600 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 uppercase"
-                      (keydown.enter)="applyCoupon()"
-                    />
-                    <button
-                      type="button"
-                      (click)="applyCoupon()"
-                      [disabled]="!couponCode.trim() || couponLoading"
-                      class="coupon-apply-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    >
-                      {{ couponLoading ? '...' : 'Aplicar' }}
-                    </button>
-                  </div>
-                }
-              </div>
             }
 
             <!--
-              PSVERSION0001 paso 6 — total destacado Stitch: etiqueta +
-              subtítulo copy estático "Métodos combinados disponibles"
-              (split-payment real fuera de alcance, decisión explícita) +
-              cifra text-3xl verde. success-700 (~5:1 sobre claro) en vez del
-              brand-600 del mockup para no romper AA (regla paso 7).
+              Total destacado ultra-compacto (< 80px):
+              Etiqueta + Trigger clickable del Modal de Cupón / Código Promo +
+              Cifra text-2xl en color primario.
             -->
             <div
-              class="pt-3 border-t border-border/50 flex items-baseline justify-between gap-2"
+              class="pt-1.5 border-t border-border/50 flex items-center justify-between gap-2"
             >
               <div class="min-w-0">
                 <span
-                  class="block text-xs font-bold uppercase tracking-wider text-neutral-600"
+                  class="block text-[11px] font-bold uppercase tracking-wider text-neutral-700 leading-tight"
                   >{{
                     withholdingAmount() > 0 ? 'Total a cobrar' : 'Total a pagar'
                   }}</span
                 >
-                <span class="text-[11px] font-medium text-emerald-700"
-                  >Métodos combinados disponibles</span
-                >
+                @if (!isQuotationMode() && !isLayawayMode()) {
+                  @if (getAppliedCoupon(); as coupon) {
+                    <button
+                      type="button"
+                      (click)="openCouponModal()"
+                      class="text-[11px] font-semibold text-primary hover:underline inline-flex items-center gap-1 cursor-pointer transition-colors leading-tight mt-0.5 text-left"
+                      title="Ver o modificar cupón aplicado"
+                    >
+                      <app-icon name="ticket" [size]="11" class="text-primary shrink-0"></app-icon>
+                      <span class="truncate">Cupón: {{ coupon.coupon_code }}</span>
+                    </button>
+                  } @else {
+                    <button
+                      type="button"
+                      (click)="openCouponModal()"
+                      class="text-[11px] font-medium text-primary hover:underline inline-flex items-center gap-1 cursor-pointer transition-colors leading-tight mt-0.5 text-left"
+                      title="Ingresar cupón o código de promoción"
+                    >
+                      <span>¿Tienes código promo? Ingrésalo aquí</span>
+                    </button>
+                  }
+                } @else {
+                  <span class="text-[11px] font-medium text-neutral-500 leading-tight">
+                    {{ isQuotationMode() ? 'Cotización' : 'Plan Separé' }}
+                  </span>
+                }
               </div>
               <span
-                class="text-3xl font-black tracking-tight leading-none text-emerald-700 shrink-0"
+                class="text-2xl font-black tracking-tight leading-none text-primary shrink-0"
               >
                 {{ formatCurrency(netTotal()) }}
               </span>
@@ -952,10 +907,10 @@ import {
             -->
             @if (getPromotionDiscounts().length > 0 || getAppliedCoupon()) {
               <div
-                class="flex items-center gap-1 text-[10px] text-neutral-600 italic mt-1"
+                class="flex items-center gap-1 text-[9px] text-neutral-500 italic mt-0.5"
                 title="Los totales finales se confirman al procesar el pago"
               >
-                <app-icon name="info" [size]="10"></app-icon>
+                <app-icon name="info" [size]="9"></app-icon>
                 <span>Estimación. El total final se confirma al cobrar.</span>
               </div>
             }
@@ -968,14 +923,11 @@ import {
             -->
             @if (invoiceRequiredByUvt()) {
               <div
-                class="mt-2 flex items-start gap-2 rounded-md border border-warning bg-warning-light px-2 py-1.5 text-[11px] text-text-primary"
+                class="mt-1 flex items-start gap-1.5 rounded border border-warning bg-warning-light px-2 py-1 text-[10px] text-text-primary"
               >
-                <app-icon name="alert-triangle" [size]="12" class="text-warning mt-0.5 shrink-0"></app-icon>
+                <app-icon name="alert-triangle" [size]="11" class="text-warning mt-0.5 shrink-0"></app-icon>
                 <span>
-                  Esta venta supera
-                  {{ formatCurrency(uvtLimitCop()) }}
-                  ({{ uvtThreshold()!.uvt_limit }} UVT) y requiere factura
-                  electrónica: identifica al cliente antes de cobrar.
+                  Supera {{ formatCurrency(uvtLimitCop()) }} ({{ uvtThreshold()!.uvt_limit }} UVT). Requiere factura electrónica.
                 </span>
               </div>
             }
@@ -1007,57 +959,43 @@ import {
               </button>
             } @else {
               <!--
-                PSVERSION0001 paso 6 — acciones secundarias Stitch (grid 2
-                col): "Guardar / Espera" conserva saveDraft.emit intacto;
-                "Pre-cuenta" imprime el snapshot sin crear orden. La segunda
-                fila conserva Ítem libre y Envío existentes (sin regresión);
-                Ítem libre también vive en el header (paso 1).
+                PSVERSION0001 — acciones secundarias Stitch (grid 2 col):
+                "Guardar / Espera" conserva saveDraft.emit intacto;
+                "Cliente" abre el selector de cliente del ticket / shell.
               -->
-              <div class="grid grid-cols-2 gap-2">
+              <div class="grid grid-cols-2 gap-2 pt-1">
                 <button
                   type="button"
                   class="cart-btn save-btn"
                   (click)="saveDraft.emit()"
                   [disabled]="isEmpty()"
+                  title="Guardar orden en espera"
                 >
                   <app-icon name="clipboard-list" [size]="16"></app-icon>
                   <span>Guardar / Espera</span>
                 </button>
                 <button
                   type="button"
-                  class="cart-btn save-btn"
-                  (click)="printPreCuenta()"
-                  [disabled]="isEmpty() || preCuentaPrinting()"
-                  [attr.aria-busy]="preCuentaPrinting() ? 'true' : null"
-                  title="Imprimir pre-cuenta (no crea la orden)"
+                  class="cart-btn customer-action-btn"
+                  (click)="openCustomerModal.emit()"
+                  title="Asignar o cambiar cliente"
+                  [attr.aria-label]="
+                    cartState().customer
+                      ? 'Cliente: ' + (cartState().customer?.name ?? '')
+                      : 'Asignar cliente'
+                  "
                 >
-                  <app-icon name="printer" [size]="16"></app-icon>
-                  <span>{{
-                    preCuentaPrinting() ? 'Imprimiendo…' : 'Pre-cuenta'
+                  <app-icon
+                    [name]="cartState().customer ? 'user-check' : 'user-plus'"
+                    [size]="16"
+                  ></app-icon>
+                  <span class="truncate">{{
+                    customerButtonLabel(cartState().customer)
                   }}</span>
                 </button>
               </div>
-              <div class="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  class="cart-btn custom-item-btn"
-                  (click)="openCustomItemModal()"
-                  [disabled]="!canCreateCustomItems()"
-                  title="Agregar ítem personalizado"
-                >
-                  <app-icon name="file-plus" [size]="16"></app-icon>
-                  <span>Ítem</span>
-                </button>
-                <button
-                  type="button"
-                  class="cart-btn shipping-btn"
-                  (click)="shipping.emit()"
-                  [disabled]="isEmpty()"
-                >
-                  <app-icon name="truck" [size]="16"></app-icon>
-                  <span>Envío</span>
-                </button>
-              </div>
+
+
               <!--
                 CP-POS-CREAR-EDITAR-COBRAR-001 — main checkout CTA.
                 proceedToPayment() delegates to checkout.emit() which the
@@ -1234,6 +1172,127 @@ import {
     </app-modal>
 
     <!--
+      Modal de cupón o código de promoción.
+      Permite al cajero ingresar y validar un cupón de descuento,
+      o ver y eliminar el cupón actualmente aplicado.
+    -->
+    <app-modal
+      [isOpen]="isCouponModalOpen()"
+      title="Cupón o código promocional"
+      subtitle="Aplica un descuento a la orden actual"
+      size="sm"
+      [centered]="true"
+      (closed)="closeCouponModal()"
+    >
+      <div class="space-y-4">
+        @if (getAppliedCoupon(); as coupon) {
+          <!-- Cupón actualmente aplicado -->
+          <div class="p-3.5 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="w-9 h-9 rounded-lg bg-primary/20 text-primary flex items-center justify-center shrink-0">
+                <app-icon name="ticket" [size]="18"></app-icon>
+              </div>
+              <div class="min-w-0">
+                <span class="block text-xs font-bold text-primary truncate uppercase tracking-wider">
+                  {{ coupon.coupon_code }}
+                </span>
+                <span class="block text-xs font-semibold text-primary/80">
+                  Descuento: -{{ formatCurrency(getCouponDiscountAmount()) }}
+                </span>
+              </div>
+            </div>
+            <app-badge variant="success" size="sm" badgeStyle="solid">Aplicado</app-badge>
+          </div>
+
+          <div class="pt-2 border-t border-border">
+            <span class="block text-xs font-medium text-neutral-600 mb-1.5">
+              O ingresa otro código para reemplazarlo:
+            </span>
+            <div class="flex gap-2">
+              <input
+                type="text"
+                [(ngModel)]="couponCode"
+                placeholder="Nuevo código"
+                aria-label="Nuevo código de cupón"
+                class="flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wider rounded-lg border border-border bg-surface text-text-primary focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-neutral-400 placeholder:normal-case transition-colors"
+                (keydown.enter)="applyCoupon()"
+                [disabled]="couponLoading"
+              />
+              <app-button
+                variant="primary"
+                size="sm"
+                [disabled]="!couponCode.trim() || couponLoading"
+                [loading]="couponLoading"
+                (clicked)="applyCoupon()"
+              >
+                Aplicar
+              </app-button>
+            </div>
+          </div>
+        } @else {
+          <!-- Sin cupón aplicado -->
+          <p class="text-xs text-neutral-600">
+            Ingresa el código del cupón o promoción para aplicar el descuento correspondiente sobre la orden actual.
+          </p>
+          <div>
+            <label class="block text-xs font-medium text-neutral-700 mb-1.5">
+              Código del cupón
+            </label>
+            <input
+              type="text"
+              [(ngModel)]="couponCode"
+              placeholder="Ej: PROMO10"
+              aria-label="Código de cupón o promoción"
+              class="w-full px-3 py-2.5 text-sm font-semibold uppercase tracking-wider rounded-xl border border-border bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary placeholder:text-neutral-400 placeholder:normal-case transition-all"
+              (keydown.enter)="applyCoupon()"
+              [disabled]="couponLoading"
+            />
+          </div>
+        }
+      </div>
+
+      <div
+        slot="footer"
+        class="flex items-center justify-between w-full"
+      >
+        @if (getAppliedCoupon()) {
+          <app-button
+            variant="outline-danger"
+            size="md"
+            [disabled]="couponLoading"
+            (clicked)="removeCoupon()"
+          >
+            <app-icon name="trash-2" [size]="14" class="mr-1.5"></app-icon>
+            Eliminar Cupón
+          </app-button>
+        } @else {
+          <div></div>
+        }
+        <div class="flex items-center gap-2">
+          <app-button
+            variant="outline"
+            size="md"
+            [disabled]="couponLoading"
+            (clicked)="closeCouponModal()"
+          >
+            {{ getAppliedCoupon() ? 'Cerrar' : 'Cancelar' }}
+          </app-button>
+          @if (!getAppliedCoupon()) {
+            <app-button
+              variant="primary"
+              size="md"
+              [disabled]="!couponCode.trim() || couponLoading"
+              [loading]="couponLoading"
+              (clicked)="applyCoupon()"
+            >
+              {{ couponLoading ? 'Aplicando...' : 'Aplicar Cupón' }}
+            </app-button>
+          }
+        </div>
+      </div>
+    </app-modal>
+
+    <!--
       CP-POS-SVC-PERF-001 / C.2 + C.3 — service scheduler modal. Mounted
       at the cart root so the calendar icon on a service/prepared item
       can toggle the schedulerOpen signal with the target cartItem and
@@ -1266,14 +1325,7 @@ import {
         outline-offset: 2px;
       }
 
-      /* Stitch paso 3 — targets táctiles ≥ 44px (lenguaje paso 2). */
-      .cart-header-btn {
-        min-height: 44px;
-      }
-
       .cart-line-btn {
-        min-width: 44px;
-        min-height: 44px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -1335,11 +1387,11 @@ import {
         width: 100%;
         padding: 16px;
         border-radius: 16px;
-        background: var(--color-success-700);
-        color: var(--color-text-on-primary);
+        background: var(--color-primary);
+        color: var(--color-text-on-primary, #ffffff);
         font-size: 16px;
         font-weight: 800;
-        box-shadow: 0 4px 12px rgba(var(--color-success-700-rgb), 0.3);
+        box-shadow: 0 4px 14px rgba(var(--color-primary-rgb, 16, 185, 129), 0.3);
       }
 
       .checkout-btn:hover:not(:disabled) {
@@ -1347,20 +1399,18 @@ import {
         transform: translateY(-1px);
       }
 
-      /* Stitch paso 11 — gradiente 700→800: ambos extremos pasan AA
-         con texto blanco (5.02 y 7.13:1); success→primary fallaba (~2.2:1). */
       .cobrar-btn {
         width: 100%;
         padding: 14px;
         background: linear-gradient(
           135deg,
-          var(--color-success-700) 0%,
-          var(--color-success-800) 100%
+          var(--color-primary) 0%,
+          var(--color-primary-dark, var(--color-primary)) 100%
         );
-        color: var(--color-text-on-primary);
+        color: var(--color-text-on-primary, #ffffff);
         font-size: 15px;
         font-weight: 700;
-        box-shadow: 0 4px 14px rgba(var(--color-success-700-rgb), 0.32);
+        box-shadow: 0 4px 14px rgba(var(--color-primary-rgb, 16, 185, 129), 0.32);
       }
 
       .cobrar-btn:hover:not(:disabled) {
@@ -1373,29 +1423,21 @@ import {
         outline-offset: 2px;
       }
 
-      .save-btn {
-        background: var(--color-muted);
+      .save-btn,
+      .customer-action-btn {
+        background: #ffffff;
         border: 1px solid var(--color-border);
-        color: var(--color-neutral-600);
+        color: var(--color-text-primary);
+        font-weight: 700;
       }
 
-      .save-btn:hover:not(:disabled) {
-        background: var(--color-surface);
-        color: var(--color-text-primary);
+      .save-btn:hover:not(:disabled),
+      .customer-action-btn:hover:not(:disabled) {
+        background: var(--color-muted);
         border-color: var(--color-text-secondary);
       }
 
 
-
-
-
-
-      /* Stitch paso 11 — sólido success-700 (AA con blanco); el
-         opacity 0.85 sobre primary aclaraba el fondo y fallaba AA. */
-      .shipping-btn {
-        background: var(--color-success-700);
-        color: var(--color-text-on-primary);
-      }
 
       .custom-item-btn {
         background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
@@ -1405,10 +1447,6 @@ import {
 
       .custom-item-btn:hover:not(:disabled) {
         background: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface));
-      }
-
-      .shipping-btn:hover:not(:disabled) {
-        background: var(--color-success-800);
       }
 
       /* ── System AI tooltip (same pattern as ai-generate-btn) ── */
@@ -1526,6 +1564,7 @@ private cartService = inject(PosCartService);
    * el flag deshabilita el botón y anuncia el estado vía `aria-busy`.
    */
   readonly preCuentaPrinting = signal(false);
+  readonly isCouponModalOpen = signal(false);
   readonly canCreateCustomItems = computed(() =>
     this.hasPermission('store:pos:custom_items:create'),
   );
@@ -1621,7 +1660,6 @@ private cartService = inject(PosCartService);
    * separate `Cobrar` button below uses the full shell wizard.
    */
   readonly saveDraft = output<void>();
-  readonly shipping = output<void>();
   readonly checkout = output<void>();
   /**
    * Phase D.3 — emitted when the cashier clicks the `Cobrar` CTA. The parent
@@ -2501,6 +2539,7 @@ private cartService = inject(PosCartService);
                   this.toastService.success(`Cupón "${code}" aplicado`);
                   this.couponCode = '';
                   this.couponLoading = false;
+                  this.closeCouponModal();
                 },
                 error: (error) => {
                   this.toastService.error(
@@ -2528,10 +2567,20 @@ private cartService = inject(PosCartService);
       .subscribe({
         next: () => {
           this.toastService.success('Cupón eliminado');
+          this.closeCouponModal();
         },
         error: (error) => {
           this.toastService.error(error.message || 'Error al eliminar cupón');
         } });
+  }
+
+  openCouponModal(): void {
+    this.couponCode = '';
+    this.isCouponModalOpen.set(true);
+  }
+
+  closeCouponModal(): void {
+    this.isCouponModalOpen.set(false);
   }
 
   getAppliedCoupon(): { coupon_id: number; coupon_code: string } | null {
@@ -2621,6 +2670,13 @@ private cartService = inject(PosCartService);
       .filter(Boolean)
       .join(' ');
     return [doc, customer?.phone].filter(Boolean).join(' · ');
+  }
+
+  /** Nombre a mostrar en el botón de acción de cliente del ticket. */
+  customerButtonLabel(customer: { name?: string; first_name?: string } | null | undefined): string {
+    if (!customer) return 'Cliente';
+    const first = customer.first_name || customer.name?.split(' ')[0];
+    return first || 'Cliente';
   }
 
   handleImageError(event: any): void {

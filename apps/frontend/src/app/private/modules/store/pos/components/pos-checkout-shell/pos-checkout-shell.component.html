@@ -60,17 +60,17 @@
     <div class="checkout-grid">
       <!-- Columna principal: paso activo -->
       <div class="checkout-main">
-        <!-- Paso · Consumo (restaurante ∧ intent ≠ delivery). Se mantiene
-             MONTADO mientras 'consumo' esté en stepKeys para que el shell lea
-             fulfillment()/checkoutTableId()/needsTable(). Elegir mesa aquí NO
-             escribe nada: la mesa se materializa en el cobro (QUI-535). -->
-        @if (stepKeys().includes('consumo')) {
-          <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'consumo'">
-            <app-pos-consumo-step
+        <!-- Paso · Entrega (Consumir / Para llevar / Enviar). Siempre primero
+             (paso 0). Se mantiene MONTADO mientras 'entrega' esté en stepKeys
+             para que el shell lea checkoutTableId()/needsTable(). -->
+        @if (stepKeys().includes('entrega')) {
+          <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'entrega'">
+            <app-pos-entrega-step
               [cartState]="cartState()"
               [tableId]="tableId()"
+              [(choice)]="entregaChoice"
               (advanceRequested)="attemptNextStep()"
-            ></app-pos-consumo-step>
+            ></app-pos-entrega-step>
           </div>
         }
 
@@ -81,10 +81,10 @@
           <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'cobro'">
             <app-pos-payment-step
               [cartState]="cartState()"
-              [checkoutIntent]="checkoutIntent()"
+              [checkoutIntent]="effectiveIntent()"
               [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
               [tableId]="checkoutTableId()"
-              [fulfillment]="consumoStep()?.fulfillment() ?? 'entrega'"
+              [fulfillment]="entregaChoice() === 'mesa' ? 'consumo' : 'entrega'"
               [takeawayOrder]="isTakeawayOrder()"
               [sessionId]="checkoutSessionId()"
               [isAnonymous]="isAnonymousSale()"
@@ -93,8 +93,9 @@
               [paymentMethods]="paymentMethods()"
               [isProcessing]="isProcessing()"
               [editingOrderId]="editingOrderId()"
-              [autoExecute]="mode() !== 'create-draft' && checkoutIntent() === 'pickup'"
+              [autoExecute]="mode() !== 'create-draft' && effectiveIntent() === 'pickup'"
               [amountOverride]="deliveryAmount()"
+              [paymentResetKey]="paymentResetKey()"
               (paymentCompleted)="onCheckoutCompleted($event)"
               (paymentReady)="onPaymentReady($event)"
               (amountConfirmed)="onAmountConfirmed()"
@@ -348,49 +349,8 @@
                         </p>
                       }
                     </section>
-                  } @else if (clienteSubStep() > 1 && cartState()?.customer) {
-                    <button
-                      type="button"
-                      class="cliente-collapsed"
-                      (click)="goToClienteSubStep(1)"
-                    >
-                      <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
-                      <span class="sw-label">Cliente: {{ customerDisplayName }}</span>
-                      <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
-                    </button>
                   }
                 }
-              }
-
-              <!-- SUB-STEP 2 · Dirección de envío (solo delivery, terminal).
-                   Captura la dirección con app-address-form-fields (mapa +
-                   geocoding). No se colapsa. -->
-              @if (
-                clienteSubStep() === 2 &&
-                requiresAddress() &&
-                !isAnonymousSale() &&
-                cartState()?.customer
-              ) {
-                <section class="cliente-section">
-                  <div class="section-header">
-                    <app-icon name="map-pin" [size]="16" class="section-icon"></app-icon>
-                    <h2 class="section-title">Dirección de envío</h2>
-                    @if (!addressValid()) {
-                      <span
-                        class="addr-required-badge"
-                        [class.addr-required-badge--error]="showAddressErrors()"
-                        >Obligatoria</span
-                      >
-                    }
-                  </div>
-                  <app-address-form-fields
-                    [initialAddress]="customerInitialAddress()"
-                    [requirePhone]="true"
-                    [showErrors]="showAddressErrors()"
-                    (addressChange)="onShellAddressChange($event)"
-                    (validChange)="addressValid.set($event)"
-                  ></app-address-form-fields>
-                </section>
               }
             </div>
 
@@ -423,8 +383,6 @@
           <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'envio'">
             <app-pos-shipping-step
               [cartState]="cartState()"
-              [address]="capturedAddress()"
-              [addressId]="capturedAddressId()"
               (shippingCompleted)="onShippingCompleted($event)"
             ></app-pos-shipping-step>
           </div>
@@ -542,7 +500,7 @@
                 >
               </div>
             }
-            @if (checkoutIntent() === 'delivery') {
+            @if (effectiveIntent() === 'delivery') {
               <div class="summary-row">
                 <span>Envío</span>
                 <span class="summary-value">{{ shippingCost() | currency }}</span>

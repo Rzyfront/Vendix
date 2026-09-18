@@ -1,16 +1,13 @@
-/* Paso · Consumo — "Tipo de servicio".
-   Réplica 1:1 del diseño Pencil: fondo blanco (sin card gris), section-title,
-   dos option-rows apiladas con radio, y CTA "Elegir mesa" full-width.
-   Se usan tokens del design system donde existen (--color-primary, --color-*),
-   y los hex de Pencil solo donde el contraste sobre el fondo verde lo exige. */
-.consumo-step {
+/* Paso · Entrega — "Tipo de entrega".
+   Fondo blanco, section-title, option-rows apiladas con radio, y CTA "Elegir mesa" full-width. */
+.entrega-step {
   display: flex;
   flex-direction: column;
   gap: 12px;
   background: transparent;
 }
 
-/* ── Section title (fondo blanco, icono verde + texto ink-900) ────────────── */
+/* ── Section title ───────────────────────────────────────────────────────── */
 .section-title {
   display: flex;
   align-items: center;
@@ -31,7 +28,7 @@
   color: var(--color-text-primary);
 }
 
-/* ── Option rows (stack vertical, gap 12px) ──────────────────────────────── */
+/* ── Option rows ─────────────────────────────────────────────────────────── */
 .option-list {
   display: flex;
   flex-direction: column;
@@ -109,9 +106,6 @@
   color: var(--color-text-primary);
 }
 
-/* Stitch paso 5 — texto seleccionado en success-800 (pasa AA sobre
-   success-100); la descripción no seleccionada usa neutral-600 en vez de
-   text-secondary (#94a3b8, ~2.6:1). */
 .option-row--selected .option-row__title {
   color: var(--color-success-800);
 }
@@ -165,7 +159,6 @@
   border: 1.5px solid var(--color-primary);
   border-radius: 12px;
   background: var(--color-success-50, #f0fdf4);
-  /* Texto en success-800 (AA sobre el tinte); borde primary de marca. */
   color: var(--color-success-800);
   font-size: 16px;
   font-weight: 700;
