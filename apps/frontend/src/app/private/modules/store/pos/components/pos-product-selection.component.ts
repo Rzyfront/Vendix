@@ -297,7 +297,7 @@ function isMultiTokenQuery(query: string): boolean {
               </span>
               <button
                 type="button"
-                class="ml-1 shrink-0 rounded-full p-0.5 hover:bg-warning/20"
+                class="ml-1 flex min-h-7 min-w-7 shrink-0 items-center justify-center rounded-full p-0.5 hover:bg-warning/20"
                 aria-label="Descartar aviso de orden aproximado"
                 (click)="degradedDismissed.set(true)"
               >
@@ -439,8 +439,11 @@ function isMultiTokenQuery(query: string): boolean {
                 class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer product-card"
                 [class]="
                   isProductCardUnavailable(product)
-                    ? 'opacity-60 cursor-not-allowed'
+                    ? 'is-unavailable opacity-60 cursor-not-allowed'
                     : 'cursor-pointer hover:border-primary active:scale-[0.97]'
+                "
+                [class.is-selected]="
+                  selectedProductForVariant()?.id === product.id
                 "
               >
                 <!-- Product Image or Icon -->
@@ -480,7 +483,7 @@ function isMultiTokenQuery(query: string): boolean {
                       <app-badge
                         variant="error"
                         size="xs"
-                        badgeStyle="outline"
+                        badgeStyle="solid"
                         class="absolute top-2 right-2 z-[1]"
                       >
                         AGOTADO
@@ -489,7 +492,7 @@ function isMultiTokenQuery(query: string): boolean {
                       <app-badge
                         variant="warning"
                         size="xs"
-                        badgeStyle="outline"
+                        badgeStyle="solid"
                         class="absolute top-2 right-2 z-[1]"
                       >
                         Últimas {{ product.stock }}
@@ -498,7 +501,7 @@ function isMultiTokenQuery(query: string): boolean {
                       <app-badge
                         variant="success"
                         size="xs"
-                        badgeStyle="outline"
+                        badgeStyle="solid"
                         class="absolute top-2 right-2 z-[1]"
                       >
                         {{ product.stock }} Disponibles
@@ -508,7 +511,7 @@ function isMultiTokenQuery(query: string): boolean {
                     <app-badge
                       variant="info"
                       size="xs"
-                      badgeStyle="outline"
+                      badgeStyle="solid"
                       class="absolute top-2 right-2 z-[1]"
                     >
                       Disponible
@@ -519,7 +522,7 @@ function isMultiTokenQuery(query: string): boolean {
                     <app-badge
                       variant="success"
                       size="xs"
-                      badgeStyle="outline"
+                      badgeStyle="solid"
                       class="absolute bottom-2 right-2 z-[1] promo-badge"
                     >
                       {{ product.active_promotion.badge_label }}
@@ -566,8 +569,8 @@ function isMultiTokenQuery(query: string): boolean {
                     >
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
-                        width="16"
-                        height="16"
+                        width="20"
+                        height="20"
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
@@ -608,7 +611,7 @@ function isMultiTokenQuery(query: string): boolean {
                       @if (hasActivePromoOrSale(product)) {
                         <div class="flex items-baseline gap-1 flex-wrap">
                           <span
-                            class="text-success font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
+                            class="text-[var(--color-success-700)] font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
                           >
                             {{ promotionalPrice(product) | currency }}
                             @if (product.pricing_type === 'weight') {
@@ -626,7 +629,7 @@ function isMultiTokenQuery(query: string): boolean {
                         </div>
                       } @else {
                         <span
-                          class="text-text-primary font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
+                          class="text-[var(--color-success-700)] font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
                         >
                           {{ product.final_price | currency }}
                           @if (product.pricing_type === 'weight') {
@@ -639,6 +642,15 @@ function isMultiTokenQuery(query: string): boolean {
                       }
                       <!-- Disponibilidad: vive en el badge superior de la card
                            (AGOTADO / Últimas N / N disponibles / Disponible). -->
+                      <!-- Precio por tier: el producto admite niveles de precio
+                           (resueltos por PriceTierCacheService en el carrito);
+                           la grilla lo senala sin duplicar la resolucion. -->
+                      @if (product.has_multiple_price_tiers === true) {
+                        <span class="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-[var(--color-success-100)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-success-700)]">
+                          <app-icon name="tags" [size]="10"></app-icon>
+                          Precios por nivel
+                        </span>
+                      }
                     </div>
                   </div>
                 </div>
@@ -818,13 +830,28 @@ function isMultiTokenQuery(query: string): boolean {
       }
 
       /* FAB de agregar sobre la imagen.
-         Base táctil: siempre visible, porque sin :hover no habría forma de verlo. */
+         Base táctil: siempre visible, porque sin :hover no habría forma de verlo.
+         Stitch paso 2: 44x44 minimo (target tactil AA) + foco visible.
+         El selector calificado gana a las utilidades w-8/h-8 del helper. */
+      .product-card .add-fab {
+        width: 44px;
+        height: 44px;
+      }
+
       .add-fab {
         opacity: 1;
         transform: scale(1);
         transition:
           opacity 0.15s ease,
           transform 0.15s ease;
+      }
+
+      .add-fab:focus-visible {
+        outline: 3px solid var(--color-primary);
+        outline-offset: 2px;
+        opacity: 1;
+        transform: scale(1);
+        pointer-events: auto;
       }
 
       .promo-badge {
@@ -915,6 +942,36 @@ function isMultiTokenQuery(query: string): boolean {
       .price-primary {
         color: var(--color-primary);
         font-weight: var(--fw-bold);
+      }
+
+      /* Stitch paso 2 — estados de card. Van AL FINAL para que ganen al
+         hover (igual especificidad, manda el orden): selected + hover
+         muestra el anillo, no la sombra de hover. */
+      .product-card:focus-visible {
+        outline: 3px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+
+      .product-card:focus-visible .name-pop {
+        visibility: visible;
+        opacity: 1;
+        transform: translateY(0);
+        transition-delay: 0s;
+      }
+
+      /* Estado selected: la card cuyo selector de variantes esta abierto.
+         Anillo doble para no depender solo del color. */
+      .product-card.is-selected {
+        border-color: var(--color-primary);
+        box-shadow:
+          0 0 0 2px var(--color-surface),
+          0 0 0 5px var(--color-primary);
+      }
+
+      /* Estado sin-stock: la imagen en grises refuerza el badge AGOTADO en
+         texto (distinguible sin depender solo del color). */
+      .product-card.is-unavailable img {
+        filter: grayscale(1);
       }
     `,
   ],
