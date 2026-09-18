@@ -6,6 +6,18 @@
   gap: 16px;
 }
 
+/* Stitch 11b (6) — el collector y su steps-line (compartidos, fuera de
+   alcance) pintan método seleccionado en primary #2ecc71 (2.1:1) y helpers /
+   sub-labels 9.6px en text-secondary/muted #94a3b8 (2.56:1). Se remapean las
+   vars heredadas en el contexto del paso: success-700 (~5.0:1),
+   neutral-600 (~7.0:1) y neutral-500 (~4.8:1). Con color AA el tamaño 9.6px
+   ya cumple, no hizo falta subirlo. Solo afecta a este subárbol. */
+.pos-payment-context {
+  --color-primary: var(--color-success-700);
+  --color-text-secondary: var(--color-neutral-600);
+  --color-text-muted: var(--color-neutral-500);
+}
+
 /* Fulfillment selector (Restaurant stores with prepared items) */
 .fulfillment-section {
   display: flex;

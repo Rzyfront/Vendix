@@ -21,6 +21,18 @@
   display: block;
 }
 
+/* Stitch 11b (3) — labels de paso de app-steps-line (compartido, fuera de
+   alcance): las actuales/pasadas usan var(--color-primary) #2ecc71 (2.1:1) y
+   las futuras var(--color-text-secondary) #94a3b8 (2.56:1). Se remapean las
+   vars heredadas en los dos contenedores del shell (desktop + sub-pasos
+   Cliente): success-700 (~5.0:1) y neutral-600 (~7.0:1). Círculos, checks y
+   conectores heredan el verde oscuro. */
+.checkout-stepper,
+.steps-col {
+  --color-primary: var(--color-success-700);
+  --color-text-secondary: var(--color-neutral-600);
+}
+
 /* Utilidad screen-reader-only para las live regions que anuncian el paso
    actual (el step indicator compartido no expone aria-current). */
 .sr-only {
@@ -883,15 +895,16 @@
 }
 
 /* Cancelar: extremo IZQUIERDO del footer (margin-right:auto empuja el resto a
-   la derecha) + outline danger claro. */
+   la derecha) + outline danger. Stitch 11b (4): texto/borde en error-700
+   (~5.9:1 sobre surface; error #ef4444 daba 3.76 y fallaba AA). */
 .btn-cancel {
   margin-right: auto;
   min-height: 44px;
   padding: 12px 16px;
-  border: 1.5px solid var(--color-error);
+  border: 1.5px solid var(--color-error-700);
   border-radius: 12px;
   background: transparent;
-  color: var(--color-error);
+  color: var(--color-error-700);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -901,12 +914,12 @@
 }
 
 .btn-cancel:hover:not(:disabled) {
-  background: rgba(var(--color-error-rgb), 0.08);
-  border-color: var(--color-error);
+  background: rgba(var(--color-error-700-rgb), 0.08);
+  border-color: var(--color-error-700);
 }
 
 .btn-cancel:focus-visible {
-  outline: 3px solid var(--color-error);
+  outline: 3px solid var(--color-error-700);
   outline-offset: 2px;
 }
 

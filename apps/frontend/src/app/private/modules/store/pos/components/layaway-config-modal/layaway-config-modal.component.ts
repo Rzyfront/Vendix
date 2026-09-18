@@ -35,6 +35,7 @@ export interface LayawayConfigResult {
       title="Configurar Plan Separé"
       subtitle="Define el abono inicial y las cuotas del plan"
       size="md"
+      class="lw-aa-scope"
     >
       <!-- Header icon -->
       <div slot="header" class="lw-header-icon">
@@ -477,6 +478,15 @@ export interface LayawayConfigResult {
       display: flex;
       justify-content: flex-end;
       gap: 8px;
+    }
+
+    /* Stitch 11b (8) — submit "Crear Plan Separé" de app-button (compartido,
+       fuera de alcance): blanco sobre primary #2ecc71 (2.1:1). Se remapea la
+       var heredada a success-700 (~5.0:1). Solo afecta a este subárbol. */
+    .lw-aa-scope {
+      --color-primary: var(--color-success-700);
+      --color-text-secondary: var(--color-neutral-600);
+      --color-text-muted: var(--color-neutral-500);
     }
   `],
 })

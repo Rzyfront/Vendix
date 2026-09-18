@@ -1577,6 +1577,14 @@ export class PosCheckoutShellComponent {
   @HostListener('keydown', ['$event'])
   onShellKeydown(event: KeyboardEvent): void {
     if (!this.isOpen() || event.defaultPrevented) return;
+    // Stitch 11b (5): corrección de la trampa de Tab ANTES del guard de
+    // procesamiento — el foco debe envolverse aunque el footer esté
+    // deshabilitado. Corre en el host (burbuja) antes del listener de
+    // document del modal, así que el wrap visible gana siempre.
+    if (event.key === 'Tab') {
+      this.trapTabToVisible(event);
+      return;
+    }
     if (this.footerProcessing()) return;
     const target = event.target as HTMLElement | null;
     const tag = target?.tagName;
@@ -1628,6 +1636,59 @@ export class PosCheckoutShellComponent {
         return;
       }
       this.onPrimaryConfirm();
+    }
+  }
+
+  /**
+   * Stitch 11b (5) — wrap de Tab sobre focuseables VISIBLES del diálogo.
+   *
+   * El trap de `app-modal` (compartido, fuera de alcance) calcula primero/
+   * último con `querySelectorAll` + `tabIndex !== -1`, que INCLUYE nodos con
+   * `display:none`: en desktop su "último" es el CTA del footer móvil oculto,
+   * así que tabular desde Siguiente no envuelve y el foco cae a BODY. Este
+   * handler corre antes (burbuja en el host vs. document del modal) y envuelve
+   * primero↔último visibles; el del modal resulta no-op porque el activo ya
+   * cambió. Si el Tab nace en un diálogo anidado (ej. picker de mesa), se
+   * cede: ese diálogo es dueño de su propio Tab.
+   */
+  private trapTabToVisible(event: KeyboardEvent): void {
+    const root = this.host.nativeElement as HTMLElement | null;
+    const target = event.target as HTMLElement | null;
+    if (!root || !target) return;
+    const shellDialog =
+      (root.querySelector('[role="dialog"]') as HTMLElement | null) ?? root;
+    const targetDialog = target.closest?.('[role="dialog"]');
+    if (targetDialog && targetDialog !== shellDialog) return;
+    const focusables = Array.from(
+      shellDialog.querySelectorAll<HTMLElement>(
+        'a[href],' +
+          'button:not([disabled]),' +
+          'input:not([disabled]),' +
+          'select:not([disabled]),' +
+          'textarea:not([disabled]),' +
+          '[tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter(
+      (el) =>
+        !el.hasAttribute('disabled') &&
+        el.tabIndex !== -1 &&
+        isRenderedVisible(el),
+    );
+    if (focusables.length === 0) {
+      event.preventDefault();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (event.shiftKey) {
+      if (active === first) {
+        event.preventDefault();
+        last.focus();
+      }
+    } else if (active === last) {
+      event.preventDefault();
+      first.focus();
     }
   }
 
@@ -2192,4 +2253,15 @@ export class PosCheckoutShellComponent {
     this.isOpenChange.emit(false);
     this.closed.emit();
   }
+}
+
+/**
+ * Stitch 11b (5) — visibilidad renderizada para el trap de Tab: excluye
+ * `display:none` (sin rects, incluye ancestros ocultos) y
+ * `visibility:hidden` (conserva rects pero no es focuseable por teclado).
+ */
+function isRenderedVisible(el: HTMLElement): boolean {
+  if (el.getClientRects().length === 0) return false;
+  const style = getComputedStyle(el);
+  return style.visibility !== 'hidden' && style.display !== 'none';
 }

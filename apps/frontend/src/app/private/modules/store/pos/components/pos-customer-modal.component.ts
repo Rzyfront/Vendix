@@ -63,6 +63,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
       (cancel)="onCancel()"
       [size]="'md'"
       [showCloseButton]="false"
+      class="cm-aa-scope"
       >
       <!-- Modal Header -->
       <div
@@ -573,7 +574,20 @@ import { StoreContextService } from '../../../../../core/services/store-context.
         </div>
       }
     </app-modal>
-    ` })
+    `,
+  styles: [`
+    /* Stitch 11b (1)(2) — scope a11y del modal (shared/ fuera de alcance, se
+       remapean vars heredadas en vez de tocar app-button/app-input): primary
+       #2ecc71 -> success-700 (blanco encima pasa de 2.1 a ~5.0; tabs activos,
+       outline y focus rings heredan el verde oscuro), text-secondary ->
+       neutral-600 y text-muted -> neutral-500 (helpers/labels/placeholders de
+       2.56 a >=4.8). Solo afecta a este subárbol. */
+    .cm-aa-scope {
+      --color-primary: var(--color-success-700);
+      --color-text-secondary: var(--color-neutral-600);
+      --color-text-muted: var(--color-neutral-500);
+    }
+  `] })
 export class PosCustomerModalComponent {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);

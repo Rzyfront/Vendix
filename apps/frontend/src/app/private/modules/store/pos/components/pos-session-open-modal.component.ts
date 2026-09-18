@@ -40,6 +40,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
       [dialog]="true"
       title="Abrir Caja"
       subtitle="Selecciona una caja e ingresa el monto de apertura"
+      class="so-aa-scope"
     >
       <!-- Header icon -->
       <div slot="header" class="so-header-icon">
@@ -247,6 +248,17 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
       display: flex;
       justify-content: flex-end;
       gap: 8px;
+    }
+
+    /* Stitch 11b (7) — label MONTO + helper de app-input (compartido, fuera
+       de alcance) en text-muted/secondary #94a3b8 (2.56:1): se remapean las
+       vars heredadas a neutral-500 (~4.8:1) y neutral-600 (~7.0:1); primary
+       -> success-700 deja el submit "Abrir Caja" (blanco/#2ecc71, 2.1) en
+       ~5.0:1. Solo afecta a este subárbol. */
+    .so-aa-scope {
+      --color-primary: var(--color-success-700);
+      --color-text-secondary: var(--color-neutral-600);
+      --color-text-muted: var(--color-neutral-500);
     }
   `],
 })
