@@ -12,6 +12,20 @@
   min-width: 0;
 }
 
+/* Stitch paso 5 — screen-reader-only para la live region que anuncia el
+   sub-paso actual (el step indicator compartido no expone aria-current). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ── Sub-wizard grid (opciones | stepper) ─────────────────
    Móvil: una columna, steps-col ABAJO (DOM-last) pero oculta.
    Desktop (≥768px): ship-main | steps-col. */
@@ -32,7 +46,14 @@
 /* Fila-resumen colapsada (clickable, vuelve a ese sub-paso). Verde "completado".
    Patrón compartido del sub-wizard — ver payment-collector/_subwizard.scss. */
 .ship-collapsed {
+  /* Stitch paso 5 — el mixin solo garantiza 44px en móvil; refuerzo desktop. */
+  min-height: 44px;
   @include subwizard.subwizard-collapsed-row;
+
+  &:focus-visible {
+    outline: 3px solid var(--color-primary);
+    outline-offset: 2px;
+  }
 }
 
 /* Columna del stepper (derecha en desktop; debajo de las opciones en móvil). */
@@ -143,6 +164,13 @@
   border-color: var(--color-primary);
 }
 
+/* Stitch paso 5 — foco 3px del lenguaje fijado; texto seleccionado en
+   success-800 (primary #2ecc71 da ~2.1:1 y falla AA como texto). */
+.method-card:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .method-card.selected {
   border-color: var(--color-primary);
   background: rgba(var(--color-success-rgb), 0.14);
@@ -150,7 +178,7 @@
 
 .method-card.selected .method-card-icon,
 .method-card.selected .method-card-label {
-  color: var(--color-primary);
+  color: var(--color-success-800);
 }
 
 /* ── No methods alert ─────────────────────────────────── */
@@ -176,15 +204,17 @@
   gap: 4px;
 }
 
+/* Stitch paso 5 — título en error-700 (error #ef4444 da ~3.8:1, falla AA);
+   descripción en neutral-600; enlace con target ≥44px y foco 3px. */
 .no-methods-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--color-error);
+  color: var(--color-error-700);
 }
 
 .no-methods-desc {
   font-size: 12px;
-  color: var(--color-text-secondary);
+  color: var(--color-neutral-600);
 }
 
 .no-methods-link {
@@ -192,12 +222,18 @@
   border: none;
   padding: 0;
   margin-top: 2px;
+  min-height: 44px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--color-primary);
+  color: var(--color-success-700);
   cursor: pointer;
   text-align: left;
   text-decoration: underline;
+
+  &:focus-visible {
+    outline: 3px solid var(--color-primary);
+    outline-offset: 2px;
+  }
 }
 
 /* ── Costo · card ─────────────────────────────────────── */
@@ -217,7 +253,7 @@
 
 .cost-row-label {
   font-size: 16px;
-  color: var(--color-text-secondary);
+  color: var(--color-neutral-600);
 }
 
 .cost-row-amount {
@@ -242,7 +278,7 @@
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: var(--color-text-muted);
+  color: var(--color-neutral-600);
 }
 
 /* Input de costo manual (aparece con el toggle activo o sin cálculo automático) */
@@ -267,7 +303,7 @@
 .cash-input .currency {
   font-size: 16px;
   font-weight: 600;
-  color: var(--color-text-secondary);
+  color: var(--color-neutral-600);
   margin-right: 4px;
 }
 
@@ -329,6 +365,11 @@
   border-color: var(--color-primary);
 }
 
+.notes-textarea:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 /* ── Totales · card ───────────────────────────────────── */
 .totals-card {
   border-radius: 16px;
@@ -349,7 +390,7 @@
 
 .totals-label {
   font-size: 16px;
-  color: var(--color-text-secondary);
+  color: var(--color-neutral-600);
 }
 
 .totals-amount {
@@ -370,10 +411,11 @@
   color: var(--color-text-primary);
 }
 
+/* Stitch paso 5 — total en text-primary como el carrito (primary falla AA). */
 .totals-grand-amount {
   font-size: 24px;
   font-weight: 700;
-  color: var(--color-primary);
+  color: var(--color-text-primary);
 }
 
 @keyframes spin {

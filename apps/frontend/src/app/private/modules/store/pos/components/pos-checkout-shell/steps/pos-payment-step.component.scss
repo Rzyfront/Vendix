@@ -89,9 +89,10 @@
   margin: 0;
 }
 
+/* Stitch paso 5 — texto informativo en neutral-600 (text-secondary falla AA). */
 .awaiting-attempts {
   font-size: 12px;
-  color: var(--color-text-secondary);
+  color: var(--color-neutral-600);
   max-width: 320px;
   margin: 0;
 }

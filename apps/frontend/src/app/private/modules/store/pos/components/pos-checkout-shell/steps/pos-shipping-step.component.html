@@ -178,6 +178,10 @@
         [clickable]="true"
         (stepClicked)="goToShipSubStep($event)"
       ></app-steps-line>
+      <p class="sr-only" aria-live="polite" aria-atomic="true">
+        Sub-paso {{ shipSubStep() + 1 }} de {{ shipSubSteps().length }}:
+        {{ shipSubSteps()[shipSubStep()]?.label }}
+      </p>
     </aside>
   </div>
 </div>

@@ -38,13 +38,22 @@
       </div>
     </div>
 
-    <!-- Stepper desktop (círculos numerados) -->
+    <!-- Stepper desktop (círculos numerados). Stitch paso 5: <nav> con
+         nombre accesible + live region que anuncia "Paso X de N: <etiqueta>"
+         porque app-steps-line (compartido, fuera de alcance) no expone
+         aria-current. Solo presentación: lee señales existentes. -->
     <div class="checkout-stepper">
-      <app-steps-line
-        [steps]="steps()"
-        [currentStep]="currentStep()"
-        [clickable]="false"
-      ></app-steps-line>
+      <nav class="stepper-nav" aria-label="Progreso del checkout">
+        <app-steps-line
+          [steps]="steps()"
+          [currentStep]="currentStep()"
+          [clickable]="false"
+        ></app-steps-line>
+      </nav>
+      <p class="sr-only" aria-live="polite" aria-atomic="true">
+        Paso {{ currentStep() + 1 }} de {{ steps().length }}:
+        {{ steps()[currentStep()]?.label }}
+      </p>
     </div>
 
     <!-- Body: paso activo + resumen (rail) -->
@@ -398,6 +407,11 @@
                 [clickable]="true"
                 (stepClicked)="goToClienteSubStep($event)"
               ></app-steps-line>
+              <p class="sr-only" aria-live="polite" aria-atomic="true">
+                Sub-paso {{ clienteSubStep() + 1 }} de
+                {{ clienteSubSteps().length }}:
+                {{ clienteSubSteps()[clienteSubStep()]?.label }}
+              </p>
             </aside>
           </div>
         </div>
