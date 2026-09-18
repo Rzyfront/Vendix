@@ -1,5 +1,6 @@
 import {
   Component,
+  ElementRef,
   input,
   output,
   inject,
@@ -7,6 +8,7 @@ import {
   DestroyRef,
   signal,
   computed } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
   FormsModule,
@@ -44,6 +46,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
   standalone: true,
   imports: [
     FormsModule,
+    NgClass,
     ReactiveFormsModule,
     ButtonComponent,
     ModalComponent,
@@ -100,32 +103,23 @@ import { StoreContextService } from '../../../../../core/services/store-context.
         </div>
         <button
           type="button"
-          class="absolute top-4 right-4 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all duration-200 p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-text-muted)]/20 focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+          class="absolute top-4 right-4 min-w-11 min-h-11 flex items-center justify-center text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-all duration-200 p-2 rounded-[var(--radius-md)] hover:bg-[var(--color-text-muted)]/20 focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2"
           (click)="onModalClosed()"
           aria-label="Cerrar modal"
           >
-          <svg
-            class="h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="2"
-            >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M6 18L18 6M6 6l12 12"
-              />
-          </svg>
+          <app-icon name="x" [size]="20"></app-icon>
         </button>
       </div>
     
       <!-- Tab Navigation -->
       @if (!customer()) {
-        <div class="flex border-b border-[var(--color-border)]">
+        <div class="flex border-b border-[var(--color-border)]" role="tablist" aria-label="Modo de cliente">
           <button
+            type="button"
+            role="tab"
             (click)="switchToSearchMode()"
-            class="flex-1 px-4 py-3 text-sm font-medium transition-colors"
+            [attr.aria-selected]="currentStep() === 'search'"
+            class="flex-1 px-4 py-3 min-h-[44px] text-sm font-medium transition-colors focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)] focus-visible:ring-inset"
             [class.text-[var(--color-primary)]]="currentStep() === 'search'"
             [class.border-b-2]="currentStep() === 'search'"
             [class.border-[var(--color-primary)]]="currentStep() === 'search'"
@@ -134,8 +128,11 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             Buscar
           </button>
           <button
+            type="button"
+            role="tab"
             (click)="switchToCreateMode()"
-            class="flex-1 px-4 py-3 text-sm font-medium transition-colors"
+            [attr.aria-selected]="currentStep() === 'create'"
+            class="flex-1 px-4 py-3 min-h-[44px] text-sm font-medium transition-colors focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)] focus-visible:ring-inset"
             [class.text-[var(--color-primary)]]="currentStep() === 'create'"
             [class.border-b-2]="currentStep() === 'create'"
             [class.border-[var(--color-primary)]]="currentStep() === 'create'"
@@ -145,8 +142,11 @@ import { StoreContextService } from '../../../../../core/services/store-context.
           </button>
           @if (queueEnabled()) {
             <button
+              type="button"
+              role="tab"
               (click)="switchToQueueMode()"
-              class="flex-1 px-4 py-3 text-sm font-medium transition-colors relative"
+              [attr.aria-selected]="currentStep() === 'queue'"
+              class="flex-1 px-4 py-3 min-h-[44px] text-sm font-medium transition-colors relative focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)] focus-visible:ring-inset"
               [class.text-[var(--color-primary)]]="currentStep() === 'queue'"
               [class.border-b-2]="currentStep() === 'queue'"
               [class.border-[var(--color-primary)]]="currentStep() === 'queue'"
@@ -249,9 +249,11 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 </h3>
                 <div class="max-h-48 overflow-y-auto space-y-2">
                   @for (customer of searchResults(); track customer) {
-                    <div
+                    <button
+                      type="button"
                       (click)="selectCustomer(customer)"
-                      class="p-3 border border-[var(--color-border)] rounded-lg cursor-pointer hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-light)] transition-colors"
+                      [attr.aria-label]="'Seleccionar ' + customer.first_name + ' ' + customer.last_name"
+                      class="w-full min-h-[44px] p-3 border border-[var(--color-border)] rounded-lg text-left cursor-pointer hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-light)] transition-colors focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)]"
                       >
                       <div class="flex items-center justify-between">
                         <div>
@@ -265,7 +267,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                             <p
                               class="text-xs text-[var(--color-text-muted)]"
                               >
-                              Doc: {{ customer.document_number }}
+                              {{ customer.document_type || 'Doc' }}: {{ customer.document_number }}
                             </p>
                           }
                         </div>
@@ -275,7 +277,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                           color="var(--color-text-secondary)"
                         ></app-icon>
                       </div>
-                    </div>
+                    </button>
                   }
                 </div>
               </div>
@@ -485,8 +487,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 @for (entry of queueEntries(); track entry; let i = $index) {
                   <div
                     class="p-3 border border-[var(--color-border)] rounded-lg transition-colors"
-                    [class.bg-yellow-50]="entry.status === 'selected'"
-                    [class.border-yellow-300]="entry.status === 'selected'"
+                    [ngClass]="entry.status === 'selected' ? 'bg-[var(--color-warning-light)] border-[var(--color-warning)]' : ''"
                     >
                     <div class="flex items-center justify-between">
                       <div class="flex items-center gap-3">
@@ -501,9 +502,9 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                             {{ entry.document_type }}: {{ entry.document_number }}
                           </p>
                           @if (entry.status === 'selected') {
-                            <p class="text-xs text-yellow-600 font-medium">
+                            <span class="inline-flex items-center px-2 py-0.5 text-xs font-bold text-white bg-[var(--color-primary)] rounded-full">
                               Seleccionado
-                            </p>
+                            </span>
                           }
                         </div>
                       </div>
@@ -667,6 +668,7 @@ export class PosCustomerModalComponent {
   readonly lookupPerformed = signal(false);
   readonly lookupLoading = signal(false);
 private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
+  private hostRef = inject(ElementRef);
   private dialogService = inject(DialogService);
   private fb = inject(FormBuilder);
   private customerService = inject(PosCustomerService);
@@ -907,6 +909,7 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
   onSave(): void {
     if (!this.customerForm.valid) {
       this.markFormGroupTouched();
+      this.focusFirstInvalidField();
       return;
     }
 
@@ -963,6 +966,23 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
         control.markAsTouched();
       }
     });
+  }
+
+  /**
+   * Stitch paso 4 — business decision "errores por campo con foco al primer
+   * error": tras marcar touched, mueve el foco al primer campo inválido del
+   * formulario (DOM order = orden del form). Solo presentación/a11y: no cambia
+   * validaciones ni el contrato del servicio.
+   */
+  private focusFirstInvalidField(): void {
+    const root = this.hostRef.nativeElement as HTMLElement;
+    const invalidControl = root.querySelector(
+      'app-input.ng-invalid, app-selector.ng-invalid',
+    );
+    const focusable = invalidControl?.querySelector(
+      'input, select, textarea, button',
+    ) as HTMLElement | null;
+    focusable?.focus();
   }
 
   // Queue methods
