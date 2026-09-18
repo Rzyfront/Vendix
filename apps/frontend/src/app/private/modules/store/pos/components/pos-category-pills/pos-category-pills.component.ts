@@ -88,17 +88,19 @@ function normalizeCategoryName(name: string): string {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+// Keywords largas primero ("panaderia" gana sobre "pan"); ordenado una sola
+// vez a nivel módulo en lugar de por llamada. El match por token evita
+// falsos positivos de substring ("aceites" no es "te").
+const SORTED_CATEGORY_EMOJI_KEYWORDS = [...CATEGORY_EMOJI_KEYWORDS].sort(
+  ([a], [b]) => b.length - a.length,
+);
+
 /** Emoji display-only derivado del nombre; fallback genérico si no hay match. */
 export function categoryEmojiFor(name: string): string {
   const tokens = normalizeCategoryName(name)
     .split(/[^a-z0-9]+/)
     .filter((token) => token.length > 0);
-  // Keywords largas primero: "panaderia" gana sobre "pan"; el match por token
-  // evita falsos positivos de substring ("aceites" no es "te").
-  const sorted = [...CATEGORY_EMOJI_KEYWORDS].sort(
-    ([a], [b]) => b.length - a.length,
-  );
-  const hit = sorted.find(([keyword]) =>
+  const hit = SORTED_CATEGORY_EMOJI_KEYWORDS.find(([keyword]) =>
     tokens.some((token) => token === keyword || token.startsWith(keyword)),
   );
   return hit ? hit[1] : CATEGORY_EMOJI_FALLBACK;

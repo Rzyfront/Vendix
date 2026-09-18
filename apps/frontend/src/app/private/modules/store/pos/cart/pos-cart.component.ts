@@ -2253,9 +2253,9 @@ private cartService = inject(PosCartService);
 
   /**
    * Cierra el editor y, si el borrador trimado difiere del actual, lo persiste
-   * via `PosCartService.updateCartItem` (que ya propaga `notes` a través del
-   * signal store — ver `pos-cart.service.ts:2224, 2265, 2383`). Si el cajero
-   * borró todo, el campo se omite para que el backend lo deje en null.
+   * via `PosCartService.updateCartItem`. Si el cajero borró todo se pasa
+   * `notes: undefined` CON la clave presente: la presencia de la clave es la
+   * intención de borrado (ver fix en `pos-cart.service.ts`).
    */
   closeItemNote(): void {
     const target = this.itemNoteTarget();

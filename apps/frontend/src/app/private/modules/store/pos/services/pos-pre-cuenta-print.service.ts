@@ -78,7 +78,12 @@ export class PosPreCuentaPrintService {
       0,
       (Number(summary?.total ?? 0) || 0) - withholding,
     );
-    const date = new Date().toLocaleString();
+    // Locale explícito (patrón date.util.ts): el toLocaleString() pelado
+    // varía según el entorno del navegador.
+    const date = new Date().toLocaleString('es-CO', {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
 
     const lines = state.items
       .map((item) => {
