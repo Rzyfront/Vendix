@@ -2573,7 +2573,12 @@ export class PosCartService {
       taxAmount: this.calculateItemTaxWithBase(item.product, item.unitPrice, taxMultiplier),
       finalPrice: finalUnitPrice,
       totalPrice: newTotalPrice,
-      notes: request.notes || item.notes,
+      // PSVERSION0001 paso 5 — `request.notes || item.notes` hacía imposible
+      // BORRAR una nota (undefined/'' caían al valor viejo): el "Quitar nota"
+      // de QUI-787 mostraba éxito pero la nota sobrevivía. La presencia de la
+      // clave distingue intención: ambos editores de nota la pasan siempre,
+      // los cambios solo-cantidad la omiten y preservan.
+      notes: 'notes' in request ? request.notes : item.notes,
     };
 
     return {

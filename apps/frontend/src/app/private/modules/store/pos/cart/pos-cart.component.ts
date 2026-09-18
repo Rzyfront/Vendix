@@ -157,34 +157,72 @@ import {
         </div>
 
         <!--
-          Stitch paso 3 — tarjeta de cliente bajo la cabecera (antes: tira
-          compacta al pie del resumen). Muestra nombre + documento cuando el
-          carrito tiene cliente adoptado; solo lectura, sin handlers nuevos.
+          PSVERSION0001 paso 5 — tarjeta de cliente Stitch (d25526af): avatar
+          con iniciales, nombre, documento · teléfono, y botones explícitos
+          Cambiar (abre el modal del shell) / Quitar (desasigna vía shell).
+          Sin badge de puntos: no hay fuente de datos y no se inventa.
         -->
-        @if (cartState().customer) {
-          <div
-            class="px-5 py-2.5 bg-primary/5 border-b border-primary/10 flex items-center gap-3"
-          >
+        @if (cartState().customer; as customer) {
+          <div class="px-5 pb-2.5">
             <div
-              class="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary shrink-0"
+              class="p-2.5 bg-slate-50 hover:bg-slate-100/60 border border-slate-200/90 rounded-xl flex items-center justify-between gap-2.5 transition-all shadow-xs"
             >
-              <app-icon name="user" [size]="16"></app-icon>
-            </div>
-            <div class="flex-1 min-w-0">
-              <p
-                class="text-[11px] text-neutral-600 font-medium leading-none mb-0.5"
-              >
-                Cliente
-              </p>
-              <p class="text-sm font-bold text-text-primary truncate">
-                {{ cartState().customer?.name }}
-              </p>
-              @if (cartState().customer?.document_number) {
-                <p class="text-[11px] text-neutral-600 truncate">
-                  {{ cartState().customer?.document_type }}
-                  {{ cartState().customer?.document_number }}
-                </p>
-              }
+              <div class="flex items-center gap-2.5 min-w-0">
+                <div
+                  class="w-8 h-8 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold text-xs flex items-center justify-center shrink-0 shadow-xs"
+                  aria-hidden="true"
+                >
+                  {{ customerInitials(customer) }}
+                </div>
+                <div class="min-w-0 leading-tight">
+                  <h4 class="text-xs font-bold text-slate-800 truncate">
+                    {{ customer.name }}
+                  </h4>
+                  <div
+                    class="flex items-center gap-1 text-[11px] text-slate-500 font-medium truncate mt-0.5"
+                  >
+                    @if (
+                      customer.document_type || customer.document_number
+                    ) {
+                      <span class="truncate"
+                        >{{ customer.document_type }}
+                        {{ customer.document_number }}</span
+                      >
+                    }
+                    @if (
+                      (customer.document_type || customer.document_number) &&
+                      customer.phone
+                    ) {
+                      <span class="text-slate-300">·</span>
+                    }
+                    @if (customer.phone) {
+                      <span class="text-slate-400 truncate">{{
+                        customer.phone
+                      }}</span>
+                    }
+                  </div>
+                </div>
+              </div>
+              <div class="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  (click)="openCustomerModal.emit()"
+                  class="cart-line-btn p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg transition-all"
+                  title="Cambiar cliente"
+                  [attr.aria-label]="'Cambiar cliente ' + customer.name"
+                >
+                  <app-icon name="pencil" [size]="14"></app-icon>
+                </button>
+                <button
+                  type="button"
+                  (click)="clearCustomer.emit()"
+                  class="cart-line-btn p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200/70 rounded-lg transition-all"
+                  title="Quitar cliente"
+                  [attr.aria-label]="'Quitar cliente ' + customer.name"
+                >
+                  <app-icon name="x" [size]="14"></app-icon>
+                </button>
+              </div>
             </div>
           </div>
         }
@@ -231,20 +269,28 @@ import {
           </div>
         }
 
-        <!-- Cart Items List -->
+        <!--
+          PSVERSION0001 paso 5 — ítems como tarjetas Stitch (d25526af):
+          p-3 bg-slate-50 rounded-2xl, miniatura 48px, nombre + papelera,
+          línea Base/Descuento, chip de nota universal, divisor, stepper sm
+          blanco y total extrabold. Badges fiscales/tiers/peso/promos,
+          tier-selector, hints, scheduler y booking intactos.
+        -->
         @if (!isEmpty()) {
-          <div class="space-y-2">
+          <div class="space-y-3">
             @for (
               item of cartState().items;
               track trackByItemId($index, item)
             ) {
               <div
                 role="listitem"
-                class="group grid grid-cols-[40px_1fr_auto] gap-x-2.5 gap-y-1.5 p-2.5 rounded-md border border-border bg-surface hover:bg-muted/30 hover:border-primary/30 transition-all duration-200"
+                data-purpose="cart-item"
+                class="group p-3 bg-slate-50 border border-slate-200/80 rounded-2xl flex flex-col gap-2.5 hover:border-emerald-300 transition-colors"
               >
-                <!-- Product Image -->
+                <div class="flex items-start gap-3">
+                  <!-- Product Image -->
                 <div
-                  class="row-span-1 w-10 h-10 shrink-0 bg-muted rounded-md overflow-hidden relative border border-border/50"
+                  class="w-12 h-12 shrink-0 bg-white rounded-xl overflow-hidden relative border border-slate-200"
                 >
                   @if (item.variant_image_url || item.product.image_url || item.product.image) {
                     <img
@@ -263,86 +309,69 @@ import {
                   }
                 </div>
                 <!-- Item Info -->
-                <div class="min-w-0 flex flex-col justify-center">
-                  <div class="flex items-center gap-1.5">
-                    <h4
-                      class="text-sm font-semibold text-text-primary truncate leading-tight"
-                    >
-                      {{ item.product.name }}
-                    </h4>
-                    <!-- CP-POS-SVC-PERF-001 / C.3 — calendar icon on
-                         service/prepared items opens the scheduler modal
-                         so the cashier can pick staff + day + time before
-                         Actualizar / Cobrar. Replaces the absent
-                         scheduling UI of the prior release. -->
-                    @if (
-                      item.product.product_type === 'service' ||
-                      item.product.product_type === 'prepared'
-                    ) {
-                      <button
-                        type="button"
-                        class="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-violet-600 hover:bg-violet-50 border border-violet-200 transition-colors"
-                        [attr.aria-label]="
-                          (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
-                          item.product.name
-                        "
-                        [title]="
-                          (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
-                          item.product.name
-                        "
-                        (click)="openScheduler(item)"
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-start justify-between gap-1">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                      <h4
+                        class="text-sm font-bold text-slate-900 truncate"
                       >
-                        <app-icon name="calendar" [size]="12"></app-icon>
-                      </button>
-                      <!--
-                        QUI-787 · botón "Notas" por línea. Paridad visual con el
-                        botón global "Nota" del header del carrito (mismo icono
-                        notebook-pen, mismo texto "Nota", mismos estados de
-                        color verde-lleno / gris-vacío). Compacto (px-1.5
-                        py-0.5, texto 10 px, icono 12 px) para caber al lado de
-                        la indita calendar sin romper la grilla del carrito.
-                      -->
-                      <button
-                        type="button"
-                        class="shrink-0 px-1.5 py-0.5 rounded flex items-center gap-1 border transition-colors text-[10px] font-semibold"
-                        [class]="
-                          item.notes
-                            ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
-                            : 'text-neutral-600 border-border/80 hover:text-text-primary hover:bg-muted/40'
-                        "
-                        [attr.aria-label]="
-                          (item.notes ? 'Editar nota de ' : 'Agregar nota a ') +
-                          item.product.name
-                        "
-                        [title]="
-                          (item.notes ? 'Editar nota' : 'Agregar nota para cocina') +
-                          ': ' +
-                          item.product.name
-                        "
-                        (click)="openItemNote(item)"
-                      >
-                        <app-icon name="notebook-pen" [size]="12"></app-icon>
-                        <span>Nota</span>
-                      </button>
-                    }
-                  </div>
-                  @if (item.notes) {
+                        {{ item.product.name }}
+                      </h4>
+                      <!-- CP-POS-SVC-PERF-001 / C.3 — calendar icon on
+                           service/prepared items opens the scheduler modal
+                           so the cashier can pick staff + day + time before
+                           Actualizar / Cobrar. Replaces the absent
+                           scheduling UI of the prior release. -->
+                      @if (
+                        item.product.product_type === 'service' ||
+                        item.product.product_type === 'prepared'
+                      ) {
+                        <button
+                          type="button"
+                          class="shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-violet-600 hover:bg-violet-50 border border-violet-200 transition-colors"
+                          [attr.aria-label]="
+                            (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
+                            item.product.name
+                          "
+                          [title]="
+                            (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
+                            item.product.name
+                          "
+                          (click)="openScheduler(item)"
+                        >
+                          <app-icon name="calendar" [size]="12"></app-icon>
+                        </button>
+                      }
+                    </div>
                     <!--
-                      QUI-787 · chip amarillo de nota activa en su propia
-                      línea para no competir con el botón "Nota". Paridad
-                      visual con .item-comanda-note de mesa
-                      (table-session-page.component.scss:688-700): fondo
-                      warning-100, texto warning-700. Truncado a 180 px.
+                      PSVERSION0001 paso 5 — papelera Stitch arriba-derecha
+                      (antes: columna de acciones de la grilla). Mismo handler
+                      removeFromCart; el botón de editar ítem personalizado se
+                      conserva a su izquierda con canEditItemPrice intacto.
                     -->
-                    <p
-                      class="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium w-fit"
-                      style="background-color: var(--color-warning-100, #fef3c7); color: var(--color-warning-700, #b45309);"
-                      [attr.title]="'Nota para cocina: ' + item.notes"
-                    >
-                      <app-icon name="message-square" [size]="10"></app-icon>
-                      <span class="truncate" style="max-width: 180px;">{{ item.notes }}</span>
-                    </p>
-                  }
+                    <div class="flex items-start gap-1 shrink-0">
+                      @if (item.itemType === 'custom' && canEditItemPrice(item)) {
+                        <button
+                          type="button"
+                          (click)="editItemPrice(item)"
+                          class="cart-line-btn p-1 rounded text-primary hover:bg-primary/15 border border-primary/30 bg-primary/5 transition-colors shadow-2xs"
+                          title="Editar ítem personalizado"
+                          [attr.aria-label]="'Editar ítem personalizado ' + item.product.name"
+                        >
+                          <app-icon name="pencil" [size]="13"></app-icon>
+                        </button>
+                      }
+                      <button
+                        type="button"
+                        (click)="removeFromCart(item.id)"
+                        class="cart-line-btn p-1.5 rounded-lg text-rose-500 hover:text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200/70 transition-colors shadow-xs"
+                        title="Eliminar producto"
+                        [attr.aria-label]="'Eliminar ' + item.product.name + ' del carrito'"
+                      >
+                        <app-icon name="trash-2" [size]="16"></app-icon>
+                      </button>
+                    </div>
+                  </div>
                   @if (item.variant_display_name) {
                     <p
                       class="text-[10px] text-primary font-medium truncate leading-tight"
@@ -357,7 +386,7 @@ import {
                       {{ item.itemType === 'custom' ? 'Ítem personalizado' : item.description }}
                     </p>
                   }
-                  <div class="flex items-center gap-2 mt-0.5">
+                  <div class="flex items-center gap-2 mt-0.5 flex-wrap">
                     <!-- F-137 (C.9, major — revisión 2026-09-14): 'text-text-muted'
                          (10px) rinde 3,27:1, bajo el mínimo AA (4,5:1) que el
                          propio repo se exige (skills/vendix-ui-ux/SKILL.md:51)
@@ -367,6 +396,19 @@ import {
                     <span class="text-xs text-[#5C6672]">
                       Base: {{ formatCurrency(item.unitPrice)
                       }}{{ unitPriceSuffix(item) }}
+                      <!--
+                        PSVERSION0001 paso 5 — "(Descuento -$Y)" Stitch. Solo
+                        cuando la línea tiene rebaja real (override hacia abajo
+                        vs originalFinalPrice); emerald-700 en vez del 600 del
+                        mockup para conservar AA sobre slate-50.
+                      -->
+                      @if (getItemDiscountAmount(item) > 0) {
+                        <span class="text-emerald-700 font-semibold"
+                          >(Descuento -{{
+                            formatCurrency(getItemDiscountAmount(item))
+                          }})</span
+                        >
+                      }
                     </span>
                     @if (item.is_weight_product && item.weight) {
                       <span
@@ -434,34 +476,44 @@ import {
                       </p>
                     }
                   }
+                  <!--
+                    PSVERSION0001 paso 5 — chip de nota Stitch UNIVERSAL: la nota
+                    por línea (flujo QUI-787 intacto: openItemNote + modal +
+                    clearItemNote) se extiende de solo-service/prepared a TODOS
+                    los ítems. Con nota muestra el texto truncado (edita); sin
+                    nota muestra "+ Agregar Nota". Reemplaza el botón "Nota"
+                    service/prepared y el chip amarillo legacy.
+                  -->
+                  <div class="flex items-center gap-1.5 mt-1">
+                    @if (item.notes) {
+                      <button
+                        type="button"
+                        (click)="openItemNote(item)"
+                        class="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded-md hover:bg-slate-50 max-w-full min-w-0 transition-colors"
+                        [attr.aria-label]="'Editar nota de ' + item.product.name"
+                        [title]="'Nota para cocina: ' + item.notes"
+                      >
+                        <app-icon name="pencil" [size]="12" class="text-slate-400 shrink-0"></app-icon>
+                        <span class="truncate min-w-0">{{ item.notes }}</span>
+                      </button>
+                    } @else {
+                      <button
+                        type="button"
+                        (click)="openItemNote(item)"
+                        class="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 hover:text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded-md transition-colors"
+                        [attr.aria-label]="'Agregar nota a ' + item.product.name"
+                        [title]="'Agregar nota: ' + item.product.name"
+                      >
+                        + Agregar Nota
+                      </button>
+                    }
+                  </div>
                 </div>
-                <!-- Item actions -->
-                <div class="flex items-start gap-1 self-start">
-                  @if (item.itemType === 'custom' && canEditItemPrice(item)) {
-                    <button
-                      type="button"
-                      (click)="editItemPrice(item)"
-                      class="cart-line-btn p-1 rounded text-primary hover:bg-primary/15 border border-primary/30 bg-primary/5 transition-colors shadow-2xs"
-                      title="Editar ítem personalizado"
-                      [attr.aria-label]="'Editar ítem personalizado ' + item.product.name"
-                    >
-                      <app-icon name="pencil" [size]="13"></app-icon>
-                    </button>
-                  }
-                  <button
-                    type="button"
-                    (click)="removeFromCart(item.id)"
-                    class="cart-line-btn p-1 rounded text-red-600 hover:bg-red-100 border border-red-200 bg-red-50/80 transition-colors shadow-2xs"
-                    title="Eliminar"
-                    [attr.aria-label]="'Eliminar ' + item.product.name + ' del carrito'"
-                  >
-                    <app-icon name="trash-2" [size]="13"></app-icon>
-                  </button>
-                </div>
+              </div>
 
                 <!-- CP-POS-SVC-BOOKING-001: Booking summary badge for service line items -->
                 @if (schedulerFor(item.id) || item.booking; as b) {
-                  <div class="col-span-3 mt-1.5 flex items-center justify-between gap-1.5 p-2 rounded-md bg-violet-50 border border-violet-200 text-[11px] text-violet-900">
+                  <div class="flex items-center justify-between gap-1.5 p-2 rounded-md bg-violet-50 border border-violet-200 text-[11px] text-violet-900">
                     <div class="flex items-center gap-1.5 min-w-0">
                       <app-icon name="calendar-check" [size]="14" class="text-violet-600 shrink-0"></app-icon>
                       <div class="truncate">
@@ -488,7 +540,7 @@ import {
                     </button>
                   </div>
                 } @else if (item.product.product_type === 'service' || item.product.requires_booking) {
-                  <div class="col-span-3 mt-1.5 flex items-center justify-between gap-1.5 p-2 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
+                  <div class="flex items-center justify-between gap-1.5 p-2 rounded-md bg-amber-50 border border-amber-200 text-[11px] text-amber-900">
                     <div class="flex items-center gap-1.5 min-w-0">
                       <app-icon name="alert-circle" [size]="14" class="text-amber-600 shrink-0"></app-icon>
                       <span class="font-medium truncate">Servicio sin horario asignado</span>
@@ -503,9 +555,13 @@ import {
                   </div>
                 }
 
-                <!-- Actions Row: Quantity + Total -->
+                <!--
+                  PSVERSION0001 paso 5 — divisor Stitch + stepper sm blanco +
+                  total extrabold. Handlers intactos (editWeight,
+                  editSaleQuantity, updateQuantity, valueClamped).
+                -->
                 <div
-                  class="col-span-3 flex items-center justify-between pt-2 mt-1 border-t border-border/50"
+                  class="flex items-center justify-between pt-1 border-t border-slate-200/60"
                 >
                   <div class="flex items-center gap-2 min-w-0">
                     <!-- Weight products: show clickable weight badge instead of quantity control -->
@@ -552,25 +608,29 @@ import {
                       </button>
                     } @else {
                       <div class="flex flex-col gap-0.5">
-                        <!-- F-141 (C.9, minor — revisión 2026-09-14): 'sm' mide
-                             28px (bajo los 44px que skills/vendix-ui-ux/SKILL.md:25
-                             exige para blancos táctiles). 'md' sólo llega a 36px;
-                             'lg' es el único tamaño del propio componente que
-                             cumple 44px, así que es el que se usa acá — sin
-                             tocar el default compartido 'sm' que usan otros
-                             consumidores. -->
-                        <app-quantity-control
-                          [value]="item.quantity"
-                          [min]="1"
-                          [max]="
-                            getQuantityMax(item)
-                          "
-                          [unitsPerPackage]="getRequiredStockPerUnit(item)"
-                          [editable]="true"
-                          [size]="'lg'"
-                          (valueChange)="updateQuantity(item.id, $event)"
-                          (valueClamped)="onQuantityClamped(item, $event)"
-                        ></app-quantity-control>
+                        <!--
+                          PSVERSION0001 paso 5 — stepper Stitch: se reutiliza
+                          app-quantity-control con size 'sm' (ya existía en el
+                          componente compartido; default 'sm' intacto, cero
+                          cambios para otros consumidores). El fondo blanco va
+                          por .cart-stepper-sm (ver styles). RESIDUAL a11y: 'sm'
+                          mide 28px, bajo los 44px de vendix-ui-ux — el paso 7
+                          decide el ajuste AA sin romper fidelidad Stitch.
+                        -->
+                        <div class="cart-stepper-sm">
+                          <app-quantity-control
+                            [value]="item.quantity"
+                            [min]="1"
+                            [max]="
+                              getQuantityMax(item)
+                            "
+                            [unitsPerPackage]="getRequiredStockPerUnit(item)"
+                            [editable]="true"
+                            [size]="'sm'"
+                            (valueChange)="updateQuantity(item.id, $event)"
+                            (valueClamped)="onQuantityClamped(item, $event)"
+                          ></app-quantity-control>
+                        </div>
                         @if (isPackageLine(item)) {
                           <span class="text-[10px] font-medium text-blue-700 leading-none">
                             {{ item.quantity }} {{ item.quantity === 1 ? 'paquete' : 'paquetes' }}
@@ -584,7 +644,7 @@ import {
                          'aria-label' da el mismo contexto que un lector de
                          pantalla necesita, sin agregar texto visible nuevo. -->
                     <span
-                      class="text-sm font-extrabold leading-none text-text-primary"
+                      class="text-base font-black text-slate-900"
                       [attr.aria-label]="'Total de línea: ' + formatCurrency(item.totalPrice)"
                     >
                       {{ formatCurrency(item.totalPrice) }}
@@ -1169,14 +1229,17 @@ import {
       }
 
       /*
-       * Stitch paso 3 — el stepper 'lg' del quantity-control compartido
-       * rinde 42px de alto; se garantiza el mínimo de 44px del repo sin
-       * tocar el componente compartido (::ng-deep con precedente en el
-       * POS: pos-ai-summary-modal, pos-session-detail-modal). Solo afecta
-       * a los steppers dentro de este carrito.
+       * PSVERSION0001 paso 5 — stepper Stitch blanco: el quantity-control
+       * 'sm' rinde bg-muted/50; se pinta blanco solo dentro de este
+       * carrito, sin tocar el componente compartido (::ng-deep con
+       * precedente en el POS: pos-ai-summary-modal,
+       * pos-session-detail-modal). Reemplaza la regla min-height 44px del
+       * paso 3, que era para 'lg' y recortaría el 'sm' (h-7) — ver el
+       * residual a11y anotado junto al stepper en el template.
        */
-      :host ::ng-deep app-quantity-control .qc-step {
-        min-height: 44px;
+      :host ::ng-deep .cart-stepper-sm app-quantity-control .qc-wrapper > div {
+        background-color: #fff;
+        border-color: var(--color-border);
       }
 
       .cart-actions {
@@ -1483,6 +1546,13 @@ private cartService = inject(PosCartService);
   readonly cashCloseClicked = output<void>();
   readonly cashMovementClicked = output<void>();
   readonly cashDetailClicked = output<void>();
+  /**
+   * PSVERSION0001 paso 5 — la tarjeta cliente Stitch re-emite Cambiar/Quitar
+   * al shell POS, dueño del modal y del CustomerService (mismo patrón que
+   * la tira de caja del paso 4 y que pos-product-selection.openCustomerModal).
+   */
+  readonly openCustomerModal = output<void>();
+  readonly clearCustomer = output<void>();
   readonly create = output<void>();
   /**
    * CP-POS-CREAR-EDITAR-COBRAR-001 — direct save-draft (skip the checkout
@@ -2410,6 +2480,49 @@ private cartService = inject(PosCartService);
 
   getItemTaxAmount(item: CartItem): number {
     return item.taxAmount;
+  }
+
+  /**
+   * PSVERSION0001 paso 5 — rebaja de la línea para "(Descuento -$Y)" Stitch.
+   * Fuente: `originalFinalPrice` (precio pre-override que el servicio
+   * preserva) vs `finalPrice` actual, por el multiplicador de la línea
+   * (resuelto desde totalPrice/finalPrice para cubrir peso y paquetes sin
+   * importar la unidad de captura). 0 cuando no hay rebaja real (sin
+   * override, override hacia arriba, o líneas custom sin original).
+   */
+  getItemDiscountAmount(item: CartItem): number {
+    const original = Number(item.originalFinalPrice ?? item.finalPrice) || 0;
+    const current = Number(item.finalPrice) || 0;
+    const perUnit = original - current;
+    if (perUnit <= 0) return 0;
+    const multiplier =
+      current > 0 && Number.isFinite(item.totalPrice / current)
+        ? item.totalPrice / current
+        : item.quantity;
+    return Math.max(0, Math.round(perUnit * multiplier * 100) / 100);
+  }
+
+  /**
+   * PSVERSION0001 paso 5 — iniciales del avatar de la tarjeta cliente
+   * Stitch (máx. 2 letras, mismo algoritmo que cashierInitials del shell).
+   */
+  customerInitials(customer: {
+    name?: string;
+    first_name?: string;
+    last_name?: string;
+  } | null): string {
+    const full = [customer?.first_name, customer?.last_name]
+      .filter(Boolean)
+      .join(' ');
+    const source = full || customer?.name || '';
+    const initials = source
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((word) => word[0])
+      .join('')
+      .toUpperCase();
+    return initials || 'CL';
   }
 
   handleImageError(event: any): void {

@@ -496,6 +496,8 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                 (layaway)="onLayaway()"
                 (customerSelected)="onCustomerSelected($event)"
                 (bookingsChanged)="onBookingsChanged($event)"
+                (openCustomerModal)="onOpenCustomerModal()"
+                (clearCustomer)="onClearCustomer()"
                 ></app-pos-cart>
             </div>
           </div>
