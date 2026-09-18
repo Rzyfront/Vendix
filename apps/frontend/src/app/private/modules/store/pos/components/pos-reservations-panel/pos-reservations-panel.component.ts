@@ -32,6 +32,12 @@ export class PosReservationsPanelComponent {
 
   private timeInterval: ReturnType<typeof setInterval> | null = null;
 
+  // Matriz de permisos POS→reservations (paso 1 plan POS-stitch; backend:
+  // reservations.controller.ts @Controller('store/reservations')):
+  // - GET .../today → 'store:reservations:read'
+  // - POST .../:id/confirm|complete|no-show → HALLAZGO: el backend solo
+  //   define PATCH para esas rutas ('store:reservations:update'); el POST
+  //   no tiene ruta (404). Ver paso 9 del plan.
   private readonly apiUrl = `${environment.apiUrl}/store/reservations`;
   private readonly DAY_START_HOUR = 7;
   private readonly DAY_END_HOUR = 22;

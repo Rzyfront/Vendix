@@ -13,6 +13,14 @@ import {
   CategoryStats,
 } from '../models/dashboard.model';
 
+/**
+ * STALE (verificado, paso 1 plan POS-stitch, 2026-09-17): el único consumidor
+ * es `pos-dashboard.component.ts` (selector `app-pos-dashboard`), que a su vez
+ * es huérfano — el selector no se usa en ningún template ni ruta (la ruta
+ * /admin/dashboard resuelve a `store/dashboard/`, otro módulo). Además el
+ * cuerpo solo genera datos mock (Math.random, sin HTTP). NO rediseñar,
+ * NO importar desde código nuevo.
+ */
 @Injectable({
   providedIn: 'root',
 })

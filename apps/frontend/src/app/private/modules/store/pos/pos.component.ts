@@ -870,6 +870,11 @@ export class PosComponent {
     this.cartBookingsFromChild.set(new Map(map ?? []));
   }
 
+  // Matriz de permisos POS→reservations aquí (paso 1 plan POS-stitch;
+  // backend: reservations.controller.ts @Controller('store/reservations')):
+  // - POST /store/reservations → 'store:reservations:create'
+  // - PUT /store/reservations/:id → HALLAZGO: el backend solo define
+  //   PATCH ':id' ('store:reservations:update'); el PUT no tiene ruta (404).
   /**
    * CP-POS-SVC-PERF-001 / Annotation-3 — fire any pending booking blocks
    * collected by the cart scheduler once the order is persisted. New
@@ -1799,6 +1804,10 @@ export class PosComponent {
       ...(cartNotes ? { notes: cartNotes } : {}),
     };
 
+    // Matriz de permisos POS→quotations (paso 1 plan POS-stitch; backend:
+    // quotations.controller.ts @Controller('store/quotations')). El POS solo usa:
+    // - createQuotation → POST /store/quotations → 'store:quotations:create'
+    // - updateQuotation → PATCH /store/quotations/:id → 'store:quotations:update'
     const editId = this.editingQuotationId();
     const obs$ = editId
       ? this.quotationsService.updateQuotation(Number(editId), dto as any)
@@ -1873,6 +1882,10 @@ export class PosComponent {
       installments: config.installments || [],
     };
 
+    // Matriz de permisos POS→layaway (paso 1 plan POS-stitch; backend:
+    // layaway.controller.ts @Controller('store/layaway')). El POS solo usa:
+    // - create → POST /store/layaway → 'store:layaway:create'
+    // (payment/cancel/complete los opera el módulo layaway, no el POS)
     this.layawayService
       .create(dto)
       .pipe(takeUntilDestroyed(this.destroyRef))

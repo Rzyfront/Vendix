@@ -95,6 +95,10 @@ export class PosQuickBookComponent {
     this.loadAvailability();
   }
 
+  // Matriz de permisos POS→reservations (paso 1 plan POS-stitch; backend:
+  // reservations.controller.ts @Controller('store/reservations')):
+  // - GET /store/reservations/availability/:productId → 'store:reservations:read'
+  // - POST /store/reservations → 'store:reservations:create'
   loadAvailability() {
     const service = this.selectedService();
     const date = this.selectedDate();

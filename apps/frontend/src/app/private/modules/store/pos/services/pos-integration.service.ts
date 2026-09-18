@@ -26,6 +26,14 @@ import {
 } from '../models/payment.model';
 import { Product } from './pos-product.service';
 
+/**
+ * STALE (huérfano verificado, paso 1 plan POS-stitch, 2026-09-17):
+ * `grep -rn "PosIntegrationService" apps/frontend/src/app --include=*.ts | grep -v spec`
+ * devuelve solo este archivo. Ningún componente/servicio del POS lo inyecta;
+ * la integración viva pasa por `pos-api.service.ts` + servicios dedicados
+ * (`pos-order.service.ts`, `pos-customer.service.ts`, etc.).
+ * NO rediseñar, NO importar desde código nuevo (ver paso 10 del plan).
+ */
 @Injectable({
   providedIn: 'root',
 })

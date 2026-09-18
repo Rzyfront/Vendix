@@ -436,6 +436,14 @@ export class PosCartService {
       return of(state);
     }
 
+    // Matriz de permisos POS→price-tiers (paso 1 plan POS-stitch; backend:
+    // price-tiers.controller.ts @Controller('store/price-tiers'), vía
+    // PriceTierCacheService → PriceTiersService). El POS solo lee:
+    // - getActiveTiers → GET /store/price-tiers → 'store:price-tiers:read'
+    // - getProductOverrides → GET /store/price-tiers/products/:id/overrides
+    //   → 'store:price-tiers:read'
+    // (Mismos 2 endpoints consumen pos-cart.component.ts y
+    // pos-cart-modal.component.ts vía el mismo caché.)
     return forkJoin({
       tiers: this.priceTierCache.getActiveTiers(),
       overrides: this.priceTierCache.getProductOverrides(productId),
