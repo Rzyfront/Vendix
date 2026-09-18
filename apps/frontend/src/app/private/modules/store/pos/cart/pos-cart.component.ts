@@ -28,6 +28,7 @@ import type { QuantityClampEvent } from '../../../../../shared/components/quanti
 import { showStockCapToast } from './utils/stock-toast';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { PosScaleService } from '../services/pos-scale.service';
+import { PosPreCuentaPrintService } from '../services/pos-pre-cuenta-print.service';
 import { PosApiService } from '../services/pos-api.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { TaxesService } from '../../products/services/taxes.service';
@@ -695,6 +696,19 @@ import {
                 formatCurrency(summary().subtotal || 0)
               }}</span>
             </div>
+            <!--
+              PSVERSION0001 paso 6 — fila Stitch "Descuento aplicado" en rose.
+              Agrega promos + cupón ('discountAmount' del summary); visible
+              solo cuando hay descuento real (> 0).
+            -->
+            @if (summary().discountAmount > 0) {
+              <div class="flex justify-between text-xs">
+                <span class="text-neutral-600">Descuento aplicado</span>
+                <span class="font-bold text-rose-500"
+                  >-{{ formatCurrency(summary().discountAmount) }}</span
+                >
+              </div>
+            }
             <div class="flex justify-between text-xs text-neutral-600">
               <span>Impuestos</span>
               <span class="font-medium">{{
@@ -900,13 +914,30 @@ import {
               </div>
             }
 
+            <!--
+              PSVERSION0001 paso 6 — total destacado Stitch: etiqueta +
+              subtítulo copy estático "Métodos combinados disponibles"
+              (split-payment real fuera de alcance, decisión explícita) +
+              cifra text-3xl verde. success-700 (~5:1 sobre claro) en vez del
+              brand-600 del mockup para no romper AA (regla paso 7).
+            -->
             <div
-              class="pt-2 border-t border-border/50 flex justify-between items-center"
+              class="pt-3 border-t border-border/50 flex items-baseline justify-between gap-2"
             >
-              <span class="font-bold text-text-primary text-base">{{
-                withholdingAmount() > 0 ? 'Total a cobrar' : 'Total a pagar'
-              }}</span>
-              <span class="font-extrabold text-2xl text-text-primary tracking-tight">
+              <div class="min-w-0">
+                <span
+                  class="block text-xs font-bold uppercase tracking-wider text-neutral-600"
+                  >{{
+                    withholdingAmount() > 0 ? 'Total a cobrar' : 'Total a pagar'
+                  }}</span
+                >
+                <span class="text-[11px] font-medium text-emerald-700"
+                  >Métodos combinados disponibles</span
+                >
+              </div>
+              <span
+                class="text-3xl font-black tracking-tight leading-none text-emerald-700 shrink-0"
+              >
                 {{ formatCurrency(netTotal()) }}
               </span>
             </div>
@@ -974,8 +1005,38 @@ import {
                 <span>Crear Plan Separé</span>
               </button>
             } @else {
-              <!-- Normal POS buttons -->
-              <div class="cart-actions-row">
+              <!--
+                PSVERSION0001 paso 6 — acciones secundarias Stitch (grid 2
+                col): "Guardar / Espera" conserva saveDraft.emit intacto;
+                "Pre-cuenta" imprime el snapshot sin crear orden. La segunda
+                fila conserva Ítem libre y Envío existentes (sin regresión);
+                Ítem libre también vive en el header (paso 1).
+              -->
+              <div class="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  class="cart-btn save-btn"
+                  (click)="saveDraft.emit()"
+                  [disabled]="isEmpty()"
+                >
+                  <app-icon name="clipboard-list" [size]="16"></app-icon>
+                  <span>Guardar / Espera</span>
+                </button>
+                <button
+                  type="button"
+                  class="cart-btn save-btn"
+                  (click)="printPreCuenta()"
+                  [disabled]="isEmpty() || preCuentaPrinting()"
+                  [attr.aria-busy]="preCuentaPrinting() ? 'true' : null"
+                  title="Imprimir pre-cuenta (no crea la orden)"
+                >
+                  <app-icon name="printer" [size]="16"></app-icon>
+                  <span>{{
+                    preCuentaPrinting() ? 'Imprimiendo…' : 'Pre-cuenta'
+                  }}</span>
+                </button>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   class="cart-btn custom-item-btn"
@@ -985,15 +1046,6 @@ import {
                 >
                   <app-icon name="file-plus" [size]="16"></app-icon>
                   <span>Ítem</span>
-                </button>
-                <button
-                  type="button"
-                  class="cart-btn save-btn"
-                  (click)="saveDraft.emit()"
-                  [disabled]="isEmpty()"
-                >
-                  <app-icon name="clipboard-list" [size]="16"></app-icon>
-                  <span>Guardar</span>
                 </button>
                 <button
                   type="button"
@@ -1020,6 +1072,9 @@ import {
                 cobra)" because it saves a draft without payment.
                 Stitch paso 3 — el CTA muestra el total neto a cobrar
                 (netTotal() ya calculado), como en el diseño.
+                PSVERSION0001 paso 6 — copy Stitch "Cobrar $X" sin badge kbd
+                (decisión "sin shortcuts" del paso 1); el handler sigue
+                abriendo el checkout-shell actual sin cambios.
               -->
               <button
                 type="button"
@@ -1029,8 +1084,8 @@ import {
                 [attr.aria-busy]="isCharging() ? 'true' : null"
                 [attr.aria-label]="'Cobrar ' + formatCurrency(netTotal())"
               >
-                <app-icon name="credit-card" [size]="18"></app-icon>
-                <span>Cobrar · {{ formatCurrency(netTotal()) }}</span>
+                <app-icon name="credit-card" [size]="20"></app-icon>
+                <span>Cobrar {{ formatCurrency(netTotal()) }}</span>
               </button>
               <!--
                 Phase D.3 — Cobrar only when an updated order is sitting in
@@ -1248,12 +1303,6 @@ import {
         gap: 8px;
       }
 
-      .cart-actions-row {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 8px;
-      }
-
       .cart-btn {
         display: flex;
         align-items: center;
@@ -1278,14 +1327,17 @@ import {
       }
 
       /* Stitch paso 11 — CTA sobre success-700 (~5:1 con blanco, AA);
-         blanco sobre primary #2ecc71 daba 2.10:1 y fallaba AA. */
+         blanco sobre primary #2ecc71 daba 2.10:1 y fallaba AA.
+         PSVERSION0001 paso 6 — CTA gigante Stitch (py-4, text-base,
+         extrabold, rounded-2xl); fondo success-700 intacto (AA). */
       .checkout-btn {
         width: 100%;
-        padding: 14px;
+        padding: 16px;
+        border-radius: 16px;
         background: var(--color-success-700);
         color: var(--color-text-on-primary);
-        font-size: 15px;
-        font-weight: 700;
+        font-size: 16px;
+        font-weight: 800;
         box-shadow: 0 4px 12px rgba(var(--color-success-700-rgb), 0.3);
       }
 
@@ -1416,6 +1468,7 @@ private cartService = inject(PosCartService);
   private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
   private scaleService = inject(PosScaleService);
+  private preCuentaPrint = inject(PosPreCuentaPrintService);
   private posApiService = inject(PosApiService);
   private authFacade = inject(AuthFacade);
   private taxesService = inject(TaxesService);
@@ -1467,6 +1520,11 @@ private cartService = inject(PosCartService);
   );
   readonly taxCategories = signal<TaxCategory[]>([]);
   readonly customItemModalOpen = signal(false);
+  /**
+   * PSVERSION0001 paso 6 — la pre-cuenta imprime async (iframe + diálogo);
+   * el flag deshabilita el botón y anuncia el estado vía `aria-busy`.
+   */
+  readonly preCuentaPrinting = signal(false);
   readonly canCreateCustomItems = computed(() =>
     this.hasPermission('store:pos:custom_items:create'),
   );
@@ -2247,6 +2305,30 @@ private cartService = inject(PosCartService);
     }
 
     this.checkout.emit();
+  }
+
+  /**
+   * PSVERSION0001 paso 6 — imprime la Pre-cuenta (snapshot de solo lectura
+   * con leyenda "PRE-CUENTA — documento no fiscal"). No crea orden, no llama
+   * al backend y no muta el carrito: el servicio formatea el estado actual a
+   * HTML local y lo envía por la tubería `DocumentPrintService`.
+   */
+  async printPreCuenta(): Promise<void> {
+    const currentState = this.cartService.getCurrentState();
+    if (currentState.items.length === 0) {
+      this.toastService.warning(this.emptyCartMessage);
+      return;
+    }
+    if (this.preCuentaPrinting()) return;
+    this.preCuentaPrinting.set(true);
+    try {
+      await this.preCuentaPrint.printPreCuenta(currentState);
+    } catch (error) {
+      console.error('Error al imprimir pre-cuenta:', error);
+      this.toastService.error('No se pudo imprimir la pre-cuenta');
+    } finally {
+      this.preCuentaPrinting.set(false);
+    }
   }
 
   async editWeight(item: CartItem): Promise<void> {
