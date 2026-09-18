@@ -990,14 +990,18 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
    * validaciones ni el contrato del servicio.
    */
   private focusFirstInvalidField(): void {
-    const root = this.hostRef.nativeElement as HTMLElement;
-    const invalidControl = root.querySelector(
-      'app-input.ng-invalid, app-selector.ng-invalid',
-    );
-    const focusable = invalidControl?.querySelector(
-      'input, select, textarea, button',
-    ) as HTMLElement | null;
-    focusable?.focus();
+    // Review PR #824: diferir un frame para que .ng-invalid se aplique en
+    // el siguiente ciclo CD (Zoneless) antes de buscar el campo inválido.
+    requestAnimationFrame(() => {
+      const root = this.hostRef.nativeElement as HTMLElement;
+      const invalidControl = root.querySelector(
+        'app-input.ng-invalid, app-selector.ng-invalid',
+      );
+      const focusable = invalidControl?.querySelector(
+        'input, select, textarea, button',
+      ) as HTMLElement | null;
+      focusable?.focus();
+    });
   }
 
   // Queue methods
