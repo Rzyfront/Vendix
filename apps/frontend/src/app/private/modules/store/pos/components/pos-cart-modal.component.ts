@@ -64,7 +64,12 @@ import {
         >
         <!-- Header -->
         <div class="modal-header">
-          <button class="back-btn" (click)="closed.emit()">
+          <button
+            type="button"
+            class="back-btn"
+            (click)="closed.emit()"
+            aria-label="Cerrar carrito"
+          >
             <app-icon name="chevron-left" [size]="24"></app-icon>
           </button>
           <h2 id="pos-cart-modal-title" class="modal-title">
@@ -228,9 +233,11 @@ import {
                   </div>
                   <!-- Remove Button -->
                   <button
+                    type="button"
                     class="remove-btn"
                     (click)="onRemoveItem(item.id)"
                     title="Eliminar"
+                    [attr.aria-label]="'Eliminar ' + item.product.name + ' del carrito'"
                     >
                     <app-icon name="x" [size]="16"></app-icon>
                   </button>
@@ -475,6 +482,19 @@ import {
         display: contents;
       }
 
+      /* Stitch paso 3 — foco visible por teclado en todo control nativo
+         del modal (mismo lenguaje del paso 2: 3px primary). */
+      .back-btn:focus-visible,
+      .clear-btn:focus-visible,
+      .remove-btn:focus-visible,
+      .edit-price-btn:focus-visible,
+      .action-btn:focus-visible,
+      .empty-custom-item-btn:focus-visible,
+      .summary-custom-item-btn:focus-visible {
+        outline: 3px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+
       .modal-overlay {
         position: fixed;
         inset: 0;
@@ -522,8 +542,8 @@ import {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 40px;
-        height: 40px;
+        min-width: 44px;
+        min-height: 44px;
         border: none;
         background: transparent;
         color: var(--color-text-primary);
@@ -550,6 +570,7 @@ import {
 
       .clear-btn {
         padding: 8px 14px;
+        min-height: 44px;
         border: none;
         background: transparent;
         color: var(--color-destructive);
@@ -849,8 +870,8 @@ import {
       .remove-btn {
         grid-row: 1;
         grid-column: 3;
-        width: 28px;
-        height: 28px;
+        min-width: 44px;
+        min-height: 44px;
         border: none;
         background: transparent;
         color: var(--color-text-muted);
@@ -895,8 +916,8 @@ import {
       }
 
       .edit-price-btn {
-        width: 34px;
-        height: 34px;
+        min-width: 44px;
+        min-height: 44px;
         border: 1px solid rgba(var(--color-primary-rgb), 0.24);
         border-radius: 10px;
         background: rgba(var(--color-primary-rgb), 0.08);
@@ -930,7 +951,7 @@ import {
 
       .summary-custom-item-btn {
         width: 100%;
-        min-height: 42px;
+        min-height: 44px;
         margin-bottom: 10px;
         border: 1px solid rgba(var(--color-primary-rgb), 0.24);
         border-radius: 12px;
@@ -1025,7 +1046,7 @@ import {
       }
 
       .modal-actions-row > .action-btn {
-        height: 42px;
+        min-height: 44px;
         font-size: 13px;
       }
 
@@ -1061,7 +1082,7 @@ import {
 
       .checkout-btn {
         background: var(--color-primary);
-        color: white;
+        color: var(--color-text-on-primary);
         font-weight: 700;
         box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
       }
@@ -1080,7 +1101,7 @@ import {
       }
 
       .cobrar-btn:focus-visible {
-        outline: 2px solid var(--color-primary);
+        outline: 3px solid var(--color-primary);
         outline-offset: 2px;
       }
 

@@ -68,20 +68,34 @@ import {
     >
       <!-- Cart Header & Summary Section (Fixed at top) -->
       <div class="flex-none bg-surface border-b border-border shadow-sm">
-        <!-- Header Row -->
+        <!--
+          Stitch paso 3 — cabecera del panel "Carrito Actual": título,
+          conteo de ítems y acciones (Vaciar con confirmación via
+          clearCart(), Nota interna). Solo presentación: handlers intactos.
+        -->
         <div
           class="px-5 py-3 border-b border-border/50 flex items-center justify-between gap-2"
         >
-          <h2
-            class="text-base font-bold text-text-primary flex items-center gap-2"
-          >
-            <app-icon
-              name="shopping-cart"
-              [size]="18"
-              class="text-primary"
-            ></app-icon>
-            Carrito ({{ cartState().items.length }})
-          </h2>
+          <div class="min-w-0">
+            <h2
+              class="text-base font-bold text-text-primary flex items-center gap-2"
+            >
+              <app-icon
+                name="shopping-cart"
+                [size]="18"
+                class="text-primary"
+              ></app-icon>
+              Carrito Actual
+            </h2>
+            <p
+              class="text-xs text-text-secondary mt-0.5"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {{ cartState().items.length }}
+              {{ cartState().items.length === 1 ? 'ítem' : 'ítems' }}
+            </p>
+          </div>
 
           <div class="flex items-center gap-1.5">
             <!-- Vaciar carrito (desktop): el modal móvil ya lo tiene; el
@@ -90,7 +104,7 @@ import {
               <button
                 type="button"
                 (click)="clearCart()"
-                class="px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors border text-xs font-semibold shadow-2xs text-red-600 border-red-200 bg-red-50/80 hover:bg-red-100"
+                class="cart-header-btn px-2.5 rounded-lg flex items-center gap-1.5 transition-colors border text-xs font-semibold shadow-2xs text-red-600 border-red-200 bg-red-50/80 hover:bg-red-100"
                 aria-label="Vaciar carrito"
                 title="Vaciar carrito"
               >
@@ -106,7 +120,7 @@ import {
             <button
               type="button"
               (click)="orderNoteModalOpen.set(true)"
-              class="staff-note-btn relative px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors border text-xs font-semibold shadow-2xs"
+              class="cart-header-btn staff-note-btn relative px-2.5 rounded-lg flex items-center gap-1.5 transition-colors border text-xs font-semibold shadow-2xs"
               [class]="
                 hasStaffNote()
                   ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
@@ -120,380 +134,19 @@ import {
           </div>
         </div>
 
-        <!-- Totals Row (High Contrast) -->
-        <!-- F-134 (C.9, major — revisión 2026-09-14): Subtotal/Impuestos/Total
-             se recalculan por acción del cajero (cambio de cantidad, cupón,
-             etc.) y no se anunciaban a lectores de pantalla. 'aria-live' +
-             'aria-atomic' sin cambiar el layout ni el copy existente. -->
-        <div class="px-3 py-3 bg-muted/20" aria-live="polite" aria-atomic="true">
-          <div class="space-y-1.5 mb-4">
-            <div class="flex justify-between text-xs text-text-secondary">
-              <span>Subtotal</span>
-              <span class="font-medium">{{
-                formatCurrency(summary().subtotal || 0)
-              }}</span>
-            </div>
-            <div class="flex justify-between text-xs text-text-secondary">
-              <span>Impuestos</span>
-              <span class="font-medium">{{
-                formatCurrency(summary().taxAmount || 0)
-              }}</span>
-            </div>
-
-            <!--
-              Retención (preview). role='suffered': el cliente agente retenedor
-              nos retiene; reduce el total a cobrar. Fuente única de verdad:
-              endpoint backend /store/withholding-tax/preview. Solo se muestra
-              cuando hay retención resuelta (> 0).
-            -->
-            @if (withholdingAmount() > 0) {
-              <div class="flex justify-between text-xs text-text-secondary">
-                <span class="flex items-center gap-1">
-                  <app-icon name="minus" [size]="12" class="text-amber-600"></app-icon>
-                  Retención
-                </span>
-                <span class="font-medium text-amber-700"
-                  >-{{ formatCurrency(withholdingAmount()) }}</span
-                >
-              </div>
-            }
-
-            <!-- Promotions & Coupons (hidden in quotation mode) -->
-            @if (!isQuotationMode() && !isLayawayMode()) {
-              <!-- Promotions Applied -->
-              @if (getPromotionDiscounts().length > 0) {
-                <div class="pt-1.5 border-t border-border/30">
-                  <div class="flex items-center gap-1.5 mb-1">
-                    <app-icon
-                      name="tag"
-                      [size]="12"
-                      class="text-green-600"
-                    ></app-icon>
-                    <span class="text-[11px] font-semibold text-green-700"
-                      >Promociones aplicadas</span
-                    >
-                    <span
-                      class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-100 text-green-700 text-[9px] font-bold"
-                    >
-                      {{ getPromotionDiscounts().length }}
-                    </span>
-                  </div>
-                  @for (disc of getPromotionDiscounts(); track disc.id) {
-                    <div class="flex items-start justify-between gap-2 py-0.5">
-                      <div class="min-w-0 flex-1">
-                        <div class="flex items-baseline gap-1 min-w-0 flex-wrap">
-                          <span class="text-[11px] text-green-700 truncate">{{
-                            disc.description
-                          }}</span>
-                          @if (formatAffectedProducts(disc.affected_products); as
-                            affectedLabel) {
-                            @if (affectedLabel) {
-                              <span
-                                class="text-[10px] text-green-600/80"
-                                [title]="'Aplicada a: ' + affectedLabel"
-                                >[{{ affectedLabel }}]</span
-                              >
-                            }
-                          }
-                          @if (disc.is_auto_applied) {
-                            <span
-                              class="inline-flex items-center px-1 rounded text-[8px] font-medium bg-green-100 text-green-600 shrink-0"
-                              >auto</span
-                            >
-                          }
-                        </div>
-                        <div class="mt-0.5 flex flex-wrap items-center gap-1">
-                          <app-badge
-                            [variant]="promotionTypeBadge(disc).variant"
-                            size="xsm"
-                            badgeStyle="outline"
-                          >
-                            {{ promotionTypeBadge(disc).label }}
-                          </app-badge>
-                          @if (disc.badge_label) {
-                            <app-badge
-                              variant="warning"
-                              size="xsm"
-                              badgeStyle="outline"
-                            >
-                              {{ disc.badge_label }}
-                            </app-badge>
-                          }
-                          <app-badge
-                            variant="success"
-                            size="xsm"
-                            badgeStyle="solid"
-                            title="Promoción activa aplicada."
-                          >
-                            Aplicada
-                          </app-badge>
-                        </div>
-                      </div>
-                      <div class="flex items-center gap-1 shrink-0">
-                        <span class="text-[11px] font-medium text-green-700"
-                          >-{{ formatCurrency(disc.amount) }}</span
-                        >
-                        @if (!disc.is_auto_applied) {
-                          <button
-                            (click)="removePromoDiscount(disc.id)"
-                            class="p-0.5 rounded text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
-                            title="Eliminar promoción"
-                          >
-                            <app-icon name="x" [size]="10"></app-icon>
-                          </button>
-                        }
-                      </div>
-                    </div>
-                  }
-                </div>
-              }
-
-              <!--
-                Tier progress nudge (best-effort). Shown when a scaled promo
-                (quantity_tiered) already has in-scope items and a higher tier
-                is reachable. Data comes from the active-promotions payload
-                (promotion_quantity_tiers) — no extra backend call.
-              -->
-              @if (promotionTierProgress().length > 0) {
-                <div class="pt-1.5 border-t border-border/30 space-y-1">
-                  @for (
-                    progress of promotionTierProgress();
-                    track progress.promotion_id
-                  ) {
-                    <div
-                      class="flex items-start gap-1.5 text-[10px] leading-tight text-primary"
-                    >
-                      <app-icon
-                        name="trending-up"
-                        [size]="11"
-                        class="mt-0.5 shrink-0 text-primary"
-                      ></app-icon>
-                      <span>
-                        Agrega
-                        <span class="font-semibold"
-                          >{{ progress.remaining_quantity }} und</span
-                        >
-                        más y obtén
-                        <span class="font-semibold">{{
-                          progress.next_benefit_label
-                        }}</span>
-                        en “{{ progress.name }}”.
-                      </span>
-                    </div>
-                  }
-                </div>
-              }
-
-              <!-- Coupon Code Input / Applied Coupon -->
-              <div class="pt-1.5 border-t border-border/30">
-                @if (getAppliedCoupon(); as coupon) {
-                  <div class="flex items-center justify-between py-0.5">
-                    <div class="flex items-center gap-1.5">
-                      <app-icon
-                        name="ticket"
-                        [size]="12"
-                        class="text-primary"
-                      ></app-icon>
-                      <span class="text-[11px] font-semibold text-primary">{{
-                        coupon.coupon_code
-                      }}</span>
-                    </div>
-                    <div class="flex items-center gap-1">
-                      <span class="text-[11px] font-medium text-green-700"
-                        >-{{ formatCurrency(getCouponDiscountAmount()) }}</span
-                      >
-                      <button
-                        (click)="removeCoupon()"
-                        class="p-0.5 rounded text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
-                        title="Eliminar cupón"
-                      >
-                        <app-icon name="x" [size]="10"></app-icon>
-                      </button>
-                    </div>
-                  </div>
-                } @else {
-                  <div class="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      [(ngModel)]="couponCode"
-                      placeholder="Código de cupón"
-                      class="flex-1 px-2 py-1.5 text-xs rounded-md border border-border bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 uppercase"
-                      (keydown.enter)="applyCoupon()"
-                    />
-                    <button
-                      (click)="applyCoupon()"
-                      [disabled]="!couponCode.trim() || couponLoading"
-                      class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    >
-                      {{ couponLoading ? '...' : 'Aplicar' }}
-                    </button>
-                  </div>
-                }
-              </div>
-            }
-
-            <div
-              class="pt-2 border-t border-border/50 flex justify-between items-center"
-            >
-              <span class="font-bold text-text-primary text-base">{{
-                withholdingAmount() > 0 ? 'Total a cobrar' : 'Total'
-              }}</span>
-              <span class="font-extrabold text-2xl text-primary tracking-tight">
-                {{ formatCurrency(netTotal()) }}
-              </span>
-            </div>
-
-            <!--
-              Local estimate disclaimer.
-              Backend (PromotionEngineService + CouponsService) is the source
-              of truth for the final discount and grand total. The values
-              shown above are computed locally for UX feedback only and are
-              recalculated server-side when the sale is processed.
-            -->
-            @if (getPromotionDiscounts().length > 0 || getAppliedCoupon()) {
-              <div
-                class="flex items-center gap-1 text-[10px] text-text-secondary/80 italic mt-1"
-                title="Los totales finales se confirman al procesar el pago"
-              >
-                <app-icon name="info" [size]="10"></app-icon>
-                <span>Estimación. El total final se confirma al cobrar.</span>
-              </div>
-            }
-
-            <!--
-              Aviso 5 UVT (Art. 616-1 ET / Res. 000165 de 2023). Aparece ANTES de
-              cobrar para que el cajero pida el documento con el cliente delante:
-              el backend rechaza la venta anónima por encima del tope, y descubrirlo
-              al pulsar «Cobrar» obliga a rehacer el cierre.
-            -->
-            @if (invoiceRequiredByUvt()) {
-              <div
-                class="mt-2 flex items-start gap-2 rounded-md border border-warning bg-warning-light px-2 py-1.5 text-[11px] text-text-primary"
-              >
-                <app-icon name="alert-triangle" [size]="12" class="text-warning mt-0.5 shrink-0"></app-icon>
-                <span>
-                  Esta venta supera
-                  {{ formatCurrency(uvtLimitCop()) }}
-                  ({{ uvtThreshold()!.uvt_limit }} UVT) y requiere factura
-                  electrónica: identifica al cliente antes de cobrar.
-                </span>
-              </div>
-            }
-          </div>
-
-          <!-- Checkout Actions -->
-          <div class="cart-actions">
-            @if (isQuotationMode()) {
-              <!-- Quotation mode: only quote button, styled as primary -->
-              <button
-                type="button"
-                class="cart-btn checkout-btn"
-                (click)="quote.emit()"
-                [disabled]="isEmpty()"
-              >
-                <app-icon name="file-text" [size]="18"></app-icon>
-                <span>Crear Cotización</span>
-              </button>
-            } @else if (isLayawayMode()) {
-              <!-- Layaway mode: only layaway button -->
-              <button
-                type="button"
-                class="cart-btn checkout-btn"
-                (click)="layaway.emit()"
-                [disabled]="isEmpty()"
-              >
-                <app-icon name="calendar" [size]="18"></app-icon>
-                <span>Crear Plan Separé</span>
-              </button>
-            } @else {
-              <!-- Normal POS buttons -->
-              <div class="cart-actions-row">
-                <button
-                  type="button"
-                  class="cart-btn custom-item-btn"
-                  (click)="openCustomItemModal()"
-                  [disabled]="!canCreateCustomItems()"
-                  title="Agregar ítem personalizado"
-                >
-                  <app-icon name="file-plus" [size]="16"></app-icon>
-                  <span>Ítem</span>
-                </button>
-                <button
-                  type="button"
-                  class="cart-btn save-btn"
-                  (click)="saveDraft.emit()"
-                  [disabled]="isEmpty()"
-                >
-                  <app-icon name="clipboard-list" [size]="16"></app-icon>
-                  <span>Guardar</span>
-                </button>
-                <button
-                  type="button"
-                  class="cart-btn shipping-btn"
-                  (click)="shipping.emit()"
-                  [disabled]="isEmpty()"
-                >
-                  <app-icon name="truck" [size]="16"></app-icon>
-                  <span>Envío</span>
-                </button>
-              </div>
-              <!--
-                CP-POS-CREAR-EDITAR-COBRAR-001 — main checkout CTA.
-                proceedToPayment() delegates to checkout.emit() which the
-                parent wires to onCheckout():
-                  - create mode → opens the checkout shell stepper (customer
-                    + shipping + payment) — the full payment flow.
-                  - edit mode   → calls updateExistingOrder() first, then
-                    surfaces readyToPayOrder so the secondary Cobrar
-                    button below opens the payment modal.
-                The label was previously mistyped as "Guardar Orden (no cobra)"
-                in this slot — fixed back to Cobrar per D.2: only the
-                secondary save button above renames to "Guardar Orden (no
-                cobra)" because it saves a draft without payment.
-              -->
-              <button
-                type="button"
-                class="cart-btn checkout-btn"
-                (click)="proceedToPayment()"
-                [disabled]="isEmpty() || isCharging()"
-                [attr.aria-busy]="isCharging() ? 'true' : null"
-              >
-                <app-icon name="credit-card" [size]="18"></app-icon>
-                <span>Cobrar</span>
-              </button>
-              <!--
-                Phase D.3 — Cobrar only when an updated order is sitting in
-                readyToPayOrder. Visible in BOTH create-draft and edit modes,
-                but realistically only ever non-null after an edit update.
-                Separate button so the label matches the action: the primary
-                CTA never silently opens payment.
-              -->
-              @if (readyToPayOrder() !== null && !isEditMode()) {
-                <button
-                  type="button"
-                  class="cart-btn cobrar-btn"
-                  (click)="charge.emit()"
-                  [disabled]="isEmpty() || isCharging()"
-                  [attr.aria-busy]="isCharging() ? 'true' : null"
-                  [attr.aria-label]="cobrarAriaLabel()"
-                >
-                  <app-icon name="credit-card" [size]="18"></app-icon>
-                  <span>Cobrar</span>
-                </button>
-              }
-            }
-          </div>
-        </div>
-
-        <!-- Customer Information (Compact) -->
+        <!--
+          Stitch paso 3 — tarjeta de cliente bajo la cabecera (antes: tira
+          compacta al pie del resumen). Muestra nombre + documento cuando el
+          carrito tiene cliente adoptado; solo lectura, sin handlers nuevos.
+        -->
         @if (cartState().customer) {
           <div
-            class="px-5 py-2.5 bg-primary/5 border-t border-primary/10 flex items-center gap-3"
+            class="px-5 py-2.5 bg-primary/5 border-b border-primary/10 flex items-center gap-3"
           >
             <div
-              class="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"
+              class="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary shrink-0"
             >
-              <app-icon name="user" [size]="14"></app-icon>
+              <app-icon name="user" [size]="16"></app-icon>
             </div>
             <div class="flex-1 min-w-0">
               <p
@@ -501,20 +154,42 @@ import {
               >
                 Cliente
               </p>
-              <p class="text-xs font-bold text-text-primary truncate">
+              <p class="text-sm font-bold text-text-primary truncate">
                 {{ cartState().customer?.name }}
               </p>
+              @if (cartState().customer?.document_number) {
+                <p class="text-[11px] text-text-secondary truncate">
+                  {{ cartState().customer?.document_type }}
+                  {{ cartState().customer?.document_number }}
+                </p>
+              }
             </div>
           </div>
         }
+
+        <!--
+          Stitch paso 3 — el resumen (subtotal/impuestos/total) y las
+          acciones de cobro viven ahora en el pie fijo del panel, bajo la
+          lista de ítems, como en el panel "Carrito Actual" del diseño.
+          Contenido intacto: solo cambió su posición en el DOM.
+        -->
       </div>
 
-      <!-- Cart Content (Scrollable Items) -->
-      <div class="flex-1 overflow-y-auto p-4 bg-bg/30">
+      <!--
+        Stitch paso 3 — lista scrolleable de ítems en el centro del panel
+        (antes: bajo el resumen). role list/listitem para AT; la fila
+        conserva miniatura, nombre, badges de tier/impuesto, stepper y total.
+      -->
+      <div
+        class="flex-1 overflow-y-auto p-4 bg-bg/30"
+        role="list"
+        aria-label="Ítems del carrito"
+      >
         <!-- Empty State -->
         @if (isEmpty()) {
           <div
-            class="flex flex-col items-center pt-10 min-h-[200px] text-center opacity-60"
+            role="status"
+            class="flex flex-col items-center justify-center min-h-[220px] text-center border-2 border-dashed border-border rounded-xl p-6 bg-surface"
           >
             <div
               class="w-12 h-12 bg-muted/20 rounded-full flex items-center justify-center mb-3"
@@ -542,6 +217,7 @@ import {
               track trackByItemId($index, item)
             ) {
               <div
+                role="listitem"
                 class="group grid grid-cols-[40px_1fr_auto] gap-x-2.5 gap-y-1.5 p-2.5 rounded-md border border-border bg-surface hover:bg-muted/30 hover:border-primary/30 transition-all duration-200"
               >
                 <!-- Product Image -->
@@ -743,8 +419,9 @@ import {
                     <button
                       type="button"
                       (click)="editItemPrice(item)"
-                      class="p-1 rounded text-primary hover:bg-primary/15 border border-primary/30 bg-primary/5 transition-colors shadow-2xs"
+                      class="cart-line-btn p-1 rounded text-primary hover:bg-primary/15 border border-primary/30 bg-primary/5 transition-colors shadow-2xs"
                       title="Editar ítem personalizado"
+                      [attr.aria-label]="'Editar ítem personalizado ' + item.product.name"
                     >
                       <app-icon name="pencil" [size]="13"></app-icon>
                     </button>
@@ -752,8 +429,9 @@ import {
                   <button
                     type="button"
                     (click)="removeFromCart(item.id)"
-                    class="p-1 rounded text-red-600 hover:bg-red-100 border border-red-200 bg-red-50/80 transition-colors shadow-2xs"
+                    class="cart-line-btn p-1 rounded text-red-600 hover:bg-red-100 border border-red-200 bg-red-50/80 transition-colors shadow-2xs"
                     title="Eliminar"
+                    [attr.aria-label]="'Eliminar ' + item.product.name + ' del carrito'"
                   >
                     <app-icon name="trash-2" [size]="13"></app-icon>
                   </button>
@@ -884,7 +562,7 @@ import {
                          'aria-label' da el mismo contexto que un lector de
                          pantalla necesita, sin agregar texto visible nuevo. -->
                     <span
-                      class="text-sm font-extrabold leading-none text-primary"
+                      class="text-sm font-extrabold leading-none text-text-primary"
                       [attr.aria-label]="'Total de línea: ' + formatCurrency(item.totalPrice)"
                     >
                       {{ formatCurrency(item.totalPrice) }}
@@ -899,8 +577,8 @@ import {
                         <button
                           type="button"
                           (click)="editItemPrice(item)"
-                          class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-primary/25 bg-primary/10 text-primary transition-colors hover:border-primary/40 hover:bg-primary/15"
-                          aria-label="Editar precio de venta"
+                          class="cart-line-btn inline-flex items-center justify-center rounded-md border border-primary/25 bg-primary/10 text-primary transition-colors hover:border-primary/40 hover:bg-primary/15"
+                          [attr.aria-label]="'Editar precio de venta de ' + item.product.name"
                           title="Edita el precio de venta de este producto."
                         >
                           <app-icon name="pencil" [size]="14"></app-icon>
@@ -913,6 +591,388 @@ import {
             }
           </div>
         }
+      </div>
+
+      <!--
+        Stitch paso 3 — pie fijo del panel: resumen (subtotal, impuestos,
+        retención, promociones, cupón, total) + acciones de cobro, como en
+        el panel "Carrito Actual" del diseño. Movido desde la cabecera sin
+        cambiar bindings, handlers ni señales.
+      -->
+      <div class="flex-none bg-surface border-t border-border shadow-sm">
+        <!-- Totals (High Contrast) -->
+        <!-- F-134 (C.9, major — revisión 2026-09-14): Subtotal/Impuestos/Total
+             se recalculan por acción del cajero (cambio de cantidad, cupón,
+             etc.) y no se anunciaban a lectores de pantalla. 'aria-live' +
+             'aria-atomic' sin cambiar el layout ni el copy existente. -->
+        <div class="px-3 py-3 bg-muted/20" aria-live="polite" aria-atomic="true">
+          <div class="space-y-1.5 mb-4">
+            <div class="flex justify-between text-xs text-text-secondary">
+              <span>Subtotal</span>
+              <span class="font-medium">{{
+                formatCurrency(summary().subtotal || 0)
+              }}</span>
+            </div>
+            <div class="flex justify-between text-xs text-text-secondary">
+              <span>Impuestos</span>
+              <span class="font-medium">{{
+                formatCurrency(summary().taxAmount || 0)
+              }}</span>
+            </div>
+
+            <!--
+              Retención (preview). role='suffered': el cliente agente retenedor
+              nos retiene; reduce el total a cobrar. Fuente única de verdad:
+              endpoint backend /store/withholding-tax/preview. Solo se muestra
+              cuando hay retención resuelta (> 0).
+            -->
+            @if (withholdingAmount() > 0) {
+              <div class="flex justify-between text-xs text-text-secondary">
+                <span class="flex items-center gap-1">
+                  <app-icon name="minus" [size]="12" class="text-amber-600"></app-icon>
+                  Retención
+                </span>
+                <span class="font-medium text-amber-700"
+                  >-{{ formatCurrency(withholdingAmount()) }}</span
+                >
+              </div>
+            }
+
+            <!-- Promotions & Coupons (hidden in quotation mode) -->
+            @if (!isQuotationMode() && !isLayawayMode()) {
+              <!-- Promotions Applied -->
+              @if (getPromotionDiscounts().length > 0) {
+                <div class="pt-1.5 border-t border-border/30">
+                  <div class="flex items-center gap-1.5 mb-1">
+                    <app-icon
+                      name="tag"
+                      [size]="12"
+                      class="text-green-600"
+                    ></app-icon>
+                    <span class="text-[11px] font-semibold text-green-700"
+                      >Promociones aplicadas</span
+                    >
+                    <span
+                      class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-100 text-green-700 text-[9px] font-bold"
+                    >
+                      {{ getPromotionDiscounts().length }}
+                    </span>
+                  </div>
+                  @for (disc of getPromotionDiscounts(); track disc.id) {
+                    <div class="flex items-start justify-between gap-2 py-0.5">
+                      <div class="min-w-0 flex-1">
+                        <div class="flex items-baseline gap-1 min-w-0 flex-wrap">
+                          <span class="text-[11px] text-green-700 truncate">{{
+                            disc.description
+                          }}</span>
+                          @if (formatAffectedProducts(disc.affected_products); as
+                            affectedLabel) {
+                            @if (affectedLabel) {
+                              <span
+                                class="text-[10px] text-green-600/80"
+                                [title]="'Aplicada a: ' + affectedLabel"
+                                >[{{ affectedLabel }}]</span
+                              >
+                            }
+                          }
+                          @if (disc.is_auto_applied) {
+                            <span
+                              class="inline-flex items-center px-1 rounded text-[8px] font-medium bg-green-100 text-green-600 shrink-0"
+                              >auto</span
+                            >
+                          }
+                        </div>
+                        <div class="mt-0.5 flex flex-wrap items-center gap-1">
+                          <app-badge
+                            [variant]="promotionTypeBadge(disc).variant"
+                            size="xsm"
+                            badgeStyle="outline"
+                          >
+                            {{ promotionTypeBadge(disc).label }}
+                          </app-badge>
+                          @if (disc.badge_label) {
+                            <app-badge
+                              variant="warning"
+                              size="xsm"
+                              badgeStyle="outline"
+                            >
+                              {{ disc.badge_label }}
+                            </app-badge>
+                          }
+                          <app-badge
+                            variant="success"
+                            size="xsm"
+                            badgeStyle="solid"
+                            title="Promoción activa aplicada."
+                          >
+                            Aplicada
+                          </app-badge>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-1 shrink-0">
+                        <span class="text-[11px] font-medium text-green-700"
+                          >-{{ formatCurrency(disc.amount) }}</span
+                        >
+                        @if (!disc.is_auto_applied) {
+                          <button
+                            type="button"
+                            (click)="removePromoDiscount(disc.id)"
+                            class="p-0.5 rounded text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            title="Eliminar promoción"
+                            aria-label="Eliminar promoción"
+                          >
+                            <app-icon name="x" [size]="10"></app-icon>
+                          </button>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
+
+              <!--
+                Tier progress nudge (best-effort). Shown when a scaled promo
+                (quantity_tiered) already has in-scope items and a higher tier
+                is reachable. Data comes from the active-promotions payload
+                (promotion_quantity_tiers) — no extra backend call.
+              -->
+              @if (promotionTierProgress().length > 0) {
+                <div class="pt-1.5 border-t border-border/30 space-y-1">
+                  @for (
+                    progress of promotionTierProgress();
+                    track progress.promotion_id
+                  ) {
+                    <div
+                      class="flex items-start gap-1.5 text-[10px] leading-tight text-primary"
+                    >
+                      <app-icon
+                        name="trending-up"
+                        [size]="11"
+                        class="mt-0.5 shrink-0 text-primary"
+                      ></app-icon>
+                      <span>
+                        Agrega
+                        <span class="font-semibold"
+                          >{{ progress.remaining_quantity }} und</span
+                        >
+                        más y obtén
+                        <span class="font-semibold">{{
+                          progress.next_benefit_label
+                        }}</span>
+                        en “{{ progress.name }}”.
+                      </span>
+                    </div>
+                  }
+                </div>
+              }
+
+              <!-- Coupon Code Input / Applied Coupon -->
+              <div class="pt-1.5 border-t border-border/30">
+                @if (getAppliedCoupon(); as coupon) {
+                  <div class="flex items-center justify-between py-0.5">
+                    <div class="flex items-center gap-1.5">
+                      <app-icon
+                        name="ticket"
+                        [size]="12"
+                        class="text-primary"
+                      ></app-icon>
+                      <span class="text-[11px] font-semibold text-primary">{{
+                        coupon.coupon_code
+                      }}</span>
+                    </div>
+                    <div class="flex items-center gap-1">
+                      <span class="text-[11px] font-medium text-green-700"
+                        >-{{ formatCurrency(getCouponDiscountAmount()) }}</span
+                      >
+                      <button
+                        type="button"
+                        (click)="removeCoupon()"
+                        class="p-0.5 rounded text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        title="Eliminar cupón"
+                        aria-label="Eliminar cupón"
+                      >
+                        <app-icon name="x" [size]="10"></app-icon>
+                      </button>
+                    </div>
+                  </div>
+                } @else {
+                  <div class="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      [(ngModel)]="couponCode"
+                      placeholder="¿Tienes cupón o código promo?"
+                      aria-label="Código de cupón"
+                      class="coupon-input flex-1 px-2 py-1.5 text-xs rounded-md border border-border bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 uppercase"
+                      (keydown.enter)="applyCoupon()"
+                    />
+                    <button
+                      type="button"
+                      (click)="applyCoupon()"
+                      [disabled]="!couponCode.trim() || couponLoading"
+                      class="coupon-apply-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {{ couponLoading ? '...' : 'Aplicar' }}
+                    </button>
+                  </div>
+                }
+              </div>
+            }
+
+            <div
+              class="pt-2 border-t border-border/50 flex justify-between items-center"
+            >
+              <span class="font-bold text-text-primary text-base">{{
+                withholdingAmount() > 0 ? 'Total a cobrar' : 'Total a pagar'
+              }}</span>
+              <span class="font-extrabold text-2xl text-text-primary tracking-tight">
+                {{ formatCurrency(netTotal()) }}
+              </span>
+            </div>
+
+            <!--
+              Local estimate disclaimer.
+              Backend (PromotionEngineService + CouponsService) is the source
+              of truth for the final discount and grand total. The values
+              shown above are computed locally for UX feedback only and are
+              recalculated server-side when the sale is processed.
+            -->
+            @if (getPromotionDiscounts().length > 0 || getAppliedCoupon()) {
+              <div
+                class="flex items-center gap-1 text-[10px] text-text-secondary/80 italic mt-1"
+                title="Los totales finales se confirman al procesar el pago"
+              >
+                <app-icon name="info" [size]="10"></app-icon>
+                <span>Estimación. El total final se confirma al cobrar.</span>
+              </div>
+            }
+
+            <!--
+              Aviso 5 UVT (Art. 616-1 ET / Res. 000165 de 2023). Aparece ANTES de
+              cobrar para que el cajero pida el documento con el cliente delante:
+              el backend rechaza la venta anónima por encima del tope, y descubrirlo
+              al pulsar «Cobrar» obliga a rehacer el cierre.
+            -->
+            @if (invoiceRequiredByUvt()) {
+              <div
+                class="mt-2 flex items-start gap-2 rounded-md border border-warning bg-warning-light px-2 py-1.5 text-[11px] text-text-primary"
+              >
+                <app-icon name="alert-triangle" [size]="12" class="text-warning mt-0.5 shrink-0"></app-icon>
+                <span>
+                  Esta venta supera
+                  {{ formatCurrency(uvtLimitCop()) }}
+                  ({{ uvtThreshold()!.uvt_limit }} UVT) y requiere factura
+                  electrónica: identifica al cliente antes de cobrar.
+                </span>
+              </div>
+            }
+          </div>
+
+          <!-- Checkout Actions -->
+          <div class="cart-actions">
+            @if (isQuotationMode()) {
+              <!-- Quotation mode: only quote button, styled as primary -->
+              <button
+                type="button"
+                class="cart-btn checkout-btn"
+                (click)="quote.emit()"
+                [disabled]="isEmpty()"
+              >
+                <app-icon name="file-text" [size]="18"></app-icon>
+                <span>Crear Cotización</span>
+              </button>
+            } @else if (isLayawayMode()) {
+              <!-- Layaway mode: only layaway button -->
+              <button
+                type="button"
+                class="cart-btn checkout-btn"
+                (click)="layaway.emit()"
+                [disabled]="isEmpty()"
+              >
+                <app-icon name="calendar" [size]="18"></app-icon>
+                <span>Crear Plan Separé</span>
+              </button>
+            } @else {
+              <!-- Normal POS buttons -->
+              <div class="cart-actions-row">
+                <button
+                  type="button"
+                  class="cart-btn custom-item-btn"
+                  (click)="openCustomItemModal()"
+                  [disabled]="!canCreateCustomItems()"
+                  title="Agregar ítem personalizado"
+                >
+                  <app-icon name="file-plus" [size]="16"></app-icon>
+                  <span>Ítem</span>
+                </button>
+                <button
+                  type="button"
+                  class="cart-btn save-btn"
+                  (click)="saveDraft.emit()"
+                  [disabled]="isEmpty()"
+                >
+                  <app-icon name="clipboard-list" [size]="16"></app-icon>
+                  <span>Guardar</span>
+                </button>
+                <button
+                  type="button"
+                  class="cart-btn shipping-btn"
+                  (click)="shipping.emit()"
+                  [disabled]="isEmpty()"
+                >
+                  <app-icon name="truck" [size]="16"></app-icon>
+                  <span>Envío</span>
+                </button>
+              </div>
+              <!--
+                CP-POS-CREAR-EDITAR-COBRAR-001 — main checkout CTA.
+                proceedToPayment() delegates to checkout.emit() which the
+                parent wires to onCheckout():
+                  - create mode → opens the checkout shell stepper (customer
+                    + shipping + payment) — the full payment flow.
+                  - edit mode   → calls updateExistingOrder() first, then
+                    surfaces readyToPayOrder so the secondary Cobrar
+                    button below opens the payment modal.
+                The label was previously mistyped as "Guardar Orden (no cobra)"
+                in this slot — fixed back to Cobrar per D.2: only the
+                secondary save button above renames to "Guardar Orden (no
+                cobra)" because it saves a draft without payment.
+                Stitch paso 3 — el CTA muestra el total neto a cobrar
+                (netTotal() ya calculado), como en el diseño.
+              -->
+              <button
+                type="button"
+                class="cart-btn checkout-btn"
+                (click)="proceedToPayment()"
+                [disabled]="isEmpty() || isCharging()"
+                [attr.aria-busy]="isCharging() ? 'true' : null"
+                [attr.aria-label]="'Cobrar ' + formatCurrency(netTotal())"
+              >
+                <app-icon name="credit-card" [size]="18"></app-icon>
+                <span>Cobrar · {{ formatCurrency(netTotal()) }}</span>
+              </button>
+              <!--
+                Phase D.3 — Cobrar only when an updated order is sitting in
+                readyToPayOrder. Visible in BOTH create-draft and edit modes,
+                but realistically only ever non-null after an edit update.
+                Separate button so the label matches the action: the primary
+                CTA never silently opens payment.
+              -->
+              @if (readyToPayOrder() !== null && !isEditMode()) {
+                <button
+                  type="button"
+                  class="cart-btn cobrar-btn"
+                  (click)="charge.emit()"
+                  [disabled]="isEmpty() || isCharging()"
+                  [attr.aria-busy]="isCharging() ? 'true' : null"
+                  [attr.aria-label]="cobrarAriaLabel()"
+                >
+                  <app-icon name="credit-card" [size]="18"></app-icon>
+                  <span>Cobrar</span>
+                </button>
+              }
+            }
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1059,6 +1119,44 @@ import {
         height: 100%;
       }
 
+      /* Stitch paso 3 — foco visible por teclado en todo control nativo
+         del carrito (mismo lenguaje del paso 2: 3px primary). */
+      :host button:focus-visible,
+      :host input:focus-visible,
+      :host textarea:focus-visible {
+        outline: 3px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+
+      /* Stitch paso 3 — targets táctiles ≥ 44px (lenguaje paso 2). */
+      .cart-header-btn {
+        min-height: 44px;
+      }
+
+      .cart-line-btn {
+        min-width: 44px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .coupon-input,
+      .coupon-apply-btn {
+        min-height: 44px;
+      }
+
+      /*
+       * Stitch paso 3 — el stepper 'lg' del quantity-control compartido
+       * rinde 42px de alto; se garantiza el mínimo de 44px del repo sin
+       * tocar el componente compartido (::ng-deep con precedente en el
+       * POS: pos-ai-summary-modal, pos-session-detail-modal). Solo afecta
+       * a los steppers dentro de este carrito.
+       */
+      :host ::ng-deep app-quantity-control .qc-step {
+        min-height: 44px;
+      }
+
       .cart-actions {
         display: flex;
         flex-direction: column;
@@ -1098,7 +1196,7 @@ import {
         width: 100%;
         padding: 14px;
         background: var(--color-primary);
-        color: white;
+        color: var(--color-text-on-primary);
         font-size: 15px;
         font-weight: 700;
         box-shadow: 0 4px 12px rgba(var(--color-primary-rgb), 0.3);
@@ -1117,7 +1215,7 @@ import {
           var(--color-success, #16a34a) 0%,
           var(--color-primary) 100%
         );
-        color: white;
+        color: var(--color-text-on-primary);
         font-size: 15px;
         font-weight: 700;
         box-shadow: 0 4px 14px rgba(34, 197, 94, 0.32);
@@ -1129,7 +1227,7 @@ import {
       }
 
       .cobrar-btn:focus-visible {
-        outline: 2px solid var(--color-primary);
+        outline: 3px solid var(--color-primary);
         outline-offset: 2px;
       }
 
@@ -1152,7 +1250,7 @@ import {
 
       .shipping-btn {
         background: var(--color-primary);
-        color: white;
+        color: var(--color-text-on-primary);
         opacity: 0.85;
       }
 
