@@ -55,6 +55,8 @@ import {
   TopCustomer,
   CustomersAnalyticsQueryDto,
   CustomersByChannel,
+  CustomerReceivableRow,
+  CustomerReceivablesSummary,
 } from '../interfaces/customers-analytics.interface';
 import {
   AbandonedCartsSummary,
@@ -996,6 +998,39 @@ export class AnalyticsService {
         { params: this.buildParams(query) },
       ),
     );
+  }
+
+  // ==================== CUSTOMER RECEIVABLES (QUI-540) ====================
+
+  getCustomerReceivables(
+    query: Record<string, any> = {},
+  ): Observable<PaginatedResponse<CustomerReceivableRow>> {
+    const cacheKey = `customer-receivables-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<PaginatedResponse<CustomerReceivableRow>>(
+        this.getApiUrl('customers/receivable'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  getCustomerReceivablesSummary(
+    query: Record<string, any> = {},
+  ): Observable<ApiResponse<CustomerReceivablesSummary>> {
+    const cacheKey = `customer-receivables-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<CustomerReceivablesSummary>>(
+        this.getApiUrl('customers/receivable/summary'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  exportCustomerReceivables(query: Record<string, any> = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('customers/receivable/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
   }
 
   // ==================== PURCHASES ANALYTICS ====================

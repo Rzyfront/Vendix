@@ -208,6 +208,8 @@ export class ReportsShellComponent {
     'customer-summary': '/admin/analytics/customers/summary',
     'customer-acquisition': '/admin/analytics/customers/acquisition',
     'customer-abandoned-carts': '/admin/analytics/customers/abandoned-carts',
+    // QUI-540: drill-down analítico del reporte de cuentas por cobrar
+    'customers-receivable': '/admin/analytics/customers/receivable',
     // Purchases
     'purchase-summary': '/admin/analytics/purchases/summary',
     'purchase-by-supplier': '/admin/analytics/purchases/by-supplier',

@@ -182,6 +182,22 @@ export class PaymentAgreementService {
           where: { id: installment.payment_agreement_id },
           data: { state: 'completed' },
         });
+      } else {
+        // Advance AR's due_date to the next pending installment's due_date
+        const nextPending = await tx.agreement_installments.findFirst({
+          where: {
+            payment_agreement_id: installment.payment_agreement_id,
+            state: { not: 'paid' },
+            id: { not: installment_id },
+          },
+          orderBy: { installment_number: 'asc' },
+        });
+        if (nextPending) {
+          await tx.accounts_receivable.update({
+            where: { id: installment.payment_agreement.accounts_receivable_id },
+            data: { due_date: nextPending.due_date },
+          });
+        }
       }
 
       return updated_installment;

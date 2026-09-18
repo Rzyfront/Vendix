@@ -137,8 +137,20 @@ export class AccountsReceivableService {
       throw new NotFoundException(`Cuenta por cobrar #${id} no encontrada`);
     }
 
+    let order_installments: any[] = [];
+    if (
+      ar.source_id &&
+      (ar.source_type === 'credit_sale' || ar.source_type === 'order')
+    ) {
+      order_installments = await this.prisma.order_installments.findMany({
+        where: { order_id: ar.source_id },
+        orderBy: { installment_number: 'asc' },
+      });
+    }
+
     return {
       ...ar,
+      order_installments,
       customer: ar.customer
         ? {
             id: ar.customer.id,
@@ -228,6 +240,15 @@ export class AccountsReceivableService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      // 0. Serialize concurrent abonos on the same AR: the installment
+      // distribution below is read-modify-write. Same convention as the
+      // invoice-number generator (advisory xact lock; $executeRaw, never
+      // $queryRaw, because void has no mappable column).
+      await tx.$executeRawUnsafe(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        `ar_payment:${ar_id}`,
+      );
+
       // 1. Create ar_payment record
       const payment = await tx.ar_payments.create({
         data: {
@@ -247,7 +268,68 @@ export class AccountsReceivableService {
       const new_balance = Number(ar.original_amount) - new_paid;
       const new_status = new_balance <= 0 ? 'paid' : 'partial';
 
-      // 3. Update AR
+      // 3. Find next pending installment due date if installments exist
+      let nextDueDate: Date | undefined;
+      if (
+        ar.source_id &&
+        (ar.source_type === 'credit_sale' || ar.source_type === 'order')
+      ) {
+        if (!dto.payment_id) {
+          let rem = dto.amount;
+          const pendingInsts = await tx.order_installments.findMany({
+            where: {
+              order_id: ar.source_id,
+              state: { in: ['pending', 'partial', 'overdue'] },
+            },
+            orderBy: { installment_number: 'asc' },
+          });
+          for (const inst of pendingInsts) {
+            if (rem <= 0.01) break;
+            const payable = Math.min(rem, Number(inst.remaining_balance));
+            const newPaid = Number(inst.amount_paid) + payable;
+            const newBal = Number(inst.remaining_balance) - payable;
+            await tx.order_installments.update({
+              where: { id: inst.id },
+              data: {
+                amount_paid: Math.round(newPaid * 100) / 100,
+                remaining_balance: Math.round(Math.max(newBal, 0) * 100) / 100,
+                state:
+                  newBal <= 0.01
+                    ? 'paid'
+                    : inst.state === 'overdue'
+                      ? 'overdue'
+                      : 'partial',
+                paid_at: newBal <= 0.01 ? new Date() : null,
+              },
+            });
+            rem -= payable;
+          }
+        }
+
+        const nextOrderInst = await tx.order_installments.findFirst({
+          where: {
+            order_id: ar.source_id,
+            state: { in: ['pending', 'partial', 'overdue'] },
+          },
+          orderBy: { installment_number: 'asc' },
+        });
+        if (nextOrderInst) {
+          nextDueDate = nextOrderInst.due_date;
+        }
+      }
+
+      const nextAgreementInst = await tx.agreement_installments.findFirst({
+        where: {
+          payment_agreement: { accounts_receivable_id: ar_id },
+          state: { not: 'paid' },
+        },
+        orderBy: { installment_number: 'asc' },
+      });
+      if (nextAgreementInst) {
+        nextDueDate = nextAgreementInst.due_date;
+      }
+
+      // 4. Update AR
       const updated_ar = await tx.accounts_receivable.update({
         where: { id: ar_id },
         data: {
@@ -255,6 +337,7 @@ export class AccountsReceivableService {
           balance: Math.max(new_balance, 0),
           status: new_status,
           last_payment_date: new Date(),
+          ...(nextDueDate ? { due_date: nextDueDate } : {}),
         },
       });
 
