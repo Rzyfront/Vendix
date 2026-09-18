@@ -183,7 +183,7 @@ function isMultiTokenQuery(query: string): boolean {
           <app-inputsearch
             class="flex-1"
             size="sm"
-            placeholder="Busca por nombre, SKU o palabras en cualquier orden"
+            placeholder="Buscar por nombre, SKU o código de barras…"
             ariaLabel="Buscar productos"
             [debounceTime]="300"
             [autofocus]="true"
@@ -204,6 +204,21 @@ function isMultiTokenQuery(query: string): boolean {
             (clearAllFilters)="onClearFilters()"
             class="shrink-0"
           ></app-options-dropdown>
+
+          <!-- Ítem libre (Stitch PSVERSION0001 paso 1; sin badge kbd por
+               decisión de usuario "sin shortcuts"). Abre el modal
+               compartido vía el contenedor POS. -->
+          <button
+            type="button"
+            class="flex items-center gap-1.5 px-3.5 py-2.5 bg-surface border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs font-bold rounded-xl transition-colors shadow-2xs shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+            (click)="openCustomItemModal.emit()"
+            [disabled]="!canCreateCustomItems()"
+            title="Agregar ítem manual"
+            aria-label="Agregar ítem libre"
+          >
+            <app-icon name="plus" [size]="16"></app-icon>
+            <span class="hidden sm:inline">Ítem libre</span>
+          </button>
 
           <!-- Botón cliente / Cola -->
           @if (queueEnabled() && queueCount() > 0) {
@@ -1126,12 +1141,14 @@ export class PosProductSelectionComponent {
   readonly selectedCustomer = input<any>(null);
   readonly queueEnabled = input<boolean>(false);
   readonly queueCount = input<number>(0);
+  readonly canCreateCustomItems = input<boolean>(true);
 
   readonly productSelected = output<any>();
   readonly productAddedToCart = output<{ product: any; quantity: number }>();
   readonly bookingRequired = output<any>();
   readonly openCustomerModal = output<void>();
   readonly openQueueModal = output<void>();
+  readonly openCustomItemModal = output<void>();
 
   private searchSubject$ = new Subject<string>(); // LEGÍTIMO — distinctUntilChanged search stream (debounce ya vive dentro de app-inputsearch)
   // E.1 — stream único de carga paginada (switchMap + seq, F-058).

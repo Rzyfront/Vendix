@@ -201,21 +201,19 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           class="flex-none px-4 lg:px-6 py-2 lg:py-2.5 border-b border-border pos-header relative z-30"
         >
           <div class="flex justify-between items-center" style="gap: 0.75rem;">
-            <!-- Left: Logo + Title -->
-            <div class="flex items-center" style="gap: 0.5rem;">
+            <!-- Left: Logo + Title + Turno + Cajero (Stitch PSVERSION0001 paso 1) -->
+            <div class="flex items-center gap-2 min-w-0">
               <div
-                class="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-primary/10 flex items-center justify-center"
+                class="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 shrink-0"
               >
                 <app-icon
                   name="shopping-bag"
                   [size]="isMobile() ? 20 : 24"
-                  class="text-primary"
                 ></app-icon>
               </div>
-              <div class="flex flex-col leading-none" style="gap: 0;">
+              <div class="flex items-center gap-2 min-w-0">
                 <h1
-                  class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center mb-0"
-                  style="gap: 0.5rem;"
+                  class="font-bold text-slate-800 text-lg leading-none truncate shrink-0"
                 >
                   @if (isQuotationMode()) {
                     <span>Modo Cotización</span>
@@ -224,10 +222,10 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                   } @else if (isEditMode()) {
                     <span>Editando Orden #{{ editingOrderNumber() }}</span>
                   } @else {
-                    <span class="hidden sm:inline">Vendix</span> POS
+                    <span>Vendix POS</span>
                   }
                 </h1>
-                <span class="hidden sm:block leading-none">
+                <span class="hidden sm:block leading-none shrink-0">
                   @if (isQuotationMode()) {
                     <app-badge variant="primary" size="xs"
                       >Crear cotización</app-badge
@@ -240,12 +238,48 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                     <app-badge variant="warning" size="xs"
                       >Modificar items de la orden</app-badge
                     >
-                  } @else {
-                    <app-badge variant="success" size="xs"
-                      >Punto de venta</app-badge
-                    >
                   }
                 </span>
+                @if (activeSession()) {
+                  <span
+                    class="bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-semibold px-2 py-1 rounded-full shrink-0 hidden sm:inline-flex items-center gap-1.5"
+                  >
+                    <span
+                      class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"
+                    ></span
+                    >Turno Activo
+                  </span>
+                } @else {
+                  <span
+                    class="bg-slate-100 text-slate-600 border border-slate-200 text-xs font-semibold px-2 py-1 rounded-full shrink-0 hidden sm:inline-flex items-center gap-1.5"
+                  >
+                    <span
+                      class="w-2 h-2 rounded-full bg-slate-400"
+                    ></span
+                    >Sin turno
+                  </span>
+                }
+                <div
+                  class="hidden md:flex items-center gap-1.5 ml-1 pl-2 border-l border-slate-200 text-xs overflow-hidden min-w-0"
+                >
+                  <div
+                    class="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold text-[10px] flex items-center justify-center shrink-0 border border-emerald-200"
+                  >
+                    {{ cashierInitials() }}
+                  </div>
+                  <span class="font-medium text-slate-500 shrink-0">Cajero:</span>
+                  <span
+                    class="font-semibold text-slate-800 truncate min-w-0 max-w-[120px]"
+                    [title]="cashierName()"
+                    >{{ cashierName() }}</span
+                  >
+                  <span
+                    class="text-slate-400 font-normal whitespace-nowrap shrink-0"
+                    >({{ cashierRoleLabel() }}@if (cashierTerminal()) {
+                      · {{ cashierTerminal() }}
+                    })</span
+                  >
+                </div>
               </div>
             </div>
 
@@ -291,7 +325,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                         >{{ selectedCustomer()?.name }}</span
                       >
                       <span
-                        class="text-xs text-text-secondary leading-none truncate mt-0.5"
+                        class="hidden 2xl:block text-xs text-text-secondary leading-none truncate mt-0.5"
                         [title]="selectedCustomer()?.email"
                         >{{ selectedCustomer()?.email }}</span
                       >
@@ -429,11 +463,13 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                 [selectedCustomer]="selectedCustomer()"
                 [queueEnabled]="queueEnabled()"
                 [queueCount]="queueCount()"
+                [canCreateCustomItems]="canCreateCustomItems()"
                 (productSelected)="onProductSelected($event)"
                 (productAddedToCart)="onProductAddedToCart($event)"
                 (bookingRequired)="onBookingRequired($event)"
                 (openCustomerModal)="onOpenCustomerModal()"
                 (openQueueModal)="onOpenQueueModal()"
+                (openCustomItemModal)="openCustomItemModal()"
               ></app-pos-product-selection>
             </div>
 
@@ -465,10 +501,12 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
               class="h-full block"
               [refreshTrigger]="productRefreshCounter()"
               [selectedCustomer]="selectedCustomer()"
+              [canCreateCustomItems]="canCreateCustomItems()"
               (productSelected)="onProductSelected($event)"
               (productAddedToCart)="onProductAddedToCart($event)"
               (bookingRequired)="onBookingRequired($event)"
               (openCustomerModal)="onOpenCustomerModal()"
+              (openCustomItemModal)="openCustomItemModal()"
             ></app-pos-product-selection>
           </div>
         </div>
@@ -521,8 +559,9 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       ></app-pos-cart-modal>
 
       <!--
-        Ítem personalizado (camino móvil). Mismo modal compartido que usa el
-        carrito de escritorio y el carril fiscal: una sola captura, un solo
+        Ítem personalizado (camino móvil + botón "Ítem libre" del header del
+        catálogo en PC, paso 1 PSVERSION0001). Mismo modal compartido que usa
+        el carrito de escritorio y el carril fiscal: una sola captura, un solo
         contrato. Ver pos-custom-item-modal.component.ts.
       -->
       <app-pos-custom-item-modal
@@ -1265,6 +1304,65 @@ export class PosComponent {
   readonly canOverridePrices = computed(() =>
     this.hasPermission('store:pos:price_override'),
   );
+
+  /**
+   * PSVERSION0001 paso 1 — bloque "Cajero: X (Rol · POS-01)" del header
+   * Stitch, con datos reales de sesión: nombre del AuthFacade, rol
+   * principal con etiqueta corta ES y código de la caja del turno activo
+   * (`null` sin sesión abierta: el template omite el terminal).
+   */
+  readonly cashierName = computed(() => {
+    // El selector solo lee camelCase; el login devuelve snake_case
+    // (misma resolución que user-dropdown: first_name + last_name).
+    const fromSelector = this.authFacade.userName();
+    if (fromSelector) return fromSelector;
+    const u = this.authFacade.user() as any;
+    const full = [u?.first_name ?? u?.firstName, u?.last_name ?? u?.lastName]
+      .filter(Boolean)
+      .join(' ');
+    return full || u?.name || u?.email || 'Cajero';
+  });
+  readonly cashierInitials = computed(() =>
+    this.cashierName()
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((word: string) => word[0])
+      .join('')
+      .toUpperCase(),
+  );
+  readonly cashierRoleLabel = computed(() =>
+    PosComponent.roleLabel(this.authFacade.userRole()),
+  );
+  readonly cashierTerminal = computed(
+    () =>
+      this.activeSession()?.register?.code ||
+      this.activeSession()?.register?.name ||
+      null,
+  );
+
+  private static roleLabel(role: string | null): string {
+    switch ((role ?? '').toLowerCase()) {
+      case 'super_admin':
+        return 'Super Admin';
+      case 'admin':
+        return 'Admin';
+      case 'owner':
+        return 'Dueño';
+      case 'manager':
+        return 'Gerente';
+      case 'supervisor':
+        return 'Supervisor';
+      case 'cashier':
+        return 'Cajero';
+      case 'employee':
+        return 'Empleado';
+      case 'carrier':
+        return 'Repartidor';
+      default:
+        return role ? role : 'Cajero';
+    }
+  }
 
   constructor() {
     // Vexi reaches the POS through this handle while the screen is mounted.
@@ -2930,7 +3028,11 @@ export class PosComponent {
       .subscribe({
         next: () => {
           this.customItemModalOpen.set(false);
-          this.showCartModal.set(true);
+          // Solo móvil/tablet: en PC el carrito ya está visible al lado y
+          // abrir el estado del modal-cart dejaría un signal rancio.
+          if (this.isMobile() || this.isTablet()) {
+            this.showCartModal.set(true);
+          }
           this.toastService.success('Ítem personalizado agregado');
         },
         error: (error: any) => {
