@@ -326,6 +326,38 @@
   margin-top: 0.125rem;
 }
 
+// Checkbox opcional debajo del control del filtro
+.filter-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+
+  input[type='checkbox'] {
+    width: 1rem;
+    height: 1rem;
+    margin: 0;
+    flex-shrink: 0;
+    accent-color: var(--color-primary);
+    cursor: pointer;
+
+    &:disabled {
+      cursor: not-allowed;
+    }
+  }
+
+  .filter-checkbox-label {
+    font-size: var(--fs-xs);
+    color: var(--color-text-secondary);
+    transition: color var(--transition-fast) ease;
+  }
+
+  &:hover .filter-checkbox-label {
+    color: var(--color-text-primary);
+  }
+}
+
 .date-filter-input {
   width: 100%;
   padding: 0.375rem 0.75rem;

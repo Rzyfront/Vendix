@@ -12,6 +12,23 @@ import { SelectorOption } from '../selector/selector.component';
 export type FilterType = 'select' | 'multi-select' | 'date' | 'date-range';
 
 /**
+ * Optional checkbox rendered under a filter control, inside the same
+ * `filter-section`. Se usa para opciones que NO acotan el resultado sino que
+ * cambian cómo se recuerda el filtro (p. ej. "fijar este período").
+ *
+ * Escribe su propia key en `FilterValues`: `'true'` cuando está marcado y
+ * `null` cuando no. No cuenta como filtro activo (no acota datos).
+ */
+export interface FilterCheckboxConfig {
+  /** Key del checkbox en `FilterValues` (valor `'true'` | `null`) */
+  key: string;
+  /** Texto visible junto al checkbox */
+  label: string;
+  /** Si true, el checkbox se deshabilita */
+  disabled?: boolean;
+}
+
+/**
  * Configuration for a single filter in the dropdown
  */
 export interface FilterConfig {
@@ -31,6 +48,12 @@ export interface FilterConfig {
   helpText?: string;
   /** Default value to restore when filters are cleared (instead of null) */
   defaultValue?: string | string[];
+
+  /**
+   * Checkbox opcional debajo del control principal, dentro del mismo bloque
+   * del filtro. Ver `FilterCheckboxConfig`.
+   */
+  checkbox?: FilterCheckboxConfig;
 
   // --- Sólo para `type: 'date-range'` ---------------------------------------
 

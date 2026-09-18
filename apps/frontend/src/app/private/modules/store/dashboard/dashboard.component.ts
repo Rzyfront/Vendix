@@ -50,6 +50,19 @@ const QUICK_LINKS: QuickLink[] = [
   { icon: 'shopping-bag', label: 'Compras', route: '/admin/inventory/pop' },
 ];
 
+/** Key del checkbox "fijar este período" dentro de `FilterValues`. */
+const FIXED_PERIOD_FILTER_KEY = 'fix_period';
+
+/** Prefijo de la key de localStorage donde se recuerda el período fijado. */
+const FIXED_PERIOD_STORAGE_PREFIX = 'vendix_dashboard_preset_';
+
+/** Forma serializada en localStorage del período fijado. */
+interface FixedPeriodState {
+  preset: string;
+  start_date?: string;
+  end_date?: string;
+}
+
 @Component({
   selector: 'app-store-dashboard',
   standalone: true,
@@ -356,6 +369,11 @@ export class DashboardComponent {
   // rellena con la forma EXACTA que emitió el dropdown (round-trip estable
   // → shallowEqual pasa → no overwrite); `debounceMs=300` da tiempo real al
   // sync effect para correr antes que el emit.
+  //
+  // QUI-847: el dashboard abría SIEMPRE en "Hoy". Se agrega un checkbox
+  // "fijar este período" (bajo el selector de período) que persiste el preset
+  // elegido en localStorage por tienda, y el bootstrap lo hidrata ANTES del
+  // primer fetch para no mostrar un flash del rango default ni duplicar GET.
 
   selectedPreset = signal<string>('today');
   private readonly customRange = signal<{ start_date: string; end_date: string }>({
@@ -372,6 +390,10 @@ export class DashboardComponent {
         type: 'select',
         options: this.presetOptions,
         placeholder: 'Seleccionar período',
+        checkbox: {
+          key: FIXED_PERIOD_FILTER_KEY,
+          label: 'Fijar este período',
+        },
       },
     ];
     if ((this.selectedPreset() as string) === 'custom') {
@@ -387,8 +409,15 @@ export class DashboardComponent {
   // forma exacta del dropdown (`{preset}` o `{preset, start_date, end_date}`
   // sólo cuando aplica). Así el round-trip preserva la cantidad de keys y
   // el `shallowEqual` del sync effect del dropdown pasa → no pisa el local.
-  private readonly _dateFilterValues = signal<FilterValues>({ preset: 'today' });
+  private readonly _dateFilterValues = signal<FilterValues>({
+    preset: 'today',
+    [FIXED_PERIOD_FILTER_KEY]: null,
+  });
   readonly dateFilterValues = this._dateFilterValues.asReadonly();
+
+  // Última firma de rango con la que se cargaron datos. Evita duplicar el GET
+  // del bootstrap cuando la hidratación del período fijado cambia el preset.
+  private lastLoadedRangeSignature: string | null = null;
 
   dateRangeLabel = computed(() => {
     const range = this.dateRange();
@@ -449,45 +478,41 @@ export class DashboardComponent {
   constructor() {
     this.currencyService.loadCurrency();
 
-    // Bootstrap: wait for store id then load data once.
-    //
-    // NOTA: este effect llama loadAllData() una vez al detectar el store. NO
-    // hace falta coordinarlo con el effect del dateRange porque cada uno se
-    // dispara por su propia signal. Si el store ya estaba seteado cuando el
-    // effect corre por primera vez (CD tras init), el body se ejecuta y
-    // fetchea "today" — es el comportamiento esperado del primer render.
+    // Bootstrap: al conocer el store, hidrata el período fijado (si lo hay) y
+    // carga una sola vez. Hidratar ANTES del fetch evita el flash del rango
+    // default y el doble GET. La firma del rango se registra aquí para que el
+    // effect de abajo no vuelva a disparar por el cambio de preset restaurado.
     effect(() => {
       const store = this.userStore();
       const id = (store as any)?.id;
-      if (id && !this.storeId()) {
-        this.storeId.set(String(id));
-        untracked(() => this.loadAllData());
-      }
-    });
-
-    // React to date range changes. Como `dateRange` ahora es un `computed`
-    // del preset + customRange, este effect se dispara SIEMPRE que el usuario
-    // cambia el preset (no hay carrera entre `selectedPreset` y `dateRange`
-    // porque son la misma fuente). El guard `isFirst` se reemplazó por
-    // `userChangedFilter` — solo recargamos cuando el usuario cambió algo,
-    // no en la primera lectura ni cuando el bootstrap effect ya disparó
-    // el fetch inicial. Esto evita el doble GET al montar el componente.
-    let userChangedFilter = false;
-    effect(() => {
-      this.dateRange();
-      if (!userChangedFilter) return;
-      untracked(() => this.loadAllData());
-    });
-    // Marcamos el "ya cambió el usuario" recién cuando el handler corre;
-    // así el primer render monta la pantalla con los datos del bootstrap
-    // effect (que ya disparó loadAllData) y no recargamos encima.
-    effect(() => {
-      // Solo leemos para registrar reactividad; el handler setea el flag.
-      this.dateFilterValues();
+      if (!id || this.storeId()) return;
+      this.storeId.set(String(id));
       untracked(() => {
-        userChangedFilter = true;
+        this.restoreFixedPeriod(String(id));
+        this.lastLoadedRangeSignature = this.rangeSignature();
+        this.loadAllData();
       });
     });
+
+    // Recarga cuando cambia el rango pedido por el usuario. Se compara por
+    // FIRMA (preset + fechas) en vez de un flag "el usuario cambió algo": así
+    // la hidratación del período fijado no cuenta como cambio y no se duplica
+    // el fetch inicial, pero cualquier cambio real (o el paso de custom sin
+    // fechas incompletas) sí recarga.
+    effect(() => {
+      const signature = this.rangeSignature();
+      untracked(() => {
+        if (signature === this.lastLoadedRangeSignature) return;
+        this.lastLoadedRangeSignature = signature;
+        this.loadAllData();
+      });
+    });
+  }
+
+  /** Firma estable del rango actual para decidir si hace falta recargar. */
+  private rangeSignature(): string {
+    const r = this.dateRange();
+    return `${r.preset}|${r.start_date}|${r.end_date}`;
   }
 
   onDateFilterChange(values: FilterValues): void {
@@ -496,10 +521,16 @@ export class DashboardComponent {
 
     this.selectedPreset.set(preset);
 
-    // Round-trip: replicar la forma EXACTA que emitió el dropdown.
-    // Si el preset no es custom, NO añadimos `start_date/end_date: null`
-    // porque el sync effect del dropdown compara por key count y eso
-    // causaba el overwrite que rompía el flujo.
+    // El checkbox viaja en las MISMAS FilterValues que el preset. Se replica
+    // su key en el round-trip aunque el preset no sea custom: el sync effect
+    // del dropdown compara por cantidad de keys (QUI-744), así que omitirla
+    // haría que el dropdown pisara el local y perdiera el "fijar".
+    const fixed = values[FIXED_PERIOD_FILTER_KEY] === 'true';
+    const next: FilterValues = {
+      preset,
+      [FIXED_PERIOD_FILTER_KEY]: fixed ? 'true' : null,
+    };
+
     if (preset === 'custom') {
       const start = values['start_date'] as string;
       const end = values['end_date'] as string;
@@ -509,13 +540,89 @@ export class DashboardComponent {
           end_date: end || c.end_date,
         }));
       }
+      if (start) next['start_date'] = start;
+      if (end) next['end_date'] = end;
+    }
+
+    this._dateFilterValues.set(next);
+    this.persistFixedPeriod(fixed);
+  }
+
+  // ── Período fijado (QUI-847) ─────────────────────────────
+
+  /** Hidrata el preset fijado para la tienda, si existe y es válido. */
+  private restoreFixedPeriod(storeId: string): void {
+    if (typeof localStorage === 'undefined') return;
+
+    const key = `${FIXED_PERIOD_STORAGE_PREFIX}${storeId}`;
+    let saved: FixedPeriodState | null = null;
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return;
+      saved = JSON.parse(raw) as FixedPeriodState;
+    } catch {
+      // Valor corrupto o storage no disponible: se ignora y se sigue con
+      // el default ("Hoy").
+      return;
+    }
+
+    const preset = saved?.preset;
+    if (!preset || !this.presetOptions.some((o) => o.value === preset)) return;
+
+    if (preset === 'custom') {
+      if (!saved?.start_date || !saved?.end_date) return;
+      this.customRange.set({
+        start_date: saved.start_date,
+        end_date: saved.end_date,
+      });
       this._dateFilterValues.set({
-        preset: 'custom',
-        ...(start ? { start_date: start } : {}),
-        ...(end ? { end_date: end } : {}),
+        preset,
+        [FIXED_PERIOD_FILTER_KEY]: 'true',
+        start_date: saved.start_date,
+        end_date: saved.end_date,
       });
     } else {
-      this._dateFilterValues.set({ preset });
+      this._dateFilterValues.set({
+        preset,
+        [FIXED_PERIOD_FILTER_KEY]: 'true',
+      });
+    }
+
+    this.selectedPreset.set(preset);
+  }
+
+  /**
+   * Persiste el período actual solo si el checkbox "fijar" está marcado. Al
+   * desmarcarlo se borra la key: la próxima apertura vuelve al default "Hoy".
+   * Un rango custom incompleto no se persiste porque no es restaurable.
+   */
+  private persistFixedPeriod(fixed: boolean): void {
+    if (typeof localStorage === 'undefined') return;
+
+    const storeId = this.storeId();
+    if (!storeId) return;
+
+    const key = `${FIXED_PERIOD_STORAGE_PREFIX}${storeId}`;
+    try {
+      if (!fixed) {
+        localStorage.removeItem(key);
+        return;
+      }
+
+      const preset = this.selectedPreset();
+      const state: FixedPeriodState = { preset };
+      if (preset === 'custom') {
+        const range = this.customRange();
+        if (!range.start_date || !range.end_date) {
+          localStorage.removeItem(key);
+          return;
+        }
+        state.start_date = range.start_date;
+        state.end_date = range.end_date;
+      }
+      localStorage.setItem(key, JSON.stringify(state));
+    } catch {
+      // Storage lleno o no disponible: fijar es best-effort, no rompe el filtro.
     }
   }
 
