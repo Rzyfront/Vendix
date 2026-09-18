@@ -59,6 +59,7 @@ import {
   PreparedChoice,
 } from './pos-prepared-choice-modal/pos-prepared-choice-modal.component';
 import { PosSerialSelectionModalComponent } from './pos-serial-selection-modal/pos-serial-selection-modal.component';
+import { PosCategoryPillsComponent } from './pos-category-pills/pos-category-pills.component';
 import { MultiSelectorOption } from '../../../../../shared/components/multi-selector/multi-selector.component';
 import { SerialNumbersService } from '../../serial-numbers/services/serial-numbers.service';
 import { PosCashRegisterService } from '../services/pos-cash-register.service';
@@ -167,6 +168,7 @@ function isMultiTokenQuery(query: string): boolean {
     PosPreparedChoiceModalComponent,
     PosSerialSelectionModalComponent,
     BadgeComponent,
+    PosCategoryPillsComponent,
   ],
   schemas: [NO_ERRORS_SCHEMA],
   template: `
@@ -261,6 +263,17 @@ function isMultiTokenQuery(query: string): boolean {
             </app-button>
           }
         </div>
+
+        <!-- Barra táctil de categorías (Stitch PSVERSION0001 paso 2).
+             Escribe al mismo filtro category_id que el dropdown Filtros. -->
+        @if (categories().length > 1) {
+          <app-pos-category-pills
+            [categories]="categories()"
+            [selectedId]="selectedCategory()?.id ?? ''"
+            [totalCount]="totalResults()"
+            (categorySelected)="onCategoryPillSelected($event)"
+          />
+        }
 
         <!-- General order-scope promotion notice. Order-scope auto-apply
              promotions discount the WHOLE order (not a single product), so
@@ -1786,7 +1799,27 @@ export class PosProductSelectionComponent {
 
   onSelectCategory(category: any): void {
     this.selectedCategory.set(category);
+    // Stitch PSVERSION0001 paso 2 — las pills escriben la misma señal que
+    // el dropdown Filtros: el dropdown refleja lo elegido en la barra.
+    const categoryId = category?.id != null ? String(category.id) : '';
+    const current = this.filterValues();
+    if (categoryId) {
+      this.filterValues.set({ ...current, category_id: categoryId });
+    } else if ('category_id' in current) {
+      const { category_id: _dropped, ...rest } = current;
+      this.filterValues.set(rest);
+    }
     this.filterProducts();
+  }
+
+  /**
+   * Stitch PSVERSION0001 paso 2 — selección desde la barra de pills.
+   * Revive `onSelectCategory`: resuelve el id a la categoría y filtra igual
+   * que el dropdown (misma señal, mismo request).
+   */
+  onCategoryPillSelected(categoryId: string): void {
+    const found = this.categories().find((c) => c.id === categoryId);
+    this.onSelectCategory(found ?? this.categories()[0]);
   }
 
   onSelectBrand(brand: Brand): void {
