@@ -77,10 +77,10 @@ type InstructionField = {
           <!-- Row: picker + instrucciones lado a lado (50/50) cuando ambos existen -->
           <div
             class="pi-row"
-            [class.pi-row--split]="accounts().length > 1 && visibleFields().length > 0"
+            [class.pi-row--split]="!isVoucher() && accounts().length > 1 && visibleFields().length > 0"
           >
-          <!-- Account picker (solo si hay más de 1 cuenta configurada) -->
-          @if (accounts().length > 1) {
+          <!-- Account picker (solo si es transferencia y hay más de 1 cuenta configurada) -->
+          @if (!isVoucher() && accounts().length > 1) {
             <section class="pi-card pi-account-picker">
               <header class="pi-card-header">
                 <app-icon name="bank" size="16" class="text-primary-500" />
@@ -977,6 +977,28 @@ export class PaymentInstructionsModalComponent {
   readonly hasHeroImage = computed(() => this.heroImageUrl() !== null);
 
   readonly visibleFields = computed<InstructionField[]>(() => {
+    // Si el método es voucher, sólo debe mostrar instrucciones de voucher
+    // y jamás cuentas bancarias ni campos de transferencia bancaria.
+    if (this.isVoucher()) {
+      const i = this.method()?.payment_instructions;
+      if (!i) return [];
+      const all: InstructionField[] = [
+        {
+          key: 'voucher_instructions',
+          label: 'Instrucciones del voucher',
+          value: i.voucher_instructions ?? '',
+        },
+        {
+          key: 'redemption_phone',
+          label: 'Teléfono',
+          value: i.redemption_phone ?? '',
+          copyable: true,
+        },
+        { key: 'notes', label: 'Notas', value: i.notes ?? '' },
+      ];
+      return all.filter((f) => f.value && f.value.toString().trim().length > 0);
+    }
+
     // Camino nuevo: derivar de la cuenta seleccionada.
     const acc = this.selectedAccount();
     if (acc) {
@@ -1038,18 +1060,6 @@ export class PaymentInstructionsModalComponent {
       },
       { key: 'account_type', label: 'Tipo de cuenta', value: i.account_type ?? '' },
       { key: 'instructions', label: 'Instrucciones', value: i.instructions ?? '' },
-      {
-        key: 'voucher_instructions',
-        label: 'Instrucciones del voucher',
-        value: i.voucher_instructions ?? '',
-      },
-      {
-        key: 'redemption_phone',
-        label: 'Teléfono',
-        value: i.redemption_phone ?? '',
-        copyable: true,
-      },
-      { key: 'notes', label: 'Notas', value: i.notes ?? '' },
     ];
     return all.filter((f) => f.value && f.value.toString().trim().length > 0);
   });

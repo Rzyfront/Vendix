@@ -224,6 +224,9 @@ describe('CheckoutService - promotions and coupons', () => {
           .fn()
           .mockResolvedValue({ first_name: 'Test', last_name: 'User', phone: null }),
       },
+      bank_accounts: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
 
     storePrisma = {
@@ -254,7 +257,8 @@ describe('CheckoutService - promotions and coupons', () => {
         update: jest.fn(),
         findUnique: jest.fn(),
       },
-      store_payment_methods: { findFirst: jest.fn() },
+      store_payment_methods: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      bank_accounts: { findMany: jest.fn().mockResolvedValue([]) },
       domain_settings: { findMany: jest.fn().mockResolvedValue([]) },
     };
 
@@ -923,6 +927,60 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(err).toBeInstanceOf(VendixHttpException);
       expect(err.errorCode).toBe('ECOM_CHECKOUT_001');
       expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    describe('getBankAccountsForMethod (QUI-849)', () => {
+      it('retorna las cuentas bancarias configuradas si el método es bank_transfer', async () => {
+        prisma.stores.findUnique.mockResolvedValue({ organization_id: 1, store_code: 'EC' });
+        prisma.store_payment_methods.findFirst.mockResolvedValue({
+          id: 10,
+          custom_config: { accounts: [{ id: 101 }] },
+          system_payment_method: { type: 'bank_transfer' },
+        });
+        prisma.bank_accounts.findMany.mockResolvedValue([
+          {
+            id: 101,
+            name: 'Cuenta Principal',
+            bank_name: 'Bancolombia',
+            account_number: '123456789',
+            image_s3_key: null,
+          },
+        ]);
+
+        const result = await service.getBankAccountsForMethod(10, STORE_ID);
+
+        expect(result).toHaveLength(1);
+        expect(result[0]).toEqual(
+          expect.objectContaining({
+            id: 101,
+            bank_name: 'Bancolombia',
+            account_number: '123456789',
+          }),
+        );
+      });
+
+      it('retorna array vacío si el método es voucher (no expone cuentas de transferencia)', async () => {
+        prisma.stores.findUnique.mockResolvedValue({ organization_id: 1, store_code: 'EC' });
+        prisma.store_payment_methods.findFirst.mockResolvedValue({
+          id: 11,
+          custom_config: { allow_validation: true },
+          system_payment_method: { type: 'voucher' },
+        });
+
+        const result = await service.getBankAccountsForMethod(11, STORE_ID);
+
+        expect(result).toEqual([]);
+        expect(prisma.bank_accounts.findMany).not.toHaveBeenCalled();
+      });
+
+      it('retorna array vacío si el método de pago no existe', async () => {
+        prisma.stores.findUnique.mockResolvedValue({ organization_id: 1, store_code: 'EC' });
+        prisma.store_payment_methods.findFirst.mockResolvedValue(null);
+
+        const result = await service.getBankAccountsForMethod(999, STORE_ID);
+
+        expect(result).toEqual([]);
+      });
     });
   });
 });
