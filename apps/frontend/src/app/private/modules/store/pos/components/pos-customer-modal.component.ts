@@ -89,7 +89,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             : 'Crear Cliente Rápido'
             }}
           </h2>
-          <p class="text-sm text-[var(--color-text-secondary)]">
+          <p class="text-sm text-[var(--color-neutral-600)]">
             {{
             customer()
             ? 'Edita la información del cliente seleccionado'
@@ -123,7 +123,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             [class.text-[var(--color-primary)]]="currentStep() === 'search'"
             [class.border-b-2]="currentStep() === 'search'"
             [class.border-[var(--color-primary)]]="currentStep() === 'search'"
-            [class.text-[var(--color-text-secondary)]]="currentStep() !== 'search'"
+            [class.text-[var(--color-neutral-600)]]="currentStep() !== 'search'"
             >
             Buscar
           </button>
@@ -136,7 +136,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             [class.text-[var(--color-primary)]]="currentStep() === 'create'"
             [class.border-b-2]="currentStep() === 'create'"
             [class.border-[var(--color-primary)]]="currentStep() === 'create'"
-            [class.text-[var(--color-text-secondary)]]="currentStep() !== 'create'"
+            [class.text-[var(--color-neutral-600)]]="currentStep() !== 'create'"
             >
             Crear
           </button>
@@ -150,7 +150,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               [class.text-[var(--color-primary)]]="currentStep() === 'queue'"
               [class.border-b-2]="currentStep() === 'queue'"
               [class.border-[var(--color-primary)]]="currentStep() === 'queue'"
-              [class.text-[var(--color-text-secondary)]]="currentStep() !== 'queue'"
+              [class.text-[var(--color-neutral-600)]]="currentStep() !== 'queue'"
               >
               Cola
               @if (queueEntries().length > 0) {
@@ -467,15 +467,15 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             }
             @if (!queueLoading() && queueEntries().length === 0) {
               <div class="text-center py-8">
-                <app-icon name="users" [size]="48" color="var(--color-text-muted)" class="mx-auto mb-4"></app-icon>
-                <p class="text-[var(--color-text-secondary)] mb-4">No hay clientes en la cola</p>
+                <app-icon name="users" [size]="48" color="var(--color-neutral-400)" class="mx-auto mb-4"></app-icon>
+                <p class="text-[var(--color-text-primary)] font-medium mb-4">No hay clientes en la cola</p>
                 @if (queueQrData(); as qr) {
                   <div class="mt-4">
-                    <p class="text-sm text-[var(--color-text-muted)] mb-2">Comparte este QR para que los clientes se registren:</p>
+                    <p class="text-sm text-[var(--color-neutral-600)] mb-2">Comparte este QR para que los clientes se registren:</p>
                     <img [src]="qr.qr_data_url" alt="QR Cola" class="mx-auto w-40 h-40">
-                    <p class="text-xs text-[var(--color-text-muted)] mt-2">{{ qr.url }}</p>
-                    <app-button variant="outline" size="sm" (clicked)="printQueueQr()" class="mt-3">
-                      <app-icon name="printer" [size]="14" slot="icon" ></app-icon>
+                    <p class="text-xs text-[var(--color-neutral-600)] mt-2">{{ qr.url }}</p>
+                    <app-button variant="outline" size="md" (clicked)="printQueueQr()" class="mt-3">
+                      <app-icon name="printer" [size]="16" slot="icon" ></app-icon>
                       Imprimir QR
                     </app-button>
                   </div>
@@ -498,7 +498,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                           <p class="font-medium text-[var(--color-text-primary)]">
                             {{ entry.first_name }} {{ entry.last_name }}
                           </p>
-                          <p class="text-xs text-[var(--color-text-muted)]">
+                          <p class="text-xs text-[var(--color-neutral-600)]">
                             {{ entry.document_type }}: {{ entry.document_number }}
                           </p>
                           @if (entry.status === 'selected') {
@@ -512,7 +512,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                         @if (entry.status === 'waiting') {
                           <app-button
                             variant="primary"
-                            size="sm"
+                            size="md"
                             (clicked)="onSelectFromQueue(entry)"
                             >
                             Seleccionar
@@ -521,7 +521,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                         @if (entry.status === 'selected') {
                           <app-button
                             variant="outline"
-                            size="sm"
+                            size="md"
                             (clicked)="onReleaseFromQueue(entry)"
                             >
                             Liberar
@@ -537,11 +537,11 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             @if (!queueLoading() && queueEntries().length > 0 && queueQrData(); as qr2) {
               <div class="pt-4 border-t border-[var(--color-border)]">
                 <details class="text-center">
-                  <summary class="text-sm text-[var(--color-text-muted)] cursor-pointer">Mostrar QR de registro</summary>
+                  <summary class="inline-flex items-center justify-center min-h-[44px] px-4 rounded-lg text-sm font-medium text-[var(--color-neutral-600)] cursor-pointer focus:outline-none focus-visible:ring-[3px] focus-visible:ring-[var(--color-primary)]">Mostrar QR de registro</summary>
                   <img [src]="qr2.qr_data_url" alt="QR Cola" class="mx-auto w-32 h-32 mt-2">
-                  <p class="text-xs text-[var(--color-text-muted)] mt-1">{{ qr2.url }}</p>
-                  <app-button variant="outline" size="sm" (clicked)="printQueueQr()" class="mt-2">
-                    <app-icon name="printer" [size]="14" slot="icon" ></app-icon>
+                  <p class="text-xs text-[var(--color-neutral-600)] mt-1">{{ qr2.url }}</p>
+                  <app-button variant="outline" size="md" (clicked)="printQueueQr()" class="mt-2">
+                    <app-icon name="printer" [size]="16" slot="icon" ></app-icon>
                     Imprimir QR
                   </app-button>
                 </details>
