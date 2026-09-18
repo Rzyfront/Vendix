@@ -68,24 +68,35 @@
   font-weight: 600;
 }
 
-/* ─── Wompi awaiting ─────────────────────────────── */
+/* ─── Wompi awaiting ───────────────────────────────
+   Stitch paso 6 — card de estado sólida (radius 16, borde 1.5px) con
+   título, mensaje y contador de intentos; acciones md = 44px desktop. */
 .wompi-awaiting {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 32px;
+  gap: 12px;
+  padding: 32px 24px;
   text-align: center;
   min-height: 192px;
   margin-top: 16px;
-  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  border-radius: 16px;
+}
+
+.wompi-awaiting-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 0;
 }
 
 .awaiting-message {
   font-size: 15px;
   color: var(--color-text-primary);
-  max-width: 320px;
+  max-width: 360px;
   margin: 0;
 }
 
@@ -93,7 +104,7 @@
 .awaiting-attempts {
   font-size: 12px;
   color: var(--color-neutral-600);
-  max-width: 320px;
+  max-width: 360px;
   margin: 0;
 }
 

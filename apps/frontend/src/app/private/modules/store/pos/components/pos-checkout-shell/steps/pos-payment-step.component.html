@@ -27,10 +27,13 @@
     ></app-payment-collector>
   </div>
 
-  <!-- Wompi Awaiting Payment UI (POST-submit polling vive en este step). -->
+  <!-- Wompi Awaiting Payment UI (POST-submit polling vive en este step).
+       Stitch paso 6 — card de estado con título, spinner y acciones md
+       (44px en desktop; sm da 36px y falla el target mínimo). -->
   @if (wompiAwaitingPayment()) {
-    <div class="wompi-awaiting">
+    <div class="wompi-awaiting" role="status">
       <app-spinner></app-spinner>
+      <h3 class="wompi-awaiting-title">Esperando confirmación de Wompi</h3>
       <p class="awaiting-message">{{ wompiAwaitingMessage() }}</p>
       @if (wompiPollingState().active) {
         <p class="awaiting-attempts">
@@ -43,21 +46,21 @@
         <app-button
           label="Verificar pago ahora"
           variant="outline"
-          size="sm"
+          size="md"
           (clicked)="manualVerifyPayment()"
         ></app-button>
         @if (!wompiPollingState().active) {
           <app-button
             label="Continuar esperando"
             variant="ghost"
-            size="sm"
+            size="md"
             (clicked)="startWompiPolling()"
           ></app-button>
         }
         <app-button
           label="Cancelar espera"
           variant="ghost"
-          size="sm"
+          size="md"
           (clicked)="cancelWompiAwait()"
         ></app-button>
       </div>
