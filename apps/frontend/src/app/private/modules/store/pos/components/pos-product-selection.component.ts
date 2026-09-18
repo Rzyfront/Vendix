@@ -464,7 +464,7 @@ function isMultiTokenQuery(query: string): boolean {
                 "
                 (click)="onAddToCart(product)"
                 (keydown)="onProductCardKeydown($event, product)"
-                class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer product-card"
+                class="group relative bg-surface border border-border rounded-2xl shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer product-card"
                 [class]="
                   isProductCardUnavailable(product)
                     ? 'is-unavailable opacity-60 cursor-not-allowed'
@@ -473,10 +473,11 @@ function isMultiTokenQuery(query: string): boolean {
                 [class.is-selected]="
                   selectedProductForVariant()?.id === product.id
                 "
+                [class.is-in-cart]="cartQtyFor(product.id) > 0"
               >
                 <!-- Product Image or Icon -->
                 <div
-                  class="aspect-square bg-gradient-to-br from-surface to-muted/30 relative overflow-hidden rounded-t-card"
+                  class="aspect-square bg-gradient-to-br from-surface to-muted/30 relative overflow-hidden rounded-t-2xl"
                 >
                   <!-- Product Image -->
                   @if (product.image_url || product.image) {
@@ -502,6 +503,18 @@ function isMultiTokenQuery(query: string): boolean {
                         ></app-icon>
                       </div>
                     </div>
+                  }
+                  <!-- Stitch PSVERSION0001 paso 3 — badge reactivo En Carrito (N).
+                       Apilado bajo el badge de stock (columna derecha): el
+                       top-center solapaba el stock en cards angostas (~150px
+                       en xl 4-col). No colisiona con variantes (izq) ni
+                       peso/promo/FAB (abajo). -->
+                  @if (cartQtyFor(product.id) > 0) {
+                    <span
+                      class="absolute top-9 right-2 z-[1] whitespace-nowrap rounded-full bg-[var(--color-success-700)] px-2 py-0.5 text-[10px] font-bold text-white shadow-md"
+                    >
+                      En Carrito ({{ cartQtyFor(product.id) }})
+                    </span>
                   }
                   <!-- Stock Badge -->
                   @if (
@@ -632,14 +645,25 @@ function isMultiTokenQuery(query: string): boolean {
                       product.name
                     }}</span>
                   </div>
-                  <!-- Bottom Section: Price and Stock -->
-                  <div class="flex items-center justify-between">
+                  <!-- Stitch PSVERSION0001 paso 3 — descripción del contrato,
+                       una línea. min-h reserva el renglón cuando el producto
+                       no trae descripción para no desalinear la grilla. -->
+                  <p
+                    class="text-[11px] leading-4 text-neutral-600 truncate min-h-4"
+                    [title]="product.description || ''"
+                  >
+                    {{ product.description || '' }}
+                  </p>
+                  <!-- Bottom Section: Price and add button -->
+                  <div
+                    class="mt-1.5 pt-2 border-t border-border flex items-center justify-between gap-2"
+                  >
                     <!-- Price -->
-                    <div class="flex flex-col">
+                    <div class="flex flex-col min-w-0">
                       @if (hasActivePromoOrSale(product)) {
                         <div class="flex items-baseline gap-1 flex-wrap">
                           <span
-                            class="text-[var(--color-success-700)] font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
+                            class="text-[var(--color-success-700)] font-black text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
                           >
                             {{ promotionalPrice(product) | currency }}
                             @if (product.pricing_type === 'weight') {
@@ -657,7 +681,7 @@ function isMultiTokenQuery(query: string): boolean {
                         </div>
                       } @else {
                         <span
-                          class="text-[var(--color-success-700)] font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
+                          class="text-[var(--color-success-700)] font-black text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
                         >
                           {{ product.final_price | currency }}
                           @if (product.pricing_type === 'weight') {
@@ -680,6 +704,37 @@ function isMultiTokenQuery(query: string): boolean {
                         </span>
                       }
                     </div>
+                    <!-- Stitch PSVERSION0001 paso 3 — botón + cuadrado junto
+                         al precio. El FAB sobre la imagen se conserva intacto;
+                         ambos invocan el mismo flujo onAddToCart. -->
+                    @if (!isProductCardUnavailable(product)) {
+                      <button
+                        type="button"
+                        class="add-square shrink-0 w-10 h-10 rounded-xl flex items-center justify-center bg-[var(--color-success-700)] text-[var(--color-text-on-primary)] hover:brightness-110 active:scale-95 transition"
+                        (click)="
+                          $event.stopPropagation(); onAddToCart(product)
+                        "
+                        [attr.aria-label]="
+                          'Agregar ' + product.name + ' al carrito'
+                        "
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="20"
+                          height="20"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          <line x1="12" y1="5" x2="12" y2="19"></line>
+                          <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                      </button>
+                    }
                   </div>
                 </div>
               </div>
@@ -691,7 +746,7 @@ function isMultiTokenQuery(query: string): boolean {
               @for (slot of loadMoreSkeletonSlots; track $index) {
                 <div
                   aria-hidden="true"
-                  class="bg-surface border border-border rounded-card overflow-hidden"
+                  class="bg-surface border border-border rounded-2xl overflow-hidden"
                 >
                   <div class="aspect-square bg-muted/40 animate-pulse"></div>
                   <div class="p-2 space-y-1.5">
@@ -996,6 +1051,23 @@ function isMultiTokenQuery(query: string): boolean {
           0 0 0 5px var(--color-primary);
       }
 
+      /* Stitch PSVERSION0001 paso 3 — estado en-carrito: anillo verde doble
+         (no depende solo del color: el badge 'En Carrito (N)' lo etiqueta en
+         texto). Va DESPUES de .is-selected para que el estado del ticket
+         mande sobre el del selector de variantes. */
+      .product-card.is-in-cart {
+        border-color: var(--color-success-600);
+        box-shadow:
+          0 0 0 2px var(--color-surface),
+          0 0 0 4px var(--color-success-600);
+      }
+
+      /* Botón + cuadrado junto al precio: foco visible AA. */
+      .add-square:focus-visible {
+        outline: 3px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+
       /* Estado sin-stock: la imagen en grises refuerza el badge AGOTADO en
          texto (distinguible sin depender solo del color). */
       .product-card.is-unavailable img {
@@ -1066,6 +1138,25 @@ export class PosProductSelectionComponent {
   readonly showStopwordsHint = computed(() =>
     isStopwordsOnlyQuery(this.searchQuery()),
   );
+
+  /**
+   * Stitch PSVERSION0001 paso 3 — qty en carrito por product_id. Suma
+   * `quantity` de todas las líneas del producto (variantes incluidas);
+   * los ítems libres (`itemType === 'custom'`) no tienen product_id y se
+   * ignoran. Lee `PosCartService.cartItems` (computed) así que el badge
+   * "En Carrito" reacciona sin flicker ni suscripciones manuales.
+   */
+  readonly cartQtyByProductId = computed(() => {
+    const map = new Map<string, number>();
+    for (const item of this.cartService.cartItems()) {
+      if (item.itemType === 'custom') continue;
+      const id = item.product?.id;
+      if (id == null || id === '') continue;
+      const key = String(id);
+      map.set(key, (map.get(key) ?? 0) + (Number(item.quantity) || 0));
+    }
+    return map;
+  });
 
   /** Copy exacto del contador (F-066/F-098). Vacío cuando no hay total. */
   readonly counterText = computed(() => {
@@ -1749,7 +1840,21 @@ export class PosProductSelectionComponent {
       return `${name}, ${price}, Agotado`;
     }
     const stock = Number(product?.stock ?? 0);
-    return `${name}, ${price}, ${stock} disponibles`;
+    // Stitch PSVERSION0001 paso 3 — el badge "En Carrito (N)" también se
+    // anuncia en texto para lector de pantalla.
+    const inCart = this.cartQtyFor(product?.id);
+    const cartSuffix = inCart > 0 ? `, ${inCart} en carrito` : '';
+    return `${name}, ${price}, ${stock} disponibles${cartSuffix}`;
+  }
+
+  /**
+   * Stitch PSVERSION0001 paso 3 — qty del producto en el ticket
+   * (0 si ausente). Lee el computed `cartQtyByProductId`, así que las
+   * lecturas desde el template son reactivas en zoneless.
+   */
+  cartQtyFor(productId: string | number | null | undefined): number {
+    if (productId == null || productId === '') return 0;
+    return this.cartQtyByProductId().get(String(productId)) ?? 0;
   }
 
   /** E.1 (F-061) — publica un anuncio en la live-region polite. */
