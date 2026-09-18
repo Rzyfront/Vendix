@@ -260,7 +260,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                   </span>
                 }
                 <div
-                  class="hidden md:flex items-center gap-1.5 ml-1 pl-2 border-l border-slate-200 text-xs overflow-hidden min-w-0"
+                  class="hidden md:flex items-center gap-1.5 ml-1 pl-2 border-l border-slate-200 text-xs overflow-hidden shrink-0"
                 >
                   <div
                     class="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold text-[10px] flex items-center justify-center shrink-0 border border-emerald-200"
@@ -270,11 +270,12 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                   <span class="font-medium text-slate-500 shrink-0">Cajero:</span>
                   <span
                     class="font-semibold text-slate-800 truncate min-w-0 max-w-[120px]"
-                    [title]="cashierName()"
+                    [title]="cashierFullTitle()"
                     >{{ cashierName() }}</span
                   >
                   <span
-                    class="text-slate-400 font-normal whitespace-nowrap shrink-0"
+                    class="hidden 2xl:inline text-slate-400 font-normal whitespace-nowrap shrink-0"
+                    [title]="cashierFullTitle()"
                     >({{ cashierRoleLabel() }}@if (cashierTerminal()) {
                       · {{ cashierTerminal() }}
                     })</span
@@ -1347,6 +1348,15 @@ export class PosComponent {
       this.activeSession()?.register?.name ||
       null,
   );
+  /**
+   * PSVERSION0001 paso 7b F3 — tooltip con la identidad completa del
+   * cajero. El bloque visible compacta a ≤1536px (rol/terminal ocultos)
+   * porque a 1280 con cliente el nombre colapsaba a ancho 0.
+   */
+  readonly cashierFullTitle = computed(() => {
+    const terminal = this.cashierTerminal();
+    return `${this.cashierName()} (${this.cashierRoleLabel()}${terminal ? ` · ${terminal}` : ''})`;
+  });
 
   private static roleLabel(role: string | null): string {
     switch ((role ?? '').toLowerCase()) {

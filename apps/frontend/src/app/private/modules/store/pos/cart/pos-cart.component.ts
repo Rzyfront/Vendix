@@ -181,6 +181,7 @@ import {
                   </h4>
                   <div
                     class="flex items-center gap-1 text-[11px] text-slate-500 font-medium truncate mt-0.5"
+                    [title]="customerContactTitle(customer)"
                   >
                     @if (
                       customer.document_type || customer.document_number
@@ -704,7 +705,7 @@ import {
             @if (summary().discountAmount > 0) {
               <div class="flex justify-between text-xs">
                 <span class="text-neutral-600">Descuento aplicado</span>
-                <span class="font-bold text-rose-500"
+                <span class="font-bold text-rose-600"
                   >-{{ formatCurrency(summary().discountAmount) }}</span
                 >
               </div>
@@ -2605,6 +2606,21 @@ private cartService = inject(PosCartService);
       .join('')
       .toUpperCase();
     return initials || 'CL';
+  }
+
+  /**
+   * PSVERSION0001 paso 7b F5 — tooltip de la tarjeta de cliente con
+   * documento + teléfono completos (la fila los trunca con elipsis).
+   */
+  customerContactTitle(customer: {
+    document_type?: string;
+    document_number?: string;
+    phone?: string;
+  } | null): string {
+    const doc = [customer?.document_type, customer?.document_number]
+      .filter(Boolean)
+      .join(' ');
+    return [doc, customer?.phone].filter(Boolean).join(' · ');
   }
 
   handleImageError(event: any): void {

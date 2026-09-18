@@ -656,14 +656,15 @@ function isMultiTokenQuery(query: string): boolean {
                   </p>
                   <!-- Bottom Section: Price and add button -->
                   <div
-                    class="mt-1.5 pt-2 border-t border-border flex items-center justify-between gap-2"
+                    class="mt-1.5 pt-2 border-t border-border flex items-center justify-between gap-1.5"
                   >
                     <!-- Price -->
                     <div class="flex flex-col min-w-0">
                       @if (hasActivePromoOrSale(product)) {
                         <div class="flex items-baseline gap-1 flex-wrap">
                           <span
-                            class="text-[var(--color-success-700)] font-black text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
+                            class="text-[var(--color-success-700)] font-black text-xs sm:text-sm lg:text-base leading-tight truncate"
+                            [title]="promotionalPrice(product) | currency"
                           >
                             {{ promotionalPrice(product) | currency }}
                             @if (product.pricing_type === 'weight') {
@@ -681,7 +682,8 @@ function isMultiTokenQuery(query: string): boolean {
                         </div>
                       } @else {
                         <span
-                          class="text-[var(--color-success-700)] font-black text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
+                          class="text-[var(--color-success-700)] font-black text-xs sm:text-sm lg:text-base leading-tight truncate"
+                          [title]="product.final_price | currency"
                         >
                           {{ product.final_price | currency }}
                           @if (product.pricing_type === 'weight') {

@@ -41,7 +41,7 @@ import { CashRegisterSession } from '../services/pos-cash-register.service';
               title="Movimiento de efectivo"
             >
               <span class="sbc-move-prefix" aria-hidden="true">+/-</span>
-              <span>Movimiento</span>
+              <span class="sbc-btn-label">Movimiento</span>
             </button>
             <button
               type="button"
@@ -344,7 +344,7 @@ import { CashRegisterSession } from '../services/pos-cash-register.service';
       padding: 6px 8px;
       min-height: 36px;
       min-width: 0;
-      flex: 1 1 auto;
+      flex: 1 1 0%;
       background: var(--color-surface, #ffffff);
       border: 1px solid var(--color-border);
       border-radius: 12px;
@@ -367,12 +367,25 @@ import { CashRegisterSession } from '../services/pos-cash-register.service';
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      flex: 1 1 auto;
+      min-width: 0;
     }
 
     .sbc-time {
       font-size: 11px;
       font-weight: 500;
       color: var(--color-neutral-600, #5c6672);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    /* PSVERSION0001 paso 7b F1 — la tira compacta (~323px) no da para
+       nombre + hora + 3 botones con texto: el nombre colapsaba a ancho 0.
+       La palabra "Movimiento" se colapsa visualmente (queda "+/-" +
+       title/aria intactos); sigue en DOM/AT porque no es display:none. */
+    .sbc-btn-label {
+      max-width: 0;
+      overflow: hidden;
       white-space: nowrap;
     }
 
