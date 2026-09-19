@@ -1894,8 +1894,11 @@ export class CheckoutComponent implements OnInit {
       this.selected_shipping_method_type === 'pickup';
 
     this.loading_payment_methods = true;
-    this.checkout_service.getPaymentMethods(effectiveShippingType).subscribe({
-      next: (response) => {
+    this.checkout_service
+      .getPaymentMethods(effectiveShippingType)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
         if (response.success) {
           this.payment_methods.set(
             this.filterPaymentMethods(response.data, isPickup),

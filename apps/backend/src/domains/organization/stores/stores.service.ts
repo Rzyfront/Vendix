@@ -351,9 +351,13 @@ export class StoresService {
         : (countryRaw.toLowerCase() === 'colombia' ? 'CO' : 'CO');
 
       if (line1 && city) {
-        const existingPrimary = await this.prisma.addresses.findFirst({
-          where: { store_id: id, is_primary: true },
-        });
+        const existingPrimary =
+          (await this.prisma.addresses.findFirst({
+            where: { store_id: id, is_primary: true },
+          })) ||
+          (await this.prisma.addresses.findFirst({
+            where: { store_id: id, type: 'store_physical' },
+          }));
 
         if (existingPrimary) {
           await this.prisma.addresses.update({
@@ -367,6 +371,7 @@ export class StoresService {
               country_code: countryCode,
               phone_number: address.phone_number ?? null,
               type: 'store_physical',
+              is_primary: true,
             },
           });
         } else {

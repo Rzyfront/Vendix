@@ -777,6 +777,9 @@
                   }
                   <div class="payment-info">
                     <span class="payment-name">{{ method.name }}</span>
+                    @if (method.type === 'cash') {
+                      <span class="payment-subtitle">Pagas al retirar en el local</span>
+                    }
                     @if (
                       selected_payment_method_id() === method.id &&
                       payment_receipt_file()

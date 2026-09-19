@@ -89,6 +89,17 @@
           ></app-input>
         </div>
 
+        <div class="md:col-span-2">
+          <app-input
+            [formControl]="addressLine2Control"
+            type="text"
+            label="Detalles adicionales (Barrio, Edificio, Local)"
+            placeholder="Edificio Centro, Local 102"
+            size="sm"
+            (inputChange)="onFieldChange()"
+          ></app-input>
+        </div>
+
         <app-input
           [formControl]="cityControl"
           type="text"
@@ -112,15 +123,6 @@
           type="text"
           label="Código Postal"
           placeholder="440001"
-          size="sm"
-          (inputChange)="onFieldChange()"
-        ></app-input>
-
-        <app-input
-          [formControl]="addressLine2Control"
-          type="text"
-          label="Detalles adicionales (Barrio, Edificio, Local)"
-          placeholder="Edificio Centro, Local 102"
           size="sm"
           (inputChange)="onFieldChange()"
         ></app-input>
