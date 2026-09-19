@@ -11,15 +11,21 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
-  background: rgba(var(--color-surface-rgb, 255, 255, 255), 0.85);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: var(--color-surface);
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 
   h3 {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 700;
     color: var(--color-text-primary);
     margin: 0;
@@ -27,32 +33,53 @@
   }
 }
 
+// Stitch paso 11 — fondo success-700 (AA con blanco); primary fallaba.
+.panel-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-success-700);
+  color: var(--color-text-on-primary);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
 }
 
 .icon-btn {
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: none;
   background: transparent;
-  color: var(--color-text-secondary);
+  color: var(--color-neutral-600);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 
   &:hover {
-    background: var(--color-surface-hover, rgba(0, 0, 0, 0.04));
+    background: var(--color-surface-hover);
     color: var(--color-primary);
   }
 
   &:active {
     transform: scale(0.95);
+  }
+
+  &:focus-visible {
+    outline: 3px solid var(--color-primary);
+    outline-offset: 2px;
   }
 }
 
@@ -60,10 +87,9 @@
   flex: 1;
   overflow-y: auto;
   overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
 
   &::-webkit-scrollbar {
-    width: 4px;
+    width: 6px;
   }
 
   &::-webkit-scrollbar-track {
@@ -72,7 +98,7 @@
 
   &::-webkit-scrollbar-thumb {
     background: var(--color-border);
-    border-radius: 2px;
+    border-radius: 3px;
   }
 }
 
@@ -90,14 +116,25 @@
   justify-content: center;
   padding: 48px 24px;
   text-align: center;
-  color: var(--color-text-secondary);
   gap: 12px;
 
   p {
     font-size: 14px;
     font-weight: 500;
+    color: var(--color-neutral-600);
     margin: 0;
   }
+}
+
+.empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
 }
 
 // Timeline layout
@@ -116,16 +153,16 @@
 }
 
 .time-label {
-  width: 52px;
+  width: 56px;
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--color-text-secondary);
+  color: var(--color-neutral-600);
   padding: 0 8px;
   text-align: right;
   font-variant-numeric: tabular-nums;
   line-height: 1;
-  transform: translateY(-5px);
+  transform: translateY(-6px);
 }
 
 .time-line {
@@ -137,54 +174,73 @@
 // Booking blocks
 .booking-block {
   position: absolute;
-  left: 56px;
+  left: 60px;
   right: 8px;
-  border-radius: 8px;
-  padding: 6px 10px;
-  cursor: pointer;
+  border-radius: var(--radius-md);
+  border-left: 4px solid transparent;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 11px;
-  border-left: 3px solid transparent;
-  transition: box-shadow 0.15s ease, transform 0.1s ease;
   z-index: 2;
   min-height: 28px;
 
-  &:hover {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-    transform: translateX(1px);
+  &.expanded {
+    height: auto !important;
+    overflow: visible;
+    z-index: 6;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
   }
 
   &.status-pending {
-    background: var(--color-yellow-100, #fef9c3);
-    border-left-color: #f59e0b;
-    color: #92400e;
+    background: var(--color-warning-100);
+    border-left-color: var(--color-warning-500);
+    color: var(--color-warning-800);
   }
 
   &.status-confirmed {
-    background: var(--color-primary-light, #eff6ff);
-    border-left-color: var(--color-primary);
-    color: var(--color-primary);
+    background: var(--color-info-100);
+    border-left-color: var(--color-info-500);
+    color: var(--color-info-800);
   }
 
   &.status-completed {
-    background: #d1fae5;
-    border-left-color: #10b981;
-    color: #065f46;
+    background: var(--color-success-100);
+    border-left-color: var(--color-success-500);
+    color: var(--color-success-800);
   }
 
   &.status-cancelled {
-    background: var(--color-error-100, #fee2e2);
-    border-left-color: #ef4444;
-    color: #991b1b;
+    background: var(--color-error-100);
+    border-left-color: var(--color-error-500);
+    color: var(--color-error-800);
   }
 
   &.status-no_show {
     background: var(--color-neutral-100);
-    border-left-color: #9ca3af;
-    color: #6b7280;
+    border-left-color: var(--color-neutral-400);
+    color: var(--color-neutral-700);
+  }
+}
+
+.block-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+
+  &:hover {
+    filter: brightness(0.98);
+  }
+
+  &:focus-visible {
+    outline: 3px solid var(--color-primary);
+    outline-offset: 2px;
   }
 }
 
@@ -192,54 +248,81 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 4px;
+  gap: 6px;
 }
 
 .block-time {
   font-weight: 700;
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .block-status {
-  font-size: 9px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.3px;
-  opacity: 0.8;
+  letter-spacing: 0.4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  color: #ffffff;
+  white-space: nowrap;
+
+  .status-pending & {
+    background: var(--color-warning-700);
+  }
+
+  .status-confirmed & {
+    background: var(--color-info-700);
+  }
+
+  .status-completed & {
+    background: var(--color-success-700);
+  }
+
+  .status-cancelled & {
+    background: var(--color-error-700);
+  }
+
+  .status-no_show & {
+    background: var(--color-neutral-600);
+  }
 }
 
 .block-service {
   font-weight: 600;
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .block-customer {
-  font-size: 10px;
-  opacity: 0.8;
+  font-size: 11px;
+  color: var(--color-neutral-600);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+
+  .status-no_show & {
+    color: var(--color-neutral-600);
+  }
 }
 
 .block-actions {
   display: flex;
-  gap: 6px;
-  padding-top: 4px;
-  margin-top: 2px;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px 10px;
   border-top: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 // Current time indicator
 .current-time-line {
   position: absolute;
-  left: 44px;
+  left: 48px;
   right: 0;
   height: 2px;
-  background: #ef4444;
+  background: var(--color-error-500);
   z-index: 5;
   pointer-events: none;
 
@@ -252,6 +335,6 @@
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background: #ef4444;
+    background: var(--color-error-500);
   }
 }

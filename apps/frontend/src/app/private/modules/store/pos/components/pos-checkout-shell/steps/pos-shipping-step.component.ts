@@ -19,6 +19,7 @@ import {
 import { Router } from '@angular/router';
 
 import {
+  CurrencyInputDirective,
   IconComponent,
   StepsLineComponent,
   ToggleComponent,
@@ -32,9 +33,11 @@ import {
   CurrencyFormatService,
   CurrencyPipe,
 } from '../../../../../../../shared/pipes/currency';
-import { CurrencyInputDirective } from '../../../../../../../shared/directives/currency-input.directive';
-import { CountryService } from '../../../../../../../services/country.service';
-import { AddressPayload } from '../../../../../../../shared/components/address-form-fields/address-form-fields.component';
+import {
+  AddressFormFieldsComponent,
+  AddressPayload,
+} from '../../../../../../../shared/components/address-form-fields/address-form-fields.component';
+import { CountryService } from '../../../../../../../core/services/country.service';
 
 import { PosPaymentService } from '../../../services/pos-payment.service';
 import { PosShippingService } from '../../../services/pos-shipping.service';
@@ -65,19 +68,9 @@ type ShippingCreditConfig = {
 /**
  * Fase 5·B2b — `app-pos-shipping-step`.
  *
- * Cuerpo del paso **Envío** del checkout shell. Extrae SOLO la recolección de
- * ENVÍO de `PosPaymentInterfaceComponent`/`PosShippingModalComponent` (método,
- * dirección con depto/ciudad, costo calculado/manual, notas) SIN su UI de pago
- * interna — el cobro lo posee el paso Cobro (`app-pos-payment-step`). La lógica
- * drill-in overview/method/address del modal viejo queda **aplanada** en un
- * único panel scrollable.
- *
- * Ya NO existe el eje "cuándo paga": "contra entrega" es ahora un método de
- * pago canónico (`cash_on_delivery`, `processing_mode=ON_DELIVERY`) que vive en
- * el paso Cobro. La ejecución se dispara desde el shell vía {@link execute}, que
- * arma `shippingAddress` + `deliveryType`, mapea el `PaymentSubmit` del collector
- * a `paymentRequest`/`creditConfig` y llama a
- * `PosPaymentService.processShippingSale` (misma firma 1:1 que el modal viejo).
+ * Cuerpo del paso **Envío** del checkout shell. Recolecta el método de envío,
+ * la dirección de entrega (solo cuando el método lo requiere, omitiendo dirección
+ * si es recoger en tienda), costo y notas.
  */
 @Component({
   selector: 'app-pos-shipping-step',
@@ -91,6 +84,7 @@ type ShippingCreditConfig = {
     CurrencyInputDirective,
     StepsLineComponent,
     ToggleComponent,
+    AddressFormFieldsComponent,
   ],
   templateUrl: './pos-shipping-step.component.html',
   styleUrl: './pos-shipping-step.component.scss',
@@ -100,17 +94,44 @@ export class PosShippingStepComponent {
 
   // ── Inputs / two-way ──────────────────────────────────────────────────────
   readonly cartState = input<CartState | null>(null);
-  /**
-   * Shipping address captured upstream in the Cliente step (shell-owned
-   * `app-address-form-fields`). This step no longer collects the address; it
-   * only consumes it to calculate the cost and build the order.
-   */
-  readonly address = input<AddressPayload | null>(null);
-  /**
-   * Id of the customer's saved address to reuse. `null` → this step will
-   * create the captured address before processing the order.
-   */
-  readonly addressId = input<number | null>(null);
+  // ── Address capture (owned by shipping step according to method type) ───
+  readonly address = signal<AddressPayload | null>(null);
+  readonly addressValid = signal<boolean>(false);
+  readonly showAddressErrors = signal<boolean>(false);
+  readonly addressId = signal<number | null>(null);
+
+  readonly customerInitialAddress = computed<AddressPayload | null>(() => {
+    const customer = this.cartState()?.customer;
+    const addresses = customer?.addresses;
+    const a = addresses?.find((x) => x.is_primary) ?? addresses?.[0];
+    if (!a) return null;
+    return {
+      address_line1: a.address_line1 ?? null,
+      address_line2: null,
+      city: a.city ?? null,
+      state_province: a.state_province ?? null,
+      country_code: a.country_code ?? 'CO',
+      postal_code: null,
+      phone_number: customer?.phone ?? null,
+      latitude: null,
+      longitude: null,
+    };
+  });
+
+  readonly isPickupMethod = computed<boolean>(
+    () => this.selectedShippingMethod()?.type === 'pickup',
+  );
+
+  readonly requiresAddress = computed<boolean>(() => {
+    const m = this.selectedShippingMethod();
+    return !!m && m.type !== 'pickup';
+  });
+
+  readonly addressSummary = computed<string>(() => {
+    const a = this.address();
+    if (!a) return 'Sin dirección';
+    return [a.address_line1, a.city].filter(Boolean).join(', ') || 'Sin dirección';
+  });
 
   // ── Outputs ───────────────────────────────────────────────────────────────
   readonly shippingCompleted = output<any>();
@@ -134,13 +155,27 @@ export class PosShippingStepComponent {
   readonly isCalculatingShipping = signal<boolean>(false);
 
   // ── Envío sub-wizard (presentación; espeja el patrón de Cobro) ────────────
-  /** Sub-paso activo del paso Envío: 0=Método · 1=Costo (terminal). */
+  /** Sub-paso activo del paso Envío: 0=Método · 1=Dirección (si no pickup) · Costo (terminal). */
   readonly shipSubStep = signal<number>(0);
-  /** Sub-pasos fijos reflejados en el `app-steps-line` vertical (Costo es terminal). */
-  readonly shipSubSteps = computed<StepsLineItem[]>(() => [
-    { label: 'Método' },
-    { label: 'Costo' },
-  ]);
+  /** Sub-pasos dinámicos reflejados en el `app-steps-line` vertical. */
+  readonly shipSubSteps = computed<StepsLineItem[]>(() => {
+    if (this.requiresAddress()) {
+      return [
+        { label: 'Método' },
+        { label: 'Dirección' },
+        { label: 'Costo' },
+      ];
+    }
+    return [
+      { label: 'Método' },
+      { label: 'Costo' },
+    ];
+  });
+
+  /** True cuando el sub-paso activo es el sub-paso terminal de Costo. */
+  readonly isCostSubStep = computed<boolean>(
+    () => this.shipSubStep() === (this.requiresAddress() ? 2 : 1),
+  );
 
   // ── Processing ────────────────────────────────────────────────────────────
   readonly isProcessing = signal<boolean>(false);
@@ -192,9 +227,9 @@ export class PosShippingStepComponent {
     if (!method) return false;
     if (!this.cartState()?.customer) return false;
     if (!this.cartState()?.items?.length) return false;
-    if (method.type !== 'pickup') {
+    if (this.requiresAddress()) {
       const a = this.address();
-      if (!a?.address_line1 || !a?.city) return false;
+      if (!a?.address_line1 || !a?.city || !this.addressValid()) return false;
     }
     return true;
   });
@@ -213,6 +248,47 @@ export class PosShippingStepComponent {
       untracked(() => {
         const first = methods.find((m) => m.is_active !== false) ?? null;
         if (first) this.selectShippingMethod(first, { advance: false });
+      });
+    });
+
+    // Pre-populate customer's saved address on initial load or customer change
+    let lastCustomerId: string | number | null = null;
+    effect(() => {
+      const customer = this.cartState()?.customer;
+      const currentId = customer?.id ?? null;
+      const init = this.customerInitialAddress();
+      untracked(() => {
+        if (currentId !== lastCustomerId) {
+          lastCustomerId = currentId;
+          if (init) {
+            this.address.set(init);
+            const addresses = customer?.addresses;
+            const a = addresses?.find((x) => x.is_primary) ?? addresses?.[0];
+            this.addressId.set(a?.id ?? null);
+            this.addressValid.set(!!(init.address_line1 && init.city));
+          } else {
+            this.address.set(null);
+            this.addressId.set(null);
+            this.addressValid.set(false);
+          }
+        }
+      });
+    });
+
+    // Auto-clear address errors when valid
+    effect(() => {
+      if (this.addressValid()) {
+        untracked(() => this.showAddressErrors.set(false));
+      }
+    });
+
+    // Clamp sub-step when shipSubSteps changes
+    effect(() => {
+      const len = this.shipSubSteps().length;
+      untracked(() => {
+        if (this.shipSubStep() >= len) {
+          this.shipSubStep.set(Math.max(0, len - 1));
+        }
       });
     });
 
@@ -260,9 +336,66 @@ export class PosShippingStepComponent {
     } else {
       this.calculateShippingCost();
     }
-    // Avanza al sub-paso terminal Costo (índice 1) tras seleccionar método,
-    // salvo preselección de default (advance:false deja Método visible).
+    // Avanza al siguiente sub-paso (Dirección si requiere dirección, o Costo si pickup)
     if (opts?.advance !== false) this.goToShipSubStep(1);
+  }
+
+  onAddressChange(payload: AddressPayload): void {
+    this.address.set(payload);
+  }
+
+  onAddressValidChange(valid: boolean): void {
+    this.addressValid.set(valid);
+  }
+
+  /**
+   * Intenta avanzar un sub-paso dentro del paso Envío:
+   *  - Método (0) → Dirección (1) si requiresAddress(), o Costo (1) si pickup.
+   *  - Dirección (1) → Costo (2), validando la dirección primero.
+   *  - Costo (terminal) → devuelve true para que el shell avance a Cobro.
+   */
+  attemptNextSubStep(): boolean {
+    const current = this.shipSubStep();
+    if (current === 0) {
+      if (!this.selectedShippingMethod()) {
+        this.flashValidation();
+        return false;
+      }
+      this.goToShipSubStep(1);
+      return false;
+    }
+
+    if (this.requiresAddress() && current === 1) {
+      const a = this.address();
+      if (!a?.address_line1 || !a?.city || !this.addressValid()) {
+        this.showAddressErrors.set(true);
+        this.flashSection.set('address');
+        this.flashMessage.set('Completa la dirección de entrega');
+        if (this.flashTimeout) clearTimeout(this.flashTimeout);
+        this.flashTimeout = setTimeout(() => {
+          this.flashSection.set(null);
+          this.flashMessage.set('');
+        }, 3000);
+        return false;
+      }
+      this.goToShipSubStep(2);
+      return false;
+    }
+
+    // Costo sub-step reached (terminal for shipping)
+    return true;
+  }
+
+  /**
+   * Retrocede un sub-paso dentro del paso Envío si no está en el primero (0).
+   * Devuelve true si retrocedió internamente, false si ya estaba en 0 (el shell maneja).
+   */
+  attemptPrevSubStep(): boolean {
+    if (this.shipSubStep() > 0) {
+      this.goToShipSubStep(this.shipSubStep() - 1);
+      return true;
+    }
+    return false;
   }
 
   getShippingIcon(type: string): string {
@@ -347,9 +480,9 @@ export class PosShippingStepComponent {
     if (!method) {
       return { section: 'shipping-method', message: 'Selecciona un método de envío' };
     }
-    if (method.type !== 'pickup') {
+    if (this.requiresAddress()) {
       const a = this.address();
-      if (!a?.address_line1 || !a?.city) {
+      if (!a?.address_line1 || !a?.city || !this.addressValid()) {
         return { section: 'address', message: 'Completa la dirección de envío' };
       }
     }
@@ -457,6 +590,16 @@ export class PosShippingStepComponent {
 
   /** Snapshot de dirección que viaja con la orden (venta o borrador). */
   private buildShippingAddress(): PosShippingAddress {
+    if (this.isPickupMethod()) {
+      return {
+        address_line1: 'Recoger en tienda',
+        city: '',
+        state_province: '',
+        country_code: 'CO',
+        recipient_name: this.customerDisplayName,
+        recipient_phone: this.cartState()?.customer?.phone || '',
+      };
+    }
     const a = this.address();
     return {
       address_line1: a?.address_line1 || '',
@@ -483,7 +626,7 @@ export class PosShippingStepComponent {
       deliveryType: this.resolveDeliveryType(method),
       shippingAddress: this.buildShippingAddress(),
       deliveryNotes: this.notesControl.value || undefined,
-      shippingAddressId: this.addressId(),
+      shippingAddressId: this.isPickupMethod() ? undefined : (this.addressId() ?? undefined),
     };
   }
 
@@ -510,9 +653,15 @@ export class PosShippingStepComponent {
     const customer = this.cartState()?.customer;
     const existingId = this.addressId();
 
-    // Sin cliente o dirección incompleta → procesa sin persistir.
-    if (!customer || !a?.address_line1 || !a?.city) {
-      this.processOrder(shippingAddress, deliveryType, paymentRequest, existingId, creditConfig);
+    // Recoger en tienda, sin cliente o dirección incompleta → procesa sin persistir dirección.
+    if (this.isPickupMethod() || !customer || !a?.address_line1 || !a?.city) {
+      this.processOrder(
+        shippingAddress,
+        deliveryType,
+        paymentRequest,
+        this.isPickupMethod() ? null : existingId,
+        creditConfig,
+      );
       return;
     }
 
@@ -584,7 +733,7 @@ export class PosShippingStepComponent {
       address_line_1: p.address_line1 ?? '',
       city: p.city ?? '',
       state: p.state_province ?? '',
-      country: p.country_code ?? this.countryService.getDefaultCountry(),
+      country: p.country_code ?? this.countryService.getDefaultCountry().code ?? 'CO',
       type: 'shipping',
       customer_id: customerId,
     };

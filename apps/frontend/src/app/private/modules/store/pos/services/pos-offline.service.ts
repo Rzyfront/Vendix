@@ -30,6 +30,14 @@ export interface OfflineStatus {
   storageQuota: number;
 }
 
+/**
+ * STALE (verificado, paso 1 plan POS-stitch, 2026-09-17):
+ * `grep -rn "PosOfflineService" apps/frontend/src/app --include=*.ts | grep -v spec`
+ * devuelve solo este archivo (más menciones en README). Ningún
+ * componente/servicio lo inyecta; la sincronización real (`performSync`) es
+ * simulada (setTimeout + Math.random). NO rediseñar, NO importar desde
+ * código nuevo.
+ */
 @Injectable({
   providedIn: 'root',
 })

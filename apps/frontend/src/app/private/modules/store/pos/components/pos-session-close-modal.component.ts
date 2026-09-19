@@ -79,17 +79,16 @@ function staleExpectedNow(err: unknown): number | null {
       (cancel)="onCancel()"
       [size]="'md'"
       [showCloseButton]="true"
+      [dialog]="true"
     >
       <!-- Header -->
-      <div slot="header" class="flex items-center gap-3">
-        <div
-          class="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center"
-        >
-          <app-icon name="lock" [size]="20" class="text-destructive"></app-icon>
+      <div slot="header" class="sc-header">
+        <div class="sc-header-icon">
+          <app-icon name="lock" [size]="20"></app-icon>
         </div>
         <div>
-          <h2 class="text-lg font-semibold text-text-primary">Cerrar Caja</h2>
-          <p class="text-sm text-text-secondary">
+          <h2 class="sc-title">Cerrar Caja</h2>
+          <p class="sc-subtitle">
             {{ session()?.register?.name || 'Caja' }} — Abierta
             {{ session()?.opened_at | date: 'shortTime' }}
           </p>
@@ -97,31 +96,19 @@ function staleExpectedNow(err: unknown): number | null {
       </div>
 
       <!-- Body -->
-      <div class="space-y-5">
+      <div class="sc-body">
         <!-- Session summary cards -->
         @if (session()) {
-          <div class="grid grid-cols-2 gap-3">
-            <div
-              class="bg-primary/5 border border-primary/20 p-3 rounded-xl text-center"
-            >
-              <p
-                class="text-[10px] font-medium text-text-secondary uppercase tracking-wider mb-1"
-              >
-                Monto Apertura
-              </p>
-              <p class="text-xl font-bold text-text-primary">
+          <div class="sc-cards">
+            <div class="sc-card">
+              <p class="sc-card-label">Monto Apertura</p>
+              <p class="sc-card-amount">
                 {{ session()!.opening_amount | currency: 0 }}
               </p>
             </div>
-            <div
-              class="bg-primary/5 border border-primary/20 p-3 rounded-xl text-center"
-            >
-              <p
-                class="text-[10px] font-medium text-text-secondary uppercase tracking-wider mb-1"
-              >
-                Cajero
-              </p>
-              <p class="text-xl font-bold text-text-primary">
+            <div class="sc-card">
+              <p class="sc-card-label">Cajero</p>
+              <p class="sc-card-amount">
                 {{ session()!.opened_by_user?.first_name }}
                 {{ session()!.opened_by_user?.last_name }}
               </p>
@@ -131,36 +118,26 @@ function staleExpectedNow(err: unknown): number | null {
 
         <!-- Movements Summary -->
         @if (summary()) {
-          <div class="border border-border rounded-xl p-4 space-y-2">
-            <p
-              class="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2"
-            >
-              Resumen de Movimientos
-            </p>
-            <div class="space-y-1.5 text-sm">
-              <div class="flex justify-between">
-                <span class="text-text-secondary">Apertura</span>
-                <span class="font-medium text-text-primary">{{
+          <div class="sc-box">
+            <p class="sc-box-title">Resumen de Movimientos</p>
+            <div class="sc-rows">
+              <div class="sc-row">
+                <span class="sc-row-label">Apertura</span>
+                <span class="sc-row-value">{{
                   summary()?.opening | currency: 0
                 }}</span>
               </div>
 
               @if ((summary()?.sales_by_method?.length ?? 0) > 0) {
-                <p
-                  class="text-[10px] font-semibold text-text-secondary uppercase tracking-wider pt-1"
-                >
-                  Ventas por metodo
-                </p>
+                <p class="sc-box-subtitle">Ventas por metodo</p>
                 @for (
                   entry of summary()?.sales_by_method ?? [];
                   track entry.method
                 ) {
-                  <div class="flex justify-between">
+                  <div class="sc-row">
                     <span
                       [class]="
-                        entry.method === 'cash'
-                          ? 'text-green-600'
-                          : 'text-slate-500'
+                        entry.method === 'cash' ? 'sc-cash' : 'sc-other'
                       "
                     >
                       + {{ methodLabels[entry.method] ?? entry.method }} ({{
@@ -168,12 +145,9 @@ function staleExpectedNow(err: unknown): number | null {
                       }})
                     </span>
                     <span
-                      class="font-medium"
-                      [class]="
-                        entry.method === 'cash'
-                          ? 'text-green-600'
-                          : 'text-slate-500'
-                      "
+                      class="sc-row-value"
+                      [class.sc-cash]="entry.method === 'cash'"
+                      [class.sc-other]="entry.method !== 'cash'"
                     >
                       {{ entry.total | currency: 0 }}
                     </span>
@@ -182,43 +156,39 @@ function staleExpectedNow(err: unknown): number | null {
               }
 
               @if ((summary()?.cash_in ?? 0) > 0) {
-                <div class="flex justify-between">
-                  <span class="text-blue-600">+ Entradas de efectivo</span>
-                  <span class="font-medium text-blue-600">{{
+                <div class="sc-row">
+                  <span class="sc-in">+ Entradas de efectivo</span>
+                  <span class="sc-row-value sc-in">{{
                     summary()?.cash_in | currency: 0
                   }}</span>
                 </div>
               }
               @if ((summary()?.cash_refunds ?? 0) > 0) {
-                <div class="flex justify-between">
-                  <span class="text-red-600">- Reembolsos (efectivo)</span>
-                  <span class="font-medium text-red-600">{{
+                <div class="sc-row">
+                  <span class="sc-out">- Reembolsos (efectivo)</span>
+                  <span class="sc-row-value sc-out">{{
                     summary()?.cash_refunds | currency: 0
                   }}</span>
                 </div>
               }
               @if ((summary()?.cash_out ?? 0) > 0) {
-                <div class="flex justify-between">
-                  <span class="text-amber-600">- Salidas de efectivo</span>
-                  <span class="font-medium text-amber-600">{{
+                <div class="sc-row">
+                  <span class="sc-warn">- Salidas de efectivo</span>
+                  <span class="sc-row-value sc-warn">{{
                     summary()?.cash_out | currency: 0
                   }}</span>
                 </div>
               }
-              <div class="border-t border-border pt-2 flex justify-between">
-                <span class="font-semibold text-text-primary"
-                  >Efectivo Esperado en Caja</span
-                >
-                <span class="font-bold text-text-primary">{{
+              <div class="sc-row sc-expected">
+                <span class="sc-expected-label">Efectivo Esperado en Caja</span>
+                <span class="sc-expected-value">{{
                   summary()?.expected_cash_total | currency: 0
                 }}</span>
               </div>
               @if ((summary()?.non_cash_total ?? 0) > 0) {
-                <div class="flex justify-between text-xs pt-1">
-                  <span class="text-text-secondary"
-                    >Ventas por otros medios</span
-                  >
-                  <span class="text-text-secondary">{{
+                <div class="sc-row sc-noncash">
+                  <span>Ventas por otros medios</span>
+                  <span>{{
                     summary()?.non_cash_total | currency: 0
                   }}</span>
                 </div>
@@ -229,23 +199,19 @@ function staleExpectedNow(err: unknown): number | null {
 
         <!-- Expected cash changed while counting (QUI-572) -->
         @if (expectedChanged()) {
-          <div
-            class="p-4 rounded-xl border bg-amber-50 text-amber-700 border-amber-200 space-y-3"
-          >
-            <div class="flex items-start gap-3">
-              <div
-                class="w-9 h-9 rounded-full bg-amber-100 flex items-center justify-center shrink-0"
-              >
+          <div class="sc-stale" role="alert">
+            <div class="sc-stale-body">
+              <div class="sc-stale-icon">
                 <app-icon name="alert-triangle" [size]="18"></app-icon>
               </div>
-              <div class="min-w-0">
-                <p class="text-sm font-semibold">
+              <div class="sc-stale-text">
+                <p class="sc-stale-title">
                   El efectivo esperado cambió mientras contabas
                 </p>
-                <p class="text-xs opacity-80">
+                <p class="sc-stale-sub">
                   Entró un movimiento en esta caja.
                 </p>
-                <p class="text-base font-bold mt-1">
+                <p class="sc-stale-amounts">
                   {{ staleFrom() | currency: 0 }} →
                   {{ summary()?.expected_cash_total | currency: 0 }}
                 </p>
@@ -253,7 +219,7 @@ function staleExpectedNow(err: unknown): number | null {
             </div>
             <app-button
               variant="outline-warning"
-              size="sm"
+              size="md"
               (clicked)="acceptNewExpected()"
             >
               <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
@@ -263,7 +229,7 @@ function staleExpectedNow(err: unknown): number | null {
         }
 
         <!-- Form -->
-        <form [formGroup]="form" class="space-y-4">
+        <form [formGroup]="form" class="sc-form">
           <app-input
             formControlName="actual_closing_amount"
             label="Conteo Real de Efectivo"
@@ -289,27 +255,21 @@ function staleExpectedNow(err: unknown): number | null {
         <!-- Difference indicator (shown after closing) -->
         @if (difference() !== null) {
           <div
-            class="p-4 rounded-xl flex items-center gap-3 border"
-            [class]="
-              (difference() ?? 0) >= 0
-                ? 'bg-green-50 text-green-700 border-green-200'
-                : 'bg-red-50 text-red-700 border-red-200'
-            "
+            class="sc-diff"
+            [class.sc-diff-plus]="(difference() ?? 0) >= 0"
+            [class.sc-diff-minus]="(difference() ?? 0) < 0"
           >
-            <div
-              class="w-9 h-9 rounded-full flex items-center justify-center"
-              [class]="(difference() ?? 0) >= 0 ? 'bg-green-100' : 'bg-red-100'"
-            >
+            <div class="sc-diff-icon">
               <app-icon
                 [name]="(difference() ?? 0) >= 0 ? 'trending-up' : 'trending-down'"
                 [size]="18"
               ></app-icon>
             </div>
             <div>
-              <p class="text-xs font-medium opacity-70">
+              <p class="sc-diff-label">
                 {{ (difference() ?? 0) >= 0 ? 'Sobrante' : 'Faltante' }}
               </p>
-              <p class="text-lg font-bold">
+              <p class="sc-diff-amount">
                 {{
                   ((difference() ?? 0) >= 0 ? (difference() ?? 0) : -(difference() ?? 0))
                     | currency: 0
@@ -321,7 +281,7 @@ function staleExpectedNow(err: unknown): number | null {
       </div>
 
       <!-- Footer -->
-      <div slot="footer" class="flex justify-end gap-2">
+      <div slot="footer" class="sc-footer">
         <app-button variant="secondary" size="md" (clicked)="onCancel()">
           Cancelar
         </app-button>
@@ -345,6 +305,260 @@ function staleExpectedNow(err: unknown): number | null {
       </div>
     </app-modal>
   `,
+  styles: [`
+    /* Stitch paso 7 — cierre con arqueo: tarjetas de resumen, desglose de
+       movimientos con colores de signo en tonos 700/800 (AA sobre tint 50),
+       banner QUI-572 en warning sólido y foco 3px primary. Textos
+       informativos en neutral-600 (text-secondary falla AA). */
+    .sc-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .sc-header-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 999px;
+      background: var(--color-error-50);
+      color: var(--color-error-700);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .sc-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--color-text-primary);
+      margin: 0;
+    }
+
+    .sc-subtitle {
+      font-size: 14px;
+      color: var(--color-neutral-600);
+      margin: 0;
+    }
+
+    .sc-body {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .sc-cards {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .sc-card {
+      background: var(--color-surface-secondary);
+      border: 1px solid var(--color-border);
+      border-radius: 16px;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .sc-card-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-neutral-600);
+      margin: 0 0 4px;
+    }
+
+    .sc-card-amount {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--color-text-primary);
+      margin: 0;
+    }
+
+    .sc-box {
+      border: 1px solid var(--color-border);
+      border-radius: 16px;
+      padding: 16px;
+    }
+
+    .sc-box-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-neutral-600);
+      margin: 0 0 8px;
+    }
+
+    .sc-box-subtitle {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-neutral-600);
+      margin: 0;
+      padding-top: 4px;
+    }
+
+    .sc-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 14px;
+    }
+
+    .sc-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .sc-row-label {
+      color: var(--color-neutral-600);
+    }
+
+    .sc-row-value {
+      font-weight: 500;
+      color: var(--color-text-primary);
+      text-align: right;
+    }
+
+    .sc-cash { color: var(--color-success-700); }
+    .sc-other { color: var(--color-neutral-600); }
+    .sc-in { color: var(--color-info-700); }
+    .sc-out { color: var(--color-error-700); }
+    .sc-warn { color: var(--color-warning-800); }
+
+    .sc-expected {
+      border-top: 1px solid var(--color-border);
+      padding-top: 8px;
+    }
+
+    .sc-expected-label {
+      font-weight: 600;
+      color: var(--color-text-primary);
+    }
+
+    .sc-expected-value {
+      font-weight: 700;
+      color: var(--color-text-primary);
+    }
+
+    .sc-noncash {
+      font-size: 12px;
+      color: var(--color-neutral-600);
+      padding-top: 4px;
+    }
+
+    .sc-stale {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid var(--color-warning-200);
+      background: var(--color-warning-50);
+      color: var(--color-warning-800);
+    }
+
+    .sc-stale-body {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .sc-stale-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      background: var(--color-warning-100);
+      color: var(--color-warning-700);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .sc-stale-text { min-width: 0; }
+
+    .sc-stale-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    .sc-stale-sub {
+      font-size: 12px;
+      margin: 0;
+      color: var(--color-warning-800);
+    }
+
+    .sc-stale-amounts {
+      font-size: 16px;
+      font-weight: 700;
+      margin: 4px 0 0;
+    }
+
+    .sc-form {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .sc-diff {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid;
+    }
+
+    .sc-diff-plus {
+      background: var(--color-success-50);
+      border-color: var(--color-success-200);
+      color: var(--color-success-800);
+    }
+
+    .sc-diff-minus {
+      background: var(--color-error-50);
+      border-color: var(--color-error-200);
+      color: var(--color-error-800);
+    }
+
+    .sc-diff-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .sc-diff-plus .sc-diff-icon { background: var(--color-success-100); }
+    .sc-diff-minus .sc-diff-icon { background: var(--color-error-100); }
+
+    .sc-diff-label {
+      font-size: 12px;
+      font-weight: 500;
+      margin: 0;
+    }
+
+    .sc-diff-amount {
+      font-size: 18px;
+      font-weight: 700;
+      margin: 0;
+    }
+
+    .sc-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+  `],
 })
 export class PosSessionCloseModalComponent {
   private destroyRef = inject(DestroyRef);

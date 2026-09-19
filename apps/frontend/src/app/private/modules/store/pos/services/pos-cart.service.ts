@@ -223,8 +223,24 @@ export class PosCartService {
         return null;
       }
 
+      let loadedCustomer = parsed.state.customer;
+      if (loadedCustomer) {
+        const full = [loadedCustomer.first_name, loadedCustomer.last_name].filter(Boolean).join(' ').trim();
+        loadedCustomer = {
+          ...loadedCustomer,
+          name:
+            loadedCustomer.name?.trim() ||
+            full ||
+            loadedCustomer.legal_name?.trim() ||
+            loadedCustomer.business_name?.trim() ||
+            loadedCustomer.email?.trim() ||
+            'Cliente',
+        };
+      }
+
       return {
         ...parsed.state,
+        customer: loadedCustomer,
         createdAt: parsed.state.createdAt ? new Date(parsed.state.createdAt) : new Date(),
         updatedAt: parsed.state.updatedAt ? new Date(parsed.state.updatedAt) : new Date(),
       };
@@ -436,6 +452,14 @@ export class PosCartService {
       return of(state);
     }
 
+    // Matriz de permisos POS→price-tiers (paso 1 plan POS-stitch; backend:
+    // price-tiers.controller.ts @Controller('store/price-tiers'), vía
+    // PriceTierCacheService → PriceTiersService). El POS solo lee:
+    // - getActiveTiers → GET /store/price-tiers → 'store:price-tiers:read'
+    // - getProductOverrides → GET /store/price-tiers/products/:id/overrides
+    //   → 'store:price-tiers:read'
+    // (Mismos 2 endpoints consumen pos-cart.component.ts y
+    // pos-cart-modal.component.ts vía el mismo caché.)
     return forkJoin({
       tiers: this.priceTierCache.getActiveTiers(),
       overrides: this.priceTierCache.getProductOverrides(productId),
@@ -559,10 +583,24 @@ export class PosCartService {
   setCustomer(customer: PosCustomer | null): Observable<CartState> {
     return of(customer).pipe(
       map((cust) => {
+        let normalizedCust = cust;
+        if (cust) {
+          const full = [cust.first_name, cust.last_name].filter(Boolean).join(' ').trim();
+          normalizedCust = {
+            ...cust,
+            name:
+              cust.name?.trim() ||
+              full ||
+              (cust as any).legal_name?.trim() ||
+              (cust as any).business_name?.trim() ||
+              cust.email?.trim() ||
+              'Cliente',
+          };
+        }
         const currentState = this.cartState();
         return {
           ...currentState,
-          customer: cust,
+          customer: normalizedCust,
           updatedAt: new Date(),
         };
       }),
@@ -974,9 +1012,16 @@ export class PosCartService {
     if (!u || (!u.id && !u.user_id)) return null;
     const id = Number(u.id ?? u.user_id ?? 0) || 0;
     if (!id) return null;
+    const full = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
     return {
       id,
-      name: `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() || u.name || '',
+      name:
+        u.name?.trim() ||
+        full ||
+        u.legal_name?.trim() ||
+        u.business_name?.trim() ||
+        u.email ||
+        'Cliente',
       first_name: u.first_name ?? '',
       last_name: u.last_name ?? '',
       email: u.email ?? '',
@@ -2565,7 +2610,12 @@ export class PosCartService {
       taxAmount: this.calculateItemTaxWithBase(item.product, item.unitPrice, taxMultiplier),
       finalPrice: finalUnitPrice,
       totalPrice: newTotalPrice,
-      notes: request.notes || item.notes,
+      // PSVERSION0001 paso 5 — `request.notes || item.notes` hacía imposible
+      // BORRAR una nota (undefined/'' caían al valor viejo): el "Quitar nota"
+      // de QUI-787 mostraba éxito pero la nota sobrevivía. La presencia de la
+      // clave distingue intención: ambos editores de nota la pasan siempre,
+      // los cambios solo-cantidad la omiten y preservan.
+      notes: 'notes' in request ? request.notes : item.notes,
     };
 
     return {

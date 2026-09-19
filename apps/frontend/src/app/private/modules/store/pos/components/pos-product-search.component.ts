@@ -27,11 +27,12 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
       <div class="search-header">
         <div class="search-input-group">
           <div class="search-input-wrapper">
-            <i class="fas fa-search search-icon"></i>
+            <app-icon name="search" [size]="18" class="search-icon"></app-icon>
             <input
               type="text"
               class="search-input"
               placeholder="Buscar productos por nombre, SKU o código de barras..."
+              aria-label="Buscar productos por nombre, SKU o código de barras"
               [(ngModel)]="searchQuery"
               (input)="onSearchInput($event)"
               (keyup.enter)="performSearch()"
@@ -42,8 +43,9 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
                 class="clear-search-btn"
                 (click)="clearSearch()"
                 type="button"
+                aria-label="Limpiar búsqueda"
               >
-                <i class="fas fa-times"></i>
+                <app-icon name="x" [size]="16"></app-icon>
               </button>
             }
           </div>
@@ -54,9 +56,11 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
             class="filter-toggle-btn"
             (click)="toggleFilters()"
             [class.active]="showFilters"
+            [attr.aria-expanded]="showFilters"
+            aria-label="Mostrar u ocultar filtros de búsqueda"
             type="button"
           >
-            <i class="fas fa-filter"></i>
+            <app-icon name="filter" [size]="16"></app-icon>
             Filtros
             @if (activeFiltersCount > 0) {
               <span class="filter-count">
@@ -188,7 +192,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
                 class="suggestion-item"
                 (click)="selectSuggestion(suggestion)"
               >
-                <i class="fas fa-history"></i>
+                <app-icon name="history" [size]="14"></app-icon>
                 {{ suggestion }}
               </div>
             }
@@ -201,10 +205,22 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
     `
       .product-search-container {
         background: var(--color-surface);
+        border: 1px solid var(--color-border);
         border-radius: 12px;
         padding: 20px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         margin-bottom: 20px;
+      }
+
+      /* Stitch paso 2 — foco visible por teclado en todo control del buscador. */
+      .search-input:focus-visible,
+      .filter-select:focus-visible,
+      .filter-input:focus-visible,
+      .clear-search-btn:focus-visible,
+      .filter-toggle-btn:focus-visible,
+      .btn:focus-visible {
+        outline: 3px solid var(--color-primary);
+        outline-offset: 2px;
       }
 
       .variants-warning-banner {
@@ -249,39 +265,48 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
       .search-icon {
         position: absolute;
         left: 12px;
-        color: #6b7280;
+        color: var(--color-neutral-600);
         z-index: 1;
+        display: inline-flex;
       }
 
       .search-input {
         width: 100%;
-        padding: 12px 16px 12px 40px;
-        border: 2px solid #e5e7eb;
+        padding: 12px 52px 12px 40px;
+        border: 2px solid var(--color-border);
         border-radius: 8px;
         font-size: 16px;
+        background: var(--color-surface);
+        color: var(--color-text-primary);
         transition: border-color 0.3s ease;
       }
 
       .search-input:focus {
         outline: none;
-        border-color: #3b82f6;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 3px var(--color-primary-light);
       }
 
       .clear-search-btn {
         position: absolute;
-        right: 12px;
+        right: 2px;
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         background: none;
         border: none;
-        color: #6b7280;
+        color: var(--color-neutral-600);
         cursor: pointer;
         padding: 4px;
-        border-radius: 4px;
+        border-radius: 8px;
         transition: background-color 0.3s ease;
       }
 
       .clear-search-btn:hover {
-        background-color: var(--color-neutral-100);
+        background-color: var(--color-primary-light);
+        color: var(--color-text-primary);
       }
 
       .search-actions {
@@ -294,24 +319,32 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
         align-items: center;
         gap: 8px;
         padding: 12px 16px;
-        background-color: var(--color-neutral-100);
-        border: 2px solid #e5e7eb;
+        min-height: 44px;
+        background-color: var(--color-surface);
+        border: 2px solid var(--color-border);
         border-radius: 8px;
-        color: #374151;
+        color: var(--color-text-primary);
         cursor: pointer;
         transition: all 0.3s ease;
         position: relative;
       }
 
-      .filter-toggle-btn:hover,
+      /* Stitch paso 11 — el hover no aplica sobre .active (texto blanco
+         sobre fondo oscuro; pintarlo text-primary lo haría ilegible). */
+      .filter-toggle-btn:hover:not(.active) {
+        border-color: var(--color-primary);
+        color: var(--color-text-primary);
+      }
+
+      /* Stitch paso 11 — fondo success-700 (AA con blanco); primary fallaba. */
       .filter-toggle-btn.active {
-        background-color: #3b82f6;
-        border-color: #3b82f6;
-        color: white;
+        background-color: var(--color-success-700);
+        border-color: var(--color-success-700);
+        color: var(--color-text-on-primary);
       }
 
       .filter-count {
-        background-color: #ef4444;
+        background-color: var(--color-error);
         color: white;
         border-radius: 50%;
         width: 20px;
@@ -324,7 +357,8 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
       }
 
       .search-filters {
-        background-color: var(--color-neutral-50);
+        background-color: var(--color-surface);
+        border: 1px solid var(--color-border);
         border-radius: 8px;
         padding: 20px;
         margin-bottom: 16px;
@@ -345,24 +379,27 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
 
       .filter-group label {
         font-weight: 500;
-        color: #374151;
+        color: var(--color-text-primary);
         font-size: 14px;
       }
 
       .filter-select,
       .filter-input {
         padding: 8px 12px;
-        border: 1px solid #d1d5db;
+        min-height: 44px;
+        border: 1px solid var(--color-border);
         border-radius: 6px;
         font-size: 14px;
+        background: var(--color-surface);
+        color: var(--color-text-primary);
         transition: border-color 0.3s ease;
       }
 
       .filter-select:focus,
       .filter-input:focus {
         outline: none;
-        border-color: #3b82f6;
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 3px var(--color-primary-light);
       }
 
       .checkbox-label {
@@ -384,6 +421,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
 
       .btn {
         padding: 8px 16px;
+        min-height: 44px;
         border: none;
         border-radius: 6px;
         font-size: 14px;
@@ -392,28 +430,30 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
         transition: all 0.3s ease;
       }
 
+      /* Stitch paso 11 — fondo success-700 (AA con blanco); primary fallaba. */
       .btn-primary {
-        background-color: #3b82f6;
-        color: white;
+        background-color: var(--color-success-700);
+        color: var(--color-text-on-primary);
       }
 
       .btn-primary:hover {
-        background-color: #2563eb;
+        filter: brightness(0.92);
       }
 
       .btn-secondary {
-        background-color: #6b7280;
-        color: white;
+        background-color: var(--color-surface);
+        color: var(--color-text-primary);
+        border: 1px solid var(--color-border);
       }
 
       .btn-secondary:hover {
-        background-color: #4b5563;
+        border-color: var(--color-primary);
       }
 
       .search-suggestions {
         position: relative;
         background-color: var(--color-surface);
-        border: 1px solid #e5e7eb;
+        border: 1px solid var(--color-border);
         border-radius: 8px;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
         z-index: 10;
@@ -429,9 +469,11 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
         align-items: center;
         gap: 12px;
         padding: 12px 16px;
+        min-height: 44px;
         cursor: pointer;
         transition: background-color 0.3s ease;
-        border-bottom: 1px solid #f3f4f6;
+        border-bottom: 1px solid var(--color-border);
+        color: var(--color-text-primary);
       }
 
       .suggestion-item:last-child {
@@ -439,12 +481,12 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
       }
 
       .suggestion-item:hover {
-        background-color: var(--color-neutral-50);
+        background-color: var(--color-primary-light);
       }
 
-      .suggestion-item i {
-        color: #6b7280;
-        font-size: 14px;
+      .suggestion-item app-icon {
+        color: var(--color-neutral-600);
+        display: inline-flex;
       }
 
       @media (max-width: 768px) {

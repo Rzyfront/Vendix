@@ -98,16 +98,31 @@ import { AddCustomItemRequest } from '../../models/cart.model';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [InvoiceCustomItemModalComponent],
   template: `
-    <vendix-invoice-custom-item-modal
-      [open]="open()"
-      [draft]="null"
-      [taxes]="taxOptions()"
-      [isAiu]="false"
-      [isEditing]="false"
-      (saved)="onSaved($event)"
-      (closed)="closed.emit()"
-    />
+    <div class="pos-ci-aa">
+      <vendix-invoice-custom-item-modal
+        [open]="open()"
+        [draft]="null"
+        [taxes]="taxOptions()"
+        [isAiu]="false"
+        [isEditing]="false"
+        (saved)="onSaved($event)"
+        (closed)="closed.emit()"
+      />
+    </div>
   `,
+  styles: [`
+    /* Stitch 11b (8b) — el modal fiscal (otro módulo, fuera de alcance) pinta
+       "Agregar impuesto" en primary #2ecc71 (2.1:1) con min-h 38px. Se remapea
+       la var heredada a success-700 (~5.0:1) y se eleva el target a 44px con
+       ::ng-deep (precedente en pos-ai-summary-modal). Solo este subárbol. */
+    .pos-ci-aa {
+      --color-primary: var(--color-success-700);
+    }
+
+    .pos-ci-aa ::ng-deep button[class*="min-h-[38px]"] {
+      min-height: 44px;
+    }
+  `],
 })
 export class PosCustomItemModalComponent {
   private readonly toast = inject(ToastService);
