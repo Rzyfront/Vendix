@@ -26,6 +26,7 @@ import {
       [isOpen]="isOpen()"
       (isOpenChange)="$event || onClose()"
       size="md"
+      [dialog]="true"
     >
       <!-- Header with AI styling -->
       <div slot="header" class="ai-summary-header">
@@ -33,19 +34,19 @@ import {
           <app-icon name="sparkles" [size]="20"></app-icon>
         </div>
         <div>
-          <h2 class="text-lg font-semibold" style="color: var(--color-text-primary)">Resumen IA del Cierre</h2>
-          <p class="text-sm" style="color: var(--color-text-secondary)">Analisis generado por inteligencia artificial</p>
+          <h2 class="ai-summary-title">Resumen IA del Cierre</h2>
+          <p class="ai-summary-subtitle">Analisis generado por inteligencia artificial · Solo lectura</p>
         </div>
       </div>
 
       <!-- Body -->
       <div class="ai-summary-body" #scrollContainer>
         @if (status() === 'loading') {
-          <div class="ai-loading-state">
-            <div class="ai-thinking-dots">
+          <div class="ai-loading-state" role="status" aria-live="polite">
+            <div class="ai-thinking-dots" aria-hidden="true">
               <span></span><span></span><span></span>
             </div>
-            <p class="text-sm" style="color: var(--color-text-secondary); margin-top: 8px">
+            <p class="ai-loading-text">
               Analizando movimientos del turno...
             </p>
           </div>
@@ -55,7 +56,7 @@ import {
           <div class="ai-content-area">
             <div class="ai-markdown-content" [innerHTML]="renderedHtml()"></div>
             @if (status() === 'streaming') {
-              <span class="ai-cursor"></span>
+              <span class="ai-cursor" aria-hidden="true"></span>
             }
           </div>
           @if (status() === 'done') {
@@ -67,16 +68,16 @@ import {
         }
 
         @if (status() === 'error') {
-          <div class="ai-error-state">
+          <div class="ai-error-state" role="alert">
             <app-icon name="alert-circle" [size]="24"></app-icon>
-            <p class="text-sm">{{ errorMessage() }}</p>
-            <button class="ai-retry-btn" (click)="retry()">Reintentar</button>
+            <p class="ai-error-text">{{ errorMessage() }}</p>
+            <button type="button" class="ai-retry-btn" (click)="retry()">Reintentar</button>
           </div>
         }
       </div>
 
       <!-- Footer -->
-      <div slot="footer" class="flex justify-end">
+      <div slot="footer" class="ai-summary-footer">
         <app-button [variant]="'secondary'" [size]="'md'" (clicked)="onClose()">
           Cerrar
         </app-button>
@@ -85,10 +86,27 @@ import {
   `,
   styles: [
     `
+      /* Stitch paso 7 — resumen IA (lectura): subtítulo y estados en
+         neutral-600 (text-secondary falla AA), reintentar con target 44px
+         y foco 3px primary. El resumen nunca escribe: sin cambios de
+         comportamiento. */
       .ai-summary-header {
         display: flex;
         align-items: center;
         gap: 12px;
+      }
+
+      .ai-summary-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+        margin: 0;
+      }
+
+      .ai-summary-subtitle {
+        font-size: 14px;
+        color: var(--color-neutral-600);
+        margin: 0;
       }
 
       .ai-summary-icon {
@@ -178,6 +196,12 @@ import {
         padding: 48px 0;
       }
 
+      .ai-loading-text {
+        font-size: 14px;
+        color: var(--color-neutral-600);
+        margin: 8px 0 0;
+      }
+
       .ai-thinking-dots {
         display: flex;
         gap: 6px;
@@ -210,23 +234,35 @@ import {
         align-items: center;
         gap: 12px;
         padding: 48px 0;
-        color: var(--color-text-secondary);
+        color: var(--color-neutral-600);
+      }
+
+      .ai-error-text {
+        font-size: 14px;
+        margin: 0;
+        text-align: center;
       }
 
       .ai-retry-btn {
-        padding: 6px 16px;
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 500;
+        min-height: 44px;
+        padding: 10px 24px;
+        border-radius: 12px;
+        font-size: 14px;
+        font-weight: 600;
         background: rgba(var(--color-primary-rgb), 0.1);
         color: rgb(var(--color-primary-rgb));
         border: 1px solid rgba(var(--color-primary-rgb), 0.2);
         cursor: pointer;
-        transition: all 0.2s ease;
+        transition: background-color 0.2s ease;
       }
 
       .ai-retry-btn:hover {
         background: rgba(var(--color-primary-rgb), 0.15);
+      }
+
+      .ai-retry-btn:focus-visible {
+        outline: 3px solid var(--color-primary);
+        outline-offset: 2px;
       }
 
       .ai-saved-indicator {
@@ -234,12 +270,25 @@ import {
         align-items: center;
         gap: 6px;
         margin-top: 12px;
-        font-size: 12px;
-        color: var(--color-text-secondary);
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--color-neutral-600);
       }
 
       .ai-saved-indicator app-icon {
-        color: #22c55e;
+        color: var(--color-success-600);
+      }
+
+      .ai-summary-footer {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .ai-cursor,
+        .ai-thinking-dots span {
+          animation: none;
+        }
       }
     `,
   ],

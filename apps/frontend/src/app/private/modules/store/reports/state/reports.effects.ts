@@ -4,7 +4,16 @@ import { Store } from '@ngrx/store';
 import { of, EMPTY } from 'rxjs';
 import { map, mergeMap, catchError, tap, withLatestFrom } from 'rxjs/operators';
 import { ReportsActions } from './reports.actions';
-import { selectSelectedReport, selectDateRange, selectFiscalPeriodId, selectCurrentPage, selectItemsPerPage } from './reports.selectors';
+import {
+  selectSelectedReport,
+  selectDateRange,
+  selectFiscalPeriodId,
+  selectCurrentPage,
+  selectItemsPerPage,
+  selectReportMeta,
+  selectReportData,
+  selectTotalItems,
+} from './reports.selectors';
 import { ReportsDataService } from '../services/reports-data.service';
 import { ReportExportService } from '../services/report-export.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -35,6 +44,30 @@ export class ReportsEffects {
       ),
       tap(() => this.reportsDataService.clearCache()),
       map(() => ReportsActions.loadReportData()),
+    ),
+  );
+
+  reloadOnPageChange$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(ReportsActions.setPage),
+      withLatestFrom(
+        this.store.select(selectSelectedReport),
+        this.store.select(selectReportMeta),
+        this.store.select(selectReportData),
+        this.store.select(selectTotalItems),
+      ),
+      mergeMap(([, report, reportMeta, reportData, totalItems]) => {
+        const isServerPaginated =
+          Boolean(report?.serverPagination) ||
+          Boolean(reportMeta?.['pagination']) ||
+          Number(reportMeta?.['totalPages']) > 1 ||
+          (reportMeta?.['total'] != null && totalItems > (reportData?.length ?? 0));
+
+        if (isServerPaginated) {
+          return of(ReportsActions.loadReportData());
+        }
+        return EMPTY;
+      }),
     ),
   );
 

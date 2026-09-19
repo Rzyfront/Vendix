@@ -732,6 +732,40 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/inventory/movement-summary',
   },
 
+  {
+    id: 'inventory-ingredient-consumption',
+    category: 'inventory',
+    title: 'Consumo de Insumos',
+    description: 'Insumos gastados y su costo consolidado por plato y receta',
+    detailedDescription:
+      'Vista consolidada de los insumos y materias primas consumidos en la cocina durante el período. Muestra cantidades gastadas, costo total y el desglose de qué platos o preparaciones requirieron cada insumo.',
+    icon: 'utensils',
+    route: '/admin/reports/inventory/inventory-ingredient-consumption',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'ingredient_id',
+    columns: [
+      { key: 'ingredient_name', header: 'Insumo / Ingrediente', type: 'text' },
+      { key: 'dish_name', header: 'Plato / Preparación', type: 'text' },
+      { key: 'dish_quantity', header: 'Cant. Platos', type: 'number', footer: 'sum' },
+      { key: 'consumed_quantity', header: 'Cant. Consumida', type: 'number', footer: 'sum' },
+      { key: 'unit', header: 'Unidad', type: 'text' },
+      { key: 'unit_cost', header: 'Costo Unit.', type: 'currency' },
+      { key: 'total_cost', header: 'Costo Total', type: 'currency', footer: 'sum' },
+      { key: 'orders_count', header: 'Órdenes', type: 'number', footer: 'sum' },
+    ],
+    exportFilename: 'consumo_insumos',
+    stats: [
+      { key: 'total_cost', label: 'Costo Total Insumos', type: 'currency', icon: 'dollar-sign' },
+      { key: 'total_ingredients', label: 'Insumos Utilizados', type: 'number', icon: 'package' },
+      { key: 'total_dishes', label: 'Platos Preparados', type: 'number', icon: 'utensils' },
+      { key: 'total_movements', label: 'Movimientos Consumo', type: 'number', icon: 'arrow-left-right' },
+    ],
+    dataEndpoint: 'store/analytics/inventory/ingredient-consumption',
+    exportEndpoint: 'store/analytics/inventory/ingredient-consumption/export',
+  },
+
   // ─── PRODUCTOS (3) ────────────────────────────────────────────────────────────
 
   {
@@ -828,7 +862,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportEndpoint: 'store/analytics/products/profitability/export',
   },
 
-  // ─── CLIENTES (4) ─────────────────────────────────────────────────────────────
+  // ─── CLIENTES (5) ─────────────────────────────────────────────────────────────
 
   {
     id: 'customer-summary',
@@ -965,6 +999,45 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/customers/top',
     exportEndpoint: 'store/analytics/customers/top/export',
+  },
+
+  {
+    // QUI-540: Cuentas por cobrar de clientes (open + partial) con
+    // bucketing de antigüedad (0-30 / 31-60 / 61-90 / 90+).
+    // Preview tabular paginado (type: 'list') con totales en el footer.
+    id: 'customers-receivable',
+    category: 'customers',
+    title: 'Cuentas por Cobrar',
+    description: 'Cartera abierta de clientes con bucketing de antigüedad',
+    detailedDescription:
+      'Listado de cuentas por cobrar pendientes o parciales con días de mora y bucketing de antigüedad (0-30, 31-60, 61-90, 90+ días). Permite priorizar la gestión de cobro.',
+    icon: 'hand-coins',
+    route: '/admin/reports/customers/customers-receivable',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    serverPagination: true,
+    trackKey: 'id',
+    columns: [
+      { key: 'document_number', header: 'ID de Órdenes', type: 'text' },
+      { key: 'customer_name', header: 'Cliente', type: 'text' },
+      { key: 'due_date', header: 'Vencimiento', type: 'date' },
+      { key: 'installment_info', header: 'Cuota', type: 'text' },
+      { key: 'days_overdue', header: 'Días Mora', type: 'number' },
+      { key: 'original_amount', header: 'Monto Original', type: 'currency', footer: 'sum' },
+      { key: 'paid_amount', header: 'Pagado', type: 'currency', footer: 'sum' },
+      { key: 'balance', header: 'Saldo', type: 'currency', footer: 'sum' },
+      { key: 'status_label', header: 'Estado', type: 'text' },
+    ],
+    exportFilename: 'cuentas_por_cobrar',
+    stats: [
+      { key: 'balance', label: 'Saldo Total', type: 'currency', icon: 'dollar-sign' },
+      { key: 'original_amount', label: 'Total Cartera', type: 'currency', icon: 'receipt' },
+      { key: 'paid_amount', label: 'Total Recaudado', type: 'currency', icon: 'check-circle' },
+      { key: '_count', label: 'Documentos', type: 'number', icon: 'file-text' },
+    ],
+    dataEndpoint: 'store/analytics/customers/receivable',
+    exportEndpoint: 'store/analytics/customers/receivable/export',
   },
 
   // ─── CONTABILIDAD (11) ────────────────────────────────────────────────────────

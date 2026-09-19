@@ -127,6 +127,18 @@ const ACTIVE_MENU_TTL_MS = 60_000;
  * their availability windows. A short TTL (60s) avoids hammering
  * the backend on every product reload while still picking up menu
  * edits within a minute.
+ *
+ * ── Frontera mesas/cocina (paso 10 plan POS-stitch, 2026-09-18) ──
+ * Este servicio es el ÚNICO puente vivo restaurante↔POS: todo lo que el
+ * POS necesita de cocina/mesas (fire, preview, open/add-items/close/split
+ * de table-sessions, menú activo) pasa por acá. Consumidores verificados
+ * dentro de `pos/`: `pos.component`, `pos-product-selection`,
+ * `pos-checkout-shell`, `pos-consumo-step`, `pos-open-table-modal`,
+ * `pos-split-bill-modal`.
+ * FUERA de alcance del rediseño: el KDS (pantallas de cocina) y las
+ * superficies de mesas viven fuera de `pos/` y NO se tocan; el POS solo
+ * dispara acciones contra ellos vía este puente y nunca renderiza sus
+ * superficies. No agregar un segundo puente: extender este servicio.
  */
 @Injectable({ providedIn: 'root' })
 export class PosRestaurantIntegrationService {

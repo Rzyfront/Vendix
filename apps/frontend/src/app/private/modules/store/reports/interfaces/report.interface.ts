@@ -52,6 +52,7 @@ export interface ReportDefinition {
   trackKey?: string;
   summaryLayout?: SummaryLayoutConfig;
   stats?: ReportStatField[];
+  serverPagination?: boolean;
 }
 
 export interface ReportAdaptedData {

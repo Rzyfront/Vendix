@@ -11,6 +11,17 @@ type MockStorePrismaService = {
   store_settings: { findFirst: jest.Mock };
   $queryRaw: jest.Mock;
   withoutScope: jest.Mock;
+  accounts_receivable?: {
+    count: jest.Mock;
+    findMany: jest.Mock;
+    aggregate: jest.Mock;
+  };
+  order_installments?: {
+    findMany: jest.Mock;
+  };
+  agreement_installments?: {
+    findMany: jest.Mock;
+  };
 } & Partial<StorePrismaService>;
 
 describe('CustomersAnalyticsService.getAbandonedCartsSummary (QUI-628)', () => {
@@ -178,3 +189,228 @@ describe('CustomersAnalyticsService.getAbandonedCartsSummary (QUI-628)', () => {
     expect(sqls.some((s) => s.includes("c.state = 'converted'"))).toBe(true);
   });
 });
+
+describe('CustomersAnalyticsService.getAccountsReceivable (QUI-540)', () => {
+  let service: CustomersAnalyticsService;
+  let prisma: MockStorePrismaService;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    prisma = {
+      store_settings: { findFirst: jest.fn() },
+      $queryRaw: jest.fn(),
+      withoutScope: jest.fn(),
+      accounts_receivable: {
+        count: jest.fn(),
+        findMany: jest.fn(),
+        aggregate: jest.fn(),
+      },
+      order_installments: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      agreement_installments: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    } as MockStorePrismaService;
+
+    jest
+      .spyOn(RequestContextService, 'getContext')
+      .mockReturnValue({ store_id: 10, organization_id: 2, is_super_admin: false, is_owner: false });
+
+    service = new CustomersAnalyticsService(prisma as any);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('queries open and partial accounts_receivable with positive balance', async () => {
+    const mockReceivables = [
+      {
+        id: 1,
+        customer_id: 101,
+        source_type: 'order',
+        source_id: 50,
+        document_number: 'REC-001',
+        original_amount: 1000,
+        paid_amount: 200,
+        balance: 800,
+        currency: 'COP',
+        issue_date: new Date('2026-06-01'),
+        due_date: new Date('2026-06-15'),
+        days_overdue: 25,
+        last_payment_date: null,
+        status: 'partial',
+        customer: {
+          first_name: 'Juan',
+          last_name: 'Perez',
+          email: 'juan@example.com',
+          document_number: '12345678',
+        },
+      },
+      {
+        id: 2,
+        customer_id: 102,
+        source_type: 'order',
+        source_id: 51,
+        document_number: 'REC-002',
+        original_amount: 500,
+        paid_amount: 0,
+        balance: 500,
+        currency: 'COP',
+        issue_date: new Date('2026-05-01'),
+        due_date: new Date('2026-05-10'),
+        days_overdue: 75,
+        last_payment_date: null,
+        status: 'open',
+        customer: null,
+      },
+    ];
+
+    prisma.accounts_receivable!.count.mockResolvedValue(2);
+    prisma.accounts_receivable!.findMany.mockResolvedValue(mockReceivables);
+
+    const result = await service.getAccountsReceivable({ page: 1, limit: 10 } as any);
+
+    expect(prisma.accounts_receivable!.count).toHaveBeenCalledWith({
+      where: {
+        store_id: 10,
+        status: { in: ['open', 'partial'] },
+        balance: { gt: 0 },
+      },
+    });
+
+    expect(prisma.accounts_receivable!.findMany).toHaveBeenCalledWith({
+      where: {
+        store_id: 10,
+        status: { in: ['open', 'partial'] },
+        balance: { gt: 0 },
+      },
+      select: expect.any(Object),
+      orderBy: { due_date: 'asc' },
+      skip: 0,
+      take: 10,
+    });
+
+    expect(result.total).toBe(2);
+    expect(result.page).toBe(1);
+    expect(result.limit).toBe(10);
+    expect(result.data).toHaveLength(2);
+
+    expect(result.data[0]).toEqual({
+      id: 1,
+      customer_id: 101,
+      customer_name: 'Juan Perez',
+      customer_email: 'juan@example.com',
+      customer_document: '12345678',
+      document_number: 'REC-001',
+      source_type: 'order',
+      source_id: 50,
+      issue_date: mockReceivables[0].issue_date,
+      due_date: mockReceivables[0].due_date,
+      days_overdue: 25,
+      aging_bucket: '0-30',
+      original_amount: 1000,
+      paid_amount: 200,
+      balance: 800,
+      currency: 'COP',
+      status: 'partial',
+      status_label: 'Parcial',
+      last_payment_date: null,
+      installment_info: null,
+      installment_current: null,
+      installment_total: null,
+    });
+
+    expect(result.data[1].aging_bucket).toBe('61-90');
+    expect(result.data[1].customer_name).toBe('');
+  });
+
+  it('resolves effective due_date and installment_info from pending order installments', async () => {
+    const mockReceivable = {
+      id: 10,
+      customer_id: 101,
+      source_type: 'credit_sale',
+      source_id: 200,
+      document_number: 'POS-2026-0099',
+      original_amount: 100000,
+      paid_amount: 66666,
+      balance: 33334,
+      currency: 'COP',
+      issue_date: new Date('2026-09-01'),
+      due_date: new Date('2026-10-01'), // Old initial due date
+      days_overdue: 0,
+      last_payment_date: null,
+      status: 'partial',
+      customer: { first_name: 'Carlos', last_name: 'Ruiz', email: 'c@r.com', document_number: '999' },
+    };
+
+    prisma.accounts_receivable!.count.mockResolvedValue(1);
+    prisma.accounts_receivable!.findMany.mockResolvedValue([mockReceivable]);
+
+    // Cuota 1 y 2 pagadas, cuota 3 pendiente para diciembre
+    prisma.order_installments!.findMany.mockResolvedValue([
+      { order_id: 200, installment_number: 1, due_date: new Date('2026-10-01'), state: 'paid' },
+      { order_id: 200, installment_number: 2, due_date: new Date('2026-11-01'), state: 'paid' },
+      { order_id: 200, installment_number: 3, due_date: new Date('2026-12-01'), state: 'pending' },
+    ]);
+
+    const result = await service.getAccountsReceivable({ page: 1, limit: 10 } as any);
+
+    expect(result.data[0].due_date).toEqual(new Date('2026-12-01'));
+    expect(result.data[0].installment_info).toBe('Cuota 3 de 3');
+    expect(result.data[0].installment_current).toBe(3);
+    expect(result.data[0].installment_total).toBe(3);
+  });
+
+  it('throws when store context is missing', async () => {
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue(null as any);
+
+    await expect(service.getAccountsReceivable({} as any)).rejects.toThrow();
+  });
+
+  it('calculates executive summary across the full portfolio with aging distribution', async () => {
+    prisma.accounts_receivable!.aggregate.mockResolvedValue({
+      _sum: {
+        original_amount: 150000,
+        paid_amount: 50000,
+        balance: 100000,
+      },
+      _count: 2,
+    });
+
+    const now = new Date();
+    const mockAllReceivables = [
+      {
+        id: 1,
+        source_type: 'order',
+        source_id: 10,
+        balance: 60000,
+        due_date: new Date(now.getTime() - 10 * 86400000), // 10 days overdue -> '0-30'
+        days_overdue: 10,
+      },
+      {
+        id: 2,
+        source_type: 'order',
+        source_id: 11,
+        balance: 40000,
+        due_date: new Date(now.getTime() - 45 * 86400000), // 45 days overdue -> '31-60'
+        days_overdue: 45,
+      },
+    ];
+    prisma.accounts_receivable!.findMany.mockResolvedValue(mockAllReceivables);
+
+    const summary = await service.getAccountsReceivableSummary();
+
+    expect(summary.total_balance).toBe(100000);
+    expect(summary.total_original).toBe(150000);
+    expect(summary.total_paid).toBe(50000);
+    expect(summary.total_documents).toBe(2);
+    expect(summary.bucket_totals['0-30']).toBe(60000);
+    expect(summary.bucket_totals['31-60']).toBe(40000);
+    expect(summary.bucket_counts['0-30']).toBe(1);
+    expect(summary.bucket_counts['31-60']).toBe(1);
+  });
+});
+

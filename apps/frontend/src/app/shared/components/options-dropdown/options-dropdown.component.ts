@@ -388,4 +388,16 @@ export class OptionsDropdownComponent {
     }
     return [];
   }
+
+  /**
+   * Estado de un checkbox opcional de filtro. Se guarda como `'true'` en
+   * `FilterValues` para mantener el contrato plano del dropdown.
+   */
+  getCheckboxValue(key: string): boolean {
+    return this.localFilterValues()[key] === 'true';
+  }
+
+  onCheckboxChange(key: string, checked: boolean): void {
+    this.onFilterChange(key, checked ? 'true' : null);
+  }
 }

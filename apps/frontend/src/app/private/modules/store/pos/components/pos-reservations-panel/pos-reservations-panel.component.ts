@@ -32,6 +32,14 @@ export class PosReservationsPanelComponent {
 
   private timeInterval: ReturnType<typeof setInterval> | null = null;
 
+  // Matriz de permisos POS→reservations (paso 1 plan POS-stitch; backend:
+  // reservations.controller.ts @Controller('store/reservations')):
+  // - GET .../today → 'store:reservations:read'
+  // - PATCH .../:id/confirm|complete|no-show → 'store:reservations:update'
+  // RESUELTO (paso 9): el HALLAZGO del paso 1 quedó confirmado — el backend
+  // solo define PATCH para confirm/complete/no-show (reservations.controller.ts
+  // :413/:443/:453) y no existe ninguna ruta POST ':id/...' para esas
+  // transiciones. Los métodos confirm()/complete()/noShow() usan PATCH.
   private readonly apiUrl = `${environment.apiUrl}/store/reservations`;
   private readonly DAY_START_HOUR = 7;
   private readonly DAY_END_HOUR = 22;
@@ -74,7 +82,7 @@ export class PosReservationsPanelComponent {
 
   confirm(booking: any) {
     this.http
-      .post(`${this.apiUrl}/${booking.id}/confirm`, {})
+      .patch(`${this.apiUrl}/${booking.id}/confirm`, {})
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => this.loadTodayBookings(),
@@ -83,7 +91,7 @@ export class PosReservationsPanelComponent {
 
   complete(booking: any) {
     this.http
-      .post(`${this.apiUrl}/${booking.id}/complete`, {})
+      .patch(`${this.apiUrl}/${booking.id}/complete`, {})
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => this.loadTodayBookings(),
@@ -92,7 +100,7 @@ export class PosReservationsPanelComponent {
 
   noShow(booking: any) {
     this.http
-      .post(`${this.apiUrl}/${booking.id}/no-show`, {})
+      .patch(`${this.apiUrl}/${booking.id}/no-show`, {})
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => this.loadTodayBookings(),

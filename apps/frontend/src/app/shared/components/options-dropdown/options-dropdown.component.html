@@ -146,6 +146,20 @@
                 (valueChange)="onDateRangeChange(filter, $event)"
               ></vendix-date-range-filter>
             }
+            <!-- Checkbox opcional del filtro (p. ej. "fijar este período").
+                 Escribe su propia key en filterValues y NO cuenta como filtro
+                 activo: no acota datos, cambia cómo se recuerda el filtro. -->
+            @if (filter.checkbox; as checkbox) {
+              <label class="filter-checkbox">
+                <input
+                  type="checkbox"
+                  [ngModel]="getCheckboxValue(checkbox.key)"
+                  (ngModelChange)="onCheckboxChange(checkbox.key, $event)"
+                  [disabled]="checkbox.disabled || filter.disabled || false"
+                  />
+                <span class="filter-checkbox-label">{{ checkbox.label }}</span>
+              </label>
+            }
             @if (filter.helpText) {
               <div class="filter-help-text">
                 {{ filter.helpText }}

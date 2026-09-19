@@ -185,6 +185,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   help_support: '/admin/help/support',
   help_pqrs: '/admin/pqrs',
   help_center: '/admin/help/center',
+  help_videos: '/admin/help/videos',
 };
 
 function flatten(

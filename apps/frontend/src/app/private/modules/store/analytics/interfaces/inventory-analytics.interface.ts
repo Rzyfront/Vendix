@@ -94,6 +94,38 @@ export interface MovementTrend {
   total: number;
 }
 
+// Ingredient Consumption
+export interface IngredientConsumptionAnalyticsRow {
+  section: string;
+  ingredient_id: number;
+  ingredient_name: string;
+  ingredient_sku: string | null;
+  ingredient_unit: string;
+  dish_id: number | null;
+  dish_name: string;
+  dish_quantity: number;
+  consumed_quantity: number;
+  unit: string;
+  unit_cost: number;
+  total_cost: number;
+  orders_count: number;
+}
+
+export interface IngredientConsumptionMeta {
+  totals: {
+    total_cost: number;
+    total_ingredients: number;
+    total_dishes: number;
+    total_movements: number;
+  };
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    pages: number;
+  };
+}
+
 // Query DTO for Inventory Analytics
 export interface InventoryAnalyticsQueryDto {
   date_range?: DateRangeFilter;
@@ -103,8 +135,10 @@ export interface InventoryAnalyticsQueryDto {
   movement_type?: string;
   granularity?: 'hour' | 'day' | 'week' | 'month' | 'year';
   days_threshold?: number;
+  group_by?: 'ingredient' | 'dish';
   page?: number;
   limit?: number;
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
 }
+

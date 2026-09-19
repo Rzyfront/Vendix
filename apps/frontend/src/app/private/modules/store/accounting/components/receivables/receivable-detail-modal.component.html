@@ -1,0 +1,413 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="isOpenChange.emit($event)"
+  (cancel)="onClose()"
+  [title]="receivable()?.document_number || 'Detalle Cuenta por Cobrar'"
+  size="xl"
+>
+  @if (detail(); as d) {
+    <div class="p-4 space-y-6 max-h-[70vh] overflow-y-auto">
+      <!-- Customer Info -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div>
+          <p class="text-xs text-text-secondary">Cliente</p>
+          <p class="text-sm font-semibold">
+            {{ d.customer?.name || '—' }}
+          </p>
+        </div>
+        <div>
+          <p class="text-xs text-text-secondary">Email</p>
+          <p class="text-sm">{{ d.customer?.email || '—' }}</p>
+        </div>
+        <div>
+          <p class="text-xs text-text-secondary">Telefono</p>
+          <p class="text-sm">{{ d.customer?.phone || '—' }}</p>
+        </div>
+        <div>
+          <p class="text-xs text-text-secondary">Origen</p>
+          <p class="text-sm">
+            {{ d.source_type }} #{{ d.source_id }}
+          </p>
+        </div>
+      </div>
+
+      <!-- Status -->
+      <div class="flex items-center gap-3">
+        <span
+          class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
+          [class]="getStatusClass(d.status)"
+        >
+          {{ getStatusLabel(d.status) }}
+        </span>
+        @if (d.days_overdue > 0) {
+          <span class="text-xs text-error font-medium">
+            {{ d.days_overdue }} dias vencido
+          </span>
+        }
+      </div>
+
+      <!-- Financial Summary -->
+      <div
+        class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-[var(--color-surface-secondary)] rounded-lg"
+      >
+        <div>
+          <p class="text-xs text-text-secondary">Monto Original</p>
+          <p class="text-sm font-semibold font-mono">
+            {{ formatCurrency(d.original_amount) }}
+          </p>
+        </div>
+        <div>
+          <p class="text-xs text-text-secondary">Cobrado</p>
+          <p class="text-sm font-semibold font-mono text-success">
+            {{ formatCurrency(d.paid_amount) }}
+          </p>
+        </div>
+        <div>
+          <p class="text-xs text-text-secondary">Saldo</p>
+          <p class="text-sm font-bold font-mono text-[var(--color-primary)]">
+            {{ formatCurrency(d.balance) }}
+          </p>
+        </div>
+        <div>
+          <p class="text-xs text-text-secondary">Vencimiento</p>
+          <p class="text-sm font-medium">
+            {{ d.due_date | date: 'dd/MM/yyyy':'UTC' }}
+          </p>
+        </div>
+      </div>
+
+      <!-- Dates -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div>
+          <p class="text-xs text-text-secondary">Fecha Emision</p>
+          <p class="text-sm">
+            {{ d.issue_date | date: 'dd/MM/yyyy':'UTC' }}
+          </p>
+        </div>
+        <div>
+          <p class="text-xs text-text-secondary">Ultimo Pago</p>
+          <p class="text-sm">
+            {{
+              d.last_payment_date
+                ? (d.last_payment_date | date: 'dd/MM/yyyy':'UTC')
+                : '—'
+            }}
+          </p>
+        </div>
+        @if (d.notes) {
+          <div class="col-span-2">
+            <p class="text-xs text-text-secondary">Notas</p>
+            <p class="text-sm">{{ d.notes }}</p>
+          </div>
+        }
+      </div>
+
+      <!-- Payment History -->
+      <div>
+        <h4
+          class="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2"
+        >
+          <app-icon name="history" [size]="16"></app-icon>
+          Historial de Cobros
+        </h4>
+        @if (d.ar_payments && d.ar_payments.length > 0) {
+          <div class="space-y-2">
+            @for (payment of d.ar_payments; track payment.id) {
+              <div
+                class="flex items-center justify-between p-3 bg-[var(--color-surface-secondary)] rounded-lg"
+              >
+                <div class="flex items-center gap-3 min-w-0">
+                  <div
+                    class="w-8 h-8 rounded-full bg-success-light flex items-center justify-center shrink-0"
+                  >
+                    <app-icon
+                      name="banknote"
+                      [size]="14"
+                      class="text-success"
+                    ></app-icon>
+                  </div>
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium">
+                      {{ formatCurrency(payment.amount) }}
+                    </p>
+                    <p class="text-xs text-text-secondary">
+                      {{ payment.payment_date | date: 'dd/MM/yyyy':'UTC' }}
+                      @if (payment.payment_method) {
+                        ·
+                        {{ getPaymentMethodLabel(payment.payment_method) }}
+                      }
+                      @if (payment.reference) {
+                        · Ref: {{ payment.reference }}
+                      }
+                    </p>
+                  </div>
+                </div>
+              </div>
+            }
+          </div>
+        } @else {
+          <p class="text-sm text-text-secondary text-center py-4">
+            No hay cobros registrados
+          </p>
+        }
+      </div>
+
+      <!-- Payment Agreements -->
+      <div>
+        <h4
+          class="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2"
+        >
+          <app-icon name="handshake" [size]="16"></app-icon>
+          Acuerdos de Pago
+        </h4>
+
+        <!-- Plan summary: última pagada, próxima pendiente y progreso -->
+        @if (installmentSummary(); as s) {
+          <div
+            class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-3 rounded-lg bg-[var(--color-surface-secondary)] border border-border"
+          >
+            <div>
+              <p class="text-[10px] font-semibold uppercase tracking-wider text-text-secondary">
+                Cuotas Pagadas
+              </p>
+              <p class="text-base font-bold text-success mt-0.5">
+                {{ s.paidCount }} / {{ s.total }}
+              </p>
+              <p class="text-[11px] text-text-secondary mt-0.5">
+                {{ formatCurrency(s.paidAmount) }} de {{ formatCurrency(s.totalAmount) }}
+              </p>
+            </div>
+            <div>
+              <p class="text-[10px] font-semibold uppercase tracking-wider text-text-secondary">
+                Última Cuota Pagada
+              </p>
+              @if (s.lastPaid) {
+                <p class="text-base font-bold text-text-primary mt-0.5">
+                  #{{ s.lastPaid.installment_number }}
+                </p>
+                <p class="text-[11px] text-text-secondary mt-0.5">
+                  {{ s.lastPaid.paid_at
+                      ? (s.lastPaid.paid_at | date: 'dd/MM/yyyy':'UTC')
+                      : (s.lastPaid.due_date | date: 'dd/MM/yyyy':'UTC') }}
+                </p>
+              } @else {
+                <p class="text-sm text-text-secondary mt-1">—</p>
+              }
+            </div>
+            <div>
+              <p class="text-[10px] font-semibold uppercase tracking-wider text-text-secondary">
+                Próxima Cuota
+              </p>
+              @if (s.nextDue) {
+                <p
+                  class="text-base font-bold mt-0.5"
+                  [class.text-error]="s.nextDue.state === 'partial'"
+                  [class.text-warning]="s.nextDue.state === 'pending'"
+                >
+                  #{{ s.nextDue.installment_number }}
+                </p>
+                <p class="text-[11px] text-text-secondary mt-0.5">
+                  Vence {{ s.nextDue.due_date | date: 'dd/MM/yyyy':'UTC' }}
+                </p>
+              } @else {
+                <p class="text-sm text-success mt-1 font-medium">Plan completo</p>
+              }
+            </div>
+            <div>
+              <p class="text-[10px] font-semibold uppercase tracking-wider text-text-secondary">
+                Pendientes
+              </p>
+              <p class="text-base font-bold mt-0.5 text-text-primary">
+                {{ s.pendingCount + s.partialCount }}
+              </p>
+              <p class="text-[11px] text-text-secondary mt-0.5">
+                @if (s.partialCount > 0) {
+                  {{ s.partialCount }} parcial{{ s.partialCount === 1 ? '' : 'es' }}
+                } @else if (s.pendingCount > 0) {
+                  {{ s.pendingCount }} por vencer
+                } @else {
+                  Sin saldo
+                }
+              </p>
+            </div>
+          </div>
+        }
+        @if (
+          d.payment_agreements &&
+          d.payment_agreements.length > 0
+        ) {
+          <div class="space-y-3">
+            @for (
+              agreement of d.payment_agreements;
+              track agreement.id
+            ) {
+              <div class="p-3 bg-[var(--color-surface-secondary)] rounded-lg space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-medium">
+                    {{ agreement.agreement_number }}
+                  </span>
+                  <span
+                    class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
+                    [class]="
+                      agreement.state === 'active'
+                        ? 'bg-[var(--color-info-light)] text-[var(--color-info)]'
+                        : 'bg-success-light text-success'
+                    "
+                  >
+                    {{
+                      agreement.state === 'active' ? 'Activo' : 'Completado'
+                    }}
+                  </span>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <span class="text-text-secondary">Monto</span>
+                    <p class="font-medium font-mono">
+                      {{ formatCurrency(agreement.total_amount) }}
+                    </p>
+                  </div>
+                  <div>
+                    <span class="text-text-secondary">Cuotas</span>
+                    <p class="font-medium">
+                      {{ agreement.num_installments }}
+                    </p>
+                  </div>
+                  <div>
+                    <span class="text-text-secondary">Interes</span>
+                    <p class="font-medium">
+                      {{ agreement.interest_rate }}%
+                    </p>
+                  </div>
+                </div>
+                <!-- Installments -->
+                @if (
+                  agreement.agreement_installments &&
+                  agreement.agreement_installments.length > 0
+                ) {
+                  <div class="space-y-1 pt-1">
+                    @for (
+                      installment of agreement.agreement_installments;
+                      track installment.id
+                    ) {
+                      <div
+                        class="flex items-center justify-between text-xs p-2 rounded"
+                        [class]="
+                          installment.state === 'paid'
+                            ? 'bg-success-light'
+                            : installment.state === 'partial'
+                              ? 'bg-warning-light'
+                              : 'bg-[var(--color-surface)]'
+                        "
+                      >
+                        <span>
+                          Cuota {{ installment.installment_number }} ·
+                          {{ installment.due_date | date: 'dd/MM/yyyy':'UTC' }}
+                        </span>
+                        <div class="flex items-center gap-2">
+                          <span class="font-mono">
+                            {{ formatCurrency(installment.amount) }}
+                          </span>
+                          <span
+                            class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full"
+                            [class]="
+                              getInstallmentStatusClass(installment.state)
+                            "
+                          >
+                            {{
+                              getInstallmentStatusLabel(installment.state)
+                            }}
+                          </span>
+                        </div>
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        } @else if (d.order_installments && d.order_installments.length > 0) {
+          @if (d.order_installments; as orderInsts) {
+            <div class="space-y-3">
+              <div class="p-3 bg-[var(--color-surface-secondary)] rounded-lg space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-medium">Plan de Cuotas de Venta</span>
+                  <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-[var(--color-info-light)] text-[var(--color-info)]">
+                    {{ orderInsts.length }} cuotas
+                  </span>
+                </div>
+                <div class="space-y-1 pt-1">
+                  @for (
+                    installment of orderInsts;
+                    track installment.id
+                  ) {
+                    <div
+                      class="flex items-center justify-between text-xs p-2 rounded"
+                      [class]="
+                        installment.state === 'paid'
+                          ? 'bg-success-light'
+                          : installment.state === 'partial'
+                            ? 'bg-warning-light'
+                            : 'bg-[var(--color-surface)]'
+                      "
+                    >
+                      <span>
+                        Cuota {{ installment.installment_number }} ·
+                        {{ installment.due_date | date: 'dd/MM/yyyy':'UTC' }}
+                      </span>
+                      <div class="flex items-center gap-2">
+                        <span class="font-mono">
+                          {{ formatCurrency(installment.amount) }}
+                        </span>
+                        <span
+                          class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full"
+                          [class]="getInstallmentStatusClass(installment.state)"
+                        >
+                          {{ getInstallmentStatusLabel(installment.state) }}
+                        </span>
+                      </div>
+                    </div>
+                  }
+                </div>
+              </div>
+            </div>
+          }
+        } @else {
+          <p class="text-sm text-text-secondary text-center py-4">
+            No hay acuerdos ni plan de cuotas registrado
+          </p>
+        }
+      </div>
+
+      <!-- Actions -->
+      @if (
+        d.status !== 'paid' && d.status !== 'written_off'
+      ) {
+        <div class="flex justify-end gap-3 pt-4 border-t border-border">
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="writeOffRequested.emit(d)"
+          >
+            <app-icon name="x-circle" [size]="14" slot="icon"></app-icon>
+            Castigar
+          </app-button>
+          <app-button
+            variant="primary"
+            size="sm"
+            (clicked)="paymentRequested.emit(d)"
+          >
+            <app-icon name="banknote" [size]="14" slot="icon"></app-icon>
+            Registrar Cobro
+          </app-button>
+        </div>
+      }
+    </div>
+  } @else {
+    <div class="p-8 text-center text-text-secondary">
+      <div
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
+      ></div>
+      <p class="mt-2">Cargando detalle...</p>
+    </div>
+  }
+</app-modal>

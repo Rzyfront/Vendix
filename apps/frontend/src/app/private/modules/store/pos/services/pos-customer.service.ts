@@ -421,7 +421,13 @@ export class PosCustomerService {
       email: apiCustomer.email,
       first_name: apiCustomer.first_name,
       last_name: apiCustomer.last_name,
-      name: name || apiCustomer.email, // Fallback to email if no name
+      name:
+        apiCustomer.name?.trim() ||
+        name ||
+        apiCustomer.legal_name?.trim() ||
+        apiCustomer.business_name?.trim() ||
+        apiCustomer.email ||
+        'Cliente',
       phone: apiCustomer.phone,
       document_type: apiCustomer.document_type,
       document_number: apiCustomer.document_number,

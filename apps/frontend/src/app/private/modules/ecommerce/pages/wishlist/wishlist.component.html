@@ -60,7 +60,7 @@
                 }}</span>
               } @else {
                 <span class="price">{{
-                  item.product.final_price ?? item.product.base_price
+                  (item.product.final_price || item.product.base_price)
                     | currency
                 }}</span>
               }

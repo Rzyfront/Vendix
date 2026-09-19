@@ -206,7 +206,37 @@ export class AnalyticsController {
   @Permissions('store:analytics:read')
   async getSalesByChannel(@Query() query: SalesAnalyticsQueryDto) {
     const result = await this.sales_analytics_service.getSalesByChannel(query);
-    return this.response_service.success(result);
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
+  }
+
+  @Get('sales/by-channel/export')
+  @Permissions('store:analytics:read')
+  async exportSalesByChannel(
+    @Query() query: SalesAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const result =
+      await this.sales_analytics_service.getSalesByChannelForExport(query);
+
+    const channelColumns: ReportColumn[] = [
+      { key: 'display_name', header: 'Canal', type: 'text' },
+      { key: 'order_count', header: 'Órdenes', type: 'number' },
+      { key: 'revenue', header: 'Ingresos', type: 'currency' },
+      { key: 'percentage', header: '% Participación', type: 'number' },
+    ];
+
+    await this.emitReport(res, 'ventas_por_canal', tz, [
+      this.toSheet('Por canal', channelColumns, result, tz),
+    ]);
   }
 
   @Get('sales/export')
@@ -632,6 +662,104 @@ export class AnalyticsController {
     ]);
   }
 
+  @Get('inventory/ingredient-consumption')
+  @Permissions('store:analytics:read')
+  async getIngredientConsumption(
+    @Query() query: InventoryAnalyticsQueryDto,
+  ) {
+    const result =
+      await this.inventory_analytics_service.getIngredientConsumption(query);
+    return this.response_service.success(
+      result.data,
+      'Operation completed successfully',
+      result.meta,
+    );
+  }
+
+  @Get('inventory/ingredient-consumption/export')
+  @Permissions('store:analytics:read')
+  async exportIngredientConsumptionXlsx(
+    @Query() query: InventoryAnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const { summaryRows, detailRows } =
+      await this.inventory_analytics_service.getIngredientConsumptionForExport(
+        query,
+      );
+
+    const summaryColumns: ReportColumn[] = [
+      { key: 'ingredient_name', header: 'Insumo', type: 'text', width: 25 },
+      { key: 'sku', header: 'SKU', type: 'text', width: 15 },
+      { key: 'unit', header: 'Unidad', type: 'text', width: 12 },
+      {
+        key: 'total_consumed',
+        header: 'Cant. Consumida',
+        type: 'number',
+        width: 16,
+      },
+      {
+        key: 'avg_unit_cost',
+        header: 'Costo Unit. Promedio',
+        type: 'currency',
+        width: 20,
+      },
+      {
+        key: 'total_cost',
+        header: 'Costo Total',
+        type: 'currency',
+        width: 18,
+      },
+      {
+        key: 'associated_dishes',
+        header: 'Platos Asociados',
+        type: 'text',
+        width: 35,
+      },
+    ];
+
+    const detailColumns: ReportColumn[] = [
+      { key: 'ingredient_name', header: 'Insumo', type: 'text', width: 25 },
+      { key: 'sku', header: 'SKU', type: 'text', width: 15 },
+      {
+        key: 'dish_name',
+        header: 'Plato / Preparación',
+        type: 'text',
+        width: 25,
+      },
+      {
+        key: 'dish_quantity',
+        header: 'Cant. Platos',
+        type: 'number',
+        width: 14,
+      },
+      {
+        key: 'consumed_quantity',
+        header: 'Insumo Gastado',
+        type: 'number',
+        width: 16,
+      },
+      { key: 'unit', header: 'Unidad', type: 'text', width: 12 },
+      {
+        key: 'unit_cost',
+        header: 'Costo Unitario',
+        type: 'currency',
+        width: 16,
+      },
+      {
+        key: 'total_cost',
+        header: 'Costo Total',
+        type: 'currency',
+        width: 18,
+      },
+    ];
+
+    await this.emitReport(res, 'consumo_insumos', tz, [
+      this.toSheet('Consolidado Insumos', summaryColumns, summaryRows, tz),
+      this.toSheet('Detalle por Plato', detailColumns, detailRows, tz),
+    ]);
+  }
+
   @Get('inventory/export')
   @Permissions('store:analytics:read')
   async exportInventoryAnalytics(
@@ -867,7 +995,44 @@ export class AnalyticsController {
   /**
    * QUI-540: cuentas por cobrar de clientes (open + partial) con
    * bucketing de antigüedad (0-30 / 31-60 / 61-90 / 90+).
+   * Preview paginado.
    */
+  @Get('customers/receivable')
+  @Permissions('store:analytics:read')
+  async getAccountsReceivable(@Query() query: AnalyticsQueryDto) {
+    const result =
+      await this.customers_analytics_service.getAccountsReceivable(query);
+    return this.response_service.paginated(
+      result.data,
+      result.total,
+      result.page,
+      result.limit,
+    );
+  }
+
+  @Get('customers/receivables')
+  @Permissions('store:analytics:read')
+  async getAccountsReceivablesAlias(@Query() query: AnalyticsQueryDto) {
+    return this.getAccountsReceivable(query);
+  }
+
+  @Get('customers/receivable/summary')
+  @Permissions('store:analytics:read')
+  async getAccountsReceivableSummary(@Query() query: AnalyticsQueryDto) {
+    const result =
+      await this.customers_analytics_service.getAccountsReceivableSummary(query);
+    return this.response_service.success(
+      result,
+      'Resumen de cuentas por cobrar obtenido',
+    );
+  }
+
+  @Get('customers/receivables/summary')
+  @Permissions('store:analytics:read')
+  async getAccountsReceivablesSummaryAlias(@Query() query: AnalyticsQueryDto) {
+    return this.getAccountsReceivableSummary(query);
+  }
+
   @Get('customers/receivable/export')
   @Permissions('store:analytics:read')
   async exportAccountsReceivable(
@@ -879,23 +1044,30 @@ export class AnalyticsController {
       await this.customers_analytics_service.getAccountsReceivableForExport(query);
 
     const columns: ReportColumn[] = [
-      { key: 'document_number', header: 'Documento', type: 'text' },
+      { key: 'document_number', header: 'ID de Órdenes', type: 'text' },
       { key: 'customer_name', header: 'Cliente', type: 'text' },
       { key: 'customer_document', header: 'NIT/Doc', type: 'text' },
-      { key: 'customer_email', header: 'Correo', type: 'text' },
-      { key: 'issue_date', header: 'Emisión', type: 'date-only' },
       { key: 'due_date', header: 'Vencimiento', type: 'date-only' },
+      { key: 'installment_info', header: 'Cuota', type: 'text' },
       { key: 'days_overdue', header: 'Días Mora', type: 'number' },
-      { key: 'aging_bucket', header: 'Antigüedad', type: 'text' },
       { key: 'original_amount', header: 'Original', type: 'currency' },
       { key: 'paid_amount', header: 'Pagado', type: 'currency' },
       { key: 'balance', header: 'Saldo', type: 'currency' },
-      { key: 'status', header: 'Estado', type: 'text' },
+      { key: 'status_label', header: 'Estado', type: 'text' },
     ];
 
     await this.emitReport(res, 'cuentas_por_cobrar', tz, [
       this.toSheet('Cuentas por Cobrar', columns, rows, tz),
     ]);
+  }
+
+  @Get('customers/receivables/export')
+  @Permissions('store:analytics:read')
+  async exportAccountsReceivablesAlias(
+    @Query() query: AnalyticsQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    return this.exportAccountsReceivable(query, res);
   }
 
   @Get('customers/abandoned-carts/summary')

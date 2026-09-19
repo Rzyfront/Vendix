@@ -995,3 +995,103 @@ describe('PosCartService — isPriceOverridden en centavos enteros (F-225)', () 
     });
   });
 });
+
+describe('PosCartService — updateCartItem preserva/borra notas por línea (paso 5)', () => {
+  let service: PosCartService;
+
+  const flatProduct = () =>
+    ({
+      id: 'NOTE5',
+      name: 'Producto nota paso 5',
+      sku: 'NOTE5',
+      price: 1000,
+      final_price: 1000,
+      stock: 0,
+      track_inventory: false,
+      isActive: true,
+      has_variants: false,
+      product_variants: [],
+      tax_assignments: [],
+    }) as any;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        PosCartService,
+        { provide: PosProductService, useValue: { getProductById: () => of(null) } },
+        { provide: PosApiService, useValue: {} },
+        {
+          provide: PosSaleUnitService,
+          useValue: {
+            configFor: () => ({
+              priceUnitQuantity: 1,
+              unitsPerCapture: 1,
+              captureUnit: null,
+            }),
+          },
+        },
+        {
+          provide: PriceResolverService,
+          useValue: {
+            resolve: (product: any, variant?: any) => ({
+              unitPrice: Number(
+                variant?.price_override ?? product?.base_price ?? 0,
+              ),
+            }),
+          },
+        },
+        { provide: PriceTierCacheService, useValue: {} },
+        {
+          provide: WithholdingTaxService,
+          useValue: {
+            previewWithholding: () => of({ lines: [], total_withholding: 0 }),
+          },
+        },
+        { provide: CurrencyFormatService, useValue: {} },
+        {
+          provide: InvoicingService,
+          useValue: { getPosUvtThreshold: () => of({ data: null }) },
+        },
+        { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+      ],
+    });
+    service = TestBed.inject(PosCartService);
+  });
+
+  it('borra la nota cuando el request trae la clave notes en undefined (Quitar nota)', (done) => {
+    service.addToCart({ product: flatProduct(), quantity: 1 }).subscribe((added) => {
+      const itemId = added.items[0].id;
+
+      service
+        .updateCartItem({ itemId, quantity: 1, notes: 'Sin cebolla' })
+        .subscribe((withNote) => {
+          expect(withNote.items[0].notes).toBe('Sin cebolla');
+
+          service
+            .updateCartItem({ itemId, quantity: 1, notes: undefined })
+            .subscribe((cleared) => {
+              expect(cleared.items[0].notes).toBeUndefined();
+              done();
+            });
+        });
+    });
+  });
+
+  it('preserva la nota cuando el request omite la clave notes (cambio solo-cantidad)', (done) => {
+    service.addToCart({ product: flatProduct(), quantity: 1 }).subscribe((added) => {
+      const itemId = added.items[0].id;
+
+      service
+        .updateCartItem({ itemId, quantity: 1, notes: 'Término medio' })
+        .subscribe(() => {
+          service
+            .updateCartItem({ itemId, quantity: 2 })
+            .subscribe((state) => {
+              expect(state.items[0].quantity).toBe(2);
+              expect(state.items[0].notes).toBe('Término medio');
+              done();
+            });
+        });
+    });
+  });
+});

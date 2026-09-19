@@ -239,10 +239,21 @@ export class CheckoutService {
 
     const method = await this.prisma.store_payment_methods.findFirst({
       where: { id: methodId, store_id: storeId },
-      select: { custom_config: true },
+      select: {
+        custom_config: true,
+        system_payment_method: { select: { type: true } },
+      },
     });
+    if (!method) return [];
+
+    // QUI-849: solo métodos de tipo 'bank_transfer' exponen cuentas bancarias.
+    // Métodos como 'voucher' no usan cuentas y no deben heredar el fallback de la organización.
+    if (method.system_payment_method?.type !== 'bank_transfer') {
+      return [];
+    }
+
     const configured = this.extractConfiguredBankAccountIds(
-      method?.custom_config,
+      method.custom_config,
     );
 
     // Lista curada presente pero sin ninguna FK resoluble (config legacy sin

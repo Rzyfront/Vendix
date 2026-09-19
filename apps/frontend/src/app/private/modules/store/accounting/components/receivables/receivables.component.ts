@@ -100,10 +100,11 @@ private carteraService = inject(CarteraService);
   columns: TableColumn[] = [
     {
       key: 'document_number',
-      label: 'Documento',
+      label: 'ID de Órdenes',
       sortable: true,
       priority: 1,
-      transform: (val: any) => val || '—'},
+      transform: (val: any) => val || '—',
+    },
     {
       key: 'customer_name',
       label: 'Cliente',

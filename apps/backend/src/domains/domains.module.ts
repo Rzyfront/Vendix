@@ -7,6 +7,7 @@ import { PublicDomainModule } from './public/public.module';
 import { EcommerceDomainModule } from './ecommerce/ecommerce.module';
 import { SupportModule } from './support/support.module';
 import { HelpCenterModule } from './help-center/help-center.module';
+import { VideoLibraryModule } from './video-library/video-library.module';
 import { FiscalOperationsModule } from './fiscal-operations/fiscal-operations.module';
 
 @Module({
@@ -19,6 +20,7 @@ import { FiscalOperationsModule } from './fiscal-operations/fiscal-operations.mo
     EcommerceDomainModule,
     SupportModule,
     HelpCenterModule,
+    VideoLibraryModule,
     FiscalOperationsModule,
   ],
 })

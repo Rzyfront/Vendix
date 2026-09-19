@@ -6,6 +6,18 @@
   gap: 16px;
 }
 
+/* Stitch 11b (6) — el collector y su steps-line (compartidos, fuera de
+   alcance) pintan método seleccionado en primary #2ecc71 (2.1:1) y helpers /
+   sub-labels 9.6px en text-secondary/muted #94a3b8 (2.56:1). Se remapean las
+   vars heredadas en el contexto del paso: success-700 (~5.0:1),
+   neutral-600 (~7.0:1) y neutral-500 (~4.8:1). Con color AA el tamaño 9.6px
+   ya cumple, no hizo falta subirlo. Solo afecta a este subárbol. */
+.pos-payment-context {
+  --color-primary: var(--color-success-700);
+  --color-text-secondary: var(--color-neutral-600);
+  --color-text-muted: var(--color-neutral-500);
+}
+
 /* Fulfillment selector (Restaurant stores with prepared items) */
 .fulfillment-section {
   display: flex;
@@ -68,31 +80,43 @@
   font-weight: 600;
 }
 
-/* ─── Wompi awaiting ─────────────────────────────── */
+/* ─── Wompi awaiting ───────────────────────────────
+   Stitch paso 6 — card de estado sólida (radius 16, borde 1.5px) con
+   título, mensaje y contador de intentos; acciones md = 44px desktop. */
 .wompi-awaiting {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 32px;
+  gap: 12px;
+  padding: 32px 24px;
   text-align: center;
   min-height: 192px;
   margin-top: 16px;
-  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  border-radius: 16px;
+}
+
+.wompi-awaiting-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 0;
 }
 
 .awaiting-message {
   font-size: 15px;
   color: var(--color-text-primary);
-  max-width: 320px;
+  max-width: 360px;
   margin: 0;
 }
 
+/* Stitch paso 5 — texto informativo en neutral-600 (text-secondary falla AA). */
 .awaiting-attempts {
   font-size: 12px;
-  color: var(--color-text-secondary);
-  max-width: 320px;
+  color: var(--color-neutral-600);
+  max-width: 360px;
   margin: 0;
 }
 

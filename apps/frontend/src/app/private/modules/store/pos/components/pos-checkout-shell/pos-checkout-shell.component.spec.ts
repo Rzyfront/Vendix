@@ -61,17 +61,19 @@ class IconStub {
   readonly color = input<string | null>(null);
 }
 
-@Component({ selector: 'app-pos-consumo-step', standalone: true, template: `` })
-class ConsumoStub {
+@Component({ selector: 'app-pos-entrega-step', standalone: true, template: `` })
+class EntregaStub {
   readonly cartState = input<unknown>(null);
   readonly tableId = input<number | null>(null);
+  readonly initialChoice = input<string>('llevar');
+  readonly choiceChange = output<string>();
   readonly advanceRequested = output<void>();
-  fulfillmentMode = 'entrega';
+  choiceSignal = signal<'mesa' | 'llevar' | 'enviar'>('llevar');
   needsTableFlag = false;
   readonly openTablePicker = signal(false);
   readonly checkoutTableId = signal<number | null>(null);
-  fulfillment(): string {
-    return this.fulfillmentMode;
+  choice() {
+    return this.choiceSignal();
   }
   needsTable(): boolean {
     return this.needsTableFlag;
@@ -94,6 +96,7 @@ class PaymentStub {
   readonly editingOrderId = input<number | null>(null);
   readonly autoExecute = input(true);
   readonly amountOverride = input<number | null>(null);
+  readonly paymentResetKey = input(0);
   // La plantilla del shell enlaza `[takeawayOrder]` (`:79`) y el doble no lo
   // declaraba: NG0303 al primer `detectChanges()`, que tumbaba las 20 pruebas.
   readonly takeawayOrder = input(false);
@@ -122,13 +125,18 @@ class PaymentStub {
 @Component({ selector: 'app-pos-shipping-step', standalone: true, template: `` })
 class ShippingStub {
   readonly cartState = input<unknown>(null);
-  readonly address = input<unknown>(null);
-  readonly addressId = input<number | null>(null);
   readonly shippingCompleted = output<unknown>();
   readonly shippingCost = signal(0);
   readonly shipSubStep = signal(0);
+  readonly shipSubSteps = signal<any[]>([]);
   readonly canConfirm = signal(true);
   readonly shipIsProcessing = signal(false);
+  attemptNextSubStep(): boolean {
+    return true;
+  }
+  attemptPrevSubStep(): boolean {
+    return false;
+  }
   flashValidation(): void {}
   execute(_submit: unknown): void {}
 }
@@ -202,6 +210,14 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       value: () => pay,
       configurable: true,
     });
+    const entregaEl = fixture.debugElement.query(By.directive(EntregaStub));
+    const entrega = entregaEl
+      ? entregaEl.componentInstance
+      : TestBed.runInInjectionContext(() => new EntregaStub());
+    Object.defineProperty(component, 'entregaStep', {
+      value: () => entrega,
+      configurable: true,
+    });
     // Envío solo se monta en delivery: si no está, stub suelto para el slot.
     const shipEl = fixture.debugElement.query(By.directive(ShippingStub));
     const ship = shipEl
@@ -265,7 +281,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
           ModalStub,
           StepsLineStub,
           IconStub,
-          ConsumoStub,
+          EntregaStub,
           PaymentStub,
           ShippingStub,
           CustomerSelectorStub,
@@ -286,8 +302,8 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   });
 
   it('→ en paso intermedio llama a Siguiente con source arrows y no cobra', () => {
-    // mode create-payment + pickup sin restaurante → [Cliente, Cobro], paso 0.
-    expect(component.currentStepKey()).toBe('cliente');
+    // mode create-payment + default llevar → [Entrega, Cliente, Cobro], paso 0.
+    expect(component.currentStepKey()).toBe('entrega');
     const next = spyOn(component, 'attemptNextStep');
     const confirm = spyOn(component, 'onPrimaryConfirm');
     component.onShellKeydown(keyEvent('ArrowRight'));
@@ -296,7 +312,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   });
 
   it('→ en CTA terminal es no-op: ni avanza ni cobra', () => {
-    component.currentStep.set(1); // Cobro, último
+    component.currentStep.set(2); // Cobro, último
     fixture.detectChanges();
     expect(component.isLastStep()).toBeTrue();
     const next = spyOn(component, 'attemptNextStep');
@@ -307,7 +323,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   });
 
   it('← siempre retrocede sin cobrar', () => {
-    component.currentStep.set(1);
+    component.currentStep.set(2);
     fixture.detectChanges();
     const prev = spyOn(component, 'prevStep');
     const confirm = spyOn(component, 'onPrimaryConfirm');
@@ -452,42 +468,67 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     expect(confirm).toHaveBeenCalledTimes(1);
   });
 
-  it('restaurante ordena [Consumo, Cliente, Cobro]', () => {
-    restaurantMode.set(true);
+  it('matriz Entrega: llevar o mesa ordena [Entrega, Cliente, Cobro], enviar ordena [Entrega, Cliente, Envío, Cobro]', () => {
+    component.entregaChoice.set('llevar');
     fixture.detectChanges();
-    expect(component.stepKeys()).toEqual(['consumo', 'cliente', 'cobro']);
-    expect(component.currentStepKey()).toBe('consumo');
+    expect(component.stepKeys()).toEqual(['entrega', 'cliente', 'cobro']);
+    expect(component.currentStepKey()).toBe('entrega');
+
+    component.entregaChoice.set('mesa');
+    fixture.detectChanges();
+    expect(component.stepKeys()).toEqual(['entrega', 'cliente', 'cobro']);
+
+    component.entregaChoice.set('enviar');
+    fixture.detectChanges();
+    expect(component.stepKeys()).toEqual(['entrega', 'cliente', 'envio', 'cobro']);
   });
 
-  it('Consumo-entrega avanza; consumo sin mesa abre el picker sin avanzar', () => {
-    const stub = TestBed.runInInjectionContext(() => new ConsumoStub());
-    Object.defineProperty(component, 'consumoStep', {
+  it('Entrega-llevar avanza; mesa sin mesa abre el picker sin avanzar', () => {
+    const stub = TestBed.runInInjectionContext(() => new EntregaStub());
+    Object.defineProperty(component, 'entregaStep', {
       value: () => stub,
       configurable: true,
     });
-    const advance = component as unknown as { advanceConsumo: () => void };
-    // Entrega (default) → avanza.
-    advance.advanceConsumo();
+    const advance = component as unknown as { advanceEntrega: () => void };
+    // Llevar (default) → avanza.
+    component.entregaChoice.set('llevar');
+    advance.advanceEntrega();
     expect(component.currentStep()).toBe(1);
-    // Consumo sin mesa → abre picker, no avanza.
+
+    // Mesa sin mesa → abre picker, no avanza.
     component.currentStep.set(0);
-    stub.fulfillmentMode = 'consumo';
+    component.entregaChoice.set('mesa');
     stub.needsTableFlag = true;
-    advance.advanceConsumo();
+    advance.advanceEntrega();
     expect(stub.openTablePicker()).toBeTrue();
     expect(component.currentStep()).toBe(0);
+
     // Con mesa → avanza.
     stub.needsTableFlag = false;
-    advance.advanceConsumo();
+    advance.advanceEntrega();
     expect(component.currentStep()).toBe(1);
+  });
+
+  it('flip enviar agrega paso envio y volver a llevar lo remueve', () => {
+    component.entregaChoice.set('llevar');
+    fixture.detectChanges();
+    expect(component.stepKeys()).not.toContain('envio');
+
+    component.onEntregaChoiceChange('enviar');
+    fixture.detectChanges();
+    expect(component.stepKeys()).toContain('envio');
+
+    component.onEntregaChoiceChange('llevar');
+    fixture.detectChanges();
+    expect(component.stepKeys()).not.toContain('envio');
   });
 
   it(`Para llevar estampa is_takeaway al anexar a mesa`, () => {
     restaurantMode.set(true);
-    const stub = TestBed.runInInjectionContext(() => new ConsumoStub());
-    stub.fulfillmentMode = 'entrega';
+    component.entregaChoice.set('llevar');
+    const stub = TestBed.runInInjectionContext(() => new EntregaStub());
     (stub as any).effectiveTableId = () => null;
-    Object.defineProperty(component, 'consumoStep', {
+    Object.defineProperty(component, 'entregaStep', {
       value: () => stub,
       configurable: true,
     });
@@ -542,10 +583,10 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
 
   it(`Consumo en mesa no marca takeaway salvo línea explícita`, () => {
     restaurantMode.set(true);
-    const stub = TestBed.runInInjectionContext(() => new ConsumoStub());
-    stub.fulfillmentMode = 'consumo';
+    component.entregaChoice.set('mesa');
+    const stub = TestBed.runInInjectionContext(() => new EntregaStub());
     (stub as any).effectiveTableId = () => 5;
-    Object.defineProperty(component, 'consumoStep', {
+    Object.defineProperty(component, 'entregaStep', {
       value: () => stub,
       configurable: true,
     });

@@ -1,16 +1,13 @@
-/* Paso · Consumo — "Tipo de servicio".
-   Réplica 1:1 del diseño Pencil: fondo blanco (sin card gris), section-title,
-   dos option-rows apiladas con radio, y CTA "Elegir mesa" full-width.
-   Se usan tokens del design system donde existen (--color-primary, --color-*),
-   y los hex de Pencil solo donde el contraste sobre el fondo verde lo exige. */
-.consumo-step {
+/* Paso · Entrega — "Tipo de entrega".
+   Fondo blanco, section-title, option-rows apiladas con radio, y CTA "Elegir mesa" full-width. */
+.entrega-step {
   display: flex;
   flex-direction: column;
   gap: 12px;
   background: transparent;
 }
 
-/* ── Section title (fondo blanco, icono verde + texto ink-900) ────────────── */
+/* ── Section title ───────────────────────────────────────────────────────── */
 .section-title {
   display: flex;
   align-items: center;
@@ -31,7 +28,7 @@
   color: var(--color-text-primary);
 }
 
-/* ── Option rows (stack vertical, gap 12px) ──────────────────────────────── */
+/* ── Option rows ─────────────────────────────────────────────────────────── */
 .option-list {
   display: flex;
   flex-direction: column;
@@ -60,7 +57,7 @@
 }
 
 .option-row:focus-visible {
-  outline: 2px solid var(--color-primary);
+  outline: 3px solid var(--color-primary);
   outline-offset: 2px;
 }
 
@@ -110,18 +107,18 @@
 }
 
 .option-row--selected .option-row__title {
-  color: #15803d;
+  color: var(--color-success-800);
 }
 
 .option-row__desc {
   font-size: 13px;
   font-weight: 500;
   line-height: 1.25;
-  color: var(--color-text-secondary);
+  color: var(--color-neutral-600);
 }
 
 .option-row--selected .option-row__desc {
-  color: #166534;
+  color: var(--color-success-800);
 }
 
 /* Radio (derecha) */
@@ -162,7 +159,7 @@
   border: 1.5px solid var(--color-primary);
   border-radius: 12px;
   background: var(--color-success-50, #f0fdf4);
-  color: var(--color-primary);
+  color: var(--color-success-800);
   font-size: 16px;
   font-weight: 700;
   cursor: pointer;
@@ -176,7 +173,7 @@
 }
 
 .choose-table-btn:focus-visible {
-  outline: 2px solid var(--color-primary);
+  outline: 3px solid var(--color-primary);
   outline-offset: 2px;
 }
 
@@ -190,7 +187,7 @@
   border-radius: 999px;
   background: var(--color-success-100, #dcfce7);
   border: 1px solid var(--color-primary);
-  color: #15803d;
+  color: var(--color-success-800);
   font-size: 13px;
   font-weight: 600;
 }

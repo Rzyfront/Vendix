@@ -59,6 +59,7 @@ import {
   PreparedChoice,
 } from './pos-prepared-choice-modal/pos-prepared-choice-modal.component';
 import { PosSerialSelectionModalComponent } from './pos-serial-selection-modal/pos-serial-selection-modal.component';
+import { PosCategoryPillsComponent } from './pos-category-pills/pos-category-pills.component';
 import { MultiSelectorOption } from '../../../../../shared/components/multi-selector/multi-selector.component';
 import { SerialNumbersService } from '../../serial-numbers/services/serial-numbers.service';
 import { PosCashRegisterService } from '../services/pos-cash-register.service';
@@ -167,26 +168,27 @@ function isMultiTokenQuery(query: string): boolean {
     PosPreparedChoiceModalComponent,
     PosSerialSelectionModalComponent,
     BadgeComponent,
+    PosCategoryPillsComponent,
   ],
   schemas: [NO_ERRORS_SCHEMA],
   template: `
     <div
-      class="h-full flex flex-col bg-surface rounded-card lg:rounded-card shadow-card border border-border overflow-hidden"
+      class="h-full flex flex-col bg-slate-50 min-w-0 overflow-hidden w-full"
     >
       <!-- Products Header -->
       <div
-        class="px-3 lg:px-6 py-3 lg:py-4 border-b border-border product-header"
+        class="px-3 lg:px-4 py-2.5 bg-white border-b border-slate-200/80 shrink-0 shadow-2xs product-header"
       >
         <!-- Single header row: count badge + search + filters -->
         <div class="flex items-center gap-2 lg:gap-3 w-full">
           <!-- Input de búsqueda -->
           <app-inputsearch
             class="flex-1"
-            size="sm"
-            placeholder="Busca por nombre, SKU o palabras en cualquier orden"
+            size="md"
+            placeholder="Buscar por nombre, SKU o código de barras…"
             ariaLabel="Buscar productos"
             [debounceTime]="300"
-            [autofocus]="true"
+            [autofocus]="false"
             [ngModel]="searchQuery()"
             (ngModelChange)="searchQuery.set($event)"
             (searchChange)="onSearch($event)"
@@ -202,13 +204,26 @@ function isMultiTokenQuery(query: string): boolean {
             triggerLabel="Filtros"
             (filterChange)="onOptionsFilterChange($event)"
             (clearAllFilters)="onClearFilters()"
-            class="shrink-0"
+            class="shrink-0 pos-filters-dropdown"
           ></app-options-dropdown>
 
-          <!-- Botón cliente / Cola -->
+          <!-- Ítem libre (Stitch PSVERSION0001; abre el modal compartido vía POS) -->
+          <button
+            type="button"
+            class="h-10 sm:h-11 w-10 sm:w-auto px-0 sm:px-3.5 bg-white border border-primary/30 text-primary hover:bg-primary/10 text-xs font-bold rounded-xl transition-colors shadow-2xs shrink-0 flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            (click)="openCustomItemModal.emit()"
+            [disabled]="!canCreateCustomItems()"
+            title="Agregar ítem manual"
+            aria-label="Agregar ítem libre"
+          >
+            <app-icon name="plus" [size]="16"></app-icon>
+            <span class="hidden sm:inline">Ítem libre</span>
+          </button>
+
+          <!-- Botón de cola de clientes (si hay cola activa con turnos) -->
           @if (queueEnabled() && queueCount() > 0) {
             <button
-              class="relative flex items-center justify-center w-10 sm:w-11 h-10 sm:h-11 rounded-[10px] bg-accent/10 hover:bg-accent/20 transition-colors border border-accent/30 shrink-0"
+              class="relative flex items-center justify-center w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-accent/10 hover:bg-accent/20 transition-colors border border-accent/30 shrink-0"
               (click)="openQueueModal.emit()"
               title="Cola de clientes ({{ queueCount() }})"
               [attr.aria-label]="
@@ -222,30 +237,21 @@ function isMultiTokenQuery(query: string): boolean {
                 {{ queueCount() }}
               </span>
             </button>
-          } @else {
-            <app-button
-              variant="outline"
-              size="md"
-              customClasses="w-10 sm:w-11 !px-0 bg-surface !rounded-[10px] shrink-0"
-              (clicked)="openCustomerModal.emit()"
-              [title]="
-                selectedCustomer() ? selectedCustomer().name : 'Agregar cliente'
-              "
-              [ariaLabel]="
-                selectedCustomer()
-                  ? 'Cliente: ' + selectedCustomer().name
-                  : 'Agregar cliente'
-              "
-            >
-              <app-icon
-                slot="icon"
-                [name]="selectedCustomer() ? 'user-check' : 'user-plus'"
-                [size]="18"
-                [class]="selectedCustomer() ? 'text-primary' : ''"
-              ></app-icon>
-            </app-button>
           }
         </div>
+
+        <!-- Barra táctil de categorías (Stitch PSVERSION0001 paso 2).
+             Escribe al mismo filtro category_id que el dropdown Filtros.
+             En móvil se oculta (hidden lg:block) para ganar espacio vertical. -->
+        @if (categories().length > 1) {
+          <app-pos-category-pills
+            class="hidden lg:block"
+            [categories]="categories()"
+            [selectedId]="selectedCategory()?.id ?? ''"
+            [totalCount]="totalResults()"
+            (categorySelected)="onCategoryPillSelected($event)"
+          />
+        }
 
         <!-- General order-scope promotion notice. Order-scope auto-apply
              promotions discount the WHOLE order (not a single product), so
@@ -271,7 +277,7 @@ function isMultiTokenQuery(query: string): boolean {
         <!-- E.1 — hint stopwords (F-099/ERR-20): la query solo trae palabras
              comunes y el backend cae al fallback frase-legacy. -->
         @if (showStopwordsHint()) {
-          <p class="mt-2 text-xs text-text-secondary" role="note">
+          <p class="mt-2 text-xs text-neutral-600" role="note">
             Palabras muy comunes: prueba con palabras del producto, ej. 'aceite
             casa'.
           </p>
@@ -297,7 +303,7 @@ function isMultiTokenQuery(query: string): boolean {
               </span>
               <button
                 type="button"
-                class="ml-1 shrink-0 rounded-full p-0.5 hover:bg-warning/20"
+                class="ml-1 flex min-h-7 min-w-7 shrink-0 items-center justify-center rounded-full p-0.5 hover:bg-warning/20"
                 aria-label="Descartar aviso de orden aproximado"
                 (click)="degradedDismissed.set(true)"
               >
@@ -307,27 +313,13 @@ function isMultiTokenQuery(query: string): boolean {
           </div>
         }
 
-        <!-- E.1 — contador de paginación (F-066/F-098): copy exacto. Con
-             búsqueda enseña el ranking ("mejores coincidencias primero"). -->
-        @if (counterText()) {
-          <div
-            class="mt-2 flex items-center justify-between gap-2 text-xs text-text-secondary"
-          >
-            <span>{{ counterText() }}</span>
-            @if (isSearchActive() && filteredProducts().length > 0) {
-              <span class="hidden sm:inline shrink-0">
-                Enter &#8629; agrega el primer resultado
-              </span>
-            }
-          </div>
-        }
       </div>
 
       <!-- Products Content -->
       <div
         #productsScroll
         tabindex="-1"
-        class="flex-1 overflow-y-auto min-h-0 p-3 lg:p-6 relative z-0 outline-none"
+        class="flex-1 overflow-y-auto min-h-0 p-3 lg:p-4 relative z-0 outline-none"
         (pointerdown)="onGridPointerDown()"
         (pointerup)="onGridPointerUp()"
         (pointercancel)="onGridPointerUp()"
@@ -339,7 +331,7 @@ function isMultiTokenQuery(query: string): boolean {
             <div
               class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
-            <p class="mt-2 text-text-secondary">Cargando productos...</p>
+            <p class="mt-2 text-neutral-600">Cargando productos...</p>
           </div>
         }
 
@@ -394,7 +386,7 @@ function isMultiTokenQuery(query: string): boolean {
             <h3 class="text-lg font-semibold text-text-primary mb-2">
               {{ getEmptyStateTitle() }}
             </h3>
-            <p class="text-sm text-text-secondary mb-4 max-w-xs mx-auto">
+            <p class="text-sm text-neutral-600 mb-4 max-w-xs mx-auto">
               {{ getEmptyStateDescription() }}
             </p>
             <!-- E.1 (F-100) — la acción cumple lo que promete: con filtros
@@ -415,12 +407,179 @@ function isMultiTokenQuery(query: string): boolean {
              búsquedas (dim + overlay "Buscando…", F-056/F-067): swap atómico
              al responder, nunca flash a vacío. -->
         @if (filteredProducts().length > 0) {
+          <!-- Mobile Product Cards: Stitch Horizontal Compact Format (lg:hidden) -->
+          <div
+            role="list"
+            aria-label="Resultados de productos móviles"
+            [attr.aria-busy]="searching()"
+            [class.opacity-60]="searching()"
+            class="flex flex-col gap-2 lg:hidden transition-opacity duration-150"
+          >
+            @for (
+              product of filteredProducts();
+              track trackByProductId($index, product)
+            ) {
+              <article
+                role="listitem"
+                tabindex="0"
+                [attr.aria-label]="productCardLabel(product)"
+                [attr.aria-disabled]="isProductCardUnavailable(product) || null"
+                (click)="onAddToCart(product)"
+                (keydown)="onProductCardKeydown($event, product)"
+                class="flex flex-row items-center p-2 rounded-xl bg-white border border-slate-200/90 shadow-2xs gap-2.5 hover:border-primary active:scale-[0.99] transition-all cursor-pointer group select-none"
+                [class.opacity-50]="isProductCardUnavailable(product)"
+                [class.cursor-not-allowed]="isProductCardUnavailable(product)"
+                [class.border-primary]="cartQtyFor(product.id) > 0"
+                [class.bg-primary/2]="cartQtyFor(product.id) > 0"
+              >
+                <!-- Thumbnail -->
+                <div
+                  class="w-14 h-14 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 overflow-hidden p-1 relative"
+                >
+                  @if (product.image_url || product.image) {
+                    <img
+                      [src]="product.image_url || product.image"
+                      [alt]="product.name"
+                      class="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform"
+                      (error)="onImageError($event)"
+                    />
+                  } @else {
+                    <app-icon
+                      name="image"
+                      [size]="20"
+                      class="text-slate-400"
+                    ></app-icon>
+                  }
+
+                  @if (product.pricing_type === 'weight') {
+                    <div
+                      class="absolute bottom-0.5 left-0.5 px-1 py-0.2 rounded text-[8px] font-bold bg-blue-700 text-white"
+                    >
+                      Peso
+                    </div>
+                  }
+                </div>
+
+                <!-- Info -->
+                <div class="flex-1 min-w-0 pr-1 leading-tight">
+                  <div class="flex items-center gap-1.5">
+                    <h3
+                      class="text-xs font-bold text-slate-800 truncate group-hover:text-primary transition-colors"
+                      [title]="product.name"
+                    >
+                      {{ product.name }}
+                    </h3>
+                    @if (product.has_variants) {
+                      <span
+                        class="text-[9px] font-semibold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.2 rounded-full shrink-0"
+                      >
+                        Variantes
+                      </span>
+                    } @else if (isProductCardUnavailable(product)) {
+                      <span
+                        class="text-[9px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.2 rounded-full shrink-0"
+                      >
+                        Agotado
+                      </span>
+                    } @else if (isProductLowStock(product)) {
+                      <span
+                        class="text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded-full shrink-0"
+                      >
+                        Últimas {{ product.stock }}
+                      </span>
+                    } @else {
+                      <span
+                        class="text-[9px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full shrink-0"
+                      >
+                        Disponible
+                      </span>
+                    }
+                    @if (product.active_promotion) {
+                      <span
+                        class="text-[9px] font-semibold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded-full shrink-0"
+                      >
+                        {{ product.active_promotion.badge_label }}
+                      </span>
+                    }
+                  </div>
+
+                  <p class="text-[10px] text-slate-400 truncate mt-0.5">
+                    {{
+                      product.description ||
+                      product.category?.name ||
+                      (product.sku ? 'SKU: ' + product.sku : '')
+                    }}
+                  </p>
+
+                  <div class="text-xs font-black text-slate-900 mt-1 flex items-baseline gap-1.5">
+                    @if (hasActivePromoOrSale(product)) {
+                      <span>{{ promotionalPrice(product) | currency }}</span>
+                      <span class="text-[10px] text-slate-400 line-through font-normal">
+                        {{ product.final_price | currency }}
+                      </span>
+                    } @else {
+                      <span>{{ product.final_price | currency }}</span>
+                    }
+                    @if (product.pricing_type === 'weight') {
+                      <span class="text-[10px] font-normal text-slate-500">
+                        /{{ defaultWeightUnit() }}
+                      </span>
+                    }
+                    @if (product.has_multiple_price_tiers === true) {
+                      <span class="text-[9px] font-semibold text-primary bg-primary/10 px-1 rounded">
+                        Tiers
+                      </span>
+                    }
+                  </div>
+                </div>
+
+                <!-- Add Button / Count Badge -->
+                <button
+                  type="button"
+                  class="w-8 h-8 rounded-full flex items-center justify-center shadow-2xs active:scale-95 transition-all shrink-0 cursor-pointer"
+                  [class]="
+                    cartQtyFor(product.id) > 0
+                      ? 'bg-primary text-white shadow-primary/30'
+                      : 'bg-slate-100 hover:bg-primary hover:text-white text-slate-700'
+                  "
+                  [disabled]="isProductCardUnavailable(product)"
+                  (click)="$event.stopPropagation(); onAddToCart(product)"
+                  [attr.aria-label]="'Agregar ' + product.name + ' al carrito'"
+                >
+                  @if (cartQtyFor(product.id) > 0) {
+                    <span class="text-[11px] font-bold">{{ cartQtyFor(product.id) }}</span>
+                  } @else {
+                    <app-icon name="plus" [size]="16"></app-icon>
+                  }
+                </button>
+              </article>
+            }
+
+            @if (loadingMore()) {
+              @for (slot of loadMoreSkeletonSlots; track $index) {
+                <div
+                  aria-hidden="true"
+                  class="h-16 rounded-xl bg-white border border-slate-100 p-2 flex items-center gap-2.5 animate-pulse"
+                >
+                  <div class="w-14 h-14 rounded-lg bg-slate-100 shrink-0"></div>
+                  <div class="flex-1 space-y-1.5">
+                    <div class="h-3 w-1/2 bg-slate-100 rounded"></div>
+                    <div class="h-2.5 w-3/4 bg-slate-100 rounded"></div>
+                    <div class="h-3 w-1/4 bg-slate-100 rounded"></div>
+                  </div>
+                  <div class="w-8 h-8 rounded-full bg-slate-100 shrink-0"></div>
+                </div>
+              }
+            }
+          </div>
+
+          <!-- Desktop Product Cards: Traditional Grid (hidden lg:grid) -->
           <div
             role="list"
             aria-label="Resultados de productos"
             [attr.aria-busy]="searching()"
             [class.opacity-60]="searching()"
-            class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3 transition-opacity duration-150"
+            class="hidden lg:grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3 transition-opacity duration-150"
           >
             <!-- Modern Product Card (iOS-style) -->
             @for (
@@ -436,23 +595,27 @@ function isMultiTokenQuery(query: string): boolean {
                 "
                 (click)="onAddToCart(product)"
                 (keydown)="onProductCardKeydown($event, product)"
-                class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer product-card"
+                class="group relative bg-white border border-slate-200/90 rounded-2xl shadow-2xs hover:shadow-md transition-all duration-200 cursor-pointer product-card flex flex-col justify-between overflow-hidden"
                 [class]="
                   isProductCardUnavailable(product)
-                    ? 'opacity-60 cursor-not-allowed'
-                    : 'cursor-pointer hover:border-primary active:scale-[0.97]'
+                    ? 'is-unavailable opacity-60 cursor-not-allowed'
+                    : 'cursor-pointer hover:border-primary'
                 "
+                [class.is-selected]="
+                  selectedProductForVariant()?.id === product.id
+                "
+                [class.is-in-cart]="cartQtyFor(product.id) > 0"
               >
                 <!-- Product Image or Icon -->
                 <div
-                  class="aspect-square bg-gradient-to-br from-surface to-muted/30 relative overflow-hidden rounded-t-card"
+                  class="aspect-square bg-slate-50 relative overflow-hidden rounded-t-2xl shrink-0"
                 >
                   <!-- Product Image -->
                   @if (product.image_url || product.image) {
                     <img
                       [src]="product.image_url || product.image"
                       [alt]="product.name"
-                      class="w-full h-full object-contain p-2"
+                      class="w-full h-full object-cover"
                       (error)="onImageError($event)"
                     />
                   }
@@ -472,6 +635,15 @@ function isMultiTokenQuery(query: string): boolean {
                       </div>
                     </div>
                   }
+                  <!-- Stitch PSVERSION0001 — badge circular En Carrito (Soft style) -->
+                  @if (cartQtyFor(product.id) > 0) {
+                    <div
+                      class="absolute top-2.5 left-2.5 z-10 w-7 h-7 rounded-full bg-primary/10 text-primary border border-primary/20 flex items-center justify-center shadow-2xs backdrop-blur-xs"
+                      [title]="cartQtyFor(product.id) + ' en carrito'"
+                    >
+                      <app-icon name="shopping-cart" [size]="13"></app-icon>
+                    </div>
+                  }
                   <!-- Stock Badge -->
                   @if (
                     product.track_inventory !== false && !product.has_variants
@@ -480,7 +652,7 @@ function isMultiTokenQuery(query: string): boolean {
                       <app-badge
                         variant="error"
                         size="xs"
-                        badgeStyle="outline"
+                        badgeStyle="solid"
                         class="absolute top-2 right-2 z-[1]"
                       >
                         AGOTADO
@@ -489,7 +661,7 @@ function isMultiTokenQuery(query: string): boolean {
                       <app-badge
                         variant="warning"
                         size="xs"
-                        badgeStyle="outline"
+                        badgeStyle="solid"
                         class="absolute top-2 right-2 z-[1]"
                       >
                         Últimas {{ product.stock }}
@@ -498,7 +670,7 @@ function isMultiTokenQuery(query: string): boolean {
                       <app-badge
                         variant="success"
                         size="xs"
-                        badgeStyle="outline"
+                        badgeStyle="solid"
                         class="absolute top-2 right-2 z-[1]"
                       >
                         {{ product.stock }} Disponibles
@@ -508,7 +680,7 @@ function isMultiTokenQuery(query: string): boolean {
                     <app-badge
                       variant="info"
                       size="xs"
-                      badgeStyle="outline"
+                      badgeStyle="solid"
                       class="absolute top-2 right-2 z-[1]"
                     >
                       Disponible
@@ -519,7 +691,7 @@ function isMultiTokenQuery(query: string): boolean {
                     <app-badge
                       variant="success"
                       size="xs"
-                      badgeStyle="outline"
+                      badgeStyle="solid"
                       class="absolute bottom-2 right-2 z-[1] promo-badge"
                     >
                       {{ product.active_promotion.badge_label }}
@@ -528,7 +700,9 @@ function isMultiTokenQuery(query: string): boolean {
                   <!-- Variant Indicator -->
                   @if (product.has_variants) {
                     <div
-                      class="absolute top-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-black/60 border border-white/10 flex items-center gap-1"
+                      class="absolute top-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-black/60 border border-white/10 flex items-center gap-1 z-[1]"
+                      [class.left-11]="cartQtyFor(product.id) > 0"
+                      [class.left-2]="cartQtyFor(product.id) === 0"
                     >
                       <app-icon
                         name="layers"
@@ -543,7 +717,7 @@ function isMultiTokenQuery(query: string): boolean {
                   <!-- Weight Product Badge -->
                   @if (product.pricing_type === 'weight') {
                     <div
-                      class="absolute bottom-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-blue-600/80 border border-white/10 flex items-center gap-1"
+                      class="absolute bottom-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold bg-blue-700 border border-white/10 flex items-center gap-1 z-[1]"
                     >
                       <app-icon
                         name="scale"
@@ -553,93 +727,98 @@ function isMultiTokenQuery(query: string): boolean {
                       <span class="text-white">Peso</span>
                     </div>
                   }
-                  <!-- Add FAB — esquina inferior derecha de la imagen.
-                       Se revela al hacer hover sobre la card (desktop);
-                       en táctil queda siempre visible (ver .add-fab en styles). -->
-                  @if (!isProductCardUnavailable(product)) {
-                    <button
-                      [class]="getAddButtonClass(product)"
-                      (click)="$event.stopPropagation(); onAddToCart(product)"
-                      [attr.aria-label]="
-                        'Agregar ' + product.name + ' al carrito'
-                      "
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      >
-                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                        <line x1="5" y1="12" x2="19" y2="12"></line>
-                      </svg>
-                    </button>
-                  }
                 </div>
                 <!-- Product Info -->
-                <div class="p-2">
-                  <!-- Product Name — una sola línea en reposo.
-                       El nombre completo se revela en hover mediante .name-pop,
-                       un overlay absoluto que no altera el flujo ni el alto. -->
-                  <div class="relative mb-0.5">
-                    <!-- E.1 (F-054) — con búsqueda activa, 2 líneas para que
-                         el token que justificó el rank no quede cortado. -->
+                <div class="p-3 flex flex-col justify-between flex-1">
+                  <!-- Name & Description/SKU slot -->
+                  <div class="h-10 overflow-hidden flex flex-col justify-start">
                     <h3
-                      class="text-text-primary font-medium text-xs sm:text-sm leading-tight group-hover:text-primary transition-colors"
-                      [class.truncate]="!isSearchActive()"
-                      [class.line-clamp-2]="isSearchActive()"
+                      class="font-bold text-xs sm:text-sm text-slate-800 group-hover:text-primary transition-colors line-clamp-2 leading-tight"
                       [title]="product.name"
                     >
                       {{ product.name }}
                     </h3>
-                    <span class="name-pop" aria-hidden="true">{{
-                      product.name
-                    }}</span>
+                    @if (product.description) {
+                      <p
+                        class="text-[11px] text-slate-400 mt-0.5 truncate leading-tight"
+                        [title]="product.description"
+                      >
+                        {{ product.description }}
+                      </p>
+                    } @else if (product.sku) {
+                      <p
+                        class="text-[11px] text-slate-400 font-mono mt-0.5 truncate leading-tight"
+                        [title]="'SKU: ' + product.sku"
+                      >
+                        SKU: {{ product.sku }}
+                      </p>
+                    }
                   </div>
-                  <!-- Bottom Section: Price and Stock -->
-                  <div class="flex items-center justify-between">
+
+                  <!-- Bottom Section: Price and compact add button -->
+                  <div
+                    class="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5"
+                  >
                     <!-- Price -->
-                    <div class="flex flex-col">
+                    <div class="flex flex-col min-w-0">
                       @if (hasActivePromoOrSale(product)) {
                         <div class="flex items-baseline gap-1 flex-wrap">
                           <span
-                            class="text-success font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
+                            class="text-slate-900 font-black text-sm sm:text-base leading-tight truncate"
+                            [title]="promotionalPrice(product) | currency"
                           >
                             {{ promotionalPrice(product) | currency }}
                             @if (product.pricing_type === 'weight') {
                               <span
-                                class="text-[10px] font-normal text-text-secondary"
+                                class="text-[10px] font-normal text-slate-500"
                                 >/{{ defaultWeightUnit() }}</span
                               >
                             }
                           </span>
                           <span
-                            class="text-[10px] sm:text-xs text-text-muted line-through"
+                            class="text-[10px] sm:text-xs text-slate-400 line-through"
                           >
                             {{ product.final_price | currency }}
                           </span>
                         </div>
                       } @else {
                         <span
-                          class="text-text-primary font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
+                          class="text-slate-900 font-black text-sm sm:text-base leading-tight truncate"
+                          [title]="product.final_price | currency"
                         >
                           {{ product.final_price | currency }}
                           @if (product.pricing_type === 'weight') {
                             <span
-                              class="text-[10px] font-normal text-text-secondary"
+                              class="text-[10px] font-normal text-slate-500"
                               >/{{ defaultWeightUnit() }}</span
                             >
                           }
                         </span>
                       }
-                      <!-- Disponibilidad: vive en el badge superior de la card
-                           (AGOTADO / Últimas N / N disponibles / Disponible). -->
+                      @if (product.has_multiple_price_tiers === true) {
+                        <span class="mt-0.5 inline-flex w-fit items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.2 text-[9px] font-semibold text-primary">
+                          <app-icon name="tags" [size]="10"></app-icon>
+                          Precios por nivel
+                        </span>
+                      }
                     </div>
+
+                    <!-- Small, soft add button matching cart trash button size -->
+                    @if (!isProductCardUnavailable(product)) {
+                      <button
+                        type="button"
+                        class="shrink-0 w-6 h-6 sm:w-7 sm:h-7 rounded-md bg-primary/10 hover:bg-primary text-primary hover:text-white border border-primary/20 transition-colors flex items-center justify-center cursor-pointer shadow-2xs"
+                        (click)="
+                          $event.stopPropagation(); onAddToCart(product)
+                        "
+                        [attr.aria-label]="
+                          'Agregar ' + product.name + ' al carrito'
+                        "
+                        title="Agregar al carrito"
+                      >
+                        <app-icon name="plus" [size]="14"></app-icon>
+                      </button>
+                    }
                   </div>
                 </div>
               </div>
@@ -651,7 +830,7 @@ function isMultiTokenQuery(query: string): boolean {
               @for (slot of loadMoreSkeletonSlots; track $index) {
                 <div
                   aria-hidden="true"
-                  class="bg-surface border border-border rounded-card overflow-hidden"
+                  class="bg-surface border border-border rounded-2xl overflow-hidden"
                 >
                   <div class="aspect-square bg-muted/40 animate-pulse"></div>
                   <div class="p-2 space-y-1.5">
@@ -669,7 +848,7 @@ function isMultiTokenQuery(query: string): boolean {
                sigue visible; el cajero nunca ve flash a vacío. -->
           @if (searching()) {
             <div
-              class="sticky top-2 z-[5] mx-auto mt-2 w-fit flex items-center gap-2 rounded-full border border-border bg-surface/95 px-3 py-1.5 text-xs text-text-secondary shadow-card"
+              class="sticky top-2 z-[5] mx-auto mt-2 w-fit flex items-center gap-2 rounded-full border border-border bg-surface/95 px-3 py-1.5 text-xs text-neutral-600 shadow-card"
               role="status"
             >
               <span
@@ -679,34 +858,6 @@ function isMultiTokenQuery(query: string): boolean {
             </div>
           }
 
-          <!-- E.1 — barra sticky-bottom de paginación (F-057/F-066): UN
-               mecanismo (botón, no scroll infinito). El botón persiste
-               durante la carga (disabled + aria-busy, F-010) y al fallar
-               el append ofrece reintento sin perder items (F-036). -->
-          @if (hasMoreResults() || loadingMore()) {
-            <div
-              class="sticky bottom-0 z-[5] -mx-3 lg:-mx-6 mt-3 border-t border-border bg-surface/95 px-3 lg:px-6 py-2.5 backdrop-blur-md"
-            >
-              <button
-                #loadMoreButton
-                type="button"
-                class="w-full rounded-[10px] border border-primary/40 bg-surface px-4 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary-light disabled:cursor-wait disabled:opacity-70"
-                [disabled]="loadingMore()"
-                [attr.aria-busy]="loadingMore()"
-                [attr.aria-label]="loadMoreText()"
-                (click)="loadMore()"
-              >
-                {{ loadMoreText() }}
-              </button>
-            </div>
-          } @else if (showTerminalLine()) {
-            <p
-              class="mt-3 pb-1 text-center text-xs text-text-secondary"
-              role="status"
-            >
-              {{ terminalText() }}
-            </p>
-          }
         }
       </div>
 
@@ -781,6 +932,25 @@ function isMultiTokenQuery(query: string): boolean {
         z-index: 10;
       }
 
+      :host ::ng-deep .pos-filters-dropdown .options-dropdown-trigger {
+        border-radius: 0.75rem !important;
+      }
+
+      @media (max-width: 639px) {
+        :host ::ng-deep .pos-filters-dropdown .options-dropdown-trigger {
+          min-width: 40px !important;
+          width: 40px !important;
+          height: 40px !important;
+          padding: 0 !important;
+          justify-content: center !important;
+
+          .trigger-label-text,
+          .chevron-icon {
+            display: none !important;
+          }
+        }
+      }
+
       /* Clamp utilities for text truncation */
       .line-clamp-1 {
         display: -webkit-box;
@@ -808,8 +978,7 @@ function isMultiTokenQuery(query: string): boolean {
 
       @media (hover: hover) {
         .product-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 8px 25px -8px rgba(0, 0, 0, 0.15);
+          box-shadow: 0 4px 14px -2px rgba(0, 0, 0, 0.08);
         }
 
         .product-card:active {
@@ -817,104 +986,50 @@ function isMultiTokenQuery(query: string): boolean {
         }
       }
 
-      /* FAB de agregar sobre la imagen.
-         Base táctil: siempre visible, porque sin :hover no habría forma de verlo. */
-      .add-fab {
-        opacity: 1;
-        transform: scale(1);
-        transition:
-          opacity 0.15s ease,
-          transform 0.15s ease;
-      }
-
       .promo-badge {
         transition: opacity 0.15s ease;
-      }
-
-      /* Overlay del nombre completo. Vive fuera del flujo (absolute) sobre el
-         h3 truncado, así revelar el texto no empuja el precio ni crece la card.
-         Anclado por bottom: las líneas extra crecen hacia ARRIBA, invadiendo
-         la imagen en vez de tapar el precio.
-         Oculto por defecto — en táctil el nombre completo queda en [title]. */
-      .name-pop {
-        position: absolute;
-        bottom: 0;
-        left: -0.25rem;
-        right: -0.25rem;
-        z-index: 4;
-        visibility: hidden;
-        opacity: 0;
-        /* translateY en vez de scaleY: escalar deforma la tipografía durante la
-           animación y eso delata el overlay como algo pegado encima. */
-        transform: translateY(3px);
-        transition:
-          opacity 0.2s ease-out,
-          transform 0.2s ease-out,
-          visibility 0s linear 0.2s;
-        /* El padding-top extra no aloja texto: es la banda donde el fondo se
-           desvanece, para que el borde superior no corte en seco sobre la
-           imagen. El texto arranca ya en zona opaca, así que sigue legible. */
-        /* Sin sombra ni radio: cualquiera de los dos dibuja el contorno de la
-           caja y rompe la fusión. El bloque nace opaco abajo — donde ya está el
-           fondo de la card — y se disuelve del todo antes de invadir la foto. */
-        padding: 1.1rem 0.25rem 0.125rem;
-        background: linear-gradient(
-          to bottom,
-          rgba(var(--color-surface-rgb, 255, 255, 255), 0) 0,
-          rgba(var(--color-surface-rgb, 255, 255, 255), 0.12) 30%,
-          rgba(var(--color-surface-rgb, 255, 255, 255), 0.45) 55%,
-          rgba(var(--color-surface-rgb, 255, 255, 255), 0.82) 78%,
-          rgba(var(--color-surface-rgb, 255, 255, 255), 1) 92%
-        );
-        color: var(--color-primary);
-        font-weight: var(--fw-medium, 500);
-        font-size: 0.75rem;
-        line-height: 1.25;
-      }
-
-      @media (min-width: 640px) {
-        .name-pop {
-          font-size: 0.875rem;
-        }
-      }
-
-      @media (hover: hover) {
-        /* Solo en punteros con hover el FAB se esconde hasta que la card recibe hover. */
-        .add-fab {
-          opacity: 0;
-          transform: scale(0.85);
-          pointer-events: none;
-        }
-
-        .product-card:hover .add-fab,
-        .add-fab:focus-visible {
-          opacity: 1;
-          transform: scale(1);
-          pointer-events: auto;
-        }
-
-        /* El badge de promoción comparte esquina con el FAB: cede el lugar en hover. */
-        .product-card:hover .promo-badge {
-          opacity: 0;
-        }
-
-        /* Nombre completo al hover, sin consumir alto de la card. */
-        .product-card:hover .name-pop {
-          visibility: visible;
-          opacity: 1;
-          transform: translateY(0);
-          transition-delay: 0s;
-        }
-
-        .add-fab:active {
-          transform: scale(0.92);
-        }
       }
 
       /* Price styling */
       .price-primary {
         color: var(--color-primary);
         font-weight: var(--fw-bold);
+      }
+
+      /* Stitch paso 2 — estados de card. Van AL FINAL para que ganen al
+         hover (igual especificidad, manda el orden): selected + hover
+         muestra el anillo, no la sombra de hover. */
+      .product-card:focus-visible {
+        outline: 3px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+
+      .product-card button:focus-visible {
+        outline: 3px solid var(--color-primary);
+        outline-offset: 2px;
+      }
+
+      /* Estado selected: la card cuyo selector de variantes esta abierto.
+         Anillo doble para no depender solo del color. */
+      .product-card.is-selected {
+        border-color: var(--color-primary);
+        box-shadow:
+          0 0 0 2px var(--color-surface),
+          0 0 0 5px var(--color-primary);
+      }
+
+      /* Stitch PSVERSION0001 paso 3 — estado en-carrito: anillo primario suave */
+      .product-card.is-in-cart {
+        border-color: var(--color-primary);
+        box-shadow:
+          0 0 0 2px var(--color-surface),
+          0 0 0 3px rgba(var(--color-primary-rgb, 16, 185, 129), 0.25);
+      }
+
+      /* Estado sin-stock: la imagen en grises refuerza el badge AGOTADO en
+         texto (distinguible sin depender solo del color). */
+      .product-card.is-unavailable img {
+        filter: grayscale(1);
       }
     `,
   ],
@@ -981,6 +1096,25 @@ export class PosProductSelectionComponent {
   readonly showStopwordsHint = computed(() =>
     isStopwordsOnlyQuery(this.searchQuery()),
   );
+
+  /**
+   * Stitch PSVERSION0001 paso 3 — qty en carrito por product_id. Suma
+   * `quantity` de todas las líneas del producto (variantes incluidas);
+   * los ítems libres (`itemType === 'custom'`) no tienen product_id y se
+   * ignoran. Lee `PosCartService.cartItems` (computed) así que el badge
+   * "En Carrito" reacciona sin flicker ni suscripciones manuales.
+   */
+  readonly cartQtyByProductId = computed(() => {
+    const map = new Map<string, number>();
+    for (const item of this.cartService.cartItems()) {
+      if (item.itemType === 'custom') continue;
+      const id = item.product?.id;
+      if (id == null || id === '') continue;
+      const key = String(id);
+      map.set(key, (map.get(key) ?? 0) + (Number(item.quantity) || 0));
+    }
+    return map;
+  });
 
   /** Copy exacto del contador (F-066/F-098). Vacío cuando no hay total. */
   readonly counterText = computed(() => {
@@ -1069,12 +1203,14 @@ export class PosProductSelectionComponent {
   readonly selectedCustomer = input<any>(null);
   readonly queueEnabled = input<boolean>(false);
   readonly queueCount = input<number>(0);
+  readonly canCreateCustomItems = input<boolean>(true);
 
   readonly productSelected = output<any>();
   readonly productAddedToCart = output<{ product: any; quantity: number }>();
   readonly bookingRequired = output<any>();
   readonly openCustomerModal = output<void>();
   readonly openQueueModal = output<void>();
+  readonly openCustomItemModal = output<void>();
 
   private searchSubject$ = new Subject<string>(); // LEGÍTIMO — distinctUntilChanged search stream (debounce ya vive dentro de app-inputsearch)
   // E.1 — stream único de carga paginada (switchMap + seq, F-058).
@@ -1090,6 +1226,7 @@ export class PosProductSelectionComponent {
     viewChild<ElementRef<HTMLDivElement>>('productsScroll');
   private readonly loadMoreButton =
     viewChild<ElementRef<HTMLButtonElement>>('loadMoreButton');
+  private hostRef = inject(ElementRef);
   private productService = inject(PosProductService);
   private cartService = inject(PosCartService);
   private toastService = inject(ToastService);
@@ -1662,7 +1799,21 @@ export class PosProductSelectionComponent {
       return `${name}, ${price}, Agotado`;
     }
     const stock = Number(product?.stock ?? 0);
-    return `${name}, ${price}, ${stock} disponibles`;
+    // Stitch PSVERSION0001 paso 3 — el badge "En Carrito (N)" también se
+    // anuncia en texto para lector de pantalla.
+    const inCart = this.cartQtyFor(product?.id);
+    const cartSuffix = inCart > 0 ? `, ${inCart} en carrito` : '';
+    return `${name}, ${price}, ${stock} disponibles${cartSuffix}`;
+  }
+
+  /**
+   * Stitch PSVERSION0001 paso 3 — qty del producto en el ticket
+   * (0 si ausente). Lee el computed `cartQtyByProductId`, así que las
+   * lecturas desde el template son reactivas en zoneless.
+   */
+  cartQtyFor(productId: string | number | null | undefined): number {
+    if (productId == null || productId === '') return 0;
+    return this.cartQtyByProductId().get(String(productId)) ?? 0;
   }
 
   /** E.1 (F-061) — publica un anuncio en la live-region polite. */
@@ -1695,12 +1846,22 @@ export class PosProductSelectionComponent {
    * CP-pos-checkout-enter-focus (step A.2) — devuelve el foco al buscador de
    * productos. No-op total si el input no está montado; nunca lanza.
    */
-  focusSearch(): void {
+  focusSearch(initialChar?: string): void {
     try {
-      this.searchInput()?.focusInput();
+      this.searchInput()?.focusInput(initialChar);
     } catch {
       // El foco nunca debe romper un flujo de cierre.
     }
+  }
+
+  isVisible(): boolean {
+    const el = this.hostRef.nativeElement as HTMLElement;
+    return !!(
+      el &&
+      (el.offsetWidth > 0 ||
+        el.offsetHeight > 0 ||
+        (typeof el.getClientRects === 'function' && el.getClientRects().length > 0))
+    );
   }
 
   onCategoryChange(event: any): void {
@@ -1712,7 +1873,27 @@ export class PosProductSelectionComponent {
 
   onSelectCategory(category: any): void {
     this.selectedCategory.set(category);
+    // Stitch PSVERSION0001 paso 2 — las pills escriben la misma señal que
+    // el dropdown Filtros: el dropdown refleja lo elegido en la barra.
+    const categoryId = category?.id != null ? String(category.id) : '';
+    const current = this.filterValues();
+    if (categoryId) {
+      this.filterValues.set({ ...current, category_id: categoryId });
+    } else if ('category_id' in current) {
+      const { category_id: _dropped, ...rest } = current;
+      this.filterValues.set(rest);
+    }
     this.filterProducts();
+  }
+
+  /**
+   * Stitch PSVERSION0001 paso 2 — selección desde la barra de pills.
+   * Revive `onSelectCategory`: resuelve el id a la categoría y filtra igual
+   * que el dropdown (misma señal, mismo request).
+   */
+  onCategoryPillSelected(categoryId: string): void {
+    const found = this.categories().find((c) => c.id === categoryId);
+    this.onSelectCategory(found ?? this.categories()[0]);
   }
 
   onSelectBrand(brand: Brand): void {
@@ -1784,9 +1965,11 @@ export class PosProductSelectionComponent {
 
   getCategoryClass(category: any): string {
     const baseClass =
-      'border-border bg-surface text-text-secondary hover:border-primary hover:text-primary hover:bg-primary-light transition-colors';
+      'border-border bg-surface text-neutral-600 hover:border-primary hover:text-primary hover:bg-[var(--color-primary-light)] transition-colors';
     const selectedClass =
-      'border-primary bg-primary-light text-primary shadow-card';
+      // Stitch paso 11 — bg-primary-light no existe en tailwind.config (compilaba
+      // a nada); forma arbitraria para que el estado seleccionado tenga fondo.
+      'border-primary bg-[var(--color-primary-light)] text-primary shadow-card';
 
     return this.selectedCategory()?.id === category.id
       ? selectedClass
@@ -1849,7 +2032,8 @@ export class PosProductSelectionComponent {
    */
   getAddButtonClass(product: any): string {
     void product;
-    return 'add-fab absolute bottom-2 right-2 z-[2] w-8 h-8 rounded-full flex items-center justify-center bg-[var(--color-primary)] text-[var(--color-text-on-primary)] hover:brightness-110';
+    // Stitch paso 11 — fondo success-700 (contraste no-texto ≥3:1); primary fallaba.
+    return 'add-fab absolute bottom-2 right-2 z-[2] w-8 h-8 rounded-full flex items-center justify-center bg-[var(--color-success-700)] text-[var(--color-text-on-primary)] hover:brightness-110';
   }
 
   async onAddToCart(product: any): Promise<void> {

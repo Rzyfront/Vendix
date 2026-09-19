@@ -95,6 +95,7 @@ export const reportsRoutes: Routes = [
           { path: 'inventory-valuation',           data: { reportId: 'inventory-valuation' },           loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'inventory-movements',           data: { reportId: 'inventory-movements' },           loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'inventory-movement-analysis',   data: { reportId: 'inventory-movement-analysis' },   loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'inventory-ingredient-consumption', data: { reportId: 'inventory-ingredient-consumption' }, loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {
@@ -126,6 +127,7 @@ export const reportsRoutes: Routes = [
           { path: 'customer-acquisition',        data: { reportId: 'customer-acquisition' },        loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'customer-abandoned-carts',    data: { reportId: 'customer-abandoned-carts' },    loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
           { path: 'customers-top',               data: { reportId: 'customers-top' },               loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
+          { path: 'customers-receivable',        data: { reportId: 'customers-receivable' },        loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent) },
         ],
       },
       {

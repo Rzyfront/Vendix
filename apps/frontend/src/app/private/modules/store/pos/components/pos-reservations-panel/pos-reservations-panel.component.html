@@ -1,19 +1,22 @@
-<div class="reservations-panel">
+<section class="reservations-panel" aria-label="Reservas de hoy">
   <!-- Header -->
   <div class="panel-header">
-    <h3>Reservas Hoy ({{ todayBookings().length }})</h3>
+    <div class="panel-title">
+      <h3>Reservas hoy</h3>
+      <span class="panel-count" aria-label="{{ todayBookings().length }} reservas">{{ todayBookings().length }}</span>
+    </div>
     <div class="header-actions">
-      <button class="icon-btn" (click)="quickBook.emit()" title="Reserva rapida">
-        <app-icon name="plus" [size]="18"></app-icon>
+      <button type="button" class="icon-btn" (click)="quickBook.emit()" aria-label="Nueva reserva rápida" title="Reserva rápida">
+        <app-icon name="plus" [size]="20"></app-icon>
       </button>
-      <button class="icon-btn" (click)="walkIn.emit()" title="Walk-in">
-        <app-icon name="user-plus" [size]="18"></app-icon>
+      <button type="button" class="icon-btn" (click)="walkIn.emit()" aria-label="Registrar cliente sin cita" title="Walk-in">
+        <app-icon name="user-plus" [size]="20"></app-icon>
       </button>
-      <button class="icon-btn" (click)="loadTodayBookings()" title="Actualizar">
-        <app-icon name="refresh-cw" [size]="16"></app-icon>
+      <button type="button" class="icon-btn" (click)="loadTodayBookings()" aria-label="Actualizar reservas" title="Actualizar">
+        <app-icon name="refresh-cw" [size]="18"></app-icon>
       </button>
-      <button class="icon-btn" (click)="close.emit()" title="Cerrar">
-        <app-icon name="x" [size]="18"></app-icon>
+      <button type="button" class="icon-btn" (click)="close.emit()" aria-label="Cerrar panel de reservas" title="Cerrar">
+        <app-icon name="x" [size]="20"></app-icon>
       </button>
     </div>
   </div>
@@ -21,21 +24,23 @@
   <!-- Timeline -->
   <div class="timeline-container">
     @if (loading()) {
-      <div class="loading-center">
+      <div class="loading-center" role="status" aria-label="Cargando reservas">
         <app-spinner size="sm" color="primary"></app-spinner>
       </div>
     } @else if (todayBookings().length === 0) {
       <div class="empty-state">
-        <app-icon name="calendar" [size]="32"></app-icon>
+        <span class="empty-icon" aria-hidden="true">
+          <app-icon name="calendar" [size]="32"></app-icon>
+        </span>
         <p>No hay reservas para hoy</p>
-        <app-button variant="primary" size="sm" (clicked)="quickBook.emit()">
-          <app-icon name="plus" [size]="14" slot="icon" ></app-icon> Nueva Reserva
+        <app-button variant="primary" size="md" (clicked)="quickBook.emit()">
+          <app-icon name="plus" [size]="16" slot="icon" ></app-icon> Nueva reserva
         </app-button>
       </div>
     } @else {
-      <div class="timeline">
+      <div class="timeline" role="list" aria-label="Línea de tiempo de reservas">
         @for (slot of timeSlots; track slot) {
-          <div class="time-row">
+          <div class="time-row" aria-hidden="true">
             <span class="time-label">{{ slot }}</span>
             <div class="time-line"></div>
           </div>
@@ -44,25 +49,33 @@
         <!-- Booking blocks -->
         @for (booking of todayBookings(); track booking.id) {
           <div
+            role="listitem"
             class="booking-block status-{{ booking.status }}"
+            [class.expanded]="expandedBookingId() === booking.id"
             [style.top.%]="getBlockTop(booking)"
-            [style.height.%]="getBlockHeight(booking)"
-            (click)="toggleBookingActions(booking)">
-            <div class="block-header">
-              <span class="block-time">{{ formatTime(booking.start_time) }}</span>
-              <span class="block-status">{{ getStatusLabel(booking.status) }}</span>
-            </div>
-            <span class="block-service">{{ booking.product?.name || booking.service_name || 'Servicio' }}</span>
-            <span class="block-customer">{{ booking.customer?.first_name || booking.customer?.name || '' }} {{ booking.customer?.last_name || '' }}</span>
+            [style.height.%]="getBlockHeight(booking)">
+            <button
+              type="button"
+              class="block-toggle"
+              [attr.aria-expanded]="expandedBookingId() === booking.id"
+              [attr.aria-label]="getStatusLabel(booking.status) + ': ' + (booking.product?.name || booking.service_name || 'Servicio') + ', ' + formatTime(booking.start_time)"
+              (click)="toggleBookingActions(booking)">
+              <span class="block-header">
+                <span class="block-time">{{ formatTime(booking.start_time) }}</span>
+                <span class="block-status">{{ getStatusLabel(booking.status) }}</span>
+              </span>
+              <span class="block-service">{{ booking.product?.name || booking.service_name || 'Servicio' }}</span>
+              <span class="block-customer">{{ booking.customer?.first_name || booking.customer?.name || '' }} {{ booking.customer?.last_name || '' }}</span>
+            </button>
 
             @if (expandedBookingId() === booking.id) {
-              <div class="block-actions" (click)="$event.stopPropagation()">
+              <div class="block-actions">
                 @if (booking.status === 'pending') {
-                  <app-button variant="primary" size="sm" (clicked)="confirm(booking)">Confirmar</app-button>
+                  <app-button variant="primary" size="md" (clicked)="confirm(booking)">Confirmar</app-button>
                 }
                 @if (booking.status === 'confirmed') {
-                  <app-button variant="primary" size="sm" (clicked)="complete(booking)">Completar</app-button>
-                  <app-button variant="ghost" size="sm" (clicked)="noShow(booking)">No Show</app-button>
+                  <app-button variant="primary" size="md" (clicked)="complete(booking)">Completar</app-button>
+                  <app-button variant="outline" size="md" (clicked)="noShow(booking)">No show</app-button>
                 }
               </div>
             }
@@ -70,8 +83,8 @@
         }
 
         <!-- Current time line -->
-        <div class="current-time-line" [style.top.%]="currentTimePercent()"></div>
+        <div class="current-time-line" [style.top.%]="currentTimePercent()" aria-hidden="true"></div>
       </div>
     }
   </div>
-</div>
+</section>
