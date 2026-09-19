@@ -188,7 +188,7 @@ function isMultiTokenQuery(query: string): boolean {
             placeholder="Buscar por nombre, SKU o código de barras…"
             ariaLabel="Buscar productos"
             [debounceTime]="300"
-            [autofocus]="true"
+            [autofocus]="false"
             [ngModel]="searchQuery()"
             (ngModelChange)="searchQuery.set($event)"
             (searchChange)="onSearch($event)"
@@ -1226,6 +1226,7 @@ export class PosProductSelectionComponent {
     viewChild<ElementRef<HTMLDivElement>>('productsScroll');
   private readonly loadMoreButton =
     viewChild<ElementRef<HTMLButtonElement>>('loadMoreButton');
+  private hostRef = inject(ElementRef);
   private productService = inject(PosProductService);
   private cartService = inject(PosCartService);
   private toastService = inject(ToastService);
@@ -1845,12 +1846,22 @@ export class PosProductSelectionComponent {
    * CP-pos-checkout-enter-focus (step A.2) — devuelve el foco al buscador de
    * productos. No-op total si el input no está montado; nunca lanza.
    */
-  focusSearch(): void {
+  focusSearch(initialChar?: string): void {
     try {
-      this.searchInput()?.focusInput();
+      this.searchInput()?.focusInput(initialChar);
     } catch {
       // El foco nunca debe romper un flujo de cierre.
     }
+  }
+
+  isVisible(): boolean {
+    const el = this.hostRef.nativeElement as HTMLElement;
+    return !!(
+      el &&
+      (el.offsetWidth > 0 ||
+        el.offsetHeight > 0 ||
+        (typeof el.getClientRects === 'function' && el.getClientRects().length > 0))
+    );
   }
 
   onCategoryChange(event: any): void {

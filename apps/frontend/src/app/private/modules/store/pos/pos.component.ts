@@ -1159,23 +1159,13 @@ export class PosComponent {
   );
 
   /**
-   * CP-pos-checkout-enter-focus (step A.2) — devuelve el foco al buscador de
-   * productos tras cerrar cualquier modal del POS. Diferido ~50ms para dejar
-   * que la animación de cierre libere el foco. Recorre todas las instancias
-   * (desktop + móvil, una oculta por CSS); enfocar la oculta es no-op en el
-   * navegador. No-op total si el buscador no está montado (p. ej. overlay de
-   * fuera de horario); jamás lanza en un flujo de cierre.
+   * CP-pos-checkout-enter-focus — el auto-focus del buscador ya no es automático
+   * al cerrar modales ni al iniciar la vista; se activa justo cuando el usuario
+   * intenta escribir una letra o número en la vista principal del POS.
    */
   private focusSearchSoon(): void {
-    setTimeout(() => {
-      try {
-        for (const child of this.productSelectionList()) {
-          child?.focusSearch();
-        }
-      } catch {
-        // El foco nunca debe romper un flujo de cierre.
-      }
-    }, 50);
+    // Intencionalmente no-op: el auto-focus del buscador no es automático al cerrar
+    // modales ni al iniciar la vista; el foco se activa bajo demanda al teclear.
   }
   private customerService = inject(PosCustomerService);
   private vexiPos = inject(VexiPosBridgeService);
@@ -1379,6 +1369,129 @@ export class PosComponent {
     this.isMobile.set(width < 768);
     // Tablet range: 768px - 1023px (where sidebar can be collapsed/expanded)
     this.isTablet.set(width >= 768 && width < 1024);
+  }
+
+  @HostListener('window:keydown', ['$event'])
+  onWindowKeydown(event: KeyboardEvent): void {
+    this.handleTypeToSearch(event);
+  }
+
+  /**
+   * Auto-focus inteligente bajo demanda: enfoca el buscador de productos del POS
+   * solo cuando el usuario teclea una letra o número en la vista principal,
+   * garantizando que NINGÚN modal abierto (nota, cupón, cliente, caja, cobro, etc.)
+   * ni ningún input/textarea activo pierda su funcionalidad de escritura.
+   */
+  private handleTypeToSearch(event: KeyboardEvent): void {
+    // 1. Teclas modificadoras (Ctrl, Alt, Meta/Cmd) no son escritura de texto
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+      return;
+    }
+
+    // 2. Solo caracteres imprimibles de longitud 1
+    if (!event.key || event.key.length !== 1) {
+      return;
+    }
+
+    // 3. Validar estrictamente letras (con acentos/ñ) y números Unicode
+    if (!/^[\p{L}\p{N}]$/u.test(event.key)) {
+      return;
+    }
+
+    // 4. Si el foco actual ya está en un elemento editable, permitir la escritura nativa
+    const active =
+      typeof document !== 'undefined'
+        ? (document.activeElement as HTMLElement | null)
+        : null;
+    if (
+      active &&
+      (active.tagName === 'INPUT' ||
+        active.tagName === 'TEXTAREA' ||
+        active.tagName === 'SELECT' ||
+        active.isContentEditable)
+    ) {
+      return;
+    }
+
+    // 5. OJO REQUISITO CRÍTICO: Sin modales abiertos (nota, cupón, cliente, caja, cobro, etc.)
+    if (this.hasAnyModalOpen()) {
+      return;
+    }
+
+    // 6. Verificar que el target del evento no esté dentro de un diálogo o modal
+    const target = event.target as HTMLElement | null;
+    if (
+      target?.closest(
+        '[role="dialog"], [aria-modal="true"], app-modal, .modal-content, .modal-overlay, dialog',
+      )
+    ) {
+      return;
+    }
+
+    // 7. Si el target es editable, no interferir
+    if (
+      target &&
+      (target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.isContentEditable)
+    ) {
+      return;
+    }
+
+    // 8. Buscar la instancia visible de catálogo (desktop o móvil) y enfocar con el carácter inicial
+    const children = this.productSelectionList();
+    const targetChild = children.find((c) => c?.isVisible()) ?? children[0];
+    if (targetChild) {
+      event.preventDefault();
+      targetChild.focusSearch(event.key);
+    }
+  }
+
+  private hasAnyModalOpen(): boolean {
+    // Señales de modales en el shell POS:
+    if (
+      this.showCartModal() ||
+      this.customItemModalOpen() ||
+      this.showCustomerModal() ||
+      this.showCheckoutModal() ||
+      this.showOrderConfirmation() ||
+      this.showSessionOpenModal() ||
+      this.showSessionCloseModal() ||
+      this.showAISummaryModal() ||
+      this.showCashMovementModal() ||
+      this.showSessionDetailModal() ||
+      this.showScheduleModal() ||
+      this.showReservationModal() ||
+      this.showLayawayConfigModal() ||
+      this.kitchenConfirmOpen() ||
+      this.chargeModalOpen() ||
+      this.loading()
+    ) {
+      return true;
+    }
+
+    // Inspección en el DOM para modales hijos o modales globales:
+    if (typeof document !== 'undefined') {
+      // Modales con app-modal (notas de orden, notas de ítem, cupones, etc.)
+      if (document.querySelector('app-modal > div')) {
+        return true;
+      }
+      // Overlays abiertos en móvil o desktop
+      if (
+        document.querySelector(
+          '.modal-overlay.open, .modal-content.open, .modal.open, .modal.show, .app-dialog-backdrop, .app-dialog-panel, dialog[open]',
+        )
+      ) {
+        return true;
+      }
+      // Bloqueo de scroll global en body (activado por ModalComponent)
+      if (document.body && document.body.style.overflow === 'hidden') {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
