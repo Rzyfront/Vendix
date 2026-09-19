@@ -166,9 +166,31 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
     }
   }
 
-  focusInput(): void {
+  focusInput(initialChar?: string): void {
     const el = this.hostRef.nativeElement?.querySelector?.('input') as HTMLInputElement | null;
-    el?.focus({ preventScroll: true });
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    if (initialChar !== undefined && initialChar !== '') {
+      let nextVal = '';
+      if (
+        el.selectionStart !== null &&
+        el.selectionEnd !== null &&
+        el.selectionStart !== el.selectionEnd
+      ) {
+        const start = el.selectionStart;
+        const end = el.selectionEnd;
+        nextVal =
+          el.value.substring(0, start) + initialChar + el.value.substring(end);
+      } else {
+        nextVal = (el.value || '') + initialChar;
+      }
+      el.value = nextVal;
+      this.value.set(nextVal);
+      this.onChange(nextVal);
+      this.searchSubject$.next(nextVal);
+      const len = nextVal.length;
+      el.setSelectionRange(len, len);
+    }
   }
 // ControlValueAccessor implementation
   writeValue(value: string): void {
