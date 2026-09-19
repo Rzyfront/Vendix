@@ -19,6 +19,7 @@ import {
   ValidatorFn,
 } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
+import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import {
   SelectorComponent,
   SelectorOption,
@@ -66,6 +67,7 @@ const nonEmptyArray: ValidatorFn = (control) => {
     CommonModule,
     ReactiveFormsModule,
     InputComponent,
+    IconComponent,
     SelectorComponent,
     MultiSelectorComponent,
     PanelUiModulesEditorComponent,
@@ -345,6 +347,30 @@ export class GeneralSettingsForm implements OnInit {
 
   get taxIncludedControl(): FormControl<boolean> {
     return this.form.get('tax_included') as FormControl<boolean>;
+  }
+
+  get localAddressGroup(): FormGroup {
+    return this.form.get('services.local_address') as FormGroup;
+  }
+
+  get addressLine1Control(): FormControl<string> {
+    return this.form.get('services.local_address.address_line1') as FormControl<string>;
+  }
+
+  get addressLine2Control(): FormControl<string> {
+    return this.form.get('services.local_address.address_line2') as FormControl<string>;
+  }
+
+  get cityControl(): FormControl<string> {
+    return this.form.get('services.local_address.city') as FormControl<string>;
+  }
+
+  get stateProvinceControl(): FormControl<string> {
+    return this.form.get('services.local_address.state_province') as FormControl<string>;
+  }
+
+  get postalCodeControl(): FormControl<string> {
+    return this.form.get('services.local_address.postal_code') as FormControl<string>;
   }
 
   async ngOnInit() {

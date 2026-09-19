@@ -347,6 +347,43 @@ export class SettingsService {
       settings = migratedSettings;
     }
 
+    // Hidratar la dirección física de la tienda en settings.services.local_address
+    // desde la tabla addresses si no está presente en el JSON de store_settings.
+    const currentLocalAddr = (settings as any).services?.local_address;
+    if (!currentLocalAddr?.address_line1) {
+      try {
+        const storePhysicalAddr =
+          (await this.prisma.addresses.findFirst({
+            where: { store_id, is_primary: true, type: 'store_physical' },
+          })) ||
+          (await this.prisma.addresses.findFirst({
+            where: { store_id, type: 'store_physical' },
+          }));
+
+        if (storePhysicalAddr) {
+          const currentServices = (settings as any).services || (defaultSettings as any).services || {};
+          settings = {
+            ...settings,
+            services: {
+              ...currentServices,
+              local_address: {
+                address_line1: storePhysicalAddr.address_line1,
+                address_line2: storePhysicalAddr.address_line2 || '',
+                city: storePhysicalAddr.city,
+                state_province: storePhysicalAddr.state_province || '',
+                country_code: storePhysicalAddr.country_code || 'CO',
+                postal_code: storePhysicalAddr.postal_code || '',
+              },
+            },
+          } as any;
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `[Settings] failed to hydrate store_physical address for store ${store_id}: ${err?.message ?? err}`,
+        );
+      }
+    }
+
     // Read branding from store_settings.settings.branding (source of truth)
     const branding = settings.branding || defaultSettings.branding;
 
@@ -725,6 +762,72 @@ export class SettingsService {
           }
         } catch (error) {
           console.error('Error updating stores table:', error);
+        }
+      }
+    }
+
+    // Sincronizar dirección física de la tienda a la tabla addresses si viene en services.local_address
+    if (dto.services?.local_address) {
+      const addr = dto.services.local_address;
+      const line1 = (addr.address_line1 ?? '').trim();
+      const city = (addr.city ?? '').trim();
+      if (line1 && city) {
+        try {
+          const store = await this.prisma.stores.findUnique({
+            where: { id: store_id },
+            select: { organization_id: true },
+          });
+          const orgId = store?.organization_id;
+          const stateProv = (addr.state_province ?? '').trim() || null;
+          const postCode = (addr.postal_code ?? '').trim() || null;
+          const countryRaw = (addr.country_code ?? 'CO').trim();
+          const countryCode =
+            countryRaw.length === 2
+              ? countryRaw.toUpperCase()
+              : (countryRaw.toLowerCase() === 'colombia' ? 'CO' : 'CO');
+
+          const existingPhysical =
+            (await this.prisma.addresses.findFirst({
+              where: { store_id, is_primary: true, type: 'store_physical' },
+            })) ||
+            (await this.prisma.addresses.findFirst({
+              where: { store_id, type: 'store_physical' },
+            }));
+
+          if (existingPhysical) {
+            await this.prisma.addresses.updateMany({
+              where: { id: existingPhysical.id, store_id },
+              data: {
+                address_line1: line1,
+                address_line2: (addr.address_line2 ?? '').trim() || null,
+                city,
+                state_province: stateProv,
+                postal_code: postCode,
+                country_code: countryCode,
+                is_primary: true,
+                type: 'store_physical',
+              },
+            });
+          } else if (orgId) {
+            await this.prisma.addresses.create({
+              data: {
+                store_id,
+                organization_id: orgId,
+                address_line1: line1,
+                address_line2: (addr.address_line2 ?? '').trim() || null,
+                city,
+                state_province: stateProv,
+                postal_code: postCode,
+                country_code: countryCode,
+                is_primary: true,
+                type: 'store_physical',
+              },
+            });
+          }
+        } catch (error: any) {
+          this.logger.warn(
+            `[Settings] failed to sync store_physical address for store ${store_id}: ${error?.message ?? error}`,
+          );
         }
       }
     }

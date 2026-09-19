@@ -119,12 +119,14 @@ export class StoresService {
               },
               address_data: address
                 ? {
-                    address_line1: address.address_line1,
+                    address_line1: (address.address_line1 ?? address.street ?? '').trim(),
                     address_line2: address.address_line2 ?? null,
-                    city: address.city,
-                    state_province: address.state_province ?? null,
-                    postal_code: address.postal_code ?? null,
-                    country_code: address.country_code,
+                    city: (address.city ?? '').trim(),
+                    state_province: (address.state_province ?? address.state ?? '').trim() || null,
+                    postal_code: (address.postal_code ?? address.zipCode ?? '').trim() || null,
+                    country_code: ((address.country_code ?? address.country ?? 'CO').trim().length === 2
+                      ? (address.country_code ?? address.country ?? 'CO').trim().toUpperCase()
+                      : ((address.country_code ?? address.country ?? '').trim().toLowerCase() === 'colombia' ? 'CO' : 'CO')),
                     phone_number: address.phone_number ?? null,
                     type: 'store_physical',
                     is_primary: true,
@@ -339,39 +341,51 @@ export class StoresService {
     // Handle address: upsert primary address for the store
     if (address) {
       const orgId = existing.organization_id;
-      const existingPrimary = await this.prisma.addresses.findFirst({
-        where: { store_id: id, is_primary: true },
-      });
+      const line1 = (address.address_line1 ?? address.street ?? '').trim();
+      const city = (address.city ?? '').trim();
+      const stateProv = (address.state_province ?? address.state ?? '').trim() || null;
+      const postCode = (address.postal_code ?? address.zipCode ?? '').trim() || null;
+      const countryRaw = (address.country_code ?? address.country ?? 'CO').trim();
+      const countryCode = countryRaw.length === 2
+        ? countryRaw.toUpperCase()
+        : (countryRaw.toLowerCase() === 'colombia' ? 'CO' : 'CO');
 
-      if (existingPrimary) {
-        await this.prisma.addresses.update({
-          where: { id: existingPrimary.id },
-          data: {
-            address_line1: address.address_line1,
-            address_line2: address.address_line2 ?? null,
-            city: address.city,
-            state_province: address.state_province ?? null,
-            postal_code: address.postal_code ?? null,
-            country_code: address.country_code,
-            phone_number: address.phone_number ?? null,
-          },
+      if (line1 && city) {
+        const existingPrimary = await this.prisma.addresses.findFirst({
+          where: { store_id: id, is_primary: true },
         });
-      } else {
-        await this.prisma.addresses.create({
-          data: {
-            store_id: id,
-            organization_id: orgId,
-            address_line1: address.address_line1,
-            address_line2: address.address_line2 ?? null,
-            city: address.city,
-            state_province: address.state_province ?? null,
-            postal_code: address.postal_code ?? null,
-            country_code: address.country_code,
-            phone_number: address.phone_number ?? null,
-            type: 'store_physical',
-            is_primary: true,
-          },
-        });
+
+        if (existingPrimary) {
+          await this.prisma.addresses.update({
+            where: { id: existingPrimary.id },
+            data: {
+              address_line1: line1,
+              address_line2: address.address_line2 ?? null,
+              city,
+              state_province: stateProv,
+              postal_code: postCode,
+              country_code: countryCode,
+              phone_number: address.phone_number ?? null,
+              type: 'store_physical',
+            },
+          });
+        } else {
+          await this.prisma.addresses.create({
+            data: {
+              store_id: id,
+              organization_id: orgId,
+              address_line1: line1,
+              address_line2: address.address_line2 ?? null,
+              city,
+              state_province: stateProv,
+              postal_code: postCode,
+              country_code: countryCode,
+              phone_number: address.phone_number ?? null,
+              type: 'store_physical',
+              is_primary: true,
+            },
+          });
+        }
       }
     }
 
