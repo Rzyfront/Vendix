@@ -844,9 +844,11 @@ describe('CheckoutService - promotions and coupons', () => {
       ]);
     });
 
-    it('rechaza el pago en efectivo aunque esté habilitado en la tienda', async () => {
+    it('permite el pago en efectivo si la entrega es pickup (recoger en tienda) (QUI-850)', async () => {
+      mockOrderCreate(10000);
       prisma.store_payment_methods.findFirst.mockResolvedValue({
         id: 9,
+        store_id: STORE_ID,
         state: 'enabled',
         system_payment_method: {
           id: 1,
@@ -855,10 +857,56 @@ describe('CheckoutService - promotions and coupons', () => {
           provider: 'manual',
         },
       });
+      storePrisma.shipping_methods.findFirst.mockResolvedValue({
+        id: 1,
+        type: 'pickup',
+        store_id: STORE_ID,
+        is_active: true,
+      });
+
+      const result: any = await service.checkout({
+        payment_method_id: 9,
+        shipping_method_id: 1,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+      } as any);
+
+      expect(result).toBeDefined();
+      expect(prisma.orders.create).toHaveBeenCalled();
+      expect(prisma.payments.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            state: 'pending',
+            store_payment_method_id: 9,
+          }),
+        }),
+      );
+    });
+
+    it('rechaza el pago en efectivo si la entrega no es pickup (QUI-850)', async () => {
+      mockOrderCreate(10000);
+      prisma.store_payment_methods.findFirst.mockResolvedValue({
+        id: 9,
+        store_id: STORE_ID,
+        state: 'enabled',
+        system_payment_method: {
+          id: 1,
+          display_name: 'Efectivo',
+          type: 'cash',
+          provider: 'manual',
+        },
+      });
+      storePrisma.shipping_methods.findFirst.mockResolvedValue({
+        id: 2,
+        type: 'own_fleet',
+        store_id: STORE_ID,
+        is_active: true,
+      });
 
       const err = await service
         .checkout({
           payment_method_id: 9,
+          shipping_method_id: 2,
+          shipping_address_id: 1,
           items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
         } as any)
         .then(
@@ -871,15 +919,12 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(prisma.payments.create).not.toHaveBeenCalled();
     });
 
-    it('getPaymentMethods excluye cash por tipo en todo shipping_type', async () => {
+    it('getPaymentMethods excluye cash para envíos que no son pickup y lo permite en pickup (QUI-850)', async () => {
       prisma.store_payment_methods.findMany.mockResolvedValue([]);
 
-      for (const shippingType of [undefined, 'pickup', 'own_fleet']) {
+      for (const shippingType of [undefined, 'own_fleet']) {
         jest.clearAllMocks();
         await service.getPaymentMethods(shippingType);
-        // El `AND` viaja DENTRO de `where`, no en la raíz del argumento. La
-        // aserción original lo buscaba en la raíz y fallaba aunque la
-        // exclusión de `cash` estuviera presente y correcta.
         expect(prisma.store_payment_methods.findMany).toHaveBeenCalledWith(
           expect.objectContaining({
             where: expect.objectContaining({
@@ -890,6 +935,18 @@ describe('CheckoutService - promotions and coupons', () => {
           }),
         );
       }
+
+      jest.clearAllMocks();
+      await service.getPaymentMethods('pickup');
+      expect(prisma.store_payment_methods.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            AND: expect.not.arrayContaining([
+              { system_payment_method: { type: { not: 'cash' } } },
+            ]),
+          }),
+        }),
+      );
     });
 
     it('getDeliveryOptions devuelve un tipo de entrega por método activo', async () => {

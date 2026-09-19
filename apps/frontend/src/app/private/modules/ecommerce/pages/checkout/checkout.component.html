@@ -768,6 +768,12 @@
                       [alt]="method.name"
                       class="payment-logo"
                     />
+                  } @else if (method.type === 'cash') {
+                    <div
+                      class="payment-logo flex items-center justify-center text-[var(--color-primary)]"
+                    >
+                      <app-icon name="banknote" [size]="28" />
+                    </div>
                   }
                   <div class="payment-info">
                     <span class="payment-name">{{ method.name }}</span>
