@@ -1,4 +1,4 @@
-import { Component, Directive, Pipe, PipeTransform, WritableSignal, input, output, runInInjectionContext, signal } from '@angular/core';
+import { Component, Directive, Pipe, PipeTransform, WritableSignal, input, model, output, runInInjectionContext, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ReactiveFormsModule } from '@angular/forms';
@@ -66,15 +66,14 @@ class EntregaStub {
   readonly cartState = input<unknown>(null);
   readonly tableId = input<number | null>(null);
   readonly initialChoice = input<string>('llevar');
-  readonly choiceChange = output<string>();
+  // La plantilla del shell enlaza `[(choice)]="entregaChoice"` (`:71`) y el doble
+  // debe exponerlo como model() para aceptar two-way binding y evitar NG0303.
+  readonly choice = model<'mesa' | 'llevar' | 'enviar'>('llevar');
   readonly advanceRequested = output<void>();
-  choiceSignal = signal<'mesa' | 'llevar' | 'enviar'>('llevar');
   needsTableFlag = false;
   readonly openTablePicker = signal(false);
   readonly checkoutTableId = signal<number | null>(null);
-  choice() {
-    return this.choiceSignal();
-  }
+  readonly effectiveTableId = signal<number | null>(null);
   needsTable(): boolean {
     return this.needsTableFlag;
   }
