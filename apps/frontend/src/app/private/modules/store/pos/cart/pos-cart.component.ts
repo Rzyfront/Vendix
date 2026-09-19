@@ -190,7 +190,7 @@ import {
                 </div>
                 <div class="min-w-0 leading-tight">
                   <h4 class="text-xs font-bold text-slate-800 truncate">
-                    {{ customer.name }}
+                    {{ customerDisplayName(customer) }}
                   </h4>
                   <div
                     class="flex items-center gap-1 text-[11px] text-slate-500 font-medium truncate mt-0.5"
@@ -215,6 +215,24 @@ import {
                         customer.phone
                       }}</span>
                     }
+                    @if (
+                      !customer.document_number &&
+                      !customer.phone &&
+                      customer.email
+                    ) {
+                      <span class="text-slate-400 truncate">{{
+                        customer.email
+                      }}</span>
+                    }
+                    @if (
+                      !customer.document_number &&
+                      !customer.phone &&
+                      !customer.email
+                    ) {
+                      <span class="text-slate-400 truncate"
+                        >Cliente registrado</span
+                      >
+                    }
                   </div>
                 </div>
               </div>
@@ -224,7 +242,7 @@ import {
                   (click)="openCustomerModal.emit()"
                   class="w-6 h-6 flex items-center justify-center text-slate-500 hover:text-primary hover:bg-white border border-transparent hover:border-slate-200 rounded-md transition-all cursor-pointer"
                   title="Cambiar cliente"
-                  [attr.aria-label]="'Cambiar cliente ' + customer.name"
+                  [attr.aria-label]="'Cambiar cliente ' + customerDisplayName(customer)"
                 >
                   <app-icon name="pencil" [size]="13"></app-icon>
                 </button>
@@ -233,7 +251,7 @@ import {
                   (click)="clearCustomer.emit()"
                   class="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200/70 rounded-md transition-all cursor-pointer"
                   title="Quitar cliente"
-                  [attr.aria-label]="'Quitar cliente ' + customer.name"
+                  [attr.aria-label]="'Quitar cliente ' + customerDisplayName(customer)"
                 >
                   <app-icon name="x" [size]="13"></app-icon>
                 </button>
@@ -300,7 +318,7 @@ import {
               <div
                 role="listitem"
                 data-purpose="cart-item"
-                class="group p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl flex flex-col gap-1.5 hover:border-primary/40 transition-colors"
+                class="group p-2.5 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/80 hover:border-primary/40 rounded-xl flex flex-col gap-1.5 transition-all duration-150"
               >
                 <div class="flex items-start gap-2.5">
                   <!-- Product Image (Compact 40x40) -->
@@ -2634,6 +2652,27 @@ private cartService = inject(PosCartService);
     return Math.max(0, Math.round(perUnit * multiplier * 100) / 100);
   }
 
+  /** Nombre completo a mostrar del cliente con múltiples fallbacks. */
+  customerDisplayName(customer: {
+    name?: string;
+    first_name?: string;
+    last_name?: string;
+    legal_name?: string;
+    business_name?: string;
+    email?: string;
+  } | null | undefined): string {
+    if (!customer) return '';
+    const full = [customer.first_name, customer.last_name].filter(Boolean).join(' ').trim();
+    return (
+      customer.name?.trim() ||
+      full ||
+      customer.legal_name?.trim() ||
+      customer.business_name?.trim() ||
+      customer.email?.trim() ||
+      'Cliente'
+    );
+  }
+
   /**
    * PSVERSION0001 paso 5 — iniciales del avatar de la tarjeta cliente
    * Stitch (máx. 2 letras, mismo algoritmo que cashierInitials del shell).
@@ -2642,11 +2681,11 @@ private cartService = inject(PosCartService);
     name?: string;
     first_name?: string;
     last_name?: string;
+    legal_name?: string;
+    business_name?: string;
+    email?: string;
   } | null): string {
-    const full = [customer?.first_name, customer?.last_name]
-      .filter(Boolean)
-      .join(' ');
-    const source = full || customer?.name || '';
+    const source = this.customerDisplayName(customer);
     const initials = source
       .split(' ')
       .filter(Boolean)
@@ -2665,17 +2704,23 @@ private cartService = inject(PosCartService);
     document_type?: string;
     document_number?: string;
     phone?: string;
+    email?: string;
+    name?: string;
+    first_name?: string;
+    last_name?: string;
   } | null): string {
     const doc = [customer?.document_type, customer?.document_number]
       .filter(Boolean)
       .join(' ');
-    return [doc, customer?.phone].filter(Boolean).join(' · ');
+    const parts = [doc, customer?.phone, customer?.email].filter(Boolean);
+    return parts.join(' · ') || this.customerDisplayName(customer);
   }
 
   /** Nombre a mostrar en el botón de acción de cliente del ticket. */
-  customerButtonLabel(customer: { name?: string; first_name?: string } | null | undefined): string {
+  customerButtonLabel(customer: { name?: string; first_name?: string; last_name?: string } | null | undefined): string {
     if (!customer) return 'Cliente';
-    const first = customer.first_name || customer.name?.split(' ')[0];
+    const name = this.customerDisplayName(customer);
+    const first = customer.first_name || name.split(' ')[0];
     return first || 'Cliente';
   }
 

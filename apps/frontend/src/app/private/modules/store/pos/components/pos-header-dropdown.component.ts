@@ -28,49 +28,44 @@ import { PosCustomer } from '../models/customer.model';
         [attr.aria-expanded]="isOpen()"
         aria-haspopup="menu"
         aria-label="Opciones de venta: cliente, horario y caja"
-        class="flex items-center gap-2 px-3 min-h-[44px] min-w-[44px] justify-center rounded-[var(--radius-lg)] bg-surface border border-border shadow-[var(--shadow-card)] hover:bg-surface-secondary active:scale-95 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary focus-visible:ring-offset-2"
+        class="flex items-center gap-1.5 px-3 min-h-[32px] justify-center rounded-full bg-primary/10 hover:bg-primary/15 border border-primary/25 shadow-2xs active:scale-95 transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-primary focus-visible:ring-offset-2"
       >
         <!-- Customer avatar -->
         @if (customer()) {
           <div
             aria-hidden="true"
-            class="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-green-700 flex-shrink-0"
+            class="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
           >
-            <app-icon name="user" [size]="12"></app-icon>
+            <app-icon name="user" [size]="11"></app-icon>
           </div>
+        }
+
+        <!-- Cash register status indicator -->
+        @if (cashSession()?.status === 'open') {
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" aria-hidden="true"></span>
+          <span class="text-[11px] font-semibold text-primary">Turno Activo</span>
+        } @else if (showCashOpenButton()) {
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" aria-hidden="true"></span>
+          <span class="text-[11px] font-semibold text-amber-700">Abrir Caja</span>
+        } @else {
+          <span class="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0" aria-hidden="true"></span>
+          <span class="text-[11px] font-semibold text-slate-600">Sin Turno</span>
         }
 
         <!-- Schedule dot -->
         @if (scheduleEnabled()) {
           <span
             aria-hidden="true"
-            class="h-2.5 w-2.5 rounded-full flex-shrink-0"
+            class="h-1.5 w-1.5 rounded-full flex-shrink-0"
             [ngClass]="isWithinHours() ? 'bg-green-500' : 'bg-red-500'"
-          ></span>
-        }
-
-        <!-- Cash register dot -->
-        @if (cashSession()?.status === 'open') {
-          <span class="relative flex h-2.5 w-2.5 flex-shrink-0" aria-hidden="true">
-            <span
-              class="motion-reduce:animate-none animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
-            ></span>
-            <span
-              class="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"
-            ></span>
-          </span>
-        } @else if (showCashOpenButton()) {
-          <span
-            aria-hidden="true"
-            class="h-2.5 w-2.5 rounded-full bg-amber-400 flex-shrink-0"
           ></span>
         }
 
         <!-- Chevron -->
         <app-icon
           name="chevron-down"
-          [size]="14"
-          class="text-neutral-600 transition-transform duration-200"
+          [size]="12"
+          class="text-primary transition-transform duration-200"
           [ngClass]="{ 'rotate-180': isOpen() }"
         ></app-icon>
       </button>
@@ -96,18 +91,18 @@ import { PosCustomer } from '../models/customer.model';
               >
                 <div
                   aria-hidden="true"
-                  class="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-green-700 flex-shrink-0"
+                  class="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary flex-shrink-0"
                 >
                   <app-icon name="user" [size]="16"></app-icon>
                 </div>
                 <div class="flex flex-col min-w-0 flex-1">
                   <span
                     class="font-semibold text-text-primary text-sm leading-tight truncate"
-                    >{{ customer()!.name }}</span
+                    >{{ customerDisplayName(customer()) }}</span
                   >
                   <span
                     class="text-xs text-neutral-600 leading-tight truncate"
-                    >{{ customer()!.email }}</span
+                    >{{ customerContactSubtitle(customer()) }}</span
                   >
                 </div>
               </button>
@@ -281,5 +276,24 @@ export class PosHeaderDropdownComponent {
         .join(', ');
     }
     return `${hours.open} – ${hours.close}`;
+  }
+
+  customerDisplayName(customer: PosCustomer | null | undefined): string {
+    if (!customer) return '';
+    const full = [customer.first_name, customer.last_name].filter(Boolean).join(' ').trim();
+    return (
+      customer.name?.trim() ||
+      full ||
+      (customer as any).legal_name?.trim() ||
+      (customer as any).business_name?.trim() ||
+      customer.email?.trim() ||
+      'Cliente'
+    );
+  }
+
+  customerContactSubtitle(customer: PosCustomer | null | undefined): string {
+    if (!customer) return '';
+    const doc = [customer.document_type, customer.document_number].filter(Boolean).join(' ');
+    return customer.email || customer.phone || doc || 'Cliente registrado';
   }
 }

@@ -42,7 +42,6 @@ import {
   ToastService,
   SpinnerComponent,
   CardComponent,
-  BadgeComponent,
   DialogService,
 } from '../../../../shared/components';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
@@ -114,12 +113,10 @@ import {
   CashRegisterSession,
 } from './services/pos-cash-register.service';
 import { PosQueueService } from './services/pos-queue.service';
-import { PosSessionStatusBarComponent } from './components/pos-session-status-bar.component';
 import { PosSessionOpenModalComponent } from './components/pos-session-open-modal.component';
 import { PosSessionCloseModalComponent } from './components/pos-session-close-modal.component';
 import { PosCashMovementModalComponent } from './components/pos-cash-movement-modal.component';
 import { PosSessionDetailModalComponent } from './components/pos-session-detail-modal.component';
-import { PosScheduleIndicatorComponent } from './components/pos-schedule-indicator.component';
 import { PosScheduleModalComponent } from './components/pos-schedule-modal.component';
 import { PosHeaderDropdownComponent } from './components/pos-header-dropdown.component';
 import { BookingSchedulerModalComponent } from '../../../../shared/components/booking-scheduler-modal/booking-scheduler-modal.component';
@@ -164,15 +161,12 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     PosCheckoutShellComponent,
     PosOrderConfirmationComponent,
     PosCartComponent,
-    BadgeComponent,
     PosMobileFooterComponent,
     PosCartModalComponent,
-    PosSessionStatusBarComponent,
     PosSessionOpenModalComponent,
     PosSessionCloseModalComponent,
     PosCashMovementModalComponent,
     PosSessionDetailModalComponent,
-    PosScheduleIndicatorComponent,
     PosScheduleModalComponent,
     PosHeaderDropdownComponent,
     LayawayConfigModalComponent,
@@ -360,41 +354,49 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           ></app-pos-cart>
         </div>
 
-        <!-- Mobile Layout: Header + Products + Bottom drawer trigger -->
+        <!-- Mobile Layout: Sub-barra + Products + Bottom drawer trigger -->
         <div class="lg:hidden flex-1 flex flex-col min-h-0 pb-20 w-full h-full">
-          <!-- Mobile Header with compact dropdown -->
-          <div
-            class="flex-none px-3 py-2 bg-white border-b border-slate-200/80 pos-header relative z-30 shrink-0 flex justify-between items-center"
-          >
+          <!-- Sub-barra Sucursal / POS y Estado de Caja / Turno Activo -->
+          <div class="flex-none px-3.5 py-2 bg-white flex items-center justify-between border-b border-slate-200/80 relative z-30 shrink-0 shadow-2xs">
             <div class="flex items-center gap-2 min-w-0">
-              <div
-                class="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 shrink-0"
-              >
-                <app-icon name="shopping-bag" [size]="18"></app-icon>
+              <div class="w-7 h-7 rounded-lg bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shadow-2xs shrink-0">
+                <app-icon name="store" [size]="15"></app-icon>
               </div>
-              <h1 class="font-bold text-slate-800 text-base leading-none truncate">
-                Vendix POS
-              </h1>
-              @if (activeSession()) {
-                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              }
+              <div class="flex flex-col min-w-0">
+                <span class="text-xs font-black text-slate-900 leading-none tracking-tight">
+                  @if (isQuotationMode()) {
+                    Cotización
+                  } @else if (isLayawayMode()) {
+                    Separado
+                  } @else if (isEditMode()) {
+                    Editando #{{ editingOrderNumber() }}
+                  } @else {
+                    POS
+                  }
+                </span>
+                <span class="text-[10px] text-slate-400 font-medium leading-tight mt-0.5 truncate max-w-[170px]">
+                  Cajero: {{ cashierName() || 'Cajero' }} · {{ activeSession()?.register?.name || 'Caja Principal' }}
+                </span>
+              </div>
             </div>
-            <app-pos-header-dropdown
-              [customer]="selectedCustomer()"
-              [scheduleEnabled]="enableScheduleValidation()"
-              [isWithinHours]="!isActuallyOutOfHours()"
-              [isDayClosed]="isTodayClosed"
-              [todayHours]="todaySchedule"
-              [cashSession]="activeSession()"
-              [showCashOpenButton]="cashRegisterEnabled()"
-              (customerClicked)="onOpenCustomerModal()"
-              (clearCustomer)="onClearCustomer()"
-              (scheduleClicked)="showScheduleModal.set(true)"
-              (cashOpenClicked)="showSessionOpenModal.set(true)"
-              (cashCloseClicked)="showSessionCloseModal.set(true)"
-              (cashMovementClicked)="showCashMovementModal.set(true)"
-              (cashDetailClicked)="showSessionDetailModal.set(true)"
-            ></app-pos-header-dropdown>
+            <div class="relative z-40 shrink-0">
+              <app-pos-header-dropdown
+                [customer]="selectedCustomer()"
+                [scheduleEnabled]="enableScheduleValidation()"
+                [isWithinHours]="!isActuallyOutOfHours()"
+                [isDayClosed]="isTodayClosed"
+                [todayHours]="todaySchedule"
+                [cashSession]="activeSession()"
+                [showCashOpenButton]="cashRegisterEnabled()"
+                (customerClicked)="onOpenCustomerModal()"
+                (clearCustomer)="onClearCustomer()"
+                (scheduleClicked)="showScheduleModal.set(true)"
+                (cashOpenClicked)="showSessionOpenModal.set(true)"
+                (cashCloseClicked)="showSessionCloseModal.set(true)"
+                (cashMovementClicked)="showCashMovementModal.set(true)"
+                (cashDetailClicked)="showSessionDetailModal.set(true)"
+              ></app-pos-header-dropdown>
+            </div>
           </div>
 
           <!-- Mobile Products -->
@@ -425,9 +427,8 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           [isEditMode]="isEditMode()"
           [readyToPayOrder]="readyToPayOrder()"
           [isCharging]="isCharging()"
-          [canCreateCustomItems]="canCreateCustomItems()"
           (viewCart)="onOpenCartModal()"
-          (customItem)="openCustomItemModal()"
+          (selectClient)="onOpenCustomerModal()"
           (create)="onOpenCreateModal()"
           (saveDraft)="onSaveDraft()"
           (checkout)="onCheckout()"
@@ -444,6 +445,8 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         [canCreateCustomItems]="canCreateCustomItems()"
         [canOverridePrices]="canOverridePrices()"
         [isEditMode]="isEditMode()"
+        [isQuotationMode]="isQuotationMode()"
+        [isLayawayMode]="isLayawayMode()"
         [readyToPayOrder]="readyToPayOrder()"
         [isCharging]="isCharging()"
         (closed)="onCloseCartModal()"
@@ -456,6 +459,12 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (saveDraft)="onSaveDraft()"
         (checkout)="onCheckoutFromModal()"
         (charge)="onCharge()"
+        (openCustomerModal)="onOpenCustomerModal()"
+        (clearCustomer)="onClearCustomer()"
+        (quote)="onQuote()"
+        (layaway)="onLayaway()"
+        (customerSelected)="onCustomerSelected($event)"
+        (bookingsChanged)="onBookingsChanged($event)"
       ></app-pos-cart-modal>
 
       <!--

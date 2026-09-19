@@ -16,97 +16,6 @@ export interface PosCategoryPill {
 }
 
 /**
- * Mapa display-only nombre→emoji para las pills. El backend
- * (`ProductCategory`) no provee emoji; esto es solo presentación y no
- * afecta el filtro. Nombres sin match usan el fallback genérico.
- */
-const CATEGORY_EMOJI_KEYWORDS: ReadonlyArray<readonly [string, string]> = [
-  ['carne', '🔥'],
-  ['asado', '🔥'],
-  ['parrilla', '🔥'],
-  ['pollo', '🍗'],
-  ['hamburguesa', '🍔'],
-  ['pizza', '🍕'],
-  ['pasta', '🍝'],
-  ['pescado', '🐟'],
-  ['marisco', '🦐'],
-  ['sushi', '🍣'],
-  ['taco', '🌮'],
-  ['ensalada', '🥗'],
-  ['fresco', '🥗'],
-  ['vegetariano', '🥗'],
-  ['acompanamiento', '🍟'],
-  ['papa', '🍟'],
-  ['postre', '🍰'],
-  ['dulce', '🍰'],
-  ['helado', '🍨'],
-  ['pan', '🥖'],
-  ['panaderia', '🥖'],
-  ['pasteleria', '🧁'],
-  ['desayuno', '🍳'],
-  ['infantil', '👶'],
-  ['nino', '👶'],
-  ['familiar', '👨‍👩‍👦'],
-  ['bebida', '🍺'],
-  ['cerveza', '🍺'],
-  ['gaseosa', '🥤'],
-  ['jugo', '🧃'],
-  ['cafe', '☕'],
-  ['caliente', '☕'],
-  ['te', '🍵'],
-  ['licor', '🍷'],
-  ['vino', '🍷'],
-  ['coctel', '🍸'],
-  ['salsa', '🌶️'],
-  ['picante', '🌶️'],
-  ['extra', '🌶️'],
-  ['snack', '🍿'],
-  ['ropa', '👕'],
-  ['calzado', '👟'],
-  ['zapato', '👟'],
-  ['electronica', '🔌'],
-  ['tecnologia', '💻'],
-  ['hogar', '🏠'],
-  ['limpieza', '🧹'],
-  ['mascota', '🐾'],
-  ['farmacia', '💊'],
-  ['salud', '💊'],
-  ['belleza', '💄'],
-  ['juguete', '🧸'],
-  ['deporte', '⚽'],
-  ['libro', '📚'],
-  ['oficina', '📎'],
-];
-
-const CATEGORY_EMOJI_FALLBACK = '🏷️';
-
-/** Normalización mínima para el match de keywords (sin acentos, minúsculas). */
-function normalizeCategoryName(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-}
-
-// Keywords largas primero ("panaderia" gana sobre "pan"); ordenado una sola
-// vez a nivel módulo en lugar de por llamada. El match por token evita
-// falsos positivos de substring ("aceites" no es "te").
-const SORTED_CATEGORY_EMOJI_KEYWORDS = [...CATEGORY_EMOJI_KEYWORDS].sort(
-  ([a], [b]) => b.length - a.length,
-);
-
-/** Emoji display-only derivado del nombre; fallback genérico si no hay match. */
-export function categoryEmojiFor(name: string): string {
-  const tokens = normalizeCategoryName(name)
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length > 0);
-  const hit = SORTED_CATEGORY_EMOJI_KEYWORDS.find(([keyword]) =>
-    tokens.some((token) => token === keyword || token.startsWith(keyword)),
-  );
-  return hit ? hit[1] : CATEGORY_EMOJI_FALLBACK;
-}
-
-/**
  * PSVERSION0001 paso 2 — barra táctil de categorías del POS.
  *
  * Replica el bloque `#categories-scroll-container` de
@@ -163,12 +72,9 @@ export function categoryEmojiFor(name: string): string {
               isSelected(cat) ? selectedPillClass : unselectedPillClass
             "
           >
-            @if (cat.id !== '') {
-              <span aria-hidden="true">{{ categoryEmoji(cat.name) }}</span>
-            }
             {{ cat.name }}
             @if (cat.id === '') {
-              <span class="font-normal text-slate-400">({{ totalCount() }})</span>
+              <span class="font-normal" [class.text-white/80]="isSelected(cat)" [class.text-slate-400]="!isSelected(cat)">({{ totalCount() }})</span>
             }
           </button>
         }
@@ -196,6 +102,12 @@ export function categoryEmojiFor(name: string): string {
   `,
   styles: [
     `
+      :host {
+        display: block;
+      }
+      :host.hidden {
+        display: none !important;
+      }
       .no-scrollbar {
         scrollbar-width: none;
         -ms-overflow-style: none;
@@ -225,7 +137,7 @@ export class PosCategoryPillsComponent {
   readonly canScrollRight = signal(false);
 
   readonly selectedPillClass =
-    'px-3.5 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-white shrink-0 shadow-xs whitespace-nowrap';
+    'px-3.5 py-1.5 rounded-lg text-xs font-bold bg-primary text-white shrink-0 shadow-xs whitespace-nowrap';
   readonly unselectedPillClass =
     'px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 shrink-0 transition-colors whitespace-nowrap';
 
@@ -279,10 +191,6 @@ export class PosCategoryPillsComponent {
 
   isSelected(cat: PosCategoryPill): boolean {
     return cat.id === (this.selectedId() ?? '');
-  }
-
-  categoryEmoji(name: string): string {
-    return categoryEmojiFor(name);
   }
 
   pillLabel(cat: PosCategoryPill): string {

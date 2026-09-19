@@ -177,7 +177,7 @@
                   <app-icon name="user" [size]="16" class="text-primary"></app-icon>
                 </div>
                 <div class="min-w-0">
-                  <p class="text-sm font-semibold text-text-primary truncate">{{ selectedCustomer().name }}</p>
+                  <p class="text-sm font-semibold text-text-primary truncate">{{ customerDisplayName(selectedCustomer()) }}</p>
                   @if (selectedCustomer().email) {
                     <p class="text-xs qb-secondary truncate">{{ selectedCustomer().email }}</p>
                   }
@@ -218,7 +218,7 @@
                       <app-icon name="user" [size]="14" class="text-primary"></app-icon>
                     </div>
                     <div class="min-w-0">
-                      <p class="text-sm font-medium text-text-primary truncate">{{ customer.name }}</p>
+                      <p class="text-sm font-medium text-text-primary truncate">{{ customerDisplayName(customer) }}</p>
                       <p class="text-xs qb-secondary truncate">
                         {{ customer.email || customer.phone || '' }}
                       </p>
@@ -256,7 +256,7 @@
               </div>
               <div class="summary-row">
                 <app-icon name="user" [size]="14" class="qb-summary-icon"></app-icon>
-                <span>{{ selectedCustomer().name }}</span>
+                <span>{{ customerDisplayName(selectedCustomer()) }}</span>
               </div>
             </div>
           }

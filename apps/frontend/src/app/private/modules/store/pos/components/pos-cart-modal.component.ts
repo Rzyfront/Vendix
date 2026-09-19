@@ -17,12 +17,17 @@ import type { QuantityClampEvent } from '../../../../../shared/components/quanti
 import { showStockCapToast } from '../cart/utils/stock-toast';
 import { TooltipComponent } from '../../../../../shared/components/tooltip/tooltip.component';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
-import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { ButtonComponent, BadgeComponent } from '../../../../../shared/components';
 import { CartState, CartItem } from '../models/cart.model';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
+import { PosScaleService } from '../services/pos-scale.service';
+import { BookingSchedulerModalComponent } from '../../../../../shared/components/booking-scheduler-modal/booking-scheduler-modal.component';
 import { PosCartService } from '../services/pos-cart.service';
+import { PosPreCuentaPrintService } from '../services/pos-pre-cuenta-print.service';
+import { PosApiService } from '../services/pos-api.service';
 import {
   PriceTier,
   ProductPriceTierOverride,
@@ -44,7 +49,9 @@ import {
     TooltipComponent,
     ModalComponent,
     ButtonComponent,
+    BadgeComponent,
     PriceTierSelectorComponent,
+    BookingSchedulerModalComponent,
   ],
   template: `
     <!-- Overlay -->
@@ -64,27 +71,123 @@ import {
         >
         <!-- Header -->
         <div class="modal-header">
-          <button
-            type="button"
-            class="back-btn"
-            (click)="closed.emit()"
-            aria-label="Cerrar carrito"
-          >
-            <app-icon name="chevron-left" [size]="24"></app-icon>
-          </button>
-          <h2 id="pos-cart-modal-title" class="modal-title">
-            Carrito
-            <span class="item-count">({{ cartState()?.items?.length || 0 }})</span>
-          </h2>
-          <button
-            class="clear-btn"
-            (click)="onClearCart()"
-            [disabled]="!cartState()?.items?.length"
+          <div class="modal-header-left">
+            <button
+              type="button"
+              class="back-btn"
+              (click)="closed.emit()"
+              aria-label="Cerrar carrito"
             >
-            Vaciar
-          </button>
+              <app-icon name="chevron-left" [size]="22"></app-icon>
+            </button>
+            <h2 id="pos-cart-modal-title" class="modal-title">
+              Carrito
+              <span class="item-count">({{ cartState()?.items?.length || 0 }})</span>
+            </h2>
+          </div>
+
+          <div class="header-actions">
+            <!-- Vaciar carrito -->
+            <button
+              type="button"
+              class="header-action-btn clear-btn"
+              (click)="onClearCart()"
+              [disabled]="!cartState()?.items?.length"
+              title="Vaciar carrito"
+            >
+              <app-icon name="trash-2" [size]="13"></app-icon>
+              <span>Vaciar</span>
+            </button>
+
+            <!-- Nota general -->
+            <button
+              type="button"
+              class="header-action-btn note-btn"
+              [class.active]="hasStaffNote()"
+              (click)="orderNoteModalOpen.set(true)"
+              title="Nota general del pedido"
+            >
+              <app-icon name="notebook-pen" [size]="13"></app-icon>
+              <span>Nota</span>
+            </button>
+
+            <!-- Pre-cuenta -->
+            <button
+              type="button"
+              class="header-action-btn print-btn"
+              (click)="printPreCuenta()"
+              [disabled]="!cartState()?.items?.length || preCuentaPrinting()"
+              [attr.aria-busy]="preCuentaPrinting() ? 'true' : null"
+              title="Imprimir pre-cuenta"
+              aria-label="Imprimir pre-cuenta"
+            >
+              <app-icon name="printer" [size]="13"></app-icon>
+            </button>
+          </div>
         </div>
-    
+
+        <!-- Customer Section -->
+        <div class="customer-section-container">
+          @if (cartState()?.customer; as customer) {
+            <div class="customer-card">
+              <div class="customer-info-main">
+                <div class="customer-avatar" aria-hidden="true">
+                  {{ customerInitials(customer) }}
+                </div>
+                <div class="customer-details">
+                  <h4 class="customer-name">{{ customerDisplayName(customer) }}</h4>
+                  <div class="customer-sub" [title]="customerContactTitle(customer)">
+                    @if (customer.document_type || customer.document_number) {
+                      <span>{{ customer.document_type }} {{ customer.document_number }}</span>
+                    }
+                    @if ((customer.document_type || customer.document_number) && customer.phone) {
+                      <span class="sep">·</span>
+                    }
+                    @if (customer.phone) {
+                      <span>{{ customer.phone }}</span>
+                    }
+                    @if (!customer.document_number && !customer.phone && customer.email) {
+                      <span>{{ customer.email }}</span>
+                    }
+                    @if (!customer.document_number && !customer.phone && !customer.email) {
+                      <span>Cliente registrado</span>
+                    }
+                  </div>
+                </div>
+              </div>
+              <div class="customer-card-actions">
+                <button
+                  type="button"
+                  (click)="openCustomerModal.emit()"
+                  class="customer-action-icon-btn"
+                  title="Cambiar cliente"
+                  [attr.aria-label]="'Cambiar cliente ' + customerDisplayName(customer)"
+                >
+                  <app-icon name="pencil" [size]="13"></app-icon>
+                </button>
+                <button
+                  type="button"
+                  (click)="clearCustomer.emit()"
+                  class="customer-action-icon-btn remove"
+                  title="Quitar cliente"
+                  [attr.aria-label]="'Quitar cliente ' + customerDisplayName(customer)"
+                >
+                  <app-icon name="x" [size]="13"></app-icon>
+                </button>
+              </div>
+            </div>
+          } @else {
+            <button
+              type="button"
+              class="customer-assign-btn"
+              (click)="openCustomerModal.emit()"
+            >
+              <app-icon name="user-plus" [size]="15"></app-icon>
+              <span>+ Asignar cliente a la venta</span>
+            </button>
+          }
+        </div>
+
         <!-- Items List -->
         <div class="items-container">
           <!-- Empty State -->
@@ -113,167 +216,331 @@ import {
             <div class="items-list">
               @for (item of cartState()?.items; track trackByItemId($index, item)) {
                 <div
-                  class="cart-item"
-                  >
-                  <!-- Product Image -->
-                  <div class="item-image">
-                    @if (item.variant_image_url || item.product.image_url || item.product.image) {
-                      <img
-                        [src]="item.variant_image_url || item.product.image_url || item.product.image"
-                        [alt]="item.product.name"
-                        (error)="handleImageError($event)"
+                  role="listitem"
+                  data-purpose="cart-item"
+                  class="group p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl flex flex-col gap-1.5 hover:border-primary/40 transition-colors"
+                >
+                  <div class="flex items-start gap-2.5">
+                    <!-- Product Image (Compact 40x40) -->
+                    <div
+                      class="w-10 h-10 shrink-0 bg-white rounded-lg overflow-hidden relative border border-slate-200"
+                    >
+                      @if (item.variant_image_url || item.product.image_url || item.product.image) {
+                        <img
+                          [src]="item.variant_image_url || item.product.image_url || item.product.image"
+                          [alt]="item.product.name"
+                          class="absolute inset-0 w-full h-full object-cover"
+                          (error)="handleImageError($event)"
                         />
-                    }
-                    @if (!item.variant_image_url && !item.product.image_url && !item.product.image) {
-                      <div
-                        class="image-placeholder"
+                      }
+                      @if (!item.variant_image_url && !item.product.image_url && !item.product.image) {
+                        <div
+                          class="absolute inset-0 flex items-center justify-center text-neutral-600"
                         >
-                        <app-icon name="image" [size]="18"></app-icon>
-                      </div>
-                    }
-                  </div>
-                  <!-- Item Info -->
-                  <div class="item-info">
-                    <!--
-                      QUI-787 · fila del nombre con botón "Notas" a la derecha
-                      (paridad con el desktop, adyacente al producto en lugar
-                      de la indita calendar porque el mobile no monta scheduler).
-                    -->
-                    <div class="item-name-row">
-                      <h4 class="item-name">{{ item.product.name }}</h4>
-                      @if (
-                        item.product.product_type === 'service' ||
-                        item.product.product_type === 'prepared'
-                      ) {
-                        <button
-                          type="button"
-                          class="shrink-0 px-1.5 py-0.5 rounded flex items-center gap-1 border transition-colors text-[10px] font-semibold"
-                          [class]="item.notes
-                            ? 'text-green-700 bg-green-50 border-green-200 hover:bg-green-100'
-                            : 'text-neutral-600 border-border/80 hover:text-text-primary hover:bg-muted/40'"
-                          [attr.aria-label]="(item.notes ? 'Editar nota de ' : 'Agregar nota a ') + item.product.name"
-                          [title]="(item.notes ? 'Editar nota' : 'Agregar nota para cocina') + ': ' + item.product.name"
-                          (click)="openItemNote(item)"
-                        >
-                          <app-icon name="notebook-pen" [size]="12"></app-icon>
-                          <span>Nota</span>
-                        </button>
+                          <app-icon name="image" [size]="12"></app-icon>
+                        </div>
                       }
                     </div>
-                    @if (item.notes) {
-                      <!--
-                        QUI-787 · chip amarillo de nota activa, paridad con
-                        .item-comanda-note de mesa.
-                      -->
-                      <p
-                        class="item-note-chip"
-                        [attr.title]="'Nota para cocina: ' + item.notes"
-                      >
-                        <app-icon name="message-square" [size]="10"></app-icon>
-                        <span class="truncate" style="max-width: 220px;">{{ item.notes }}</span>
-                      </p>
-                    }
-                    @if (item.variant_display_name) {
-                      <p style="font-size: 11px; color: var(--color-primary); font-weight: 500; margin: 0 0 2px 0;">
-                        {{ item.variant_display_name }}
-                      </p>
-                    }
-                    @if (item.itemType === 'custom' || item.description) {
-                      <p class="item-description">
-                        {{ item.itemType === 'custom' ? 'Ítem personalizado' : item.description }}
-                      </p>
-                    }
-                    <div class="item-meta">
-                      @if (item.variant_sku || item.product.sku) {
-                        <span class="item-sku">{{ item.variant_sku || item.product.sku }}</span>
-                      }
-                      @if (item.is_weight_product && item.weight) {
-                        <span class="item-weight-badge">
-                          {{ item.weight }} {{ item.weight_unit || 'kg' }}
-                        </span>
-                      }
-                      <span class="item-unit-price">
-                        {{ formatCurrency(item.finalPrice) }}{{ unitPriceSuffix(item) }}
-                      </span>
-                      @if ((item.taxAmount || 0) > 0) {
-                        <span class="item-tax-badge">
-                          IVA {{ formatCurrency(item.taxAmount) }}
-                        </span>
-                      }
-                      @if (item.isPriceOverridden) {
-                        <span class="item-price-badge">precio editado</span>
-                      }
-                      @if (item.applied_price_tier_id && item.applied_price_tier_name) {
-                        <span
-                          class="item-tier-badge"
-                          [title]="'Tarifa aplicada: ' + item.applied_price_tier_name"
-                        >{{ item.applied_price_tier_name }}</span>
-                      }
-                      @if (isPackageLine(item)) {
-                        <span class="item-package-badge" [title]="'Empaque de ' + item.units_per_package + ' unidades'">Caja ×{{ item.units_per_package }}</span>
-                      }
-                    </div>
-                    @if (canShowTierSelector(item)) {
-                      <div class="item-tier-selector">
-                        <app-price-tier-selector
-                          [tiers]="visibleTiersForItem(item)"
-                          [selectedTierId]="item.applied_price_tier_id ?? null"
-                          [unitsPerPackage]="item.units_per_package ?? null"
-                          (selectedTierIdChange)="onTierChange(item, $event)"
-                        ></app-price-tier-selector>
+                    <!-- Item Info -->
+                    <div class="flex-1 min-w-0">
+                      <!-- Line 1: Title + Variant badge + Actions -->
+                      <div class="flex items-center justify-between gap-1">
+                        <div class="flex items-center gap-1.5 min-w-0 flex-wrap">
+                          <h4
+                            class="text-xs font-bold text-slate-900 truncate leading-tight"
+                          >
+                            {{ item.product.name }}
+                          </h4>
+                          @if (item.variant_display_name) {
+                            <span
+                              class="text-[10px] font-semibold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.2 rounded shrink-0 leading-tight"
+                            >
+                              {{ item.variant_display_name }}
+                            </span>
+                          }
+                          @if (item.itemType === 'custom') {
+                            <span
+                              class="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded shrink-0 leading-tight"
+                            >
+                              Personalizado
+                            </span>
+                          }
+                          @if (
+                            item.product.product_type === 'service' ||
+                            item.product.product_type === 'prepared'
+                          ) {
+                            <button
+                              type="button"
+                              class="shrink-0 w-5 h-5 rounded flex items-center justify-center text-violet-600 hover:bg-violet-50 border border-violet-200 transition-colors cursor-pointer"
+                              [attr.aria-label]="
+                                (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
+                                item.product.name
+                              "
+                              [title]="
+                                (schedulerFor(item.id) ? 'Re-agendar ' : 'Agendar ') +
+                                item.product.name
+                              "
+                              (click)="openScheduler(item)"
+                            >
+                              <app-icon name="calendar" [size]="11"></app-icon>
+                            </button>
+                          }
+
+                          <!-- Botón discreto + Nota al lado del icono de calendario / título cuando NO tiene nota -->
+                          @if (!item.notes) {
+                            <button
+                              type="button"
+                              (click)="openItemNote(item)"
+                              class="inline-flex items-center gap-0.5 text-[10px] font-medium text-slate-400 hover:text-slate-700 hover:bg-white px-1.5 py-0.5 rounded border border-transparent hover:border-slate-200 transition-colors cursor-pointer shrink-0 leading-none"
+                              [attr.aria-label]="'Agregar nota a ' + item.product.name"
+                              title="Agregar nota"
+                            >
+                              <app-icon name="plus" [size]="10"></app-icon>
+                              <span>Nota</span>
+                            </button>
+                          }
+                        </div>
+
+                        <div class="flex items-center gap-1 shrink-0">
+                          @if (item.itemType === 'custom' && canEditItemPrice(item)) {
+                            <button
+                              type="button"
+                              (click)="editItemPrice(item)"
+                              class="w-6 h-6 flex items-center justify-center rounded text-primary hover:bg-primary/15 border border-primary/30 bg-primary/5 transition-colors shadow-2xs"
+                              title="Editar ítem personalizado"
+                              [attr.aria-label]="'Editar ítem personalizado ' + item.product.name"
+                            >
+                              <app-icon name="pencil" [size]="12"></app-icon>
+                            </button>
+                          }
+                          <button
+                            type="button"
+                            (click)="onRemoveItem(item.id)"
+                            class="w-6 h-6 flex items-center justify-center rounded-md text-rose-500 hover:text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200/70 transition-colors shadow-2xs cursor-pointer"
+                            title="Eliminar producto"
+                            [attr.aria-label]="'Eliminar ' + item.product.name + ' del carrito'"
+                          >
+                            <app-icon name="trash-2" [size]="13"></app-icon>
+                          </button>
+                        </div>
                       </div>
-                    } @else {
-                      <!-- QUI-648: sin selector, la línea dice POR QUÉ. -->
-                      @if (saleConfigHints()[item.id]; as hint) {
-                        <p class="item-sale-config" [title]="hint.detail">
-                          {{ hint.headline }}
+
+                      @if (item.description && item.itemType !== 'custom') {
+                        <p
+                          class="text-[10px] text-neutral-500 truncate leading-tight mt-0.5"
+                        >
+                          {{ item.description }}
                         </p>
                       }
-                    }
-                  </div>
-                  <!-- Remove Button -->
-                  <button
-                    type="button"
-                    class="remove-btn"
-                    (click)="onRemoveItem(item.id)"
-                    title="Eliminar"
-                    [attr.aria-label]="'Eliminar ' + item.product.name + ' del carrito'"
-                    >
-                    <app-icon name="x" [size]="16"></app-icon>
-                  </button>
-                  <!-- Actions Row: Quantity + Total -->
-                  <div class="item-actions">
-                    @if (item.is_weight_product) {
-                      <div class="weight-badge-mobile">
-                        <span class="weight-value">{{ item.weight }} {{ item.weight_unit || 'kg' }}</span>
-                      </div>
-                    } @else if (isSaleUnitLine(item)) {
-                      <!-- QUI-648: la escala que el cajero capturó, no la mínima. -->
-                      <div class="weight-badge-mobile">
-                        <span class="weight-value">{{ saleQuantityLabel(item) }}</span>
-                      </div>
-                    } @else {
-                      <div class="qty-with-packages">
-                        <app-quantity-control
-                          [value]="item.quantity"
-                          [min]="1"
-                          [max]="getQuantityMax(item)"
-                          [unitsPerPackage]="getRequiredStockPerUnit(item)"
-                          [editable]="true"
-                          [size]="'sm'"
-                          (valueChange)="onQuantityChange(item.id, $event)"
-                          (valueClamped)="onQuantityClamped(item, $event)"
-                        ></app-quantity-control>
-                        @if (isPackageLine(item)) {
-                          <span class="package-count-label">
-                            {{ item.quantity }} {{ item.quantity === 1 ? 'paquete' : 'paquetes' }}
+
+                      <!-- Line 2: Base price, discount & badges (left), Note chip (if has notes) -->
+                      <div class="flex items-center justify-between gap-1 mt-1 text-xs">
+                        <div class="flex items-center gap-1.5 flex-wrap min-w-0">
+                          <span class="text-[11px] text-[#5C6672] leading-none">
+                            Base: {{ formatCurrency(item.unitPrice)
+                            }}{{ unitPriceSuffix(item) }}
+                            @if (getItemDiscountAmount(item) > 0) {
+                              <span class="text-primary font-semibold ml-0.5"
+                                >(-{{
+                                  formatCurrency(getItemDiscountAmount(item))
+                                }})</span
+                              >
+                            }
                           </span>
+                          @if (item.is_weight_product && item.weight) {
+                            <span
+                              class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-semibold bg-blue-100 text-blue-800 leading-none"
+                            >
+                              {{ item.weight }} {{ item.weight_unit || 'kg' }}
+                            </span>
+                          }
+                          @if (getItemTaxAmount(item) > 0) {
+                            <span
+                              class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-medium bg-orange-100 text-orange-800 leading-none"
+                              [attr.aria-label]="'IVA de la línea: ' + formatCurrency(getItemTaxAmount(item))"
+                            >
+                              +IVA {{ formatCurrency(getItemTaxAmount(item)) }}
+                            </span>
+                          }
+                          @if (item.isPriceOverridden) {
+                            <span
+                              class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-medium bg-purple-100 text-purple-800 leading-none"
+                            >
+                              editado
+                            </span>
+                          }
+                          @if (item.applied_price_tier_id && item.applied_price_tier_name) {
+                            <span
+                              class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-semibold bg-amber-100 text-amber-800 leading-none"
+                              [title]="'Tarifa aplicada: ' + item.applied_price_tier_name"
+                            >
+                              {{ item.applied_price_tier_name }}
+                            </span>
+                          }
+                          @if (isPackageLine(item)) {
+                            <span
+                              class="inline-flex items-center px-1 py-0.2 rounded text-[9px] font-medium bg-blue-50 text-blue-700 leading-none"
+                              [title]="'Empaque de ' + item.units_per_package + ' unidades'"
+                            >
+                              ×{{ item.units_per_package }}
+                            </span>
+                          }
+                        </div>
+
+                        <!-- Si SÍ tiene nota: chip con texto al lado de base / derecha -->
+                        @if (item.notes) {
+                          <div class="shrink-0">
+                            <button
+                              type="button"
+                              (click)="openItemNote(item)"
+                              class="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-700 bg-white border border-slate-200/90 px-1.5 py-0.5 rounded-md hover:bg-slate-50 max-w-[130px] transition-colors shadow-2xs cursor-pointer"
+                              [attr.aria-label]="'Editar nota de ' + item.product.name"
+                              [title]="'Nota para cocina: ' + item.notes"
+                            >
+                              <app-icon name="pencil" [size]="10" class="text-slate-400 shrink-0"></app-icon>
+                              <span class="truncate min-w-0">{{ item.notes }}</span>
+                            </button>
+                          </div>
                         }
                       </div>
-                    }
-                    <div class="item-price-action">
-                      <span class="item-total">{{ formatCurrency(item.totalPrice) }}</span>
-                      @if (canEditItemPrice(item)) {
+
+                      @if (canShowTierSelector(item)) {
+                        <div class="mt-1">
+                          <app-price-tier-selector
+                            [tiers]="visibleTiersForItem(item)"
+                            [selectedTierId]="item.applied_price_tier_id ?? null"
+                            [unitsPerPackage]="item.units_per_package ?? null"
+                            (selectedTierIdChange)="onTierChange(item, $event)"
+                          ></app-price-tier-selector>
+                        </div>
+                      } @else {
+                        @if (saleConfigHints()[item.id]; as hint) {
+                          <p
+                            class="mt-0.5 text-[10px] text-neutral-600 leading-tight truncate"
+                            [title]="hint.detail"
+                          >
+                            {{ hint.headline }}
+                          </p>
+                        }
+                      }
+                    </div>
+                  </div>
+
+                  <!-- CP-POS-SVC-BOOKING-001: Booking summary badge for service line items -->
+                  @if (schedulerFor(item.id) || item.booking; as b) {
+                    <div class="flex items-center justify-between gap-1.5 px-2 py-1 rounded-md bg-violet-50 border border-violet-200 text-[10px] text-violet-900 mt-0.5">
+                      <div class="flex items-center gap-1.5 min-w-0">
+                        <app-icon name="calendar-check" [size]="12" class="text-violet-600 shrink-0"></app-icon>
+                        <div class="truncate">
+                          <span class="font-bold">{{ b.date }}</span>
+                          <span class="mx-1 opacity-70">|</span>
+                          <span>{{ b.start_time }} – {{ b.end_time }}</span>
+                          @if (b.provider_name) {
+                            <span class="ml-1 text-violet-700 font-semibold truncate">({{ b.provider_name }})</span>
+                          }
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        (click)="openScheduler(item)"
+                        class="px-1.5 py-0.2 rounded text-[9px] font-bold text-violet-700 hover:bg-violet-200/50 border border-violet-300 transition-colors shrink-0"
+                      >
+                        Re-agendar
+                      </button>
+                    </div>
+                  } @else if (item.product.product_type === 'service' || item.product.requires_booking) {
+                    <div class="flex items-center justify-between gap-1.5 px-2 py-1 rounded-md bg-amber-50 border border-amber-200 text-[10px] text-amber-900 mt-0.5">
+                      <div class="flex items-center gap-1.5 min-w-0">
+                        <app-icon name="alert-circle" [size]="12" class="text-amber-600 shrink-0"></app-icon>
+                        <span class="font-medium truncate">Servicio sin horario asignado</span>
+                      </div>
+                      <button
+                        type="button"
+                        (click)="openScheduler(item)"
+                        class="px-1.5 py-0.2 rounded bg-amber-200 hover:bg-amber-300 text-amber-900 text-[9px] font-bold shrink-0 transition-colors"
+                      >
+                        Agendar
+                      </button>
+                    </div>
+                  }
+
+                  <!-- Line 3: Stepper + Total Price -->
+                  <div
+                    class="flex items-center justify-between pt-1 border-t border-slate-200/60 mt-0.5"
+                  >
+                    <div class="flex items-center gap-2 min-w-0">
+                      <!-- Weight products: show clickable weight badge instead of quantity control -->
+                      @if (item.is_weight_product) {
+                        <button
+                          type="button"
+                          (click)="editWeight(item)"
+                          class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
+                          title="Editar peso"
+                        >
+                          <app-icon
+                            name="scale"
+                            [size]="14"
+                            class="text-blue-600"
+                          ></app-icon>
+                          <span class="text-xs font-bold text-blue-700"
+                            >{{ item.weight }} {{ item.weight_unit || 'kg' }}</span
+                          >
+                          <app-icon
+                            name="edit"
+                            [size]="10"
+                            class="text-blue-400"
+                          ></app-icon>
+                        </button>
+                      } @else if (isSaleUnitLine(item)) {
+                        <button
+                          type="button"
+                          (click)="editSaleQuantity(item)"
+                          class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
+                          [title]="
+                            item.captured_by_scale
+                              ? 'Volver a pesar'
+                              : 'Editar cantidad'
+                          "
+                        >
+                          <app-icon
+                            [name]="item.captured_by_scale ? 'scale' : 'edit'"
+                            [size]="14"
+                            class="text-blue-600"
+                          ></app-icon>
+                          <span class="text-xs font-bold text-blue-700">{{
+                            saleQuantityLabel(item)
+                          }}</span>
+                        </button>
+                      } @else {
+                        <div class="flex flex-col gap-0.5">
+                          <div class="cart-stepper-sm">
+                            <app-quantity-control
+                              [value]="item.quantity"
+                              [min]="1"
+                              [max]="getQuantityMax(item)"
+                              [unitsPerPackage]="getRequiredStockPerUnit(item)"
+                              [editable]="true"
+                              [size]="'sm'"
+                              (valueChange)="updateQuantity(item.id, $event)"
+                              (valueClamped)="onQuantityClamped(item, $event)"
+                            ></app-quantity-control>
+                          </div>
+                          @if (isPackageLine(item)) {
+                            <span class="text-[10px] font-medium text-blue-700 leading-none">
+                              {{ item.quantity }} {{ item.quantity === 1 ? 'paquete' : 'paquetes' }}
+                            </span>
+                          }
+                        </div>
+                      }
+                    </div>
+                    <div class="flex shrink-0 items-center justify-end gap-2">
+                      <span
+                        class="text-base font-black text-slate-900"
+                        [attr.aria-label]="'Total de línea: ' + formatCurrency(item.totalPrice)"
+                      >
+                        {{ formatCurrency(item.totalPrice) }}
+                      </span>
+                      @if (item.itemType !== 'custom' && canEditItemPrice(item)) {
                         <app-tooltip
                           content="Edita el precio de venta de este producto."
                           position="top"
@@ -282,12 +549,12 @@ import {
                         >
                           <button
                             type="button"
-                            class="edit-price-btn"
-                            (click)="itemPriceEditRequested.emit(item)"
-                            aria-label="Editar precio de venta"
+                            (click)="editItemPrice(item)"
+                            class="cart-line-btn inline-flex items-center justify-center rounded-md border border-primary/25 bg-primary/10 text-primary transition-colors hover:border-primary/40 hover:bg-primary/15"
+                            [attr.aria-label]="'Editar precio de venta de ' + item.product.name"
                             title="Edita el precio de venta de este producto."
                           >
-                            <app-icon name="pencil" [size]="15"></app-icon>
+                            <app-icon name="pencil" [size]="14"></app-icon>
                           </button>
                         </app-tooltip>
                       }
@@ -299,50 +566,76 @@ import {
           }
         </div>
     
-        <!-- Summary Section -->
+        <!-- Summary Section (< 80px ultra-compact) -->
         @if (cartState()?.items?.length) {
           <div class="summary-section">
-            <button
-              type="button"
-              class="summary-custom-item-btn"
-              (click)="customItemRequested.emit()"
-              [disabled]="!canCreateCustomItems()"
-            >
-              <app-icon name="file-plus" [size]="16"></app-icon>
-              <span>Ítem personalizado</span>
-            </button>
             <div class="summary-row">
               <span>Subtotal</span>
-              <span>{{ formatCurrency(cartState()?.summary?.subtotal || 0) }}</span>
+              <span class="font-medium">{{ formatCurrency(cartState()?.summary?.subtotal || 0) }}</span>
             </div>
+            @if ((cartState()?.summary?.discountAmount || 0) > 0) {
+              <div class="summary-row discount">
+                <span>Descuento aplicado</span>
+                <span class="discount-amount">-{{ formatCurrency(cartState()?.summary?.discountAmount || 0) }}</span>
+              </div>
+            }
             <div class="summary-row">
               <span>IVA / impuestos</span>
-              <span>{{ formatCurrency(cartState()?.summary?.taxAmount || 0) }}</span>
+              <span class="font-medium">{{ formatCurrency(cartState()?.summary?.taxAmount || 0) }}</span>
             </div>
-            <div class="summary-row total">
-              <span>Total</span>
-              <span class="total-amount">{{
-                formatCurrency(cartState()?.summary?.total || 0)
-              }}</span>
+            @if (withholdingAmount() > 0) {
+              <div class="summary-row withholding">
+                <span class="flex items-center gap-1">
+                  <app-icon name="minus" [size]="11" class="text-amber-600"></app-icon>
+                  Retención
+                </span>
+                <span class="withholding-amount">-{{ formatCurrency(withholdingAmount()) }}</span>
+              </div>
+            }
+
+            <div class="summary-total-block">
+              <div class="summary-total-left">
+                <span class="summary-total-label">
+                  {{ withholdingAmount() > 0 ? 'Total a cobrar' : 'Total a pagar' }}
+                </span>
+                @if (!isQuotationMode() && !isLayawayMode()) {
+                  @if (getAppliedCoupon(); as coupon) {
+                    <button
+                      type="button"
+                      (click)="openCouponModal()"
+                      class="coupon-trigger-btn applied"
+                      title="Ver o modificar cupón aplicado"
+                    >
+                      <app-icon name="ticket" [size]="11"></app-icon>
+                      <span class="truncate">Cupón: {{ coupon.coupon_code }}</span>
+                    </button>
+                  } @else {
+                    <button
+                      type="button"
+                      (click)="openCouponModal()"
+                      class="coupon-trigger-btn"
+                      title="Ingresar cupón o código de promoción"
+                    >
+                      <span>¿Tienes código promo? Ingrésalo aquí</span>
+                    </button>
+                  }
+                } @else {
+                  <span class="mode-label">
+                    {{ isQuotationMode() ? 'Cotización' : 'Plan Separé' }}
+                  </span>
+                }
+              </div>
+              <span class="summary-total-amount">
+                {{ formatCurrency(netTotal()) }}
+              </span>
             </div>
 
-            <!--
-              Aviso 5 UVT (Art. 616-1 ET / Res. 000165 de 2023). Es el MISMO
-              predicado del carrito de escritorio, reusado del servicio (ver
-              nota en la clase), no una segunda regla: dos umbrales calculados
-              aparte terminan discrepando. Faltaba en el camino móvil, así que
-              el cajero de tablet o teléfono sólo se enteraba del tope cuando el
-              backend rechazaba la venta al pulsar «Finalizar Venta», con el
-              cliente delante y el cierre ya hecho.
-            -->
+            <!-- Aviso 5 UVT -->
             @if (invoiceRequiredByUvt()) {
               <div class="uvt-warning">
                 <app-icon name="alert-triangle" [size]="12"></app-icon>
                 <span>
-                  Esta venta supera
-                  {{ formatCurrency(uvtLimitCop()) }}
-                  ({{ uvtThreshold()!.uvt_limit }} UVT) y requiere factura
-                  electrónica: identifica al cliente antes de cobrar.
+                  Supera {{ formatCurrency(uvtLimitCop()) }} ({{ uvtThreshold()!.uvt_limit }} UVT). Requiere factura electrónica.
                 </span>
               </div>
             }
@@ -351,68 +644,84 @@ import {
     
         <!-- Action Buttons -->
         <div class="modal-actions">
-          <div class="modal-actions-row">
+          @if (isQuotationMode()) {
             <button
               type="button"
-              class="action-btn save-btn"
-              (click)="saveDraft.emit()"
+              class="action-btn checkout-btn"
+              (click)="quote.emit()"
               [disabled]="!cartState()?.items?.length"
-              >
-              <app-icon name="clipboard-list" [size]="18"></app-icon>
-              <span>{{ isEditMode() ? 'Actualizar' : 'Guardar' }}</span>
+            >
+              <app-icon name="file-text" [size]="18"></app-icon>
+              <span>Crear Cotización</span>
             </button>
-          </div>
-          <!--
-            CP-POS-CREAR-EDITAR-COBRAR-001 — main CTA stays Cobrar. The
-            previous label "Guardar Orden / Actualizar Orden" on this slot
-            was a regression: it duplicated the secondary save button
-            copy and broke the Cobrar = charge mental model. Restored to
-            the canonical charge copy; the secondary save button above now
-            carries the "no cobra" suffix because it persists without
-            payment.
-          -->
-          <button
-            type="button"
-            class="action-btn checkout-btn"
-            (click)="checkout.emit()"
-            [disabled]="!cartState()?.items?.length || isCharging()"
-            [attr.aria-busy]="isCharging() ? 'true' : null"
-          >
-            <app-icon name="credit-card" [size]="18"></app-icon>
-            <span>Cobrar</span>
-          </button>
-          <!--
-            Phase D.3 — secondary Cobrar mirrors the desktop cart sidebar;
-            only renders when the parent has a fresh readyToPayOrder to
-            charge (post-edit payment flow).
-          -->
-          @if (readyToPayOrder() !== null) {
+          } @else if (isLayawayMode()) {
             <button
               type="button"
-              class="action-btn checkout-btn cobrar-btn"
-              (click)="charge.emit()"
+              class="action-btn checkout-btn"
+              (click)="layaway.emit()"
+              [disabled]="!cartState()?.items?.length"
+            >
+              <app-icon name="calendar" [size]="18"></app-icon>
+              <span>Crear Plan Separé</span>
+            </button>
+          } @else {
+            <div class="modal-actions-row">
+              <button
+                type="button"
+                class="action-btn save-btn"
+                (click)="saveDraft.emit()"
+                [disabled]="!cartState()?.items?.length"
+              >
+                <app-icon name="clipboard-list" [size]="16"></app-icon>
+                <span>{{ isEditMode() ? 'Actualizar' : 'Guardar' }}</span>
+              </button>
+              <button
+                type="button"
+                class="action-btn client-btn"
+                (click)="openCustomerModal.emit()"
+                [attr.aria-label]="
+                  cartState()?.customer
+                    ? 'Cliente: ' + (cartState()?.customer?.name ?? '')
+                    : 'Asignar cliente'
+                "
+              >
+                <app-icon
+                  [name]="cartState()?.customer ? 'user-check' : 'user-plus'"
+                  [size]="16"
+                ></app-icon>
+                <span class="truncate">{{ customerButtonLabel(cartState()?.customer) }}</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              class="action-btn checkout-btn checkout-charge"
+              (click)="checkout.emit()"
               [disabled]="!cartState()?.items?.length || isCharging()"
               [attr.aria-busy]="isCharging() ? 'true' : null"
-              aria-label="Cobrar la orden editada"
+              [attr.aria-label]="'Cobrar ' + formatCurrency(netTotal())"
             >
               <app-icon name="credit-card" [size]="18"></app-icon>
-              <span>Cobrar</span>
+              <span>Cobrar {{ formatCurrency(netTotal()) }}</span>
             </button>
+
+            @if (readyToPayOrder() !== null && !isEditMode()) {
+              <button
+                type="button"
+                class="action-btn checkout-btn cobrar-btn"
+                (click)="charge.emit()"
+                [disabled]="!cartState()?.items?.length || isCharging()"
+                [attr.aria-busy]="isCharging() ? 'true' : null"
+                aria-label="Cobrar la orden editada"
+              >
+                <app-icon name="credit-card" [size]="18"></app-icon>
+                <span>Cobrar</span>
+              </button>
+            }
           }
         </div>
 
-        <!--
-          QUI-787 · editor de nota POR LÍNEA (paridad con desktop). Montado
-          localmente porque el mobile modal se renderiza en su propio
-          overlay y no comparte la jerarquía del app-pos-cart. Mismo
-          contrato: maxlength 200, trim al cerrar, persiste via
-          PosCartService.updateCartItem.
-
-          NOTA: usa [value] + (input) nativos en lugar de [ngModel] para
-          no importar FormsModule aquí — FormsModule hace que el type-checker
-          de Angular trate [class] como NgClass y se queje por el boolean
-          que ya usa este modal ([class.open]="isOpen()").
-        -->
+        <!-- Kitchen Item Note Modal -->
         <app-modal
           [isOpen]="itemNoteModalOpen()"
           [title]="'Nota para cocina: ' + (itemNoteTarget()?.product?.name ?? '')"
@@ -464,8 +773,180 @@ import {
             </app-button>
           </div>
         </app-modal>
+
+        <!-- Order Staff Note Modal -->
+        <app-modal
+          [isOpen]="orderNoteModalOpen()"
+          title="Nota de la orden"
+          size="sm"
+          (closed)="orderNoteModalOpen.set(false)"
+        >
+          <div class="space-y-2">
+            <textarea
+              [value]="cartState()?.notes || ''"
+              (input)="onStaffNoteInput($event)"
+              maxlength="500"
+              rows="4"
+              placeholder="Instrucción interna para el equipo, no se envía al cliente"
+              class="w-full px-3 py-2 text-sm border border-border bg-surface rounded-md text-text-primary placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none"
+            ></textarea>
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] text-neutral-600">
+                Instrucción interna para el equipo, no se envía al cliente.
+              </span>
+              <span class="text-[11px] text-neutral-600">
+                {{ (cartState()?.notes || '').length }}/500
+              </span>
+            </div>
+          </div>
+
+          <div
+            slot="footer"
+            class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"
+          >
+            <app-button
+              class="w-full sm:w-auto"
+              variant="primary"
+              size="md"
+              customClasses="min-w-[120px]"
+              (clicked)="orderNoteModalOpen.set(false)"
+            >
+              Aceptar
+            </app-button>
+          </div>
+        </app-modal>
+
+        <!-- Coupon / Promotion Modal -->
+        <app-modal
+          [isOpen]="isCouponModalOpen()"
+          title="Cupón o código promocional"
+          subtitle="Aplica un descuento a la orden actual"
+          size="sm"
+          [centered]="true"
+          (closed)="closeCouponModal()"
+        >
+          <div class="space-y-4">
+            @if (getAppliedCoupon(); as coupon) {
+              <!-- Cupón actualmente aplicado -->
+              <div class="p-3.5 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2.5 min-w-0">
+                  <div class="w-9 h-9 rounded-lg bg-primary/20 text-primary flex items-center justify-center shrink-0">
+                    <app-icon name="ticket" [size]="18"></app-icon>
+                  </div>
+                  <div class="min-w-0">
+                    <span class="block text-xs font-bold text-primary truncate uppercase tracking-wider">
+                      {{ coupon.coupon_code }}
+                    </span>
+                    <span class="block text-xs font-semibold text-primary/80">
+                      Descuento: -{{ formatCurrency(getCouponDiscountAmount()) }}
+                    </span>
+                  </div>
+                </div>
+                <app-badge variant="success" size="sm" badgeStyle="solid">Aplicado</app-badge>
+              </div>
+
+              <div class="pt-2 border-t border-border">
+                <span class="block text-xs font-medium text-neutral-600 mb-1.5">
+                  O ingresa otro código para reemplazarlo:
+                </span>
+                <div class="flex gap-2">
+                  <input
+                    type="text"
+                    [value]="couponCode()"
+                    (input)="onCouponInput($event)"
+                    placeholder="Nuevo código"
+                    aria-label="Nuevo código de cupón"
+                    class="flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wider rounded-lg border border-border bg-surface text-text-primary focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-neutral-400 placeholder:normal-case transition-colors"
+                    (keydown.enter)="applyCoupon()"
+                    [disabled]="couponLoading()"
+                  />
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    [disabled]="!couponCode().trim() || couponLoading()"
+                    [loading]="couponLoading()"
+                    (clicked)="applyCoupon()"
+                  >
+                    Aplicar
+                  </app-button>
+                </div>
+              </div>
+            } @else {
+              <!-- Sin cupón aplicado -->
+              <p class="text-xs text-neutral-600">
+                Ingresa el código del cupón o promoción para aplicar el descuento correspondiente sobre la orden actual.
+              </p>
+              <div>
+                <label class="block text-xs font-medium text-neutral-700 mb-1.5">
+                  Código del cupón
+                </label>
+                <input
+                  type="text"
+                  [value]="couponCode()"
+                  (input)="onCouponInput($event)"
+                  placeholder="Ej: PROMO10"
+                  aria-label="Código de cupón o promoción"
+                  class="w-full px-3 py-2.5 text-sm font-semibold uppercase tracking-wider rounded-xl border border-border bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary placeholder:text-neutral-400 placeholder:normal-case transition-all"
+                  (keydown.enter)="applyCoupon()"
+                  [disabled]="couponLoading()"
+                />
+              </div>
+            }
+          </div>
+
+          <div
+            slot="footer"
+            class="flex items-center justify-between w-full"
+          >
+            @if (getAppliedCoupon()) {
+              <app-button
+                variant="outline-danger"
+                size="md"
+                [disabled]="couponLoading()"
+                (clicked)="removeCoupon()"
+              >
+                <app-icon name="trash-2" [size]="14" class="mr-1.5"></app-icon>
+                Eliminar Cupón
+              </app-button>
+            } @else {
+              <div></div>
+            }
+            <div class="flex items-center gap-2">
+              <app-button
+                variant="outline"
+                size="md"
+                [disabled]="couponLoading()"
+                (clicked)="closeCouponModal()"
+              >
+                {{ getAppliedCoupon() ? 'Cerrar' : 'Cancelar' }}
+              </app-button>
+              @if (!getAppliedCoupon()) {
+                <app-button
+                  variant="primary"
+                  size="md"
+                  [disabled]="!couponCode().trim() || couponLoading()"
+                  [loading]="couponLoading()"
+                  (clicked)="applyCoupon()"
+                >
+                  {{ couponLoading() ? 'Aplicando...' : 'Aplicar Cupón' }}
+                </app-button>
+              }
+            </div>
+          </div>
+        </app-modal>
       </div>
     </div>
+
+    @if (schedulerOpen()) {
+      <app-booking-scheduler-modal
+        [cartItem]="schedulerTarget()"
+        [existingBooking]="schedulerExisting()"
+        [posCustomer]="cartState()?.customer"
+        (customerSelected)="onCustomerSelected($event)"
+        (scheduled)="onScheduled($event)"
+        (cancelled)="closeScheduler()"
+      ></app-booking-scheduler-modal>
+    }
     `,
   styles: [
     `
@@ -477,13 +958,32 @@ import {
          del modal (mismo lenguaje del paso 2: 3px primary). */
       .back-btn:focus-visible,
       .clear-btn:focus-visible,
+      .note-btn:focus-visible,
+      .print-btn:focus-visible,
       .remove-btn:focus-visible,
       .edit-price-btn:focus-visible,
+      .cart-line-btn:focus-visible,
       .action-btn:focus-visible,
       .empty-custom-item-btn:focus-visible,
-      .summary-custom-item-btn:focus-visible {
+      .dashed-custom-item-btn:focus-visible,
+      .customer-assign-btn:focus-visible,
+      .customer-action-icon-btn:focus-visible,
+      .coupon-trigger-btn:focus-visible {
         outline: 3px solid var(--color-primary);
         outline-offset: 2px;
+      }
+
+      :host ::ng-deep .cart-stepper-sm app-quantity-control .qc-wrapper > div {
+        background-color: #fff;
+        border-color: var(--color-border);
+      }
+
+      .cart-line-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
       }
 
       .modal-overlay {
@@ -524,61 +1024,243 @@ import {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 16px 20px;
+        padding: 12px 16px;
         border-bottom: 1px solid var(--color-border);
         flex-shrink: 0;
+        gap: 8px;
+      }
+
+      .modal-header-left {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
       }
 
       .back-btn {
         display: flex;
         align-items: center;
         justify-content: center;
-        min-width: 44px;
-        min-height: 44px;
+        width: 36px;
+        height: 36px;
         border: none;
         background: transparent;
-        color: var(--color-text-primary);
-        cursor: pointer;
-        border-radius: 10px;
-        transition: background 0.2s ease;
-      }
-
-      .back-btn:hover {
-        background: var(--color-muted);
-      }
-
-      .modal-title {
-        font-size: 18px;
-        font-weight: 700;
-        color: var(--color-text-primary);
-        margin: 0;
-      }
-
-      .item-count {
-        font-weight: 500;
-        color: var(--color-neutral-600);
-      }
-
-      .clear-btn {
-        padding: 8px 14px;
-        min-height: 44px;
-        border: none;
-        background: transparent;
-        color: var(--color-destructive);
-        font-size: 14px;
-        font-weight: 600;
+        color: var(--color-primary);
         cursor: pointer;
         border-radius: 8px;
         transition: background 0.2s ease;
       }
 
-      .clear-btn:hover:not(:disabled) {
-        background: rgba(239, 68, 68, 0.1);
+      .back-btn:hover {
+        background: rgba(var(--color-primary-rgb), 0.08);
       }
 
-      .clear-btn:disabled {
-        color: var(--color-neutral-600);
+      .modal-title {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--color-text-primary);
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+      }
+
+      .item-count {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--color-primary);
+      }
+
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+
+      .header-action-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 0 10px;
+        height: 32px;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        border: 1px solid transparent;
+      }
+
+      .header-action-btn:disabled {
+        opacity: 0.45;
         cursor: not-allowed;
+      }
+
+      .clear-btn {
+        background: rgba(239, 68, 68, 0.08);
+        border-color: rgba(239, 68, 68, 0.2);
+        color: rgb(220, 38, 38);
+      }
+
+      .clear-btn:hover:not(:disabled) {
+        background: rgba(239, 68, 68, 0.16);
+      }
+
+      .note-btn {
+        background: var(--color-muted);
+        border-color: var(--color-border);
+        color: var(--color-text-secondary);
+      }
+
+      .note-btn.active {
+        background: rgba(var(--color-primary-rgb), 0.1);
+        border-color: rgba(var(--color-primary-rgb), 0.25);
+        color: var(--color-primary);
+      }
+
+      .note-btn:hover:not(:disabled) {
+        filter: brightness(0.96);
+      }
+
+      .print-btn {
+        background: rgba(var(--color-primary-rgb), 0.08);
+        border-color: rgba(var(--color-primary-rgb), 0.2);
+        color: var(--color-primary);
+        padding: 0 8px;
+      }
+
+      .print-btn:hover:not(:disabled) {
+        background: rgba(var(--color-primary-rgb), 0.16);
+      }
+
+      /* Customer Section */
+      .customer-section-container {
+        padding: 10px 16px;
+        background: var(--color-surface);
+        border-bottom: 1px solid var(--color-border);
+        flex-shrink: 0;
+      }
+
+      .customer-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 8px 12px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+      }
+
+      .customer-info-main {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+        flex: 1;
+      }
+
+      .customer-avatar {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: rgba(var(--color-primary-rgb), 0.12);
+        border: 1px solid rgba(var(--color-primary-rgb), 0.25);
+        color: var(--color-primary);
+        font-size: 11px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+
+      .customer-details {
+        min-width: 0;
+        line-height: 1.25;
+      }
+
+      .customer-name {
+        font-size: 12px;
+        font-weight: 700;
+        color: #1e293b;
+        margin: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .customer-sub {
+        font-size: 11px;
+        font-weight: 500;
+        color: #64748b;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-top: 1px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .customer-sub .sep {
+        color: #cbd5e1;
+      }
+
+      .customer-card-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+      }
+
+      .customer-action-icon-btn {
+        width: 28px;
+        height: 28px;
+        border: none;
+        background: transparent;
+        color: #64748b;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+
+      .customer-action-icon-btn:hover {
+        background: #ffffff;
+        color: var(--color-primary);
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      }
+
+      .customer-action-icon-btn.remove:hover {
+        background: rgba(239, 68, 68, 0.1);
+        color: rgb(220, 38, 38);
+      }
+
+      .customer-assign-btn {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 9px 12px;
+        border: 1.5px dashed rgba(var(--color-primary-rgb), 0.35);
+        border-radius: 12px;
+        background: rgba(var(--color-primary-rgb), 0.04);
+        color: var(--color-primary);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+
+      .customer-assign-btn:hover {
+        background: rgba(var(--color-primary-rgb), 0.08);
+        border-color: var(--color-primary);
       }
 
       /* Items Container */
@@ -656,10 +1338,11 @@ import {
         background: var(--color-surface);
         border: 1px solid var(--color-border);
         border-radius: 14px;
-        transition: border-color 0.2s ease;
+        transition: border-color 0.2s ease, background-color 0.2s ease;
       }
 
       .cart-item:hover {
+        background-color: var(--color-surface-hover, #f1f5f9);
         border-color: var(--color-primary);
       }
 
@@ -803,13 +1486,13 @@ import {
       }
 
       .item-tier-badge {
-        background: rgba(245, 158, 11, 0.14);
-        color: rgb(180, 83, 9);
+        background: rgba(var(--color-primary-rgb), 0.12);
+        color: var(--color-primary);
       }
 
       .item-package-badge {
-        background: rgba(59, 130, 246, 0.1);
-        color: rgb(29, 78, 216);
+        background: rgba(var(--color-primary-rgb), 0.1);
+        color: var(--color-primary);
         font-weight: 600;
       }
 
@@ -824,8 +1507,8 @@ import {
         border-radius: 4px;
         font-size: 11px;
         font-weight: 600;
-        background: rgba(59, 130, 246, 0.1);
-        color: rgb(29, 78, 216);
+        background: rgba(var(--color-primary-rgb), 0.1);
+        color: var(--color-primary);
       }
 
       .weight-badge-mobile {
@@ -834,8 +1517,8 @@ import {
         gap: 4px;
         padding: 4px 10px;
         border-radius: 8px;
-        background: rgba(59, 130, 246, 0.08);
-        border: 1px solid rgba(59, 130, 246, 0.2);
+        background: rgba(var(--color-primary-rgb), 0.08);
+        border: 1px solid rgba(var(--color-primary-rgb), 0.2);
       }
 
       .qty-with-packages {
@@ -849,13 +1532,13 @@ import {
         font-size: 10px;
         font-weight: 500;
         line-height: 1;
-        color: rgb(29, 78, 216);
+        color: var(--color-primary);
       }
 
       .weight-value {
         font-size: 13px;
         font-weight: 700;
-        color: rgb(29, 78, 216);
+        color: var(--color-primary);
       }
 
       .remove-btn {
@@ -932,63 +1615,132 @@ import {
         transform: scale(0.96);
       }
 
-      /* Summary Section */
-      .summary-section {
-        padding: 16px 20px;
-        border-top: 1px solid var(--color-border);
-        background: var(--color-muted);
-        flex-shrink: 0;
-      }
-
-      .summary-custom-item-btn {
+      .dashed-custom-item-btn {
         width: 100%;
-        min-height: 44px;
-        margin-bottom: 10px;
-        border: 1px solid rgba(var(--color-primary-rgb), 0.24);
-        border-radius: 12px;
-        background: var(--color-surface);
-        color: var(--color-primary);
-        font-size: 14px;
-        font-weight: 700;
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 8px;
+        padding: 10px 14px;
+        border: 1.5px dashed rgba(var(--color-primary-rgb), 0.35);
+        border-radius: 12px;
+        background: rgba(var(--color-primary-rgb), 0.04);
+        color: var(--color-primary);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-top: 8px;
+        transition: all 0.2s ease;
       }
 
-      .summary-custom-item-btn:disabled {
-        opacity: 0.4;
+      .dashed-custom-item-btn:hover {
+        border-color: var(--color-primary);
+        color: var(--color-primary);
+        background: rgba(var(--color-primary-rgb), 0.08);
+      }
+
+      /* Summary Section (< 80px ultra-compact) */
+      .summary-section {
+        padding: 10px 16px;
+        border-top: 1px solid var(--color-border);
+        background: #f8fafc;
+        flex-shrink: 0;
       }
 
       .summary-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        font-size: 14px;
-        color: var(--color-neutral-600);
-        padding: 4px 0;
+        font-size: 12px;
+        color: #64748b;
+        padding: 2px 0;
       }
 
-      .summary-row.total {
-        padding-top: 12px;
-        margin-top: 8px;
-        border-top: 1px solid var(--color-border);
-        font-size: 16px;
+      .summary-row.discount {
+        color: #e11d48;
+      }
+
+      .discount-amount {
         font-weight: 700;
-        color: var(--color-text-primary);
+        color: #e11d48;
       }
 
-      .total-amount {
-        font-size: 22px;
+      .summary-row.withholding {
+        color: #b45309;
+      }
+
+      .withholding-amount {
+        font-weight: 600;
+        color: #b45309;
+      }
+
+      .summary-total-block {
+        margin-top: 6px;
+        padding-top: 6px;
+        border-top: 1px solid #e2e8f0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .summary-total-left {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .summary-total-label {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #475569;
+        line-height: 1.2;
+      }
+
+      .coupon-trigger-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 600;
         color: var(--color-primary);
+        background: transparent;
+        border: none;
+        padding: 0;
+        margin-top: 2px;
+        cursor: pointer;
+        text-decoration: underline;
+        text-align: left;
+      }
+
+      .coupon-trigger-btn:hover {
+        filter: brightness(0.9);
+      }
+
+      .summary-total-amount {
+        font-size: 22px;
+        font-weight: 900;
+        color: var(--color-primary);
+        letter-spacing: -0.02em;
+        line-height: 1;
+        flex-shrink: 0;
+      }
+
+      .mode-label {
+        font-size: 11px;
+        font-weight: 500;
+        color: #64748b;
+        margin-top: 2px;
       }
 
       .uvt-warning {
         display: flex;
         align-items: flex-start;
         gap: 8px;
-        margin-top: 10px;
-        padding: 6px 8px;
+        margin-top: 6px;
+        padding: 5px 8px;
         border: 1px solid var(--color-warning);
         border-radius: 6px;
         background: var(--color-warning-light);
@@ -1007,9 +1759,9 @@ import {
       .modal-actions {
         display: flex;
         flex-direction: column;
-        gap: 10px;
-        padding: 16px 20px;
-        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        gap: 8px;
+        padding: 12px 16px;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
         border-top: 1px solid var(--color-border);
         background: var(--color-surface);
         flex-shrink: 0;
@@ -1017,74 +1769,82 @@ import {
 
       .modal-actions-row {
         display: grid;
-        grid-template-columns: 1fr;
-        gap: 10px;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
       }
 
       .action-btn {
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 8px;
-        height: 48px;
+        gap: 6px;
+        height: 44px;
         border: none;
         border-radius: 12px;
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 600;
         cursor: pointer;
         transition: all 0.2s ease;
         width: 100%;
       }
 
-      .modal-actions-row > .action-btn {
-        min-height: 44px;
-        font-size: 13px;
-      }
-
       .action-btn:active:not(:disabled) {
-        transform: scale(0.97);
+        transform: scale(0.98);
       }
 
       .action-btn:disabled {
-        opacity: 0.4;
+        opacity: 0.45;
         cursor: not-allowed;
       }
 
+      .client-btn {
+        background: rgba(var(--color-primary-rgb), 0.08);
+        border: 1px solid rgba(var(--color-primary-rgb), 0.25);
+        color: var(--color-primary);
+        font-size: 13px;
+        font-weight: 600;
+        padding: 0 10px;
+      }
+
+      .client-btn:hover:not(:disabled) {
+        background: rgba(var(--color-primary-rgb), 0.15);
+        border-color: var(--color-primary);
+      }
+
       .save-btn {
-        background: var(--color-surface);
-        border: 1px solid var(--color-border);
-        color: var(--color-text-primary);
+        background: #f8fafc;
+        border: 1px solid #cbd5e1;
+        color: #334155;
+        font-size: 13px;
+        font-weight: 600;
+        padding: 0 10px;
       }
 
       .save-btn:hover:not(:disabled) {
-        background: var(--color-muted);
-        border-color: var(--color-text-secondary);
+        background: rgba(var(--color-primary-rgb), 0.06);
+        border-color: var(--color-primary);
+        color: var(--color-primary);
       }
 
-
-
-      /* Stitch paso 11 — CTA sobre success-700 (~5:1 con blanco, AA);
-         blanco sobre primary #2ecc71 daba 2.10:1 y fallaba AA. */
       .checkout-btn {
-        background: var(--color-success-700);
-        color: var(--color-text-on-primary);
+        background: var(--color-primary);
+        color: var(--color-text-on-primary, #ffffff);
         font-weight: 700;
-        box-shadow: 0 4px 12px rgba(var(--color-success-700-rgb), 0.3);
+        box-shadow: 0 4px 14px rgba(var(--color-primary-rgb), 0.35);
+      }
+
+      .checkout-charge {
+        font-size: 15px;
+        font-weight: 800;
       }
 
       .checkout-btn:hover:not(:disabled) {
-        filter: brightness(1.05);
+        filter: brightness(1.08);
       }
 
-      /* Stitch paso 11 — gradiente 700→800: ambos extremos pasan AA
-         con texto blanco (5.02 y 7.13:1); success→primary fallaba (~2.2:1). */
       .cobrar-btn {
-        background: linear-gradient(
-          135deg,
-          var(--color-success-700) 0%,
-          var(--color-success-800) 100%
-        );
-        box-shadow: 0 4px 14px rgba(var(--color-success-700-rgb), 0.32);
+        background: var(--color-primary);
+        box-shadow: 0 4px 14px rgba(var(--color-primary-rgb), 0.35);
       }
 
       .cobrar-btn:focus-visible {
@@ -1109,12 +1869,18 @@ export class PosCartModalComponent {
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly saleUnitService = inject(PosSaleUnitService);
+  private readonly preCuentaPrint = inject(PosPreCuentaPrintService);
+  private readonly posApiService = inject(PosApiService);
+  private readonly dialogService = inject(DialogService);
+  private readonly scaleService = inject(PosScaleService);
 
   readonly isOpen = input<boolean>(false);
   readonly cartState = input<CartState | null>(null);
   readonly canCreateCustomItems = input<boolean>(false);
   readonly canOverridePrices = input<boolean>(false);
   readonly isEditMode = input<boolean>(false);
+  readonly isQuotationMode = input<boolean>(false);
+  readonly isLayawayMode = input<boolean>(false);
   readonly readyToPayOrder = input<unknown>(null);
   readonly isCharging = input<boolean>(false);
 
@@ -1132,17 +1898,52 @@ export class PosCartModalComponent {
     () => this.cartService.uvtThreshold()?.limit_cop ?? 0,
   );
 
+  /**
+   * Retención (preview) y total neto a cobrar.
+   */
+  readonly withholdingAmount = computed(
+    () => Number(this.cartState()?.summary?.withholdingAmount ?? 0) || 0,
+  );
+  readonly netTotal = computed(() => {
+    const total = Number(this.cartState()?.summary?.total ?? 0) || 0;
+    return Math.max(0, total - this.withholdingAmount());
+  });
+
   readonly closed = output<void>();
   readonly customItemRequested = output<void>();
   readonly itemPriceEditRequested = output<CartItem>();
   readonly itemQuantityChanged = output<{ itemId: string; quantity: number }>();
   readonly itemRemoved = output<string>();
   readonly clearCart = output<void>();
+  readonly openCustomerModal = output<void>();
+  readonly clearCustomer = output<void>();
+  readonly quote = output<void>();
+  readonly layaway = output<void>();
+  readonly customerSelected = output<any>();
+  readonly bookingsChanged = output<Map<string, any>>();
+
+  // CP-POS-SVC-BOOKING-001 — Service scheduler state.
+  readonly schedulerOpen = signal(false);
+  readonly schedulerTarget = signal<any>(null);
+  readonly schedulerExisting = signal<any>(null);
+  readonly cartBookingsByItemId = signal<Map<string, any>>(new Map());
 
   // ─── QUI-787 · editor de nota por línea (paridad con desktop) ─────────
   readonly itemNoteModalOpen = signal(false);
   readonly itemNoteTarget = signal<CartItem | null>(null);
   readonly itemNoteDraft = signal<string>('');
+
+  // ─── Nota general de la orden (staff note) ───────────────────────────
+  readonly orderNoteModalOpen = signal(false);
+
+  // ─── Modal de cupón / código promocional ──────────────────────────────
+  readonly isCouponModalOpen = signal(false);
+  readonly couponCode = signal('');
+  readonly couponLoading = signal(false);
+
+  // ─── Pre-cuenta impresión ─────────────────────────────────────────────
+  readonly preCuentaPrinting = signal(false);
+
   readonly create = output<void>();
   /**
    * CP-POS-CREAR-EDITAR-COBRAR-001 — direct save-draft (skip the
@@ -1230,11 +2031,11 @@ export class PosCartModalComponent {
     );
   }
 
-  /** QUI-648 — sufijo de la escala de precio: "/m", "/kg", " c/u". */
+  /** QUI-648 — sufijo de la escala de precio: "/m", "/kg", "/paquete". */
   unitPriceSuffix(item: CartItem): string {
     if (item.is_weight_product) return '/' + (item.weight_unit || 'kg');
-    if (item.sale_unit_code) return '/' + item.sale_unit_code;
-    return ' c/u';
+    if (this.isPackageLine(item)) return '/paquete';
+    return item.sale_unit_code ? '/' + item.sale_unit_code : '';
   }
 
   /** `true` cuando la línea se capturó en una unidad de venta ≠ unidad mínima. */
@@ -1410,6 +2211,255 @@ export class PosCartModalComponent {
     return this.currencyService.format(amount);
   }
 
+  getItemDiscountAmount(item: CartItem): number {
+    const original = Number(item.originalFinalPrice ?? item.finalPrice) || 0;
+    const current = Number(item.finalPrice) || 0;
+    const perUnit = original - current;
+    if (perUnit <= 0) return 0;
+    const multiplier =
+      current > 0 && Number.isFinite(item.totalPrice / current)
+        ? item.totalPrice / current
+        : item.quantity;
+    return Math.max(0, Math.round(perUnit * multiplier * 100) / 100);
+  }
+
+  getItemTaxAmount(item: CartItem): number {
+    return item.taxAmount;
+  }
+
+  updateQuantity(itemId: string, quantity: number): void {
+    if (quantity <= 0) {
+      this.onRemoveItem(itemId);
+      return;
+    }
+    this.onQuantityChange(itemId, quantity);
+  }
+
+  async editItemPrice(item: CartItem): Promise<void> {
+    if (!this.canEditItemPrice(item)) {
+      this.toastService.warning('No tienes permiso para editar este precio');
+      return;
+    }
+
+    const value = await this.dialogService.prompt(
+      {
+        title: 'Editar precio de venta',
+        message: item.product.name,
+        placeholder: 'Precio final',
+        defaultValue: item.finalPrice.toString(),
+        confirmText: 'Actualizar',
+        cancelText: 'Cancelar',
+        inputType: 'number',
+      },
+      { size: 'sm' },
+    );
+
+    if (value === undefined) return;
+    const finalPrice = Number(value);
+    if (Number.isNaN(finalPrice) || finalPrice < 0) {
+      this.toastService.warning('El precio debe ser un número válido');
+      return;
+    }
+
+    let reason = item.priceOverrideReason;
+    if (item.itemType !== 'custom') {
+      reason = await this.dialogService.prompt(
+        {
+          title: 'Motivo del cambio',
+          message: 'Opcional, queda como referencia de auditoría de la orden.',
+          placeholder: 'Ej. precio negociado con el cliente',
+          defaultValue: item.priceOverrideReason || '',
+          confirmText: 'Guardar',
+          cancelText: 'Omitir',
+        },
+        { size: 'sm' },
+      );
+    }
+
+    this.cartService
+      .updateCartItemPrice({ itemId: item.id, finalPrice, reason })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Precio actualizado');
+          this.itemPriceEditRequested.emit(item);
+        },
+        error: (error) =>
+          this.toastService.error(error.message || 'Error al actualizar precio'),
+      });
+  }
+
+  async editWeight(item: CartItem): Promise<void> {
+    const unit = item.weight_unit || 'kg';
+    let newWeight: number;
+
+    if (this.scaleService.isConnected()) {
+      const scaleWeight = await this.scaleService.showWeightModal({
+        title: 'Editar Peso',
+        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
+        weightUnit: unit,
+        allowManualFallback: true,
+      });
+      if (scaleWeight === undefined) return;
+      newWeight = scaleWeight;
+    } else {
+      const weightStr = await this.dialogService.prompt(
+        {
+          title: 'Editar Peso',
+          message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
+          placeholder: `Peso en ${unit}`,
+          defaultValue: item.weight?.toString() || '1.0',
+          confirmText: 'Actualizar',
+          cancelText: 'Cancelar',
+          inputType: 'number',
+        },
+        { size: 'sm' },
+      );
+
+      if (!weightStr) return;
+      newWeight = parseFloat(weightStr.replace(',', '.'));
+    }
+
+    if (isNaN(newWeight) || newWeight <= 0) {
+      this.toastService.warning('El peso debe ser mayor a 0');
+      return;
+    }
+    if (newWeight > 999) {
+      this.toastService.warning('El peso máximo permitido es 999 ' + unit);
+      return;
+    }
+
+    this.cartService
+      .updateCartItemWeight(item.id, newWeight)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(`Peso actualizado: ${newWeight} ${unit}`);
+        },
+        error: (error) => {
+          this.toastService.error(error.message || 'Error al actualizar peso');
+        },
+      });
+  }
+
+  async editSaleQuantity(item: CartItem): Promise<void> {
+    const factor = Number(item.stock_units_per_sale_unit ?? 1) || 1;
+    const unit = item.sale_unit_code || '';
+    const current = Number(item.quantity) / factor;
+    let amount: number | undefined;
+
+    if (item.captured_by_scale && this.scaleService.isConnected()) {
+      amount = await this.scaleService.showWeightModal({
+        title: 'Volver a pesar',
+        message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
+        weightUnit: unit,
+        allowManualFallback: true,
+      });
+    } else {
+      const raw = await this.dialogService.prompt(
+        {
+          title: `Cantidad en ${unit}`,
+          message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
+          placeholder: `Cantidad en ${unit}`,
+          defaultValue: String(current),
+          confirmText: 'Actualizar',
+          cancelText: 'Cancelar',
+          inputType: 'number',
+        },
+        { size: 'sm' },
+      );
+      if (!raw) return;
+      const parsed = parseFloat(String(raw).replace(',', '.'));
+      amount = Number.isNaN(parsed) ? undefined : parsed;
+    }
+
+    if (amount === undefined) return;
+    if (!(amount > 0)) {
+      this.toastService.warning('La cantidad debe ser mayor a 0');
+      return;
+    }
+
+    const quantity = Math.round(amount * factor);
+    if (quantity <= 0) {
+      this.toastService.warning(
+        `La cantidad mínima es ${1 / factor} ${unit}.`,
+      );
+      return;
+    }
+    this.updateQuantity(item.id, quantity);
+  }
+
+  openScheduler(item: any): void {
+    this.schedulerTarget.set(item);
+    const existing = this.cartBookingsByItemId().get(item.id) || item.booking;
+    this.schedulerExisting.set(existing ?? null);
+    this.schedulerOpen.set(true);
+  }
+
+  closeScheduler(): void {
+    this.schedulerOpen.set(false);
+    this.schedulerTarget.set(null);
+    this.schedulerExisting.set(null);
+  }
+
+  onCustomerSelected(c: any): void {
+    if (c) {
+      this.cartService.setCustomer(c).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
+      this.customerSelected.emit(c);
+    }
+  }
+
+  onScheduled(booking: any): void {
+    const target = this.schedulerTarget();
+    if (!target || !booking) {
+      this.closeScheduler();
+      return;
+    }
+    if (booking.customer) {
+      this.cartService.setCustomer(booking.customer).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
+      this.customerSelected.emit(booking.customer);
+    }
+    const resolvedProductId =
+      typeof target.productId === 'number'
+        ? target.productId
+        : Number(target.productId) || Number(target.product?.id) || Number(booking.product_id) || 0;
+    const enrichedBooking = {
+      ...booking,
+      product_id: resolvedProductId,
+      product_variant_id: target.variant_id ?? booking.product_variant_id ?? null,
+      cart_item_id: target.id,
+    };
+    const next = new Map(this.cartBookingsByItemId());
+    next.set(target.id, enrichedBooking);
+    this.cartBookingsByItemId.set(next);
+    target.booking = enrichedBooking;
+    this.bookingsChanged.emit(next);
+    this.cartService
+      .addPendingBooking({
+        id: booking.booking_id ?? 0,
+        booking_number: '',
+        product_id: resolvedProductId,
+        product_name: target.product?.name ?? '',
+        product_variant_id: target.variant_id ?? booking.product_variant_id ?? null,
+        variant_name: target.variant_display_name ?? undefined,
+        customer_id: booking.customer_id ?? 0,
+        date: booking.date,
+        start_time: booking.start_time,
+        end_time: booking.end_time,
+        provider_name: booking.provider_name ?? undefined,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
+    this.closeScheduler();
+  }
+
+  schedulerFor(itemId: string): any {
+    const fromMap = this.cartBookingsByItemId().get(itemId);
+    if (fromMap) return fromMap;
+    const item = this.cartState()?.items?.find((i) => i.id === itemId);
+    return item?.booking ?? null;
+  }
+
   // ─── QUI-787 · handlers del editor de nota por línea ──────────────
 
   openItemNote(item: CartItem): void {
@@ -1462,5 +2512,208 @@ export class PosCartModalComponent {
   onItemNoteDraftInput(event: Event): void {
     const target = event.target as HTMLTextAreaElement;
     this.itemNoteDraft.set(target.value);
+  }
+
+  // ─── Staff Note ───────────────────────────────────────────────────────
+
+  hasStaffNote(): boolean {
+    const notes = this.cartState()?.notes;
+    return !!(notes && notes.trim().length > 0);
+  }
+
+  onStaffNoteInput(event: Event): void {
+    const target = event.target as HTMLTextAreaElement;
+    this.cartService.updateNotes(target.value);
+  }
+
+  // ─── Pre-cuenta ───────────────────────────────────────────────────────
+
+  async printPreCuenta(): Promise<void> {
+    const currentState = this.cartService.getCurrentState();
+    if (currentState.items.length === 0) {
+      this.toastService.warning('Tu carrito está vacío');
+      return;
+    }
+    if (this.preCuentaPrinting()) return;
+    this.preCuentaPrinting.set(true);
+    try {
+      await this.preCuentaPrint.printPreCuenta(currentState);
+    } catch (error) {
+      console.error('Error al imprimir pre-cuenta:', error);
+      this.toastService.error('No se pudo imprimir la pre-cuenta');
+    } finally {
+      this.preCuentaPrinting.set(false);
+    }
+  }
+
+  // ─── Customer Helpers ─────────────────────────────────────────────────
+
+  customerDisplayName(customer: any): string {
+    if (!customer) return '';
+    const full = [customer.first_name, customer.last_name].filter(Boolean).join(' ').trim();
+    return (
+      customer.name?.trim() ||
+      full ||
+      customer.legal_name?.trim() ||
+      customer.business_name?.trim() ||
+      customer.email?.trim() ||
+      'Cliente'
+    );
+  }
+
+  customerInitials(customer: any): string {
+    if (!customer) return 'CL';
+    const source = this.customerDisplayName(customer);
+    const initials = source
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((word: string) => word[0])
+      .join('')
+      .toUpperCase();
+    return initials || 'CL';
+  }
+
+  customerContactTitle(customer: any): string {
+    if (!customer) return '';
+    const doc = [customer?.document_type, customer?.document_number]
+      .filter(Boolean)
+      .join(' ');
+    const parts = [doc, customer?.phone, customer?.email].filter(Boolean);
+    return parts.join(' · ') || this.customerDisplayName(customer);
+  }
+
+  customerButtonLabel(customer: any): string {
+    if (!customer) return '+ Cliente';
+    const name = this.customerDisplayName(customer);
+    const first = customer.first_name || name.split(' ')[0];
+    return first || '+ Cliente';
+  }
+
+  // ─── Coupon / Promo Code Modal ────────────────────────────────────────
+
+  openCouponModal(): void {
+    this.couponCode.set('');
+    this.isCouponModalOpen.set(true);
+  }
+
+  closeCouponModal(): void {
+    this.isCouponModalOpen.set(false);
+  }
+
+  onCouponInput(event: Event): void {
+    const target = event.target as HTMLInputElement;
+    this.couponCode.set(target.value);
+  }
+
+  applyCoupon(): void {
+    const code = this.couponCode().trim().toUpperCase();
+    if (!code) return;
+
+    const currentState = this.cartService.getCurrentState();
+    const subtotal =
+      currentState.summary.subtotal + currentState.summary.taxAmount;
+    const customerId = currentState.customer?.id;
+    const productIds = currentState.items
+      .filter((item) => item.itemType !== 'custom')
+      .map((item) => parseInt(item.product.id))
+      .filter((id) => Number.isFinite(id));
+    const categoryIds = Array.from(
+      new Set(
+        currentState.items.flatMap((item) => {
+          const product = item.product as any;
+          const ids = Array.isArray(product.category_ids)
+            ? product.category_ids
+            : product.category_id
+              ? [product.category_id]
+              : [];
+          return ids
+            .map((id: string | number) => Number(id))
+            .filter((id: number) => Number.isFinite(id));
+        }),
+      ),
+    );
+    const couponItems = currentState.items
+      .filter((item) => item.itemType !== 'custom')
+      .map((item) => {
+        const product = item.product as any;
+        const itemCategoryIds = Array.isArray(product.category_ids)
+          ? product.category_ids
+          : product.category_id
+            ? [product.category_id]
+            : [];
+
+        return {
+          product_id: Number(item.product.id),
+          category_ids: itemCategoryIds
+            .map((id: string | number) => Number(id))
+            .filter((id: number) => Number.isFinite(id)),
+          line_total: Number(item.totalPrice || 0),
+        };
+      })
+      .filter((item) => Number.isFinite(item.product_id));
+
+    this.couponLoading.set(true);
+    this.posApiService
+      .validateCoupon(code, subtotal, customerId, productIds, categoryIds, couponItems)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const validation = response?.data || response;
+          if (validation?.valid) {
+            this.cartService
+              .applyCouponDiscount(validation)
+              .pipe(takeUntilDestroyed(this.destroyRef))
+              .subscribe({
+                next: () => {
+                  this.toastService.success(`Cupón "${code}" aplicado`);
+                  this.couponCode.set('');
+                  this.couponLoading.set(false);
+                  this.closeCouponModal();
+                },
+                error: (error) => {
+                  this.toastService.error(
+                    error.message || 'Error al aplicar cupón',
+                  );
+                  this.couponLoading.set(false);
+                },
+              });
+          } else {
+            this.toastService.error(validation?.message || 'Cupón no válido');
+            this.couponLoading.set(false);
+          }
+        },
+        error: (error) => {
+          this.toastService.error(
+            error?.error?.message || 'Cupón no válido o expirado',
+          );
+          this.couponLoading.set(false);
+        },
+      });
+  }
+
+  removeCoupon(): void {
+    this.cartService
+      .removeCoupon()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Cupón eliminado');
+          this.closeCouponModal();
+        },
+        error: (error) => {
+          this.toastService.error(error.message || 'Error al eliminar cupón');
+        },
+      });
+  }
+
+  getAppliedCoupon(): { coupon_id: number; coupon_code: string } | null {
+    return this.cartService.getAppliedCoupon();
+  }
+
+  getCouponDiscountAmount(): number {
+    const state = this.cartService.getCurrentState();
+    const couponDiscount = state.appliedDiscounts?.find((d) => d.coupon_id);
+    return couponDiscount?.amount || 0;
   }
 }

@@ -67,10 +67,7 @@ export class PosPreCuentaPrintService {
       [user?.first_name, user?.last_name].filter(Boolean).join(' ') ||
       user?.name ||
       '';
-    const customer = state.customer as {
-      name?: string;
-      document_number?: string;
-    } | null;
+    const customer = state.customer;
     const summary = state.summary;
     const discount = Number(summary?.discountAmount ?? 0) || 0;
     const withholding = Number(summary?.withholdingAmount ?? 0) || 0;
@@ -99,9 +96,15 @@ export class PosPreCuentaPrintService {
       })
       .join('');
 
+    const customerName =
+      customer?.name?.trim() ||
+      [customer?.first_name, customer?.last_name].filter(Boolean).join(' ').trim() ||
+      (customer as any)?.legal_name?.trim() ||
+      customer?.email?.trim() ||
+      '';
     const customerRow =
-      customer?.name != null && customer.name !== ''
-        ? `<div class="meta">Cliente: ${this.esc(customer.name)}${customer.document_number ? ` · ${this.esc(customer.document_number)}` : ''}</div>`
+      customerName !== ''
+        ? `<div class="meta">Cliente: ${this.esc(customerName)}${customer?.document_number ? ` · ${this.esc(customer.document_number)}` : ''}</div>`
         : '';
 
     const discountRow =

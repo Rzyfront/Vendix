@@ -238,4 +238,17 @@ export class PosQuickBookComponent {
     const displayHours = hours % 12 || 12;
     return `${displayHours}:${minutes} ${ampm}`;
   }
+
+  customerDisplayName(customer: any): string {
+    if (!customer) return '';
+    const full = [customer.first_name, customer.last_name].filter(Boolean).join(' ').trim();
+    return (
+      customer.name?.trim() ||
+      full ||
+      customer.legal_name?.trim() ||
+      customer.business_name?.trim() ||
+      customer.email?.trim() ||
+      'Cliente'
+    );
+  }
 }

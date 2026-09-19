@@ -210,7 +210,7 @@ function isMultiTokenQuery(query: string): boolean {
           <!-- Ítem libre (Stitch PSVERSION0001; abre el modal compartido vía POS) -->
           <button
             type="button"
-            class="h-10 sm:h-11 px-3.5 bg-white border border-primary/30 text-primary hover:bg-primary/10 text-xs font-bold rounded-xl transition-colors shadow-2xs shrink-0 flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            class="h-10 sm:h-11 w-10 sm:w-auto px-0 sm:px-3.5 bg-white border border-primary/30 text-primary hover:bg-primary/10 text-xs font-bold rounded-xl transition-colors shadow-2xs shrink-0 flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             (click)="openCustomItemModal.emit()"
             [disabled]="!canCreateCustomItems()"
             title="Agregar ítem manual"
@@ -241,9 +241,11 @@ function isMultiTokenQuery(query: string): boolean {
         </div>
 
         <!-- Barra táctil de categorías (Stitch PSVERSION0001 paso 2).
-             Escribe al mismo filtro category_id que el dropdown Filtros. -->
+             Escribe al mismo filtro category_id que el dropdown Filtros.
+             En móvil se oculta (hidden lg:block) para ganar espacio vertical. -->
         @if (categories().length > 1) {
           <app-pos-category-pills
+            class="hidden lg:block"
             [categories]="categories()"
             [selectedId]="selectedCategory()?.id ?? ''"
             [totalCount]="totalResults()"
@@ -311,24 +313,6 @@ function isMultiTokenQuery(query: string): boolean {
           </div>
         }
 
-        <!-- E.1 — contador de paginación (F-066/F-098): copy exacto. Con
-             búsqueda enseña el ranking ("mejores coincidencias primero"). -->
-        @if (counterText()) {
-          <div
-            class="mt-2 flex items-center justify-between gap-2 text-xs text-neutral-600"
-          >
-            <span>{{ counterText() }}</span>
-            @if (isSearchActive() && filteredProducts().length > 0) {
-              <span class="hidden sm:inline shrink-0">
-                Enter &#8629; agrega el primer resultado
-              </span>
-            } @else {
-              <span class="hidden sm:inline shrink-0 text-slate-400 font-medium">
-                Toca para agregar directamente al ticket
-              </span>
-            }
-          </div>
-        }
       </div>
 
       <!-- Products Content -->
@@ -423,12 +407,179 @@ function isMultiTokenQuery(query: string): boolean {
              búsquedas (dim + overlay "Buscando…", F-056/F-067): swap atómico
              al responder, nunca flash a vacío. -->
         @if (filteredProducts().length > 0) {
+          <!-- Mobile Product Cards: Stitch Horizontal Compact Format (lg:hidden) -->
+          <div
+            role="list"
+            aria-label="Resultados de productos móviles"
+            [attr.aria-busy]="searching()"
+            [class.opacity-60]="searching()"
+            class="flex flex-col gap-2 lg:hidden transition-opacity duration-150"
+          >
+            @for (
+              product of filteredProducts();
+              track trackByProductId($index, product)
+            ) {
+              <article
+                role="listitem"
+                tabindex="0"
+                [attr.aria-label]="productCardLabel(product)"
+                [attr.aria-disabled]="isProductCardUnavailable(product) || null"
+                (click)="onAddToCart(product)"
+                (keydown)="onProductCardKeydown($event, product)"
+                class="flex flex-row items-center p-2 rounded-xl bg-white border border-slate-200/90 shadow-2xs gap-2.5 hover:border-primary active:scale-[0.99] transition-all cursor-pointer group select-none"
+                [class.opacity-50]="isProductCardUnavailable(product)"
+                [class.cursor-not-allowed]="isProductCardUnavailable(product)"
+                [class.border-primary]="cartQtyFor(product.id) > 0"
+                [class.bg-primary/2]="cartQtyFor(product.id) > 0"
+              >
+                <!-- Thumbnail -->
+                <div
+                  class="w-14 h-14 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 overflow-hidden p-1 relative"
+                >
+                  @if (product.image_url || product.image) {
+                    <img
+                      [src]="product.image_url || product.image"
+                      [alt]="product.name"
+                      class="w-full h-full object-contain mix-blend-multiply group-hover:scale-105 transition-transform"
+                      (error)="onImageError($event)"
+                    />
+                  } @else {
+                    <app-icon
+                      name="image"
+                      [size]="20"
+                      class="text-slate-400"
+                    ></app-icon>
+                  }
+
+                  @if (product.pricing_type === 'weight') {
+                    <div
+                      class="absolute bottom-0.5 left-0.5 px-1 py-0.2 rounded text-[8px] font-bold bg-blue-700 text-white"
+                    >
+                      Peso
+                    </div>
+                  }
+                </div>
+
+                <!-- Info -->
+                <div class="flex-1 min-w-0 pr-1 leading-tight">
+                  <div class="flex items-center gap-1.5">
+                    <h3
+                      class="text-xs font-bold text-slate-800 truncate group-hover:text-primary transition-colors"
+                      [title]="product.name"
+                    >
+                      {{ product.name }}
+                    </h3>
+                    @if (product.has_variants) {
+                      <span
+                        class="text-[9px] font-semibold text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.2 rounded-full shrink-0"
+                      >
+                        Variantes
+                      </span>
+                    } @else if (isProductCardUnavailable(product)) {
+                      <span
+                        class="text-[9px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.2 rounded-full shrink-0"
+                      >
+                        Agotado
+                      </span>
+                    } @else if (isProductLowStock(product)) {
+                      <span
+                        class="text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded-full shrink-0"
+                      >
+                        Últimas {{ product.stock }}
+                      </span>
+                    } @else {
+                      <span
+                        class="text-[9px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full shrink-0"
+                      >
+                        Disponible
+                      </span>
+                    }
+                    @if (product.active_promotion) {
+                      <span
+                        class="text-[9px] font-semibold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded-full shrink-0"
+                      >
+                        {{ product.active_promotion.badge_label }}
+                      </span>
+                    }
+                  </div>
+
+                  <p class="text-[10px] text-slate-400 truncate mt-0.5">
+                    {{
+                      product.description ||
+                      product.category?.name ||
+                      (product.sku ? 'SKU: ' + product.sku : '')
+                    }}
+                  </p>
+
+                  <div class="text-xs font-black text-slate-900 mt-1 flex items-baseline gap-1.5">
+                    @if (hasActivePromoOrSale(product)) {
+                      <span>{{ promotionalPrice(product) | currency }}</span>
+                      <span class="text-[10px] text-slate-400 line-through font-normal">
+                        {{ product.final_price | currency }}
+                      </span>
+                    } @else {
+                      <span>{{ product.final_price | currency }}</span>
+                    }
+                    @if (product.pricing_type === 'weight') {
+                      <span class="text-[10px] font-normal text-slate-500">
+                        /{{ defaultWeightUnit() }}
+                      </span>
+                    }
+                    @if (product.has_multiple_price_tiers === true) {
+                      <span class="text-[9px] font-semibold text-primary bg-primary/10 px-1 rounded">
+                        Tiers
+                      </span>
+                    }
+                  </div>
+                </div>
+
+                <!-- Add Button / Count Badge -->
+                <button
+                  type="button"
+                  class="w-8 h-8 rounded-full flex items-center justify-center shadow-2xs active:scale-95 transition-all shrink-0 cursor-pointer"
+                  [class]="
+                    cartQtyFor(product.id) > 0
+                      ? 'bg-primary text-white shadow-primary/30'
+                      : 'bg-slate-100 hover:bg-primary hover:text-white text-slate-700'
+                  "
+                  [disabled]="isProductCardUnavailable(product)"
+                  (click)="$event.stopPropagation(); onAddToCart(product)"
+                  [attr.aria-label]="'Agregar ' + product.name + ' al carrito'"
+                >
+                  @if (cartQtyFor(product.id) > 0) {
+                    <span class="text-[11px] font-bold">{{ cartQtyFor(product.id) }}</span>
+                  } @else {
+                    <app-icon name="plus" [size]="16"></app-icon>
+                  }
+                </button>
+              </article>
+            }
+
+            @if (loadingMore()) {
+              @for (slot of loadMoreSkeletonSlots; track $index) {
+                <div
+                  aria-hidden="true"
+                  class="h-16 rounded-xl bg-white border border-slate-100 p-2 flex items-center gap-2.5 animate-pulse"
+                >
+                  <div class="w-14 h-14 rounded-lg bg-slate-100 shrink-0"></div>
+                  <div class="flex-1 space-y-1.5">
+                    <div class="h-3 w-1/2 bg-slate-100 rounded"></div>
+                    <div class="h-2.5 w-3/4 bg-slate-100 rounded"></div>
+                    <div class="h-3 w-1/4 bg-slate-100 rounded"></div>
+                  </div>
+                  <div class="w-8 h-8 rounded-full bg-slate-100 shrink-0"></div>
+                </div>
+              }
+            }
+          </div>
+
+          <!-- Desktop Product Cards: Traditional Grid (hidden lg:grid) -->
           <div
             role="list"
             aria-label="Resultados de productos"
             [attr.aria-busy]="searching()"
             [class.opacity-60]="searching()"
-            class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3 transition-opacity duration-150"
+            class="hidden lg:grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3 transition-opacity duration-150"
           >
             <!-- Modern Product Card (iOS-style) -->
             @for (
@@ -783,6 +934,21 @@ function isMultiTokenQuery(query: string): boolean {
 
       :host ::ng-deep .pos-filters-dropdown .options-dropdown-trigger {
         border-radius: 0.75rem !important;
+      }
+
+      @media (max-width: 639px) {
+        :host ::ng-deep .pos-filters-dropdown .options-dropdown-trigger {
+          min-width: 40px !important;
+          width: 40px !important;
+          height: 40px !important;
+          padding: 0 !important;
+          justify-content: center !important;
+
+          .trigger-label-text,
+          .chevron-icon {
+            display: none !important;
+          }
+        }
       }
 
       /* Clamp utilities for text truncation */
