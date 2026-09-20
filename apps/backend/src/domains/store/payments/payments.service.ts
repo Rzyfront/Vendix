@@ -1397,8 +1397,36 @@ export class PaymentsService {
         // registra luego en una remisión. Por eso `!hasSerialized` excluye la
         // venta serializada de `updateInventoryFromOrder` (no se consume stock
         // ni se marcan seriales como vendidos en este punto).
+        //
+        // `!isDigitalPayment` — El inventario sale cuando el dinero ENTRA, no
+        // cuando se promete. Un pago diferido a pasarela (wompi / wallet) NO es
+        // un cobro consumado: la rama de arriba acaba de dejar la orden en
+        // `pending_payment` esperando el webhook. Sin esta condición el
+        // predicado sólo miraba `requires_payment` + `delivery_type` +
+        // `hasSerialized` — todas verdaderas en un cobro Wompi de mostrador — y
+        // se evaluaba FUERA de las tres ramas que distinguen el tipo de pago,
+        // así que el cobro digital caía por esta puerta y consumía stock real.
+        //
+        // Y el consumo no era reversible: `commitOrderDelivery` descuenta
+        // `on_hand` por slice, marca `order_items.inventory_committed` y remata
+        // barriendo las reservas como `consumed`. Si el cliente abandonaba el
+        // widget, `cancelOrder` sólo hace
+        // `releaseReservationsByReference('order', id, 'cancelled')`, que
+        // restaura `available` desde `reserved` y NUNCA toca `on_hand` — y
+        // encima ya no quedaban reservas activas que encontrar. Peor aún, un
+        // abandono puro no produce ningún DECLINED: el cron de reconciliación
+        // sólo mira la ventana [5 min, 24 h], y pasadas 24 h el pago queda
+        // `pending` para siempre. La pérdida era permanente y silenciosa.
+        //
+        // El consumo del carril digital se ancla ahora en la confirmación del
+        // gateway — `WebhookHandlerService.confirmOrderPaid`, que corre después
+        // de `OrderFlowService.confirmPayment` y llama al MISMO seam canónico
+        // (`OrderStockCommitService.commitOrderDelivery`). Es idempotente vía
+        // `order_items.inventory_committed`, así que una orden que sí alcance
+        // `finished` más tarde no vuelve a descontar.
         const isDirectDeliveryFinished =
           createPosPaymentDto.requires_payment &&
+          !isDigitalPayment &&
           order.delivery_type !== 'home_delivery' &&
           !hasSerialized;
 

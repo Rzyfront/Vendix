@@ -20,6 +20,7 @@ import { PaymentLinksService } from '../../payment-links/payment-links.service';
 import { TableSessionsService } from '../../tables/table-sessions.service';
 import { InvoicingService } from '../../invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../invoicing/invoice-flow/invoice-flow.service';
+import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
 import { buildTaxBreakdown } from '@common/interfaces/tax-breakdown.interface';
 
 // States considered terminal for compare-and-swap and idempotency checks.
@@ -55,6 +56,19 @@ export class WebhookHandlerService {
     @Optional()
     @Inject(forwardRef(() => PaymentLinksService))
     private readonly paymentLinksService?: PaymentLinksService,
+    // Seam canónico de consumo de stock. Lo provee `OrderStockCommitModule`,
+    // que `PaymentsModule` ya importa, así que en runtime SIEMPRE resuelve.
+    //
+    // Es `@Optional()` sólo por una restricción de alcance: la suite
+    // `webhook-handler.service.spec.ts` arma el proveedor con una lista
+    // explícita y un parámetro obligatorio nuevo la haría fallar entera en
+    // `.compile()`. Cuando esa suite pueda declarar el proveedor, este
+    // parámetro debe volverse OBLIGATORIO — una dependencia que decide si el
+    // inventario se mueve no debería poder faltar en silencio. Mientras tanto
+    // `commitConfirmedPosStock` registra un `error` si llega a faltar, para que
+    // la ausencia sea ruidosa en vez de una pérdida muda.
+    @Optional()
+    private readonly orderStockCommit?: OrderStockCommitService,
   ) {}
 
   async handleWebhook(event: WebhookEvent): Promise<void> {
@@ -654,6 +668,15 @@ export class WebhookHandlerService {
         async () => {
           await this.orderFlowService.confirmPayment(orderId);
 
+          // El dinero acaba de ENTRAR: éste es el punto donde el inventario
+          // del carril digital diferido puede salir. Ver
+          // `commitConfirmedPosStock`. Va inmediatamente después de
+          // `confirmPayment` (el pago ya es `succeeded` y la orden dejó
+          // `pending_payment`) y antes de cerrar la mesa o mandar la factura,
+          // porque el movimiento de stock es el hecho económico y esos dos son
+          // consecuencias. Es best-effort: nunca tumba la confirmación.
+          await this.commitConfirmedPosStock(orderId);
+
           // Restaurant Suite (Obj 6): if this order backs a still-open table
           // session, the POS deferred its close for a digital payment
           // (wompi/wallet). Now that the gateway confirmed the charge, close
@@ -687,6 +710,103 @@ export class WebhookHandlerService {
     } catch (err) {
       this.logger.error(
         `Failed to confirm order ${orderId} after payment: ${err.message}`,
+        err.stack,
+      );
+    }
+  }
+
+  /**
+   * Ancla del consumo de stock para el carril de pago DIFERIDO a pasarela.
+   *
+   * `PaymentsService.processPosPayment` ya no descuenta stock cuando el método
+   * es digital (`wompi` / `wallet`): en ese momento el pago sólo está
+   * PROMETIDO y la orden queda en `pending_payment`. El inventario sale aquí,
+   * cuando el gateway confirma el cargo — un solo hecho económico, un solo
+   * movimiento.
+   *
+   * La compuerta reproduce, contra la orden PERSISTIDA, el mismo predicado que
+   * el POS evaluaba al cobrar (`isDirectDeliveryFinished`):
+   *
+   *  - `channel = 'pos'` — sólo el mostrador da por entregada la mercancía al
+   *    cobrar. Una orden de ecommerce conserva su reserva hasta que el flujo
+   *    de orden llega a `finished`; consumirla aquí sería adelantar la salida
+   *    de un pedido que todavía no se despachó.
+   *  - `delivery_type ≠ home_delivery` — el domicilio difiere la entrega al
+   *    despacho.
+   *  - sin líneas serializadas (QUI-431) — el serializado se cobra pero se
+   *    entrega por remisión, con su propio ciclo de seriales.
+   *
+   * `requires_payment` no se reevalúa: un pago digital sólo existe si era
+   * verdadero (ver `isDeferredDigitalMethod`, que devuelve `false` sin él).
+   *
+   * Idempotente por construcción: `commitOrderDelivery` reclama cada línea con
+   * un UPDATE condicional sobre `order_items.inventory_committed`, así que ni
+   * un webhook repetido, ni una orden que más tarde alcance `finished`, ni una
+   * orden legada que ya descontó al cobrar vuelven a mover stock.
+   *
+   * `blockOnInsufficient: false` — a diferencia del cobro en banda, aquí el
+   * dinero YA entró y la transacción del pago ya commiteó: lanzar
+   * `INV_STOCK_002` no desharía el cargo, sólo dejaría el libro peor (plata
+   * adentro, mercancía sin mover). El faltante residual se descuenta con piso
+   * 0 y queda logueado como alerta, la misma semántica que la entrega de
+   * remisión. En el caso normal no hay faltante: la reserva creada al cobrar
+   * sigue activa y `commitOrderDelivery` la libera antes de asignar.
+   *
+   * Best-effort: cualquier fallo se loguea y NUNCA se propaga — el pago ya
+   * está confirmado y tumbar esta rama dejaría la orden sin cerrar.
+   */
+  private async commitConfirmedPosStock(orderId: number): Promise<void> {
+    try {
+      const order = await this.prisma.withoutScope().orders.findUnique({
+        where: { id: orderId },
+        select: {
+          id: true,
+          channel: true,
+          delivery_type: true,
+          order_items: {
+            select: {
+              products: { select: { requires_serial_numbers: true } },
+            },
+          },
+        },
+      });
+      if (!order) return;
+
+      if (order.channel !== order_channel_enum.pos) return;
+      if (order.delivery_type === order_delivery_type_enum.home_delivery) {
+        return;
+      }
+      const hasSerialized = (order.order_items ?? []).some(
+        (item) => item.products?.requires_serial_numbers === true,
+      );
+      if (hasSerialized) return;
+
+      if (!this.orderStockCommit) {
+        // Ruidoso a propósito: la orden pasa la compuerta y su stock DEBE
+        // moverse. Sin el proveedor no se mueve, y eso no puede ser mudo.
+        this.logger.error(
+          `Order ${orderId}: OrderStockCommitService no inyectado — el stock del ` +
+            `pago digital confirmado NO se descontó. Revisar el wiring de PaymentsModule.`,
+        );
+        return;
+      }
+
+      const commit = await this.orderStockCommit.commitOrderDelivery(orderId, {
+        movementType: 'sale',
+        blockOnInsufficient: false,
+        consumeSerials: true,
+        reason: 'POS Sale (pago digital confirmado)',
+      });
+
+      if (commit.committedItemCount > 0) {
+        this.logger.log(
+          `Order ${orderId}: stock consumido tras confirmación del gateway — ` +
+            `${commit.committedItemCount} línea(s), costo ${commit.totalCost}`,
+        );
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `Order ${orderId}: falló el consumo de stock tras confirmar el pago digital: ${err.message}`,
         err.stack,
       );
     }

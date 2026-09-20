@@ -40,6 +40,8 @@ import { InventorySerialNumbersService } from '../inventory/serial-numbers/inven
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { AuditService } from '@common/audit/audit.service';
+import { mockRequestContext } from 'src/testing/prisma-mock';
+import { buildOrder } from 'src/testing/money-fixtures';
 
 /**
  * Tests for PaymentsService focused on the POS sale recalculation flow:
@@ -70,6 +72,13 @@ describe('PaymentsService', () => {
   >;
   let resolveLineTotalsMock: jest.MockedFunction<
     TaxesService['resolveLineTotals']
+  >;
+  // Handle tipado del seam canónico de consumo de stock. Mismo patrón F-157:
+  // se crea UNA vez y los tests lo usan DIRECTO por closure — nunca
+  // `(service as any).orderStockCommit` ni `as jest.Mock`, que borrarían el
+  // tipo y dejarían pasar un `CommitResult` inventado.
+  let commitOrderDeliveryMock: jest.MockedFunction<
+    OrderStockCommitService['commitOrderDelivery']
   >;
 
   const mockUser = {
@@ -197,6 +206,13 @@ describe('PaymentsService', () => {
       resolveLineTotals: resolveLineTotalsMock,
     };
 
+    commitOrderDeliveryMock = jest.fn().mockResolvedValue({
+      totalCost: 0,
+      committedItemCount: 0,
+    }) as jest.MockedFunction<
+      OrderStockCommitService['commitOrderDelivery']
+    >;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
@@ -257,11 +273,17 @@ describe('PaymentsService', () => {
           provide: FiscalInvoiceThresholdService,
           useValue: { assertInvoiceNotRequired: jest.fn(), evaluate: jest.fn() },
         },
-        // The canonical stock-commit seam: these cases assert payment behavior,
-        // not inventory commitment, so a no-op commit keeps them focused.
+        // The canonical stock-commit seam. Most cases in this suite assert
+        // payment behavior, not inventory commitment, so the default is an
+        // inert commit — but it resolves a REAL `CommitResult` because the
+        // call site reads `.totalCost` off the awaited value, and returning
+        // `undefined` turned "the commit ran" into a TypeError instead of an
+        // observable call. The handle is typed and declared at describe level
+        // (F-157 pattern) so the deferred-digital cases below can assert on it
+        // by closure, never via `(service as any).orderStockCommit`.
         {
           provide: OrderStockCommitService,
-          useValue: { commitOrderDelivery: jest.fn() },
+          useValue: { commitOrderDelivery: commitOrderDeliveryMock },
         },
         // Collaborators the POS sale path injects but this suite does not
         // exercise (stock spreading, restaurant fire, serial pools). Stubbed so
@@ -2690,6 +2712,176 @@ describe('PaymentsService', () => {
 
     it('sin peso usa la cantidad intacta', () => {
       expect(units({ quantity: 3 })).toBe(3);
+    });
+  });
+
+  /**
+   * El inventario sale cuando el dinero ENTRA, no cuando se promete.
+   *
+   * `isDirectDeliveryFinished` (payments.service.ts) decidía el consumo de
+   * stock mirando solo `requires_payment` + `delivery_type` + `hasSerialized`,
+   * y se evaluaba FUERA de las tres ramas que distinguen el tipo de pago. Un
+   * cobro con Wompi en mostrador caía por esa puerta: el pago quedaba
+   * `pending_payment` esperando el webhook, pero el stock ya había salido de
+   * `on_hand` — y `commitOrderDelivery` remata barriendo las reservas como
+   * `consumed`, así que no quedaba nada que expirara ni que `cancelOrder`
+   * pudiera devolver (solo restaura `available` desde `reserved`). Si el
+   * cliente abandonaba el widget, la pérdida era permanente.
+   *
+   * La aserción es sobre el SEAM real (`OrderStockCommitService.
+   * commitOrderDelivery`), no sobre un predicado extraído: un predicado puro
+   * puede estar correcto y no estar cableado al sitio de llamada.
+   */
+  describe('processPosPayment — el pago digital diferido NO consume stock al cobrar', () => {
+    // Corta la ejecución JUSTO DESPUÉS del punto de decisión de inventario
+    // (payments.service.ts §3). `tx.order_items.findMany` es la primera
+    // llamada posterior a esa rama y, con tienda no-restaurante, no se
+    // invoca antes (el bloque de auto-fire queda excluido). Lo que sigue
+    // —breakdown de impuestos, retenciones, asientos, eventos— no es lo que
+    // estos casos assertan.
+    const STOP_AFTER_INVENTORY = 'stop-after-inventory-decision';
+
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: 1,
+      roles: ['super_admin'],
+    };
+
+    /**
+     * @param methodType tipo de `system_payment_methods` que resuelve
+     *   `isDeferredDigitalMethod`: `wompi`/`wallet` difieren al webhook,
+     *   `cash`/`card`/`bank_transfer` liquidan en banda.
+     */
+    const arrangePosSale = (methodType: string) => {
+      // `RequestContextService.getContext` es estático: el espía que instala
+      // este helper lo retira el `jest.restoreAllMocks()` del afterEach.
+      mockRequestContext({ store_id: 1, organization_id: 1 });
+
+      const order = buildOrder({
+        id: 4242,
+        store_id: 1,
+        // Venta de mostrador: el cliente se lleva la mercancía en el acto.
+        // Es EXACTAMENTE el caso que el predicado viejo daba por entregado.
+        delivery_type: 'direct_delivery',
+        stores: { id: 1, organization_id: 1 },
+        // Sin líneas: los bucles de validación/reserva de stock quedan en
+        // no-op y el caso se concentra en la decisión de consumo.
+        order_items: [],
+      });
+
+      const tx: any = {
+        kitchen_tickets: { findMany: jest.fn().mockResolvedValue([]) },
+        // Tienda NO restaurante → el bloque de auto-fire (B5) no corre y
+        // `tx.order_items.findMany` queda libre como punto de corte.
+        stores: {
+          findUnique: jest.fn().mockResolvedValue({ industries: ['retail'] }),
+        },
+        store_payment_methods: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 9,
+            system_payment_method: { type: methodType },
+          }),
+        },
+        orders: { update: jest.fn().mockResolvedValue({ id: 4242 }) },
+        order_items: {
+          findMany: jest
+            .fn()
+            .mockRejectedValue(new Error(STOP_AFTER_INVENTORY)),
+        },
+      };
+
+      (prisma as any).$transaction = jest.fn(async (cb: any) => cb(tx));
+
+      jest
+        .spyOn(service as any, 'createOrUpdateOrderFromPos')
+        .mockResolvedValue({
+          order,
+          hasSerialized: false,
+          promotionsSnapshot: [],
+          appliedPromotions: [],
+          couponInfo: {
+            coupon_id: null,
+            coupon_code: null,
+            discount_amount: 0,
+          },
+          kitchenFire: null,
+          closedSessionId: null,
+        });
+
+      (
+        fiscalThreshold.assertInvoiceNotRequired as jest.Mock
+      ).mockResolvedValue(undefined);
+
+      return { order, tx };
+    };
+
+    const buildPosDto = (overrides: any = {}): any => ({
+      store_id: 1,
+      currency: 'COP',
+      customer_id: 77,
+      items: [],
+      payments: [],
+      requires_payment: true,
+      store_payment_method_id: 9,
+      ...overrides,
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('un cobro Wompi en mostrador deja el stock quieto: el pago está prometido, no cobrado', async () => {
+      arrangePosSale('wompi');
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_INVENTORY);
+
+      // El seam canónico de consumo NO se tocó. Con la reserva intacta, el
+      // abandono del widget deja de ser una pérdida permanente.
+      expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
+    });
+
+    it('lo mismo para wallet, el otro método que solo liquida por webhook', async () => {
+      arrangePosSale('wallet');
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_INVENTORY);
+
+      expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
+    });
+
+    it('el efectivo SÍ consume en el acto: el dinero ya entró (no-regresión)', async () => {
+      const { order } = arrangePosSale('cash');
+
+      // El cobro en banda crea el `payments` row dentro de la transacción;
+      // se stubea para aislar la decisión de inventario del procesador.
+      jest
+        .spyOn(service as any, 'processPosPaymentTransaction')
+        .mockResolvedValue({ id: 7, state: 'succeeded' });
+      // Backstop F2 (`updateOrderPaymentStatus`): sin cocina pendiente la
+      // venta directa termina en `finished`.
+      jest
+        .spyOn(service as any, 'hasPendingKitchenItemsTx')
+        .mockResolvedValue(false);
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_INVENTORY);
+
+      expect(commitOrderDeliveryMock).toHaveBeenCalledTimes(1);
+      // Y contra la orden real, con las opciones del carril POS.
+      expect(commitOrderDeliveryMock).toHaveBeenCalledWith(
+        order.id,
+        expect.objectContaining({
+          movementType: 'sale',
+          blockOnInsufficient: true,
+          consumeSerials: true,
+        }),
+        expect.anything(),
+      );
     });
   });
 });
