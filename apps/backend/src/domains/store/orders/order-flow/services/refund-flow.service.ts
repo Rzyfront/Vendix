@@ -453,15 +453,12 @@ export class RefundFlowService {
           }
         }
 
-        // ¿Llegamos a un estado terminal? Para refunds no-gateway, la promesa
-        // se cumplió en la tx así que siempre emitimos. Para refunds
-        // gateway, sólo emitimos cuando el processor devolvió `completed` o
-        // `failed` (`processing` significa que la pasarela sigue trabajando
-        // y no debe generar asiento todavía).
-        const reachedTerminalState =
-          !awaitsReversal ||
-          dispatchStatus === 'completed' ||
-          dispatchStatus === 'failed';
+        // `refund.completed` reconoce una reversión exitosa, no cualquier
+        // estado terminal. Un fallo o pendiente de pasarela no puede generar
+        // el asiento bancario de una devolución; los canales no-gateway ya
+        // completaron el refund en la transacción.
+        const refundCompleted =
+          !awaitsReversal || dispatchStatus === 'completed';
 
         // 8. Emit events after transaction (and processor dispatch) completes
         try {
@@ -480,14 +477,8 @@ export class RefundFlowService {
             Number(calculation.tax_refund || 0),
           );
 
-          // Emit `refund.completed` ONLY when we reached a terminal state.
-          // For non-gateway channels the refund was already `completed` in
-          // the tx; for gateway channels we wait for the processor to come
-          // back with `completed` or `failed`. `processing` means the
-          // gateway is still working — emitting now would generate an
-          // accounting entry for a reversal that hasn't actually happened
-          // yet, which is the exact defect audit B.3 flagged.
-          if (reachedTerminalState) {
+          // Match manual resolution: emit only after successful completion.
+          if (refundCompleted) {
             this.eventEmitter.emit('refund.completed', {
               refund_id: completedRefund.id,
               order_id: orderId,
@@ -704,9 +695,10 @@ export class RefundFlowService {
    *
    * Devuelve `{ status: 'completed' | 'failed' | 'processing', message? }`.
    *
-   *   - `completed` / `failed` → el processor respondió terminalmente;
-   *     el caller emite `refund.completed` para que la contabilidad
-   *     registre la reversión (éxito o falla).
+   *   - `completed` → el caller emite `refund.completed` para que la
+   *     contabilidad registre la reversión exitosa.
+   *   - `failed` → el intento terminó sin éxito; el caller NO emite
+   *     `refund.completed`, igual que en la resolución manual fallida.
    *   - `processing` → el processor reportó `pending` o no había
    *     processor reversible que llamar; el caller NO emite y el
    *     refund queda en `processing`/`pending_approval` para

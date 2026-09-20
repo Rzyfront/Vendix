@@ -658,7 +658,7 @@ describe('RefundFlowService — refund overhaul invariants', () => {
    *   A. processor responde `succeeded` → refund row `completed`,
    *      refund.completed emitido con payload canónico.
    *   B. processor responde `failed`   → refund row `failed`,
-   *      refund.completed emitido (la contabilidad registra la falla).
+   *      refund.completed NO emitido (no hubo reversión exitosa).
    *   C. processor responde `pending`  → refund row `processing`,
    *      refund.completed NO emitido (la pasarela sigue trabajando).
    *   D. canal no-gateway (cash)       → processor NO se llama,
@@ -703,23 +703,31 @@ describe('RefundFlowService — refund overhaul invariants', () => {
       );
       expect(terminalUpdate![0].data.processed_at).toBeInstanceOf(Date);
 
-      const refundCompleted = eventEmitter.emit.mock.calls.find(
+      const refundCompletedEvents = eventEmitter.emit.mock.calls.filter(
         ([name]) => name === 'refund.completed',
       );
-      expect(refundCompleted).toBeDefined();
-      expect(refundCompleted![1]).toEqual(
+      expect(refundCompletedEvents).toHaveLength(1);
+      expect(refundCompletedEvents[0][1]).toEqual(
         expect.objectContaining({
           refund_id: 999,
+          order_id: 3830,
           organization_id: 1,
           store_id: 10,
           amount: 3800,
+          subtotal: 3800,
+          tax: 0,
+          tax_amount: 0,
+          tax_breakdown: [],
+          shipping: 0,
+          is_full_refund: true,
           refund_method: 'original_payment',
           effective_channel: 'gateway',
         }),
       );
+      expect(refundCompletedEvents[0][1]).toHaveProperty('user_id');
     });
 
-    it('CAMINO B: processor responde failed → state=failed y refund.completed emitido', async () => {
+    it('CAMINO B: processor responde failed → state=failed y NO emite refund.completed', async () => {
       setupFinishedOrderWithSucceededPayment();
       paymentGatewayService.reversePaymentWithProcessor.mockResolvedValue({
         success: false,
@@ -749,12 +757,78 @@ describe('RefundFlowService — refund overhaul invariants', () => {
       // processed_at NO se setea cuando state='failed'.
       expect(failedUpdate![0].data.processed_at).toBeNull();
 
-      // 2. refund.completed SÍ se emite (la contabilidad debe registrar
-      // la falla para que cuadren los saldos).
+      // Una falla no puede producir el asiento bancario de un reembolso
+      // exitoso; debe coincidir con la resolución manual fallida.
       const refundCompleted = eventEmitter.emit.mock.calls.find(
         ([name]) => name === 'refund.completed',
       );
-      expect(refundCompleted).toBeDefined();
+      expect(refundCompleted).toBeUndefined();
+    });
+
+    it('processor lanza → persiste failed y NO emite refund.completed', async () => {
+      setupFinishedOrderWithSucceededPayment();
+      paymentGatewayService.reversePaymentWithProcessor.mockRejectedValue(
+        new Error('gateway unavailable'),
+      );
+
+      await service.createRefund(3830, {
+        items: [],
+        include_shipping: false,
+        refund_method: 'original_payment',
+        reason: 'test',
+      });
+
+      expect(
+        paymentGatewayService.reversePaymentWithProcessor,
+      ).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.refunds.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 999 },
+          data: expect.objectContaining({
+            state: 'failed',
+            processed_at: null,
+            gateway_response: JSON.stringify({ error: 'gateway unavailable' }),
+          }),
+        }),
+      );
+      expect(
+        eventEmitter.emit.mock.calls.filter(
+          ([name]) => name === 'refund.completed',
+        ),
+      ).toHaveLength(0);
+    });
+
+    it('dispatch no puede persistir resultado → NO emite refund.completed', async () => {
+      setupFinishedOrderWithSucceededPayment();
+      paymentGatewayService.reversePaymentWithProcessor.mockResolvedValue({
+        success: true,
+        status: 'succeeded',
+        amount: 3800,
+      });
+      mockPrisma.refunds.update
+        .mockResolvedValueOnce({
+          id: 999,
+          state: 'pending_approval',
+          refund_items: [],
+        })
+        .mockRejectedValueOnce(new Error('refund update unavailable'));
+
+      await service.createRefund(3830, {
+        items: [],
+        include_shipping: false,
+        refund_method: 'original_payment',
+        reason: 'test',
+      });
+
+      expect(
+        paymentGatewayService.reversePaymentWithProcessor,
+      ).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.refunds.update).toHaveBeenCalledTimes(2);
+      expect(
+        eventEmitter.emit.mock.calls.filter(
+          ([name]) => name === 'refund.completed',
+        ),
+      ).toHaveLength(0);
     });
 
     it('CAMINO C: processor responde pending → state=processing y NO emite refund.completed', async () => {
