@@ -335,6 +335,37 @@ export class StoreEditModalComponent {
   ngOnChanges(): void {
     const store = this.store();
     if (store) {
+      const physicalAddr =
+        store.addresses?.find((a) => a.type === 'store_physical' && a.is_primary) ||
+        store.addresses?.find((a) => a.type === 'store_physical') ||
+        store.addresses?.find((a) => a.is_primary) ||
+        store.addresses?.[0];
+
+      const street =
+        physicalAddr?.address_line1 ||
+        (typeof store.address === 'object'
+          ? store.address?.street
+          : typeof store.address === 'string'
+            ? store.address
+            : '') ||
+        '';
+      const city =
+        physicalAddr?.city ||
+        (typeof store.address === 'object' ? store.address?.city : '') ||
+        '';
+      const state =
+        physicalAddr?.state_province ||
+        (typeof store.address === 'object' ? store.address?.state : '') ||
+        '';
+      const zipCode =
+        physicalAddr?.postal_code ||
+        (typeof store.address === 'object' ? store.address?.zipCode : '') ||
+        '';
+      const country =
+        physicalAddr?.country_code ||
+        (typeof store.address === 'object' ? store.address?.country : '') ||
+        'Colombia';
+
       this.editForm.patchValue({
         id: store.id,
         name: store.name,
@@ -343,26 +374,11 @@ export class StoreEditModalComponent {
         email: store.email,
         phone: store.phone || '',
         address: {
-          street:
-            (typeof store.address === 'object'
-              ? store.address?.street
-              : '') || '',
-          city:
-            (typeof store.address === 'object'
-              ? store.address?.city
-              : '') || '',
-          state:
-            (typeof store.address === 'object'
-              ? store.address?.state
-              : '') || '',
-          zipCode:
-            (typeof store.address === 'object'
-              ? store.address?.zipCode
-              : '') || '',
-          country:
-            (typeof store.address === 'object'
-              ? store.address?.country
-              : '') || '',
+          street,
+          city,
+          state,
+          zipCode,
+          country,
         },
         status: store.status,
         logoUrl: store.logo_url || '',
@@ -443,8 +459,22 @@ export class StoreEditModalComponent {
 
   onSubmit(): void {
     if (this.editForm.valid && this.settingsForm.valid) {
+      const formVal = this.editForm.value;
+      const addrVal = formVal.address;
+      const normalizedAddress = addrVal
+        ? {
+            ...addrVal,
+            address_line1: (addrVal.street || addrVal.address_line1 || '').trim(),
+            city: (addrVal.city || '').trim(),
+            state_province: (addrVal.state || addrVal.state_province || '').trim() || null,
+            postal_code: (addrVal.zipCode || addrVal.postal_code || '').trim() || null,
+            country_code: (addrVal.country || addrVal.country_code || 'CO').trim(),
+          }
+        : undefined;
+
       const updatedStore = {
-        ...this.editForm.value,
+        ...formVal,
+        address: normalizedAddress,
         settings: this.settingsForm.value,
       };
       this.submit.emit(updatedStore);

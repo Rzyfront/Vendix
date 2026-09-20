@@ -1456,6 +1456,13 @@ export class CheckoutComponent implements OnInit {
       this.selected_address_id.set(null);
       // Se rastrea la promesa para que Continuar la espere si sigue en vuelo.
       this.shipping_fetch_promise = this.preparePickupQuote();
+    } else if (mode === 'home') {
+      // QUI-850: Si tenía seleccionado efectivo al recoger en tienda y cambia a domicilio,
+      // resetear selección y recargar métodos excluyendo efectivo.
+      if (this.selectedPaymentMethodObj()?.type === 'cash') {
+        this.selected_payment_method_id.set(null);
+      }
+      this.loadPaymentMethods('home');
     }
   }
 
@@ -1862,20 +1869,40 @@ export class CheckoutComponent implements OnInit {
   }
 
   /**
-   * Defensa en profundidad (auditoría D.3): aunque el backend ya excluye
-   * `cash` del ecommerce, la UI nunca lo renderiza aunque regresara por
-   * error. El único freno real sigue siendo el POST (ECOM_CHECKOUT_002).
+   * Defensa en profundidad (auditoría D.3 / QUI-850): el backend ya excluye
+   * `cash` si el envío no es 'pickup'. La UI refuerza esto no renderizando
+   * `cash` a menos que el modo de entrega seleccionado sea 'pickup'.
    */
-  private withoutCash(methods: PaymentMethod[]): PaymentMethod[] {
+  private filterPaymentMethods(
+    methods: PaymentMethod[],
+    isPickup: boolean,
+  ): PaymentMethod[] {
+    if (isPickup) return methods ?? [];
     return (methods ?? []).filter((m) => m?.type !== 'cash');
   }
 
   loadPaymentMethods(shippingType?: string): void {
+    const effectiveShippingType =
+      shippingType ??
+      (this.selected_delivery() === 'pickup'
+        ? 'pickup'
+        : this.selected_shipping_method_type ?? undefined);
+
+    const isPickup =
+      effectiveShippingType === 'pickup' ||
+      this.selected_delivery() === 'pickup' ||
+      this.selected_shipping_method_type === 'pickup';
+
     this.loading_payment_methods = true;
-    this.checkout_service.getPaymentMethods(shippingType).subscribe({
-      next: (response) => {
+    this.checkout_service
+      .getPaymentMethods(effectiveShippingType)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
         if (response.success) {
-          this.payment_methods.set(this.withoutCash(response.data));
+          this.payment_methods.set(
+            this.filterPaymentMethods(response.data, isPickup),
+          );
 
           // Reset selection if current method is no longer available
           if (this.selected_payment_method_id()) {
