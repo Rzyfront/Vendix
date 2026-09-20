@@ -1,4 +1,4 @@
-import { Component, Directive, Pipe, PipeTransform, WritableSignal, input, output, runInInjectionContext, signal } from '@angular/core';
+import { Component, Directive, Pipe, PipeTransform, WritableSignal, input, model, output, runInInjectionContext, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ReactiveFormsModule } from '@angular/forms';
@@ -66,15 +66,14 @@ class EntregaStub {
   readonly cartState = input<unknown>(null);
   readonly tableId = input<number | null>(null);
   readonly initialChoice = input<string>('llevar');
-  readonly choiceChange = output<string>();
+  // La plantilla del shell enlaza `[(choice)]="entregaChoice"` y el doble necesita
+  // `model()` para satisfacer el enlace bidireccional sin NG0303.
+  readonly choice = model<'mesa' | 'llevar' | 'enviar'>('llevar');
   readonly advanceRequested = output<void>();
-  choiceSignal = signal<'mesa' | 'llevar' | 'enviar'>('llevar');
   needsTableFlag = false;
   readonly openTablePicker = signal(false);
   readonly checkoutTableId = signal<number | null>(null);
-  choice() {
-    return this.choiceSignal();
-  }
+  readonly effectiveTableId = signal<number | null>(null);
   needsTable(): boolean {
     return this.needsTableFlag;
   }
@@ -339,7 +338,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   });
 
   it('Enter en terminal con gate abierto cobra', () => {
-    component.currentStep.set(1); // Cobro: canSubmit stub = true
+    component.currentStep.set(2); // Cobro: canSubmit stub = true
     fixture.detectChanges();
     expect(component.confirmDisabled()).toBeFalse();
     const confirm = spyOn(component, 'onPrimaryConfirm');
@@ -348,7 +347,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   });
 
   it('Enter en terminal con gate cerrado destella y no cobra', () => {
-    component.currentStep.set(1);
+    component.currentStep.set(2);
     payStub().canSubmit.set(false);
     fixture.detectChanges();
     expect(component.confirmDisabled()).toBeTrue();
@@ -433,7 +432,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     payStub().mode.set('credito');
     fixture.detectChanges();
     // Terminal.
-    component.currentStep.set(1);
+    component.currentStep.set(2);
     fixture.detectChanges();
     const confirm = spyOn(component, 'onPrimaryConfirm');
     const next = spyOn(component, 'attemptNextStep');
@@ -452,7 +451,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   it('flechas consumen el avance del sub-wizard sin llegar al submit (crédito)', () => {
     payStub().mode.set('credito');
     payStub().advanceRet = true; // hay sub-paso por avanzar (Forma→Plan)
-    component.currentStep.set(1);
+    component.currentStep.set(2);
     fixture.detectChanges();
     const confirm = spyOn(component, 'onPrimaryConfirm');
     component.attemptNextStep({ source: 'arrows' });
@@ -461,7 +460,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
 
   it('Enter sí cobra en modo crédito con gate válido', () => {
     payStub().mode.set('credito');
-    component.currentStep.set(1);
+    component.currentStep.set(2);
     fixture.detectChanges();
     const confirm = spyOn(component, 'onPrimaryConfirm');
     component.onShellKeydown(keyEvent('Enter'));

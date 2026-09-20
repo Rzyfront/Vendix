@@ -455,6 +455,12 @@
     .payment-info {
         display: flex;
         flex-direction: column;
+
+        .payment-subtitle {
+            font-size: var(--fs-xs);
+            color: var(--color-text-secondary);
+            margin-top: 0.125rem;
+        }
     }
 
     .payment-name {
