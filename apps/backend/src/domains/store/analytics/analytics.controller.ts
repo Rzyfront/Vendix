@@ -28,6 +28,7 @@ import {
   LowStockBySupplierQueryDto,
   LowStockBySupplierAnalyticsQueryDto,
 } from './dto/low-stock-by-supplier-query.dto';
+import { InventoryBySupplierQueryDto } from './dto/inventory-by-supplier-query.dto';
 import { ResponseService } from '../../../common/responses/response.service';
 import {
   buildReportBuffer,
@@ -87,12 +88,14 @@ export class AnalyticsController {
     columns: ReportColumn[],
     rows: readonly unknown[],
     tz: string,
+    totals?: Record<string, unknown>,
   ): ReportSheet {
     return {
       name,
       columns,
       rows: rows as unknown as Record<string, unknown>[],
       tz,
+      ...(totals ? { totals } : {}),
     };
   }
 
@@ -790,6 +793,68 @@ export class AnalyticsController {
     await this.emitReport(res, 'inventario', tz, [
       this.toSheet('Inventario', columns, rows, tz),
     ]);
+  }
+
+  // ==================== INVENTORY BY SUPPLIER (QUI-550) ====================
+  // Reporte valorizado de inventario agrupado por proveedor comercial.
+  // Calcula concentración de stock, valorización a costo y producto principal.
+
+  @Get('inventory/by-supplier')
+  @Permissions('store:analytics:read')
+  async getInventoryBySupplier(@Query() query: InventoryBySupplierQueryDto) {
+    const result =
+      await this.inventory_analytics_service.getInventoryBySupplier(query);
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+      'Data retrieved successfully',
+      undefined,
+      { totals: result.meta.totals },
+    );
+  }
+
+  @Get('inventory/by-supplier/export')
+  @Permissions('store:analytics:read')
+  async exportInventoryBySupplierXlsx(
+    @Query() query: InventoryBySupplierQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const { rows, totals } =
+      await this.inventory_analytics_service.getInventoryBySupplierForExport(
+        query,
+      );
+
+    const columns: ReportColumn[] = [
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_document', header: 'Documento', type: 'text' },
+      { key: 'product_count', header: 'Productos', type: 'number' },
+      { key: 'total_units_on_hand', header: 'En Mano', type: 'number' },
+      { key: 'total_units_reserved', header: 'Reservadas', type: 'number' },
+      { key: 'total_units_available', header: 'Disponibles', type: 'number' },
+      { key: 'total_stock_value', header: 'Valor Stock', type: 'currency' },
+      { key: 'avg_unit_cost', header: 'Costo Promedio', type: 'currency' },
+      { key: 'top_product_name', header: 'Producto Principal', type: 'text' },
+    ];
+
+    const sheet = this.toSheet(
+      'Inventario por Proveedor',
+      columns,
+      rows,
+      tz,
+      {
+        supplier_name: 'TOTAL',
+        product_count: totals.product_count,
+        total_units_on_hand: totals.total_units_on_hand,
+        total_units_reserved: totals.total_units_reserved,
+        total_units_available: totals.total_units_available,
+        total_stock_value: totals.total_stock_value,
+      },
+    );
+
+    await this.emitReport(res, 'inventario_por_proveedor', tz, [sheet]);
   }
 
   // ==================== LOW STOCK BY SUPPLIER (CP-low-stock-by-supplier) ====================

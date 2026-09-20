@@ -66,8 +66,8 @@ class EntregaStub {
   readonly cartState = input<unknown>(null);
   readonly tableId = input<number | null>(null);
   readonly initialChoice = input<string>('llevar');
-  // La plantilla del shell enlaza `[(choice)]="entregaChoice"` y el doble necesita
-  // `model()` para satisfacer el enlace bidireccional sin NG0303.
+  // La plantilla del shell enlaza `[(choice)]="entregaChoice"` (`:71`) y el doble
+  // debe exponerlo como model() para aceptar two-way binding y evitar NG0303.
   readonly choice = model<'mesa' | 'llevar' | 'enviar'>('llevar');
   readonly advanceRequested = output<void>();
   needsTableFlag = false;
@@ -338,7 +338,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   });
 
   it('Enter en terminal con gate abierto cobra', () => {
-    component.currentStep.set(2); // Cobro: canSubmit stub = true
+    component.currentStep.set(2); // Cobro, último: canSubmit stub = true
     fixture.detectChanges();
     expect(component.confirmDisabled()).toBeFalse();
     const confirm = spyOn(component, 'onPrimaryConfirm');
@@ -347,7 +347,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   });
 
   it('Enter en terminal con gate cerrado destella y no cobra', () => {
-    component.currentStep.set(2);
+    component.currentStep.set(2); // Cobro, último
     payStub().canSubmit.set(false);
     fixture.detectChanges();
     expect(component.confirmDisabled()).toBeTrue();
