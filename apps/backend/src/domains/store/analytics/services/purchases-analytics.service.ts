@@ -4,14 +4,18 @@ import { RequestContextService } from '@common/context/request-context.service';
 import {
   AnalyticsQueryDto,
   Granularity,
+  PayableAgingQueryDto,
   PurchasesBySupplierQueryDto,
-} from '../dto/analytics-query.dto';
+} from '../dto';
 import {
   getDateTruncInterval,
   getPreviousPeriod,
   parseDateRange,
 } from '../utils/date.util';
-import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
+import {
+  resolveLocalDateRange,
+  resolveStoreTimezone,
+} from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   PURCHASE_COMMITTED_STATES,
@@ -19,6 +23,10 @@ import {
   round2,
   sqlStateList,
 } from '../analytics-metrics.contract';
+import {
+  PayableAgingRow,
+  PayableAgingTotals,
+} from '../interfaces/payable-aging-row.interface';
 
 /**
  * Shape returned by {@link PurchasesAnalyticsService.aggregatePurchaseWindow}.
@@ -546,19 +554,24 @@ export class PurchasesAnalyticsService {
   }
 
   /**
-   * QUI-542: cuentas por pagar a proveedores con bucketing de
-   * antigüedad. Toma purchase_orders con payment_status IN
-   * ('unpaid', 'partial') y payment_due_date no nulo, calcula días
-   * de mora desde payment_due_date vs now(), y bucket:
-   *   - '0-30' (corriente)
-   *   - '31-60'
-   *   - '61-90'
-   *   - '90+' (crítico, escalación)
+   * QUI-542: Cuentas por pagar a proveedores con bucketing de antigüedad (aging).
    *
-   * Una fila por orden con supplier, total, saldo pendiente, días de
-   * mora y bucket.
+   * Agrupa las deudas pendientes por proveedor y distribuye el saldo en:
+   *   - current: no vencido (días de mora <= 0)
+   *   - days_1_30: 1 a 30 días de mora
+   *   - days_31_60: 31 a 60 días de mora
+   *   - days_61_90: 61 a 90 días de mora
+   *   - days_over_90: más de 90 días de mora
+   *   - total_outstanding: saldo total pendiente del proveedor
+   *   - last_payment_date: fecha del último abono/pago registrado al proveedor
+   *
+   * El universo de tienda es `location.store_id = storeId`, alineado con
+   * el contrato del dominio (QUI-624/625/550).
    */
-  async getAccountsPayableForExport(query: AnalyticsQueryDto) {
+  async buildPayableAgingRows(query: PayableAgingQueryDto): Promise<{
+    rows: PayableAgingRow[];
+    totals: PayableAgingTotals;
+  }> {
     const context = RequestContextService.getContext();
     if (!context?.store_id || !context.organization_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
@@ -566,63 +579,198 @@ export class PurchasesAnalyticsService {
     const storeId = context.store_id;
     const organizationId = context.organization_id;
 
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    let asOfDate: Date;
+    if (query.as_of) {
+      asOfDate = resolveLocalDateRange({ date_to: query.as_of }, tz).endDate;
+    } else if (query.date_to) {
+      asOfDate = resolveLocalDateRange({ date_to: query.date_to }, tz).endDate;
+    } else {
+      asOfDate = new Date();
+    }
+
     const orders = await this.prisma.purchase_orders.findMany({
       where: {
         organization_id: organizationId,
-        suppliers: { store_id: storeId },
+        location: { store_id: storeId },
         payment_status: { in: ['unpaid', 'partial'] },
-        payment_due_date: undefined,
+        status: { in: PURCHASE_COMMITTED_STATES },
+        ...(query.supplier_id ? { supplier_id: query.supplier_id } : {}),
       },
       select: {
         id: true,
         order_number: true,
-        supplier_invoice_number: true,
         total_amount: true,
-        tax_amount: true,
         order_date: true,
         payment_due_date: true,
-        payment_status: true,
-        suppliers: { select: { id: true, name: true, code: true } },
+        created_at: true,
+        supplier_id: true,
+        suppliers: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            tax_id: true,
+            verification_digit: true,
+          },
+        },
+        payments: {
+          select: {
+            amount: true,
+            payment_date: true,
+          },
+        },
       },
       orderBy: { payment_due_date: 'asc' },
       take: 10000,
     });
 
-    const now = new Date();
+    const supplierBuckets = new Map<number, PayableAgingRow>();
 
-    return orders
-      .filter((o) => o.payment_due_date !== null)
-      .map((o) => {
-        const days = Math.max(
-          0,
-          Math.floor(
-            (now.getTime() - o.payment_due_date!.getTime()) / 86400000,
-          ),
-        );
-        const bucket =
-          days <= 30
-            ? '0-30'
-            : days <= 60
-              ? '31-60'
-              : days <= 90
-                ? '61-90'
-                : '90+';
-        return {
-          id: o.id,
-          order_number: o.order_number,
-          supplier_invoice_number: o.supplier_invoice_number ?? '',
-          supplier_id: o.suppliers.id,
-          supplier_name: o.suppliers.name,
-          supplier_code: o.suppliers.code ?? '',
-          order_date: o.order_date,
-          payment_due_date: o.payment_due_date,
-          days_overdue: days,
-          aging_bucket: bucket,
-          total_amount: Math.round(Number(o.total_amount) * 100) / 100,
-          tax_amount: Math.round(Number(o.tax_amount || 0) * 100) / 100,
-          payment_status: o.payment_status,
+    for (const order of orders) {
+      const sup = order.suppliers;
+      if (!sup) continue;
+
+      const totalAmount = Number(order.total_amount);
+      const paidAmount = (order.payments || []).reduce(
+        (sum, p) => sum + Number(p.amount),
+        0,
+      );
+      const balance = Math.max(0, round2(totalAmount - paidAmount));
+      if (balance <= 0) continue;
+
+      let bucket = supplierBuckets.get(order.supplier_id);
+      if (!bucket) {
+        const doc = sup.tax_id
+          ? sup.verification_digit
+            ? `${sup.tax_id}-${sup.verification_digit}`
+            : sup.tax_id
+          : sup.code ?? '';
+
+        bucket = {
+          supplier_id: sup.id,
+          supplier_name: sup.name,
+          supplier_document: doc,
+          current: 0,
+          days_1_30: 0,
+          days_31_60: 0,
+          days_61_90: 0,
+          days_over_90: 0,
+          total_outstanding: 0,
+          last_payment_date: null,
         };
+        supplierBuckets.set(order.supplier_id, bucket);
+      }
+
+      const effectiveDueDate =
+        order.payment_due_date ?? order.order_date ?? order.created_at ?? asOfDate;
+      const daysOverdue = Math.floor(
+        (asOfDate.getTime() - effectiveDueDate.getTime()) / 86400000,
+      );
+
+      if (daysOverdue <= 0) {
+        bucket.current = round2(bucket.current + balance);
+      } else if (daysOverdue <= 30) {
+        bucket.days_1_30 = round2(bucket.days_1_30 + balance);
+      } else if (daysOverdue <= 60) {
+        bucket.days_31_60 = round2(bucket.days_31_60 + balance);
+      } else if (daysOverdue <= 90) {
+        bucket.days_61_90 = round2(bucket.days_61_90 + balance);
+      } else {
+        bucket.days_over_90 = round2(bucket.days_over_90 + balance);
+      }
+
+      bucket.total_outstanding = round2(bucket.total_outstanding + balance);
+    }
+
+    if (supplierBuckets.size > 0) {
+      const supplierIds = Array.from(supplierBuckets.keys());
+      const lastPayments = await this.prisma.purchase_order_payments.findMany({
+        where: {
+          purchase_order: {
+            organization_id: organizationId,
+            location: { store_id: storeId },
+            supplier_id: { in: supplierIds },
+          },
+        },
+        select: {
+          payment_date: true,
+          purchase_order: {
+            select: { supplier_id: true },
+          },
+        },
+        orderBy: { payment_date: 'desc' },
       });
+
+      const lastPaymentMap = new Map<number, Date>();
+      for (const p of lastPayments) {
+        const sId = p.purchase_order.supplier_id;
+        if (!lastPaymentMap.has(sId)) {
+          lastPaymentMap.set(sId, p.payment_date);
+        }
+      }
+
+      for (const [sId, bucket] of supplierBuckets.entries()) {
+        bucket.last_payment_date = lastPaymentMap.get(sId) ?? null;
+      }
+    }
+
+    let rows = Array.from(supplierBuckets.values());
+    if (query.search) {
+      const term = query.search.trim().toLowerCase();
+      rows = rows.filter(
+        (r) =>
+          r.supplier_name.toLowerCase().includes(term) ||
+          r.supplier_document.toLowerCase().includes(term),
+      );
+    }
+
+    rows.sort((a, b) => b.total_outstanding - a.total_outstanding);
+
+    const totals: PayableAgingTotals = {
+      current: round2(rows.reduce((sum, r) => sum + r.current, 0)),
+      days_1_30: round2(rows.reduce((sum, r) => sum + r.days_1_30, 0)),
+      days_31_60: round2(rows.reduce((sum, r) => sum + r.days_31_60, 0)),
+      days_61_90: round2(rows.reduce((sum, r) => sum + r.days_61_90, 0)),
+      days_over_90: round2(rows.reduce((sum, r) => sum + r.days_over_90, 0)),
+      total_outstanding: round2(rows.reduce((sum, r) => sum + r.total_outstanding, 0)),
+    };
+
+    return { rows, totals };
+  }
+
+  async getPayableAging(query: PayableAgingQueryDto) {
+    const { rows, totals } = await this.buildPayableAgingRows(query);
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.max(1, Math.min(100, Number(query.limit) || 50));
+    const total = rows.length;
+    const totalPages = Math.ceil(total / limit) || 1;
+    const offset = (page - 1) * limit;
+    const paginatedRows = rows.slice(offset, offset + limit);
+
+    return {
+      data: paginatedRows,
+      meta: {
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPreviousPage: page > 1,
+        },
+        totals,
+      },
+    };
+  }
+
+  async getPayableAgingForExport(query: PayableAgingQueryDto) {
+    return this.buildPayableAgingRows(query);
+  }
+
+  async getAccountsPayableForExport(query: any) {
+    return this.getPayableAgingForExport(query);
   }
 }
 

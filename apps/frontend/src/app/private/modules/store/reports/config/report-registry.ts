@@ -59,7 +59,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/overview/summary',
   },
 
-  // ─── COMPRAS (2) ─────────────────────────────────────────────────────────────────
+  // ─── COMPRAS (4) ─────────────────────────────────────────────────────────────────
 
   {
     id: 'purchase-summary',
@@ -154,6 +154,44 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     ],
     dataEndpoint: 'store/analytics/purchases/trends',
     exportEndpoint: 'store/analytics/purchases/trends/export',
+  },
+
+  {
+    // QUI-542: Cuentas por pagar a proveedores por edades (aging).
+    // Saldo pendiente por proveedor distribuido en buckets (corriente, 1-30, 31-60, 61-90, >90 días).
+    id: 'payable-aging',
+    category: 'purchases',
+    title: 'Cuentas por Pagar Aging',
+    description: 'Saldo pendiente a proveedores por edades de vencimiento',
+    detailedDescription:
+      'Reporte de cartera a proveedores distribuida por antigüedad (corriente, 1-30, 31-60, 61-90 y más de 90 días). Permite priorizar la gestión de pagos y controlar la deuda comercial.',
+    icon: 'clock',
+    route: '/admin/reports/purchases/payable-aging',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    serverPagination: true,
+    trackKey: 'supplier_id',
+    columns: [
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_document', header: 'Documento', type: 'text' },
+      { key: 'current', header: 'Corriente', type: 'currency', footer: 'sum' },
+      { key: 'days_1_30', header: '1-30 días', type: 'currency', footer: 'sum' },
+      { key: 'days_31_60', header: '31-60 días', type: 'currency', footer: 'sum' },
+      { key: 'days_61_90', header: '61-90 días', type: 'currency', footer: 'sum' },
+      { key: 'days_over_90', header: '>90 días', type: 'currency', footer: 'sum' },
+      { key: 'total_outstanding', header: 'Saldo Total', type: 'currency', footer: 'sum' },
+      { key: 'last_payment_date', header: 'Último Pago', type: 'date' },
+    ],
+    exportFilename: 'cuentas_por_pagar_aging',
+    stats: [
+      { key: 'total_outstanding', label: 'Saldo Total', type: 'currency', icon: 'dollar-sign' },
+      { key: 'current', label: 'Corriente', type: 'currency', icon: 'check-circle' },
+      { key: 'days_over_90', label: 'Vencido >90d', type: 'currency', icon: 'alert-triangle' },
+      { key: '_count', label: 'Proveedores', type: 'number', icon: 'building-2' },
+    ],
+    dataEndpoint: 'store/analytics/purchases/payable-aging',
+    exportEndpoint: 'store/analytics/purchases/payable-aging/export',
   },
 
   // ─── RESEÑAS (2) ──────────────────────────────────────────────────────────────────

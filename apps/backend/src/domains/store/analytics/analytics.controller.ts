@@ -29,6 +29,7 @@ import {
   LowStockBySupplierAnalyticsQueryDto,
 } from './dto/low-stock-by-supplier-query.dto';
 import { InventoryBySupplierQueryDto } from './dto/inventory-by-supplier-query.dto';
+import { PayableAgingQueryDto } from './dto/payable-aging-query.dto';
 import { ResponseService } from '../../../common/responses/response.service';
 import {
   buildReportBuffer,
@@ -1232,6 +1233,71 @@ export class AnalyticsController {
     await this.emitReport(res, 'compras', tz, [
       this.toSheet('Compras', columns, rows, tz),
     ]);
+  }
+
+  /**
+   * QUI-542: Cuentas por pagar a proveedores por edades (aging) - Vista previa paginada.
+   * Agrupa saldos pendientes por proveedor en buckets (corriente, 1-30, 31-60, 61-90, >90).
+   */
+  @Get('purchases/payable-aging')
+  @Permissions('store:analytics:read')
+  async getPayableAging(@Query() query: PayableAgingQueryDto) {
+    const result =
+      await this.purchases_analytics_service.getPayableAging(query);
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+      'Data retrieved successfully',
+      undefined,
+      { totals: result.meta.totals },
+    );
+  }
+
+  /**
+   * QUI-542: Cuentas por pagar a proveedores por edades (aging) - Exportación XLSX.
+   * Genera reporte ExcelJS completo con fechas en timezone de la tienda y totales agregados.
+   */
+  @Get('purchases/payable-aging/export')
+  @Permissions('store:analytics:read')
+  async exportPayableAging(
+    @Query() query: PayableAgingQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const tz = await this.resolveReportTz();
+    const { rows, totals } =
+      await this.purchases_analytics_service.getPayableAgingForExport(query);
+
+    const columns: ReportColumn[] = [
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_document', header: 'Documento', type: 'text' },
+      { key: 'current', header: 'Corriente', type: 'currency' },
+      { key: 'days_1_30', header: '1-30 días', type: 'currency' },
+      { key: 'days_31_60', header: '31-60 días', type: 'currency' },
+      { key: 'days_61_90', header: '61-90 días', type: 'currency' },
+      { key: 'days_over_90', header: '>90 días', type: 'currency' },
+      { key: 'total_outstanding', header: 'Saldo Total', type: 'currency' },
+      { key: 'last_payment_date', header: 'Último Pago', type: 'date', tz },
+    ];
+
+    const sheet = this.toSheet(
+      'Cuentas por Pagar Aging',
+      columns,
+      rows,
+      tz,
+      {
+        supplier_name: 'TOTAL',
+        current: totals.current,
+        days_1_30: totals.days_1_30,
+        days_31_60: totals.days_31_60,
+        days_61_90: totals.days_61_90,
+        days_over_90: totals.days_over_90,
+        total_outstanding: totals.total_outstanding,
+      },
+    );
+
+    await this.emitReport(res, 'cuentas_por_pagar_aging', tz, [sheet]);
   }
 
   // ==================== REVIEWS ANALYTICS ====================
