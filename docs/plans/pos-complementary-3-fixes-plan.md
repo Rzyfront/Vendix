@@ -114,12 +114,39 @@ El diseño integral de F-006 se prepara como documento separado porque necesita 
 4. `docker logs --since 5m vendix_backend` y `/api/health` limpios después de la última edición. No reiniciar servidores ajenos ni lanzar builds para verificar.
 5. Revisión del diff final por unidad y juntos; `git diff --check`; push por SHA y seguimiento de CI hasta resultado o bloqueo externo explícito.
 
+
+**Ejecución verificada — 2026-09-20:**
+
+- Checkpoint: `ab2aa5f91`; A `1fd93d1ac`, B `6f435661a`, C `dfdd47a2d`. Plan/diseño inicial: `cf1ac72dd`.
+- Rojo real antes de cada fix: A 2 fallos/19; B 4/10 cálculo, 8/20 DTO, 5/11 integración; C 6/25 DTO y 12/51 HTTP. Fallos corresponden a los defectos, no al harness.
+- Corrida conjunta del orquestador sobre `dfdd47a2d46a70aabe304215d712d656eba5ca32`: **151 passed, 151 total; 7 suites; exit 0; cero omitidos**. UTC 2026-09-20T05:44:30Z a 2026-09-20T05:46:00Z. Un parser inicial no eliminaba ANSI del resumen: se corrigió únicamente el lector de evidencia; el primer Jest había salido 0 y su log propio confirmó 19/19.
+
+| Suite | Pruebas verdes |
+|---|---:|
+| refund-flow.service.spec.ts | 19 |
+| refund-calculation.service.spec.ts | 10 |
+| create-refund.dto.spec.ts | 20 |
+| refund-integrity.service.spec.ts | 11 |
+| bulk-orders.dto.spec.ts | 25 |
+| orders-bulk.controller.spec.ts | 51 |
+| orders-bulk.service.spec.ts | 15 |
+
+- HTTP real en **Roku local**, cuenta indicada por el usuario, sin guardar contraseña: 191 solicitudes curl en la matriz (incluye lecturas antes/después); 30 invariantes de rechazo sin mutación, 22 bulk y 8 refund. Inválidos 400 `SYS_VALIDATION_001`; cuatro rutas sin token 401. Los roles autenticados sin permiso se verifican en el harness de guard real, no se afirma esa prueba en vivo.
+- Happy real: cuatro destinos bulk en preview 200; orden QA1094 cancelada por bulk 200; orden QA1093 cobrada localmente por efectivo y reembolsada en dos operaciones completadas de 10 y 1.000 (refunds26/27), total igual a pago1.010; primera parcial conserva orden y segunda marca refunded.
+- Solo dos órdenes nuevas `QA-POS-COMPLEMENTARY-20260920-*`, sin product_id: cero movimientos de inventario, cero facturas y cero pasarela/DIAN externos. Suscripción Roku siguió active y contabilidad fiscal INACTIVE; no se modificaron settings/suscripciones ni se borraron fixtures.
+- A/pasarela fallida se prueba con proveedor simulado e integración de servicio real, no con una devolución bancaria real.
+- Backend health200 y logs posteriores sin errores relevantes; frontend watcher activo y último ciclo OK, sin lanzar builds/typechecks. Revisión cruzada A/C PASS y revisión root B sin bloqueadores introducidos confirmados.
+- Evidencia local no versionada (sin secretos en logs): `.dev/pos-complementary-20260920/final-tests.json`, `final-1.log` a `final-7.log`, `runtime-evidence.json`, `runtime-fixtures.json`. Tokens temporales están fuera de Git y no forman parte de la evidencia compartida.
+- Publicación: pendiente del commit de evidencia/memoria y del push por SHA revisado; el resultado CI se reporta por SHA, no por la última corrida de la rama.
+
 ## Knowledge Gaps
 - Sincronización inicial resuelta con merge `ab2aa5f91`; revalidar ancestro remoto y estado compartido antes del push, sin asumir que HEAD permanece quieto.
 - F-004 original (tope/sobrepagos), carrera entre refunds simultáneos/en curso y estados anticipados de orden/pagos quedan fuera de estos fixes. No reportarlos cerrados.
 - F-016 global/forzado y G3/F-017 quedan fuera; G3 requiere vigilancia G2 y 30 días, no se enciende aquí.
 - F-006 necesita contrato del documento por porción ya pagada, edición post-split, representación financiera y esquema aditivo revisado; su implementación es siguiente etapa coordinada, no parche implícito de esta tanda.
-- El entorno fiscal/pasarela local no se presume sandbox configurado: no ejecutar cobros/reversas reales para satisfacer una casilla de prueba.
+- El entorno fiscal/pasarela local no se presume sandbox configurado: no se ejecutaron cobros/reversas bancarios externos. La autorización de usuario fue para Roku local, no para producción.
+- Deuda preexistente observada en QA acumulada: la orden queda refunded y la suma devuelta cuadra, pero el pago permanece partially_refunded porque el selector activePayment excluye ese estado. No fue introducido ni corregido por A/B; requiere una siguiente corrección de máquina de estados.
+- Los seeds tech-solutions/fashion-retail bloquearon POST con SUBSCRIPTION_003 antes del DTO. Se cambió la identidad de pruebas a Roku por indicación del usuario, sin reactivar ninguna suscripción.
 
 ## Approval Request
 This plan is ready for human review. Reply **"ejecuta"**, **"apruebo"**, or **"procede"** to start execution under `how-to-dev`. Reply with corrections to revise the plan in place.
