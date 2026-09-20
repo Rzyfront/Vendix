@@ -91,10 +91,12 @@ export interface FulfillmentSelection {
         gap: 12px;
       }
 
+      /* Stitch paso 5 — target ≥44px y foco 3px del lenguaje fijado. */
       .fulfillment-option {
         display: flex;
         align-items: center;
         gap: 12px;
+        min-height: 44px;
         padding: 14px 16px;
         border-radius: 12px;
         border: 1px solid var(--color-border);
@@ -108,6 +110,11 @@ export interface FulfillmentSelection {
       .fulfillment-option:hover:not(:disabled):not(.selected) {
         border-color: var(--color-primary);
         background: rgba(var(--color-primary-rgb), 0.04);
+      }
+
+      .fulfillment-option:focus-visible {
+        outline: 3px solid var(--color-primary);
+        outline-offset: 2px;
       }
 
       .fulfillment-option.selected {
@@ -134,9 +141,10 @@ export interface FulfillmentSelection {
         line-height: 1.2;
       }
 
+      /* Texto informativo en neutral-600 (text-secondary #94a3b8 falla AA). */
       .fulfillment-option-hint {
         font-size: 12px;
-        color: var(--color-text-secondary);
+        color: var(--color-neutral-600);
         line-height: 1.2;
       }
     `,

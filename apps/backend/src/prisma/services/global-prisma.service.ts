@@ -415,6 +415,15 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.help_articles;
   }
 
+  // Video Library models (global - no scoping)
+  get video_categories() {
+    return this.baseClient.video_categories;
+  }
+
+  get videos() {
+    return this.baseClient.videos;
+  }
+
   // Layaway models
   get layaway_plans() {
     return this.baseClient.layaway_plans;

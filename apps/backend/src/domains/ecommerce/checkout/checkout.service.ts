@@ -239,10 +239,21 @@ export class CheckoutService {
 
     const method = await this.prisma.store_payment_methods.findFirst({
       where: { id: methodId, store_id: storeId },
-      select: { custom_config: true },
+      select: {
+        custom_config: true,
+        system_payment_method: { select: { type: true } },
+      },
     });
+    if (!method) return [];
+
+    // QUI-849: solo métodos de tipo 'bank_transfer' exponen cuentas bancarias.
+    // Métodos como 'voucher' no usan cuentas y no deben heredar el fallback de la organización.
+    if (method.system_payment_method?.type !== 'bank_transfer') {
+      return [];
+    }
+
     const configured = this.extractConfiguredBankAccountIds(
-      method?.custom_config,
+      method.custom_config,
     );
 
     // Lista curada presente pero sin ninguna FK resoluble (config legacy sin
@@ -434,6 +445,7 @@ export class CheckoutService {
     // FIX QUI-467: wallet requires an authenticated customer. Hide it from
     // anonymous visitors (defense-in-depth — POST /checkout also rejects it).
     const isAuthenticated = !!RequestContextService.getUserId();
+    const isPickup = shippingMethodType === 'pickup';
 
     // store_id se aplica automáticamente por EcommercePrismaService
     const methods = await this.prisma.store_payment_methods.findMany({
@@ -441,8 +453,10 @@ export class CheckoutService {
         state: 'enabled',
         AND: [
           { system_payment_method: { processing_mode: { in: allowedModes } } },
-          // PROHIBIDO `cash` en ecommerce (ver comentario en checkout()).
-          { system_payment_method: { type: { not: 'cash' } } },
+          // QUI-850: 'cash' (efectivo) solo se expone en ecommerce para 'pickup' (recoger en tienda).
+          ...(isPickup
+            ? []
+            : [{ system_payment_method: { type: { not: 'cash' } } }]),
           // Hide wallet from anonymous users — it requires a logged-in
           // customer with a wallet_id.
           ...(isAuthenticated
@@ -1156,19 +1170,6 @@ export class CheckoutService {
       throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_002);
     }
 
-    // PROHIBIDO exponer `cash` en la tienda en línea. El efectivo es el
-    // método estándar de caja/POS y, si se habilita allí, NO debe filtrarse
-    // al ecommerce: la tienda perdería la posibilidad de NO ofrecer pago
-    // contra entrega en efectivo online. La contra-entrega opt-in vive en el
-    // tipo `cash_on_delivery`, nunca reabriendo `cash`. Ver ADR-2 del plan
-    // CP-tienda-checkout-whatsapp. Caja/POS no se tocan.
-    if (payment_method.system_payment_method.type === 'cash') {
-      throw new VendixHttpException(
-        ErrorCodes.ECOM_CHECKOUT_002,
-        'El pago en efectivo no está disponible en la tienda en línea',
-      );
-    }
-
     // FIX QUI-467: block wallet payment for anonymous users. Even if a guest
     // crafts a request manually, the server must refuse wallet — the wallet
     // is per-customer (prepaid balance) and needs an authenticated identity.
@@ -1388,6 +1389,17 @@ export class CheckoutService {
       throw new VendixHttpException(
         ErrorCodes.ECOM_CHECKOUT_001,
         'La dirección de envío es requerida',
+      );
+    }
+
+    // QUI-850: El pago en efectivo solo está disponible para entrega 'pickup' (recoger en tienda).
+    if (
+      payment_method.system_payment_method.type === 'cash' &&
+      delivery_type !== 'pickup'
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.ECOM_CHECKOUT_002,
+        'El pago en efectivo solo está disponible para entrega en tienda (recoger)',
       );
     }
 

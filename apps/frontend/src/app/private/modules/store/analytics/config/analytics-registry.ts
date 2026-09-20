@@ -265,6 +265,15 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     category: 'inventory',
     icon: 'truck',
   },
+  {
+    key: 'inventory_ingredient_consumption',
+    title: 'Consumo de Insumos',
+    description: 'Insumos gastados y materias primas por plato y receta',
+    detailedDescription: 'Analiza el gasto de materia prima e insumos de cocina en el período seleccionado. Visualiza el total consolidado de cada ingrediente consumido y el desglose por plato.',
+    route: '/admin/analytics/inventory/ingredient-consumption',
+    category: 'inventory',
+    icon: 'utensils',
+  },
 
   // Products (3)
   {
@@ -315,7 +324,7 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     icon: 'truck',
   },
 
-  // Customers (3)
+  // Customers (4)
   {
     key: 'customers_summary',
     title: 'Resumen de Clientes',
@@ -342,6 +351,16 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     route: '/admin/analytics/customers/abandoned-carts',
     category: 'customers',
     icon: 'shopping-cart',
+  },
+  {
+    // QUI-540: Cuentas por cobrar de clientes
+    key: 'customers_receivable',
+    title: 'Cuentas por Cobrar',
+    description: 'Cartera abierta y morosidad de clientes',
+    detailedDescription: 'Gestiona las cuentas por cobrar pendientes de clientes con distribución por antigüedad de mora y detalle de saldos.',
+    route: '/admin/analytics/customers/receivable',
+    category: 'customers',
+    icon: 'hand-coins',
   },
 
   // Reviews (1)

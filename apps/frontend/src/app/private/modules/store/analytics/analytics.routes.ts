@@ -170,6 +170,13 @@ export const analyticsRoutes: Routes = [
                 './pages/inventory/inventory-low-stock-by-supplier/inventory-low-stock-by-supplier.component'
               ).then((c) => c.InventoryLowStockBySupplierComponent),
           },
+          {
+            path: 'ingredient-consumption',
+            loadComponent: () =>
+              import('./pages/inventory/ingredient-consumption.component').then(
+                (c) => c.IngredientConsumptionComponent,
+              ),
+          },
         ],
       },
       // Products Analytics (shell)
@@ -288,6 +295,14 @@ export const analyticsRoutes: Routes = [
             loadComponent: () =>
               import('./pages/customers/abandoned-carts.component').then(
                 (c) => c.AbandonedCartsComponent,
+              ),
+          },
+          {
+            // QUI-540: Cuentas por cobrar de clientes
+            path: 'receivable',
+            loadComponent: () =>
+              import('./pages/customers/customer-receivables.component').then(
+                (c) => c.CustomerReceivablesComponent,
               ),
           },
         ],

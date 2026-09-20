@@ -137,6 +137,8 @@ export class PaymentCollectorComponent implements OnInit {
   readonly requireCustomerIn = input<boolean | undefined>(undefined, { alias: 'requireCustomer' });
   readonly allowAmountOverrideIn = input<boolean | undefined>(undefined, { alias: 'allowAmountOverride' });
   readonly showKeypadIn = input<boolean | undefined>(undefined, { alias: 'showKeypad' });
+  /** Incremented by parent shells to explicitly trigger a state reset (e.g. on intent flip) */
+  readonly paymentResetKey = input<number>(0);
 
   // ── Outputs ────────────────────────────────────────────────────────────
   readonly submit = output<PaymentSubmit>();
@@ -554,10 +556,11 @@ export class PaymentCollectorComponent implements OnInit {
   }
 
   constructor() {
-    // Single reset effect. Tracks ONLY context(); all writes happen inside
+    // Single reset effect. Tracks context() and paymentResetKey(); all writes happen inside
     // untracked() so no cross-slice dependency is created.
     effect(() => {
       this.context();
+      this.paymentResetKey();
       untracked(() => this.resetState());
     });
 

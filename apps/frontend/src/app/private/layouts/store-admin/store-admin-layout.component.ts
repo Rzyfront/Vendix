@@ -9,7 +9,7 @@ import {
   effect,
   untracked,
 } from '@angular/core';
-import { RouterModule } from '@angular/router';
+import { RouterModule, Router, NavigationEnd } from '@angular/router';
 import {
   toSignal,
   toObservable,
@@ -43,7 +43,7 @@ import { SubscriptionFacade } from '../../../core/store/subscription/subscriptio
 import { MembershipAmbientAccessService } from '../../../core/services/membership-ambient-access.service';
 import type { StoreSettings } from '../../../core/models/store-settings.interface';
 import { combineLatest } from 'rxjs';
-import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
+import { map, distinctUntilChanged, skip, switchMap, filter, startWith } from 'rxjs/operators';
 
 @Component({
   selector: 'app-store-admin-layout',
@@ -207,10 +207,25 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
 
         <!-- Page Content -->
         <main
-          class="flex-1 flex flex-col overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
+          class="flex-1 flex flex-col transition-all duration-300 ease-in-out"
+          [class.overflow-y-auto]="!isPosRoute()"
+          [class.overflow-x-hidden]="!isPosRoute()"
+          [class.px-1]="!isPosRoute()"
+          [class.md:px-4]="!isPosRoute()"
+          [class.overflow-hidden]="isPosRoute()"
+          [class.p-0]="isPosRoute()"
+          [style.padding-top]="isPosRoute() ? '0' : 'var(--admin-header-gap)'"
           style="background-color: var(--background);"
         >
-          <div class="w-full grow shrink-0">
+          <div
+            class="w-full grow shrink-0"
+            [class.h-full]="isPosRoute()"
+            [class.flex-1]="isPosRoute()"
+            [class.flex]="isPosRoute()"
+            [class.flex-col]="isPosRoute()"
+            [class.min-h-0]="isPosRoute()"
+            [class.overflow-hidden]="isPosRoute()"
+          >
             <router-outlet></router-outlet>
           </div>
         </main>
@@ -249,6 +264,7 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
 export class StoreAdminLayoutComponent {
   @ViewChild('sidebarRef') sidebarRef!: SidebarComponent;
 
+  private router = inject(Router);
   private authFacade = inject(AuthFacade);
   private configFacade = inject(ConfigFacade);
   private tourService = inject(TourService);
@@ -257,6 +273,20 @@ export class StoreAdminLayoutComponent {
   private ambientAccess = inject(MembershipAmbientAccessService);
   private storeSettingsFacade = inject(StoreSettingsFacade);
   private destroyRef = inject(DestroyRef);
+
+  private readonly currentUrl = toSignal(
+    this.router.events.pipe(
+      filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+      map((e) => e.urlAfterRedirects),
+      startWith(this.router.url),
+    ),
+    { initialValue: this.router.url },
+  );
+
+  readonly isPosRoute = computed(() => {
+    const url = this.currentUrl() || '';
+    return url.startsWith('/admin/pos');
+  });
 
   /**
    * Vexi's store-wide master switch. Fails closed: the facade reads
@@ -918,6 +948,13 @@ export class StoreAdminLayoutComponent {
           label: 'Centro de Ayuda',
           icon: 'circle',
           route: '/admin/help/center',
+        },
+        {
+          label: 'Videos de Capacitación',
+          icon: 'video',
+          route: '/admin/help/videos',
+          alwaysVisible: true,
+          panelUiKey: 'help_videos',
         },
       ],
     },

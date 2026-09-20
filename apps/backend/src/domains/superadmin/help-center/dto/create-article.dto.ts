@@ -57,6 +57,11 @@ export class CreateArticleDto {
   tags?: string[];
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  keywords?: string[];
+
+  @IsOptional()
   @IsString()
   cover_image_url?: string;
 

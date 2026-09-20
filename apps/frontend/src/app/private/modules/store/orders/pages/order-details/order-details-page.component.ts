@@ -26,6 +26,7 @@ import { OrdersService } from '../../services/orders.service';
 // `payload.data.order_id` en el cliente.
 import { OrderDetailSseService } from '../../services/order-detail-sse.service';
 import { AddressPayload } from '../../../../../../shared/components';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
 import { ShippingAddressModalComponent } from '../../components/shipping-address-modal/shipping-address-modal.component';
 import {
@@ -3574,6 +3575,11 @@ export class OrderDetailsPageComponent {
   formatDate(dateString: string | undefined): string {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleString();
+  }
+
+  formatDueDate(dateString: string | Date | undefined): string {
+    if (!dateString) return '—';
+    return formatDateOnlyUTC(dateString);
   }
 
   getTimelineLabel(log: any): string {

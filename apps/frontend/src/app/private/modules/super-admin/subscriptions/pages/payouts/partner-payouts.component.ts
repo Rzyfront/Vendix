@@ -1,7 +1,6 @@
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
-import { DatePipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { SubscriptionAdminService } from '../../services/subscription-admin.service';
 import {
@@ -44,7 +43,6 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
     InputsearchComponent,
     OptionsDropdownComponent,
     CurrencyPipe,
-    DatePipe,
   ],
   template: `
     <div class="w-full">

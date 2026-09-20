@@ -199,6 +199,7 @@ export class ReportsShellComponent {
     'inventory-low-stock': '/admin/analytics/inventory/overview',
     'inventory-movements': '/admin/analytics/inventory/movements',
     'inventory-movement-analysis': '/admin/analytics/inventory/movement-analysis',
+    'inventory-ingredient-consumption': '/admin/analytics/inventory/ingredient-consumption',
     // Products
     'product-performance': '/admin/analytics/products/performance',
     'product-top-sellers': '/admin/analytics/products/top-sellers',
@@ -207,6 +208,8 @@ export class ReportsShellComponent {
     'customer-summary': '/admin/analytics/customers/summary',
     'customer-acquisition': '/admin/analytics/customers/acquisition',
     'customer-abandoned-carts': '/admin/analytics/customers/abandoned-carts',
+    // QUI-540: drill-down analítico del reporte de cuentas por cobrar
+    'customers-receivable': '/admin/analytics/customers/receivable',
     // Purchases
     'purchase-summary': '/admin/analytics/purchases/summary',
     'purchase-by-supplier': '/admin/analytics/purchases/by-supplier',

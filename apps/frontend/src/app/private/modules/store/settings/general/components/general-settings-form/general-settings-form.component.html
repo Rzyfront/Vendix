@@ -62,6 +62,74 @@
     }
   </div>
 
+  <!-- Dirección de la Sede y Retiro en Tienda -->
+  <div class="mt-6 rounded-lg border border-gray-200 bg-surface p-4">
+    <div class="mb-4">
+      <div class="flex items-center gap-2">
+        <app-icon name="map-pin" [size]="16" class="text-primary-600"></app-icon>
+        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider">
+          Dirección de la Sede y Retiro en Tienda
+        </h4>
+      </div>
+      <p class="text-[11px] text-gray-500 leading-relaxed mt-1">
+        Esta dirección se muestra a tus clientes en el checkout cuando eligen la opción «Recoger en tienda» o entrega local.
+      </p>
+    </div>
+
+    <div class="space-y-4" [formGroup]="localAddressGroup">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="md:col-span-2">
+          <app-input
+            [formControl]="addressLine1Control"
+            type="text"
+            label="Dirección del Local"
+            placeholder="Calle 15 # 10-20"
+            size="sm"
+            (inputChange)="onFieldChange()"
+          ></app-input>
+        </div>
+
+        <div class="md:col-span-2">
+          <app-input
+            [formControl]="addressLine2Control"
+            type="text"
+            label="Detalles adicionales (Barrio, Edificio, Local)"
+            placeholder="Edificio Centro, Local 102"
+            size="sm"
+            (inputChange)="onFieldChange()"
+          ></app-input>
+        </div>
+
+        <app-input
+          [formControl]="cityControl"
+          type="text"
+          label="Ciudad"
+          placeholder="Riohacha"
+          size="sm"
+          (inputChange)="onFieldChange()"
+        ></app-input>
+
+        <app-input
+          [formControl]="stateProvinceControl"
+          type="text"
+          label="Departamento / Provincia"
+          placeholder="La Guajira"
+          size="sm"
+          (inputChange)="onFieldChange()"
+        ></app-input>
+
+        <app-input
+          [formControl]="postalCodeControl"
+          type="text"
+          label="Código Postal"
+          placeholder="440001"
+          size="sm"
+          (inputChange)="onFieldChange()"
+        ></app-input>
+      </div>
+    </div>
+  </div>
+
   <!-- Panel UI - "Módulos de la Tienda" trigger + modal (full width, below type consequences) -->
   <div class="mt-6 rounded-lg border border-gray-200 bg-surface px-4 py-3 flex items-center justify-between gap-4">
     <div class="min-w-0">

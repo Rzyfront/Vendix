@@ -224,6 +224,9 @@ describe('CheckoutService - promotions and coupons', () => {
           .fn()
           .mockResolvedValue({ first_name: 'Test', last_name: 'User', phone: null }),
       },
+      bank_accounts: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
 
     storePrisma = {
@@ -254,7 +257,8 @@ describe('CheckoutService - promotions and coupons', () => {
         update: jest.fn(),
         findUnique: jest.fn(),
       },
-      store_payment_methods: { findFirst: jest.fn() },
+      store_payment_methods: { findFirst: jest.fn(), findMany: jest.fn().mockResolvedValue([]) },
+      bank_accounts: { findMany: jest.fn().mockResolvedValue([]) },
       domain_settings: { findMany: jest.fn().mockResolvedValue([]) },
     };
 
@@ -840,9 +844,11 @@ describe('CheckoutService - promotions and coupons', () => {
       ]);
     });
 
-    it('rechaza el pago en efectivo aunque esté habilitado en la tienda', async () => {
+    it('permite el pago en efectivo si la entrega es pickup (recoger en tienda) (QUI-850)', async () => {
+      mockOrderCreate(10000);
       prisma.store_payment_methods.findFirst.mockResolvedValue({
         id: 9,
+        store_id: STORE_ID,
         state: 'enabled',
         system_payment_method: {
           id: 1,
@@ -851,10 +857,56 @@ describe('CheckoutService - promotions and coupons', () => {
           provider: 'manual',
         },
       });
+      storePrisma.shipping_methods.findFirst.mockResolvedValue({
+        id: 1,
+        type: 'pickup',
+        store_id: STORE_ID,
+        is_active: true,
+      });
+
+      const result: any = await service.checkout({
+        payment_method_id: 9,
+        shipping_method_id: 1,
+        items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
+      } as any);
+
+      expect(result).toBeDefined();
+      expect(prisma.orders.create).toHaveBeenCalled();
+      expect(prisma.payments.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            state: 'pending',
+            store_payment_method_id: 9,
+          }),
+        }),
+      );
+    });
+
+    it('rechaza el pago en efectivo si la entrega no es pickup (QUI-850)', async () => {
+      mockOrderCreate(10000);
+      prisma.store_payment_methods.findFirst.mockResolvedValue({
+        id: 9,
+        store_id: STORE_ID,
+        state: 'enabled',
+        system_payment_method: {
+          id: 1,
+          display_name: 'Efectivo',
+          type: 'cash',
+          provider: 'manual',
+        },
+      });
+      storePrisma.shipping_methods.findFirst.mockResolvedValue({
+        id: 2,
+        type: 'own_fleet',
+        store_id: STORE_ID,
+        is_active: true,
+      });
 
       const err = await service
         .checkout({
           payment_method_id: 9,
+          shipping_method_id: 2,
+          shipping_address_id: 1,
           items: [{ product_id: PRODUCT_BASE.id, quantity: 1 }],
         } as any)
         .then(
@@ -867,15 +919,12 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(prisma.payments.create).not.toHaveBeenCalled();
     });
 
-    it('getPaymentMethods excluye cash por tipo en todo shipping_type', async () => {
+    it('getPaymentMethods excluye cash para envíos que no son pickup y lo permite en pickup (QUI-850)', async () => {
       prisma.store_payment_methods.findMany.mockResolvedValue([]);
 
-      for (const shippingType of [undefined, 'pickup', 'own_fleet']) {
+      for (const shippingType of [undefined, 'own_fleet']) {
         jest.clearAllMocks();
         await service.getPaymentMethods(shippingType);
-        // El `AND` viaja DENTRO de `where`, no en la raíz del argumento. La
-        // aserción original lo buscaba en la raíz y fallaba aunque la
-        // exclusión de `cash` estuviera presente y correcta.
         expect(prisma.store_payment_methods.findMany).toHaveBeenCalledWith(
           expect.objectContaining({
             where: expect.objectContaining({
@@ -886,6 +935,18 @@ describe('CheckoutService - promotions and coupons', () => {
           }),
         );
       }
+
+      jest.clearAllMocks();
+      await service.getPaymentMethods('pickup');
+      expect(prisma.store_payment_methods.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            AND: expect.not.arrayContaining([
+              { system_payment_method: { type: { not: 'cash' } } },
+            ]),
+          }),
+        }),
+      );
     });
 
     it('getDeliveryOptions devuelve un tipo de entrega por método activo', async () => {
@@ -923,6 +984,60 @@ describe('CheckoutService - promotions and coupons', () => {
       expect(err).toBeInstanceOf(VendixHttpException);
       expect(err.errorCode).toBe('ECOM_CHECKOUT_001');
       expect(prisma.orders.create).not.toHaveBeenCalled();
+    });
+
+    describe('getBankAccountsForMethod (QUI-849)', () => {
+      it('retorna las cuentas bancarias configuradas si el método es bank_transfer', async () => {
+        prisma.stores.findUnique.mockResolvedValue({ organization_id: 1, store_code: 'EC' });
+        prisma.store_payment_methods.findFirst.mockResolvedValue({
+          id: 10,
+          custom_config: { accounts: [{ id: 101 }] },
+          system_payment_method: { type: 'bank_transfer' },
+        });
+        prisma.bank_accounts.findMany.mockResolvedValue([
+          {
+            id: 101,
+            name: 'Cuenta Principal',
+            bank_name: 'Bancolombia',
+            account_number: '123456789',
+            image_s3_key: null,
+          },
+        ]);
+
+        const result = await service.getBankAccountsForMethod(10, STORE_ID);
+
+        expect(result).toHaveLength(1);
+        expect(result[0]).toEqual(
+          expect.objectContaining({
+            id: 101,
+            bank_name: 'Bancolombia',
+            account_number: '123456789',
+          }),
+        );
+      });
+
+      it('retorna array vacío si el método es voucher (no expone cuentas de transferencia)', async () => {
+        prisma.stores.findUnique.mockResolvedValue({ organization_id: 1, store_code: 'EC' });
+        prisma.store_payment_methods.findFirst.mockResolvedValue({
+          id: 11,
+          custom_config: { allow_validation: true },
+          system_payment_method: { type: 'voucher' },
+        });
+
+        const result = await service.getBankAccountsForMethod(11, STORE_ID);
+
+        expect(result).toEqual([]);
+        expect(prisma.bank_accounts.findMany).not.toHaveBeenCalled();
+      });
+
+      it('retorna array vacío si el método de pago no existe', async () => {
+        prisma.stores.findUnique.mockResolvedValue({ organization_id: 1, store_code: 'EC' });
+        prisma.store_payment_methods.findFirst.mockResolvedValue(null);
+
+        const result = await service.getBankAccountsForMethod(999, STORE_ID);
+
+        expect(result).toEqual([]);
+      });
     });
   });
 });

@@ -23,12 +23,11 @@ import {
 } from '../../../../../../shared/components';
 import type { StepsLineItem, PaymentSubmit } from '../../../../../../shared/components';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency';
-import {
-  AddressFormFieldsComponent,
-  AddressPayload,
-} from '../../../../../../shared/components/address-form-fields/address-form-fields.component';
 import { PosCustomerSelectorComponent } from '../pos-customer-selector/pos-customer-selector.component';
-import { PosConsumoStepComponent } from './steps/pos-consumo-step.component';
+import {
+  PosEntregaStepComponent,
+  EntregaChoice,
+} from './steps/pos-entrega-step.component';
 import { PosPaymentStepComponent } from './steps/pos-payment-step.component';
 import { PosShippingStepComponent } from './steps/pos-shipping-step.component';
 import {
@@ -53,6 +52,7 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
 import { StoreOrdersService } from '../../../orders/services/store-orders.service';
 
 export type CheckoutIntent = 'pickup' | 'delivery';
+export type { EntregaChoice };
 
 /**
  * Fase 5·B1 — `app-pos-checkout-shell`.
@@ -76,9 +76,8 @@ export type CheckoutIntent = 'pickup' | 'delivery';
     IconComponent,
     StepsLineComponent,
     CurrencyPipe,
-    AddressFormFieldsComponent,
     PosCustomerSelectorComponent,
-    PosConsumoStepComponent,
+    PosEntregaStepComponent,
     PosPaymentStepComponent,
     PosShippingStepComponent,
   ],
@@ -89,7 +88,11 @@ export class PosCheckoutShellComponent {
   // ── Inputs ────────────────────────────────────────────────────────────────
   readonly isOpen = input<boolean>(false);
   readonly cartState = input<CartState | null>(null);
-  readonly checkoutIntent = input<CheckoutIntent>('pickup');
+  /**
+   * Preselección del tipo de entrega al abrir el modal ('mesa' | 'llevar' | 'enviar').
+   * Se aplica una sola vez en la transición isOpen false→true (preserva QUI-482).
+   */
+  readonly initialEntrega = input<EntregaChoice>('llevar');
   readonly isRestaurantWithPrepared = input<boolean>(false);
   readonly tableId = input<number | null>(null);
   readonly paymentMethods = input<PaymentMethod[] | null>(null);
@@ -155,7 +158,7 @@ export class PosCheckoutShellComponent {
   private readonly host = inject(ElementRef<HTMLElement>);
 
   // ── Child references ────────────────────────────────────────────────────
-  protected readonly consumoStep = viewChild(PosConsumoStepComponent);
+  protected readonly entregaStep = viewChild(PosEntregaStepComponent);
   protected readonly paymentStep = viewChild(PosPaymentStepComponent);
   protected readonly shippingStep = viewChild(PosShippingStepComponent);
   /**
@@ -165,19 +168,26 @@ export class PosCheckoutShellComponent {
    */
   private readonly customerSelector = viewChild(PosCustomerSelectorComponent);
 
-  // ── Address capture (moved from the Envío step into the Cliente step) ────
-  /** Live address payload emitted by the shell-mounted `app-address-form-fields`. */
-  readonly capturedAddress = signal<AddressPayload | null>(null);
-  /** Validity of the captured address (drives whether delivery can proceed). */
-  readonly addressValid = signal<boolean>(false);
-  /** Id of the selected customer's saved address; null → the Envío step creates it. */
-  readonly capturedAddressId = signal<number | null>(null);
+  // ── Entrega / Intent state (owned by shell) ──────────────────────────────
   /**
-   * Flash flag that forces `app-address-form-fields` to render its inline
-   * required-field errors. Set when the operator tries to advance past the
-   * Dirección sub-step with an invalid address; auto-cleared once valid.
+   * Elección de entrega gobernada por el paso Entrega: 'mesa' | 'llevar' | 'enviar'.
+   * Se inicializa con initialEntrega() al abrir el modal.
    */
-  readonly showAddressErrors = signal<boolean>(false);
+  readonly entregaChoice = signal<EntregaChoice>('llevar');
+
+  /**
+   * Intención efectiva derivada directamente de entregaChoice:
+   * 'enviar' → 'delivery', 'llevar' | 'mesa' → 'pickup'.
+   * Fuente ÚNICA de verdad para todo el shell y sus componentes hijos.
+   */
+  readonly effectiveIntent = computed<CheckoutIntent>(() =>
+    this.entregaChoice() === 'enviar' ? 'delivery' : 'pickup',
+  );
+
+  /** Incrementado al hacer flip entre pickup y delivery para resetear el collector */
+  readonly paymentResetKey = signal<number>(0);
+
+
   /**
    * Flash flag for the Cliente sub-step: forces the "selecciona un cliente"
    * hint when the operator tries to leave the Cliente selector without having
@@ -187,7 +197,7 @@ export class PosCheckoutShellComponent {
 
   /** Delivery flows must capture a shipping address in the Cliente step. */
   readonly requiresAddress = computed<boolean>(
-    () => this.checkoutIntent() === 'delivery',
+    () => this.effectiveIntent() === 'delivery',
   );
 
   /**
@@ -198,7 +208,7 @@ export class PosCheckoutShellComponent {
    * huérfanas porque `allow_anonymous_sales=false` bloqueaba el flujo sin
    * marcar la obligatoriedad del cliente en el editor.
    *
-   * QUI-audit-round-1: la rama `checkoutIntent() === 'pickup'` que vivía aquí
+   * QUI-audit-round-1: la rama `effectiveIntent() === 'pickup'` que vivía aquí
    * era POLLUTION — pickup NO fuerza cliente por sí solo; la obligatoriedad
    * viene de la política o de la dirección de envío. Se separan los dos
    * motivos en sendos computed para que el template componga.
@@ -263,59 +273,22 @@ export class PosCheckoutShellComponent {
       : 'Selecciona o crea un cliente para continuar.',
   );
 
-  /**
-   * Seeds `app-address-form-fields` from the current customer's primary saved
-   * address (defensive mapping to `AddressPayload`). Null when the customer has
-   * no address on file.
-   */
-  readonly customerInitialAddress = computed<AddressPayload | null>(() => {
-    const customer = this.cartState()?.customer;
-    const addresses = customer?.addresses;
-    const a = addresses?.find((x) => x.is_primary) ?? addresses?.[0];
-    if (!a) return null;
-    return {
-      address_line1: a.address_line1 ?? null,
-      address_line2: null,
-      city: a.city ?? null,
-      state_province: a.state_province ?? null,
-      country_code: a.country_code ?? 'CO',
-      postal_code: null,
-      phone_number: customer?.phone ?? null,
-      latitude: null,
-      longitude: null,
-    };
-  });
+
 
   // ── Stepper state ──────────────────────────────────────────────────────
   readonly currentStep = signal(0);
 
   /**
-   * The dedicated "Consumo" step (tipo de servicio + mesa) is shown only for
-   * restaurant tenants when the intent is NOT delivery. Gating by industry ∧
-   * intent (NOT by "hay platos prepared"): consumo/mesa never makes sense on a
-   * domicilio. The kitchen fire keeps its own gate (`hasUnfiredPreparedItems`).
-   */
-  readonly showConsumoStep = computed<boolean>(
-    () => this.integration.isRestaurantMode() && this.checkoutIntent() !== 'delivery',
-  );
-
-  /**
    * QUI-535 — mesa que el cobro debe materializar. Fuente ÚNICA de la mesa del
-   * checkout: cuando el paso Consumo está montado manda él (respeta la elección
-   * del operador y devuelve null en "Para llevar"); si no está montado, cae a la
-   * mesa residual del padre. El backend abre/reusa y cierra la sesión de esa mesa
-   * dentro de la transacción del pago (`table_id`).
+   * checkout: cuando el paso Entrega está montado y en modo mesa manda él (respeta
+   * la elección del operador y devuelve null en "Para llevar" / "Enviar");
+   * si no, cae a la mesa residual del padre. El backend abre/reusa y cierra la sesión
+   * de esa mesa dentro de la transacción del pago (`table_id`).
    */
   readonly checkoutTableId = computed<number | null>(() => {
-    // Un domicilio NUNCA ocupa mesa. Sin esta salida temprana, el envío caía a
-    // la mesa residual del padre (`tableId()` = mesa abierta en el POS) y el
-    // borrador terminaba empujando los platos a esa cuenta en vez de crear el
-    // pedido a domicilio.
-    if (this.checkoutIntent() === 'delivery') return null;
-    if (this.showConsumoStep()) {
-      return this.consumoStep()?.checkoutTableId() ?? null;
-    }
-    return this.tableId();
+    // Un domicilio NUNCA ocupa mesa.
+    if (this.effectiveIntent() === 'delivery') return null;
+    return this.entregaStep()?.checkoutTableId() ?? this.tableId();
   });
 
   /**
@@ -334,86 +307,48 @@ export class PosCheckoutShellComponent {
   });
 
   /**
-   * POS 'Para llevar' a nivel de orden. El paso Consumo posee el fulfillment;
-   * en 'entrega' TODA la orden se empaca aunque ninguna línea del carrito
-   * traiga la marca per-línea (el carrito POS no tiene toggle por línea: la
-   * elección es del pedido). Los caminos que empujan ítems a una mesa leen
-   * esto para estampar `is_takeaway` sin mutar el carrito.
+   * POS 'Para llevar' a nivel de orden.
    */
   readonly isTakeawayOrder = computed<boolean>(
-    () =>
-      this.showConsumoStep() &&
-      this.consumoStep()?.fulfillment() === 'entrega',
+    () => this.entregaChoice() === 'llevar',
   );
 
   /**
-   * Orden dinámico de pasos. `delivery` es fijo — [Cliente, Envío, Cobro], Cobro
-   * SIEMPRE al final. Los flujos no-delivery se cruzan con {@link customerRequired}
-   * y {@link showConsumoStep}:
-   *
-   * | customerRequired | showConsumoStep | orden                     |
-   * | ---------------- | --------------- | ------------------------- |
-   * | false            | false           | [Cobro, Cliente]          |
-   * | false            | true            | [Consumo, Cobro, Cliente] |
-   * | true             | false           | [Cliente, Cobro]          |
-   * | true             | true            | [Consumo, Cliente, Cobro] |
-   *
-   * QUI-561 — por qué se adelanta Cliente: el paso Cobro exige cliente cuando la
-   * venta no es anónima (`[requireCustomer]="!isAnonymous()"` → el collector deja
-   * `canSubmit()` en false), y con `allow_anonymous_sales=false` ese cliente no lo
-   * había capturado NADIE todavía en pickup, porque Cliente iba DESPUÉS. Resultado:
-   * "Siguiente" no hacía nada y no mostraba error (el atasco reportado). Con el
-   * cliente obligatorio el paso Cliente va antes, exactamente como delivery.
-   *
-   * **El orden depende del SETTING ({@link customerRequired}), NO del flag mutable
-   * {@link isAnonymousSale}**: {@link currentStep} es un índice numérico y
-   * reordenar el arreglo a mitad del checkout lo dejaría apuntando a otro paso.
-   *
-   * Consecuencia deseada de la matriz: con cliente obligatorio Cobro pasa a ser el
-   * ÚLTIMO paso, así que confirmar el monto FINALIZA la venta — el mismo
-   * comportamiento que delivery ya tiene hoy.
-   *
-   * "Contra entrega" ya no es un eje aparte: es el método de pago
-   * `cash_on_delivery` (processing_mode ON_DELIVERY) que el paso Cobro ofrece
-   * solo cuando la intención es delivery.
+   * Orden dinámico de pasos.
+   * Entrega SIEMPRE va primero (Paso 0).
+   * Si entregaChoice es 'enviar', se inserta dinámicamente el paso 'Envío'.
    */
   readonly steps = computed<StepsLineItem[]>(() => {
-    // CP-POS-MODAL-SCOPE-001 / Phase A.1 — `create-draft` (Crear) renders
-    // only the Cliente step. There is no Cobro step in the create-draft
-    // flow because the order has not been saved yet and there is nothing
-    // to charge. The cashier exits via `Guardar borrador`.
     if (this.effectiveMode() === 'create-draft') {
-      return [{ label: 'Cliente' }];
+      if (this.entregaChoice() === 'enviar') {
+        return [{ label: 'Entrega' }, { label: 'Cliente' }, { label: 'Envío' }];
+      }
+      return [{ label: 'Entrega' }, { label: 'Cliente' }];
     }
-    if (this.checkoutIntent() === 'delivery') {
-      return [{ label: 'Cliente' }, { label: 'Envío' }, { label: 'Cobro' }];
-    }
-    if (this.showConsumoStep()) {
+    if (this.entregaChoice() === 'enviar') {
       return [
-        { label: 'Consumo' },
+        { label: 'Entrega' },
         { label: 'Cliente' },
+        { label: 'Envío' },
         { label: 'Cobro' },
       ];
     }
-    return [{ label: 'Cliente' }, { label: 'Cobro' }];
+    return [{ label: 'Entrega' }, { label: 'Cliente' }, { label: 'Cobro' }];
   });
 
   /** Parallel key array (same order/length as {@link steps}) used to render the
-   *  active body and gate which step components mount. Debe espejar EXACTAMENTE
-   *  la matriz documentada en {@link steps}: ambos comparten {@link currentStep}
-   *  como índice, así que una discrepancia desalinea la UI del cuerpo activo. */
+   *  active body and gate which step components mount. */
   readonly stepKeys = computed<string[]>(() => {
-    // CP-POS-MODAL-SCOPE-001 / Phase A.1 — same scoping as `steps()`.
     if (this.effectiveMode() === 'create-draft') {
-      return ['cliente'];
+      if (this.entregaChoice() === 'enviar') {
+        return ['entrega', 'cliente', 'envio'];
+      }
+      return ['entrega', 'cliente'];
     }
-    if (this.checkoutIntent() === 'delivery') {
-      return ['cliente', 'envio', 'cobro'];
+    if (this.entregaChoice() === 'enviar') {
+      return ['entrega', 'cliente', 'envio', 'cobro'];
     }
-    if (this.showConsumoStep()) {
-      return ['consumo', 'cliente', 'cobro'];
-    }
-    return ['cliente', 'cobro'];
+    return ['entrega', 'cliente', 'cobro'];
   });
 
   readonly currentStepKey = computed<string>(
@@ -447,14 +382,19 @@ export class PosCheckoutShellComponent {
    */
   readonly stepSubtitle = computed<string>(() => {
     switch (this.currentStepKey()) {
-      case 'consumo':
-        return 'Consumo · Tipo de servicio';
+      case 'entrega':
+        return 'Entrega · Tipo de entrega';
       case 'cliente': {
         const sub = this.clienteSubSteps()[this.clienteSubStep()]?.label ?? 'Tipo';
         return `Cliente · ${sub}`;
       }
-      case 'envio':
-        return `Envío · ${(this.shippingStep()?.shipSubStep() ?? 0) === 0 ? 'Método' : 'Costo'}`;
+      case 'envio': {
+        const ship = this.shippingStep();
+        const subIndex = ship?.shipSubStep() ?? 0;
+        const subSteps = ship?.shipSubSteps() ?? [];
+        const label = subSteps[subIndex]?.label ?? 'Método';
+        return `Envío · ${label}`;
+      }
       case 'cobro': {
         const pay = this.paymentStep();
         if (!pay) return 'Cobro';
@@ -482,7 +422,7 @@ export class PosCheckoutShellComponent {
    * (the monto is correct on first render — no longer depends on pay timing).
    */
   readonly deliveryAmount = computed<number | null>(() =>
-    this.checkoutIntent() === 'delivery'
+    this.effectiveIntent() === 'delivery'
       ? (this.cartState()?.summary?.total || 0) + this.shippingCost()
       : null,
   );
@@ -490,7 +430,7 @@ export class PosCheckoutShellComponent {
   /** Total shown in the Resumen rail / footer (adds flete on delivery). */
   readonly totalToPay = computed<number>(() => {
     const base = this.cartState()?.summary?.total || 0;
-    return this.checkoutIntent() === 'delivery' ? base + this.shippingCost() : base;
+    return this.effectiveIntent() === 'delivery' ? base + this.shippingCost() : base;
   });
 
   // ── Sale mode (tri-state) + Anonymous ownership ─────────────────────────
@@ -606,7 +546,7 @@ export class PosCheckoutShellComponent {
    * (with an explanatory legend) — see the template.
    */
   readonly anonymousBlockedByDelivery = computed<boolean>(
-    () => this.checkoutIntent() === 'delivery',
+    () => this.effectiveIntent() === 'delivery',
   );
 
   /**
@@ -614,7 +554,7 @@ export class PosCheckoutShellComponent {
    * address is bound to a real customer. The alias option is hidden in delivery.
    */
   readonly aliasBlockedByDelivery = computed<boolean>(
-    () => this.checkoutIntent() === 'delivery',
+    () => this.effectiveIntent() === 'delivery',
   );
 
   get customerDisplayName(): string {
@@ -629,18 +569,15 @@ export class PosCheckoutShellComponent {
   /** Sub-paso activo del paso Cliente: 0=Tipo · 1=Cliente · 2=Dirección. */
   readonly clienteSubStep = signal<number>(0);
   /**
-   * Sub-pasos DINÁMICOS del paso Cliente:
+   * Sub-pasos dinámicos del paso Cliente:
    *  - anónima                    → [Tipo]
-   *  - con cliente (no delivery)  → [Tipo, Cliente]
-   *  - con cliente (delivery)     → [Tipo, Cliente, Dirección]  (Dirección terminal)
+   *  - alias                      → [Tipo, Alias]
+   *  - con cliente                → [Tipo, Cliente]
    */
   readonly clienteSubSteps = computed<StepsLineItem[]>(() => {
     if (this.isAnonymousSale()) return [{ label: 'Tipo' }];
     // QUI-737 (B.4) — modo alias: sub-paso propio de captura del alias.
     if (this.saleMode() === 'alias') return [{ label: 'Tipo' }, { label: 'Alias' }];
-    if (this.requiresAddress()) {
-      return [{ label: 'Tipo' }, { label: 'Cliente' }, { label: 'Dirección' }];
-    }
     return [{ label: 'Tipo' }, { label: 'Cliente' }];
   });
 
@@ -709,7 +646,7 @@ export class PosCheckoutShellComponent {
       return !this.allowAnonymousSales();
     }
 
-    if (this.checkoutIntent() === 'delivery') {
+    if (this.effectiveIntent() === 'delivery') {
       // Cobro es el último paso: la validez del envío ya se garantizó por el gate
       // de navegación (onConfirm re-valida y redirige a Envío si falta). Aquí solo
       // gatea el collector — para cash_on_delivery canSubmit() es true sin monto.
@@ -718,13 +655,13 @@ export class PosCheckoutShellComponent {
       return !pay.canSubmit();
     }
 
-    // pickup (B1): idéntico al collector + gate de mesa del paso Consumo. Vale
+    // pickup (B1): idéntico al collector + gate de mesa del paso Entrega. Vale
     // para las dos posiciones de Cobro (intermedio → el CTA terminal vive en
     // Cliente; último con cliente obligatorio → vive en Cobro): lo que decide en
     // ambos casos es canSubmit() del collector, no el índice del paso.
     const step = this.paymentStep();
     if (!step) return true;
-    return !step.canSubmit() || (this.consumoStep()?.needsTable() ?? false);
+    return !step.canSubmit() || (this.entregaStep()?.needsTable() ?? false);
   });
   /** Delivery → 'Finalizar venta'. Pickup → replica el label del collector. */
   readonly confirmLabel = computed<string>(() => {
@@ -735,7 +672,7 @@ export class PosCheckoutShellComponent {
     // - create-payment / delivery / pickup → existing copy
     if (this.effectiveMode() === 'create-draft') return 'Guardar';
     if (this.effectiveMode() === 'edit') return 'Actualizar';
-    if (this.checkoutIntent() === 'delivery') return 'Finalizar venta';
+    if (this.effectiveIntent() === 'delivery') return 'Finalizar venta';
     const step = this.paymentStep();
     if (!step) return 'Confirmar Pago';
     if (step.mode() === 'credito') return 'Crear Venta a Crédito';
@@ -857,13 +794,27 @@ export class PosCheckoutShellComponent {
     // CP-pos-checkout-enter-focus (step A.1) — al abrir el modal (transición
     // isOpen false→true) llevar el foco al panel del paso activo. Sin esto, el
     // foco queda en el botón de fondo que abrió el modal y el primer Enter se
-    // pierde fuera del wizard. QUI-482 intacto: solo mueve el foco, no resetea
-    // ningún estado.
+    // pierde fuera del wizard. Preselecciona initialEntrega() respetando QUI-482.
     effect(() => {
       const open = this.isOpen();
       untracked(() => {
-        if (open && !this.wasOpen) this.focusActiveStepSoon();
+        if (open && !this.wasOpen) {
+          this.entregaChoice.set(this.initialEntrega());
+          this.focusActiveStepSoon();
+        }
         this.wasOpen = open;
+      });
+    });
+
+    // Reset collector whenever effectiveIntent flips (pickup <-> delivery)
+    let lastIntent: CheckoutIntent | null = null;
+    effect(() => {
+      const intent = this.effectiveIntent();
+      untracked(() => {
+        if (lastIntent !== null && lastIntent !== intent) {
+          this.paymentResetKey.update((k) => k + 1);
+        }
+        lastIntent = intent;
       });
     });
 
@@ -909,12 +860,6 @@ export class PosCheckoutShellComponent {
       }
     });
 
-    // Auto-clear the address-error flash once the captured address becomes valid.
-    effect(() => {
-      if (this.addressValid()) {
-        untracked(() => this.showAddressErrors.set(false));
-      }
-    });
   }
 
   private syncAnonymousSaleState(): void {
@@ -940,13 +885,10 @@ export class PosCheckoutShellComponent {
   private resetState(): void {
     this.currentStep.set(0);
     this.clienteSubStep.set(0);
+    this.entregaChoice.set('llevar');
     this.userOverrideAnonymous.set(null);
     // QUI-737 (B.4) — limpiar el alias para la próxima venta.
     this.customerAlias.set('');
-    this.capturedAddress.set(null);
-    this.addressValid.set(false);
-    this.capturedAddressId.set(null);
-    this.showAddressErrors.set(false);
     this.showCustomerError.set(false);
     this.submittingDraft.set(false);
     // CP-POS-MODAL-SCOPE-001 / Phase F.10 — drop the post-edit payment mode
@@ -987,13 +929,13 @@ export class PosCheckoutShellComponent {
   attemptNextStep(opts?: { source?: 'arrows' | 'enter' | 'button' }): void {
     const key = this.currentStepKey();
 
-    // ── Consumo: avance validado (C.2) — nunca salta fulfillment/mesa ─────────
-    if (key === 'consumo') {
-      this.advanceConsumo();
+    // ── Entrega: avance validado — nunca salta fulfillment/mesa ─────────────
+    if (key === 'entrega') {
+      this.advanceEntrega();
       return;
     }
 
-    // ── Cliente: sub-flujo obligatorio (Tipo → Cliente → Dirección) ──────────
+    // ── Cliente: sub-flujo obligatorio (Tipo → Cliente) ──────────
     if (key === 'cliente' && !this.isAnonymousSale()) {
       const sub = this.clienteSubStep();
       // Tipo → Cliente (con-cliente ya elegido en este sub-paso).
@@ -1001,7 +943,7 @@ export class PosCheckoutShellComponent {
         this.goToClienteSubStep(1);
         return;
       }
-      // Cliente → en delivery exige cliente antes de la Dirección.
+      // Cliente
       if (sub === 1) {
         // QUI-737 (B.4) — sub-paso "Alias": falta el texto del alias.
         if (this.saleMode() === 'alias') {
@@ -1043,54 +985,31 @@ export class PosCheckoutShellComponent {
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe((resolved) => {
               if (!resolved) return; // toast ya emitido por el selector.
-              // IMPORTANT — DO NOT recurse into `attemptNextStep()` here:
-              // the parent's `cartService.setCustomer()` is async (HTTP), so
-              // `cartState().customer` is still null when this subscribe
-              // fires, and the recursion would re-enter the resolve branch
-              // with an empty form (silent failure, no advance). The
-              // shell's `onSelectCustomerAndAdvance` already moved the
-              // sub-step synchronously (to 2 for delivery, kept at 1 for
-              // pickup), so we can advance based on `clienteSubStep()` here.
-              if (this.requiresAddress()) {
-                // Delivery: stay at sub-step 2 (Dirección). User must fill
-                // the address before clicking Siguiente again.
-                return;
-              }
-              // Pickup (no delivery): sub stayed at 1. Advance to Cobro.
               this.nextStep();
             });
           return;
         }
 
-        if (this.requiresAddress()) {
-          this.goToClienteSubStep(2);
-          return;
-        }
-        // Pickup con-cliente: Cliente es el sub-paso terminal. Si llegamos
-        // acá con cliente cargado, el resolve ya surtió efecto — avanzamos.
-        // (La rama customerRequired+!customer ya quedó cubierta arriba con el
-        // resolveIfNeeded.)
+        // Cliente ya seleccionado → avanzamos.
         this.nextStep();
-        return;
-      }
-      // Dirección → exige dirección válida (con teléfono) antes de avanzar.
-      if (sub === 2 && this.requiresAddress() && !this.addressValid()) {
-        this.showAddressErrors.set(true);
-        // Lleva el foco/viewport al primer campo inválido (ej. teléfono, que
-        // en pantallas chicas queda fuera de vista). Reusa el utilitario del
-        // fiscal-wizard; el navegador hace scroll nativo al enfocar.
-        focusFirstInvalid(this.host);
         return;
       }
       this.nextStep();
       return;
     }
 
-    // ── Envío: exige método + dirección/costo válidos antes de Cobro ─────────
+    // ── Envío: sub-wizard de envío (Método → [Dirección] → Costo) ───────────
     if (key === 'envio') {
       const ship = this.shippingStep();
-      if (!ship?.canConfirm()) {
-        ship?.flashValidation();
+      if (!ship) {
+        this.nextStep();
+        return;
+      }
+      if (!ship.attemptNextSubStep()) {
+        return;
+      }
+      if (!ship.canConfirm()) {
+        ship.flashValidation();
         return;
       }
       this.nextStep();
@@ -1138,8 +1057,35 @@ export class PosCheckoutShellComponent {
     focusFirstInvalid(this.host);
   }
 
-  /** Wizard: go back one top-level step (no-op before the first; forward state preserved). */
+  /** Wizard: go back one sub-step or top-level step (no-op before the first; forward state preserved). */
   prevStep(): void {
+    const key = this.currentStepKey();
+
+    if (key === 'cobro') {
+      if (this.paymentStep()?.attemptPrevSubStep()) {
+        return;
+      }
+      this.goToStep(this.currentStep() - 1);
+      return;
+    }
+
+    if (key === 'envio') {
+      if (this.shippingStep()?.attemptPrevSubStep()) {
+        return;
+      }
+      this.goToStep(this.currentStep() - 1);
+      return;
+    }
+
+    if (key === 'cliente') {
+      if (!this.isAnonymousSale() && this.clienteSubStep() > 0) {
+        this.goToClienteSubStep(this.clienteSubStep() - 1);
+        return;
+      }
+      this.goToStep(this.currentStep() - 1);
+      return;
+    }
+
     this.goToStep(this.currentStep() - 1);
   }
 
@@ -1306,6 +1252,11 @@ export class PosCheckoutShellComponent {
     // and network retries; first call wins, retries get the cached Order).
     const idempotencyKey = `editor:${orderId}:${Date.now()}`;
 
+    const shipping =
+      this.entregaChoice() === 'enviar'
+        ? this.shippingStep()?.buildShippingContext()
+        : null;
+
     this.submittingDraft.set(true);
     this.ordersService
       .updateOrderFromEditor(String(orderId), {
@@ -1323,6 +1274,18 @@ export class PosCheckoutShellComponent {
           .filter((id: any) => typeof id === 'number'),
         coupon_code: state.appliedCoupon?.code ?? undefined,
         idempotency_key: idempotencyKey,
+        ...(shipping
+          ? {
+              delivery_type: (shipping.deliveryType || 'home_delivery') as any,
+              shipping_address_id: shipping.shippingAddressId ?? undefined,
+              shipping_method_id: shipping.shippingMethodId ?? undefined,
+              shipping_cost: shipping.shippingCost,
+            }
+          : this.entregaChoice() === 'llevar' || this.entregaChoice() === 'mesa'
+            ? {
+                delivery_type: 'pickup' as any,
+              }
+            : {}),
       } as any)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -1369,7 +1332,7 @@ export class PosCheckoutShellComponent {
 
   onConfirm(): void {
     // pickup (B1): the Cobro step self-executes (autoExecute=true).
-    if (this.checkoutIntent() !== 'delivery') {
+    if (this.effectiveIntent() !== 'delivery') {
       // CP-POS-MODAL-SCOPE-001 / Phase F.10 — the cashier enters the Cobro
       // step and the collector's sub-wizard (Forma → Método → Monto) may
       // still have pending sub-steps, OR the Monto sub-step may hold a
@@ -1577,6 +1540,14 @@ export class PosCheckoutShellComponent {
   @HostListener('keydown', ['$event'])
   onShellKeydown(event: KeyboardEvent): void {
     if (!this.isOpen() || event.defaultPrevented) return;
+    // Stitch 11b (5): corrección de la trampa de Tab ANTES del guard de
+    // procesamiento — el foco debe envolverse aunque el footer esté
+    // deshabilitado. Corre en el host (burbuja) antes del listener de
+    // document del modal, así que el wrap visible gana siempre.
+    if (event.key === 'Tab') {
+      this.trapTabToVisible(event);
+      return;
+    }
     if (this.footerProcessing()) return;
     const target = event.target as HTMLElement | null;
     const tag = target?.tagName;
@@ -1632,6 +1603,59 @@ export class PosCheckoutShellComponent {
   }
 
   /**
+   * Stitch 11b (5) — wrap de Tab sobre focuseables VISIBLES del diálogo.
+   *
+   * El trap de `app-modal` (compartido, fuera de alcance) calcula primero/
+   * último con `querySelectorAll` + `tabIndex !== -1`, que INCLUYE nodos con
+   * `display:none`: en desktop su "último" es el CTA del footer móvil oculto,
+   * así que tabular desde Siguiente no envuelve y el foco cae a BODY. Este
+   * handler corre antes (burbuja en el host vs. document del modal) y envuelve
+   * primero↔último visibles; el del modal resulta no-op porque el activo ya
+   * cambió. Si el Tab nace en un diálogo anidado (ej. picker de mesa), se
+   * cede: ese diálogo es dueño de su propio Tab.
+   */
+  private trapTabToVisible(event: KeyboardEvent): void {
+    const root = this.host.nativeElement as HTMLElement | null;
+    const target = event.target as HTMLElement | null;
+    if (!root || !target) return;
+    const shellDialog =
+      (root.querySelector('[role="dialog"]') as HTMLElement | null) ?? root;
+    const targetDialog = target.closest?.('[role="dialog"]');
+    if (targetDialog && targetDialog !== shellDialog) return;
+    const focusables = Array.from(
+      shellDialog.querySelectorAll<HTMLElement>(
+        'a[href],' +
+          'button:not([disabled]),' +
+          'input:not([disabled]),' +
+          'select:not([disabled]),' +
+          'textarea:not([disabled]),' +
+          '[tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter(
+      (el) =>
+        !el.hasAttribute('disabled') &&
+        el.tabIndex !== -1 &&
+        isRenderedVisible(el),
+    );
+    if (focusables.length === 0) {
+      event.preventDefault();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (event.shiftKey) {
+      if (active === first) {
+        event.preventDefault();
+        last.focus();
+      }
+    } else if (active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  /**
    * Lleva el foco al panel del paso activo tras navegar con teclado (ADR-4).
    * Diferido un tick: las clases `.step-hidden` se actualizan con el ciclo de
    * detección posterior al set de la señal.
@@ -1646,30 +1670,29 @@ export class PosCheckoutShellComponent {
   }
 
   /**
-   * Avance por teclado/click del paso Consumo (C.2): replica la semántica de
-   * `onFulfillmentReselected` sin emitir `advanceRequested` (evita recursión
-   * con `attemptNextStep`). Entrega avanza; consumo sin mesa abre el picker;
-   * con mesa avanza. Nunca salta la mesa en silencio.
+   * Avance por teclado/click del paso Entrega: si la opción es mesa y no tiene
+   * mesa seleccionada, abre el picker de mesa; en cualquier otro caso avanza.
    */
-  private advanceConsumo(): void {
-    const step = this.consumoStep();
-    const fulfillment = step?.fulfillment() ?? 'entrega';
-    if (fulfillment !== 'consumo') {
-      this.nextStep();
-      return;
-    }
-    if (step && step.needsTable()) {
-      step.openTablePicker.set(true);
-      return;
+  private advanceEntrega(): void {
+    const step = this.entregaStep();
+    const choice = this.entregaChoice();
+    if (choice === 'mesa') {
+      if (step && step.needsTable()) {
+        step.openTablePicker.set(true);
+        return;
+      }
     }
     this.nextStep();
   }
 
-  /** Cliente elegido/creado: preserva la lógica de selectCustomer y avanza. */
+  onEntregaChoiceChange(choice: EntregaChoice): void {
+    this.entregaChoice.set(choice);
+  }
+
+  /** Cliente elegido/creado: preserva la lógica de selectCustomer y avanza al siguiente paso. */
   onSelectCustomerAndAdvance(customer: PosCustomer): void {
     this.selectCustomer(customer);
-    // Delivery → sub-paso Dirección (2); sin delivery Cliente es terminal (clamp a 1).
-    this.goToClienteSubStep(this.requiresAddress() ? 2 : 1);
+    this.nextStep();
   }
 
   // ── Cliente step handlers ───────────────────────────────────────────────
@@ -1702,63 +1725,11 @@ export class PosCheckoutShellComponent {
     this.showCustomerError.set(false);
     // El padre (POS) es dueño del carrito; solo re-emitimos.
     this.customerSelected.emit(customer);
-    // Derive the customer's saved primary-address id so the Envío step reuses it
-    // (null → the shipping step will create the captured address).
-    const addresses = customer.addresses;
-    const primary = addresses?.find((a) => a.is_primary) ?? addresses?.[0];
-    this.capturedAddressId.set(primary?.id ?? null);
-
-    // Seed the captured address from the customer's saved primary address so the
-    // delivery gate is not blocked before the operator touches the form.
-    // `app-address-form-fields` prefills via patchValue({emitEvent:false}) and
-    // never emits addressChange/validChange on hydration, so `capturedAddress`
-    // would otherwise stay null for an existing customer with a saved address.
-    // We derive from the `customer` argument (NOT cartState(), which is still
-    // stale here — the parent has not propagated the new customer yet).
-    if (this.requiresAddress() && primary) {
-      const seeded: AddressPayload = {
-        address_line1: primary.address_line1 ?? null,
-        address_line2: null,
-        city: primary.city ?? null,
-        state_province: primary.state_province ?? null,
-        country_code: primary.country_code ?? 'CO',
-        postal_code: null,
-        phone_number: customer.phone ?? null,
-        latitude: null,
-        longitude: null,
-      };
-      this.capturedAddress.set(seeded);
-      // Delivery requires a phone too (requirePhone on the form-fields). The
-      // form prefills silently (no validChange on hydration), so seed the gate
-      // consistently — phone included — to avoid a stale "valid" that would let
-      // the operator skip an incomplete address.
-      this.addressValid.set(
-        !!(seeded.address_line1 && seeded.city && seeded.phone_number),
-      );
-    } else {
-      // CP-pos-customer-stale (F-005/F-009) — cualquier cambio de identidad
-      // descarta el estado de dirección previo: en delivery sin primaria el
-      // sub-paso exige captura fresca, y en pickup evita que un flip posterior
-      // a delivery reutilice la dirección de A para B.
-      this.capturedAddress.set(null);
-      this.addressValid.set(false);
-    }
-  }
-
-  /** Live address payload from the shell-mounted `app-address-form-fields`. */
-  onShellAddressChange(a: AddressPayload): void {
-    this.capturedAddress.set(a);
   }
 
   /** "Quitar cliente / venta anónima" desde el selector inline. */
   onCustomerCleared(): void {
     this.toggleAnonymousSale(true);
-    // CP-pos-customer-stale (F-006/F-009) — la etiqueta no basta: el padre es
-    // dueño del carro y debe desvincular al cliente; la dirección capturada de
-    // A tampoco sobrevive a la venta anónima.
-    this.capturedAddressId.set(null);
-    this.capturedAddress.set(null);
-    this.addressValid.set(false);
     this.customerCleared.emit();
   }
 
@@ -1822,7 +1793,7 @@ export class PosCheckoutShellComponent {
     // la mesa abierta (o abrirían una) y descartarían método, costo, dirección
     // y notas del envío. Se guarda como borrador con su contexto de envío; la
     // cocina se dispara al cobrarlo, igual que en la venta directa.
-    if (this.checkoutIntent() === 'delivery') {
+    if (this.effectiveIntent() === 'delivery') {
       this.createRetailDraft(state, this.shippingStep()?.buildShippingContext() ?? null);
       return;
     }
@@ -2083,14 +2054,14 @@ export class PosCheckoutShellComponent {
     orderItemIds: number[],
     firedToKitchen: boolean,
   ): void {
-    const fulfillment: FulfillmentType | null = this.showConsumoStep()
-      ? (this.consumoStep()?.fulfillment() ?? null)
-      : null;
+    const choice = this.entregaChoice();
+    const fulfillment: FulfillmentType | null =
+      choice === 'mesa' ? 'consumo' : choice === 'llevar' ? 'entrega' : null;
     // La sesión realmente abierta es la verdad de dónde quedó el borrador; si no
     // hay ninguna, la mesa que eligió el operador.
     const tableId =
       this.integration.currentTableSession()?.table_id ??
-      this.consumoStep()?.effectiveTableId() ??
+      this.entregaStep()?.effectiveTableId() ??
       this.tableId() ??
       null;
 
@@ -2192,4 +2163,15 @@ export class PosCheckoutShellComponent {
     this.isOpenChange.emit(false);
     this.closed.emit();
   }
+}
+
+/**
+ * Stitch 11b (5) — visibilidad renderizada para el trap de Tab: excluye
+ * `display:none` (sin rects, incluye ancestros ocultos) y
+ * `visibility:hidden` (conserva rects pero no es focuseable por teclado).
+ */
+function isRenderedVisible(el: HTMLElement): boolean {
+  if (el.getClientRects().length === 0) return false;
+  const style = getComputedStyle(el);
+  return style.visibility !== 'hidden' && style.display !== 'none';
 }

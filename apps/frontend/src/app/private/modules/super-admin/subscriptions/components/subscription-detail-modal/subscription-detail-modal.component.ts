@@ -12,7 +12,6 @@ import { CommonModule, CurrencyPipe, DatePipe, JsonPipe } from '@angular/common'
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ModalComponent,
-  BadgeComponent,
   IconComponent,
   ButtonComponent,
   TimelineComponent,
@@ -31,7 +30,6 @@ import { SubscriptionAdminService } from '../../services/subscription-admin.serv
   imports: [
     CommonModule,
     ModalComponent,
-    BadgeComponent,
     IconComponent,
     ButtonComponent,
     TimelineComponent,

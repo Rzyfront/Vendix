@@ -29,6 +29,7 @@ import { SuperadminAccountingModule } from './accounting/superadmin-accounting.m
 import { SuperadminFiscalOperationsModule } from './fiscal-operations/superadmin-fiscal-operations.module';
 import { SuperadminInvoicingModule } from './invoicing/superadmin-invoicing.module';
 import { SuperadminTenantConfigModule } from './tenant-config/superadmin-tenant-config.module';
+import { VideoLibraryAdminModule } from './video-library/video-library-admin.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { SuperadminTenantConfigModule } from './tenant-config/superadmin-tenant-
     SuperadminSupportModule,
     AIEngineConfigModule,
     HelpCenterAdminModule,
+    VideoLibraryAdminModule,
     MonitoringModule,
     BackupModule,
     PayrollDefaultsModule,

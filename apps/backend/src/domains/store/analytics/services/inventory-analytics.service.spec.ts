@@ -12,6 +12,8 @@ type MockStorePrismaService = {
   products: { findMany: jest.Mock };
   store_settings: { findFirst: jest.Mock };
   inventory_movements: { findMany: jest.Mock };
+  supplier_products: { findMany: jest.Mock };
+  $queryRaw: jest.Mock;
   withoutScope: jest.Mock;
 } & Partial<StorePrismaService>;
 
@@ -43,7 +45,11 @@ describe('InventoryAnalyticsService', () => {
       // null -> DEFAULT_STORE_TIMEZONE ('America/Bogota') + default settings.
       store_settings: { findFirst: jest.fn().mockResolvedValue(null) },
       inventory_movements: { findMany: jest.fn() },
-      withoutScope: jest.fn(),
+      supplier_products: { findMany: jest.fn().mockResolvedValue([]) },
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      withoutScope: jest.fn().mockReturnValue({
+        $queryRaw: jest.fn().mockResolvedValue([]),
+      }),
     } as MockStorePrismaService;
 
     jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
@@ -190,7 +196,7 @@ describe('InventoryAnalyticsService', () => {
           name: 'Muestra Gratis',
           sku: 'SAMPLE-1',
           product_images: [],
-          stock_quantity: 3,
+          stock_quantity: 1,
           cost_price: 0, // costo cero explícito
           min_stock_level: 1,
           reorder_point: 2,
@@ -492,59 +498,404 @@ describe('InventoryAnalyticsService', () => {
 
   // ==================== QUI-550: GET-INVENTORY-BY-SUPPLIER-FOR-EXPORT ====================
 
-  describe('getInventoryBySupplierForExport (QUI-550)', () => {
-    // Cobertura mínima del nuevo método flat-array introducido por QUI-550.
-    // Verifica la forma del retorno y que tolere tiendas sin productos.
-    it('returns a flat array grouped by supplier with product_count, total_stock, total_value', async () => {
-      prisma.products.findMany.mockResolvedValue([
-        {
+  // ==================== QUI-550: INVENTORY BY SUPPLIER REPORT ====================
+
+  describe('Inventory by Supplier Report (QUI-550)', () => {
+    const sampleLinks = [
+      {
+        supplier_id: 10,
+        product_id: 1,
+        cost_per_unit: 1500,
+        is_preferred: true,
+        suppliers: {
+          id: 10,
+          name: 'Distribuidora Andina',
+          code: 'AND',
+          tax_id: '900123456',
+          verification_digit: '1',
+        },
+        products: {
           id: 1,
-          name: 'Coca-Cola 350ml',
-          sku: 'CC350',
+          name: 'Producto A',
+          sku: 'SKU-A',
           stock_quantity: 100,
           cost_price: 1500,
-          primary_supplier_id: 10,
-          primary_supplier: { id: 10, name: 'Distribuidora Andina' },
         },
-        {
+      },
+      {
+        supplier_id: 10,
+        product_id: 2,
+        cost_per_unit: 800,
+        is_preferred: true,
+        suppliers: {
+          id: 10,
+          name: 'Distribuidora Andina',
+          code: 'AND',
+          tax_id: '900123456',
+          verification_digit: '1',
+        },
+        products: {
           id: 2,
-          name: 'Galletas Festival',
-          sku: 'GAL-FES',
+          name: 'Producto B',
+          sku: 'SKU-B',
           stock_quantity: 50,
           cost_price: 800,
-          primary_supplier_id: 10,
-          primary_supplier: { id: 10, name: 'Distribuidora Andina' },
         },
-        {
+      },
+      {
+        supplier_id: 20,
+        product_id: 3,
+        cost_per_unit: 2000,
+        is_preferred: true,
+        suppliers: {
+          id: 20,
+          name: 'Post Colombiano SA',
+          code: 'COL',
+          tax_id: null,
+          verification_digit: null,
+        },
+        products: {
           id: 3,
-          name: 'Chocorramo',
-          sku: 'CHOCO',
+          name: 'Producto C',
+          sku: 'SKU-C',
           stock_quantity: 200,
           cost_price: 2000,
-          primary_supplier_id: 20,
-          primary_supplier: { id: 20, name: 'Post Colombiano SA' },
         },
-      ] as any);
+      },
+    ];
 
-      const rows = await service.getInventoryBySupplierForExport({
-        storeId: 1,
-      } as any);
+    describe('getInventoryBySupplier (preview / pagination)', () => {
+      it('returns paginated data with calculated fields, document formatting and aggregated totals', async () => {
+        prisma.supplier_products.findMany.mockResolvedValue(sampleLinks as any);
 
-      expect(Array.isArray(rows)).toBe(true);
-      const andina = rows.find((r) => r.supplier_id === 10);
-      expect(andina).toBeDefined();
-      expect(andina!.product_count).toBe(2);
-      expect(andina!.total_stock_quantity).toBe(150);
-      // total_stock_value = 100*1500 + 50*800 = 190000
-      expect(andina!.total_stock_value).toBe(190000);
+        const result = await service.getInventoryBySupplier({
+          page: 1,
+          limit: 10,
+        } as any);
+
+        expect(result).toBeDefined();
+        expect(result.data).toHaveLength(2);
+
+        // First item sorted by total_stock_value descending: Post Colombiano (400000)
+        const col = result.data.find((r) => r.supplier_id === 20);
+        expect(col).toBeDefined();
+        expect(col!.supplier_name).toBe('Post Colombiano SA');
+        expect(col!.supplier_document).toBe('COL'); // Fallback to code when tax_id is null
+        expect(col!.product_count).toBe(1);
+        expect(col!.total_units_on_hand).toBe(200);
+        expect(col!.total_units_reserved).toBe(0);
+        expect(col!.total_units_available).toBe(200);
+        expect(col!.total_stock_value).toBe(400000);
+        expect(col!.avg_unit_cost).toBe(2000);
+        expect(col!.top_product_name).toBe('Producto C');
+
+        // Second item: Distribuidora Andina (190000)
+        const andina = result.data.find((r) => r.supplier_id === 10);
+        expect(andina).toBeDefined();
+        expect(andina!.supplier_name).toBe('Distribuidora Andina');
+        expect(andina!.supplier_document).toBe('900123456-1'); // Formatted tax_id + verification_digit
+        expect(andina!.product_count).toBe(2);
+        expect(andina!.total_units_on_hand).toBe(150);
+        expect(andina!.total_units_reserved).toBe(0);
+        expect(andina!.total_units_available).toBe(150);
+        // total_stock_value = (100 * 1500) + (50 * 800) = 150000 + 40000 = 190000
+        expect(andina!.total_stock_value).toBe(190000);
+        // avg_unit_cost = 190000 / 150 = 1266.67
+        expect(andina!.avg_unit_cost).toBe(1266.67);
+        // Top product: Producto A (value 150000 vs 40000)
+        expect(andina!.top_product_name).toBe('Producto A');
+
+        // Metadata and global totals
+        expect(result.meta.pagination.total).toBe(2);
+        expect(result.meta.pagination.page).toBe(1);
+        expect(result.meta.pagination.limit).toBe(10);
+        expect(result.meta.totals.product_count).toBe(3);
+        expect(result.meta.totals.total_units_on_hand).toBe(350);
+        expect(result.meta.totals.total_units_available).toBe(350);
+        expect(result.meta.totals.total_stock_value).toBe(590000);
+      });
+
+      it('filters rows by search term across supplier name and document', async () => {
+        prisma.supplier_products.findMany.mockResolvedValue(sampleLinks as any);
+
+        const result = await service.getInventoryBySupplier({
+          search: 'Andina',
+        } as any);
+
+        expect(result.data).toHaveLength(1);
+        expect(result.data[0].supplier_name).toBe('Distribuidora Andina');
+        expect(result.meta.totals.total_stock_value).toBe(190000);
+      });
+
+      it('paginates correctly when limit is smaller than total rows', async () => {
+        prisma.supplier_products.findMany.mockResolvedValue(sampleLinks as any);
+
+        const result = await service.getInventoryBySupplier({
+          page: 2,
+          limit: 1,
+        } as any);
+
+        expect(result.data).toHaveLength(1);
+        expect(result.meta.pagination.page).toBe(2);
+        expect(result.meta.pagination.limit).toBe(1);
+        expect(result.meta.pagination.total).toBe(2);
+        expect(result.meta.pagination.totalPages).toBe(2);
+        expect(result.meta.pagination.hasNextPage).toBe(false);
+        expect(result.meta.pagination.hasPreviousPage).toBe(true);
+      });
+
+      it('returns empty dataset with zero totals when no products are found', async () => {
+        prisma.supplier_products.findMany.mockResolvedValue([]);
+
+        const result = await service.getInventoryBySupplier({} as any);
+
+        expect(result.data).toEqual([]);
+        expect(result.meta.pagination.total).toBe(0);
+        expect(result.meta.totals).toEqual({
+          product_count: 0,
+          total_units_on_hand: 0,
+          total_units_reserved: 0,
+          total_units_available: 0,
+          total_stock_value: 0,
+        });
+      });
+
+      it('resolves supplier from purchase orders when supplier_products is empty', async () => {
+        prisma.supplier_products.findMany.mockResolvedValue([]);
+
+        const mockWithoutScope = {
+          $queryRaw: jest.fn().mockImplementation((queryArg: any) => {
+            const sql = queryArg?.strings?.join(' ') ?? '';
+            if (sql.includes('purchase_order_items')) {
+              return Promise.resolve([
+                {
+                  supplier_id: 30,
+                  product_id: 5,
+                  cost_per_unit: 25000,
+                  s_id: 30,
+                  s_name: 'Proveedor Directo POP',
+                  s_code: 'PDP',
+                  s_tax_id: '800555666',
+                  s_verification_digit: '7',
+                  p_id: 5,
+                  p_name: 'Repuesto Moto X',
+                  p_sku: 'RMX-001',
+                  p_stock_quantity: 4,
+                  p_cost_price: 25000,
+                },
+              ]);
+            }
+            if (sql.includes('stock_levels')) {
+              return Promise.resolve([
+                {
+                  product_id: 5,
+                  on_hand: 4,
+                  reserved: 1,
+                  available: 3,
+                  cost_per_unit: 25000,
+                },
+              ]);
+            }
+            return Promise.resolve([]);
+          }),
+        };
+        (prisma as any).withoutScope.mockReturnValue(mockWithoutScope);
+
+        const result = await service.getInventoryBySupplier({} as any);
+
+        expect(result.data).toHaveLength(1);
+        const row = result.data[0];
+        expect(row.supplier_id).toBe(30);
+        expect(row.supplier_name).toBe('Proveedor Directo POP');
+        expect(row.supplier_document).toBe('800555666-7');
+        expect(row.product_count).toBe(1);
+        expect(row.total_units_on_hand).toBe(4);
+        expect(row.total_units_reserved).toBe(1);
+        expect(row.total_units_available).toBe(3);
+        expect(row.total_stock_value).toBe(100000);
+        expect(row.avg_unit_cost).toBe(25000);
+        expect(row.top_product_name).toBe('Repuesto Moto X');
+      });
     });
 
-    it('returns an empty array when there are no products, without throwing', async () => {
-      prisma.products.findMany.mockResolvedValue([] as any);
-      const rows = await service.getInventoryBySupplierForExport({
-        storeId: 1,
+    describe('getInventoryBySupplierForExport (complete dataset)', () => {
+      it('returns unpaginated rows and totals for export', async () => {
+        prisma.supplier_products.findMany.mockResolvedValue(sampleLinks as any);
+
+        const result = await service.getInventoryBySupplierForExport({} as any);
+
+        expect(result.rows).toHaveLength(2);
+        expect(result.totals.total_stock_value).toBe(590000);
+        expect(result.totals.total_units_on_hand).toBe(350);
+      });
+
+      it('incorporates stock_levels quantities and costs when available', async () => {
+        prisma.supplier_products.findMany.mockResolvedValue([
+          sampleLinks[0], // Product 1
+        ] as any);
+
+        // Mock stock_levels query via withoutScope().$queryRaw
+        const mockWithoutScope = {
+          $queryRaw: jest.fn().mockResolvedValue([
+            {
+              product_id: 1,
+              on_hand: 80,
+              reserved: 10,
+              available: 70,
+              cost_per_unit: 1400,
+            },
+          ]),
+        };
+        (prisma as any).withoutScope.mockReturnValue(mockWithoutScope);
+
+        const result = await service.getInventoryBySupplierForExport({} as any);
+
+        expect(result.rows).toHaveLength(1);
+        const row = result.rows[0];
+        expect(row.total_units_on_hand).toBe(80);
+        expect(row.total_units_reserved).toBe(10);
+        expect(row.total_units_available).toBe(70);
+        expect(row.total_stock_value).toBe(80 * 1400); // 112000
+        expect(row.avg_unit_cost).toBe(1400);
+      });
+    });
+  });
+
+  // ==================== INGREDIENT CONSUMPTION ====================
+
+  describe('getIngredientConsumption & getIngredientConsumptionForExport', () => {
+    const rawConsumptionRows = [
+      {
+        ingredient_id: 7,
+        ingredient_name: 'Pechuga de Pollo',
+        ingredient_sku: 'POLLO-01',
+        ingredient_unit: 'kg',
+        dish_id: 30,
+        dish_name: 'Barril Pollo',
+        transaction_count: 5,
+        orders_count: 5,
+        dish_quantity: '10',
+        consumed_quantity: '5.5',
+        avg_unit_cost: '18000',
+        total_cost: '99000',
+      },
+      {
+        ingredient_id: 7,
+        ingredient_name: 'Pechuga de Pollo',
+        ingredient_sku: 'POLLO-01',
+        ingredient_unit: 'kg',
+        dish_id: 31,
+        dish_name: 'Barril Mixto',
+        transaction_count: 3,
+        orders_count: 3,
+        dish_quantity: '5',
+        consumed_quantity: '2.5',
+        avg_unit_cost: '18000',
+        total_cost: '45000',
+      },
+      {
+        ingredient_id: 15,
+        ingredient_name: 'Papas Francesas',
+        ingredient_sku: 'PAPA-01',
+        ingredient_unit: 'kg',
+        dish_id: 30,
+        dish_name: 'Barril Pollo',
+        transaction_count: 5,
+        orders_count: 5,
+        dish_quantity: '10',
+        consumed_quantity: '4',
+        avg_unit_cost: '5000',
+        total_cost: '20000',
+      },
+    ];
+
+    it('returns ingredient consumption grouped by ingredient by default', async () => {
+      const queryRawMock = jest.fn().mockResolvedValue(rawConsumptionRows);
+      prisma.withoutScope.mockReturnValue({
+        $queryRaw: queryRawMock,
+      });
+
+      const result = await service.getIngredientConsumption({
+        date_from: '2026-09-01',
+        date_to: '2026-09-14',
       } as any);
-      expect(rows).toEqual([]);
+
+      expect(result.data).toHaveLength(3);
+      expect(result.data[0].section).toBe('Pechuga de Pollo (kg)');
+      expect(result.data[0].ingredient_name).toBe('Pechuga de Pollo');
+      expect(result.data[0].dish_name).toBe('Barril Pollo');
+      expect(result.data[0].consumed_quantity).toBe(5.5);
+      expect(result.data[0].total_cost).toBe(99000);
+
+      expect(result.data[2].section).toBe('Papas Francesas (kg)');
+      expect(result.data[2].total_cost).toBe(20000);
+
+      // Meta totals
+      expect(result.meta.totals.total_cost).toBe(164000);
+      expect(result.meta.totals.total_ingredients).toBe(2);
+      expect(result.meta.totals.total_dishes).toBe(2);
+      expect(result.meta.totals.total_movements).toBe(13);
+      expect(result.meta.group_by).toBe('ingredient');
+    });
+
+    it('supports grouping by dish (group_by: "dish")', async () => {
+      const queryRawMock = jest.fn().mockResolvedValue(rawConsumptionRows);
+      prisma.withoutScope.mockReturnValue({
+        $queryRaw: queryRawMock,
+      });
+
+      const result = await service.getIngredientConsumption({
+        date_from: '2026-09-01',
+        date_to: '2026-09-14',
+        group_by: 'dish',
+      } as any);
+
+      expect(result.data).toHaveLength(3);
+      expect(result.data[0].section).toBe('Barril Pollo (10 prep.)');
+      expect(result.data[1].section).toBe('Barril Mixto (5 prep.)');
+      expect(result.meta.group_by).toBe('dish');
+    });
+
+    it('rejects with STORE_CONTEXT_001 when store_id is missing', async () => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        organization_id: 1,
+        store_id: undefined,
+      } as any);
+
+      await expect(service.getIngredientConsumption({} as any)).rejects.toThrow(
+        VendixHttpException,
+      );
+    });
+
+    it('getIngredientConsumptionForExport returns two sheets (summaryRows and detailRows)', async () => {
+      const queryRawMock = jest.fn().mockResolvedValue(rawConsumptionRows);
+      prisma.withoutScope.mockReturnValue({
+        $queryRaw: queryRawMock,
+      });
+
+      const result = await service.getIngredientConsumptionForExport({
+        date_from: '2026-09-01',
+        date_to: '2026-09-14',
+      } as any);
+
+      expect(result.summaryRows).toHaveLength(2);
+      const polloSummary = result.summaryRows.find(
+        (s) => s.ingredient_name === 'Pechuga de Pollo',
+      );
+      expect(polloSummary).toBeDefined();
+      expect(polloSummary!.total_consumed).toBe(8);
+      expect(polloSummary!.total_cost).toBe(144000);
+      expect(polloSummary!.associated_dishes).toContain('Barril Pollo');
+      expect(polloSummary!.associated_dishes).toContain('Barril Mixto');
+
+      const papaSummary = result.summaryRows.find(
+        (s) => s.ingredient_name === 'Papas Francesas',
+      );
+      expect(papaSummary).toBeDefined();
+      expect(papaSummary!.total_consumed).toBe(4);
+      expect(papaSummary!.total_cost).toBe(20000);
+
+      expect(result.detailRows).toHaveLength(3);
     });
   });
 });

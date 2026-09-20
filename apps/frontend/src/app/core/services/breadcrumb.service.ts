@@ -428,6 +428,24 @@ export class BreadcrumbService {
       parent: 'Super Admin',
       icon: 'eye',
     },
+    {
+      path: '/super-admin/video-library',
+      title: 'Biblioteca de Videos',
+      parent: 'Super Admin',
+      icon: 'video',
+    },
+    {
+      path: '/super-admin/video-library/new',
+      title: 'Publicar Video',
+      parent: 'Biblioteca de Videos',
+      icon: 'plus',
+    },
+    {
+      path: '/super-admin/video-library/:id/edit',
+      title: 'Editar Video',
+      parent: 'Biblioteca de Videos',
+      icon: 'edit',
+    },
 
     // Admin - Organization Admin Routes
     { path: '/admin', title: 'Panel Administrativo', icon: 'settings' },
@@ -1147,6 +1165,18 @@ export class BreadcrumbService {
       title: 'Artículo de Ayuda',
       parent: 'Centro de Ayuda',
       icon: 'file-text',
+    },
+    {
+      path: '/admin/help/videos',
+      title: 'Videos de Capacitación',
+      parent: 'Ayuda',
+      icon: 'video',
+    },
+    {
+      path: '/admin/help/videos/:slug',
+      title: 'Video',
+      parent: 'Videos de Capacitación',
+      icon: 'play-circle',
     },
 
     // PQRs (Peticiones, Quejas y Reclamos) — visible as "PQRS" in the

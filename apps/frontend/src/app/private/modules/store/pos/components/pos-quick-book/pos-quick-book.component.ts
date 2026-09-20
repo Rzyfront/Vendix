@@ -95,6 +95,10 @@ export class PosQuickBookComponent {
     this.loadAvailability();
   }
 
+  // Matriz de permisos POS→reservations (paso 1 plan POS-stitch; backend:
+  // reservations.controller.ts @Controller('store/reservations')):
+  // - GET /store/reservations/availability/:productId → 'store:reservations:read'
+  // - POST /store/reservations → 'store:reservations:create'
   loadAvailability() {
     const service = this.selectedService();
     const date = this.selectedDate();
@@ -233,5 +237,18 @@ export class PosQuickBookComponent {
     const ampm = hours >= 12 ? 'PM' : 'AM';
     const displayHours = hours % 12 || 12;
     return `${displayHours}:${minutes} ${ampm}`;
+  }
+
+  customerDisplayName(customer: any): string {
+    if (!customer) return '';
+    const full = [customer.first_name, customer.last_name].filter(Boolean).join(' ').trim();
+    return (
+      customer.name?.trim() ||
+      full ||
+      customer.legal_name?.trim() ||
+      customer.business_name?.trim() ||
+      customer.email?.trim() ||
+      'Cliente'
+    );
   }
 }

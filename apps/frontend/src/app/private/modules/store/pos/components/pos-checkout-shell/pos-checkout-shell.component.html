@@ -38,30 +38,39 @@
       </div>
     </div>
 
-    <!-- Stepper desktop (círculos numerados) -->
+    <!-- Stepper desktop (círculos numerados). Stitch paso 5: <nav> con
+         nombre accesible + live region que anuncia "Paso X de N: <etiqueta>"
+         porque app-steps-line (compartido, fuera de alcance) no expone
+         aria-current. Solo presentación: lee señales existentes. -->
     <div class="checkout-stepper">
-      <app-steps-line
-        [steps]="steps()"
-        [currentStep]="currentStep()"
-        [clickable]="false"
-      ></app-steps-line>
+      <nav class="stepper-nav" aria-label="Progreso del checkout">
+        <app-steps-line
+          [steps]="steps()"
+          [currentStep]="currentStep()"
+          [clickable]="false"
+        ></app-steps-line>
+      </nav>
+      <p class="sr-only" aria-live="polite" aria-atomic="true">
+        Paso {{ currentStep() + 1 }} de {{ steps().length }}:
+        {{ steps()[currentStep()]?.label }}
+      </p>
     </div>
 
     <!-- Body: paso activo + resumen (rail) -->
     <div class="checkout-grid">
       <!-- Columna principal: paso activo -->
       <div class="checkout-main">
-        <!-- Paso · Consumo (restaurante ∧ intent ≠ delivery). Se mantiene
-             MONTADO mientras 'consumo' esté en stepKeys para que el shell lea
-             fulfillment()/checkoutTableId()/needsTable(). Elegir mesa aquí NO
-             escribe nada: la mesa se materializa en el cobro (QUI-535). -->
-        @if (stepKeys().includes('consumo')) {
-          <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'consumo'">
-            <app-pos-consumo-step
+        <!-- Paso · Entrega (Consumir / Para llevar / Enviar). Siempre primero
+             (paso 0). Se mantiene MONTADO mientras 'entrega' esté en stepKeys
+             para que el shell lea checkoutTableId()/needsTable(). -->
+        @if (stepKeys().includes('entrega')) {
+          <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'entrega'">
+            <app-pos-entrega-step
               [cartState]="cartState()"
               [tableId]="tableId()"
+              [(choice)]="entregaChoice"
               (advanceRequested)="attemptNextStep()"
-            ></app-pos-consumo-step>
+            ></app-pos-entrega-step>
           </div>
         }
 
@@ -72,10 +81,10 @@
           <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'cobro'">
             <app-pos-payment-step
               [cartState]="cartState()"
-              [checkoutIntent]="checkoutIntent()"
+              [checkoutIntent]="effectiveIntent()"
               [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
               [tableId]="checkoutTableId()"
-              [fulfillment]="consumoStep()?.fulfillment() ?? 'entrega'"
+              [fulfillment]="entregaChoice() === 'mesa' ? 'consumo' : 'entrega'"
               [takeawayOrder]="isTakeawayOrder()"
               [sessionId]="checkoutSessionId()"
               [isAnonymous]="isAnonymousSale()"
@@ -84,8 +93,9 @@
               [paymentMethods]="paymentMethods()"
               [isProcessing]="isProcessing()"
               [editingOrderId]="editingOrderId()"
-              [autoExecute]="mode() !== 'create-draft' && checkoutIntent() === 'pickup'"
+              [autoExecute]="mode() !== 'create-draft' && effectiveIntent() === 'pickup'"
               [amountOverride]="deliveryAmount()"
+              [paymentResetKey]="paymentResetKey()"
               (paymentCompleted)="onCheckoutCompleted($event)"
               (paymentReady)="onPaymentReady($event)"
               (amountConfirmed)="onAmountConfirmed()"
@@ -287,7 +297,7 @@
                         (input)="onAliasInput($event)"
                         placeholder="Ej.: Mesa 5, Juan del taller"
                         aria-label="Nombre o referencia de la venta"
-                        class="w-full rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:border-[var(--color-primary)] focus:outline-none"
+                        class="w-full rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2 text-sm text-text-primary placeholder:text-neutral-600 focus:border-[var(--color-primary)] focus:outline-none"
                       />
                       @if (showCustomerError() && !customerAlias().trim()) {
                         <p class="sale-type-hint sale-type-hint--error">
@@ -339,49 +349,8 @@
                         </p>
                       }
                     </section>
-                  } @else if (clienteSubStep() > 1 && cartState()?.customer) {
-                    <button
-                      type="button"
-                      class="cliente-collapsed"
-                      (click)="goToClienteSubStep(1)"
-                    >
-                      <span class="sw-check"><app-icon name="check" [size]="16"></app-icon></span>
-                      <span class="sw-label">Cliente: {{ customerDisplayName }}</span>
-                      <span class="sw-edit"><app-icon name="pencil" [size]="16"></app-icon></span>
-                    </button>
                   }
                 }
-              }
-
-              <!-- SUB-STEP 2 · Dirección de envío (solo delivery, terminal).
-                   Captura la dirección con app-address-form-fields (mapa +
-                   geocoding). No se colapsa. -->
-              @if (
-                clienteSubStep() === 2 &&
-                requiresAddress() &&
-                !isAnonymousSale() &&
-                cartState()?.customer
-              ) {
-                <section class="cliente-section">
-                  <div class="section-header">
-                    <app-icon name="map-pin" [size]="16" class="section-icon"></app-icon>
-                    <h2 class="section-title">Dirección de envío</h2>
-                    @if (!addressValid()) {
-                      <span
-                        class="addr-required-badge"
-                        [class.addr-required-badge--error]="showAddressErrors()"
-                        >Obligatoria</span
-                      >
-                    }
-                  </div>
-                  <app-address-form-fields
-                    [initialAddress]="customerInitialAddress()"
-                    [requirePhone]="true"
-                    [showErrors]="showAddressErrors()"
-                    (addressChange)="onShellAddressChange($event)"
-                    (validChange)="addressValid.set($event)"
-                  ></app-address-form-fields>
-                </section>
               }
             </div>
 
@@ -398,6 +367,11 @@
                 [clickable]="true"
                 (stepClicked)="goToClienteSubStep($event)"
               ></app-steps-line>
+              <p class="sr-only" aria-live="polite" aria-atomic="true">
+                Sub-paso {{ clienteSubStep() + 1 }} de
+                {{ clienteSubSteps().length }}:
+                {{ clienteSubSteps()[clienteSubStep()]?.label }}
+              </p>
             </aside>
           </div>
         </div>
@@ -409,8 +383,6 @@
           <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'envio'">
             <app-pos-shipping-step
               [cartState]="cartState()"
-              [address]="capturedAddress()"
-              [addressId]="capturedAddressId()"
               (shippingCompleted)="onShippingCompleted($event)"
             ></app-pos-shipping-step>
           </div>
@@ -528,7 +500,7 @@
                 >
               </div>
             }
-            @if (checkoutIntent() === 'delivery') {
+            @if (effectiveIntent() === 'delivery') {
               <div class="summary-row">
                 <span>Envío</span>
                 <span class="summary-value">{{ shippingCost() | currency }}</span>

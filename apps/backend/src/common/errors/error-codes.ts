@@ -5102,6 +5102,37 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Cannot delete category with associated articles',
   },
+  // Video Library
+  VIDEO_NOT_FOUND: {
+    code: 'VIDEO_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Video not found',
+  },
+  VIDEO_CATEGORY_NOT_FOUND: {
+    code: 'VIDEO_CATEGORY_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Video category not found',
+  },
+  VIDEO_CATEGORY_HAS_VIDEOS: {
+    code: 'VIDEO_CATEGORY_HAS_VIDEOS',
+    httpStatus: 409,
+    devMessage: 'Cannot delete category with associated videos',
+  },
+  VIDEO_FILE_REQUIRED: {
+    code: 'VIDEO_FILE_REQUIRED',
+    httpStatus: 400,
+    devMessage: 'Video file is required',
+  },
+  VIDEO_FILE_TYPE_INVALID: {
+    code: 'VIDEO_FILE_TYPE_INVALID',
+    httpStatus: 400,
+    devMessage: 'Only MP4, WebM, MOV and MKV videos are allowed',
+  },
+  VIDEO_FILE_TOO_LARGE: {
+    code: 'VIDEO_FILE_TOO_LARGE',
+    httpStatus: 400,
+    devMessage: 'Video file exceeds maximum allowed size of 200MB',
+  },
   HELP_IMAGE_REQUIRED: {
     code: 'HELP_IMAGE_REQUIRED',
     httpStatus: 400,
