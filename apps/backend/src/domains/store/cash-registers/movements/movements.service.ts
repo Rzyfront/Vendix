@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
@@ -25,11 +26,23 @@ export class MovementsService {
     });
   }
 
+  /**
+   * Movimiento manual de caja (`cash_in` / `cash_out`).
+   *
+   * `amount` acepta `Prisma.Decimal` además de `number` porque hay llamadores
+   * que ya traen el monto en Decimal desde la base — p. ej. el egreso que
+   * `OrderFlowService.cancelOrder` registra al cancelar una venta cobrada en
+   * efectivo, cuya suma sale de `payments.amount` (`Decimal(12,2)`). Obligarlos
+   * a pasar por `number` metería un salto por punto flotante entre la fila y la
+   * columna, justo en el dato que después tiene que cuadrar contra el arqueo.
+   * La columna es `Decimal(12,2)` y Prisma acepta ambos tipos; el `Number(...)`
+   * del evento contable también (decimal.js define `valueOf`).
+   */
   async createManualMovement(
     session_id: number,
     data: {
       type: 'cash_in' | 'cash_out';
-      amount: number;
+      amount: number | Prisma.Decimal;
       reference?: string;
       notes?: string;
     },

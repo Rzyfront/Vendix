@@ -9,6 +9,13 @@ import { PERMISSIONS_KEY } from '../../../auth/decorators/permissions.decorator'
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { PaymentType } from './dto';
+import { Prisma } from '@prisma/client';
+import {
+  createPrismaMock,
+  mockRequestContext,
+  PrismaMock,
+} from 'src/testing/prisma-mock';
+import { buildOrder, buildPayment } from 'src/testing/money-fixtures';
 
 /**
  * Regresión de la compensación de pago en {@link OrderFlowService.payOrder}
@@ -1757,5 +1764,327 @@ describe('OrderFlowController.cancelDeliveredOrderItem — permiso propio (1060 
       (OrderFlowController.prototype as any).cancelDeliveredOrderItem,
     );
     expect(perms).toContain('store:orders:order_flow:cancel_delivered');
+  });
+});
+
+/**
+ * Cancelar una venta YA COBRADA EN EFECTIVO tiene que mover la caja.
+ *
+ * El dinero salió del cajón cuando el cliente pagó y vuelve a salir cuando se
+ * le devuelve al cancelar: si nadie registra ese egreso, el arqueo del cierre
+ * reporta un faltante sin causa. `createRefund` NO es reutilizable para
+ * taparlo — `CANCELABLE_STATES` (`created`/`pending_payment`/`processing`) y
+ * `REFUNDABLE_STATES` (`delivered`/`finished`) son conjuntos DISJUNTOS, así
+ * que la llamada moriría en 400 antes de tocar caja.
+ *
+ * Lo que estos casos fijan:
+ *  - el egreso se escribe contra la sesión de caja abierta, por el monto
+ *    exacto de los pagos `succeeded` en efectivo (no de la orden: un cobro
+ *    parcial o mixto devuelve sólo lo que entró en billetes);
+ *  - un pago `pending` no movió dinero y NO genera egreso;
+ *  - una venta con tarjeta cancela igual y no toca la caja;
+ *  - cuando el egreso NO se puede registrar, la falla queda AUDITADA. El
+ *    anti-ejemplo vivo es `recordRefundCashRegisterMovement`
+ *    (refund-flow.service.ts:842): `catch {}` adentro y `.catch(() => {})`
+ *    afuera — dos mordazas en serie que hacen indistinguible el egreso
+ *    escrito del egreso perdido.
+ */
+describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en efectivo', () => {
+  const ORDER_ID = 9001;
+  const SESSION_ID = 77;
+  const CASH_METHOD_ID = 11;
+  const CARD_METHOD_ID = 22;
+  const CASH_PAYMENT_ID = 5001;
+  const CARD_PAYMENT_ID = 5002;
+
+  const DTO: any = { reason: 'El cliente desistió de la compra' };
+
+  let service: OrderFlowService;
+  let prismaMock: PrismaMock;
+  let settings: { getSettings: jest.Mock };
+  let sessions: { getActiveSession: jest.Mock };
+  let movements: { createManualMovement: jest.Mock };
+  let audit: { log: jest.Mock; logCustom: jest.Mock };
+  let stock: { releaseReservationsByReference: jest.Mock };
+  let emitter: { emit: jest.Mock };
+
+  /** Orden cancelable (estado `processing`) con los pagos que se le pasen. */
+  const cancelableOrder = (payments: any[]) =>
+    buildOrder({
+      id: ORDER_ID,
+      state: 'processing',
+      order_number: 'POS-1',
+      internal_notes: null,
+      payments,
+    });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // `getContext` es estático: el spy se re-aplica por test (ver prisma-mock).
+    mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
+
+    prismaMock = createPrismaMock({
+      orders: ['updateMany', 'update'],
+      order_items: ['findMany'],
+      payments: ['findMany', 'update'],
+    });
+    // Sin ítems de cocina: la rama KDS de `cancelOrder` no participa aquí.
+    prismaMock.order_items.findMany.mockResolvedValue([]);
+    // El claim atómico gana (count=1) → corre la cadena de efectos.
+    prismaMock.orders.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.orders.update.mockResolvedValue({
+      id: ORDER_ID,
+      store_id: 100,
+      state: 'cancelled',
+    });
+    prismaMock.payments.update.mockResolvedValue({});
+    // Por defecto: ningún pago del lote es en efectivo. Cada test que necesita
+    // efectivo lo declara explícitamente.
+    prismaMock.payments.findMany.mockResolvedValue([]);
+
+    settings = {
+      getSettings: jest
+        .fn()
+        .mockResolvedValue({ pos: { cash_register: { enabled: true } } }),
+    };
+    sessions = {
+      getActiveSession: jest.fn().mockResolvedValue({ id: SESSION_ID }),
+    };
+    movements = {
+      createManualMovement: jest.fn().mockResolvedValue({ id: 31 }),
+    };
+    audit = {
+      log: jest.fn().mockResolvedValue(undefined),
+      logCustom: jest.fn().mockResolvedValue(undefined),
+    };
+    stock = {
+      releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
+    };
+    emitter = { emit: jest.fn() };
+
+    service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      emitter as any,
+      settings as any,
+      sessions as any,
+      movements as any,
+      stock as any,
+      {} as any,
+      {} as any,
+      audit as any,
+    );
+  });
+
+  it('pago succeeded en efectivo: registra el egreso por el monto exacto', async () => {
+    jest
+      .spyOn(service as any, 'getOrder')
+      .mockResolvedValue(
+        cancelableOrder([
+          buildPayment({
+            id: CASH_PAYMENT_ID,
+            state: 'succeeded',
+            store_payment_method_id: CASH_METHOD_ID,
+            amount: new Prisma.Decimal('59.50'),
+          }),
+        ]),
+      );
+    prismaMock.payments.findMany.mockResolvedValue([
+      { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
+    ]);
+
+    await service.cancelOrder(ORDER_ID, DTO);
+
+    expect(movements.createManualMovement).toHaveBeenCalledTimes(1);
+    const [sessionId, payload] = movements.createManualMovement.mock.calls[0];
+    expect(sessionId).toBe(SESSION_ID);
+    expect(payload.type).toBe('cash_out');
+    // Comparación en Decimal: `59.5 === 59.50` como float esconde justo el
+    // error de escala que este caso persigue.
+    expect(
+      new Prisma.Decimal(payload.amount).equals(new Prisma.Decimal('59.50')),
+    ).toBe(true);
+  });
+
+  it('suma los pagos en efectivo del lote (cobro mixto: sólo el efectivo sale)', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      cancelableOrder([
+        buildPayment({
+          id: CASH_PAYMENT_ID,
+          state: 'succeeded',
+          store_payment_method_id: CASH_METHOD_ID,
+          amount: new Prisma.Decimal('40.00'),
+        }),
+        buildPayment({
+          id: CARD_PAYMENT_ID,
+          state: 'succeeded',
+          store_payment_method_id: CARD_METHOD_ID,
+          amount: new Prisma.Decimal('19.50'),
+        }),
+      ]),
+    );
+    // El filtro por canal vive en SQL: sólo vuelve el pago en efectivo.
+    prismaMock.payments.findMany.mockResolvedValue([
+      { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('40.00') },
+    ]);
+
+    await service.cancelOrder(ORDER_ID, DTO);
+
+    const [, payload] = movements.createManualMovement.mock.calls[0];
+    expect(
+      new Prisma.Decimal(payload.amount).equals(new Prisma.Decimal('40.00')),
+    ).toBe(true);
+  });
+
+  it('NO-REGRESIÓN — venta con tarjeta: cancela igual y no toca la caja', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      cancelableOrder([
+        buildPayment({
+          id: CARD_PAYMENT_ID,
+          state: 'succeeded',
+          store_payment_method_id: CARD_METHOD_ID,
+        }),
+      ]),
+    );
+    prismaMock.payments.findMany.mockResolvedValue([]);
+
+    const result = await service.cancelOrder(ORDER_ID, DTO);
+
+    // El arnés alcanza el call site REAL: el claim atómico corrió con su WHERE
+    // condicional, el pago quedó anulado y el evento post-commit salió. Sin
+    // estas tres, el `not.toHaveBeenCalled` de abajo pasaría por no haber
+    // ejecutado nada — un mock muerto también "no llama" a la caja.
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: ORDER_ID,
+        state: { in: ['created', 'pending_payment', 'processing'] },
+      },
+      data: expect.objectContaining({ state: 'cancelled' }),
+    });
+    expect(prismaMock.payments.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: CARD_PAYMENT_ID } }),
+    );
+    expect(emitter.emit).toHaveBeenCalledWith(
+      'order.status_changed',
+      expect.objectContaining({
+        old_state: 'processing',
+        new_state: 'cancelled',
+      }),
+    );
+    expect(result).toMatchObject({ state: 'cancelled' });
+
+    expect(movements.createManualMovement).not.toHaveBeenCalled();
+  });
+
+  it('pago en efectivo `pending`: nunca entró al cajón, no hay egreso', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      cancelableOrder([
+        buildPayment({
+          id: CASH_PAYMENT_ID,
+          state: 'pending',
+          store_payment_method_id: CASH_METHOD_ID,
+          amount: new Prisma.Decimal('59.50'),
+        }),
+      ]),
+    );
+    // Trampa deliberada: si el código mandara los pagos `pending` a la
+    // clasificación por canal, esta fila lo delataría con un egreso fantasma.
+    prismaMock.payments.findMany.mockResolvedValue([
+      { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
+    ]);
+
+    await service.cancelOrder(ORDER_ID, DTO);
+
+    expect(movements.createManualMovement).not.toHaveBeenCalled();
+  });
+
+  it('el egreso que falla deja constancia auditable (no es un catch mudo)', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      cancelableOrder([
+        buildPayment({
+          id: CASH_PAYMENT_ID,
+          state: 'succeeded',
+          store_payment_method_id: CASH_METHOD_ID,
+          amount: new Prisma.Decimal('59.50'),
+        }),
+      ]),
+    );
+    prismaMock.payments.findMany.mockResolvedValue([
+      { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
+    ]);
+    movements.createManualMovement.mockRejectedValue(
+      new Error('caja no disponible'),
+    );
+
+    // La cancelación ya hizo commit: relanzar aquí le diría al operador que
+    // falló lo que sí ocurrió, y su reintento chocaría contra el 400 de
+    // `CANCELABLE_STATES`. La falla se ESCALA, no se propaga.
+    await expect(service.cancelOrder(ORDER_ID, DTO)).resolves.toMatchObject({
+      state: 'cancelled',
+    });
+
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'order.cancel.cash_out_unrecorded',
+        resourceId: ORDER_ID,
+        metadata: expect.objectContaining({ cause: 'movement_write_failed' }),
+      }),
+    );
+  });
+
+  it('sin sesión de caja abierta: no inventa el movimiento y escala la falla', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      cancelableOrder([
+        buildPayment({
+          id: CASH_PAYMENT_ID,
+          state: 'succeeded',
+          store_payment_method_id: CASH_METHOD_ID,
+          amount: new Prisma.Decimal('59.50'),
+        }),
+      ]),
+    );
+    prismaMock.payments.findMany.mockResolvedValue([
+      { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
+    ]);
+    sessions.getActiveSession.mockResolvedValue(null);
+
+    await service.cancelOrder(ORDER_ID, DTO);
+
+    expect(movements.createManualMovement).not.toHaveBeenCalled();
+    expect(audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'order.cancel.cash_out_unrecorded',
+        metadata: expect.objectContaining({ cause: 'no_open_session' }),
+      }),
+    );
+  });
+
+  it('módulo de caja apagado: ni movimiento ni escalamiento', async () => {
+    settings.getSettings.mockResolvedValue({
+      pos: { cash_register: { enabled: false } },
+    });
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(
+      cancelableOrder([
+        buildPayment({
+          id: CASH_PAYMENT_ID,
+          state: 'succeeded',
+          store_payment_method_id: CASH_METHOD_ID,
+          amount: new Prisma.Decimal('59.50'),
+        }),
+      ]),
+    );
+    prismaMock.payments.findMany.mockResolvedValue([
+      { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('59.50') },
+    ]);
+
+    await service.cancelOrder(ORDER_ID, DTO);
+
+    // La cancelación sí corrió (el mock no está muerto)...
+    expect(prismaMock.orders.updateMany).toHaveBeenCalled();
+    // ...pero sin cajón que cuadrar no hay egreso que registrar NI falla que
+    // escalar: la venta tampoco registró su `sale` al cobrar (mismo gate en
+    // `recordPayOrderCashMovement`), así que escribir sólo el egreso
+    // descuadraría una sesión que no existe.
+    expect(movements.createManualMovement).not.toHaveBeenCalled();
+    expect(audit.log).not.toHaveBeenCalled();
   });
 });

@@ -3023,6 +3023,23 @@ export class OrderFlowService {
       );
     }
 
+    // Egreso de caja (PRE-LECTURA, fuera de la transacción — patrón
+    // `settleStop`): cancelar una venta ya COBRADA EN EFECTIVO devuelve el
+    // dinero al cliente, así que el billete sale del cajón y la sesión de caja
+    // tiene que reflejarlo. Sin este egreso, el arqueo del cierre reporta un
+    // faltante sin causa: `expected_cash_total` siguió contando la venta
+    // (`computeCashSummary`, sessions.service.ts:740) que ya se devolvió.
+    //
+    // `createRefund` NO es reutilizable para esto: `CANCELABLE_STATES`
+    // (created/pending_payment/processing) y `REFUNDABLE_STATES`
+    // (delivered/finished) son conjuntos DISJUNTOS, así que la llamada moriría
+    // en 400 antes de tocar caja.
+    //
+    // Se clasifica ANTES del claim (la transacción sólo persiste) y se escribe
+    // DESPUÉS del commit: un egreso escrito dentro de la tx quedaría huérfano
+    // si el claim perdiera la carrera o la rama KDS abortara con 422.
+    const cashReversal = await this.resolveCancelCashReversal(order);
+
     // Build cancel metadata exactly as updateOrderState would: `orders` has no
     // cancelled_at/cancellation_reason columns, so these + previous_state live
     // in internal_notes._flow_metadata (reactivateOrder reads previous_state
@@ -3239,11 +3256,197 @@ export class OrderFlowService {
       new_state: 'cancelled',
     });
 
+    // Compensación post-commit: la orden ya está `cancelled`, así que el egreso
+    // nunca queda colgado de una cancelación que hizo rollback.
+    if (cashReversal) {
+      await this.registerCancelCashOut(
+        orderId,
+        order.order_number,
+        dto.reason,
+        cashReversal,
+      );
+    }
+
     this.logger.log(
       `Order #${orderId} cancelled: ${dto.reason} ` +
         `(kitchenDisposition=${dto.kitchenDisposition ?? 'n/a'} ticketsCancelled=${cancelledTicketIds.length})`,
     );
     return updatedOrder;
+  }
+
+  /**
+   * Clasifica cuánto efectivo hay que sacar del cajón por cancelar esta orden.
+   *
+   * SÓLO los pagos `succeeded`: un pago `pending` nunca movió dinero, y
+   * registrarle un egreso inventaría un faltante de caja al cierre. (El lote
+   * que `cancelOrder` anula incluye `pending` Y `succeeded` — la diferencia
+   * importa aquí y en ningún otro lado del método.)
+   *
+   * El canal de pago NO vive en `payments`: la tabla no tiene columna de
+   * método, se llega por `store_payment_methods → system_payment_methods.type`.
+   * El filtro va en SQL para no traer los pagos con tarjeta/transferencia sólo
+   * para descartarlos en memoria.
+   *
+   * Devuelve `null` cuando no hay nada que devolver en efectivo — el caso
+   * mayoritario (venta con tarjeta, orden sin cobrar, cancelación desde un
+   * webhook de pago rechazado).
+   */
+  private async resolveCancelCashReversal(order: {
+    payments: { id: number; state: string }[];
+  }): Promise<{ amount: Prisma.Decimal; paymentIds: number[] } | null> {
+    const succeededIds = order.payments
+      .filter((p) => p.state === 'succeeded')
+      .map((p) => p.id);
+    if (succeededIds.length === 0) {
+      return null;
+    }
+
+    const cashPayments = await this.prisma.payments.findMany({
+      where: {
+        id: { in: succeededIds },
+        store_payment_method: { system_payment_method: { type: 'cash' } },
+      },
+      select: { id: true, amount: true },
+    });
+    if (cashPayments.length === 0) {
+      return null;
+    }
+
+    // Suma en Decimal, no en float: son montos de `Decimal(12,2)` que después
+    // tienen que cuadrar centavo a centavo contra el arqueo de la sesión.
+    const amount = cashPayments.reduce(
+      (acc, p) => acc.plus(new Prisma.Decimal(p.amount as any)),
+      new Prisma.Decimal(0),
+    );
+    if (amount.lessThanOrEqualTo(0)) {
+      return null;
+    }
+
+    return { amount, paymentIds: cashPayments.map((p) => p.id) };
+  }
+
+  /**
+   * Registra en caja el egreso de una venta cancelada que ya estaba cobrada en
+   * efectivo.
+   *
+   * NO ES BEST-EFFORT MUDO. El anti-ejemplo vivo es
+   * `RefundFlowService.recordRefundCashRegisterMovement`
+   * (refund-flow.service.ts:842): `catch {}` adentro y `.catch(() => {})` en el
+   * llamador — dos mordazas en serie que vuelven indistinguible el egreso
+   * escrito del egreso perdido. Aquí cada rama que NO escribe el movimiento
+   * deja constancia: log de error y fila de auditoría contra la orden
+   * (`order.cancel.cash_out_unrecorded`), con el monto y los pagos implicados
+   * para que el faltante del arqueo tenga causa y no haya que reconstruirla.
+   *
+   * Tampoco relanza, y es deliberado: la cancelación ya hizo commit. Un throw
+   * aquí le diría al operador que falló lo que sí ocurrió, y su reintento
+   * chocaría contra el 400 de `CANCELABLE_STATES` (la orden ya está
+   * `cancelled`) dejando, otra vez, el egreso sin registrar. La falla se
+   * escala, no se propaga.
+   */
+  private async registerCancelCashOut(
+    orderId: number,
+    orderNumber: string | null,
+    reason: string,
+    reversal: { amount: Prisma.Decimal; paymentIds: number[] },
+  ): Promise<void> {
+    const userId = RequestContextService.getUserId();
+
+    try {
+      const settings = await this.settingsService.getSettings();
+      const cashRegister = (settings as any)?.pos?.cash_register;
+      // Módulo de caja apagado: no hay cajón que cuadrar y la venta tampoco
+      // registró su movimiento `sale` al cobrar (`recordPayOrderCashMovement`
+      // corta en este mismo gate). Escribir sólo el egreso descuadraría una
+      // sesión que no existe. No es una falla: no se escala.
+      if (!cashRegister?.enabled) {
+        return;
+      }
+
+      if (!userId) {
+        await this.escalateCancelCashOutFailure(
+          orderId,
+          reversal,
+          'no_user_context',
+          userId,
+        );
+        return;
+      }
+
+      const session = await this.sessionsService.getActiveSession(userId);
+      if (!session) {
+        await this.escalateCancelCashOutFailure(
+          orderId,
+          reversal,
+          'no_open_session',
+          userId,
+        );
+        return;
+      }
+
+      const movement = await this.movementsService.createManualMovement(
+        session.id,
+        {
+          type: 'cash_out',
+          amount: reversal.amount,
+          reference: `Cancelación orden ${orderNumber ?? `#${orderId}`}`,
+          notes:
+            `Devolución de efectivo por cancelación de la orden #${orderId} ` +
+            `(pagos ${reversal.paymentIds.join(', ')}). Motivo: ${reason}`,
+        },
+      );
+
+      this.logger.log(
+        `Order #${orderId} cancelled: cash_out #${movement.id} for ${reversal.amount.toString()} ` +
+          `registered on session #${session.id} (payments ${reversal.paymentIds.join(', ')})`,
+      );
+    } catch (error) {
+      await this.escalateCancelCashOutFailure(
+        orderId,
+        reversal,
+        'movement_write_failed',
+        userId,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Deja constancia de un egreso de caja que NO se pudo registrar.
+   *
+   * Usa `AuditService.log` y no `logCustom` porque `userId` es opcional aquí
+   * (una cancelación disparada por webhook o por el job de expiración corre sin
+   * usuario) y `logCustom` lo exige obligatorio: pasar un `0` de relleno
+   * violaría la FK, `log()` se tragaría el error y la constancia se perdería —
+   * exactamente lo que este método existe para evitar.
+   */
+  private async escalateCancelCashOutFailure(
+    orderId: number,
+    reversal: { amount: Prisma.Decimal; paymentIds: number[] },
+    cause: 'no_user_context' | 'no_open_session' | 'movement_write_failed',
+    userId?: number,
+    error?: unknown,
+  ): Promise<void> {
+    const amount = reversal.amount.toString();
+    this.logger.error(
+      `Order #${orderId} cancelled but the cash refund of ${amount} was NOT registered ` +
+        `in the cash register (cause=${cause}, payments=${reversal.paymentIds.join(', ')})` +
+        (error ? `: ${(error as Error).message}` : ''),
+      error instanceof Error ? error.stack : undefined,
+    );
+
+    await this.auditService.log({
+      userId,
+      action: 'order.cancel.cash_out_unrecorded',
+      resource: AuditResource.ORDERS,
+      resourceId: orderId,
+      metadata: {
+        cause,
+        amount,
+        payment_ids: reversal.paymentIds,
+        error: error ? (error as Error).message : undefined,
+      },
+    });
   }
 
   /**
