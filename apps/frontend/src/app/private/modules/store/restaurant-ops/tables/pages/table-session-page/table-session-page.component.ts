@@ -42,6 +42,7 @@ import {
   KitchenTicketItemRefStatus,
   PaymentPendingView,
   TransferResult,
+  SplitResult,
 } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
 import {
@@ -63,6 +64,7 @@ import {
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { AddItemsModalComponent } from '../../components/add-items-modal/add-items-modal.component';
+import { SplitAccountsPanelComponent } from '../../components/split-accounts-panel/split-accounts-panel.component';
 import { SplitOrderModalComponent } from '../../components/split-order-modal/split-order-modal.component';
 import {
   TablePaymentModalComponent,
@@ -118,6 +120,7 @@ interface SecondaryAction {
     CurrencyPipe,
     AddItemsModalComponent,
     SplitOrderModalComponent,
+    SplitAccountsPanelComponent,
     TablePaymentModalComponent,
     AssignCustomerModalComponent,
     KitchenConfirmModalComponent,
@@ -145,6 +148,8 @@ export class TableSessionPageComponent implements OnInit {
   readonly selectedItemIds = signal<Set<number>>(new Set());
   readonly isAddItemsOpen = signal(false);
   readonly isSplitOpen = signal(false);
+  readonly hasFinancialSplit = signal(false);
+  readonly splitRefreshKey = signal(0);
   readonly isPayOpen = signal(false);
   readonly isAssignCustomerOpen = signal(false);
   readonly isAddingItems = signal(false);
@@ -545,7 +550,7 @@ export class TableSessionPageComponent implements OnInit {
         id: 'split',
         label: 'Dividir cuenta',
         icon: 'split',
-        disabled: this.items().length < 2,
+        disabled: this.items().length === 0,
       },
       {
         id: 'transfer',
@@ -711,7 +716,7 @@ export class TableSessionPageComponent implements OnInit {
    * (terminal or in-progress kitchen states the backend rejects with 409).
    */
   canRemoveItem(item: TableSessionOrderItem): boolean {
-    if (this.isClosed()) return false;
+    if (this.isClosed() || this.hasFinancialSplit()) return false;
     // Paso 6 plan 1060 — espejo del bloqueo en mesa: un ítem entregado
     // (`delivered_at`, hecho de servicio) ya no se puede cancelar. Solo
     // presentación: el enforcement real lo pone el backend (paso 1).
@@ -941,6 +946,10 @@ export class TableSessionPageComponent implements OnInit {
   // ── Add items ──────────────────────────────────────────────────────────
 
   openAddItems(): void {
+    if (this.hasFinancialSplit()) {
+      this.toastService.warning('La cuenta está dividida. Los importes están fijados; registra consumos nuevos en otra cuenta.');
+      return;
+    }
     if (this.isClosed()) {
       this.toastService.error('La mesa está cerrada');
       return;
@@ -949,6 +958,7 @@ export class TableSessionPageComponent implements OnInit {
   }
 
   onAddItems(items: TableSessionAddItem[]): void {
+    if (this.hasFinancialSplit()) return;
     const id = this.session()?.id;
     if (!id) return;
     this.isAddingItems.set(true);
@@ -1076,78 +1086,26 @@ export class TableSessionPageComponent implements OnInit {
       this.toastService.error('La mesa está cerrada');
       return;
     }
-    if (this.items().length < 2) {
-      this.toastService.error('Necesitas al menos 2 items para dividir');
+    if (this.items().length === 0) {
+      this.toastService.error('Agrega al menos un ítem antes de dividir');
       return;
     }
     this.isSplitOpen.set(true);
   }
 
-  onSplitByItems(dto: { item_groups: { order_item_ids: number[] }[] }): void {
-    const orderId = this.session()?.order_id;
-    if (!orderId) return;
-    this.isSplitting.set(true);
-    this.tablesService
-      .splitByItems(orderId, dto)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => {
-          this.isSplitting.set(false);
-          this.isSplitOpen.set(false);
-          this.toastService.success(
-            `Cuenta dividida en ${result.sub_orders.length} sub-órdenes`,
-          );
-          this.surfaceSplitFire(result);
-          this.router.navigate(['/admin/restaurant-ops/tables']);
-        },
-        error: (err: unknown) => {
-          this.isSplitting.set(false);
-          this.toastService.error(
-            typeof err === 'string' ? err : 'Error al dividir la cuenta',
-          );
-        },
-      });
+  onFinancialSplitLoaded(result: SplitResult | null): void {
+    this.hasFinancialSplit.set(!!result?.split_group_id);
   }
 
-  onSplitByAmount(dto: {
-    mode: 'equal' | 'custom';
-    n_splits: number;
-    amounts?: number[];
-  }): void {
-    const orderId = this.session()?.order_id;
-    if (!orderId) return;
-    this.isSplitting.set(true);
-    this.tablesService
-      .splitByAmount(orderId, dto)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => {
-          this.isSplitting.set(false);
-          this.isSplitOpen.set(false);
-          this.toastService.success(
-            `Cuenta dividida en ${result.sub_orders.length} sub-órdenes`,
-          );
-          this.surfaceSplitFire(result);
-          this.router.navigate(['/admin/restaurant-ops/tables']);
-        },
-        error: (err: unknown) => {
-          this.isSplitting.set(false);
-          this.toastService.error(
-            typeof err === 'string' ? err : 'Error al dividir la cuenta',
-          );
-        },
-      });
+  onFinancialSplitChanged(result: SplitResult | null): void {
+    this.onFinancialSplitLoaded(result);
+    const id = this.session()?.id;
+    if (id) this.loadSession(id, { silent: true });
   }
 
-  /** Surface backend auto-fire result from a split (Plan KDS fire-flows F4). */
-  private surfaceSplitFire(result: unknown): void {
-    const fire = (result as { kitchen_fire?: { fired_count?: number; kitchen_ticket_id?: number } })
-      ?.kitchen_fire;
-    if (fire && Number(fire.fired_count) > 0) {
-      this.toastService.success(
-        `${fire.fired_count} plato(s) enviados a cocina (ticket #${fire.kitchen_ticket_id})`,
-      );
-    }
+  onSplitCompleted(result: SplitResult): void {
+    this.onFinancialSplitChanged(result);
+    this.splitRefreshKey.update((value) => value + 1);
   }
 
   // ── Fire to kitchen ────────────────────────────────────────────────────
@@ -1531,6 +1489,10 @@ export class TableSessionPageComponent implements OnInit {
   // ── Checkout (cobro) ───────────────────────────────────────────────────
 
   openPay(): void {
+    if (this.hasFinancialSplit()) {
+      this.isSplitOpen.set(true);
+      return;
+    }
     if (this.isClosed()) {
       this.toastService.error('La mesa ya está cerrada');
       return;
@@ -1543,6 +1505,7 @@ export class TableSessionPageComponent implements OnInit {
   }
 
   onPay(payload: TablePaymentSubmit): void {
+    if (this.hasFinancialSplit()) { this.isSplitOpen.set(true); return; }
     const sessionId = this.session()?.id;
     if (!sessionId || this.isClosed()) return;
     this.isPaying.set(true);

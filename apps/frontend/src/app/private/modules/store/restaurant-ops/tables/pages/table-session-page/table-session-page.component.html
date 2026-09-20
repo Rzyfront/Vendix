@@ -52,6 +52,13 @@
         <p>Cargando sesión…</p>
       </div>
     } @else if (session()) {
+      @if (session()?.order_id; as sourceId) {
+        <app-split-accounts-panel
+          [sourceOrderId]="sourceId" [items]="items()" [allowCreate]="false"
+          [refreshKey]="splitRefreshKey()" (loaded)="onFinancialSplitLoaded($event)"
+          (changed)="onFinancialSplitChanged($event)"
+        />
+      }
       <div class="grid gap-3 lg:gap-5 lg:grid-cols-12">
         <!-- ── Resumen (Sidebar) ────────────────────────────────────── -->
         <div class="lg:col-span-4 summary-column">
@@ -692,13 +699,10 @@
   />
 
   <app-split-order-modal
-    [isOpen]="isSplitOpen()"
-    [loading]="isSplitting()"
+    [(isOpen)]="isSplitOpen"
+    [orderId]="session()?.order_id ?? null"
     [items]="items()"
-    [orderTotal]="orderTotal()"
-    (isOpenChange)="isSplitOpen.set($event)"
-    (splitByItems)="onSplitByItems($event)"
-    (splitByAmount)="onSplitByAmount($event)"
+    (splitCompleted)="onSplitCompleted($event)"
   />
 
   <app-transfer-table-modal

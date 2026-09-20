@@ -12,6 +12,7 @@ import { Store } from '@ngrx/store';
 import { environment } from '../../../../../../environments/environment';
 import { selectStoreSettings } from '../../../../../core/store/auth/auth.selectors';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { TablesService } from '../../restaurant-ops/tables/services/tables.service';
 import { MenusService } from '../../restaurant-ops/menus/services/menus.service';
 import type { MenuFull } from '../../restaurant-ops/menus/interfaces';
 import type {
@@ -24,6 +25,7 @@ import type {
   SplitByAmountDto,
   SplitResult,
   SplitMode,
+  SplitPreviewDto,
 } from '../../restaurant-ops/tables/interfaces';
 
 interface FireOrderItemsResponse {
@@ -508,6 +510,16 @@ export class PosRestaurantIntegrationService {
       );
   }
 
+  private readonly financialTables = inject(TablesService);
+
+  getFinancialSplit(orderId: number): Observable<SplitResult | null> {
+    return this.financialTables.getFinancialSplit(orderId);
+  }
+
+  previewFinancialSplit(orderId: number, dto: SplitPreviewDto): Observable<SplitResult> {
+    return this.financialTables.previewFinancialSplit(orderId, dto);
+  }
+
   // ─── Split order (financial) ──────────────────────────────────────
 
   splitByItems(orderId: number, dto: SplitByItemsDto): Observable<SplitResult> {
@@ -529,8 +541,9 @@ export class PosRestaurantIntegrationService {
     mode: SplitMode,
     nSplits: number,
     amounts?: number[],
+    context: Pick<SplitByAmountDto, 'source_version' | 'idempotency_key' | 'accounts'> = {},
   ): Observable<SplitResult> {
-    const dto: SplitByAmountDto = { mode, n_splits: nSplits, amounts };
+    const dto: SplitByAmountDto = { mode, n_splits: nSplits, amounts, ...context };
     return this.http
       .post<ApiResponse<SplitResult>>(
         `${this.apiUrl}/store/orders/${orderId}/split-by-amount`,

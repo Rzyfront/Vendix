@@ -326,25 +326,105 @@ export interface TableSessionAddItem {
 }
 
 export type SplitMode = 'equal' | 'custom';
+export type SplitMoney = string;
 
-export interface SplitByItemsDto {
+export interface SplitAccountCustomer {
+  /** Read-only display field; never send it as request data. */
+  customer_name?: string | null;
+  label?: string;
+  customer_id?: number | null;
+  customer_alias?: string | null;
+}
+
+export interface SplitRequestContext {
+  source_version?: string;
+  idempotency_key?: string;
+  accounts?: SplitAccountCustomer[];
+}
+
+export interface SplitByItemsDto extends SplitRequestContext {
   item_groups: Array<{ order_item_ids: number[] }>;
 }
 
-export interface SplitByAmountDto {
+export interface SplitByAmountDto extends SplitRequestContext {
   mode: SplitMode;
   n_splits: number;
   amounts?: number[];
 }
 
+export interface SplitPreviewDto extends SplitRequestContext {
+  mode: SplitMode | 'items';
+  n_splits?: number;
+  amounts?: number[];
+  item_groups?: Array<{ order_item_ids: number[] }>;
+}
+
+/** Financial IDs are NOT order IDs. Kitchen and stock remain on source_order_id. */
+export interface SplitFinancialAccount {
+  id: number | null;
+  ordinal: number;
+  role: 'paid_original' | 'payable';
+  label: string;
+  customer_id: number | null;
+  customer_alias: string | null;
+  customer_name?: string | null;
+  payer: { customer_id: number | null; customer_alias: string | null };
+  subtotal_amount: SplitMoney;
+  discount_amount: SplitMoney;
+  tax_amount: SplitMoney;
+  shipping_cost: SplitMoney;
+  tip_amount: SplitMoney;
+  grand_total: SplitMoney;
+  paid_snapshot: SplitMoney;
+  total_paid: SplitMoney;
+  reserved_amount: SplitMoney;
+  remaining_balance: SplitMoney;
+  available_to_pay: SplitMoney;
+  payment_state: 'unpaid' | 'pending' | 'partial' | 'paid';
+  invoice_id: number | null;
+  payments: Array<{ id: number; amount: SplitMoney; state: string; can_confirm?: boolean }>;
+}
+
 export interface SplitResult {
   source_order_id: number;
-  sub_orders: Array<{
+  split_group_id: number | null;
+  source_version: string;
+  currency: string;
+  original_total: SplitMoney;
+  preserved_paid: SplitMoney;
+  pending_to_split: SplitMoney;
+  accounts: SplitFinancialAccount[];
+  retained_account: SplitFinancialAccount | null;
+  kitchen_fire: null;
+}
+
+export interface SplitSourceItem {
+  id: number;
+  product_name: string;
+  quantity: number;
+  cancelled_at?: string | null;
+}
+
+export interface SplitAccountPayDto {
+  store_payment_method_id: number;
+  amount: number;
+  idempotency_key: string;
+  amount_received?: number;
+  bank_account_id?: number;
+  payment_reference?: string;
+  wompi_payment_method?: string;
+  return_url?: string;
+  cancel_url?: string;
+}
+
+export interface SplitAccountPaymentResult {
+  payment: {
     id: number;
-    order_number: string;
-    grand_total: number | string;
-    items_count: number;
-  }>;
+    amount: string;
+    state: string;
+    nextAction?: { type?: string; url?: string; message?: string };
+  };
+  split: SplitResult;
 }
 
 /**

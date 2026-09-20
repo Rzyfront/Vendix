@@ -19,6 +19,10 @@ import {
   SplitByItemsDto,
   SplitByAmountDto,
   SplitResult,
+  SplitPreviewDto,
+  SplitAccountCustomer,
+  SplitAccountPayDto,
+  SplitAccountPaymentResult,
   TableStatus,
   TableSessionAddItem,
   PayTableSessionDto,
@@ -540,6 +544,48 @@ export class TablesService {
         map((res) => res.data),
         catchError(this.handleError),
       );
+  }
+
+  getFinancialSplit(orderId: number): Observable<SplitResult | null> {
+    return this.http.get<ApiResponse<SplitResult | null>>(
+      `${this.apiUrl}/store/orders/${orderId}/split`,
+    ).pipe(map((res) => res.data));
+  }
+
+  previewFinancialSplit(orderId: number, dto: SplitPreviewDto): Observable<SplitResult> {
+    return this.http.post<ApiResponse<SplitResult>>(
+      `${this.apiUrl}/store/orders/${orderId}/split/preview`, dto,
+    ).pipe(map((res) => res.data));
+  }
+
+  cancelFinancialSplit(orderId: number, sourceVersion: string): Observable<{ cancelled: true }> {
+    return this.http.post<ApiResponse<{ cancelled: true }>>(
+      `${this.apiUrl}/store/orders/${orderId}/split/cancel`, { source_version: sourceVersion },
+    ).pipe(map((res) => res.data));
+  }
+
+  updateFinancialAccountCustomer(orderId: number, accountId: number, dto: SplitAccountCustomer): Observable<SplitResult> {
+    return this.http.patch<ApiResponse<SplitResult>>(
+      `${this.apiUrl}/store/orders/${orderId}/split/accounts/${accountId}/customer`, dto,
+    ).pipe(map((res) => res.data));
+  }
+
+  payFinancialAccount(orderId: number, accountId: number, dto: SplitAccountPayDto): Observable<SplitAccountPaymentResult> {
+    return this.http.post<ApiResponse<SplitAccountPaymentResult>>(
+      `${this.apiUrl}/store/orders/${orderId}/split/accounts/${accountId}/pay`, dto,
+    ).pipe(map((res) => res.data));
+  }
+
+  confirmFinancialAccountPayment(orderId: number, accountId: number, paymentId: number): Observable<SplitAccountPaymentResult> {
+    return this.http.post<ApiResponse<SplitAccountPaymentResult>>(
+      `${this.apiUrl}/store/orders/${orderId}/split/accounts/${accountId}/payments/${paymentId}/confirm`, {},
+    ).pipe(map((res) => res.data));
+  }
+
+  invoiceFinancialAccount(accountId: number): Observable<{ id: number; status: string }> {
+    return this.http.post<ApiResponse<{ id: number; status: string }>>(
+      `${this.apiUrl}/store/invoicing/from-financial-account/${accountId}`, {},
+    ).pipe(map((res) => res.data));
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────

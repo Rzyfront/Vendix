@@ -60,6 +60,8 @@ import {
   CartSummary,
   deliveryTypeToEntregaChoice,
 } from './models/cart.model';
+import { PosSplitBillModalComponent } from './components/pos-split-bill-modal.component';
+import type { SplitSourceItem } from '../restaurant-ops/tables/interfaces';
 import { PosCustomItemModalComponent } from './components/pos-custom-item-modal/pos-custom-item-modal.component';
 import { resolveSaleQuantity } from './utils/line-units.util';
 import { environment } from '../../../../../environments/environment';
@@ -158,6 +160,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     ButtonComponent,
     IconComponent,
     PosCustomItemModalComponent,
+    PosSplitBillModalComponent,
     SpinnerComponent,
     CardComponent,
     PosProductSelectionComponent,
@@ -192,6 +195,14 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         }
       -->
 
+
+      @if (isRestaurantMode() && splitSourceOrderId()) {
+        <div class="flex-none flex items-center justify-between gap-2 p-2 bg-surface border-b border-border">
+          <span class="text-sm text-text-secondary">Orden guardada · cuentas independientes</span>
+          <app-button variant="outline" size="sm" (clicked)="showSplitAccounts.set(true)">Dividir / cobrar cuentas</app-button>
+        </div>
+      }
+      <app-pos-split-bill-modal [(isOpen)]="showSplitAccounts" [sourceOrderId]="splitSourceOrderId()" [items]="splitSourceItems()" />
 
       <!-- Main POS Interface: Two flush columns directly at root (Stitch favorite design) -->
       <div
@@ -998,6 +1009,14 @@ export class PosComponent {
 
   // Edit mode
   isEditMode = signal(false);
+  readonly showSplitAccounts = signal(false);
+  readonly splitSourceOrderId = computed(() => Number(
+    this.restaurantIntegration.currentTableSession()?.order_id ?? this.editingOrderId() ?? this.readyToPayOrder()?.id ?? 0,
+  ) || null);
+  readonly splitSourceItems = computed<SplitSourceItem[]>(() => {
+    const rows = this.restaurantIntegration.currentTableSession()?.order?.order_items ?? this.editingOrder()?.order_items ?? this.readyToPayOrder()?.order_items ?? [];
+    return rows.map((item) => ({ id: Number(item.id), product_name: item.product_name, quantity: Number(item.quantity), cancelled_at: item.cancelled_at ?? null }));
+  });
   editingOrderId = signal<string | null>(null);
   editingOrderNumber = signal<string | null>(null);
   /**
