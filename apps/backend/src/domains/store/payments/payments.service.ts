@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { Prisma } from '@prisma/client';
+import { Prisma, payment_processing_mode_enum } from '@prisma/client';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import {
@@ -1568,37 +1568,50 @@ export class PaymentsService {
 
           // 5. Emit payment event (with tax/subtotal for IVA accounting)
           if (payment) {
-            this.eventEmitter.emit('payment.received', {
-              payment_id: payment.id,
-              store_id: createPosPaymentDto.store_id,
-              organization_id: order.stores?.organization_id,
-              order_id: order.id,
-              order_number: order.order_number,
-              amount: payment.amount,
-              subtotal_amount: Number(order.subtotal_amount || 0),
-              tax_amount: Number(order.tax_amount || 0),
-              // Plan Despacho Economía — FASE 4 paso 15. Ingreso de flete
-              // separado en cuenta 414505 al pagar un POS directo con flete.
-              shipping_amount: Number(order.shipping_cost || 0),
-              tax_breakdown,
-              withholding_breakdown: wh.lines,
-              discount_amount: Number(order.discount_amount || 0),
-              // GAP-6 — propina (sin IVA). El asiento la reconoce como pasivo
-              // custodio (CR propinas por pagar) para cuadrar el DR caja que ya
-              // incluye la propina dentro de payment.amount (= grand_total).
-              tip_amount: Number(order.tip_amount || 0),
-              currency: payment.currency || createPosPaymentDto.currency,
-              payment_method:
-                payment.store_payment_method?.system_payment_method
-                  ?.display_name || 'Unknown',
-              user_id: user.id,
-              // C4-followup: solo tenemos el id en memoria en este flujo POS
-              // (order.customer_id escalar) — name/tax_id quedan undefined a
-              // propósito para no introducir un lookup N+1 aquí.
-              customer: order.customer_id
-                ? { id: Number(order.customer_id) }
-                : undefined,
-            });
+            // `payment.received` es el disparador del asiento DR caja/bancos /
+            // CR ingreso: sólo puede salir cuando el dinero EXISTE. La rama
+            // directa lo crea `succeeded` y no cambia; la contra entrega
+            // (`processing_mode = ON_DELIVERY`) crea la fila `pending` porque
+            // el repartidor todavía no ha recaudado, y su `payment.received`
+            // lo emite el cierre de la ruta (`cash-settlement` →
+            // `PaymentFromDispatchRouteListener` → `applyDispatchCodPayment`).
+            // Emitirlo aquí reconocía un ingreso que nadie había cobrado y lo
+            // duplicaba al cuadrar la ruta. La condición mira el estado REAL
+            // de la fila, no el tipo de método: cualquier pago que nazca sin
+            // liquidar queda fuera por construcción.
+            if (payment.state === 'succeeded') {
+              this.eventEmitter.emit('payment.received', {
+                payment_id: payment.id,
+                store_id: createPosPaymentDto.store_id,
+                organization_id: order.stores?.organization_id,
+                order_id: order.id,
+                order_number: order.order_number,
+                amount: payment.amount,
+                subtotal_amount: Number(order.subtotal_amount || 0),
+                tax_amount: Number(order.tax_amount || 0),
+                // Plan Despacho Economía — FASE 4 paso 15. Ingreso de flete
+                // separado en cuenta 414505 al pagar un POS directo con flete.
+                shipping_amount: Number(order.shipping_cost || 0),
+                tax_breakdown,
+                withholding_breakdown: wh.lines,
+                discount_amount: Number(order.discount_amount || 0),
+                // GAP-6 — propina (sin IVA). El asiento la reconoce como pasivo
+                // custodio (CR propinas por pagar) para cuadrar el DR caja que ya
+                // incluye la propina dentro de payment.amount (= grand_total).
+                tip_amount: Number(order.tip_amount || 0),
+                currency: payment.currency || createPosPaymentDto.currency,
+                payment_method:
+                  payment.store_payment_method?.system_payment_method
+                    ?.display_name || 'Unknown',
+                user_id: user.id,
+                // C4-followup: solo tenemos el id en memoria en este flujo POS
+                // (order.customer_id escalar) — name/tax_id quedan undefined a
+                // propósito para no introducir un lookup N+1 aquí.
+                customer: order.customer_id
+                  ? { id: Number(order.customer_id) }
+                  : undefined,
+              });
+            }
 
             // Persist suffered withholding once for the immediate-payment
             // branch (mutually exclusive with credit_sale.created). Safe to
@@ -3461,6 +3474,50 @@ export class PaymentsService {
   }
 
   /**
+   * True when the payment method settles ON DELIVERY: the courier collects the
+   * money at the door, so nothing enters the store's cash today.
+   *
+   * The discriminator is `system_payment_methods.processing_mode`, NOT a
+   * literal list of method names. That column already exists, is already
+   * seeded as `ON_DELIVERY` for `cash_on_delivery`, and is already what the
+   * ecommerce checkout filters by (`checkout.service.ts`) and what the POS
+   * frontend reads. Keying on the name instead would fork the definition of
+   * "contra entrega" in two, and a second on-delivery method (card at the
+   * door, Nequi to the courier) would silently fall back to recognizing cash.
+   *
+   * SAFE DEGRADATION — the `system_payment_methods` seed is CREATE-ONLY
+   * (`system-payment-methods.seed.ts`: an existing row is skipped, never
+   * updated), so a store older than the column can hold a row whose
+   * `processing_mode` was never written. This method does NOT guess the mode
+   * from the method name: it returns `false` (today's behavior — the charge
+   * settles in band) and leaves a WARN naming the row, so the pending backfill
+   * stays visible in the logs instead of being silently decided here.
+   */
+  private isOnDeliveryMethod(
+    storePaymentMethodId: number | null | undefined,
+    paymentMethod: {
+      system_payment_method?: {
+        processing_mode?: payment_processing_mode_enum | null;
+      } | null;
+    } | null,
+  ): boolean {
+    const processingMode =
+      paymentMethod?.system_payment_method?.processing_mode ?? null;
+
+    if (processingMode == null) {
+      this.logger.warn(
+        `[POS] store_payment_method #${storePaymentMethodId ?? 'unknown'} has no ` +
+          `system_payment_method.processing_mode; treating the charge as settled in band ` +
+          `(legacy behavior). A cash_on_delivery row created before the column needs a ` +
+          `backfill to ON_DELIVERY, otherwise the POS keeps recognizing cash for a contra entrega.`,
+      );
+      return false;
+    }
+
+    return processingMode === payment_processing_mode_enum.ON_DELIVERY;
+  }
+
+  /**
    * Create or update order from POS data
    */
   /**
@@ -4414,6 +4471,13 @@ export class PaymentsService {
       throw new Error('Payment method not found');
     }
 
+    // Contra entrega — resuelto ANTES de leer `system_payment_method.type`
+    // para que una fila incompleta deje rastro en el log en vez de morir muda.
+    const isOnDelivery = this.isOnDeliveryMethod(
+      dto.store_payment_method_id,
+      paymentMethod,
+    );
+
     // Check if method requires gateway processing (digital/async methods)
     const methodType = paymentMethod.system_payment_method.type;
     const digitalMethods = ['wompi', 'wallet'];
@@ -4463,6 +4527,68 @@ export class PaymentsService {
         payment.nextAction = gatewayResult.nextAction;
         payment.change = 0;
       }
+
+      return payment;
+    }
+
+    // ------------------------------------------------------------------
+    // Contra entrega (`processing_mode = ON_DELIVERY`).
+    //
+    // El dinero de una contra entrega entra cuando el repartidor lo recauda,
+    // no cuando el POS emite la orden. Antes, todo lo que no fuera pasarela
+    // caía por la rama directa de abajo y nacía `succeeded`: se reconocía caja
+    // en el acto (asiento DR caja / CR ingreso vía `payment.received`) y
+    // `applyOrderBalanceOnPayment` saneaba `remaining_balance` a 0. Con el
+    // saldo en 0, `resolveIsPrepaid` (dispatch-routes/utils/route-stop-calc.ts)
+    // — que deriva el prepago del saldo VIVO de la orden — daba la remisión
+    // por PREPAGADA, y la parada de la ruta nacía con `expected = 0`: el
+    // repartidor salía a entregar sin nada que recaudar.
+    //
+    // El pago nace `pending` y el saldo se CONSERVA. Lo cobra después el
+    // carril que ya existe: `OrderFlowService.applyDispatchCodPayment`,
+    // idempotente por `gateway_reference`, alcanzado desde el cierre de la
+    // ruta — que sí emite su `payment.received` (`source_type='dispatch_route'`)
+    // y decrementa el saldo. El reconocimiento contable no se pierde: se MUEVE
+    // al momento en que el dinero existe.
+    // ------------------------------------------------------------------
+    if (isOnDelivery) {
+      const payment = await tx.payments.create({
+        data: {
+          order_id: order.id,
+          store_payment_method_id: dto.store_payment_method_id,
+          amount: payableAmount,
+          currency: dto.currency,
+          // `pending`, no `succeeded`: es una promesa de cobro en destino.
+          state: 'pending',
+          transaction_id: await this.generateTransactionId(),
+          gateway_response: {
+            reference: dto.payment_reference,
+            change: 0,
+            metadata: {
+              register_id: dto.register_id,
+              seller_user_id: dto.seller_user_id,
+              is_pos_payment: true,
+              // Deja el porqué del `pending` en la propia fila: quien audite el
+              // pago no tiene que reconstruirlo desde el catálogo.
+              processing_mode: payment_processing_mode_enum.ON_DELIVERY,
+            },
+          },
+        },
+        include: {
+          store_payment_method: {
+            include: {
+              system_payment_method: true,
+            },
+          },
+        },
+      });
+
+      // Saldo CONSERVADO, no reducido: re-deriva `remaining_balance =
+      // grand_total − total_paid` con un abono de CERO. No es un no-op — las
+      // órdenes POS nacen con `remaining_balance` en su default 0 (schema), así
+      // que sin esta escritura el saldo quedaría en 0 y `resolveIsPrepaid`
+      // seguiría leyendo "prepagada" por el otro camino.
+      await this.applyOrderBalanceOnPayment(tx, order.id, 0);
 
       return payment;
     }
@@ -4877,8 +5003,22 @@ export class PaymentsService {
       if (dto.store_payment_method_id) {
         const method = await this.prisma.store_payment_methods.findFirst({
           where: { id: dto.store_payment_method_id },
-          include: { system_payment_method: { select: { type: true } } },
+          include: {
+            system_payment_method: {
+              select: { type: true, processing_mode: true },
+            },
+          },
         });
+        // Contra entrega: el efectivo entra en la calle, no en ESTA caja. Con
+        // `track_non_cash_payments` activo el movimiento se registraba igual
+        // (el tipo no es 'cash', pero ese ajuste lo dejaba pasar) e inflaba el
+        // esperado del cierre de caja con dinero que el cajero nunca tuvo.
+        if (this.isOnDeliveryMethod(dto.store_payment_method_id, method)) {
+          this.logger.debug(
+            `[CashRegister] Skipping ON_DELIVERY movement (order ${order_id}): the courier collects it on the route`,
+          );
+          return;
+        }
         payment_method = method?.system_payment_method?.type || 'cash';
       }
 

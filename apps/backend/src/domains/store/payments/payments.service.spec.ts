@@ -5,7 +5,11 @@ import { PaymentGatewayService, PaymentValidatorService } from './services';
 import { WebhookHandlerService } from './services/webhook-handler.service';
 import { PaymentError, PaymentErrorCodes } from './utils';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { payments_state_enum } from '@prisma/client';
+import {
+  Prisma,
+  payment_processing_mode_enum,
+  payments_state_enum,
+} from '@prisma/client';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { TaxesService } from '../taxes/taxes.service';
 import { TaxFiscalType } from '../taxes/dto';
@@ -80,6 +84,12 @@ describe('PaymentsService', () => {
   let commitOrderDeliveryMock: jest.MockedFunction<
     OrderStockCommitService['commitOrderDelivery']
   >;
+  // Mismo patrón F-157: handle tipado concreto del emisor de eventos, creado
+  // UNA vez y usado DIRECTO por closure. Los casos de contra entrega assertan
+  // sobre la AUSENCIA de `payment.received`, y una aserción negativa recuperada
+  // con `as jest.Mock` desde `eventEmitter.emit` pasaría incluso si el handle
+  // dejara de ser el que el servicio inyecta.
+  let emitMock: jest.MockedFunction<EventEmitter2['emit']>;
 
   const mockUser = {
     id: 1,
@@ -213,6 +223,8 @@ describe('PaymentsService', () => {
       OrderStockCommitService['commitOrderDelivery']
     >;
 
+    emitMock = jest.fn() as jest.MockedFunction<EventEmitter2['emit']>;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PaymentsService,
@@ -228,7 +240,7 @@ describe('PaymentsService', () => {
           provide: TaxesService,
           useValue: mockTaxesService,
         },
-        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: EventEmitter2, useValue: { emit: emitMock } },
         {
           provide: SettingsService,
           useValue: {
@@ -299,7 +311,22 @@ describe('PaymentsService', () => {
         },
         {
           provide: WithholdingFlowService,
-          useValue: { applyToOrder: jest.fn() },
+          // `resolveSuffered` y `persistWithholdingLines` son los dos métodos
+          // que el carril de cobro POS invoca de verdad (payments.service.ts
+          // §4/§5). Sin declararlos, cualquier caso que llegue al bloque de
+          // eventos moría con "is not a function" — `resolveSuffered` bajo un
+          // try/catch que lo disfrazaba de "sin retenciones", y
+          // `persistWithholdingLines` sin red, reventando la transacción con un
+          // TypeError que no distingue una regresión real de un mock corto.
+          useValue: {
+            applyToOrder: jest.fn(),
+            resolveSuffered: jest.fn().mockResolvedValue({
+              lines: [],
+              uvt_value_used: 0,
+              counterparty_type: null,
+            }),
+            persistWithholdingLines: jest.fn().mockResolvedValue(undefined),
+          },
         },
         { provide: KitchenFireService, useValue: { fireOrder: jest.fn() } },
         {
@@ -2881,6 +2908,253 @@ describe('PaymentsService', () => {
           consumeSerials: true,
         }),
         expect.anything(),
+      );
+    });
+  });
+
+  /**
+   * El dinero de una contra entrega entra cuando el repartidor lo recauda, no
+   * cuando el POS emite la orden.
+   *
+   * `processPosPaymentTransaction` clasificaba el método con una lista literal
+   * (`['wompi','wallet']`): todo lo que no fuera pasarela caía por la rama
+   * "directa" y nacía `succeeded`. Una venta contra entrega cobrada desde /pos
+   * reconocía caja en el acto — asiento DR caja / CR ingreso emitido con
+   * `payment.received`, `remaining_balance` saneado a 0 — y con el saldo en 0
+   * `resolveIsPrepaid` (route-stop-calc.ts:277) daba la remisión por PREPAGADA,
+   * así que la parada de la ruta nacía con `expected = 0` y el repartidor salía
+   * a entregar sin nada que recaudar.
+   *
+   * El discriminador correcto es `system_payment_methods.processing_mode`
+   * (`ON_DELIVERY`), la MISMA columna que ya gobierna el carril de ecommerce
+   * (`checkout.service.ts:455`), no el nombre del método: un tipo nuevo de
+   * contra entrega entra por la columna sin tocar este archivo.
+   *
+   * Las aserciones son sobre los efectos REALES del cobro (la fila de
+   * `payments`, el evento emitido, el saldo escrito en `orders`), no sobre un
+   * predicado extraído: un predicado puede estar correcto y no estar cableado.
+   */
+  describe('processPosPayment — la contra entrega no reconoce caja en el POS', () => {
+    // Corta la ejecución en el refresco de estado de la respuesta
+    // (payments.service.ts, `const refreshed = await tx.orders.findUnique`),
+    // que es la PRIMERA lectura posterior a todo el bloque de eventos §4/§5.
+    // Así el caso observa la emisión completa sin arrastrar el post-commit
+    // (caja registradora, umbral fiscal, evento fiscal del POS).
+    const STOP_AFTER_EVENTS = 'stop-after-pos-events';
+
+    const posUser: any = {
+      id: 1,
+      email: 'cajero@example.com',
+      organization_id: 1,
+      roles: ['super_admin'],
+    };
+
+    /**
+     * @param systemMethod fila de `system_payment_methods` que resuelve el
+     *   discriminador. `processing_mode` es el eje bajo prueba; `type` sólo
+     *   alimenta las ramas preexistentes (vuelto de efectivo, gateway).
+     */
+    const arrangePosSale = (systemMethod: {
+      type: string;
+      processing_mode?: payment_processing_mode_enum | null;
+    }) => {
+      mockRequestContext({ store_id: 1, organization_id: 1 });
+
+      const order = buildOrder({
+        id: 4242,
+        store_id: 1,
+        order_number: 'POS-COD-1',
+        // Contra entrega real: la mercancía viaja y el dinero se recauda en
+        // destino. `home_delivery` mantiene el consumo de stock diferido a
+        // fulfillment, así que el caso aísla el reconocimiento del dinero.
+        delivery_type: 'home_delivery',
+        grand_total: new Prisma.Decimal(100),
+        total_paid: new Prisma.Decimal(0),
+        remaining_balance: new Prisma.Decimal(100),
+        stores: { id: 1, organization_id: 1 },
+        order_items: [],
+      });
+
+      const storePaymentMethodRow = {
+        id: 9,
+        display_name: 'Pago Contra Entrega',
+        custom_config: {},
+        system_payment_method: systemMethod,
+      };
+
+      const tx: any = {
+        kitchen_tickets: { findMany: jest.fn().mockResolvedValue([]) },
+        // Tienda NO restaurante → el auto-fire (B5) no corre.
+        stores: {
+          findUnique: jest.fn().mockResolvedValue({ industries: ['retail'] }),
+        },
+        store_payment_methods: {
+          findUnique: jest.fn().mockResolvedValue(storePaymentMethodRow),
+          findFirst: jest.fn().mockResolvedValue(storePaymentMethodRow),
+        },
+        payments: {
+          // Devuelve lo que se le pidió escribir: el caso asserta sobre el
+          // `state` REAL con el que nace la fila, no sobre una constante.
+          create: jest.fn(async ({ data }: any) => ({
+            id: 7,
+            ...data,
+            store_payment_method: storePaymentMethodRow,
+          })),
+        },
+        orders: {
+          update: jest.fn().mockResolvedValue({ id: 4242 }),
+          findUnique: jest
+            .fn()
+            // 1.ª lectura: `applyOrderBalanceOnPayment` (grand_total/total_paid).
+            .mockResolvedValueOnce({
+              grand_total: new Prisma.Decimal(100),
+              total_paid: new Prisma.Decimal(0),
+            })
+            // 2.ª lectura: el refresco de estado, ya emitidos los eventos.
+            .mockRejectedValue(new Error(STOP_AFTER_EVENTS)),
+        },
+        order_items: { findMany: jest.fn().mockResolvedValue([]) },
+      };
+
+      (prisma as any).$transaction = jest.fn(async (cb: any) => cb(tx));
+
+      jest
+        .spyOn(service as any, 'createOrUpdateOrderFromPos')
+        .mockResolvedValue({
+          order,
+          hasSerialized: false,
+          promotionsSnapshot: [],
+          appliedPromotions: [],
+          couponInfo: {
+            coupon_id: null,
+            coupon_code: null,
+            discount_amount: 0,
+          },
+          kitchenFire: null,
+          closedSessionId: null,
+        });
+
+      (fiscalThreshold.assertInvoiceNotRequired as jest.Mock).mockResolvedValue(
+        undefined,
+      );
+
+      return { order, tx };
+    };
+
+    const buildPosDto = (overrides: any = {}): any => ({
+      store_id: 1,
+      currency: 'COP',
+      customer_id: 77,
+      items: [],
+      payments: [],
+      requires_payment: true,
+      store_payment_method_id: 9,
+      ...overrides,
+    });
+
+    /** Nombres de los eventos emitidos, en orden. */
+    const emittedEventNames = (): unknown[] =>
+      emitMock.mock.calls.map((call) => call[0]);
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('el pago nace pending y NO emite el evento de caja: el dinero todavía no entró', async () => {
+      const { tx } = arrangePosSale({
+        type: 'cash_on_delivery',
+        processing_mode: payment_processing_mode_enum.ON_DELIVERY,
+      });
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+      expect(tx.payments.create).toHaveBeenCalledTimes(1);
+      expect(tx.payments.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            order_id: 4242,
+            amount: 100,
+            state: 'pending',
+          }),
+        }),
+      );
+
+      // La venta SÍ se registra (la orden existe), pero el reconocimiento de
+      // caja — asiento contable incluido — no se dispara.
+      expect(emittedEventNames()).toContain('order.created');
+      expect(emittedEventNames()).not.toContain('payment.received');
+    });
+
+    it('conserva el saldo completo de la orden: la parada de ruta nace con expected > 0', async () => {
+      const { tx } = arrangePosSale({
+        type: 'cash_on_delivery',
+        processing_mode: payment_processing_mode_enum.ON_DELIVERY,
+      });
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+      // `resolveIsPrepaid` deriva el prepago del saldo VIVO de la orden
+      // (`remaining_balance <= 0.01`). Con el saldo íntegro devuelve false y
+      // la remisión sigue siendo contra entrega.
+      expect(tx.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            total_paid: 0,
+            remaining_balance: 100,
+          }),
+        }),
+      );
+    });
+
+    it('el efectivo normal sigue reconociendo caja y emitiendo su evento (no-regresión)', async () => {
+      const { tx } = arrangePosSale({
+        type: 'cash',
+        processing_mode: payment_processing_mode_enum.DIRECT,
+      });
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+      expect(tx.payments.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ state: 'succeeded' }),
+        }),
+      );
+      expect(emittedEventNames()).toContain('payment.received');
+      expect(tx.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            total_paid: 100,
+            remaining_balance: 0,
+          }),
+        }),
+      );
+    });
+
+    it('fila de método sin processing_mode (tienda antigua): degrada al carril directo y lo deja en el log', async () => {
+      // El seed de `system_payment_methods` es CREATE-ONLY: una tienda
+      // anterior a la columna puede tener la fila sin `processing_mode`. No se
+      // inventa el modo por el nombre del método — se degrada al
+      // comportamiento de hoy y se deja rastro para el backfill pendiente.
+      const { tx } = arrangePosSale({ type: 'cash_on_delivery' });
+      const warn = jest.spyOn((service as any).logger, 'warn');
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+      expect(tx.payments.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ state: 'succeeded' }),
+        }),
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('processing_mode'),
       );
     });
   });
