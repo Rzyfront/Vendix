@@ -12,9 +12,10 @@ export class CommissionEventsListener {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  @OnEvent('payment.received')
+  @OnEvent('payment.received', { suppressErrors: false })
   async handlePaymentReceived(event: {
     payment_id: number;
+    financial_account_id?: number;
     store_id: number;
     organization_id: number;
     amount: number;
@@ -23,6 +24,7 @@ export class CommissionEventsListener {
     try {
       const result = await this.calculator.calculateForPayment({
         payment_id: event.payment_id,
+        financial_account_id: event.financial_account_id,
         amount: Number(event.amount),
         payment_method: event.payment_method,
         store_id: event.store_id,
@@ -41,6 +43,7 @@ export class CommissionEventsListener {
         );
       }
     } catch (error) {
+      if (event.financial_account_id) throw error;
       this.logger.error(
         `Failed to calculate commission for payment #${event.payment_id}: ${error.message}`,
         error.stack,

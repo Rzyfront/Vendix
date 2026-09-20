@@ -966,7 +966,32 @@ export class PosCartService {
       return Number.isFinite(n) ? n : null;
     };
 
+    const addressId = toId(order?.shipping_address_id);
+    // Never fall back to the customer's primary address: it may not be the
+    // destination persisted on this order.
+    const address = order?.addresses_orders_shipping_address_idToaddresses
+      ?? order?.users?.addresses?.find((a: { id: number }) => Number(a.id) === addressId)
+      ?? null;
+    const method = order?.shipping_method;
     return {
+      orderId: toId(order?.id),
+      customerId: toId(order?.customer_id ?? order?.users?.id),
+      shippingAddress: address ? {
+        address_line1: address.address_line1 ?? null,
+        address_line2: address.address_line2 ?? null,
+        city: address.city ?? null,
+        state_province: address.state_province ?? null,
+        country_code: address.country_code ?? null,
+        postal_code: address.postal_code ?? null,
+        phone_number: address.phone_number ?? order?.users?.phone ?? null,
+        latitude: toMoney(address.latitude),
+        longitude: toMoney(address.longitude),
+        municipality_code: address.municipality_code ?? null,
+      } : null,
+      shippingMethod: method ? {
+        id: Number(method.id), name: method.name, type: method.type,
+        is_active: method.is_active !== false,
+      } : null,
       deliveryType: order?.delivery_type ?? null,
       shippingAddressId: toId(order?.shipping_address_id),
       billingAddressId: toId(order?.billing_address_id),

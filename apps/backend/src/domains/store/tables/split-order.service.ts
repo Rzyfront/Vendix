@@ -1,604 +1,424 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { createHash } from 'crypto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
-import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
+import { resolveOrderLineTaxTotal } from '../taxes/utils/final-price.util';
 import {
-  SplitByItemsDto,
-  SplitByAmountDto,
-  SplitMode,
-} from './dto';
-// F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
-import { differsByAtLeastCents } from '@common/money-kernel';
+  SplitByItemsDto, SplitByAmountDto, SplitPreviewDto,
+  SplitAccountCustomerDto, CancelFinancialSplitDto,
+} from './dto/split-order.dto';
+import {
+  allocateFinancialSplit, FinancialSplitSource, FinancialSplitRequest,
+  FinancialSplitAllocation, FinancialSplitAllocationResult, SplitAllocationError,
+} from './utils/split-allocation.util';
 
-/**
- * Result of a split: the source order id, plus the new sub-orders.
- *
- * Plan KDS fire-flows (B9): when the split auto-fires the source order's
- * `prepared` items to the kitchen, `kitchen_fire` carries the ticket id
- * + fired count so the caller (split modal / toast) can show "N platos
- * enviados a cocina" without a follow-up roundtrip. Null when the
- * store is not a restaurant OR the source had no `prepared` items
- * left to fire.
- */
-export interface SplitResult {
-  source_order_id: number;
-  sub_orders: Array<{
-    id: number;
-    order_number: string;
-    grand_total: Prisma.Decimal | number;
-    items_count: number;
-  }>;
-  kitchen_fire: {
-    fired_count: number;
-    kitchen_ticket_id: number;
-    cogs_total: number;
-  } | null;
+const RECEIVED = ['succeeded', 'captured'];
+const RESERVED = ['pending', 'authorized'];
+const VOID_INVOICES = ['cancelled', 'voided'];
+const money = (value: unknown) => new Prisma.Decimal(String(value ?? 0));
+
+export interface SplitAccountSummary {
+  id: number | null;
+  ordinal: number;
+  role: 'paid_original' | 'payable';
+  label: string;
+  customer_id: number | null;
+  customer_alias: string | null;
+  customer_name: string | null;
+  payer: { customer_id: number | null; customer_alias: string | null };
+  subtotal_amount: string;
+  discount_amount: string;
+  tax_amount: string;
+  shipping_cost: string;
+  tip_amount: string;
+  grand_total: string;
+  paid_snapshot: string;
+  total_paid: string;
+  reserved_amount: string;
+  remaining_balance: string;
+  available_to_pay: string;
+  payment_state: 'unpaid' | 'pending' | 'partial' | 'paid';
+  invoice_id: number | null;
+  payments: Array<{ id: number; amount: string; state: string; can_confirm: boolean; next_action: unknown }>;
 }
 
-/**
- * SplitOrderService
- *
- * Restaurant Suite — Fase E. Owns the financial split of a draft
- * (cuenta abierta) order into N sub-orders.
- *
- * **Hard rule:** the split is FINANCIAL ONLY. The inventory was already
- * consumed at fire-to-kitchen (Fase D) and the `inventory_consumed_at_fire`
- * flag on every order_item is propagated to the new sub-orders so the
- * payment flow (PaymentsService.updateInventoryFromOrder) will skip the
- * consume path again. This is the "propagate the flag to the sub-orders"
- * decision documented in the Fase E plan.
- *
- * Two split modes:
- *   - byItems: the caller explicitly groups order_items into N buckets.
- *     The union of all buckets must cover every item of the source
- *     order exactly once.
- *   - byAmount: the source order is divided into N equal (or custom)
- *     monetary parts. The order_items are NOT moved — each sub-order
- *     re-uses the same line items at proportional quantities, so the
- *     sub-order's COGS attribution is consistent (each sub-order still
- *     shows the full list of items it is paying for, with quantity
- *     scaled).
- *
- * Atomicity: every split is a single Prisma transaction. If any step
- * fails, no sub-orders are created and the source order is untouched.
- */
+export interface SplitResult {
+  source_order_id: number;
+  split_group_id: number | null;
+  source_version: string;
+  currency: string;
+  original_total: string;
+  preserved_paid: string;
+  pending_to_split: string;
+  accounts: SplitAccountSummary[];
+  retained_account: SplitAccountSummary | null;
+  kitchen_fire: null;
+}
+
+/** Financial ledger only: never creates orders/items or calls stock or kitchen. */
 @Injectable()
 export class SplitOrderService {
-  private readonly logger = new Logger(SplitOrderService.name);
+  constructor(private readonly prisma: StorePrismaService) {}
 
-  constructor(
-    private prisma: StorePrismaService,
-    private readonly kitchenFireService: KitchenFireService,
-  ) {}
-
-  // ------------------------------------------------------------------ helpers
-  private requireStoreId(): number {
-    const context = RequestContextService.getContext();
-    const storeId = context?.store_id;
-    if (!storeId) {
+  private context() {
+    const ctx = RequestContextService.getContext();
+    if (!ctx?.store_id || !ctx.organization_id || !ctx.user_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
-    return storeId;
+    return ctx;
   }
 
-  private generateSubOrderNumber(sourceNumber: string, index: number) {
-    return `${sourceNumber}-S${index + 1}`;
+  private reject(message: string): never {
+    throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_ITEMS_MISSING, message);
   }
 
-  private roundMoney(value: number): number {
-    return Math.round(value * 100) / 100;
-  }
-
-  // ---------------------------------------------------------- split by items
-  /**
-   * Split the source order into N sub-orders by item assignment.
-   * `itemGroups[i]` is the list of order_item_ids that will live in
-   * sub-order `i`.
-   */
-  async splitByItems(
-    orderId: number,
-    dto: SplitByItemsDto,
-  ): Promise<SplitResult> {
-    const storeId = this.requireStoreId();
-
-    const order = await this.loadDraftOrder(orderId);
-    const orderItemIds = new Set(order.order_items.map((it) => it.id));
-
-    // Validation: every id in every group must exist on the source order,
-    // no duplicates, full coverage.
-    const assigned = new Set<number>();
-    for (const group of dto.item_groups) {
-      for (const itemId of group.order_item_ids) {
-        if (!orderItemIds.has(itemId)) {
-          throw new VendixHttpException(
-            ErrorCodes.SPLIT_ORDER_ITEMS_MISSING,
-            `order_item #${itemId} no pertenece a la orden #${orderId}`,
-          );
-        }
-        if (assigned.has(itemId)) {
-          throw new VendixHttpException(
-            ErrorCodes.SPLIT_ORDER_ITEMS_MISSING,
-            `order_item #${itemId} aparece en más de un grupo`,
-          );
-        }
-        assigned.add(itemId);
-      }
-    }
-    if (assigned.size !== orderItemIds.size) {
-      throw new VendixHttpException(
-        ErrorCodes.SPLIT_ORDER_ITEMS_MISSING,
-        `Cobertura incompleta: ${assigned.size}/${orderItemIds.size} items asignados`,
-      );
-    }
-
-    return this.runSplit(order, dto.item_groups.map((g) => g.order_item_ids));
-  }
-
-  // --------------------------------------------------------- split by amount
-  /**
-   * Split the source order into N sub-orders by amount. For 'equal'
-   * mode, the grand_total is divided into N equal parts. For 'custom',
-   * the caller provides `amounts` and the service validates that the
-   * sum equals the source order's grand_total.
-   *
-   * In both modes the items are proportionally distributed by total_price
-   * weight so each sub-order carries a coherent subset of items. This is
-   * a financial projection: the goal is "each sub-order is its own check
-   * that adds up to its share of the bill", not "items are moved around".
-   */
-  async splitByAmount(
-    orderId: number,
-    dto: SplitByAmountDto,
-  ): Promise<SplitResult> {
-    const storeId = this.requireStoreId();
-    if (dto.n_splits < 2) {
-      throw new VendixHttpException(
-        ErrorCodes.SPLIT_ORDER_INVALID_NSPLITS,
-      );
-    }
-
-    const order = await this.loadDraftOrder(orderId);
-    const orderTotal = Number(order.grand_total);
-
-    // Build the per-sub-order amounts array.
-    const amounts: number[] =
-      dto.mode === 'custom'
-        ? (() => {
-            if (!dto.amounts || dto.amounts.length !== dto.n_splits) {
-              throw new VendixHttpException(
-                ErrorCodes.SPLIT_ORDER_ITEMS_MISSING,
-                'amounts debe tener exactamente n_splits elementos',
-              );
-            }
-            const sum = dto.amounts.reduce((acc, v) => acc + v, 0);
-            // Compare to 1 cent tolerance — money rounding can produce
-            // a 0.01 diff.
-            // F-222: MISMO umbral que el `> 0.01` original (tolera 1 centavo), pero
-            // medido en centavos enteros: `>= 2` ¢. Ver ADR-16.
-            if (differsByAtLeastCents(sum, orderTotal, 2)) {
-              throw new VendixHttpException(
-                ErrorCodes.SPLIT_ORDER_ITEMS_MISSING,
-                `La suma de los montos (${sum}) no coincide con el total de la orden (${orderTotal})`,
-              );
-            }
-            return dto.amounts.map((a) => this.roundMoney(a));
-          })()
-        : (() => {
-            const base = Math.floor((orderTotal * 100) / dto.n_splits) / 100;
-            const amounts: number[] = Array(dto.n_splits).fill(base);
-            // Last bucket absorbs the rounding diff so the sum matches
-            // the source order's total exactly.
-            const diff =
-              this.roundMoney(orderTotal) - this.roundMoney(base * dto.n_splits);
-            amounts[amounts.length - 1] = this.roundMoney(
-              amounts[amounts.length - 1] + diff,
-            );
-            return amounts;
-          })();
-
-    // Distribute items into N buckets proportional to each item's
-    // share of the source total. We greedily walk items sorted by
-    // total_price desc to keep the per-bucket totals close to the
-    // target `amounts[i]`. This is intentionally simple: the goal
-    // is "each sub-order has the right items so its check adds up",
-    // not "optimize the assignment".
-    const items = order.order_items;
-    if (items.length === 0) {
-      throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_EMPTY);
-    }
-
-    const itemTotal = items.reduce(
-      (acc, it) => acc + Number(it.total_price),
-      0,
-    );
-    const groups: number[][] = Array.from(
-      { length: dto.n_splits },
-      () => [],
-    );
-
-    // Build a per-item proportional quantity for each sub-order:
-    // because we don't move line items, we re-use each item at the
-    // same quantity — but only in the bucket that "owns" it. The
-    // financial split is the order's grand_total, the per-item
-    // assignment is just operational (so each sub-order has a non-
-    // empty list of lines for the KDS / payment receipt).
-    //
-    // Strategy: walk the items in descending order, place each one
-    // in the bucket with the smallest current sum. This minimizes
-    // imbalance across buckets.
-    const sorted = [...items].sort(
-      (a, b) => Number(b.total_price) - Number(a.total_price),
-    );
-    const sums = Array<number>(dto.n_splits).fill(0);
-    for (const it of sorted) {
-      let target = 0;
-      for (let i = 1; i < sums.length; i += 1) {
-        if (sums[i] < sums[target]) target = i;
-      }
-      groups[target].push(it.id);
-      sums[target] += Number(it.total_price);
-    }
-    // Suppress unused-var lint by referencing `itemTotal`.
-    void itemTotal;
-
-    return this.runSplit(order, groups);
-  }
-
-  // -------------------------------------------------------- internal runner
-  private async runSplit(
-    order: {
-      id: number;
-      store_id: number;
-      created_by_user_id?: number | null;
-      customer_id: number | null;
-      currency: string | null;
-      channel: string;
-      delivery_type: string;
-      order_number: string;
-      order_items: Array<{
-        id: number;
-        product_id: number | null;
-        product_variant_id: number | null;
-        product_name: string;
-        description: string | null;
-        variant_sku: string | null;
-        variant_attributes: string | null;
-        variant_image_url: string | null;
-        quantity: number;
-        unit_price: Prisma.Decimal | number;
-        total_price: Prisma.Decimal | number;
-        tax_rate: Prisma.Decimal | number | null;
-        tax_amount_item: Prisma.Decimal | number | null;
-        cost_price: Prisma.Decimal | number | null;
-        catalog_unit_price: Prisma.Decimal | number | null;
-        catalog_final_price: Prisma.Decimal | number | null;
-        final_unit_price: Prisma.Decimal | number | null;
-        is_price_overridden: boolean;
-        price_override_reason: string | null;
-        price_overridden_by_user_id: number | null;
-        weight: Prisma.Decimal | number | null;
-        weight_unit: string | null;
-        item_type: string | null;
-        applied_price_tier_id: number | null;
-        applied_price_tier_name_snapshot: string | null;
-        stock_units_consumed: number | null;
-        inventory_consumed_at_fire: boolean;
-        skip_kds: boolean;
-        products: { product_type: string } | null;
-        // F-048 — el split mueve la línea ENTERA a una sub-orden nueva (id
-        // distinto): sin `price_unit_quantity` el multiplicador de un plato
-        // por peso/presentación se pierde aguas abajo (cae a `quantity`
-        // plana), y sin `order_item_taxes` el desglose por-tasa desaparece
-        // del lado que quedó huérfano (el FK apunta a la línea vieja,
-        // cancelada). Se copian ambos 1:1 — es un MOVE, no un split
-        // proporcional, así que no hay nada que prorratear.
-        price_unit_quantity: number | null;
-        order_item_taxes: Array<{
-          tax_rate_id: number | null;
-          tax_name: string;
-          tax_rate: Prisma.Decimal | number;
-          tax_amount: Prisma.Decimal | number;
-          tax_type: string | null;
-          is_compound: boolean | null;
-          is_inclusive: boolean;
-        }>;
-      }>;
-    },
-    groups: number[][],
-  ): Promise<SplitResult> {
-    const subOrders: SplitResult['sub_orders'] = [];
-    const itemById = new Map(order.order_items.map((it) => [it.id, it]));
-
-    // Plan KDS fire-flows (B7): collect candidate `prepared` items that
-    // are not yet fire-tracked AND not flagged `skip_kds` so we can
-    // fire them as part of the split transaction. After the split the
-    // source order is cancelled; if we leave the fire for later, the
-    // sub-orders inherit the FALSE flag and the payment path will
-    // discount the stock at sale (no kitchen ticket = no KDS = blind
-    // cocina). Fire here so the COGS recognition happens in fire
-    // (invariant) and the sub-orders inherit the TRUE flag.
-    const fireCandidateIds = order.order_items
-      .filter((it) =>
-        it.inventory_consumed_at_fire === false &&
-        it.skip_kds !== true &&
-        it.product_id != null &&
-        (it as any).products?.product_type === 'prepared',
-      )
-      .map((it) => it.id);
-    type SplitFireResult = {
-      ticketId: number;
-      /**
-       * QUI-651 — un id por estacion involucrada en el envio. El split financiero
-       * no rutea nada por si mismo: solo reenvia lo que `fireOrderItemsInTx`
-       * resolvio, para que el SSE llegue a cada tablero.
-       */
-      ticketIds: number[];
-      firedItemSnapshots: Array<{
-        orderItemId: number;
-        productId: number;
-        productName: string;
-        quantity: number;
-        // CP-POLLO-ARABE-727 A.6 — el split reenvía lo que `fireOrderItemsInTx`
-        // resolvió, así que el snapshot ya arrastra la variante vendida. Sin estos
-        // dos campos el callback `emitKitchenFiredAfterCommit` (que ahora los
-        // exige) no compila.
-        productVariantId: number | null;
-        variantLabel: string | null;
-      }>;
-      cogsTotal: number;
-      consumedLineCount: number;
-    };
-    const splitFireResult: { value: SplitFireResult | null } = {
-      value: null,
-    };
-
-    await this.prisma.$transaction(async (tx) => {
-      for (let i = 0; i < groups.length; i += 1) {
-        const ids = groups[i];
-        const orderNumber = this.generateSubOrderNumber(order.order_number, i);
-
-        // Compute per-bucket subtotal/tax/total.
-        let subtotal = 0;
-        let taxAmount = 0;
-        for (const id of ids) {
-          const it = itemById.get(id);
-          if (!it) continue;
-          subtotal += Number(it.total_price);
-          taxAmount += Number(it.tax_amount_item ?? 0);
-        }
-        const grandTotal = this.roundMoney(subtotal + taxAmount);
-
-        const subOrder = await tx.orders.create({
-          data: {
-            store_id: order.store_id,
-            created_by_user_id: order.created_by_user_id ?? null,
-            customer_id: order.customer_id,
-            order_number: orderNumber,
-            state: 'draft',
-            channel: order.channel as any,
-            delivery_type: order.delivery_type as any,
-            currency: order.currency,
-            subtotal_amount: new Prisma.Decimal(this.roundMoney(subtotal)),
-            tax_amount: new Prisma.Decimal(this.roundMoney(taxAmount)),
-            shipping_cost: 0,
-            discount_amount: 0,
-            grand_total: new Prisma.Decimal(grandTotal),
-            total_paid: 0,
-            remaining_balance: new Prisma.Decimal(grandTotal),
-            internal_notes: `Sub-orden del split de #${order.id} (${order.order_number})`,
-            updated_at: new Date(),
-          },
-        });
-
-        for (const id of ids) {
-          const it = itemById.get(id);
-          if (!it) continue;
-          await tx.order_items.create({
-            data: {
-              order_id: subOrder.id,
-              product_id: it.product_id,
-              product_variant_id: it.product_variant_id,
-              product_name: it.product_name,
-              description: it.description,
-              variant_sku: it.variant_sku,
-              variant_attributes: it.variant_attributes,
-              variant_image_url: it.variant_image_url,
-              quantity: it.quantity,
-              unit_price: new Prisma.Decimal(Number(it.unit_price)),
-              total_price: new Prisma.Decimal(Number(it.total_price)),
-              tax_rate:
-                it.tax_rate != null
-                  ? new Prisma.Decimal(Number(it.tax_rate))
-                  : null,
-              tax_amount_item:
-                it.tax_amount_item != null
-                  ? new Prisma.Decimal(Number(it.tax_amount_item))
-                  : null,
-              cost_price:
-                it.cost_price != null
-                  ? new Prisma.Decimal(Number(it.cost_price))
-                  : null,
-              catalog_unit_price:
-                it.catalog_unit_price != null
-                  ? new Prisma.Decimal(Number(it.catalog_unit_price))
-                  : null,
-              catalog_final_price:
-                it.catalog_final_price != null
-                  ? new Prisma.Decimal(Number(it.catalog_final_price))
-                  : null,
-              final_unit_price:
-                it.final_unit_price != null
-                  ? new Prisma.Decimal(Number(it.final_unit_price))
-                  : null,
-              is_price_overridden: it.is_price_overridden,
-              price_override_reason: it.price_override_reason,
-              price_overridden_by_user_id: it.price_overridden_by_user_id,
-              weight:
-                it.weight != null
-                  ? new Prisma.Decimal(Number(it.weight))
-                  : null,
-              weight_unit: it.weight_unit,
-              item_type: it.item_type,
-              applied_price_tier_id: it.applied_price_tier_id,
-              applied_price_tier_name_snapshot:
-                it.applied_price_tier_name_snapshot,
-              stock_units_consumed: it.stock_units_consumed,
-              // PROPAGATE THE FLAG — this is the Fase E rule: split is
-              // financial only; inventory was already consumed at fire,
-              // and we must NOT let the payment path re-consume it.
-              inventory_consumed_at_fire: it.inventory_consumed_at_fire,
-              price_unit_quantity: it.price_unit_quantity,
-              updated_at: new Date(),
-              ...((it.order_item_taxes ?? []).length > 0
-                ? {
-                    order_item_taxes: {
-                      create: (it.order_item_taxes ?? []).map((row) => ({
-                        tax_rate_id: row.tax_rate_id,
-                        tax_name: row.tax_name,
-                        tax_rate: row.tax_rate,
-                        tax_amount: row.tax_amount,
-                        tax_type: row.tax_type as any,
-                        is_compound: row.is_compound,
-                        is_inclusive: row.is_inclusive,
-                      })),
-                    },
-                  }
-                : {}),
-            },
-          });
-        }
-
-        subOrders.push({
-          id: subOrder.id,
-          order_number: orderNumber,
-          grand_total: grandTotal,
-          items_count: ids.length,
-        });
-      }
-
-      // Plan KDS fire-flows (B7): auto-fire the pending `prepared`
-      // items from the source order BEFORE we cancel it. After this
-      // returns the source order is cancelled, but the
-      // `inventory_consumed_at_fire` flag on the source's order_items
-      // is set to TRUE by the fire core; the sub-orders we just
-      // created propagated the flag (Fase E rule), and they will
-      // inherit the TRUE value when the flag flip happens here.
-      //
-      // Atomicity: fire is INSIDE the split $transaction. If fire
-      // fails, the whole split rolls back (no orphan sub-orders).
-      if (fireCandidateIds.length > 0) {
-        const storeRow = await tx.stores.findUnique({
-          where: { id: order.store_id },
-          select: { industries: true },
-        });
-        if (storeIsRestaurant(storeRow?.industries)) {
-          const ctx = await this.kitchenFireService.prepareFireContext(
-            order.id,
-            fireCandidateIds,
-          );
-          if (ctx && ctx.firedItemIds.length > 0) {
-            splitFireResult.value =
-              await this.kitchenFireService.fireOrderItemsInTx(
-                tx,
-                order.store_id,
-                ctx,
-              );
-          }
-        }
-      }
-
-      // Mark the source order as 'cancelled' with a note. We use
-      // 'cancelled' (not 'finished') because the order is being
-      // superseded by the sub-orders; 'finished' would let the
-      // payments flow try to collect the source order's grand_total,
-      // which is now distributed across the sub-orders.
-      await tx.orders.update({
-        where: { id: order.id },
-        data: {
-          state: 'cancelled',
-          internal_notes: `Cuenta dividida en ${groups.length} sub-órdenes: ${subOrders
-            .map((s) => s.order_number)
-            .join(', ')}`,
-          updated_at: new Date(),
-        },
-      });
-    });
-
-    this.logger.log(
-      `Order split: source=${order.id} → ${subOrders.length} sub-orders`,
-    );
-
-    // Plan KDS fire-flows (B9): after the split $transaction commits,
-    // emit kitchen.fired + push KDS SSE snapshot for the auto-fire we
-    // just did. Failures are logged but never bubble up: the split is
-    // already persisted and the operator can re-fire from the KDS page.
-    if (splitFireResult.value) {
-      try {
-        await this.kitchenFireService.emitKitchenFiredAfterCommit(
-          order.store_id,
-          undefined,
-          splitFireResult.value,
-          order.id,
-        );
-      } catch (err) {
-        this.logger.error(
-          `Failed to emit kitchen.fired for split auto-fire on order #${order.id}: ${
-            (err as Error).message
-          }`,
-          (err as Error).stack,
-        );
-      }
-    }
-
-    return {
-      source_order_id: order.id,
-      sub_orders: subOrders,
-      kitchen_fire: splitFireResult.value
-        ? {
-            fired_count: splitFireResult.value.firedItemSnapshots.length,
-            kitchen_ticket_id: splitFireResult.value.ticketId,
-            cogs_total: Number(splitFireResult.value.cogsTotal.toFixed(4)),
-          }
-        : null,
-    };
-  }
-
-  // -------------------------------------------------------------- internals
-  /**
-   * Loads the source order and asserts it is in `draft` (an open
-   * check). Returns the order with its items attached.
-   */
-  private async loadDraftOrder(orderId: number) {
-    const storeId = this.requireStoreId();
-    const order = await this.prisma.orders.findFirst({
-      where: { id: orderId, store_id: storeId },
+  private async source(db: any, orderId: number) {
+    const { store_id } = this.context();
+    const order = await db.orders.findFirst({
+      where: { id: orderId, store_id },
       include: {
-        order_items: {
-          orderBy: { id: 'asc' },
-          // F-048 — el desglose por-tasa viaja con la línea al moverla a la
-          // sub-orden; sin este include no hay nada que copiar.
-          include: { order_item_taxes: true },
-        },
+        order_items: { where: { cancelled_at: null }, orderBy: { id: 'asc' }, include: { order_item_taxes: { orderBy: { id: 'asc' } } } },
+        payments: { orderBy: { id: 'asc' } },
+        invoices: { select: { id: true, status: true, financial_account_id: true } },
+        refunds: { select: { id: true, state: true } },
+        order_installments: { select: { id: true } },
       },
     });
-    if (!order) {
-      throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_NOT_FOUND);
-    }
-    if (order.state !== 'draft') {
-      throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_NOT_DRAFT);
-    }
-    if (order.order_items.length === 0) {
-      throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_EMPTY);
-    }
-    return order;
+    if (!order) throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_NOT_FOUND);
+    const receivable = await db.accounts_receivable.findFirst({
+      where: { store_id, source_id: orderId, source_type: { in: ['credit_sale', 'order'] } },
+      select: { id: true },
+    });
+    return { ...order, has_receivable: !!receivable };
   }
 
-  /**
-   * Public surface used by tests to validate the round-money helper.
-   */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  private _unused: SplitMode | null = null;
+  private async lockSource(tx: any, orderId: number) {
+    const { store_id } = this.context();
+    const rows = await tx.$queryRaw`
+      SELECT id FROM orders WHERE id = ${orderId} AND store_id = ${store_id} FOR UPDATE
+    `;
+    if (!rows.length) throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_NOT_FOUND);
+    return this.source(tx, orderId);
+  }
+
+  private ensureSplittable(order: any) {
+    if (['cancelled', 'refunded'].includes(order.state)) {
+      throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_NOT_DRAFT,
+        'Una orden cancelada o reembolsada no se puede dividir.');
+    }
+    if (order.payment_form === '2' || order.credit_type || order.order_installments?.length || order.has_receivable) {
+      this.reject('La orden tiene crédito, cuotas o cartera materializada; no se puede dividir.');
+    }
+    if (!order.order_items.length) throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_EMPTY);
+    if ((order.invoices ?? []).some((invoice: any) => !VOID_INVOICES.includes(invoice.status))) {
+      this.reject('La orden tiene un documento fiscal vigente; no se puede dividir.');
+    }
+    if ((order.refunds ?? []).length) this.reject('La orden tiene devoluciones; requiere conciliación antes de dividir.');
+    if (order.payments.some((payment: any) => RESERVED.includes(payment.state))) {
+      this.reject('Confirma o cancela los pagos pendientes antes de dividir el saldo.');
+    }
+    if (order.payments.some((payment: any) => ['refunded', 'partially_refunded', 'disputed'].includes(payment.state))) {
+      this.reject('La orden tiene pagos reversados o en disputa; requiere conciliación.');
+    }
+  }
+
+  private kernelSource(order: any): FinancialSplitSource {
+    const paid = order.payments.filter((p: any) => RECEIVED.includes(p.state))
+      .reduce((sum: Prisma.Decimal, p: any) => sum.plus(money(p.amount)), money(0));
+    return {
+      subtotal_amount: order.subtotal_amount,
+      discount_amount: order.discount_amount ?? 0,
+      tax_amount: order.tax_amount ?? 0,
+      shipping_cost: order.shipping_cost ?? 0,
+      tip_amount: order.tip_amount ?? 0,
+      grand_total: order.grand_total,
+      paid_total: paid,
+      items: order.order_items.map((item: any) => {
+        const rows = item.order_item_taxes ?? [];
+        const scalarTax = resolveOrderLineTaxTotal(item);
+        if ((scalarTax > 0 && !rows.length) || rows.some((tax: any) => money(tax.tax_amount).gt(0) && !tax.tax_type)) {
+          this.reject('La orden no conserva un desglose fiscal tipado; requiere conciliación antes de dividir.');
+        }
+        const taxes = rows;
+        return {
+          id: item.id, subtotal_amount: item.total_price,
+          taxes: taxes.map((tax: any) => ({
+            tax_rate_id: tax.tax_rate_id ?? null, tax_name: tax.tax_name,
+            tax_rate: tax.tax_rate, tax_type: tax.tax_type ?? null,
+            tax_amount: tax.tax_amount, is_inclusive: !!tax.is_inclusive,
+            is_compound: tax.is_compound ?? false,
+          })),
+        };
+      }),
+    };
+  }
+
+  private version(order: any): string {
+    return createHash('sha256').update(JSON.stringify({
+      id: order.id, currency: order.currency, source: this.kernelSource(order),
+      customer_id: order.customer_id, customer_alias: order.customer_alias,
+      payment_form: order.payment_form, credit_type: order.credit_type,
+      item_snapshots: order.order_items.map((item: any) => ({ id: item.id,
+        product_name: item.product_name, quantity: item.quantity, unit_price: String(item.unit_price),
+        weight: item.weight == null ? null : String(item.weight), weight_unit: item.weight_unit,
+        sale_unit_code_snapshot: item.sale_unit_code_snapshot, sale_quantity_snapshot: item.sale_quantity_snapshot,
+      })),
+      payments: order.payments.map((p: any) => ({ id: p.id, amount: String(p.amount), state: p.state })),
+      invoices: order.invoices ?? [], refunds: order.refunds ?? [],
+    })).digest('hex');
+  }
+
+  private calculate(order: any, request: FinancialSplitRequest): FinancialSplitAllocationResult {
+    try {
+      return allocateFinancialSplit(this.kernelSource(order), request);
+    } catch (error) {
+      if (error instanceof SplitAllocationError) this.reject(error.message);
+      throw error;
+    }
+  }
+
+  private async validatePayers(db: any, payers: SplitAccountCustomerDto[] | undefined, count: number) {
+    if (payers && payers.length !== count) this.reject('Debe indicar un titular por cuenta.');
+    const { organization_id } = this.context();
+    for (const payer of payers ?? []) {
+      if (payer.customer_id != null && payer.customer_alias?.trim()) {
+        this.reject('Elige cliente o alias, no ambos.');
+      }
+      if (payer.customer_id != null) {
+        const customer = await db.users.findFirst({
+          where: { id: payer.customer_id, organization_id }, select: { id: true },
+        });
+        if (!customer) this.reject('El cliente no pertenece a esta organización.');
+      }
+    }
+  }
+
+  async preview(orderId: number, dto: SplitPreviewDto): Promise<SplitResult> {
+    const order = await this.source(this.prisma, orderId);
+    if (order.active_financial_split_id) this.reject('La orden ya tiene una división activa.');
+    this.ensureSplittable(order);
+    const allocation = this.calculate(order, dto);
+    await this.validatePayers(this.prisma, dto.accounts, allocation.accounts.length);
+    return this.previewResult(order, allocation, dto.accounts);
+  }
+
+  async splitByItems(orderId: number, dto: SplitByItemsDto): Promise<SplitResult> {
+    return this.confirm(orderId, { ...dto, mode: 'items' });
+  }
+
+  async splitByAmount(orderId: number, dto: SplitByAmountDto): Promise<SplitResult> {
+    return this.confirm(orderId, { ...dto, mode: dto.mode ?? 'equal' });
+  }
+
+  private async confirm(orderId: number, dto: SplitPreviewDto): Promise<SplitResult> {
+    if (!dto.source_version || !dto.idempotency_key) {
+      this.reject('Confirma la vista previa enviando source_version e idempotency_key.');
+    }
+    const { store_id, user_id } = this.context();
+    const requestHash = createHash('sha256').update(JSON.stringify({
+      mode: dto.mode, n_splits: dto.n_splits ?? null,
+      amounts: dto.amounts?.map((value) => money(value).toFixed(2)) ?? null,
+      item_groups: dto.item_groups?.map((group) => [...group.order_item_ids].sort((a, b) => a - b)) ?? null,
+      accounts: dto.accounts?.map((account) => ({ label: account.label?.trim() || null,
+        customer_id: account.customer_id ?? null, customer_alias: account.customer_alias?.trim() || null })) ?? null,
+    })).digest('hex');
+    return this.prisma.$transaction(async (tx: any) => {
+      const order = await this.lockSource(tx, orderId);
+      const existing = await tx.order_financial_splits.findFirst({
+        where: { store_id, idempotency_key: dto.idempotency_key },
+      });
+      if (existing) {
+        if (existing.source_order_id !== orderId || existing.source_version !== dto.source_version || existing.state !== 'active' || existing.request_hash !== requestHash) {
+          this.reject('La clave de idempotencia ya se usó para otra versión o división.');
+        }
+        const response = await this.readGroup(tx, order, existing.id);
+        if (!response) this.reject('La división ya no está disponible.');
+        return response;
+      }
+      if (order.active_financial_split_id) this.reject('La orden ya tiene una división activa.');
+      this.ensureSplittable(order);
+      if (this.version(order) !== dto.source_version) this.reject('La cuenta cambió; vuelve a generar la vista previa.');
+      const allocation = this.calculate(order, dto);
+      await this.validatePayers(tx, dto.accounts, allocation.accounts.length);
+      const last = await tx.order_financial_splits.findFirst({
+        where: { store_id, source_order_id: orderId }, orderBy: { version: 'desc' }, select: { version: true },
+      });
+      const group = await tx.order_financial_splits.create({
+        data: {
+          store_id, source_order_id: orderId, version: (last?.version ?? 0) + 1,
+          mode: dto.mode, state: 'active', source_version: dto.source_version,
+          idempotency_key: dto.idempotency_key, request_hash: requestHash,
+          original_total: allocation.original_total,
+          paid_total_snapshot: allocation.preserved_paid,
+          remaining_total: allocation.pending_to_split,
+          original_payment_ids: order.payments.filter((p: any) => RECEIVED.includes(p.state)).map((p: any) => p.id),
+          created_by: user_id,
+        },
+      });
+      if (allocation.retained_account) {
+        await this.persistAccount(tx, group.id, order, allocation.retained_account, 0, 'paid_original', {
+          label: 'Abonos anteriores', customer_id: order.customer_id ?? null,
+          customer_alias: order.customer_id ? null : order.customer_alias ?? null,
+        });
+      }
+      for (let index = 0; index < allocation.accounts.length; index++) {
+        await this.persistAccount(tx, group.id, order, allocation.accounts[index], index + 1, 'payable', dto.accounts?.[index]);
+      }
+      const claimed = await tx.orders.updateMany({
+        where: { id: orderId, store_id, active_financial_split_id: null },
+        data: { active_financial_split_id: group.id, total_paid: allocation.preserved_paid, remaining_balance: allocation.pending_to_split },
+      });
+      if (claimed.count !== 1) this.reject('La orden cambió mientras se dividía; recarga la vista previa.');
+      return (await this.readGroup(tx, order, group.id))!;
+    });
+  }
+
+  private async persistAccount(tx: any, splitId: number, order: any, allocation: FinancialSplitAllocation,
+    ordinal: number, role: 'paid_original' | 'payable', payer?: SplitAccountCustomerDto) {
+    const { lines, ...totals } = allocation;
+    const account = await tx.order_financial_accounts.create({
+      data: {
+        store_id: order.store_id, split_id: splitId, ordinal, role, state: 'active',
+        label: payer?.label?.trim() || `Cuenta ${ordinal}`,
+        customer_id: payer?.customer_id ?? null,
+        customer_alias: payer?.customer_id ? null : payer?.customer_alias?.trim() || null,
+        ...totals,
+        paid_snapshot: role === 'paid_original' ? allocation.grand_total : '0.00',
+      },
+    });
+    for (const line of lines) {
+      const source = order.order_items.find((item: any) => item.id === line.source_order_item_id);
+      const snapshot = source ? {
+        id: source.id, product_id: source.product_id, product_variant_id: source.product_variant_id,
+        product_name: source.product_name, quantity: source.quantity,
+        unit_price: String(source.unit_price), total_price: String(source.total_price),
+        price_unit_quantity: source.price_unit_quantity, weight: source.weight == null ? null : String(source.weight),
+        weight_unit: source.weight_unit, sale_unit_code_snapshot: source.sale_unit_code_snapshot,
+        sale_quantity_snapshot: source.sale_quantity_snapshot == null ? null : String(source.sale_quantity_snapshot),
+      } : { kind: line.kind, source_order_id: order.id };
+      const persisted = await tx.order_financial_lines.create({
+        data: {
+          store_id: order.store_id, account_id: account.id,
+          source_order_item_id: line.source_order_item_id ?? null, kind: line.kind,
+          description: source?.product_name ?? (line.kind === 'shipping' ? 'Envío' : 'Propina'),
+          source_snapshot: JSON.parse(JSON.stringify(snapshot)),
+          subtotal_amount: line.subtotal_amount, discount_amount: line.discount_amount,
+          tax_amount: line.tax_amount, total_amount: line.total_amount,
+        },
+      });
+      for (const tax of line.taxes) {
+        await tx.order_financial_line_taxes.create({ data: { ...tax, is_compound: tax.is_compound ?? false, store_id: order.store_id, line_id: persisted.id } });
+      }
+    }
+  }
+
+  private summary(account: any, payments: any[] = [], invoiceId: number | null = null): SplitAccountSummary {
+    const received = payments.filter((p) => RECEIVED.includes(p.state))
+      .reduce((sum, p) => sum.plus(money(p.amount)), money(account.paid_snapshot));
+    const reserved = payments.filter((p) => RESERVED.includes(p.state))
+      .reduce((sum, p) => sum.plus(money(p.amount)), money(0));
+    const remaining = Prisma.Decimal.max(0, money(account.grand_total).minus(received));
+    return {
+      id: account.id ?? null, ordinal: account.ordinal, role: account.role, label: account.label,
+      customer_id: account.customer_id ?? null, customer_alias: account.customer_alias ?? null,
+      customer_name: account.customer?.legal_name || [account.customer?.first_name, account.customer?.last_name].filter(Boolean).join(' ') || null,
+      payer: { customer_id: account.customer_id ?? null, customer_alias: account.customer_alias ?? null },
+      ...Object.fromEntries(['subtotal_amount', 'discount_amount', 'tax_amount', 'shipping_cost', 'tip_amount', 'grand_total', 'paid_snapshot'].map((key) => [key, money(account[key]).toFixed(2)])),
+      total_paid: received.toFixed(2), reserved_amount: reserved.toFixed(2),
+      remaining_balance: remaining.toFixed(2),
+      available_to_pay: Prisma.Decimal.max(0, remaining.minus(reserved)).toFixed(2),
+      payment_state: remaining.eq(0) ? 'paid' : received.gt(0) ? 'partial' : reserved.gt(0) ? 'pending' : 'unpaid',
+      invoice_id: invoiceId,
+      payments: payments.map((p) => ({ id: p.id, amount: money(p.amount).toFixed(2), state: p.state,
+        can_confirm: p.state === 'pending' && p.store_payment_method?.system_payment_method?.processing_mode === 'DIRECT' &&
+          ['cash', 'card', 'bank_transfer'].includes(p.store_payment_method?.system_payment_method?.type),
+        next_action: p.gateway_response?.nextAction ?? null,
+      })),
+    } as SplitAccountSummary;
+  }
+
+  private previewResult(order: any, result: FinancialSplitAllocationResult, payers?: SplitAccountCustomerDto[]): SplitResult {
+    return {
+      source_order_id: order.id, split_group_id: null, source_version: this.version(order), currency: order.currency ?? 'COP',
+      original_total: result.original_total, preserved_paid: result.preserved_paid, pending_to_split: result.pending_to_split,
+      accounts: result.accounts.map((a, index) => this.summary({ ...a, ordinal: index + 1, role: 'payable',
+        label: payers?.[index]?.label?.trim() || `Cuenta ${index + 1}`,
+        customer_id: payers?.[index]?.customer_id ?? null,
+        customer_alias: payers?.[index]?.customer_alias?.trim() || null, paid_snapshot: 0 })),
+      retained_account: result.retained_account ? this.summary({ ...result.retained_account, ordinal: 0,
+        role: 'paid_original', label: 'Abonos anteriores', customer_id: order.customer_id,
+        customer_alias: order.customer_alias, paid_snapshot: result.retained_account.grand_total }) : null,
+      kitchen_fire: null,
+    };
+  }
+
+  private async readGroup(db: any, order: any, groupId: number): Promise<SplitResult | null> {
+    const group = await db.order_financial_splits.findFirst({
+      where: { id: groupId, store_id: this.context().store_id, source_order_id: order.id },
+      include: { accounts: { orderBy: { ordinal: 'asc' }, include: { customer: { select: { first_name: true, last_name: true, legal_name: true } } } } },
+    });
+    if (!group || group.state !== 'active') return null;
+    const ids = group.accounts.map((account: any) => account.id);
+    const payments = await db.payments.findMany({ where: { order_id: order.id, financial_account_id: { in: ids } }, orderBy: { id: 'asc' }, include: { store_payment_method: { include: { system_payment_method: true } } } });
+    const invoices = await db.invoices.findMany({ where: { order_id: order.id, financial_account_id: { in: ids }, status: { notIn: VOID_INVOICES } }, select: { id: true, financial_account_id: true } });
+    const accounts = group.accounts.map((account: any) => this.summary(account,
+      payments.filter((p: any) => p.financial_account_id === account.id),
+      invoices.find((i: any) => i.financial_account_id === account.id)?.id ?? null));
+    return {
+      source_order_id: order.id, split_group_id: group.id, source_version: group.source_version,
+      currency: order.currency ?? 'COP', original_total: money(group.original_total).toFixed(2),
+      preserved_paid: money(group.paid_total_snapshot).toFixed(2), pending_to_split: money(group.remaining_total).toFixed(2),
+      accounts: accounts.filter((a: SplitAccountSummary) => a.role === 'payable'),
+      retained_account: accounts.find((a: SplitAccountSummary) => a.role === 'paid_original') ?? null,
+      kitchen_fire: null,
+    };
+  }
+
+  async getSplit(orderId: number): Promise<SplitResult | null> {
+    const order = await this.source(this.prisma, orderId);
+    return order.active_financial_split_id ? this.readGroup(this.prisma, order, order.active_financial_split_id) : null;
+  }
+
+  async cancel(orderId: number, dto: CancelFinancialSplitDto): Promise<{ cancelled: true }> {
+    const { store_id } = this.context();
+    return this.prisma.$transaction(async (tx: any) => {
+      const order = await this.lockSource(tx, orderId);
+      const group = await tx.order_financial_splits.findFirst({ where: { id: order.active_financial_split_id ?? -1, source_order_id: orderId, store_id, state: 'active' }, include: { accounts: true } });
+      if (!group || group.source_version !== dto.source_version) this.reject('La división cambió; recarga las cuentas.');
+      const ids = group.accounts.filter((a: any) => a.role === 'payable').map((a: any) => a.id);
+      if (await tx.payments.count({ where: { financial_account_id: { in: ids }, state: { in: [...RECEIVED, ...RESERVED] } } })) {
+        this.reject('No se puede deshacer una división con pagos nuevos recibidos o pendientes.');
+      }
+      if (await tx.invoices.count({ where: { financial_account_id: { in: group.accounts.map((a: any) => a.id) }, status: { notIn: VOID_INVOICES } } })) {
+        this.reject('No se puede deshacer una división con documentos vigentes.');
+      }
+      await tx.order_financial_accounts.updateMany({ where: { split_id: group.id, store_id }, data: { state: 'cancelled' } });
+      await tx.order_financial_splits.updateMany({ where: { id: group.id, store_id, state: 'active' }, data: { state: 'cancelled' } });
+      await tx.orders.updateMany({ where: { id: orderId, store_id, active_financial_split_id: group.id }, data: { active_financial_split_id: null } });
+      return { cancelled: true as const };
+    });
+  }
+
+  async updateCustomer(orderId: number, accountId: number, dto: SplitAccountCustomerDto): Promise<SplitResult> {
+    const { store_id } = this.context();
+    await this.prisma.$transaction(async (tx: any) => {
+      const order = await this.lockSource(tx, orderId);
+      const account = await tx.order_financial_accounts.findFirst({ where: { id: accountId, store_id, split_id: order.active_financial_split_id ?? -1, state: 'active' } });
+      if (!account) throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_NOT_FOUND);
+      await this.validatePayers(tx, [dto], 1);
+      if (account.role === 'paid_original' || await tx.payments.count({ where: { financial_account_id: accountId, state: { in: [...RECEIVED, ...RESERVED] } } }) || await tx.invoices.count({ where: { financial_account_id: accountId, status: { notIn: VOID_INVOICES } } })) {
+        this.reject('El titular queda fijado al cobrar o facturar la cuenta.');
+      }
+      await tx.order_financial_accounts.updateMany({ where: { id: accountId, store_id }, data: {
+        ...(dto.label !== undefined ? { label: dto.label?.trim() || `Cuenta ${account.ordinal}` } : {}),
+        ...(dto.customer_id !== undefined || dto.customer_alias !== undefined ? {
+          customer_id: dto.customer_id ?? null,
+          customer_alias: dto.customer_id ? null : dto.customer_alias?.trim() || null,
+        } : {}),
+      } });
+    });
+    return (await this.getSplit(orderId))!;
+  }
 }

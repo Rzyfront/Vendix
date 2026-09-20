@@ -1191,6 +1191,7 @@ describe('PosCartService — loadFromOrder repone shippingContext (flete del bor
 
     service.loadFromOrder(order).subscribe((state) => {
       expect(state.shippingContext).toEqual({
+        orderId: 700, customerId: null, shippingAddress: null, shippingMethod: null,
         deliveryType: 'direct_delivery',
         shippingAddressId: 33,
         billingAddressId: 44,
@@ -1218,6 +1219,7 @@ describe('PosCartService — loadFromOrder repone shippingContext (flete del bor
 
     service.loadFromOrder(order).subscribe((state) => {
       expect(state.shippingContext).toEqual({
+        orderId: 701, customerId: null, shippingAddress: null, shippingMethod: null,
         deliveryType: 'pickup',
         shippingAddressId: null,
         billingAddressId: null,
@@ -1246,6 +1248,7 @@ describe('PosCartService — loadFromOrder repone shippingContext (flete del bor
     service.loadFromOrder(order).subscribe((state) => {
       expect(state.items.length).toBe(0);
       expect(state.shippingContext).toEqual({
+        orderId: 702, customerId: null, shippingAddress: null, shippingMethod: null,
         deliveryType: 'home_delivery',
         shippingAddressId: 12,
         billingAddressId: null,
@@ -1256,4 +1259,42 @@ describe('PosCartService — loadFromOrder repone shippingContext (flete del bor
       done();
     });
   });
+
+  it('hidrata la dirección no primaria de la orden con método y propietario originales', (done) => {
+    const address = {
+      id: 33, address_line1: 'Bodega secundaria 42', address_line2: 'Piso 2',
+      city: 'Cali', state_province: 'Valle', country_code: 'CO', postal_code: '760001',
+      phone_number: '3001234567', latitude: '3.45', longitude: '-76.5', municipality_code: '76001',
+    };
+    service.loadFromOrder({
+      id: 703, customer_id: 99, users: { id: 99, first_name: 'Cliente',
+        addresses: [{ id: 1, is_primary: true, address_line1: 'NO USAR' }] },
+      order_items: [buildItem(1)], delivery_type: 'home_delivery',
+      shipping_address_id: 33, shipping_method_id: 7, shipping_rate_id: 88,
+      shipping_cost: '12500.50',
+      addresses_orders_shipping_address_idToaddresses: address,
+      shipping_method: { id: 7, name: 'Transportadora secundaria', type: 'carrier', is_active: true },
+    }).subscribe((state) => {
+      expect(state.shippingContext).toEqual(jasmine.objectContaining({
+        orderId: 703, customerId: 99, shippingAddressId: 33, shippingRateId: 88,
+        shippingCost: 12500.5,
+        shippingMethod: { id: 7, name: 'Transportadora secundaria', type: 'carrier', is_active: true },
+        shippingAddress: jasmine.objectContaining({ address_line1: address.address_line1, latitude: 3.45, longitude: -76.5, municipality_code: '76001' }),
+      }));
+      done();
+    });
+  });
+
+  it('no usa la dirección primaria si falta la relación de dirección original', (done) => {
+    service.loadFromOrder({
+      id: 704, customer_id: 99, shipping_address_id: 33,
+      users: { id: 99, first_name: 'Cliente', addresses: [{ id: 1, is_primary: true }] },
+      order_items: [], shipping_method_id: 7, shipping_cost: 15000,
+    }).subscribe((state) => {
+      expect(state.shippingContext?.shippingAddress).toBeNull();
+      expect(state.shippingContext?.shippingAddressId).toBe(33);
+      done();
+    });
+  });
+
 });

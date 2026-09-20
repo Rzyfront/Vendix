@@ -9,8 +9,18 @@ import { WithholdingLine } from '@common/interfaces/withholding-breakdown.interf
 import { AccountingEntryFailureService } from './accounting-entry-failure.service';
 import { VendixHttpException } from '../../../../common/errors/vendix-http.exception';
 import { ErrorCodes } from '../../../../common/errors/error-codes';
+import {
+  allocateMatrix,
+  proportional,
+  getCents,
+  formatCents,
+} from '../../tables/utils/split-allocation.util';
 
 export interface AutoEntryEventData {
+  /** Replanned under a per-account lock, including retry-queue replay. */
+  financial_account_id?: number;
+  financial_event?: 'payment' | 'invoice';
+  financial_customer?: AutoEntryThirdParty;
   source_type: string;
   source_id: number;
   organization_id: number;
@@ -978,7 +988,20 @@ export class AutoEntryService {
     }
   }
 
-  async postAutoEntry(event_data: AutoEntryEventData) {
+  async postAutoEntry(
+    event_data: AutoEntryEventData,
+    transaction?: Prisma.TransactionClient,
+    financialPrepared = false,
+  ) {
+    if (event_data.financial_account_id && !financialPrepared) {
+      // Retry jobs re-enter here with the ORIGINAL event, not stale journal
+      // lines calculated before a concurrent invoice/payment was posted.
+      return this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(471206, ${event_data.financial_account_id}::integer)`;
+        return this.postFinancialAccountEntry(event_data, tx);
+      }, { timeout: 30000 });
+    }
+    const db = transaction ?? this.prisma;
     const {
       source_type,
       source_id,
@@ -1024,7 +1047,7 @@ export class AutoEntryService {
     }
 
     const accounting_entity = accounting_entity_id
-      ? await this.prisma.withoutScope().accounting_entities.findFirst({
+      ? await (transaction ?? this.prisma.withoutScope()).accounting_entities.findFirst({
           where: {
             id: accounting_entity_id,
             organization_id,
@@ -1103,7 +1126,7 @@ export class AutoEntryService {
     // `VendixHttpException` (no `BadRequestException`) con código
     // `FISCAL_PERIOD_CLOSED` para que `AccountingEntryFailureService`
     // detecte el código en el mensaje y omita el enqueue del reintento.
-    const closed_period = await this.prisma.fiscal_periods.findFirst({
+    const closed_period = await db.fiscal_periods.findFirst({
       where: {
         organization_id,
         OR: [
@@ -1131,7 +1154,7 @@ export class AutoEntryService {
     }
 
     // Find the open fiscal period for the entry date
-    let fiscal_period = await this.prisma.fiscal_periods.findFirst({
+    let fiscal_period = await db.fiscal_periods.findFirst({
       where: {
         organization_id,
         OR: [
@@ -1160,7 +1183,7 @@ export class AutoEntryService {
 
     // Resolve account codes to IDs
     const account_codes = valid_lines.map((l) => l.account_code);
-    const accounts = await this.prisma.chart_of_accounts.findMany({
+    const accounts = await db.chart_of_accounts.findMany({
       where: {
         organization_id,
         OR: [
@@ -1198,6 +1221,8 @@ export class AutoEntryService {
       'credit_note.accepted': 'auto_return',
       'support_document.accepted': 'auto_purchase',
       'payment.received': 'auto_payment',
+      'financial_account.payment_revenue': 'auto_payment',
+      'financial_account.payment_receivable': 'auto_payment',
       'expense.approved': 'auto_expense',
       'expense.paid': 'auto_expense',
       'payroll.approved': 'auto_payroll',
@@ -1256,7 +1281,7 @@ export class AutoEntryService {
     // Generate entry number
     const year = new Date().getFullYear();
     const prefix = `AE-${year}-`;
-    const latest = await this.prisma.accounting_entries.findFirst({
+    const latest = await db.accounting_entries.findFirst({
       where: {
         organization_id,
         accounting_entity_id: accounting_entity.id,
@@ -1274,7 +1299,7 @@ export class AutoEntryService {
     }
     const entry_number = `${prefix}${String(sequence).padStart(6, '0')}`;
 
-    const existing_entry = await this.prisma.accounting_entries.findFirst({
+    const existing_entry = await db.accounting_entries.findFirst({
       where: {
         organization_id,
         source_type,
@@ -1291,7 +1316,7 @@ export class AutoEntryService {
     }
 
     // Create the entry and lines in a transaction, auto-posted
-    const entry = await this.prisma.$transaction(async (tx: any) => {
+    const writeEntry = async (tx: any) => {
       const created_entry = await tx.accounting_entries.create({
         data: {
           organization_id,
@@ -1381,7 +1406,10 @@ export class AutoEntryService {
       }
 
       return created_entry;
-    });
+    };
+    const entry = transaction
+      ? await writeEntry(transaction)
+      : await this.prisma.$transaction(writeEntry);
 
     this.logger.log(
       `Auto journal entry created: ${entry_number} for ${source_type}#${source_id} ` +
@@ -1395,6 +1423,198 @@ export class AutoEntryService {
   // These can be called directly by other services or wired via @OnEvent()
 
   /**
+   * Financial-account events share one database transaction/advisory lock.
+   * The journal, not the order-wide invoice lookup or a timestamp, determines
+   * whether this money already recognized revenue. Retry payloads come through
+   * this planner again so an invoice posted meanwhile cannot double revenue.
+   */
+  private async postFinancialAccountEntry(
+    event: AutoEntryEventData,
+    transaction: Prisma.TransactionClient,
+  ) {
+    const tx: any = transaction;
+    if (!event.store_id || !event.financial_event) {
+      throw new Error('Financial accounting requires store and event identity');
+    }
+    const account = await tx.order_financial_accounts.findFirst({
+      where: {
+        id: event.financial_account_id,
+        store_id: event.store_id,
+        store: { organization_id: event.organization_id },
+      },
+      include: {
+        split: { select: { source_order_id: true } },
+        lines: { orderBy: { id: 'asc' }, include: { taxes: { orderBy: { id: 'asc' } } } },
+        payments: { select: { id: true, amount: true } },
+      },
+    });
+    if (!account) throw new Error('Financial account does not belong to the event tenant');
+
+    const directSource = 'financial_account.payment_revenue';
+    const settlementSource = 'financial_account.payment_receivable';
+    const entryScope = { organization_id: event.organization_id, store_id: event.store_id, status: 'posted' };
+    let invoice: any = null;
+    let payment: any = null;
+    if (event.financial_event === 'invoice') {
+      invoice = await tx.invoices.findFirst({
+        where: { id: event.source_id, financial_account_id: account.id,
+          order_id: account.split.source_order_id, organization_id: event.organization_id,
+          store_id: event.store_id, invoice_type: 'sales_invoice', status: 'accepted' },
+        select: { id: true, accounting_entity_id: true },
+      });
+      if (!invoice) throw new Error('Financial invoice is not accepted for this account');
+      const posted = await tx.accounting_entries.findFirst({
+        where: { ...entryScope, source_type: 'invoice.validated', source_id: invoice.id },
+      });
+      if (posted) return posted;
+    } else {
+      payment = await tx.payments.findFirst({
+        where: { id: event.source_id, financial_account_id: account.id,
+          order_id: account.split.source_order_id, state: { in: ['succeeded', 'captured'] } },
+        include: { store_payment_method: { include: { system_payment_method: true } } },
+      });
+      if (!payment) throw new Error('Financial payment is not settled for this account');
+      const posted = await tx.accounting_entries.findFirst({
+        where: { ...entryScope, source_type: { in: [directSource, settlementSource] }, source_id: payment.id },
+      });
+      if (posted) return posted;
+    }
+
+    const markInvoiceCovered = async () => {
+      await tx.invoices.updateMany({
+        where: { id: invoice.id, organization_id: event.organization_id, financial_account_id: account.id },
+        data: { accounting_status: 'not_applicable' },
+      });
+      await tx.fiscal_transmissions.updateMany({
+        where: { source_type: 'invoice', source_id: invoice.id, accounting_entity_id: invoice.accounting_entity_id },
+        data: { accounting_status: 'not_applicable' },
+      });
+      return { id: null, skipped: true, reason: 'financial_account_already_recognized' };
+    };
+    if (account.role === 'paid_original') {
+      if (!invoice) throw new Error('Original paid portion cannot receive a new payment');
+      // Historical payments and their accounting remain intact. Issuing this
+      // document is not another sale and must not create a new receivable.
+      return markInvoiceCovered();
+    }
+
+    const asMoney = (value: bigint) => Number(formatCents(value));
+    const total = getCents(account.grand_total);
+    const discount = getCents(account.discount_amount);
+    const netRevenue = getCents(account.subtotal_amount) - discount;
+    const taxRows = account.lines.flatMap((line: any) => line.taxes ?? []);
+    const components: Array<{ kind: 'revenue' | 'tax' | 'shipping' | 'tip'; amount: bigint; tax_type?: TaxBreakdownItem['tax_type'] }> = [
+      { kind: 'revenue', amount: netRevenue },
+      ...taxRows.map((row: any) => ({ kind: 'tax' as const, amount: getCents(row.tax_amount), tax_type: row.tax_type ?? 'iva' })),
+      { kind: 'shipping', amount: getCents(account.shipping_cost) },
+      { kind: 'tip', amount: getCents(account.tip_amount) },
+    ];
+    const sumCents = (values: bigint[]) => values.reduce((a, b) => a + b, 0n);
+    if (components.some((row) => row.amount < 0n) || discount < 0n ||
+        sumCents(components.map((row) => row.amount)) !== total ||
+        sumCents(components.filter((row) => row.kind === 'tax').map((row) => row.amount)) !== getCents(account.tax_amount)) {
+      throw new Error('Financial account components do not reconcile');
+    }
+
+    // Replay the ORDER OF POSTED DIRECT PAYMENTS, not gateway timestamps or
+    // callback arrival assumptions. Allocating each remaining snapshot avoids
+    // the non-monotone cent changes of subtracting independent rounded ratios.
+    const previous = await tx.accounting_entries.findMany({
+      where: { ...entryScope, source_type: directSource,
+        source_id: { in: account.payments.map((row: any) => row.id) } },
+      orderBy: { id: 'asc' }, select: { source_id: true },
+    });
+    const paymentAmounts = new Map<number, bigint>(account.payments.map((row: any) => [row.id, getCents(row.amount)]));
+    let remaining = components.map((row) => row.amount);
+    let remainingDiscount = discount;
+    const take = (amount: bigint) => {
+      const available = sumCents(remaining);
+      if (amount <= 0n || amount > available) throw new Error('Financial recognition exceeds the remaining account');
+      const matrix = allocateMatrix(remaining, [amount, available - amount]);
+      const taken = matrix.map((row) => row[0]);
+      const leftover = matrix.map((row) => row[1]);
+      const discounts = proportional(remainingDiscount,
+        remaining[0] > 0n ? [taken[0], leftover[0]] : [amount, available - amount]);
+      remaining = leftover;
+      remainingDiscount = discounts[1];
+      return { amounts: taken, discount: discounts[0] };
+    };
+    for (const entry of previous) {
+      const amount = paymentAmounts.get(entry.source_id);
+      if (amount === undefined) throw new Error('Recognized payment is missing from financial account');
+      take(amount);
+    }
+
+    let hasPostedInvoice = false;
+    if (payment) {
+      const accepted = await tx.invoices.findMany({
+        where: { financial_account_id: account.id, order_id: account.split.source_order_id,
+          organization_id: event.organization_id, store_id: event.store_id,
+          invoice_type: 'sales_invoice', status: 'accepted' },
+        select: { id: true },
+      });
+      if (accepted.length) {
+        hasPostedInvoice = !!(await tx.accounting_entries.findFirst({
+          where: { ...entryScope, source_type: 'invoice.validated', source_id: { in: accepted.map((row: any) => row.id) } },
+          select: { id: true },
+        }));
+      }
+    }
+
+    const amount = payment ? getCents(payment.amount) : sumCents(remaining);
+    if (payment && (amount <= 0n || amount > total)) throw new Error('Invalid settled financial payment amount');
+    if (invoice && amount === 0n) return markInvoiceCovered();
+    const sourceType = invoice ? 'invoice.validated' : hasPostedInvoice ? settlementSource : directSource;
+    const description = `Cuenta financiera #${account.id} - ${invoice ? 'Factura' : 'Pago'} #${event.source_id}`;
+    const lines: (AutoEntryLine | null)[] = [];
+    lines.push(await this.resolveAccountLine(
+      event.organization_id,
+      payment ? this.resolveCashBankKey(payment.store_payment_method?.system_payment_method?.type) : 'invoice.validated.accounts_receivable',
+      description, asMoney(amount), 0, event.store_id,
+      invoice ? event.financial_customer : undefined,
+    ));
+    if (hasPostedInvoice) {
+      lines.push(await this.resolveAccountLine(event.organization_id, 'payment.received.accounts_receivable',
+        description, 0, asMoney(amount), event.store_id, event.financial_customer));
+    } else {
+      const recognized = take(amount);
+      const prefix = invoice ? 'invoice.validated' : 'payment.received';
+      if (recognized.discount > 0n) lines.push(await this.resolveAccountLine(
+        event.organization_id, 'payment.received.sales_discount', description,
+        asMoney(recognized.discount), 0, event.store_id, event.financial_customer));
+      lines.push(await this.resolveAccountLine(event.organization_id, `${prefix}.revenue`, description,
+        0, asMoney(recognized.amounts[0] + recognized.discount), event.store_id, event.financial_customer));
+      const taxBreakdown: TaxBreakdownItem[] = [];
+      components.forEach((component, index) => {
+        if (component.kind === 'tax' && recognized.amounts[index] > 0n) {
+          taxBreakdown.push({ tax_type: component.tax_type!, tax_amount: asMoney(recognized.amounts[index]) });
+        }
+      });
+      lines.push(...await this.resolveTaxLines({
+        organization_id: event.organization_id, store_id: event.store_id,
+        prefix, suffix: 'payable', side: 'credit',
+        total: taxBreakdown.reduce((sum, row) => sum + row.tax_amount, 0), breakdown: taxBreakdown,
+        legacyKey: `${prefix}.vat_payable`, label: 'Impuesto de participación financiera',
+        source_type: sourceType, source_id: event.source_id,
+      }));
+      for (let index = 0; index < components.length; index += 1) {
+        const kind = components[index].kind;
+        if ((kind === 'shipping' || kind === 'tip') && recognized.amounts[index] > 0n) {
+          lines.push(await this.resolveAccountLine(event.organization_id,
+            kind === 'tip' ? 'payment.received.tip_payable' : `${prefix}.shipping_income`,
+            kind === 'tip' ? 'Propina por pagar' : 'Ingreso por flete',
+            0, asMoney(recognized.amounts[index]), event.store_id));
+        }
+      }
+    }
+    const entry = await this.postAutoEntry({ ...event, source_type: sourceType,
+      accounting_entity_id: invoice?.accounting_entity_id ?? event.accounting_entity_id,
+      description, lines }, transaction, true);
+    if (!entry) throw new Error('Financial account journal was not posted');
+    return entry;
+  }
+
+  /**
    * Fiscal invoice acceptance: Debit Accounts Receivable, Credit Revenue + VAT Payable.
    * Mapping/source keys keep the legacy invoice.validated name for compatibility.
    *
@@ -1405,6 +1625,7 @@ export class AutoEntryService {
    * `invoicing.service.ts:590` y emite dos líneas en este método.
    */
   async onInvoiceValidated(data: {
+    financial_account_id?: number;
     invoice_id: number;
     organization_id: number;
     store_id?: number;
@@ -1443,6 +1664,16 @@ export class AutoEntryService {
       bank_account_id?: number;
     };
   }) {
+    if (data.financial_account_id) {
+      return this.createAutoEntry({
+        source_type: 'invoice.validated', source_id: data.invoice_id,
+        organization_id: data.organization_id, store_id: data.store_id,
+        accounting_entity_id: data.accounting_entity_id,
+        financial_account_id: data.financial_account_id, financial_event: 'invoice',
+        financial_customer: data.customer ? { ...data.customer, type: 'customer' } : undefined,
+        description: `Financial account invoice #${data.invoice_id}`, lines: [], user_id: data.user_id,
+      });
+    }
     const customer_third_party: AutoEntryThirdParty | undefined = data.customer
       ? {
           id: data.customer.id,
@@ -1979,6 +2210,7 @@ export class AutoEntryService {
    * para que el guard de balance cuadre.
    */
   async onPaymentReceived(data: {
+    financial_account_id?: number;
     payment_id: number;
     organization_id: number;
     store_id?: number;
@@ -2010,6 +2242,15 @@ export class AutoEntryService {
      */
     customer?: { id: number; name?: string; tax_id?: string };
   }) {
+    if (data.financial_account_id) {
+      return this.createAutoEntry({
+        source_type: 'payment.received', source_id: data.payment_id,
+        organization_id: data.organization_id, store_id: data.store_id,
+        financial_account_id: data.financial_account_id, financial_event: 'payment',
+        financial_customer: data.customer ? { ...data.customer, type: 'customer' } : undefined,
+        description: `Financial account payment #${data.payment_id}`, lines: [], user_id: data.user_id,
+      });
+    }
     const customer_third_party: AutoEntryThirdParty | undefined = data.customer
       ? {
           id: data.customer.id,

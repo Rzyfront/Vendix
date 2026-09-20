@@ -7,6 +7,13 @@
     </div>
   }
 
+  @if (preservationWarning()) {
+    <div class="flash-banner" role="status">{{ preservationWarning() }}</div>
+  }
+  @if (quoteError()) {
+    <div class="flash-banner" role="alert">{{ quoteError() }}</div>
+  }
+
   <!-- Sub-wizard vertical: opciones a la izquierda · steps-line a la derecha.
        Sub-pasos: 0=Método · 1=Costo (terminal). Espeja Cobro. El "cuándo paga"
        ya no es un sub-paso: contra entrega es el método cash_on_delivery que el
@@ -33,6 +40,7 @@
                   type="button"
                   (click)="selectShippingMethod(method)"
                   class="method-card"
+                  [disabled]="method.is_active === false"
                   [class.selected]="selectedShippingMethod()?.id === method.id"
                 >
                   <app-icon
@@ -90,13 +98,31 @@
                 >
               }
             </div>
-            <app-address-form-fields
-              [initialAddress]="customerInitialAddress()"
-              [requirePhone]="true"
-              [showErrors]="showAddressErrors()"
-              (addressChange)="onAddressChange($event)"
-              (validChange)="onAddressValidChange($event)"
-            ></app-address-form-fields>
+            @if (cartState()?.shippingContext && cartState()?.customer?.addresses?.length) {
+              <div class="method-grid" aria-label="Direcciones guardadas del cliente">
+                @for (saved of cartState()!.customer!.addresses!; track saved.id) {
+                  <button type="button" class="method-card"
+                    [class.selected]="addressId() === saved.id"
+                    (click)="selectSavedAddress(saved.id)">
+                    {{ saved.address_line1 }}, {{ saved.city }}
+                  </button>
+                }
+              </div>
+            }
+            @if (originalShipping() && !addressEditing()) {
+              <p>{{ addressSummary() }}</p>
+              <button type="button" class="no-methods-link" (click)="addressEditing.set(true)">
+                Editar dirección
+              </button>
+            } @else {
+              <app-address-form-fields
+                [initialAddress]="initialAddress()"
+                [requirePhone]="true"
+                [showErrors]="showAddressErrors()"
+                (addressChange)="onAddressChange($event)"
+                (validChange)="onAddressValidChange($event)"
+              ></app-address-form-fields>
+            }
           </section>
         } @else if (shipSubStep() > 1 && address()) {
           <button type="button" class="ship-collapsed" (click)="goToShipSubStep(1)">

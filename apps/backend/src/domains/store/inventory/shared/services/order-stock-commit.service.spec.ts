@@ -58,7 +58,8 @@ describe('OrderStockCommitService — claim atómico anti doble-descuento', () =
 
   beforeEach(() => {
     txMock = {
-      orders: { findUnique: jest.fn().mockResolvedValue(buildOrder()) },
+      orders: { findUnique: jest.fn().mockResolvedValue(buildOrder()), findFirst: jest.fn().mockResolvedValue(buildOrder()) },
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 1, state: 'processing' }]),
       order_items: { updateMany: jest.fn() },
       // reservationReader = tx (tx presente) → sin reserva activa.
       stock_reservations: { findMany: jest.fn().mockResolvedValue([]) },
@@ -139,6 +140,49 @@ describe('OrderStockCommitService — claim atómico anti doble-descuento', () =
     );
     expect(result.committedItemCount).toBe(1);
   });
+  it('no consume una orden cancelada aunque el callback llegue tarde', async () => {
+    txMock.$queryRaw.mockResolvedValue([{ id: 1, state: 'cancelled' }]);
+    await expect(service.commitOrderDelivery(1, OPTS, txMock)).rejects
+      .toMatchObject({ errorCode: 'ORD_STOCK_COMMIT_STATE_001' });
+    expect(txMock.order_items.updateMany).not.toHaveBeenCalled();
+    expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('sin tx abre una transacción que incluye claim y stock', async () => {
+    prismaMock.$transaction = jest.fn(async (callback) => callback(txMock));
+    txMock.order_items.updateMany.mockResolvedValue({ count: 1 });
+    await service.commitOrderDelivery(1, OPTS);
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+    expect(stockLevelManagerMock.updateStock).toHaveBeenCalledWith(expect.anything(), txMock);
+  });
+
+  it('notifica solo después de que la transacción propietaria hizo commit', async () => {
+    let committed = false;
+    const publish = jest.fn(() => expect(committed).toBe(true));
+    prismaMock.$transaction = jest.fn(async (cb) => {
+      const result = await cb(txMock); committed = true; return result;
+    });
+    txMock.order_items.updateMany.mockResolvedValue({count:1});
+    stockLevelManagerMock.updateStock.mockImplementation(async (params) => {
+      params.afterCommit.push(publish);
+      return {cost_snapshot:{total_cost:0}};
+    });
+    await service.commitOrderDelivery(1, OPTS);
+    expect(publish).toHaveBeenCalledTimes(1);
+  });
+
+  it('rollback descarta notificaciones que se prepararon antes del fallo', async () => {
+    const publish = jest.fn();
+    prismaMock.$transaction = jest.fn(async (cb) => cb(txMock));
+    txMock.order_items.updateMany.mockResolvedValue({count:1});
+    stockLevelManagerMock.updateStock.mockImplementation(async (params) => {
+      params.afterCommit.push(publish);
+      throw new Error('fallo de escritura');
+    });
+    await expect(service.commitOrderDelivery(1, OPTS)).rejects.toThrow('fallo de escritura');
+    expect(publish).not.toHaveBeenCalled();
+  });
+
 });
 
 /**
@@ -187,7 +231,8 @@ describe('OrderStockCommitService — descuento multi-ubicación', () => {
   /** Arma el servicio con un allocator real sobre `levels` en memoria. */
   const setup = (quantity: number, levels = SPLIT_LEVELS, reservations: any[] = []) => {
     txMock = {
-      orders: { findUnique: jest.fn().mockResolvedValue(buildOrder(quantity)) },
+      orders: { findUnique: jest.fn().mockResolvedValue(buildOrder(quantity)), findFirst: jest.fn().mockResolvedValue(buildOrder(quantity)) },
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 1, state: 'processing' }]),
       order_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       stock_reservations: { findMany: jest.fn().mockResolvedValue(reservations) },
     };

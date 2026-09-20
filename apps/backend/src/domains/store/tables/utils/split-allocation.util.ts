@@ -130,7 +130,7 @@ function sourceMoney(value: SplitDecimalInput, label: string): bigint {
 }
 
 /** Largest remainder for a single total; weights and products stay bigint. */
-function proportional(total: bigint, weights: readonly bigint[]): bigint[] {
+export function proportional(total: bigint, weights: readonly bigint[]): bigint[] {
   const denominator = sum(weights);
   if (total === 0n) return weights.map(() => 0n);
   if (denominator <= 0n)
@@ -166,7 +166,7 @@ interface FlowEdge {
  * has a solution. Independent largest-remainder rounds do not preserve columns.
  * Number capacities here count residual CENTS (bounded by cell count), never money.
  */
-function allocateMatrix(
+export function allocateMatrix(
   rows: readonly bigint[],
   columns: readonly bigint[],
 ): bigint[][] {

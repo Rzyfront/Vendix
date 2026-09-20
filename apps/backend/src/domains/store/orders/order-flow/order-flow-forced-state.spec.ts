@@ -60,6 +60,7 @@ describe('OrderFlowService — carril forzado (QUI-557)', () => {
     jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(42);
 
     prismaMock = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'processing' }]),
       orders: {
         findFirst: jest.fn().mockResolvedValue({
           id: ORDER_ID,
@@ -180,17 +181,13 @@ describe('OrderFlowService — carril forzado (QUI-557)', () => {
       );
     });
 
-    it('cancelled forzado desde delivered libera las reservas', async () => {
-      // 'delivered' ∉ CANCELABLE_STATES: el carril estricto lo rechaza.
+    it('force no convierte una entrega en anulación sin devolución', async () => {
       withOrder('delivered');
-
-      await service.forceOrderState(ORDER_ID, 'cancelled', {
+      await expect(service.forceOrderState(ORDER_ID, 'cancelled', {
         reason: 'anulada tras entrega',
-      });
-
-      expect(
-        stockLevelManagerMock.releaseReservationsByReference,
-      ).toHaveBeenCalledWith('order', ORDER_ID, 'cancelled');
+      })).rejects.toMatchObject({ errorCode: 'ORD_CANCEL_STOCK_COMMITTED_001' });
+      expect(stockLevelManagerMock.releaseReservationsByReference).not.toHaveBeenCalled();
+      expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
     });
 
     it('cancelled forzado conserva el claim atómico anclado al estado leído', async () => {
@@ -198,13 +195,13 @@ describe('OrderFlowService — carril forzado (QUI-557)', () => {
       // cancelOrder usa un UPDATE condicional para serializar cancelaciones
       // concurrentes. Forzando NO se vuelve un UPDATE ciego — el WHERE sigue
       // filtrando por estado, ahora por el que se leyó.
-      withOrder('delivered');
+      withOrder('processing');
 
       await service.forceOrderState(ORDER_ID, 'cancelled', { reason: 'manual' });
 
       expect(prismaMock.orders.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: ORDER_ID, state: { in: ['delivered'] } },
+          where: { id: ORDER_ID, state: { in: ['processing'] } },
           data: expect.objectContaining({ state: 'cancelled' }),
         }),
       );

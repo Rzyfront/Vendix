@@ -355,6 +355,7 @@ jobs:
           --include='**/orders/pages/order-details/can-resend.spec.ts'
           --include='**/orders/utils/fiscal-alert-dictionary.spec.ts'
           --include='**/pos/components/pos-checkout-shell/pos-checkout-shell.component.spec.ts'
+          --include='**/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.spec.ts'
           --include='**/print-formats/services/print-annex-validator.service.spec.ts'
 
   backend-build:

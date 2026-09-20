@@ -44,6 +44,7 @@ import {
   isVatResponsible,
 } from '@common/helpers/vat-responsibility.helper';
 import { OrderFlowService } from './order-flow/order-flow.service';
+import { getOrderCancellationPolicy } from './order-flow/order-cancellation-policy.util';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { CouponsService } from '../coupons/coupons.service';
 import { AuditService, AuditAction, AuditResource } from '@common/audit/audit.service';
@@ -766,7 +767,28 @@ export class OrdersService {
         include: {
           stores: { select: { id: true, name: true, store_code: true } },
           order_items: {
-            select: { id: true, product_name: true, quantity: true },
+            select: {
+              id: true,
+              product_name: true,
+              quantity: true,
+              inventory_committed: true,
+              inventory_consumed_at_fire: true,
+              delivered_at: true,
+            },
+          },
+          // One relation projection for the whole page, never a query per row.
+          // A state such as processing alone cannot prove cancellation is safe.
+          payments: {
+            select: {
+              state: true,
+              store_payment_method: {
+                select: {
+                  system_payment_method: {
+                    select: { processing_mode: true, type: true },
+                  },
+                },
+              },
+            },
           },
           // Cliente para la columna "Cliente" de los listados (wizard de
           // remisiones, lista de órdenes). findAll ya FILTRA por users en la
@@ -799,7 +821,13 @@ export class OrdersService {
     ]);
 
     return {
-      data: orders,
+      data: orders.map((order) => {
+        const cancellation_policy = getOrderCancellationPolicy(order);
+        // The minimal payment projection is policy input, not a partial
+        // Payment[] response that consumers could mistake for receipt data.
+        const { payments: _policyPayments, ...listOrder } = order;
+        return { ...listOrder, cancellation_policy };
+      }),
       pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -1125,7 +1153,10 @@ export class OrdersService {
       }
     }
 
-    return order;
+    return {
+      ...order,
+      cancellation_policy: getOrderCancellationPolicy(order),
+    };
   }
 
   /**

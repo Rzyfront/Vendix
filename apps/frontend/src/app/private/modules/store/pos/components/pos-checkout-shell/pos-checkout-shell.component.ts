@@ -197,16 +197,6 @@ export class PosCheckoutShellComponent {
   private seededEntrega: EntregaChoice | null = null;
 
   /**
-   * F-FLETE — ¿el cajero llegó al paso «Envío» en esta apertura?
-   *
-   * El paso de Envío auto-preselecciona el primer método activo y prefija la
-   * dirección PRIMARIA del cliente (`pos-shipping-step.component.ts:246-252`
-   * y `:256-276`), no la de la orden. Si el cajero nunca lo pisó, lo que ese
-   * paso construya NO es su decisión y no puede pisar el envío persistido.
-   */
-  private readonly envioStepVisited = signal<boolean>(false);
-
-  /**
    * Intención efectiva derivada directamente de entregaChoice:
    * 'enviar' → 'delivery', 'llevar' | 'mesa' → 'pickup'.
    * Fuente ÚNICA de verdad para todo el shell y sus componentes hijos.
@@ -442,10 +432,15 @@ export class PosCheckoutShellComponent {
     }
   });
 
-  /** Live shipping cost projected from the Envío step (0 when not mounted). */
-  readonly shippingCost = computed<number>(
-    () => this.shippingStep()?.shippingCost() ?? 0,
-  );
+  /** The persisted freight remains visible before the child mounts or is edited. */
+  readonly shippingCost = computed<number>(() => {
+    const original = this.cartState()?.shippingContext;
+    const child = this.shippingStep();
+    if (original && !child?.hasShippingChanges()) {
+      return Number(original.shippingCost ?? 0);
+    }
+    return child?.shippingCost() ?? 0;
+  });
 
   /**
    * Amount the Cobro collector must charge on a delivery: cart + flete. Cobro is
@@ -500,6 +495,7 @@ export class PosCheckoutShellComponent {
    * no signal needed); only written inside `untracked()`.
    */
   private wasOpen = false;
+  private openedOrderId: number | null = null;
 
   readonly allowAnonymousSales = computed(
     () => this.settingsFacade.pos()?.allow_anonymous_sales ?? false,
@@ -828,8 +824,10 @@ export class PosCheckoutShellComponent {
     // pierde fuera del wizard. Preselecciona initialEntrega() respetando QUI-482.
     effect(() => {
       const open = this.isOpen();
+      const orderId = this.editingOrderId();
       untracked(() => {
-        if (open && !this.wasOpen) {
+        if (open && (!this.wasOpen || orderId !== this.openedOrderId)) {
+          this.openedOrderId = orderId;
           // F-FLETE — la apertura reinicia los dos testigos de intervención:
           // lo que traiga `initialEntrega()` es la naturaleza de la orden, no
           // una decisión del cajero. `seededEntrega` guarda ese valor para que
@@ -837,7 +835,6 @@ export class PosCheckoutShellComponent {
           this.seededEntrega = this.initialEntrega();
           this.entregaChoice.set(this.seededEntrega);
           this.entregaTouched.set(false);
-          this.envioStepVisited.set(false);
           this.focusActiveStepSoon();
         }
         this.wasOpen = open;
@@ -853,16 +850,6 @@ export class PosCheckoutShellComponent {
           this.paymentResetKey.update((k) => k + 1);
         }
         lastIntent = intent;
-      });
-    });
-
-    // F-FLETE — testigo de visita al paso «Envío». Es estado del shell (no del
-    // hijo), así que sobrevive al remonte del `contentEpoch` y no depende de
-    // que el step exponga nada.
-    effect(() => {
-      const key = this.currentStepKey();
-      untracked(() => {
-        if (key === 'envio') this.envioStepVisited.set(true);
       });
     });
 
@@ -951,7 +938,6 @@ export class PosCheckoutShellComponent {
     this.seededEntrega = 'llevar';
     this.entregaChoice.set('llevar');
     this.entregaTouched.set(false);
-    this.envioStepVisited.set(false);
     this.userOverrideAnonymous.set(null);
     // QUI-737 (B.4) — limpiar el alias para la próxima venta.
     this.customerAlias.set('');
@@ -1074,7 +1060,13 @@ export class PosCheckoutShellComponent {
       if (!ship.attemptNextSubStep()) {
         return;
       }
-      if (!ship.canConfirm()) {
+      if (this.effectiveMode() === 'edit') {
+        const error = ship.editorValidationError();
+        if (error) {
+          this.toastService.error(error);
+          return;
+        }
+      } else if (!ship.canConfirm()) {
         ship.flashValidation();
         return;
       }
@@ -1321,8 +1313,14 @@ export class PosCheckoutShellComponent {
     // F-FLETE — bloque de envío. Ver {@link buildEditorShippingPayload}: la
     // fuente de verdad por defecto es el snapshot de la ORDEN, no lo que el
     // paso de Envío auto-preseleccione.
-    const { payload: shippingPayload, warning: shippingWarning } =
+    const { payload: shippingPayload, warning: shippingWarning, error: shippingError } =
       this.buildEditorShippingPayload(state);
+    if (shippingError) {
+      this.toastService.error(shippingError);
+      const stepIndex = this.stepKeys().indexOf('envio');
+      if (stepIndex >= 0) this.currentStep.set(stepIndex);
+      return;
+    }
 
     this.submittingDraft.set(true);
     this.ordersService
@@ -1393,89 +1391,59 @@ export class PosCheckoutShellComponent {
       });
   }
 
-  /**
-   * F-FLETE — bloque de envío del `PUT /store/orders/:id/editor`.
-   *
-   * REGLA DE NEGOCIO: reabrir una orden para editarla no puede cambiarle la
-   * naturaleza ni borrarle el flete. Si el envío no se pudo reconstruir, el
-   * cajero debe enterarse explícitamente.
-   *
-   * Qué hacía mal el carril vivo antes:
-   *  - Forzaba `delivery_type: 'pickup'` para 'llevar'/'mesa'. Un borrador
-   *    `direct_delivery` u `other` quedaba convertido en `pickup`, y una
-   *    mesa QR (`dine_in`) también.
-   *  - No mandaba nada de envío, y el editor lee `shipping_cost` ausente como
-   *    CERO (`orders.service.ts:1931` → `:3071`) — cero que ENTRA al
-   *    `grand_total` (`:2292`). El flete desaparecía de la orden Y del total.
-   *  - Tomaba como verdad lo que el paso de Envío hubiera auto-preseleccionado
-   *    (primer método activo + dirección PRIMARIA del cliente, no la de la
-   *    orden), aunque el cajero jamás hubiera pisado ese paso.
-   *
-   * Orden de decisión:
-   *  1. El cajero AUTORÓ el envío (visitó el paso «Envío») y el paso produjo
-   *     un contexto → manda ese contexto. También aplica cuando la orden no
-   *     tenía flete que preservar: no hay nada que romper.
-   *  2. El cajero sacó explícitamente la orden del carril 'enviar'
-   *     ({@link entregaTouched}) → baja el flete a 0 con el `delivery_type`
-   *     que corresponde al carril elegido (`llevar`→`pickup`,
-   *     `mesa`→`dine_in`; antes ambos iban a `pickup`).
-   *  3. Nadie tocó nada → NO se manda ninguna clave de envío. Omitir es la
-   *     única forma de decir "sin cambio": el backend preserva
-   *     `delivery_type`/ids con `?? existingOrder` (`:3066-3070`) y el costo
-   *     por el arreglo hermano de `orders.service.ts`. Si la orden traía
-   *     flete, se avisa.
-   *
-   * NO se manda `shipping_cost` en el carril de preservación a propósito: el
-   * editor contrasta el costo del cliente contra el que calcula el servidor y
-   * responde `ORD_EDIT_INVALID_SHIPPING_001` si difieren más de un centavo
-   * (`orders.service.ts:2056`). Mandar el costo persistido sin método volvería
-   * un 200 silencioso en un 400 que bloquearía al cajero.
+  /** Only an intentional, valid shipping edit may overwrite the order snapshot.
+   * Omitting every shipping key means preserve (sending the old cost by itself
+   * would trigger backend re-quotation). Navigation is never an edit.
    */
   private buildEditorShippingPayload(state: CartState): {
     payload: Record<string, unknown>;
     warning: string | null;
+    error?: string;
   } {
     const preserved = state.shippingContext ?? null;
-    const preservedShipment = hasShipmentContext(preserved);
     const choice = this.entregaChoice();
-    const stepCtx =
-      choice === 'enviar'
-        ? (this.shippingStep()?.buildShippingContext() ?? null)
-        : null;
-
-    // 1) Envío autorado por el cajero (o no había flete que preservar).
-    if (stepCtx && (this.envioStepVisited() || !preservedShipment)) {
-      return {
-        payload: {
-          delivery_type: (stepCtx.deliveryType || 'home_delivery') as any,
-          shipping_address_id: stepCtx.shippingAddressId ?? undefined,
-          shipping_method_id: stepCtx.shippingMethodId ?? undefined,
-          shipping_cost: stepCtx.shippingCost,
-        },
-        warning: null,
-      };
+    const customerChanged = preserved?.customerId !== undefined &&
+      preserved.customerId !== (state.customer?.id ?? null);
+    if (customerChanged && preserved?.shippingAddressId && choice !== 'enviar') {
+      return { payload: {}, warning: null,
+        error: 'Cambiaste el cliente. Selecciona Enviar y una dirección guardada de este cliente antes de actualizar.' };
     }
-
-    // 2) Salida explícita del carril de envío: el cajero SÍ quiso quitarlo.
+    // An explicit fulfillment change remains supported independently of shipping.
     if (this.entregaTouched() && choice !== 'enviar') {
       return {
         payload: {
-          delivery_type: (choice === 'mesa' ? 'dine_in' : 'pickup') as any,
+          delivery_type: choice === 'mesa' ? 'dine_in' : 'pickup',
           shipping_cost: 0,
         },
         warning: null,
       };
     }
-
-    // 3) Sin intervención: no tocar el envío de la orden.
-    return {
-      payload: {},
-      warning: preservedShipment
-        ? `Se conservó el envío original de la orden (flete ${this.currencyService.format(
-            Number(preserved?.shippingCost ?? 0),
-          )}). Si necesitas cambiarlo, elige «Enviar» en el paso Entrega y configúralo en el paso Envío.`
-        : null,
-    };
+    const ship = this.shippingStep();
+    if (choice === 'enviar') {
+      if (customerChanged && !ship) {
+        return { payload: {}, warning: null,
+          error: 'Cambiaste el cliente. Selecciona una dirección de este cliente en Envío antes de actualizar.' };
+      }
+      const error = ship?.editorValidationError();
+      if (error) return { payload: {}, warning: null, error };
+      const newShipping = !hasShipmentContext(preserved) &&
+        preserved?.deliveryType !== 'home_delivery' && !preserved?.shippingAddressId;
+      if (ship?.hasShippingChanges() || newShipping) {
+        const context = ship?.buildShippingContext();
+        if (!context) return { payload: {}, warning: null, error: 'Completa la configuración de envío antes de actualizar.' };
+        return {
+          payload: {
+            delivery_type: context.deliveryType,
+            shipping_address_id: context.shippingAddressId ?? undefined,
+            shipping_method_id: context.shippingMethodId,
+            shipping_rate_id: context.shippingRateId ?? undefined,
+            shipping_cost: context.shippingCost,
+          },
+          warning: null,
+        };
+      }
+    }
+    return { payload: {}, warning: ship?.preservationWarning() ?? null };
   }
 
   onConfirm(): void {

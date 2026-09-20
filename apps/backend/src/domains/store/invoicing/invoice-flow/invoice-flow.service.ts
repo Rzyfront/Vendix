@@ -4276,6 +4276,7 @@ export class InvoiceFlowService {
       {
         invoice_id: id,
         invoice_number: updated.invoice_number,
+        financial_account_id: updated.financial_account_id ?? undefined,
         invoice_type: updated.invoice_type,
         tracking_id: provider_response.tracking_id,
         organization_id: updated.organization_id,
@@ -4373,6 +4374,7 @@ export class InvoiceFlowService {
       {
         invoice_id: id,
         invoice_number: updated.invoice_number,
+        financial_account_id: updated.financial_account_id ?? undefined,
         invoice_type: updated.invoice_type,
         organization_id: updated.organization_id,
         store_id: updated.store_id,

@@ -1,3 +1,5 @@
+import { projectFinancialAccountInvoice } from './utils/split-invoice-projection.util';
+import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, tax_type_enum } from '@prisma/client';
 
@@ -291,15 +293,8 @@ export function needsOrderLineTaxSplit(
  * real). Matriz fiscal 2026-09-10, forma 4 (IVA incluido + ICA agregado
  * en la misma línea nacida de orden): sin esto esa combinación no emite.
  */
-export function orderTaxFractionToInvoiceRate(
-  fraction: number,
-  tax_type: string | null | undefined,
-): number {
-  const normalized = (tax_type ?? '').trim().toLowerCase();
-  const factor =
-    normalized === 'ica' || normalized === 'reteica' ? 1000 : 100;
-  return Math.round(fraction * factor * 100) / 100;
-}
+export { orderTaxFractionToInvoiceRate } from './utils/invoice-tax-rate.util';
+import { orderTaxFractionToInvoiceRate } from './utils/invoice-tax-rate.util';
 
 // F-212 — el desambiguador de magnitud vive en `utils/invoice-tax-rate.util`
 // porque lo comparten TRES sitios de dos capas: este escritor, el escritor de
@@ -2317,6 +2312,7 @@ export class InvoicingService {
       throw new VendixHttpException(ErrorCodes.INVOICING_FIND_003);
     }
 
+    assertNoActiveFinancialSplit(order);
     await this.assertNotAlreadyInvoiced({ order_id: order.id });
 
     // A.1 CP-facturacion-fixes: numberless draft. The consecutive is assigned at
@@ -2626,6 +2622,84 @@ export class InvoicingService {
       `Invoice #${created.id} created numberless from order #${order_id} (A.1: numbered at validate)`,
     );
     return created;
+  }
+
+  /** Independently invoiceable account: no new physical order or inventory line. */
+  async createFromFinancialAccount(accountId: number) {
+    const context = this.getContext();
+    await this.assertInvoicingAreaActive(context);
+    const accounting_entity_id = await this.resolveAccountingEntityIdForContext(context);
+    const account = await this.prisma.order_financial_accounts.findFirst({
+      where: { id: accountId, state: 'active', store_id: context.store_id },
+      include: {
+        split: { include: { source_order: true } },
+        customer: true,
+        lines: { orderBy: { id: 'asc' }, include: { taxes: { orderBy: { id: 'asc' } } } },
+        payments: ORDER_PAYMENT_MEANS_INCLUDE,
+      },
+    });
+    if (!account || account.split.state !== 'active' ||
+        account.split.source_order.active_financial_split_id !== account.split_id) {
+      throw new VendixHttpException(ErrorCodes.INVOICING_FIND_003, 'La cuenta financiera no existe o está cancelada.');
+    }
+    if (account.customer_id) await this.assertCustomerResolvable(account.customer_id);
+    const source = account.split.source_order;
+    const projected = projectFinancialAccountInvoice(account, source.order_number);
+    const identity = resolveAcquirerRail(account.customer ?? {}).identity;
+    const payments = account.role === 'paid_original'
+      ? await this.prisma.payments.findMany({ where: { id: { in: account.split.original_payment_ids }, order_id: source.id }, include: { store_payment_method: { include: { system_payment_method: true } } } })
+      : account.payments;
+    const paid = payments.filter((p) => ['succeeded', 'captured'].includes(p.state))
+      .reduce((sum, p) => sum.plus(p.amount), new Prisma.Decimal(0));
+    const means = resolveOrderDianPaymentMeans(
+      { ...source, grand_total: account.grand_total, total_paid: paid, remaining_balance: account.grand_total.minus(paid), payment_form: paid.gte(account.grand_total) ? '1' : '2' },
+      payments,
+    );
+    const invoice = await this.prisma.$transaction(async (tx) => {
+      // Same source lock as split/payment/cancel; duplicate requests return one draft.
+      await tx.$queryRaw`SELECT id FROM orders WHERE id = ${source.id} AND store_id = ${context.store_id} FOR UPDATE`;
+      const current = await tx.order_financial_accounts.findFirst({ where: { id: accountId, store_id: context.store_id }, include: { split: true } });
+      if (!current || current.state !== 'active' || current.split.state !== 'active' || current.customer_id !== account.customer_id || current.customer_alias !== account.customer_alias) {
+        throw new VendixHttpException(ErrorCodes.INVOICING_CREATE_003, 'La cuenta cambió; recarga antes de facturar.');
+      }
+      const existing = await tx.invoices.findFirst({ where: { financial_account_id: accountId, invoice_type: 'sales_invoice', status: { notIn: ['voided', 'cancelled'] }, store_id: context.store_id }, include: INVOICE_INCLUDE });
+      if (existing) return existing;
+      const created = await tx.invoices.create({
+        data: {
+          organization_id: context.organization_id,
+          store_id: context.store_id,
+          accounting_entity_id,
+          financial_account_id: accountId,
+          order_id: source.id,
+          fiscal_document_type: 'sales_invoice', invoice_type: 'sales_invoice', status: 'draft',
+          customer_id: account.customer_id,
+          customer_name: identity.name,
+          customer_tax_id: identity.document_number,
+          customer_document_type: identity.document_type,
+          customer_email: account.customer?.email,
+          customer_phone: account.customer?.phone,
+          customer_verification_digit: account.customer?.verification_digit,
+          invoice_number: null, resolution_id: null,
+          subtotal_amount: projected.subtotal, discount_amount: projected.discount,
+          tax_amount: projected.tax, total_amount: projected.total,
+          shipping_amount: account.shipping_cost,
+          currency: source.currency || 'COP', issue_date: new Date(),
+          payment_form: means.payment_form, payment_means_code: means.payment_means_code,
+          created_by_user_id: context.user_id,
+          invoice_items: { create: projected.items.map((line) => line.data) },
+        },
+        include: { invoice_items: true },
+      });
+      for (const line of projected.items) {
+        const savedLine = created.invoice_items.find((item) => item.financial_source_line_id === line.data.financial_source_line_id)!;
+        for (const tax of line.taxes) {
+          await tx.invoice_taxes.create({ data: { ...tax, invoice_id: created.id, invoice_item_id: savedLine.id } });
+        }
+      }
+      return tx.invoices.findFirstOrThrow({ where: { id: created.id, store_id: context.store_id }, include: INVOICE_INCLUDE });
+    });
+    this.event_emitter.emit('invoice.created', { invoice_id: invoice.id, invoice_number: invoice.invoice_number, invoice_type: 'sales_invoice', source: 'financial_account', order_id: source.id, financial_account_id: accountId });
+    return invoice;
   }
 
   async createFromSalesOrder(sales_order_id: number) {
@@ -3198,6 +3272,12 @@ export class InvoicingService {
 
   async update(id: number, dto: UpdateInvoiceDto) {
     const invoice = await this.findOne(id);
+    if (invoice.financial_account_id) {
+      const economicKeys = ['items','taxes','customer_id','inline_customer','order_id','discount_amount','shipping_amount','withholding_amount','withholdings','operation_type','profile_id'];
+      if (economicKeys.some((key) => Object.prototype.hasOwnProperty.call(dto, key))) {
+        throw new VendixHttpException(ErrorCodes.INVOICING_CREATE_003, 'Los importes y el titular de esta factura provienen de una cuenta financiera inmutable. Cancela el borrador y corrige la cuenta.');
+      }
+    }
 
     // Only allow editing invoices in draft state
     if (invoice.status !== 'draft') {

@@ -130,6 +130,12 @@ class ShippingStub {
   readonly shipSubSteps = signal<any[]>([]);
   readonly canConfirm = signal(true);
   readonly shipIsProcessing = signal(false);
+  readonly isProcessing = this.shipIsProcessing;
+  readonly hasShippingChanges = signal(false);
+  readonly editorValidationError = signal<string | null>(null);
+  readonly preservationWarning = signal<string | null>(null);
+  readonly shippingContext = signal<any>(null);
+  buildShippingContext(): any { return this.shippingContext(); }
   attemptNextSubStep(): boolean {
     return true;
   }
@@ -653,6 +659,98 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       jasmine.objectContaining({ product_id: 10, is_takeaway: true }),
     );
   });
+
+  const prepareShippingEdit = () => {
+    const state = {
+      items: [{ product: { id: '7', name: 'Producto' }, quantity: 1,
+        unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 }],
+      customer: { id: 99, first_name: 'Cliente' }, summary: { total: 1000 },
+      appliedDiscounts: [], linkedOrderId: 700,
+      shippingContext: { orderId: 700, customerId: 99, deliveryType: 'direct_delivery',
+        shippingAddressId: 33, shippingMethodId: 7, shippingRateId: 88, shippingCost: 12500.5 },
+    };
+    const update = jasmine.createSpy('updateOrderFromEditor').and.returnValue(of({ id: 700 }));
+    (TestBed.inject(StoreOrdersService) as any).updateOrderFromEditor = update;
+    const error = jasmine.createSpy('error');
+    Object.assign(TestBed.inject(ToastService), { error, success: () => {}, warning: () => {} });
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.detectChanges();
+    fixture.componentRef.setInput('mode', 'edit');
+    fixture.componentRef.setInput('editingOrderId', 700);
+    fixture.componentRef.setInput('initialEntrega', 'enviar');
+    fixture.componentRef.setInput('cartState', state);
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+    const ship = (component as any).shippingStep() as ShippingStub;
+    // Deliberately wrong automatic defaults recreate the previously destructive child.
+    ship.shippingCost.set(100);
+    ship.shippingContext.set({ deliveryType: 'home_delivery', shippingMethodId: 1,
+      shippingAddressId: 1, shippingCost: 100, shippingRateId: 2 });
+    return { state, update, error, ship };
+  };
+
+  it('visitar Envío y Actualizar omite todas las claves y conserva el total original', () => {
+    const { update } = prepareShippingEdit();
+    expect(component.totalToPay()).toBe(13500.5);
+    component.currentStep.set(component.stepKeys().indexOf('envio'));
+    fixture.detectChanges();
+    component.attemptNextStep();
+    expect(component.currentStepKey()).toBe('cobro');
+    component.onPrimaryConfirm();
+    expect(update).toHaveBeenCalledTimes(1);
+    const payload = update.calls.mostRecent().args[1];
+    for (const key of ['delivery_type', 'shipping_address_id', 'shipping_method_id', 'shipping_rate_id', 'shipping_cost']) {
+      expect(Object.prototype.hasOwnProperty.call(payload, key)).withContext(key).toBeFalse();
+    }
+  });
+
+  it('solo una edición explícita envía método, dirección, tarifa y costo', () => {
+    const { update, ship } = prepareShippingEdit();
+    ship.hasShippingChanges.set(true);
+    component.onPrimaryConfirm();
+    expect(update.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      delivery_type: 'home_delivery', shipping_method_id: 1,
+      shipping_address_id: 1, shipping_rate_id: 2, shipping_cost: 100,
+    }));
+    expect(component.totalToPay()).toBe(1100);
+  });
+
+  for (const message of ['Espera a que termine el cálculo del envío', 'Selecciona una dirección del nuevo cliente', 'Guarda la dirección en la ficha del cliente']) {
+    it(`bloquea el PUT sin fallback cuando: ${message}`, () => {
+      const { update, error, ship } = prepareShippingEdit();
+      ship.hasShippingChanges.set(true);
+      ship.editorValidationError.set(message);
+      component.onPrimaryConfirm();
+      expect(update).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(message);
+      expect(component.currentStepKey()).toBe('envio');
+    });
+  }
+
+  it('no permite heredar la dirección del antiguo cliente cambiando a pickup', () => {
+    const { update, error, state } = prepareShippingEdit();
+    fixture.componentRef.setInput('cartState', { ...state, customer: { id: 100, first_name: 'Otro' } });
+    component.entregaChoice.set('llevar');
+    fixture.detectChanges();
+    component.onPrimaryConfirm();
+    expect(update).not.toHaveBeenCalled();
+    expect(error.calls.mostRecent().args[0]).toContain('Cambiaste el cliente');
+  });
+
+  it('deja avanzar y preservar envío no reconstruible aunque canConfirm sea false', () => {
+    const { update, ship } = prepareShippingEdit();
+    ship.canConfirm.set(false);
+    ship.preservationWarning.set('Método original inactivo; envío conservado');
+    component.currentStep.set(component.stepKeys().indexOf('envio'));
+    component.attemptNextStep();
+    expect(component.currentStepKey()).toBe('cobro');
+    component.onPrimaryConfirm();
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.calls.mostRecent().args[1].shipping_method_id).toBeUndefined();
+  });
+
 });
 
 describe('PaymentCollectorComponent.handleEnter — CP-pos-checkout-enter-focus', () => {

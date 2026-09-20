@@ -1,3 +1,4 @@
+import { OrderStockCommitService } from '../inventory/shared/services/order-stock-commit.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { WebhookHandlerService } from './services/webhook-handler.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -44,7 +45,7 @@ describe('WebhookHandlerService', () => {
         updateMany: jest.fn(),
       },
       orders: {
-        findUnique: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({id: 1, store_id: 7, state: 'pending_payment', grand_total: 100, payments: []}),
         update: jest.fn(),
       },
       invoices: {
@@ -59,6 +60,7 @@ describe('WebhookHandlerService', () => {
       // Dedup guard: 1 inserted row = this event has not been seen. Returning 0
       // would make every test below exit early as a duplicate.
       $executeRaw: jest.fn().mockResolvedValue(1),
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 1, state: 'pending_payment' }]),
     };
     // updatePaymentStatus wraps lookup + compare-and-swap + order transition in
     // ONE transaction. Handing the same object back as `tx` keeps the tests'
@@ -73,11 +75,12 @@ describe('WebhookHandlerService', () => {
     // concludes a concurrent webhook already finalized the row and bails out.
     mockPrismaService.payments.updateMany.mockResolvedValue({ count: 1 });
 
-    orderFlow = { confirmPayment: jest.fn(), cancelOrder: jest.fn() };
+    orderFlow = { confirmPayment: jest.fn().mockResolvedValue({state:'processing',payment_confirmation_applied:true}), cancelOrder: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WebhookHandlerService,
+        { provide: OrderStockCommitService, useValue: { commitOrderDelivery: jest.fn().mockResolvedValue({totalCost:0,committedItemCount:0}) } },
         {
           provide: StorePrismaService,
           useValue: mockPrismaService,
@@ -138,7 +141,7 @@ describe('WebhookHandlerService', () => {
       jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue(mockPayment);
       jest.spyOn(prisma.payments, 'update').mockResolvedValue({});
       jest.spyOn(prisma.orders, 'findUnique').mockResolvedValue({
-        id: 1,
+        id: 1, store_id: 7, grand_total: 100,
         payments: [],
       });
       jest.spyOn(prisma.orders, 'update').mockResolvedValue({});
@@ -155,7 +158,7 @@ describe('WebhookHandlerService', () => {
       jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue(mockPayment);
       jest.spyOn(prisma.payments, 'update').mockResolvedValue({});
       jest.spyOn(prisma.orders, 'findUnique').mockResolvedValue({
-        id: 1,
+        id: 1, store_id: 7, grand_total: 100,
         payments: [],
       });
       jest.spyOn(prisma.orders, 'update').mockResolvedValue({});
@@ -203,7 +206,7 @@ describe('WebhookHandlerService', () => {
       jest.spyOn(prisma.payments, 'findFirst').mockResolvedValue(mockPayment);
       jest.spyOn(prisma.payments, 'update').mockResolvedValue({});
       jest.spyOn(prisma.orders, 'findUnique').mockResolvedValue({
-        id: 1,
+        id: 1, store_id: 7, grand_total: 100,
         payments: [],
       });
       jest.spyOn(prisma.orders, 'update').mockResolvedValue({});
@@ -470,4 +473,46 @@ describe('WebhookHandlerService', () => {
     });
   });
 });
+  describe('anulación vs confirmación', () => {
+    it('APPROVED tardío conserva dinero y conciliación sin revivir ni consumir', async () => {
+      const initial = { id: 8, order_id: 1, state: 'pending' };
+      (prisma.payments.findFirst as jest.Mock).mockResolvedValue({ ...initial, state: 'cancelled' });
+      (prisma.orders.findUnique as jest.Mock).mockResolvedValue({ id: 1, store_id: 7, state: 'cancelled' });
+      ((prisma as any).$queryRaw as jest.Mock).mockResolvedValue([{id: 1, state: 'cancelled'}]);
+      const result = await service['updatePaymentStatus']('txn', 'succeeded', {status: 'APPROVED'}, {matchedPayment: initial});
+      expect(result).toMatchObject({transitioned:true, reconciliationRequired:true, shouldConfirmOrder:false});
+      expect(prisma.payments.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({state:'cancelled'}),
+        data: expect.objectContaining({state:'succeeded', gateway_response: expect.objectContaining({reconciliation_required:true})}),
+      }));
+      expect(orderFlow.confirmPayment).not.toHaveBeenCalled();
+      expect((service as any).eventEmitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('no reanuda un pago marcado para conciliación aunque la orden se reactive', async () => {
+      (prisma.payments.findFirst as jest.Mock).mockResolvedValue({id:8,order_id:1,state:'succeeded',gateway_response:{reconciliation_required:true}});
+      (prisma.orders.findUnique as jest.Mock).mockResolvedValue({id:1,store_id:7,state:'processing',grand_total:100,payments:[{state:'succeeded',amount:100}]});
+      ((prisma as any).$queryRaw as jest.Mock).mockResolvedValue([{id:1,state:'processing'}]);
+      const result = await service['updatePaymentStatus']('txn','succeeded',{});
+      expect(result.shouldConfirmOrder).toBe(false);
+      expect(prisma.payments.updateMany).not.toHaveBeenCalled();
+      expect(orderFlow.confirmPayment).not.toHaveBeenCalled();
+    });
+
+    it('no-op de confirmación cancelada no cierra mesa ni invoca stock', async () => {
+      (prisma.orders.findUnique as jest.Mock).mockResolvedValue({id:1,store_id:7,state:'pending_payment'});
+      orderFlow.confirmPayment.mockResolvedValue({state:'cancelled',payment_confirmation_applied:false});
+      await service['confirmOrderPaid'](1);
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
+      expect((service as any).orderStockCommit.commitOrderDelivery).not.toHaveBeenCalled();
+      expect(prisma.table_sessions.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('dedup de Wompi distingue estados de una misma transacción', () => {
+      const event = (status: string): WebhookEvent => ({processor:'wompi',eventType:'transaction.updated',data:{transaction:{id:'same-txn',status}}});
+      expect(service['extractDedupKey'](event('PENDING'))).not.toBe(service['extractDedupKey'](event('APPROVED')));
+      expect(service['extractDedupKey'](event('APPROVED'))).toBe(service['extractDedupKey'](event('APPROVED')));
+    });
+  });
+
 });

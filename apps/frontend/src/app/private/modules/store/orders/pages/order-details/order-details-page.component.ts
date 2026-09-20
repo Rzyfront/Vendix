@@ -55,6 +55,8 @@ import {
   Address,
 } from '../../interfaces/order.interface';
 import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
 import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
 import { ResendDishModalComponent } from '../../../restaurant-ops/kds/components/resend-dish-modal/resend-dish-modal.component';
@@ -868,7 +870,7 @@ export class OrderDetailsPageComponent {
     if (!order) return [];
 
     if (this.blockedByMissingShipping()) {
-      return [
+      return this.applyCancellationPolicy(order, [
         {
           id: 'info',
           type: 'alert',
@@ -877,7 +879,7 @@ export class OrderDetailsPageComponent {
           label: 'Asigna un metodo de envio para continuar con el flujo.',
         } as OrderActionConfig,
         { id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' },
-      ];
+      ]);
     }
 
     const state = order.state;
@@ -1076,8 +1078,41 @@ export class OrderDetailsPageComponent {
         break;
     }
 
-    return actions;
+    return this.applyCancellationPolicy(order, actions);
   });
+
+  /** The server owns this policy, including legacy rows and settled gateways. */
+  private applyCancellationPolicy(
+    order: Order,
+    actions: OrderActionConfig[],
+  ): OrderActionConfig[] {
+    const policy = order.cancellation_policy;
+    const result = actions.filter((action) => {
+      if (action.id === 'cancel') return policy?.can_cancel === true;
+      if (action.id === 'cancel-payment') return policy?.can_cancel_payment === true;
+      return true;
+    });
+    if (
+      result.length !== actions.length &&
+      (!policy || policy.reason_code)
+    ) {
+      result.push({
+        id: 'cancellation-info',
+        type: 'alert',
+        color: 'warning',
+        icon: 'alert-triangle',
+        label: this.cancellationPolicyMessage(order),
+      });
+    }
+    return result;
+  }
+
+  private cancellationPolicyMessage(order: Order | null): string {
+    const code = order?.cancellation_policy?.reason_code;
+    return code
+      ? ERROR_MESSAGES[code]
+      : 'No se puede anular esta orden o su pago. Recarga el detalle para consultar las acciones disponibles.';
+  }
 
   // ── Ship Modal Config (delivery-type aware) ────────────────
 
@@ -2593,6 +2628,10 @@ export class OrderDetailsPageComponent {
   }
 
   openCancelModal(): void {
+    if (this.order()?.cancellation_policy?.can_cancel !== true) {
+      this.toastService.warning(this.cancellationPolicyMessage(this.order()));
+      return;
+    }
     this.cancelForm.reset();
     this.cancelKitchenDisposition.set(null);
     this.showCancelModal.set(true);
@@ -2600,6 +2639,10 @@ export class OrderDetailsPageComponent {
 
   submitCancellation(): void {
     if (this.cancelForm.invalid || !this.orderId) return;
+    if (this.order()?.cancellation_policy?.can_cancel !== true) {
+      this.toastService.warning(this.cancellationPolicyMessage(this.order()));
+      return;
+    }
     if (
       this.cancelRequiresDisposition() &&
       this.cancelKitchenDisposition() == null
@@ -3442,6 +3485,10 @@ export class OrderDetailsPageComponent {
 
   cancelPayment(): void {
     if (!this.orderId) return;
+    if (this.order()?.cancellation_policy?.can_cancel_payment !== true) {
+      this.toastService.warning(this.cancellationPolicyMessage(this.order()));
+      return;
+    }
 
     this.dialogService
       .confirm({
@@ -3453,6 +3500,10 @@ export class OrderDetailsPageComponent {
       })
       .then((confirmed: boolean) => {
         if (!confirmed || !this.orderId) return;
+        if (this.order()?.cancellation_policy?.can_cancel_payment !== true) {
+          this.toastService.warning(this.cancellationPolicyMessage(this.order()));
+          return;
+        }
 
         this.isProcessingAction.set(true);
         this.ordersService
@@ -3466,7 +3517,7 @@ export class OrderDetailsPageComponent {
             },
             error: (err) => {
               this.isProcessingAction.set(false);
-              this.toastService.error(err.message || 'Error al cancelar el pago');
+              this.toastService.error(extractApiErrorMessage(err));
             },
           });
       });

@@ -262,6 +262,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ORD_VALIDATE_001: 'La validacion de la orden fallo.',
   ORD_PERM_001: 'No tiene permisos para acceder a esta orden.',
   ORD_STATUS_001: 'Estado de orden invalido.',
+  ORD_CANCEL_STOCK_COMMITTED_001:
+    'Esta orden tiene inventario consumido o evidencia de entrega. No se puede anular: revisa la entrega y tramita una devolución real; si es un caso anterior sin entrega, requiere conciliación de inventario.',
+  ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001:
+    'Esta orden tiene un pago confirmado que requiere reversión o conciliación. Usa el flujo de reembolso cuando corresponda; anular la orden no devuelve el dinero de la pasarela.',
+  ORD_STOCK_COMMIT_STATE_001:
+    'No se puede entregar inventario de una orden cancelada o reembolsada.',
   ORD_SHIP_001: 'Metodo de envio no encontrado.',
   ORD_SHIP_REQUIRED_001: 'Debes asignar un método de envío antes de continuar.',
   ORD_SHIP_INVALID_METHOD_001: 'El método de envío no pertenece a esta tienda.',

@@ -1,5 +1,6 @@
 import { Product, PosProductVariant } from '../services/pos-product.service';
 import { PosCustomer } from '../models/customer.model';
+import type { PosShippingMethod } from './shipping.model';
 import { WithholdingLine } from '../../withholding-tax/interfaces/withholding.interface';
 
 export interface CartItem {
@@ -197,7 +198,25 @@ export interface PendingBooking {
  *    donde `order_delivery_type_enum` (5 valores) se colapsa a los 3 de
  *    `EntregaChoice`.
  */
+export interface ShippingAddressSnapshot {
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  state_province: string | null;
+  country_code: string | null;
+  postal_code: string | null;
+  phone_number: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  municipality_code?: string | null;
+}
+
 export interface ShippingContext {
+  /** Immutable order identity/owner: customer changes must not adopt this address. */
+  orderId?: number | null;
+  customerId?: number | null;
+  shippingAddress?: ShippingAddressSnapshot | null;
+  shippingMethod?: PosShippingMethod | null;
   deliveryType: string | null;
   shippingAddressId: number | null;
   billingAddressId: number | null;

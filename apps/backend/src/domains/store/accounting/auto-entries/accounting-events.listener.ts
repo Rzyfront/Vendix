@@ -129,8 +129,9 @@ export class AccountingEventsListener {
     return false;
   }
 
-  @OnEvent('invoice.accepted')
+  @OnEvent('invoice.accepted', { suppressErrors: false })
   async handleInvoiceAccepted(event: {
+    financial_account_id?: number;
     invoice_id: number;
     invoice_number: string;
     invoice_type?: string;
@@ -178,6 +179,7 @@ export class AccountingEventsListener {
       }
 
       await this.auto_entry_service.onInvoiceValidated({
+        financial_account_id: event.financial_account_id,
         invoice_id: event.invoice_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
@@ -201,6 +203,7 @@ export class AccountingEventsListener {
         `Failed to create auto-entry for invoice.accepted #${event.invoice_id}: ${error.message}`,
         error.stack,
       );
+      if (event.financial_account_id) throw error;
     }
   }
 
@@ -254,8 +257,9 @@ export class AccountingEventsListener {
     }
   }
 
-  @OnEvent('payment.received')
+  @OnEvent('payment.received', { suppressErrors: false })
   async handlePaymentReceived(event: {
+    financial_account_id?: number;
     payment_id: number;
     store_id: number;
     organization_id: number;
@@ -285,6 +289,7 @@ export class AccountingEventsListener {
       )
         return;
       await this.auto_entry_service.onPaymentReceived({
+        financial_account_id: event.financial_account_id,
         payment_id: event.payment_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
@@ -317,6 +322,7 @@ export class AccountingEventsListener {
         `Failed to create auto-entry for payment.received: ${error.message}`,
         error.stack,
       );
+      if (event.financial_account_id) throw error;
     }
   }
 

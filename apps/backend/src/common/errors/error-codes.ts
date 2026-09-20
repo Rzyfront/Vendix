@@ -1070,6 +1070,21 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Invalid order status',
   },
+  ORD_CANCEL_STOCK_COMMITTED_001: {
+    code: 'ORD_CANCEL_STOCK_COMMITTED_001',
+    httpStatus: 409,
+    devMessage: 'Order has committed inventory or delivery evidence; cancellation requires reconciliation or a formal return',
+  },
+  ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001: {
+    code: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001',
+    httpStatus: 409,
+    devMessage: 'Confirmed payment requires a processor reversal or reconciliation, not local cancellation',
+  },
+  ORD_STOCK_COMMIT_STATE_001: {
+    code: 'ORD_STOCK_COMMIT_STATE_001',
+    httpStatus: 409,
+    devMessage: 'No se puede entregar inventario de una orden cancelada o reembolsada.',
+  },
   ORD_SHIP_001: {
     code: 'ORD_SHIP_001',
     httpStatus: 404,

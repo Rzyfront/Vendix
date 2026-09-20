@@ -362,6 +362,77 @@ describe('OrdersService', () => {
     });
   });
 
+  describe('read-side cancellation policy', () => {
+    it('returns per-order policy and loads safety evidence in the page query without N+1', async () => {
+      mockPrismaService.orders.findMany.mockResolvedValueOnce([
+        { id: 1, state: 'processing', order_items: [{ inventory_committed: true }], payments: [] },
+        { id: 2, state: 'created', order_items: [], payments: [] },
+        { id: 3, state: 'processing', order_items: [], payments: [{ state: 'succeeded' }] },
+      ]);
+      mockPrismaService.orders.count.mockResolvedValueOnce(3);
+
+      const result = await service.findAll({} as any);
+
+      expect(result.data.map((order) => order.cancellation_policy)).toEqual([
+        { can_cancel: false, can_cancel_payment: false, reason_code: 'ORD_CANCEL_STOCK_COMMITTED_001' },
+        { can_cancel: true, can_cancel_payment: false, reason_code: null },
+        { can_cancel: false, can_cancel_payment: false, reason_code: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001' },
+      ]);
+      expect(mockPrismaService.orders.findMany).toHaveBeenCalledTimes(1);
+      expect(mockPrismaService.orders.findFirst).not.toHaveBeenCalled();
+      expect(mockPrismaService.orders.findUnique).not.toHaveBeenCalled();
+      expect(mockPrismaService.payments.findFirst).not.toHaveBeenCalled();
+      const query = mockPrismaService.orders.findMany.mock.calls[0][0];
+      expect(query.include.order_items.select).toMatchObject({
+        inventory_committed: true, inventory_consumed_at_fire: true, delivered_at: true,
+      });
+      expect(query.include.payments.select.store_payment_method.select.system_payment_method.select)
+        .toEqual({ processing_mode: true, type: true });
+    });
+
+    it('publishes the same monetary blocker on detail without an extra payment lookup', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValueOnce({
+        id: 7,
+        state: 'processing',
+        order_items: [],
+        payments: [{
+          state: 'succeeded',
+          store_payment_method: { system_payment_method: { processing_mode: 'ONLINE', type: 'wompi' } },
+        }],
+      });
+
+      const result = await service.findOne(7);
+
+      expect(result.cancellation_policy).toEqual({
+        can_cancel: false,
+        can_cancel_payment: false,
+        reason_code: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001',
+      });
+      expect(mockPrismaService.orders.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockPrismaService.payments.findFirst).not.toHaveBeenCalled();
+      expect(mockPrismaService.orders.findFirst.mock.calls[0][0].include.payments.include
+        .store_payment_method.include.system_payment_method).toBe(true);
+    });
+
+    it('preserves cash cancellation policy while exposing the existing payment snapshot', async () => {
+      const payments = [{
+        id: 8,
+        state: 'succeeded',
+        store_payment_method: { system_payment_method: { processing_mode: 'DIRECT', type: 'cash' } },
+      }];
+      mockPrismaService.orders.findFirst.mockResolvedValueOnce({
+        id: 8, state: 'processing', order_items: [], payments,
+      });
+
+      const result = await service.findOne(8);
+
+      expect(result.cancellation_policy).toEqual({
+        can_cancel: true, can_cancel_payment: true, reason_code: null,
+      });
+      expect(result.payments).toEqual(payments);
+    });
+  });
+
   describe('findOne — discount snapshots', () => {
     it('includes order_promotions and coupon_uses in the detail query', async () => {
       mockPrismaService.orders.findFirst.mockResolvedValue({

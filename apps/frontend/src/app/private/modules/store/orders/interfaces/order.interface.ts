@@ -29,6 +29,16 @@ export interface ShippingRate {
   shipping_zone?: ShippingZone;
 }
 
+/** Read-only policy computed by the backend; never infer it from state alone. */
+export interface OrderCancellationPolicy {
+  can_cancel: boolean;
+  can_cancel_payment: boolean;
+  reason_code:
+    | 'ORD_CANCEL_STOCK_COMMITTED_001'
+    | 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001'
+    | null;
+}
+
 // Core entities - Aligned with backend models
 export interface Order {
   id: number;
@@ -41,6 +51,7 @@ export interface Order {
   store_id: number;
   order_number: string;
   state: OrderState;
+  cancellation_policy?: OrderCancellationPolicy;
   channel?: OrderChannel;
   // A.3 CP-facturacion-fixes: alerta fiscal fijada por el auto-envío del webhook.
   // null = sin alerta conocida. Viaja en el detalle (include fila completa).
@@ -319,6 +330,8 @@ export interface OrderItem {
    *   from the manual fire button.
    */
   inventory_consumed_at_fire?: boolean;
+  /** Stock committed by the delivery seam (distinct from kitchen consumption). */
+  inventory_committed?: boolean;
   skip_kds?: boolean;
   /**
    * Restaurant Suite — Fase K Gap 2: KDS state for this order_item.

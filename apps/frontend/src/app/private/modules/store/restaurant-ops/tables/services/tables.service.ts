@@ -552,6 +552,12 @@ export class TablesService {
     ).pipe(map((res) => res.data));
   }
 
+  reconcileFinancialSplit(orderId: number): Observable<SplitResult> {
+    return this.http.post<ApiResponse<SplitResult>>(
+      `${this.apiUrl}/store/orders/${orderId}/split/reconcile`, {},
+    ).pipe(map((res) => res.data));
+  }
+
   previewFinancialSplit(orderId: number, dto: SplitPreviewDto): Observable<SplitResult> {
     return this.http.post<ApiResponse<SplitResult>>(
       `${this.apiUrl}/store/orders/${orderId}/split/preview`, dto,

@@ -382,7 +382,7 @@ export interface SplitFinancialAccount {
   available_to_pay: SplitMoney;
   payment_state: 'unpaid' | 'pending' | 'partial' | 'paid';
   invoice_id: number | null;
-  payments: Array<{ id: number; amount: SplitMoney; state: string; can_confirm?: boolean }>;
+  payments: Array<{ id: number; amount: SplitMoney; state: string; can_confirm?: boolean; next_action?: SplitPaymentNextAction | null }>;
 }
 
 export interface SplitResult {
@@ -405,6 +405,20 @@ export interface SplitSourceItem {
   cancelled_at?: string | null;
 }
 
+export interface SplitPaymentNextAction { type?: string; url?: string; message?: string; }
+
+export interface SplitWompiPaymentMethod {
+  type: string;
+  token?: string;
+  installments?: number;
+  phone_number?: string;
+  user_type?: number;
+  user_legal_id_type?: string;
+  user_legal_id?: string;
+  financial_institution_code?: string;
+  payment_description?: string;
+}
+
 export interface SplitAccountPayDto {
   store_payment_method_id: number;
   amount: number;
@@ -412,7 +426,7 @@ export interface SplitAccountPayDto {
   amount_received?: number;
   bank_account_id?: number;
   payment_reference?: string;
-  wompi_payment_method?: string;
+  wompi_payment_method?: SplitWompiPaymentMethod;
   return_url?: string;
   cancel_url?: string;
 }
@@ -422,7 +436,7 @@ export interface SplitAccountPaymentResult {
     id: number;
     amount: string;
     state: string;
-    nextAction?: { type?: string; url?: string; message?: string };
+    nextAction?: SplitPaymentNextAction | null;
   };
   split: SplitResult;
 }
