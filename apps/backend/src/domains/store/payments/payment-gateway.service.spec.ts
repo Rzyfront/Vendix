@@ -1,4 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { PaymentValidatorService } from './services/payment-validator.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -9,8 +11,11 @@ import {
   RefundResult,
   PaymentStatus,
 } from './interfaces';
+import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PaymentError, PaymentErrorCodes } from './utils';
-import { payments_state_enum } from '@prisma/client';
+import { Prisma, payments_state_enum } from '@prisma/client';
+import { createPrismaMock, PrismaMock } from '../../../testing/prisma-mock';
+import { buildOrder, buildPayment } from '../../../testing/money-fixtures';
 
 describe('PaymentGatewayService', () => {
   let service: PaymentGatewayService;
@@ -340,6 +345,205 @@ describe('PaymentGatewayService', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(PaymentError);
       }
+    });
+  });
+
+  /**
+   * El cliente NO decide qué validaciones se saltan.
+   *
+   * `metadata` viaja desde el body de `POST /store/payments` (permiso
+   * `store:pos:access`, o sea cualquier cajero). Mientras el gateway leyera
+   * `metadata.is_pos_payment` para saltar `validateOrder` + `validatePaymentAmount`,
+   * ese cajero podía cobrar dos veces la misma orden: la compuerta anti-sobrepago
+   * (`payment-validator.service.ts` → `amount <= grand_total − pagos
+   * succeeded|captured|pending`) quedaba desactivada por una bandera que él mismo
+   * ponía.
+   *
+   * Estos casos usan el `PaymentValidatorService` REAL contra un mock de Prisma:
+   * mockear el validador convertiría la prueba en una tautología (comprobaría que
+   * el gateway llama a un doble, no que el dinero queda protegido).
+   */
+  describe('bypass de validación vía metadata (defecto de dinero)', () => {
+    const STORE_ID = 100;
+    const ORDER_ID = 9001;
+    const PAYMENT_METHOD_ID = 1;
+
+    let gateway: PaymentGatewayService;
+    let prismaMock: PrismaMock;
+    let processor: {
+      isEnabled: jest.Mock;
+      processPayment: jest.Mock;
+    };
+
+    const paymentMethodRow = {
+      id: PAYMENT_METHOD_ID,
+      store_id: STORE_ID,
+      state: 'enabled',
+      type: 'cash',
+      system_payment_method: {
+        id: PAYMENT_METHOD_ID,
+        type: 'cash',
+        is_active: true,
+      },
+    };
+
+    /** Cobro tal cual lo arma `chargeAdoptedOrder` (pos-payment.service.ts). */
+    const posCharge = (overrides: Partial<PaymentData> = {}): PaymentData => ({
+      orderId: ORDER_ID,
+      amount: 59.5,
+      currency: 'COP',
+      storePaymentMethodId: PAYMENT_METHOD_ID,
+      storeId: STORE_ID,
+      idempotencyKey: 'idem-adopted-order',
+      ...overrides,
+    });
+
+    beforeEach(async () => {
+      prismaMock = createPrismaMock({
+        orders: ['findUnique', 'update'],
+        payments: ['create', 'update', 'findFirst'],
+        store_payment_methods: ['findFirst', 'findUnique'],
+        stores: ['findUnique'],
+      });
+
+      prismaMock.store_payment_methods.findFirst.mockResolvedValue(
+        paymentMethodRow,
+      );
+      prismaMock.store_payment_methods.findUnique.mockResolvedValue(
+        paymentMethodRow,
+      );
+      prismaMock.stores.findUnique.mockResolvedValue({
+        id: STORE_ID,
+        organization_id: 1,
+      });
+      prismaMock.payments.create.mockResolvedValue({
+        id: 5001,
+        transaction_id: 'txn-created',
+      });
+      prismaMock.payments.update.mockResolvedValue({ id: 5001 });
+      prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID });
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          PaymentGatewayService,
+          // Validador REAL — es la compuerta bajo prueba.
+          PaymentValidatorService,
+          { provide: StorePrismaService, useValue: prismaMock },
+          {
+            provide: S3Service,
+            useValue: { getPresignedUrl: jest.fn().mockResolvedValue(null) },
+          },
+        ],
+      }).compile();
+
+      gateway = module.get<PaymentGatewayService>(PaymentGatewayService);
+
+      processor = {
+        isEnabled: jest.fn().mockReturnValue(true),
+        processPayment: jest.fn().mockResolvedValue({
+          success: true,
+          status: payments_state_enum.succeeded,
+          transactionId: 'txn-processor',
+        } satisfies PaymentResult),
+      };
+      gateway.registerProcessor('cash', processor as any);
+    });
+
+    it('rechaza el segundo cobro de una orden ya pagada aunque el body traiga metadata.is_pos_payment', async () => {
+      // grand_total 59.50 ya cubierto por un pago `succeeded` de 59.50:
+      // saldo pendiente = 0, así que un segundo cobro de 59.50 es sobrepago.
+      prismaMock.orders.findUnique.mockResolvedValue(
+        buildOrder({
+          id: ORDER_ID,
+          store_id: STORE_ID,
+          state: 'finished',
+          grand_total: new Prisma.Decimal('59.50'),
+          payments: [
+            buildPayment({
+              state: 'succeeded',
+              amount: new Prisma.Decimal('59.50'),
+            }),
+          ],
+        }),
+      );
+
+      await expect(
+        gateway.processPayment(
+          posCharge({ metadata: { is_pos_payment: true } }),
+        ),
+      ).rejects.toMatchObject({
+        code: PaymentErrorCodes.INVALID_AMOUNT,
+      });
+
+      // Ninguna plata se mueve ni se persiste cuando la compuerta rechaza.
+      expect(processor.processPayment).not.toHaveBeenCalled();
+      expect(prismaMock.payments.create).not.toHaveBeenCalled();
+    });
+
+    it('rechaza el cobro de una orden cancelada aunque el body traiga metadata.is_pos_payment', async () => {
+      prismaMock.orders.findUnique.mockResolvedValue(
+        buildOrder({
+          id: ORDER_ID,
+          store_id: STORE_ID,
+          state: 'cancelled',
+          grand_total: new Prisma.Decimal('59.50'),
+          payments: [],
+        }),
+      );
+
+      await expect(
+        gateway.processPayment(
+          posCharge({ metadata: { is_pos_payment: true } }),
+        ),
+      ).rejects.toMatchObject({
+        code: PaymentErrorCodes.INVALID_ORDER,
+      });
+
+      expect(processor.processPayment).not.toHaveBeenCalled();
+      expect(prismaMock.payments.create).not.toHaveBeenCalled();
+    });
+
+    it('deja pasar el cobro legítimo de una orden adoptada sin que el cliente afirme nada', async () => {
+      prismaMock.orders.findUnique.mockResolvedValue(
+        buildOrder({
+          id: ORDER_ID,
+          store_id: STORE_ID,
+          state: 'created',
+          grand_total: new Prisma.Decimal('59.50'),
+          payments: [],
+        }),
+      );
+
+      const result = await gateway.processPayment(posCharge());
+
+      expect(result.success).toBe(true);
+      expect(processor.processPayment).toHaveBeenCalledTimes(1);
+    });
+
+    it('CreatePaymentDto rechaza is_pos_payment dentro de metadata (forbidNonWhitelisted recurre)', async () => {
+      // Mismas opciones que el ValidationPipe global de main.ts.
+      const dto = plainToInstance(
+        CreatePaymentDto,
+        {
+          orderId: ORDER_ID,
+          amount: 59.5,
+          currency: 'COP',
+          storePaymentMethodId: PAYMENT_METHOD_ID,
+          storeId: STORE_ID,
+          metadata: { is_pos_payment: true },
+        },
+        { enableImplicitConversion: true },
+      );
+
+      const errors = await validate(dto, {
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      });
+
+      const metadataError = errors.find((e) => e.property === 'metadata');
+      expect(metadataError?.children?.map((c) => c.property)).toContain(
+        'is_pos_payment',
+      );
     });
   });
 

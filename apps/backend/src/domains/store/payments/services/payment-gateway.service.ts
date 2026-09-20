@@ -271,28 +271,55 @@ export class PaymentGatewayService {
     }
   }
 
+  /**
+   * Las CUATRO validaciones corren SIEMPRE. No hay bandera, de nadie, que
+   * seleccione cuáles se saltan.
+   *
+   * Historia — hasta este cambio existía `skipOrderValidation =
+   * paymentData.metadata?.is_pos_payment === true`, que saltaba a la vez
+   * `validateOrder` y `validatePaymentAmount`. Dos problemas:
+   *
+   * 1. La justificación era falsa. Decía "la orden se acaba de crear dentro de
+   *    la misma transacción Prisma y el cliente normal todavía no la ve", pero
+   *    el único llamador POS que ponía la bandera es el bloque digital
+   *    (wompi/wallet) de `processPosPaymentTransaction`, y a ese bloque solo se
+   *    llega desde `payments.service.ts:1958` — DESPUÉS del commit y con
+   *    `this.prisma`, no con `tx` (la llamada en `:1354`, la que sí pasa `tx`,
+   *    está guardada por `!isDigitalPayment`, así que nunca entra a la rama
+   *    digital). La orden ya es visible: la validación corre y pasa.
+   *
+   * 2. `metadata` es carga del cliente. Viaja en el body de
+   *    `POST /store/payments`, cuyo permiso es `store:pos:access`. Cualquier
+   *    cajero podía mandar `metadata: { is_pos_payment: true }` y desactivar la
+   *    compuerta anti-sobrepago de `validatePaymentAmount`
+   *    (`amount <= grand_total − pagos succeeded|captured|pending`), cobrando
+   *    dos veces una orden ya pagada o cobrando una cancelada.
+   *
+   * El otro llamador legítimo —`chargeAdoptedOrder` del POS, que cobra sobre una
+   * orden ya existente— no necesitaba nada de esto: un cobro de orden adoptada
+   * pasa `validateOrder` (los estados `finished` y "ya pagada por completo" son
+   * *warnings*, no errores; solo `cancelled`, `refunded`, orden ajena a la
+   * tienda o sin ítems son errores) y pasa `validatePaymentAmount` porque su
+   * monto es exactamente el saldo pendiente. Lo cubre el caso "deja pasar el
+   * cobro legítimo de una orden adoptada" del spec.
+   *
+   * `metadata` queda como carga OPACA: se persiste en `payments.gateway_response`
+   * y se le pasa al processor, pero no decide nada del flujo de validación.
+   */
   private async validatePaymentData(paymentData: PaymentData): Promise<void> {
-    // Skip order validation for POS payments — the order was just created
-    // inside the same Prisma transaction and isn't visible to the regular client yet
-    const skipOrderValidation = paymentData.metadata?.is_pos_payment === true;
-
     const validations: Promise<any>[] = [
-      skipOrderValidation
-        ? Promise.resolve({ valid: true })
-        : this.validatorService.validateOrder(
-            paymentData.orderId,
-            paymentData.storeId,
-          ),
+      this.validatorService.validateOrder(
+        paymentData.orderId,
+        paymentData.storeId,
+      ),
       this.validatorService.validatePaymentMethod(
         paymentData.storePaymentMethodId as number,
         paymentData.storeId,
       ),
-      skipOrderValidation
-        ? Promise.resolve(true)
-        : this.validatorService.validatePaymentAmount(
-            paymentData.amount,
-            paymentData.orderId,
-          ),
+      this.validatorService.validatePaymentAmount(
+        paymentData.amount,
+        paymentData.orderId,
+      ),
       this.validatorService.validateCurrency(
         paymentData.currency,
         paymentData.storeId,

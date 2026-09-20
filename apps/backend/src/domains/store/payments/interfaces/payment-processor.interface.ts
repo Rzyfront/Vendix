@@ -38,6 +38,22 @@ export interface PaymentData {
    * sin validar. QUI-728 / ADR-3.
    */
   bankAccount?: ResolvedBankAccount;
+  /**
+   * Carga OPACA: se persiste en `payments.gateway_response` y se le entrega al
+   * processor, que lee de ella lo suyo (Wompi: `paymentMethod`, `wompiConfig`,
+   * `customerEmail`, `reference`, `payment_source_id`).
+   *
+   * INVARIANTE — `metadata` NO decide validación, autorización ni cálculo de
+   * dinero. En los endpoints públicos llega desde el body del cliente
+   * (`CreatePaymentDto.metadata`, hoy cerrado con `PaymentMetadataDto`), así
+   * que cualquier rama del servidor que se bifurque leyendo una llave de aquí
+   * es una decisión que toma el llamador, no el servidor. Hubo una:
+   * `metadata.is_pos_payment` saltaba la validación de orden y la compuerta
+   * anti-sobrepago, y permitía cobrar dos veces la misma orden con solo
+   * `store:pos:access`. Si el servidor necesita saber algo del origen, va como
+   * campo tipado de primer nivel que él mismo resuelve — el molde de QUI-728
+   * con `bankAccountId` / `bankAccount`.
+   */
   metadata?: Record<string, any>;
   returnUrl?: string;
   cancelUrl?: string;

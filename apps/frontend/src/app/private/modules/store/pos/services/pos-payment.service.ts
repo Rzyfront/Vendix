@@ -1089,8 +1089,15 @@ export class PosPaymentService {
       // `tableId` como keys de primer nivel (rechaza 400 SYS_VALIDATION_001).
       // Los anidamos en `metadata` para que el backend los consuma como
       // snake_case en el evento de cierre de mesa, no como body-level fields.
+      //
+      // `metadata` es carga OPACA de auditoría y su contrato está CERRADO en
+      // `PaymentMetadataDto` (backend): una llave no declarada se rechaza con
+      // 400. Aquí ya NO viaja `is_pos_payment`: esa bandera desactivaba en el
+      // servidor la validación de orden y la compuerta anti-sobrepago, o sea
+      // que el cliente elegía qué validaciones corrían. El cobro de orden
+      // adoptada no la necesita — su monto es el saldo pendiente de la orden,
+      // que es justo lo que el servidor valida.
       metadata: {
-        is_pos_payment: true,
         is_adopted_order: true,
         register_id,
         seller_user_id: user_id,
