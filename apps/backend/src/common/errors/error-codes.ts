@@ -3066,6 +3066,52 @@ export const ErrorCodes = {
     devMessage: 'Email provider failed to send the invoice delivery',
   },
   /**
+   * LA NOTA CRÉDITO EXCEDE EL SALDO ACREDITABLE DE SU FACTURA — la suma de
+   * esta nota más las notas ya `accepted` contra la misma factura padre supera
+   * el `total_amount` de esa factura.
+   *
+   * POR QUÉ ACUMULADO Y NO NOTA A NOTA. Validar cada nota contra el total de
+   * la factura deja pasar N notas que individualmente caben y en conjunto no:
+   * tres notas del 50 % sobre una factura de $100 son $150 acreditados sobre
+   * $100 facturados. El límite es del CONJUNTO, así que el cálculo tiene que
+   * partir del saldo restante, no del total bruto.
+   *
+   * POR QUÉ SÓLO LAS `accepted` CUENTAN. Una nota en `draft` o `rejected` no
+   * acreditó nada: incluirla bloquearía notas legítimas por documentos que la
+   * DIAN nunca recibió o devolvió. El saldo se mide por lo que efectivamente
+   * quedó emitido.
+   *
+   * 422 y no 400: el cuerpo está bien formado y es válido por sí mismo; lo que
+   * falla es la regla de negocio contra el estado acumulado del padre.
+   */
+  INVOICING_CREDIT_NOTE_001: {
+    code: 'INVOICING_CREDIT_NOTE_001',
+    httpStatus: 422,
+    devMessage:
+      'Credit note exceeds the remaining creditable balance of its parent invoice',
+  },
+  /**
+   * VENTA COBRADA SIN DOCUMENTO FISCAL — el dinero entró pero la venta no
+   * quedó respaldada por ningún documento fiscal emitido.
+   *
+   * POR QUÉ EXISTE ESTE CÓDIGO. El carril de emisión abandonaba en silencio
+   * cuando no había factura que emitir, de modo que una venta cobrada podía
+   * quedarse sin respaldo sin que nada lo registrara. Un abandono silencioso
+   * es indistinguible de un éxito: sin un código propio, la constancia de que
+   * la venta quedó descubierta no existe en ninguna parte y nadie puede
+   * reclamarla después.
+   *
+   * 409 y no 422: no es un cuerpo que se pueda corregir y reenviar, sino un
+   * conflicto entre dos hechos ya ocurridos — el cobro existe, el documento
+   * no. La acción correctiva es emitir el documento faltante, no reformular la
+   * petición.
+   */
+  INVOICING_FISCAL_COVERAGE_001: {
+    code: 'INVOICING_FISCAL_COVERAGE_001',
+    httpStatus: 409,
+    devMessage: 'Sale was charged without an issued fiscal document',
+  },
+  /**
    * IDENTIDAD FISCAL DEL EMISOR INCOMPLETA — lo lanza el resolvedor estricto
    * (`resolveTenantFiscalIdentity`) cuando falta `legal_name`,
    * `municipality_code` o `department`.
