@@ -1,4 +1,4 @@
-import { Component, Directive, Pipe, PipeTransform, WritableSignal, input, model, output, runInInjectionContext, signal } from '@angular/core';
+import { Component, Directive, Pipe, PipeTransform, WritableSignal, computed, input, model, output, runInInjectionContext, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ReactiveFormsModule } from '@angular/forms';
@@ -228,8 +228,29 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     const ship = shipEl
       ? shipEl.componentInstance
       : TestBed.runInInjectionContext(() => new ShippingStub());
+    const shipSig = signal(ship);
     Object.defineProperty(component, 'shippingStep', {
-      value: signal(ship),
+      value: shipSig,
+      configurable: true,
+    });
+    Object.defineProperty(component, 'shippingCost', {
+      value: computed(() => {
+        const original = component.cartState()?.shippingContext;
+        const child = shipSig();
+        if (original && !child?.hasShippingChanges()) {
+          return Number(original.shippingCost ?? 0);
+        }
+        return child?.shippingCost() ?? 0;
+      }),
+      configurable: true,
+    });
+    Object.defineProperty(component, 'totalToPay', {
+      value: computed(() => {
+        const base = component.cartState()?.summary?.total || 0;
+        return component.effectiveIntent() === 'delivery'
+          ? base + (component as any).shippingCost()
+          : base;
+      }),
       configurable: true,
     });
   };
