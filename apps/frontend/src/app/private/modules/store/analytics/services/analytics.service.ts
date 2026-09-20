@@ -1172,7 +1172,7 @@ export class AnalyticsService {
   invalidateCache(prefix?: string): void {
     if (prefix) {
       for (const key of analyticsCache.keys()) {
-        if (key.startsWith(prefix)) {
+        if (key.includes(prefix) || key.startsWith(prefix)) {
           analyticsCache.delete(key);
         }
       }

@@ -331,10 +331,36 @@ export class PurchaseTrendsComponent implements OnInit, Refreshable {
       granularity: this.granularity(),
     });
 
+    // Listen to query param updates (e.g. navigation via reports or header)
+    this.route.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((params) => {
+        const updatedRange = queryParamsToDateRange(params);
+        if (updatedRange) {
+          const current = this.dateRange();
+          if (
+            updatedRange.start_date !== current.start_date ||
+            updatedRange.end_date !== current.end_date ||
+            updatedRange.preset !== current.preset
+          ) {
+            this.dateRange.set(updatedRange);
+            this.dateRangeSync.setDateRange(updatedRange);
+            this.dropdownFilterValues.update((prev) => ({
+              ...prev,
+              date_range_start: updatedRange.start_date,
+              date_range_end: updatedRange.end_date,
+              date_range_preset: updatedRange.preset ?? null,
+            }));
+            this.loadData();
+          }
+        }
+      });
+
     this.loadData();
   }
 
   refresh(): void {
+    this.analyticsService.invalidateCache('purchases-trends');
     this.loadData();
   }
 
@@ -404,7 +430,12 @@ export class PurchaseTrendsComponent implements OnInit, Refreshable {
     },
   ]);
 
-  readonly dropdownFilterValues = signal<FilterValues>({});
+  readonly dropdownFilterValues = signal<FilterValues>({
+    date_range_start: getDefaultStartDate(),
+    date_range_end: getDefaultEndDate(),
+    date_range_preset: 'thisMonth',
+    granularity: 'day',
+  });
 
   readonly dropdownActions = computed<DropdownAction[]>(() => [
     {
