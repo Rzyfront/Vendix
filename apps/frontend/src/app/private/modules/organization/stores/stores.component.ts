@@ -675,9 +675,9 @@ openCreateStoreModal(): void {
       phone: storeData.phone,
       website: storeData.website,
       address: storeData.address,
-      city: storeData.city,
-      country: storeData.country,
-      is_active: storeData.state === 'active' ? true : false,
+      city: storeData.address?.city ?? storeData.city,
+      country: storeData.address?.country_code ?? storeData.address?.country ?? storeData.country,
+      is_active: storeData.status === 'active' || storeData.state === 'active' ? true : false,
       store_type: storeData.store_type || StoreType.PHYSICAL,
       // Brand assets: the modal stores the S3 key returned by the upload
       // endpoint in `logoUrl`. Persist it as `logo_url` so the store actually

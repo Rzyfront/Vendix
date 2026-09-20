@@ -640,6 +640,42 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   },
 
   {
+    id: 'inventory-by-supplier',
+    category: 'inventory',
+    title: 'Inventario por Proveedor',
+    description:
+      'Concentración de existencias, valorización a costo y producto principal agrupado por proveedor.',
+    detailedDescription:
+      'Muestra el capital invertido y las existencias en mano, reservadas y disponibles por cada proveedor comercial registrado en la tienda, permitiendo identificar la concentración de compras y el producto con mayor valor en stock.',
+    icon: 'truck',
+    route: '/admin/reports/inventory/inventory-by-supplier',
+    requiresDateRange: false,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'supplier_id',
+    columns: [
+      { key: 'supplier_name', header: 'Proveedor', type: 'text' },
+      { key: 'supplier_document', header: 'Documento', type: 'text' },
+      { key: 'product_count', header: 'Productos', type: 'number', footer: 'sum' },
+      { key: 'total_units_on_hand', header: 'En Mano', type: 'number', footer: 'sum' },
+      { key: 'total_units_reserved', header: 'Reservadas', type: 'number', footer: 'sum' },
+      { key: 'total_units_available', header: 'Disponibles', type: 'number', footer: 'sum' },
+      { key: 'total_stock_value', header: 'Valor Stock', type: 'currency', footer: 'sum' },
+      { key: 'avg_unit_cost', header: 'Costo Promedio', type: 'currency' },
+      { key: 'top_product_name', header: 'Producto Principal', type: 'text' },
+    ],
+    exportFilename: 'inventario_por_proveedor',
+    stats: [
+      { key: 'product_count', label: 'Total Productos', type: 'number', icon: 'package' },
+      { key: 'total_units_on_hand', label: 'Unidades en Mano', type: 'number', icon: 'boxes' },
+      { key: 'total_units_available', label: 'Unidades Disponibles', type: 'number', icon: 'check-circle' },
+      { key: 'total_stock_value', label: 'Valor Total Stock', type: 'currency', icon: 'dollar-sign' },
+    ],
+    dataEndpoint: 'store/analytics/inventory/by-supplier',
+    exportEndpoint: 'store/analytics/inventory/by-supplier/export',
+  },
+
+  {
     id: 'inventory-valuation',
     category: 'inventory',
     title: 'Valoracion',
