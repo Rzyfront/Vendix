@@ -82,7 +82,7 @@ import { InvoicingModule } from '../invoicing/invoicing.module';
     InventorySerialNumbersModule,
     // Restaurant Suite — table close-out / Wompi reconciliation needs
     // TableSessionsService (session_closed emit + deferred-close reconcile).
-    TablesModule,
+    forwardRef(() => TablesModule),
     // A.3 CP-facturacion-fixes: InvoicingService + InvoiceFlowService for the
     // webhook auto-send. No cycle: the invoicing graph never imports payments.
     InvoicingModule,

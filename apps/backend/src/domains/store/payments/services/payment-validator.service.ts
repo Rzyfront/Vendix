@@ -122,6 +122,7 @@ export class PaymentValidatorService {
   async validatePaymentAmount(
     amount: number,
     orderId: number,
+    excludedPaymentId?: number,
   ): Promise<boolean> {
     try {
       const order = await this.prisma.orders.findUnique({
@@ -129,8 +130,9 @@ export class PaymentValidatorService {
         include: {
           payments: {
             where: {
+              ...(excludedPaymentId ? { id: { not: excludedPaymentId } } : {}),
               state: {
-                in: ['succeeded', 'captured', 'pending'],
+                in: ['succeeded', 'captured', 'pending', 'authorized'],
               },
             },
           },

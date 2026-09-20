@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { PaymentEncryptionService } from './payment-encryption.service';
 import * as crypto from 'crypto';
 import { Prisma, refunds_state_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -26,6 +27,7 @@ export class PaymentGatewayService {
     private prisma: StorePrismaService,
     private validatorService: PaymentValidatorService,
     private s3Service: S3Service,
+    @Optional() private readonly paymentEncryption?: PaymentEncryptionService,
   ) {}
 
   /**
@@ -133,6 +135,88 @@ export class PaymentGatewayService {
       }
       throw new PaymentError(PaymentErrorCodes.PROCESSOR_ERROR, error.message);
     }
+  }
+
+  /** Server-only: executes an already budgeted account payment; never creates another row.
+   * Account service owns order reconciliation, register movements and after-commit events.
+   * The caller supplies only a row id, not trusted amounts/account flags in metadata.
+   */
+  async processReservedPayment(paymentId: number): Promise<PaymentResult> {
+    const payment = await this.prisma.payments.findFirst({
+      where: { id: paymentId },
+      include: {
+        orders: true,
+        financial_account: { include: { split: true, customer: true } },
+        store_payment_method: { include: { system_payment_method: true } },
+      },
+    });
+    const account = payment?.financial_account;
+    if (!payment || !account || !payment.store_payment_method_id ||
+        account.role !== 'payable' || account.state !== 'active' ||
+        account.split.state !== 'active' ||
+        account.split.source_order_id !== payment.order_id ||
+        account.store_id !== payment.orders.store_id ||
+        payment.orders.active_financial_split_id !== account.split_id ||
+        !payment.financial_idempotency_key) {
+      throw new PaymentError(PaymentErrorCodes.INVALID_ORDER, 'La reserva no pertenece a una cuenta financiera activa');
+    }
+    if (payment.state !== 'pending') {
+      return {
+        success: payment.state === 'succeeded' || payment.state === 'captured',
+        status: payment.state,
+        transactionId: payment.transaction_id ?? undefined,
+        gatewayResponse: payment.gateway_response,
+      };
+    }
+    const saved = (payment.gateway_response ?? {}) as Record<string, any>;
+    const request = saved.financial_request ?? {};
+    const reference = payment.gateway_reference || `financial_${payment.orders.store_id}_${payment.id}`;
+    const data: PaymentData = {
+      orderId: payment.order_id,
+      customerId: payment.customer_id ?? undefined,
+      amount: Number(payment.amount),
+      currency: payment.currency || payment.orders.currency || 'COP',
+      storePaymentMethodId: payment.store_payment_method_id,
+      storeId: payment.orders.store_id,
+      bankAccountId: payment.bank_account_id ?? undefined,
+      idempotencyKey: payment.financial_idempotency_key,
+      metadata: { paymentId: payment.id, reference, paymentMethod: request.wompi_payment_method, customerEmail: account.customer?.email },
+      returnUrl: request.return_url ?? undefined,
+      cancelUrl: request.cancel_url ?? undefined,
+    };
+    await this.validatePaymentData(data, payment.id);
+    const method = await this.getPaymentMethod(data.storePaymentMethodId!);
+    const methodType = method.system_payment_method?.type || method.type;
+    const processor = this.getProcessor(methodType);
+    if (methodType === 'wompi') {
+      if (!this.paymentEncryption) throw new PaymentError(PaymentErrorCodes.PROCESSOR_ERROR, 'Payment encryption provider unavailable');
+      data.metadata!.wompiConfig = this.paymentEncryption.decryptConfig((method.custom_config || {}) as Record<string, any>, methodType);
+    }
+    if (!processor.isEnabled()) {
+      throw new PaymentError(PaymentErrorCodes.PAYMENT_METHOD_DISABLED, 'Payment method is disabled');
+    }
+    if (data.bankAccountId) {
+      data.bankAccount = await this.resolveAndValidateBankAccount(data.bankAccountId, data.storeId);
+    }
+    await this.prisma.payments.updateMany({
+      where: { id: payment.id, state: 'pending', financial_account_id: account.id },
+      data: { gateway_reference: reference },
+    });
+    const result = await processor.processPayment(data);
+    // A fast APPROVED callback may win while the provider call is in flight.
+    // Never regress a terminal state to the HTTP response's older PENDING.
+    await this.prisma.payments.updateMany({
+      where: { id: payment.id, state: 'pending', financial_account_id: account.id },
+      data: {
+        state: result.status,
+        ...(result.transactionId ? { transaction_id: result.transactionId } : {}),
+        gateway_reference: result.gatewayReference || reference,
+        gateway_response: { ...(result.gatewayResponse || {}), financial_request: request, nextAction: result.nextAction ?? null },
+        ...(['succeeded', 'captured'].includes(result.status) ? { paid_at: new Date() } : {}),
+        updated_at: new Date(),
+      },
+    });
+    return { ...result, transactionId: result.transactionId || payment.transaction_id || undefined };
   }
 
   async processPaymentWithNewOrder(
@@ -306,7 +390,7 @@ export class PaymentGatewayService {
    * `metadata` queda como carga OPACA: se persiste en `payments.gateway_response`
    * y se le pasa al processor, pero no decide nada del flujo de validación.
    */
-  private async validatePaymentData(paymentData: PaymentData): Promise<void> {
+  private async validatePaymentData(paymentData: PaymentData, reservedPaymentId?: number): Promise<void> {
     const validations: Promise<any>[] = [
       this.validatorService.validateOrder(
         paymentData.orderId,
@@ -319,6 +403,7 @@ export class PaymentGatewayService {
       this.validatorService.validatePaymentAmount(
         paymentData.amount,
         paymentData.orderId,
+        ...(reservedPaymentId ? [reservedPaymentId] : []),
       ),
       this.validatorService.validateCurrency(
         paymentData.currency,
@@ -334,6 +419,10 @@ export class PaymentGatewayService {
         PaymentErrorCodes.INVALID_ORDER,
         orderValid.errors?.join(', ') || 'Invalid order',
       );
+    }
+
+    if (orderValid.order?.active_financial_split_id && !reservedPaymentId) {
+      throw new PaymentError(PaymentErrorCodes.INVALID_ORDER, 'Esta orden tiene cuentas independientes. Cobra desde la cuenta correspondiente.');
     }
 
     if (!methodValid) {
