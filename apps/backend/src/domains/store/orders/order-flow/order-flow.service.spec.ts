@@ -1815,7 +1815,12 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       state: 'processing',
       order_number: 'POS-1',
       internal_notes: null,
-      payments,
+      payments: payments.map((p) => ({
+        ...p,
+        store_payment_method: p.store_payment_method ?? { system_payment_method: {
+          type: p.store_payment_method_id === CARD_METHOD_ID ? 'card' : 'cash', processing_mode: 'DIRECT',
+        } },
+      })),
     });
 
   beforeEach(() => {
@@ -1828,6 +1833,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       order_items: ['findMany'],
       payments: ['findMany', 'update'],
     });
+    prismaMock.$queryRaw = jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'processing' }]);
     // Sin ítems de cocina: la rama KDS de `cancelOrder` no participa aquí.
     prismaMock.order_items.findMany.mockResolvedValue([]);
     // El claim atómico gana (count=1) → corre la cadena de efectos.
@@ -2087,4 +2093,69 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     expect(movements.createManualMovement).not.toHaveBeenCalled();
     expect(audit.log).not.toHaveBeenCalled();
   });
+  it.each([false, true])('rechaza cancelar stock comprometido incluso force=%s', async (force) => {
+    const order = cancelableOrder([buildPayment({ state: 'succeeded' })]);
+    order.order_items = [{ ...order.order_items[0], inventory_committed: true,
+      inventory_consumed_at_fire: false }] as any;
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
+    await expect(service.cancelOrder(ORDER_ID, DTO, force)).rejects.toMatchObject({
+      response: expect.objectContaining({ error_code: 'ORD_CANCEL_STOCK_COMMITTED_001' }),
+    });
+    expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(stock.releaseReservationsByReference).not.toHaveBeenCalled();
+  });
+
+  it('no anula localmente un pago ONLINE confirmado sin devolución monetaria', async () => {
+    const order = cancelableOrder([buildPayment({ state: 'succeeded',
+      store_payment_method: { system_payment_method: { type: 'wompi', processing_mode: 'ONLINE' } },
+    })]);
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
+    await expect(service.cancelOrder(ORDER_ID, DTO)).rejects.toMatchObject({
+      response: expect.objectContaining({ error_code: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001' }),
+    });
+    expect(prismaMock.payments.update).not.toHaveBeenCalled();
+  });
+
+  it('cancelPayment tampoco puede anular un ONLINE succeeded', async () => {
+    const order = cancelableOrder([buildPayment({ state: 'succeeded',
+      store_payment_method: { system_payment_method: { type: 'wompi', processing_mode: 'ONLINE' } },
+    })]);
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(order);
+    await expect(service.cancelPayment(ORDER_ID, { reason: 'QA' }, 'admin')).rejects
+      .toMatchObject({ errorCode: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001' });
+    expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(prismaMock.orders.update).not.toHaveBeenCalled();
+  });
+
+  it('relee líneas después de esperar el lock, no usa el snapshot cancelable anterior', async () => {
+    const before = cancelableOrder([]);
+    const after = { ...before, order_items: [{ inventory_committed: true }] };
+    jest.spyOn(service as any, 'getOrder').mockResolvedValueOnce(before).mockResolvedValueOnce(after);
+    await expect(service.cancelOrder(ORDER_ID, DTO)).rejects
+      .toMatchObject({ errorCode: 'ORD_CANCEL_STOCK_COMMITTED_001' });
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('confirmPayment no resucita la orden si cancelación ganó el lock', async () => {
+    const pending = { ...cancelableOrder([]), state: 'pending_payment' };
+    jest.spyOn(service as any, 'getOrder').mockResolvedValueOnce(pending)
+      .mockResolvedValueOnce({ ...pending, state: 'cancelled' });
+    await expect(service.confirmPayment(ORDER_ID)).resolves.toMatchObject({
+      state: 'cancelled', payment_confirmation_applied: false,
+    });
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(emitter.emit).not.toHaveBeenCalled();
+  });
+
+  it('cancelación registra el estado fresco ganador, no la prelectura', async () => {
+    const before = { ...cancelableOrder([]), state: 'pending_payment' };
+    jest.spyOn(service as any, 'getOrder').mockResolvedValueOnce(before)
+      .mockResolvedValueOnce({ ...before, state: 'processing' });
+    await service.cancelOrder(ORDER_ID, DTO);
+    expect(emitter.emit).toHaveBeenCalledWith('order.status_changed', expect.objectContaining({ old_state: 'processing' }));
+    const write = prismaMock.orders.update.mock.calls[0][0];
+    expect(JSON.parse(write.data.internal_notes)._flow_metadata.previous_state).toBe('processing');
+  });
+
 });

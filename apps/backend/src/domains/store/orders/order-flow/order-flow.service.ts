@@ -1,3 +1,8 @@
+import { lockOrderLifecycle } from './order-lifecycle-lock.util';
+import {
+  getCancellationBlocker,
+  getOrderCancellationPolicy,
+} from './order-cancellation-policy.util';
 import {
   Injectable,
   NotFoundException,
@@ -147,12 +152,19 @@ export class OrderFlowService {
    * lock in `promoteDraftToCreated` commits — that's how the FB-10
    * race-claim rejects concurrent second waves with 409.
    */
-  async getOrder(orderId: number) {
-    const order = await this.prisma.orders.findFirst({
+  async getOrder(orderId: number, client: Prisma.TransactionClient | StorePrismaService = this.prisma) {
+    const order = await client.orders.findFirst({
       where: { id: orderId },
       include: {
         stores: { select: { id: true, name: true, store_code: true } },
-        payments: true,
+        payments: {
+          include: { store_payment_method: {
+            select: { system_payment_method: {
+              select: { type: true, processing_mode: true },
+            } },
+          } },
+        },
+        order_items: { include: { products: true, product_variants: true } },
       },
     });
 
@@ -161,6 +173,11 @@ export class OrderFlowService {
     }
 
     return order;
+  }
+
+  private assertCancellationAllowed(order: Parameters<typeof getCancellationBlocker>[0]): void {
+    const blocker = getCancellationBlocker(order);
+    if (blocker) throw new VendixHttpException(ErrorCodes[blocker]);
   }
 
   /**
@@ -335,6 +352,7 @@ export class OrderFlowService {
     // canonical service — they are NOT replicated here. Side-effect events are
     // emitted only AFTER the transaction commits (never on rollback).
     if (newState === 'finished') {
+      const stockEvents: Array<() => void> = [];
       try {
         const { updated_order, commit } = await this.prisma.$transaction(
           async (tx) => {
@@ -345,6 +363,7 @@ export class OrderFlowService {
                 blockOnInsufficient: true,
                 consumeSerials: true,
                 reason: 'Order completed',
+                afterCommit: stockEvents,
                 userId: RequestContextService.getUserId(),
               },
               tx,
@@ -376,6 +395,11 @@ export class OrderFlowService {
           { timeout: 20000 },
         );
 
+        for (const publish of stockEvents) {
+          try { publish(); } catch (error) {
+            this.logger.warn(`Stock committed; notification failed: ${(error as Error).message}`);
+          }
+        }
         // Emitted only after a successful commit → never fires on rollback.
         this.eventEmitter.emit('order.status_changed', {
           store_id: updated_order.store_id,
@@ -1230,60 +1254,42 @@ export class OrderFlowService {
    * Called from webhook handlers or manually by admin
    */
   async confirmPayment(orderId: number) {
-    const order = await this.getOrder(orderId);
-
-    const allowedStates: OrderState[] = ['pending_payment', 'shipped'];
-    if (!allowedStates.includes(order.state as OrderState)) {
-      this.logger.warn(
-        `Attempted to confirm payment for order #${orderId} in state '${order.state}'`,
-      );
-      return order;
-    }
-
-    // Update payment state from 'pending' to 'succeeded'
-    const pendingPayment = order.payments.find((p) => p.state === 'pending');
-    if (pendingPayment) {
-      await this.prisma.payments.update({
-        where: { id: pendingPayment.id },
-        data: {
-          state: 'succeeded',
-          paid_at: new Date(),
-          updated_at: new Date(),
-        },
-      });
-    }
-
-    // Round 1 MAJOR #13 — cupón en `confirmPayment` (online flow):
-    // cuando un pago `pending` se confirma, recién entonces hay un cargo
-    // consumado: una sola vez por orden, idempotente vía `coupon_uses`.
-    await this.commitCouponUseForOrder(orderId);
-
-    // Only transition state if coming from pending_payment
-    if (order.state === 'pending_payment') {
-      this.validateTransition(order.state as OrderState, 'processing');
-      const updatedOrder = await this.updateOrderState(orderId, 'processing', {
-        paid_at: new Date(),
-      });
-      this.logger.log(
-        `Order #${orderId} payment confirmed, moved to processing`,
-      );
-      return updatedOrder;
-    }
-
-    // For shipped state: payment confirmed but state stays as shipped
-    this.logger.log(
-      `Order #${orderId} payment confirmed while in '${order.state}' state`,
-    );
-
-    // Return refreshed order with updated payment data
-    return this.prisma.orders.findFirst({
-      where: { id: orderId },
-      include: {
-        stores: { select: { id: true, name: true, store_code: true } },
-        order_items: { include: { products: true, product_variants: true } },
-        payments: true,
-      },
+    const initial = await this.getOrder(orderId);
+    const afterCommit: Array<() => Promise<void>> = [];
+    const result = await this.prisma.$transaction(async (tx) => {
+      await lockOrderLifecycle(tx, orderId, initial.store_id);
+      const order = await this.getOrder(orderId, tx);
+      if (!['pending_payment', 'shipped'].includes(order.state)) {
+        return { order, applied: false, previousState: order.state };
+      }
+      const pendingPayment = order.payments.find((p) => p.state === 'pending');
+      if (pendingPayment) {
+        await tx.payments.updateMany({
+          where: { id: pendingPayment.id, state: 'pending' },
+          data: { state: 'succeeded', paid_at: new Date(), updated_at: new Date() },
+        });
+      }
+      await this.commitCouponUseForOrder(orderId, tx, afterCommit);
+      if (order.state === 'pending_payment') {
+        const claim = await tx.orders.updateMany({
+          where: { id: orderId, store_id: order.store_id, state: 'pending_payment' },
+          data: { state: 'processing', completed_at: new Date(), updated_at: new Date() },
+        });
+        if (claim.count !== 1) throw new BadRequestException('La orden cambió durante la confirmación.');
+      }
+      return { order: await this.getOrder(orderId, tx), applied: true, previousState: order.state };
     });
+    for (const effect of afterCommit) await effect();
+    if (result.applied && result.previousState === 'pending_payment') {
+      this.eventEmitter.emit('order.status_changed', {
+        store_id: result.order.store_id, order_id: orderId,
+        order_number: result.order.order_number,
+        old_state: 'pending_payment', new_state: 'processing',
+      });
+    }
+    // Explicit result for callbacks: a no-op on a cancelled order is NOT a
+    // successful confirmation. Existing HTTP callers still receive an order.
+    return { ...result.order, payment_confirmation_applied: result.applied };
   }
 
   /**
@@ -1305,16 +1311,18 @@ export class OrderFlowService {
       );
     }
 
-    // Find the active payment (succeeded or pending — pending covers online payments not yet confirmed)
-    const activePayment = order.payments.find(
-      (p) => p.state === 'succeeded' || p.state === 'pending',
-    );
-    if (!activePayment) {
-      throw new BadRequestException('No active payment found for this order');
-    }
-
-    // Cancel the payment and revert order state in a transaction
     await this.prisma.$transaction(async (tx) => {
+      await lockOrderLifecycle(tx, orderId, order.store_id);
+      const freshOrder = await this.getOrder(orderId, tx);
+      if (!['pending_payment', 'processing'].includes(freshOrder.state)) {
+        throw new BadRequestException('La orden cambió de estado; actualiza antes de anular el pago.');
+      }
+      this.assertCancellationAllowed(freshOrder);
+      const activePayment = freshOrder.payments.find(
+        (p) => p.state === 'succeeded' || p.state === 'pending',
+      );
+      if (!activePayment) throw new BadRequestException('No active payment found for this order');
+
       // Mark payment as cancelled with metadata
       await tx.payments.update({
         where: { id: activePayment.id },
@@ -1595,7 +1603,12 @@ export class OrderFlowService {
       });
     }
 
-    return actions;
+    const policy = getOrderCancellationPolicy(order);
+    return actions.map((action) => {
+      if (action.code !== 'cancel' && action.code !== 'cancel_payment') return action;
+      const enabled = action.code === 'cancel' ? policy.can_cancel : policy.can_cancel_payment;
+      return { ...action, enabled, ...(policy.reason_code ? { reason: policy.reason_code } : {}) };
+    });
   }
 
   /**
@@ -2926,7 +2939,7 @@ export class OrderFlowService {
    */
   async cancelOrder(orderId: number, dto: CancelOrderDto, force = false) {
     const order = await this.getOrder(orderId);
-    const previousState = order.state as OrderState;
+    let previousState = order.state as OrderState;
 
     const notCancelableError = () =>
       new BadRequestException(
@@ -2937,7 +2950,7 @@ export class OrderFlowService {
     // Estados que el claim atómico acepta. Forzando es exactamente el estado
     // que acabamos de leer: sigue siendo un WHERE condicional (el perdedor de
     // una carrera encuentra 'cancelled' y no coincide), no un UPDATE ciego.
-    const claimableStates: OrderState[] = force
+    let claimableStates: OrderState[] = force
       ? [previousState]
       : CANCELABLE_STATES;
 
@@ -3038,38 +3051,44 @@ export class OrderFlowService {
     // Se clasifica ANTES del claim (la transacción sólo persiste) y se escribe
     // DESPUÉS del commit: un egreso escrito dentro de la tx quedaría huérfano
     // si el claim perdiera la carrera o la rama KDS abortara con 422.
-    const cashReversal = await this.resolveCancelCashReversal(order);
+    let cashReversal: Awaited<ReturnType<OrderFlowService['resolveCancelCashReversal']>> = null;
 
     // Build cancel metadata exactly as updateOrderState would: `orders` has no
     // cancelled_at/cancellation_reason columns, so these + previous_state live
     // in internal_notes._flow_metadata (reactivateOrder reads previous_state
     // back). Merge with any pre-existing _flow_metadata.
-    let existingMetadata: Record<string, any> = {};
-    if (order.internal_notes) {
-      try {
-        const parsed = JSON.parse(order.internal_notes);
-        if (parsed._flow_metadata) {
-          existingMetadata = parsed._flow_metadata;
-        }
-      } catch {
-        existingMetadata = { original_notes: order.internal_notes };
-      }
-    }
-    const internal_notes = JSON.stringify({
-      _flow_metadata: {
-        ...existingMetadata,
-        cancelled_at: new Date(),
-        cancellation_reason: dto.reason,
-        // Persist the previous state so reactivateOrder() can restore it.
-        previous_state: previousState,
-      },
-      notes: existingMetadata.original_notes || '',
-    });
 
     // CLAIM + payment-cancel + KDS/item branch + metadata write share ONE
     // transaction so they commit atomically (pattern of reactivateOrder).
     const cancelledTicketIds: number[] = [];
     const updatedOrder = await this.prisma.$transaction(async (tx) => {
+      await lockOrderLifecycle(tx, orderId, order.store_id);
+      const freshOrder = await this.getOrder(orderId, tx);
+      this.assertCancellationAllowed(freshOrder);
+      previousState = freshOrder.state as OrderState;
+      claimableStates = force ? [previousState] : CANCELABLE_STATES;
+      let existingMetadata: Record<string, any> = {};
+      if (freshOrder.internal_notes) {
+        try {
+          const parsed = JSON.parse(freshOrder.internal_notes);
+          if (parsed._flow_metadata) {
+            existingMetadata = parsed._flow_metadata;
+          }
+        } catch {
+          existingMetadata = { original_notes: freshOrder.internal_notes };
+        }
+      }
+      const internal_notes = JSON.stringify({
+        _flow_metadata: {
+          ...existingMetadata,
+          cancelled_at: new Date(),
+          cancellation_reason: dto.reason,
+          // Persist the previous state so reactivateOrder() can restore it.
+          previous_state: previousState,
+        },
+        notes: existingMetadata.original_notes || '',
+      });
+      cashReversal = await this.resolveCancelCashReversal(freshOrder, tx);
       // ATOMIC CLAIM — the conditional UPDATE is the source of truth that
       // serializes concurrent cancellations (double-click / retry). Only ONE
       // request flips the state out of CANCELABLE_STATES (count=1); a
@@ -3085,7 +3104,7 @@ export class OrderFlowService {
       }
 
       // Winner: cancel any active payments (one-shot).
-      const activePayments = order.payments.filter(
+      const activePayments = freshOrder.payments.filter(
         (p) => p.state === 'pending' || p.state === 'succeeded',
       );
       for (const payment of activePayments) {
@@ -3293,7 +3312,7 @@ export class OrderFlowService {
    */
   private async resolveCancelCashReversal(order: {
     payments: { id: number; state: string }[];
-  }): Promise<{ amount: Prisma.Decimal; paymentIds: number[] } | null> {
+  }, client: Prisma.TransactionClient | StorePrismaService = this.prisma): Promise<{ amount: Prisma.Decimal; paymentIds: number[] } | null> {
     const succeededIds = order.payments
       .filter((p) => p.state === 'succeeded')
       .map((p) => p.id);
@@ -3301,7 +3320,7 @@ export class OrderFlowService {
       return null;
     }
 
-    const cashPayments = await this.prisma.payments.findMany({
+    const cashPayments = await client.payments.findMany({
       where: {
         id: { in: succeededIds },
         store_payment_method: { system_payment_method: { type: 'cash' } },
@@ -4438,8 +4457,13 @@ export class OrderFlowService {
    * editor / POS ya calculó y guardó; acá NO recalculamos para no
    * divergir del cupón que el cliente vio.
    */
-  private async commitCouponUseForOrder(orderId: number): Promise<void> {
-    const order = await this.prisma.orders.findFirst({
+  private async commitCouponUseForOrder(
+    orderId: number,
+    transaction?: Prisma.TransactionClient,
+    afterCommit: Array<() => Promise<void>> = [],
+  ): Promise<void> {
+    const client = transaction ?? this.prisma;
+    const order = await client.orders.findFirst({
       where: { id: orderId },
       // CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 MAJOR.
       // `coupon_code` is needed by the audit row so SIEM rules can
@@ -4468,7 +4492,7 @@ export class OrderFlowService {
     // podrían coexistir para la misma orden y dos cargos podrían
     // incrementar el contador dos veces. La guarda aquí es explícita
     // porque el schema no tiene UNIQUE sobre ese par.
-    const existing = await this.prisma.coupon_uses.findFirst({
+    const existing = await client.coupon_uses.findFirst({
       where: { order_id: orderId, coupon_id: order.coupon_id },
       select: { id: true },
     });
@@ -4477,11 +4501,11 @@ export class OrderFlowService {
     // El cupón pudo haber sido desactivado o cambiado por el operador
     // entre el editor y el cobro. Re-leemos su estado actual bajo el
     // scope del store para confirmar que sigue consumible.
-    const coupon = await this.prisma.coupons.findFirst({
-      where: { id: order.coupon_id, stores: { some: { id: order.store_id } } },
+    const coupon = await client.coupons.findFirst({
+      where: { id: order.coupon_id, store_id: order.store_id },
       select: {
         id: true,
-        state: true,
+        is_active: true,
         current_uses: true,
         max_uses: true,
       },
@@ -4493,14 +4517,14 @@ export class OrderFlowService {
         { stage: 'commit_coupon_lookup', coupon_id: order.coupon_id },
       );
     }
-    if (coupon.state !== 'active') {
+    if (!coupon.is_active) {
       throw new VendixHttpException(
         ErrorCodes.ORD_EDIT_COUPON_COMMIT_001,
         undefined,
         {
           stage: 'commit_coupon_state',
           coupon_id: order.coupon_id,
-          state: coupon.state,
+          is_active: coupon.is_active,
         },
       );
     }
@@ -4535,7 +4559,7 @@ export class OrderFlowService {
     // exitoso devuelva count=0 cuando el cupo ya se agotó, evitando el
     // sobreconteo silencioso. count=0 ⇒ `ORD_EDIT_COUPON_COMMIT_001`
     // (abort, la orden NO queda pagada).
-    await this.prisma.$transaction(async (tx) => {
+    const write = async (tx: Prisma.TransactionClient) => {
       await tx.coupon_uses.create({
         data: {
           coupon_id: order.coupon_id as number,
@@ -4547,7 +4571,7 @@ export class OrderFlowService {
       const inc = await tx.coupons.updateMany({
         where: {
           id: order.coupon_id as number,
-          state: 'active',
+          is_active: true,
           // Sin límite (`max_uses = null`) ⇒ siempre incrementa.
           // Con límite ⇒ todavía hay cupo.
           OR: [
@@ -4568,7 +4592,9 @@ export class OrderFlowService {
           { stage: 'commit_coupon_race', coupon_id: order.coupon_id },
         );
       }
-    });
+    };
+    if (transaction) await write(transaction);
+    else await this.prisma.$transaction(write);
 
     // CP-POS-CREAR-EDITAR-COBRAR-001 — Round 3.5 MAJOR.
     // Audit row AFTER commit (no antes — un fallo del `updateMany` ya
@@ -4578,27 +4604,31 @@ export class OrderFlowService {
     // "WELCOME5" en el editor pero el `coupon_id` real se resuelve
     // recién en `flow/pay`; registrar aquí garantiza que el timeline
     // muestra el cupón final, no el que el operador había tecleado.
-    try {
-      await this.auditService.logCustom(
-        (RequestContextService.getUserId() ?? 0) as number,
-        'order.coupon_committed',
-        AuditResource.ORDERS,
-        {
-          request_id: RequestContextService.getRequestId() ?? null,
-          store_id: order.store_id ?? null,
-          order_id: orderId,
-          coupon_id: order.coupon_id,
-          coupon_code_before: order.coupon_code ?? null,
-          discount_applied: order.discount_amount ?? 0,
-        },
-        orderId,
-      );
-    } catch (auditErr) {
-      // Audit es observabilidad, nunca bloquea el commit del cupón.
-      this.logger.warn(
-        `[order.coupon_committed audit failed] order=${orderId}: ${(auditErr as Error).message}`,
-      );
-    }
+    const audit = async () => {
+      try {
+        await this.auditService.logCustom(
+          (RequestContextService.getUserId() ?? 0) as number,
+          'order.coupon_committed',
+          AuditResource.ORDERS,
+          {
+            request_id: RequestContextService.getRequestId() ?? null,
+            store_id: order.store_id ?? null,
+            order_id: orderId,
+            coupon_id: order.coupon_id,
+            coupon_code_before: order.coupon_code ?? null,
+            discount_applied: order.discount_amount ?? 0,
+          },
+          orderId,
+        );
+      } catch (auditErr) {
+        // Audit es observabilidad, nunca bloquea el commit del cupón.
+        this.logger.warn(
+          `[order.coupon_committed audit failed] order=${orderId}: ${(auditErr as Error).message}`,
+        );
+      }
+    };
+    if (transaction) afterCommit.push(audit);
+    else await audit();
   }
 
   /**
