@@ -212,7 +212,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
   const wireStubs = (): void => {
     const pay = payStub();
     Object.defineProperty(component, 'paymentStep', {
-      value: () => pay,
+      value: signal(pay),
       configurable: true,
     });
     const entregaEl = fixture.debugElement.query(By.directive(EntregaStub));
@@ -220,7 +220,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       ? entregaEl.componentInstance
       : TestBed.runInInjectionContext(() => new EntregaStub());
     Object.defineProperty(component, 'entregaStep', {
-      value: () => entrega,
+      value: signal(entrega),
       configurable: true,
     });
     // Envío solo se monta en delivery: si no está, stub suelto para el slot.
@@ -229,7 +229,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       ? shipEl.componentInstance
       : TestBed.runInInjectionContext(() => new ShippingStub());
     Object.defineProperty(component, 'shippingStep', {
-      value: () => ship,
+      value: signal(ship),
       configurable: true,
     });
   };
