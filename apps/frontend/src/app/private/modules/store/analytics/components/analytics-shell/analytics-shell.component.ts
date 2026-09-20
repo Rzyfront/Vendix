@@ -100,6 +100,7 @@ export class AnalyticsShellComponent {
     // Purchases
     '/admin/analytics/purchases/summary': '/admin/reports/purchases/purchase-summary',
     '/admin/analytics/purchases/by-supplier': '/admin/reports/purchases/purchase-by-supplier',
+    '/admin/analytics/purchases/trends': '/admin/reports/purchases/purchase-trends',
     // Reviews
     '/admin/analytics/reviews/summary': '/admin/reports/reviews/reviews-summary',
     // Financial

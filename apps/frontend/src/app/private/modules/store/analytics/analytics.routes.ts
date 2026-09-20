@@ -250,6 +250,13 @@ export const analyticsRoutes: Routes = [
                 (c) => c.PurchasesBySupplierComponent,
               ),
           },
+          {
+            path: 'trends',
+            loadComponent: () =>
+              import('./pages/purchases/purchase-trends.component').then(
+                (c) => c.PurchaseTrendsComponent,
+              ),
+          },
         ],
       },
       // Customers Analytics (shell)
