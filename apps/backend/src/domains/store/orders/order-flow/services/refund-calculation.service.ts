@@ -4,6 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 
 export interface RefundItemRequest {
   order_item_id: number;
@@ -86,6 +87,19 @@ export class RefundCalculationService {
 
     if (!order) {
       throw new NotFoundException(`Order #${order_id} not found`);
+    }
+
+    // Internal callers can bypass the DTO. Do not merge duplicate lines:
+    // their inventory actions or destinations may contradict each other.
+    const requestedQtyMap = new Map<number, number>();
+    for (const item of items) {
+      if (requestedQtyMap.has(item.order_item_id)) {
+        throw new VendixHttpException(
+          ErrorCodes.REF_VALIDATE_001,
+          `Order item #${item.order_item_id} appears more than once in the refund request`,
+        );
+      }
+      requestedQtyMap.set(item.order_item_id, item.quantity);
     }
 
     // Build map of already-refunded quantities per order_item
@@ -218,17 +232,14 @@ export class RefundCalculationService {
       );
     }
 
-    // Check if this is a full refund (all items, all quantities)
-    const totalOrderQty = order.order_items.reduce(
-      (sum, oi) => sum + oi.quantity,
-      0,
+    // Coverage is per original line. Excess historical units of one product
+    // must never stand in for units still outstanding on another product.
+    const is_full_refund = order.order_items.every(
+      (item) =>
+        (refundedQtyMap.get(item.id) || 0) +
+          (requestedQtyMap.get(item.id) || 0) >=
+        item.quantity,
     );
-    const totalRefundedQty = Array.from(refundedQtyMap.values()).reduce(
-      (sum, q) => sum + q,
-      0,
-    );
-    const thisRefundQty = items.reduce((sum, i) => sum + i.quantity, 0);
-    const is_full_refund = totalRefundedQty + thisRefundQty >= totalOrderQty;
 
     return {
       items: calculatedItems,
