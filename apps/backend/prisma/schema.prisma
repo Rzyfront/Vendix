@@ -8,6 +8,8 @@ datasource db {
 }
 
 model users {
+  financial_split_creations order_financial_splits[] @relation("financial_split_creator")
+  financial_accounts order_financial_accounts[] @relation("financial_account_customer")
   id                         Int                          @id @default(autoincrement())
   username                   String                       @unique @db.VarChar(50)
   email                      String?                      @db.VarChar(255)
@@ -802,6 +804,10 @@ model organization_payment_policies {
 }
 
 model stores {
+  financial_splits order_financial_splits[]
+  financial_accounts order_financial_accounts[]
+  financial_lines order_financial_lines[]
+  financial_line_taxes order_financial_line_taxes[]
   id                          Int                           @id @default(autoincrement())
   name                        String                        @db.VarChar(255)
   slug                        String                        @db.VarChar(255)
@@ -1316,6 +1322,7 @@ model order_item_taxes {
 }
 
 model order_items {
+  financial_lines order_financial_lines[]
   id                               Int                      @id @default(autoincrement())
   order_id                         Int
   product_id                       Int?
@@ -1494,6 +1501,10 @@ model order_items {
 }
 
 model orders {
+  // F-006: financial ownership only; this order remains the sole physical sale.
+  active_financial_split_id Int? @unique
+  active_financial_split order_financial_splits? @relation("active_financial_split", fields: [active_financial_split_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  financial_splits order_financial_splits[] @relation("financial_split_source")
   id                                              Int                       @id @default(autoincrement())
   store_id                                        Int
   customer_id                                     Int?
@@ -1687,6 +1698,11 @@ model store_payment_methods {
 }
 
 model payments {
+  financial_account_id Int?
+  financial_idempotency_key String? @unique @db.VarChar(120)
+  financial_effects_recorded_at DateTime? @db.Timestamp(6)
+  financial_account order_financial_accounts? @relation(fields: [financial_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@index([financial_account_id])
   id                      Int                       @id @default(autoincrement())
   order_id                Int
   customer_id             Int?
@@ -5664,6 +5680,9 @@ model videos {
 // ===== ELECTRONIC INVOICING DOMAIN =====
 
 model invoices {
+  financial_account_id Int?
+  financial_account order_financial_accounts? @relation(fields: [financial_account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@index([financial_account_id])
   id                               Int                             @id @default(autoincrement())
   organization_id                  Int
   store_id                         Int
@@ -5921,6 +5940,9 @@ model invoices {
 }
 
 model invoice_items {
+  financial_source_line_id Int?
+  financial_source_line order_financial_lines? @relation(fields: [financial_source_line_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@index([financial_source_line_id])
   id                      Int                 @id @default(autoincrement())
   invoice_id              Int
   product_id              Int?
@@ -11421,4 +11443,100 @@ enum aiu_component_enum {
   imprevistos
   utilidad
   contrato
+}
+
+// F-006: immutable economic snapshot, separate from physical order items and KDS.
+model order_financial_splits {
+  id Int @id @default(autoincrement())
+  store_id Int
+  source_order_id Int
+  version Int
+  mode String @db.VarChar(10)
+  state String @default("active") @db.VarChar(12)
+  source_version String @db.VarChar(64)
+  request_hash String @db.VarChar(64)
+  idempotency_key String @db.VarChar(120)
+  original_total Decimal @db.Decimal(12, 2)
+  paid_total_snapshot Decimal @db.Decimal(12, 2)
+  remaining_total Decimal @db.Decimal(12, 2)
+  original_payment_ids Int[] @default([])
+  created_by Int
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @updatedAt @db.Timestamp(6)
+  source_order orders @relation("financial_split_source", fields: [source_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  active_for_order orders? @relation("active_financial_split")
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  creator users @relation("financial_split_creator", fields: [created_by], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounts order_financial_accounts[]
+  @@unique([store_id, idempotency_key])
+  @@unique([source_order_id, version])
+  @@index([store_id, source_order_id, state])
+  @@index([created_by])
+}
+
+model order_financial_accounts {
+  id Int @id @default(autoincrement())
+  store_id Int
+  split_id Int
+  ordinal Int
+  role String @db.VarChar(20)
+  state String @default("active") @db.VarChar(12)
+  label String @db.VarChar(100)
+  customer_id Int?
+  customer_alias String? @db.VarChar(100)
+  subtotal_amount Decimal @db.Decimal(12, 2)
+  discount_amount Decimal @db.Decimal(12, 2)
+  tax_amount Decimal @db.Decimal(12, 2)
+  shipping_cost Decimal @db.Decimal(12, 2)
+  tip_amount Decimal @db.Decimal(12, 2)
+  grand_total Decimal @db.Decimal(12, 2)
+  paid_snapshot Decimal @default(0) @db.Decimal(12, 2)
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @updatedAt @db.Timestamp(6)
+  split order_financial_splits @relation(fields: [split_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer users? @relation("financial_account_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  lines order_financial_lines[]
+  payments payments[]
+  invoices invoices[]
+  @@unique([split_id, ordinal])
+  @@index([store_id, split_id])
+  @@index([customer_id])
+}
+
+model order_financial_lines {
+  id Int @id @default(autoincrement())
+  store_id Int
+  account_id Int
+  source_order_item_id Int?
+  kind String @db.VarChar(12)
+  description String @db.VarChar(500)
+  source_snapshot Json
+  subtotal_amount Decimal @db.Decimal(12, 2)
+  discount_amount Decimal @db.Decimal(12, 2)
+  tax_amount Decimal @db.Decimal(12, 2)
+  total_amount Decimal @db.Decimal(12, 2)
+  account order_financial_accounts @relation(fields: [account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  source_order_item order_items? @relation(fields: [source_order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  taxes order_financial_line_taxes[]
+  invoice_items invoice_items[]
+  @@index([store_id, account_id])
+  @@index([source_order_item_id])
+}
+
+model order_financial_line_taxes {
+  id Int @id @default(autoincrement())
+  store_id Int
+  line_id Int
+  tax_rate_id Int?
+  tax_name String @db.VarChar(100)
+  tax_rate Decimal @db.Decimal(6, 5)
+  tax_type tax_type_enum?
+  tax_amount Decimal @db.Decimal(12, 2)
+  is_inclusive Boolean @default(false)
+  is_compound Boolean @default(false)
+  line order_financial_lines @relation(fields: [line_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store stores @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@index([store_id, line_id])
 }

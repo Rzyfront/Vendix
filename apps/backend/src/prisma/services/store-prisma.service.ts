@@ -19,6 +19,11 @@ export class StorePrismaService extends BasePrismaService {
     'pos_search_selections',
     'tax_rates',
     'orders',
+    'order_financial_splits',
+    'order_financial_accounts',
+    'order_financial_lines',
+    'order_financial_line_taxes',
+
     'store_payment_methods',
     'addresses',
     'domain_settings',
@@ -1767,6 +1772,22 @@ export class StorePrismaService extends BasePrismaService {
 
   get tables() {
     return this.scoped_client.tables;
+  }
+
+  get order_financial_splits() {
+    return this.scoped_client.order_financial_splits;
+  }
+
+  get order_financial_accounts() {
+    return this.scoped_client.order_financial_accounts;
+  }
+
+  get order_financial_lines() {
+    return this.scoped_client.order_financial_lines;
+  }
+
+  get order_financial_line_taxes() {
+    return this.scoped_client.order_financial_line_taxes;
   }
 
   get table_sessions() {
