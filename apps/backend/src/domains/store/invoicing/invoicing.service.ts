@@ -107,6 +107,10 @@ import {
   contractNotReadyForInvoice,
 } from './contract-invoice.errors';
 import { normalizeInvoiceTaxRate } from './utils/invoice-tax-rate.util';
+// Impuesto TOTAL de una línea de orden, con su prioridad canónica
+// (Σ `order_item_taxes` → escalar × `resolveLineUnits`). Definición ÚNICA
+// compartida con mesas, pagos y remisiones: ver `createFromOrder`.
+import { resolveOrderLineTaxTotal } from '../taxes/utils/final-price.util';
 
 /**
  * Listing rows whose send/transmission state is an error or a pending send get
@@ -2346,7 +2350,33 @@ export class InvoicingService {
       const quantity = Number(item.quantity || 1);
       const unit_price = Number(item.unit_price || 0);
       const discount = Number(item.discount_amount || 0);
-      const tax = Number(item.tax_amount_item || 0) * quantity;
+      // El impuesto de la línea COMPLETA, leído del snapshot persistido.
+      //
+      // `order_items.tax_amount_item` es el impuesto POR UNIDAD DE PRECIO
+      // (ADR-10), y la unidad de precio NO es la unidad de stock: el propio
+      // `schema.prisma` fija que «el total de la línea es
+      // `unit_price * quantity / price_unit_quantity`». Multiplicar por
+      // `quantity` a secas declaraba DOCE veces el impuesto cobrado en una
+      // caja x12 vendida como caja (`price_unit_quantity` 12), y el de un
+      // solo kilo en una línea por PESO (donde el multiplicador real es
+      // `order_items.weight`, no `quantity`).
+      //
+      // `resolveOrderLineTaxTotal` es la definición ÚNICA de esa magnitud —la
+      // misma que ya consumen `table-sessions.service.ts`,
+      // `payments.service.ts` y `dispatch-notes.service.ts`— y aplica la
+      // prioridad canónica: Σ `order_item_taxes` cuando la línea trae
+      // desglose (el snapshot de lo que se cobró, que soporta desglose mixto
+      // y es EXACTAMENTE la fuente que `aggregateOrderTaxes` agrega en la
+      // cabecera), y sólo sin filas cae al escalar × `resolveLineUnits`
+      // (peso → escala → cantidad). No se re-aplica `price_unit_quantity`
+      // fuera del helper: ese campo ya colapsó presentación y peso, y
+      // aplicarlo dos veces rompe el multiplicador.
+      //
+      // Con esto el escalar de línea deja de divergir de los cubos de
+      // cabecera —desglose que YA era correcto—, y `checkTaxInclusiveTotal`
+      // (FAU06) deja de abortar la firma por esta causa DESPUÉS de que
+      // `validate()` consumió el consecutivo DIAN.
+      const tax = resolveOrderLineTaxTotal(item);
       const total_amount =
         Number(item.total_price || quantity * unit_price - discount) + tax;
       const lineIncl = orderLineInclusive[index];

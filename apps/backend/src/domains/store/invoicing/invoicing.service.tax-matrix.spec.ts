@@ -25,6 +25,13 @@ import {
   toDecimal,
 } from './utils/dian-money.util';
 import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
+import { resolveOrderLineTaxTotal } from '../taxes/utils/final-price.util';
+import {
+  createPrismaMock,
+  mockRequestContext,
+  type PrismaMock,
+} from '../../../testing/prisma-mock';
+import { buildOrder, buildOrderItem } from '../../../testing/money-fixtures';
 
 /**
  * MATRIZ FISCAL — `createFromOrder` + split + prevalidador.
@@ -276,6 +283,22 @@ const SHAPES: TaxMatrixShape[] = [
  * spec—; sólo las sumas flotantes de cabecera y el mapeo de ítems se
  * replican con sus expresiones exactas (documentadas en cada línea).
  */
+/**
+ * Impuesto TOTAL de una línea del fixture, con el helper REAL que
+ * `createFromOrder` consume (`resolveOrderLineTaxTotal`): Σ `order_item_taxes`
+ * cuando hay desglose, y si no el escalar × `resolveLineUnits`. Antes acá se
+ * replicaba `tax_amount_item × quantity`, que era el defecto del servicio: el
+ * espejo habría seguido afirmando una fórmula que el servicio ya no tiene.
+ * Para estas formas (sin `price_unit_quantity` ni peso) el valor es idéntico
+ * al que el espejo producía antes — por eso ninguna cambia de número.
+ */
+const orderLineTaxTotal = (line: OrderLineFixture) =>
+  resolveOrderLineTaxTotal({
+    quantity: line.quantity,
+    tax_amount_item: line.tax_amount_item,
+    order_item_taxes: line.taxes,
+  });
+
 function mapOrderToDocument(order_lines: OrderLineFixture[]) {
   const line_inclusive = order_lines.map((line) =>
     line.taxes.some((t) => t.is_inclusive === true),
@@ -291,7 +314,7 @@ function mapOrderToDocument(order_lines: OrderLineFixture[]) {
     0,
   );
   const tax = order_lines.reduce(
-    (acc, line) => acc + Number(line.tax_amount_item || 0) * Number(line.quantity),
+    (acc, line) => acc + orderLineTaxTotal(line),
     0,
   );
   const total = subtotal - discount + tax;
@@ -394,9 +417,7 @@ describe('InvoicingService · matriz fiscal createFromOrder+split+prevalidador',
       quantity: new Prisma.Decimal(line.quantity),
       unit_price: new Prisma.Decimal(line.unit_price),
       discount_amount: new Prisma.Decimal(line.discount_amount),
-      tax_amount: new Prisma.Decimal(
-        Number(line.tax_amount_item || 0) * Number(line.quantity),
-      ),
+      tax_amount: new Prisma.Decimal(orderLineTaxTotal(line)),
       total_amount: new Prisma.Decimal(
         Number(line.quantity) * Number(line.unit_price) -
           Number(line.discount_amount),
@@ -872,5 +893,226 @@ describe('aggregateOrderTaxes — tax_scalar_without_breakdown (población 3, F-
     expect(withScalarField.distinct_group_count).toBe(
       withoutScalarField.distinct_group_count,
     );
+  });
+});
+
+/**
+ * `createFromOrder` — EL ESCALAR DE LÍNEA CONTRA EL MULTIPLICADOR DE ESCALA.
+ *
+ * `order_items.tax_amount_item` es el impuesto POR UNIDAD DE PRECIO (ADR-10),
+ * y la unidad de precio NO es siempre la unidad de stock: el propio
+ * `schema.prisma` fija que «el total de la línea es
+ * `unit_price * quantity / price_unit_quantity`». `createFromOrder` derivaba
+ * el escalar de la línea de factura multiplicando ese impuesto por
+ * `quantity` a secas, así que una caja x12 vendida como caja —`quantity` 12,
+ * `price_unit_quantity` 12, UNA unidad de precio— declaraba DOCE veces el
+ * impuesto que se cobró, y una línea por PESO (donde el multiplicador real es
+ * `order_items.weight`) declaraba el de un solo kilo.
+ *
+ * El desglose de cabecera (`aggregateOrderTaxes`, que suma
+ * `order_item_taxes.tax_amount`) siempre fue correcto, así que el defecto se
+ * manifiesta como una DIVERGENCIA interna del documento: el escalar dice una
+ * cosa y los cubos de cabecera otra. `checkTaxInclusiveTotal` (FAU06) la
+ * detecta y aborta dentro de `signXml` — pero el consecutivo DIAN ya se
+ * consumió en `validate()`, así que la venta queda sin documento fiscal y con
+ * un número quemado. Por eso esto es dinero y no cosmética.
+ *
+ * Estas pruebas corren el código REAL de `createFromOrder` (Prisma mockeado,
+ * contexto stub) y afirman el impuesto esperado con VALOR LITERAL calculado a
+ * mano — nunca contra otro consumidor del mismo kernel, que sería `f(x)`
+ * contra `f(x)`.
+ */
+describe('InvoicingService.createFromOrder — el escalar de línea escala por unidades de precio, no por quantity', () => {
+  const ORDER_ID = 9001;
+  const STORE_ID = 100;
+  const ORGANIZATION_ID = 1;
+  const USER_ID = 7;
+  const ACCOUNTING_ENTITY_ID = 3;
+
+  /** Todo importe monetario viaja como `Decimal`, igual que la fila real. */
+  const money = (value: number | string) => new Prisma.Decimal(value);
+
+  /** Fila `order_item_taxes` de IVA 19 % agregado, con la cuota de LA LÍNEA. */
+  const ivaRow = (tax_amount: number) => ({
+    tax_rate_id: IVA_ID,
+    tax_name: 'IVA',
+    tax_rate: money('0.19'),
+    tax_amount: money(tax_amount),
+    tax_type: 'iva',
+    is_inclusive: false,
+  });
+
+  let prisma: PrismaMock;
+  let service: InvoicingService;
+
+  beforeEach(() => {
+    mockRequestContext({
+      store_id: STORE_ID,
+      organization_id: ORGANIZATION_ID,
+      user_id: USER_ID,
+    });
+
+    prisma = createPrismaMock({
+      orders: ['findFirst'],
+      invoices: ['findFirst', 'create'],
+    });
+    // Sin factura previa: `assertNotAlreadyInvoiced` deja pasar.
+    prisma.invoices.findFirst.mockResolvedValue(null);
+    prisma.invoices.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({
+        ...data,
+        id: 7001,
+        invoice_number: null,
+      }),
+    );
+
+    service = new InvoicingService(
+      prisma as any,
+      // A.1: la factura nacida de orden NO numera al crear — el generador
+      // no se toca en este camino.
+      {} as any,
+      { emit: jest.fn() } as any,
+      {
+        resolveAccountingEntityForFiscal: jest
+          .fn()
+          .mockResolvedValue({ id: ACCOUNTING_ENTITY_ID }),
+      } as any,
+      {} as any, // retry_queue
+      {} as any, // fiscalGate
+      { assertAreaActive: jest.fn().mockResolvedValue(undefined) } as any,
+      {} as any, // fiscalInvoiceThreshold
+      {} as any, // calculator
+      {} as any, // trm
+      {} as any, // withholdingFlow
+    );
+    // El warn de población 3 (F-090) y el log de creación son ruido acá.
+    jest
+      .spyOn((service as any).logger, 'warn')
+      .mockImplementation(() => undefined);
+    jest
+      .spyOn((service as any).logger, 'log')
+      .mockImplementation(() => undefined);
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  /** Corre el camino real y devuelve el `data` que se iba a persistir. */
+  const persistedInvoiceData = async (order: Record<string, unknown>) => {
+    prisma.orders.findFirst.mockResolvedValue(order);
+    await service.createFromOrder(ORDER_ID);
+    return prisma.invoices.create.mock.calls[0][0].data;
+  };
+
+  it('caja x12 CON desglose: declara los $11.400 cobrados, no 12 × $11.400', async () => {
+    // Caja de 12 unidades a $60.000 la caja, IVA 19 % agregado.
+    //   unidades de precio = quantity / price_unit_quantity = 12 / 12 = 1
+    //   impuesto de línea  = $11.400 (el desglose persistido, cuota de la caja)
+    //   total de línea     = $60.000 + $11.400 = $71.400
+    // El defecto multiplicaba por `quantity`: 11.400 × 12 = $136.800.
+    const data = await persistedInvoiceData(
+      buildOrder({
+        order_items: [
+          buildOrderItem({
+            quantity: 12,
+            price_unit_quantity: 12,
+            unit_price: money(60000),
+            total_price: money(60000),
+            tax_amount_item: money(11400),
+            order_item_taxes: [ivaRow(11400)],
+          }),
+        ],
+      }),
+    );
+
+    const [line] = data.invoice_items.create;
+    expect(line.tax_amount.toString()).toBe('11400');
+    expect(line.total_amount.toString()).toBe('71400');
+    // La cabecera escalar hereda la suma de las líneas.
+    expect(data.tax_amount.toString()).toBe('11400');
+    expect(data.total_amount.toString()).toBe('71400');
+    // …y coincide con el cubo de cabecera, que SIEMPRE fue correcto: es
+    // justo esa divergencia la que FAU06 usaba para abortar la firma.
+    const [headerTax] = data.invoice_taxes.create;
+    expect(headerTax.tax_amount.toString()).toBe('11400');
+    expect(headerTax.taxable_amount.toString()).toBe('60000');
+  });
+
+  it('NO-REGRESIÓN price_unit_quantity = 1: la línea ordinaria sigue declarando $28.500', async () => {
+    // 3 unidades a $50.000, IVA 19 % ⇒ $9.500 por unidad, $28.500 de línea.
+    // Sin escala el multiplicador ES `quantity`: este caso vale lo mismo
+    // antes y después del arreglo, y está acá para probarlo.
+    const data = await persistedInvoiceData(
+      buildOrder({
+        order_items: [
+          buildOrderItem({
+            quantity: 3,
+            price_unit_quantity: 1,
+            unit_price: money(50000),
+            total_price: money(150000),
+            tax_amount_item: money(9500),
+            order_item_taxes: [ivaRow(28500)],
+          }),
+        ],
+      }),
+    );
+
+    const [line] = data.invoice_items.create;
+    expect(line.tax_amount.toString()).toBe('28500');
+    expect(line.total_amount.toString()).toBe('178500');
+    expect(data.tax_amount.toString()).toBe('28500');
+  });
+
+  it('caja x24 SIN desglose: el escalar cae al fallback y escala por unidades de precio ($8.000)', async () => {
+    // Caja de 24 a $100.000, IVA 19 % ⇒ $8.000 aprox. por caja, UNA caja.
+    // Sin filas `order_item_taxes` (población 3, F-090) el único dato es el
+    // escalar: el multiplicador correcto sigue siendo 24 / 24 = 1, no 24.
+    // El defecto declaraba 8.000 × 24 = $192.000.
+    const data = await persistedInvoiceData(
+      buildOrder({
+        order_items: [
+          buildOrderItem({
+            quantity: 24,
+            price_unit_quantity: 24,
+            unit_price: money(100000),
+            total_price: money(100000),
+            tax_amount_item: money(8000),
+            order_item_taxes: [],
+          }),
+        ],
+      }),
+    );
+
+    const [line] = data.invoice_items.create;
+    expect(line.tax_amount.toString()).toBe('8000');
+    expect(line.total_amount.toString()).toBe('108000');
+    expect(data.tax_amount.toString()).toBe('8000');
+  });
+
+  it('línea por PESO: el multiplicador es `weight` (2,5 kg) ⇒ $9.500, no $3.800', async () => {
+    // 2,5 kg a $20.000/kg = $50.000 de base, IVA 19 % ⇒ $3.800 por kilo y
+    // $9.500 de línea. `quantity` vale 1 acá, así que el defecto declaraba
+    // el impuesto de UN solo kilo ($3.800). Esta es la rama que un helper
+    // de sola escala (`quantity / price_unit_quantity`) pierde.
+    const data = await persistedInvoiceData(
+      buildOrder({
+        order_items: [
+          buildOrderItem({
+            quantity: 1,
+            price_unit_quantity: 1,
+            weight: money('2.500'),
+            weight_unit: 'kg',
+            unit_price: money(20000),
+            total_price: money(50000),
+            tax_amount_item: money(3800),
+            order_item_taxes: [],
+          }),
+        ],
+      }),
+    );
+
+    const [line] = data.invoice_items.create;
+    expect(line.tax_amount.toString()).toBe('9500');
+    expect(line.total_amount.toString()).toBe('59500');
+    expect(data.tax_amount.toString()).toBe('9500');
   });
 });
