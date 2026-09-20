@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { VendixHttpException, ErrorCodes, FinancialSplitErrors } from 'src/common/errors';
 import { resolveOrderLineTaxTotal } from '../taxes/utils/final-price.util';
 import {
   SplitByItemsDto, SplitByAmountDto, SplitPreviewDto,
@@ -67,11 +67,11 @@ export class SplitOrderService {
     if (!ctx?.store_id || !ctx.organization_id || !ctx.user_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
-    return ctx;
+    return { ...ctx, store_id: ctx.store_id, organization_id: ctx.organization_id, user_id: ctx.user_id };
   }
 
-  private reject(message: string): never {
-    throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_ITEMS_MISSING, message);
+  private reject(message: string, code: keyof typeof FinancialSplitErrors = 'SPLIT_SOURCE_INCONSISTENT'): never {
+    throw new VendixHttpException(FinancialSplitErrors[code], message);
   }
 
   private async source(db: any, orderId: number) {
@@ -197,7 +197,7 @@ export class SplitOrderService {
 
   async preview(orderId: number, dto: SplitPreviewDto): Promise<SplitResult> {
     const order = await this.source(this.prisma, orderId);
-    if (order.active_financial_split_id) this.reject('La orden ya tiene una división activa.');
+    if (order.active_financial_split_id) this.reject('La orden ya tiene una división activa.', 'SPLIT_ALREADY_ACTIVE');
     this.ensureSplittable(order);
     const allocation = this.calculate(order, dto);
     await this.validatePayers(this.prisma, dto.accounts, allocation.accounts.length);
@@ -231,15 +231,15 @@ export class SplitOrderService {
       });
       if (existing) {
         if (existing.source_order_id !== orderId || existing.source_version !== dto.source_version || existing.state !== 'active' || existing.request_hash !== requestHash) {
-          this.reject('La clave de idempotencia ya se usó para otra versión o división.');
+          this.reject('La clave de idempotencia ya se usó para otra versión o división.', 'SPLIT_IDEMPOTENCY_CONFLICT');
         }
         const response = await this.readGroup(tx, order, existing.id);
         if (!response) this.reject('La división ya no está disponible.');
         return response;
       }
-      if (order.active_financial_split_id) this.reject('La orden ya tiene una división activa.');
+      if (order.active_financial_split_id) this.reject('La orden ya tiene una división activa.', 'SPLIT_ALREADY_ACTIVE');
       this.ensureSplittable(order);
-      if (this.version(order) !== dto.source_version) this.reject('La cuenta cambió; vuelve a generar la vista previa.');
+      if (this.version(order) !== dto.source_version) this.reject('La cuenta cambió; vuelve a generar la vista previa.', 'SPLIT_SOURCE_CONFLICT');
       const allocation = this.calculate(order, dto);
       await this.validatePayers(tx, dto.accounts, allocation.accounts.length);
       const last = await tx.order_financial_splits.findFirst({
@@ -270,7 +270,7 @@ export class SplitOrderService {
         where: { id: orderId, store_id, active_financial_split_id: null },
         data: { active_financial_split_id: group.id, total_paid: allocation.preserved_paid, remaining_balance: allocation.pending_to_split },
       });
-      if (claimed.count !== 1) this.reject('La orden cambió mientras se dividía; recarga la vista previa.');
+      if (claimed.count !== 1) this.reject('La orden cambió mientras se dividía; recarga la vista previa.', 'SPLIT_SOURCE_CONFLICT');
       return (await this.readGroup(tx, order, group.id))!;
     });
   }
@@ -386,13 +386,13 @@ export class SplitOrderService {
     return this.prisma.$transaction(async (tx: any) => {
       const order = await this.lockSource(tx, orderId);
       const group = await tx.order_financial_splits.findFirst({ where: { id: order.active_financial_split_id ?? -1, source_order_id: orderId, store_id, state: 'active' }, include: { accounts: true } });
-      if (!group || group.source_version !== dto.source_version) this.reject('La división cambió; recarga las cuentas.');
+      if (!group || group.source_version !== dto.source_version) this.reject('La división cambió; recarga las cuentas.', 'SPLIT_SOURCE_CONFLICT');
       const ids = group.accounts.filter((a: any) => a.role === 'payable').map((a: any) => a.id);
       if (await tx.payments.count({ where: { financial_account_id: { in: ids }, state: { in: [...RECEIVED, ...RESERVED] } } })) {
-        this.reject('No se puede deshacer una división con pagos nuevos recibidos o pendientes.');
+        this.reject('No se puede deshacer una división con pagos nuevos recibidos o pendientes.', 'SPLIT_CANCEL_BLOCKED');
       }
       if (await tx.invoices.count({ where: { financial_account_id: { in: group.accounts.map((a: any) => a.id) }, status: { notIn: VOID_INVOICES } } })) {
-        this.reject('No se puede deshacer una división con documentos vigentes.');
+        this.reject('No se puede deshacer una división con documentos vigentes.', 'SPLIT_CANCEL_BLOCKED');
       }
       await tx.order_financial_accounts.updateMany({ where: { split_id: group.id, store_id }, data: { state: 'cancelled' } });
       await tx.order_financial_splits.updateMany({ where: { id: group.id, store_id, state: 'active' }, data: { state: 'cancelled' } });
@@ -406,10 +406,10 @@ export class SplitOrderService {
     await this.prisma.$transaction(async (tx: any) => {
       const order = await this.lockSource(tx, orderId);
       const account = await tx.order_financial_accounts.findFirst({ where: { id: accountId, store_id, split_id: order.active_financial_split_id ?? -1, state: 'active' } });
-      if (!account) throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_NOT_FOUND);
+      if (!account) throw new VendixHttpException(FinancialSplitErrors.SPLIT_ACCOUNT_NOT_FOUND);
       await this.validatePayers(tx, [dto], 1);
       if (account.role === 'paid_original' || await tx.payments.count({ where: { financial_account_id: accountId, state: { in: [...RECEIVED, ...RESERVED] } } }) || await tx.invoices.count({ where: { financial_account_id: accountId, status: { notIn: VOID_INVOICES } } })) {
-        this.reject('El titular queda fijado al cobrar o facturar la cuenta.');
+        this.reject('El titular queda fijado al cobrar o facturar la cuenta.', 'SPLIT_ACCOUNT_LOCKED');
       }
       await tx.order_financial_accounts.updateMany({ where: { id: accountId, store_id }, data: {
         ...(dto.label !== undefined ? { label: dto.label?.trim() || `Cuenta ${account.ordinal}` } : {}),
