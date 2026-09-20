@@ -16,6 +16,7 @@ import {
 import {
   resolveStoreTimezone,
   assertSafeTimezone,
+  localPeriodSql,
 } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
@@ -488,16 +489,11 @@ export class PurchasesAnalyticsService {
     const { startDate, endDate } = parseDateRange(query, safeTz);
 
     const granularity: Granularity = query.granularity ?? Granularity.DAY;
-    const unit =
-      granularity === Granularity.MONTH
-        ? 'month'
-        : granularity === Granularity.WEEK
-          ? 'week'
-          : granularity === Granularity.YEAR
-            ? 'year'
-            : granularity === Granularity.HOUR
-              ? 'hour'
-              : 'day';
+    const periodSql = localPeriodSql(
+      'COALESCE(po.order_date, po.created_at)',
+      safeTz,
+      granularity,
+    );
 
     const supplierCondition = query.supplier_id
       ? Prisma.sql`AND po.supplier_id = ${query.supplier_id}`
@@ -520,7 +516,7 @@ export class PurchasesAnalyticsService {
       }>
     >`
       SELECT
-        to_char(DATE_TRUNC(${Prisma.raw(`'${unit}'`)}, (COALESCE(po.order_date, po.created_at) AT TIME ZONE 'UTC' AT TIME ZONE ${Prisma.raw(`'${safeTz}'`)})), 'YYYY-MM-DD') AS period,
+        ${periodSql} AS period,
         s.id AS supplier_id,
         COALESCE(s.name, 'Sin Proveedor') AS supplier_name,
         COUNT(po.id)::int AS purchase_count,
