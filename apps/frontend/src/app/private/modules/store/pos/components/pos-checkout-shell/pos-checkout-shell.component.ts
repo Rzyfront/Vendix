@@ -36,7 +36,7 @@ import {
 } from '../../services/pos-restaurant-integration.service';
 import { PaymentMethod, PosPaymentService } from '../../services/pos-payment.service';
 import { PosCartService } from '../../services/pos-cart.service';
-import { CartState, CartItem } from '../../models/cart.model';
+import { CartState, CartItem, hasShipmentContext } from '../../models/cart.model';
 import { PosCustomer } from '../../models/customer.model';
 import { PosShippingSaleData } from '../../models/shipping.model';
 import { FulfillmentType } from '../pos-fulfillment-selector.component';
@@ -174,6 +174,37 @@ export class PosCheckoutShellComponent {
    * Se inicializa con initialEntrega() al abrir el modal.
    */
   readonly entregaChoice = signal<EntregaChoice>('llevar');
+
+  /**
+   * F-FLETE — ¿el cajero cambió el carril de entrega EN ESTA apertura?
+   *
+   * `entregaChoice` no distingue "el wizard arrancó aquí porque la orden era
+   * así" de "el cajero lo movió". Esa diferencia es la que decide si el PUT
+   * /editor puede tocar el envío de una orden existente.
+   *
+   * NO alcanza con marcarlo en {@link onEntregaChoiceChange}: el paso Entrega
+   * está enlazado con `[(choice)]="entregaChoice"` (model two-way), así que el
+   * click del cajero escribe la señal DIRECTAMENTE sin pasar por ningún
+   * handler. La detección vive en el effect de abajo, que compara contra
+   * {@link seededEntrega} (el valor que el propio shell sembró al abrir).
+   */
+  private readonly entregaTouched = signal<boolean>(false);
+
+  /**
+   * Último valor de `entregaChoice` escrito por el PROPIO shell (semilla de
+   * apertura o reset), para poder distinguirlo de una escritura del cajero.
+   */
+  private seededEntrega: EntregaChoice | null = null;
+
+  /**
+   * F-FLETE — ¿el cajero llegó al paso «Envío» en esta apertura?
+   *
+   * El paso de Envío auto-preselecciona el primer método activo y prefija la
+   * dirección PRIMARIA del cliente (`pos-shipping-step.component.ts:246-252`
+   * y `:256-276`), no la de la orden. Si el cajero nunca lo pisó, lo que ese
+   * paso construya NO es su decisión y no puede pisar el envío persistido.
+   */
+  private readonly envioStepVisited = signal<boolean>(false);
 
   /**
    * Intención efectiva derivada directamente de entregaChoice:
@@ -799,7 +830,14 @@ export class PosCheckoutShellComponent {
       const open = this.isOpen();
       untracked(() => {
         if (open && !this.wasOpen) {
-          this.entregaChoice.set(this.initialEntrega());
+          // F-FLETE — la apertura reinicia los dos testigos de intervención:
+          // lo que traiga `initialEntrega()` es la naturaleza de la orden, no
+          // una decisión del cajero. `seededEntrega` guarda ese valor para que
+          // el effect de detección no lo confunda con un click.
+          this.seededEntrega = this.initialEntrega();
+          this.entregaChoice.set(this.seededEntrega);
+          this.entregaTouched.set(false);
+          this.envioStepVisited.set(false);
           this.focusActiveStepSoon();
         }
         this.wasOpen = open;
@@ -815,6 +853,31 @@ export class PosCheckoutShellComponent {
           this.paymentResetKey.update((k) => k + 1);
         }
         lastIntent = intent;
+      });
+    });
+
+    // F-FLETE — testigo de visita al paso «Envío». Es estado del shell (no del
+    // hijo), así que sobrevive al remonte del `contentEpoch` y no depende de
+    // que el step exponga nada.
+    effect(() => {
+      const key = this.currentStepKey();
+      untracked(() => {
+        if (key === 'envio') this.envioStepVisited.set(true);
+      });
+    });
+
+    // F-FLETE — testigo de cambio de carril de entrega. El paso Entrega
+    // escribe `entregaChoice` por el two-way `[(choice)]`, sin handler de por
+    // medio, así que la detección tiene que vivir sobre la señal. Todo valor
+    // distinto del que sembró el shell es, por descarte, del cajero.
+    effect(() => {
+      const choice = this.entregaChoice();
+      untracked(() => {
+        if (this.seededEntrega === null) {
+          this.seededEntrega = choice;
+          return;
+        }
+        if (choice !== this.seededEntrega) this.entregaTouched.set(true);
       });
     });
 
@@ -885,7 +948,10 @@ export class PosCheckoutShellComponent {
   private resetState(): void {
     this.currentStep.set(0);
     this.clienteSubStep.set(0);
+    this.seededEntrega = 'llevar';
     this.entregaChoice.set('llevar');
+    this.entregaTouched.set(false);
+    this.envioStepVisited.set(false);
     this.userOverrideAnonymous.set(null);
     // QUI-737 (B.4) — limpiar el alias para la próxima venta.
     this.customerAlias.set('');
@@ -1252,10 +1318,11 @@ export class PosCheckoutShellComponent {
     // and network retries; first call wins, retries get the cached Order).
     const idempotencyKey = `editor:${orderId}:${Date.now()}`;
 
-    const shipping =
-      this.entregaChoice() === 'enviar'
-        ? this.shippingStep()?.buildShippingContext()
-        : null;
+    // F-FLETE — bloque de envío. Ver {@link buildEditorShippingPayload}: la
+    // fuente de verdad por defecto es el snapshot de la ORDEN, no lo que el
+    // paso de Envío auto-preseleccione.
+    const { payload: shippingPayload, warning: shippingWarning } =
+      this.buildEditorShippingPayload(state);
 
     this.submittingDraft.set(true);
     this.ordersService
@@ -1274,18 +1341,7 @@ export class PosCheckoutShellComponent {
           .filter((id: any) => typeof id === 'number'),
         coupon_code: state.appliedCoupon?.code ?? undefined,
         idempotency_key: idempotencyKey,
-        ...(shipping
-          ? {
-              delivery_type: (shipping.deliveryType || 'home_delivery') as any,
-              shipping_address_id: shipping.shippingAddressId ?? undefined,
-              shipping_method_id: shipping.shippingMethodId ?? undefined,
-              shipping_cost: shipping.shippingCost,
-            }
-          : this.entregaChoice() === 'llevar' || this.entregaChoice() === 'mesa'
-            ? {
-                delivery_type: 'pickup' as any,
-              }
-            : {}),
+        ...shippingPayload,
       } as any)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -1294,6 +1350,13 @@ export class PosCheckoutShellComponent {
           this.submittingDraft.set(false);
           this.editorUpdated.emit(order);
           this.toastService.success('Orden actualizada correctamente');
+          // F-FLETE — un "actualizada correctamente" a secas era justamente
+          // lo que ocultaba que el envío se había perdido. Cuando el envío de
+          // la orden NO se pudo reconstruir en el wizard y sólo se preservó,
+          // el cajero se entera por un aviso explícito, no por el silencio.
+          if (shippingWarning) {
+            this.toastService.warning(shippingWarning, 'Envío conservado');
+          }
           // CP-POS-MODAL-SCOPE-001 / Phase F.10 — after a successful PUT /editor
           // the cashier must be able to Cobrar without leaving the shell. Flip
           // the mode so the primary CTA relabels from "Actualizar" to "Cobrar"
@@ -1328,6 +1391,91 @@ export class PosCheckoutShellComponent {
         // this the cashier sees an infinite spinner after the second edit.
         complete: () => this.submittingDraft.set(false),
       });
+  }
+
+  /**
+   * F-FLETE — bloque de envío del `PUT /store/orders/:id/editor`.
+   *
+   * REGLA DE NEGOCIO: reabrir una orden para editarla no puede cambiarle la
+   * naturaleza ni borrarle el flete. Si el envío no se pudo reconstruir, el
+   * cajero debe enterarse explícitamente.
+   *
+   * Qué hacía mal el carril vivo antes:
+   *  - Forzaba `delivery_type: 'pickup'` para 'llevar'/'mesa'. Un borrador
+   *    `direct_delivery` u `other` quedaba convertido en `pickup`, y una
+   *    mesa QR (`dine_in`) también.
+   *  - No mandaba nada de envío, y el editor lee `shipping_cost` ausente como
+   *    CERO (`orders.service.ts:1931` → `:3071`) — cero que ENTRA al
+   *    `grand_total` (`:2292`). El flete desaparecía de la orden Y del total.
+   *  - Tomaba como verdad lo que el paso de Envío hubiera auto-preseleccionado
+   *    (primer método activo + dirección PRIMARIA del cliente, no la de la
+   *    orden), aunque el cajero jamás hubiera pisado ese paso.
+   *
+   * Orden de decisión:
+   *  1. El cajero AUTORÓ el envío (visitó el paso «Envío») y el paso produjo
+   *     un contexto → manda ese contexto. También aplica cuando la orden no
+   *     tenía flete que preservar: no hay nada que romper.
+   *  2. El cajero sacó explícitamente la orden del carril 'enviar'
+   *     ({@link entregaTouched}) → baja el flete a 0 con el `delivery_type`
+   *     que corresponde al carril elegido (`llevar`→`pickup`,
+   *     `mesa`→`dine_in`; antes ambos iban a `pickup`).
+   *  3. Nadie tocó nada → NO se manda ninguna clave de envío. Omitir es la
+   *     única forma de decir "sin cambio": el backend preserva
+   *     `delivery_type`/ids con `?? existingOrder` (`:3066-3070`) y el costo
+   *     por el arreglo hermano de `orders.service.ts`. Si la orden traía
+   *     flete, se avisa.
+   *
+   * NO se manda `shipping_cost` en el carril de preservación a propósito: el
+   * editor contrasta el costo del cliente contra el que calcula el servidor y
+   * responde `ORD_EDIT_INVALID_SHIPPING_001` si difieren más de un centavo
+   * (`orders.service.ts:2056`). Mandar el costo persistido sin método volvería
+   * un 200 silencioso en un 400 que bloquearía al cajero.
+   */
+  private buildEditorShippingPayload(state: CartState): {
+    payload: Record<string, unknown>;
+    warning: string | null;
+  } {
+    const preserved = state.shippingContext ?? null;
+    const preservedShipment = hasShipmentContext(preserved);
+    const choice = this.entregaChoice();
+    const stepCtx =
+      choice === 'enviar'
+        ? (this.shippingStep()?.buildShippingContext() ?? null)
+        : null;
+
+    // 1) Envío autorado por el cajero (o no había flete que preservar).
+    if (stepCtx && (this.envioStepVisited() || !preservedShipment)) {
+      return {
+        payload: {
+          delivery_type: (stepCtx.deliveryType || 'home_delivery') as any,
+          shipping_address_id: stepCtx.shippingAddressId ?? undefined,
+          shipping_method_id: stepCtx.shippingMethodId ?? undefined,
+          shipping_cost: stepCtx.shippingCost,
+        },
+        warning: null,
+      };
+    }
+
+    // 2) Salida explícita del carril de envío: el cajero SÍ quiso quitarlo.
+    if (this.entregaTouched() && choice !== 'enviar') {
+      return {
+        payload: {
+          delivery_type: (choice === 'mesa' ? 'dine_in' : 'pickup') as any,
+          shipping_cost: 0,
+        },
+        warning: null,
+      };
+    }
+
+    // 3) Sin intervención: no tocar el envío de la orden.
+    return {
+      payload: {},
+      warning: preservedShipment
+        ? `Se conservó el envío original de la orden (flete ${this.currencyService.format(
+            Number(preserved?.shippingCost ?? 0),
+          )}). Si necesitas cambiarlo, elige «Enviar» en el paso Entrega y configúralo en el paso Envío.`
+        : null,
+    };
   }
 
   onConfirm(): void {
@@ -1686,6 +1834,10 @@ export class PosCheckoutShellComponent {
   }
 
   onEntregaChoiceChange(choice: EntregaChoice): void {
+    // F-FLETE — el testigo `entregaTouched` NO se marca aquí: el template usa
+    // el two-way `[(choice)]="entregaChoice"` y este handler no está en ese
+    // camino. Lo marca el effect que observa `entregaChoice` contra
+    // `seededEntrega`, que cubre ambas entradas.
     this.entregaChoice.set(choice);
   }
 

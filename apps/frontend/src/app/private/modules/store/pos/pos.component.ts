@@ -55,7 +55,11 @@ import {
   CartState,
   CartItem,
 } from './services/pos-cart.service';
-import { AddCustomItemRequest, CartSummary } from './models/cart.model';
+import {
+  AddCustomItemRequest,
+  CartSummary,
+  deliveryTypeToEntregaChoice,
+} from './models/cart.model';
 import { PosCustomItemModalComponent } from './components/pos-custom-item-modal/pos-custom-item-modal.component';
 import { resolveSaleQuantity } from './utils/line-units.util';
 import { environment } from '../../../../../environments/environment';
@@ -2275,6 +2279,40 @@ export class PosComponent {
     if (!open) this.focusSearchSoon();
   }
 
+  /**
+   * F-FLETE — carril del wizard con el que se abre el shell al editar.
+   *
+   * Había DOS copias de `delivery_type === 'home_delivery' ? 'enviar' :
+   * 'llevar'` (en `onCheckout` y en `onCharge`). Esa forma:
+   *  - no reconocía `dine_in` → una mesa QR se abría como "llevar";
+   *  - colapsaba `direct_delivery` y `other` a "llevar", que es lo que
+   *    empujaba al shell a forzar `delivery_type: 'pickup'`.
+   *
+   * Ahora hay UNA sola definición ({@link deliveryTypeToEntregaChoice}) y la
+   * entrada es el snapshot que `loadFromOrder` dejó en el carrito — el mismo
+   * dato con el que el shell decide qué mandar, así que no pueden divergir.
+   * Fallback a `editingOrder()` para el caso en que el carrito aún no haya
+   * hidratado (carrito libre adoptando una orden).
+   */
+  private entregaChoiceForEditingOrder(): EntregaChoice {
+    const context =
+      this.cartState()?.shippingContext ??
+      (() => {
+        const order = this.editingOrder() as any;
+        if (!order) return null;
+        return {
+          deliveryType: order.delivery_type ?? null,
+          shippingAddressId: null,
+          billingAddressId: null,
+          shippingMethodId: order.shipping_method_id ?? null,
+          shippingRateId: null,
+          shippingCost:
+            order.shipping_cost == null ? null : Number(order.shipping_cost),
+        };
+      })();
+    return deliveryTypeToEntregaChoice(context);
+  }
+
   onCheckout(): void {
     if (!this.cartState() || this.isEmpty) return;
 
@@ -2286,9 +2324,7 @@ export class PosComponent {
     // validar") is removed in favour of the shell handler.
     if (this.isEditMode()) {
       this.mode.set('edit');
-      const initialChoice: EntregaChoice =
-        this.editingOrder()?.delivery_type === 'home_delivery' ? 'enviar' : 'llevar';
-      this.initialEntrega.set(initialChoice);
+      this.initialEntrega.set(this.entregaChoiceForEditingOrder());
       this.showCheckoutModal.set(true);
       return;
     }
@@ -2343,9 +2379,7 @@ export class PosComponent {
     // the legacy OrderPaymentModalComponent for non-edit flows.
     if (this.isEditMode()) {
       this.mode.set('edit');
-      const initialChoice: EntregaChoice =
-        this.editingOrder()?.delivery_type === 'home_delivery' ? 'enviar' : 'llevar';
-      this.initialEntrega.set(initialChoice);
+      this.initialEntrega.set(this.entregaChoiceForEditingOrder());
       this.showCheckoutModal.set(true);
       return;
     }
@@ -4012,10 +4046,20 @@ export class PosComponent {
    * `POS_CUSTOMER_REQUIRED_001` locally — saves a round-trip and matches
    * the backend's authoritative rejection.
    *
-   * Shipping fields: forwarded from `state.shippingContext` (populated by
-   * `loadFromOrder`). Undefined keys are omitted, not nulled — the editor
-   * endpoint treats absent keys as "no change" and any explicit `null`
-   * could clear a value the cashier did not intend to clear.
+   * Shipping fields: forwarded from `state.shippingContext`. Hasta F-FLETE
+   * esta nota mentía — decía "populated by `loadFromOrder`" cuando NADIE lo
+   * escribía y este bloque nunca podía emitir una sola clave de envío. Hoy el
+   * escritor existe (`PosCartService.buildShippingContextFromOrder`).
+   *
+   * OJO: este método es el carril LEGADO. Su único llamador,
+   * `updateExistingOrder()`, es privado y no lo invoca nadie — el carril vivo
+   * es `PosCheckoutShellComponent.buildEditorShippingPayload`, que consume el
+   * MISMO `state.shippingContext`. Si cambias la política de flete, cámbiala
+   * allí también o los dos carriles divergen.
+   *
+   * Undefined keys are omitted, not nulled — the editor endpoint treats
+   * absent keys as "no change" and any explicit `null` could clear a value
+   * the cashier did not intend to clear.
    *
    * `saveDraft` keeps using the cart-shaped builder in `PosPaymentService` —
    * drafts are a different endpoint with a different contract.

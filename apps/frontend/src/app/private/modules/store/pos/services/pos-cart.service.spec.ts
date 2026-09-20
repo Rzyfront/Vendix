@@ -1095,3 +1095,165 @@ describe('PosCartService — updateCartItem preserva/borra notas por línea (pas
     });
   });
 });
+
+/**
+ * F-FLETE — `loadFromOrder` debe reponer `shippingContext`.
+ *
+ * `CartState.shippingContext` documentaba desde su nacimiento que lo poblaba
+ * `loadFromOrder`; NADIE lo escribía (cero ocurrencias de `shipping`/`delivery`
+ * en `pos-cart.service.ts`). Sin ese escritor, el carril vivo de edición
+ * (`pos-checkout-shell.onUpdateEditor`) no tenía contra qué comparar y
+ * reconstruía el envío desde cero: forzaba `delivery_type: 'pickup'` y dejaba
+ * que el backend reseteara `shipping_cost` a 0 — cero que ENTRA al
+ * `grand_total` (`orders.service.ts:2292`). Reabrir un borrador con flete
+ * borraba el flete y el cajero leía "Orden actualizada correctamente".
+ *
+ * Invariantes que fija este bloque:
+ *  1. Los seis campos del snapshot salen de la orden, con el valor exacto.
+ *  2. El costo llega como Decimal de Prisma (string) y se normaliza a número
+ *     SIN perder los centavos.
+ *  3. Ausencia ≠ cero: una orden sin envío deja los ids y el costo en `null`
+ *     (el editor trata la clave ausente como "sin cambio"; un 0 explícito
+ *     BORRARÍA el flete).
+ *  4. La rama de orden vacía también lo repone — si no, editar una orden sin
+ *     líneas seguiría perdiendo el envío.
+ */
+describe('PosCartService — loadFromOrder repone shippingContext (flete del borrador)', () => {
+  let service: PosCartService;
+  let productService: any;
+
+  const embeddedProduct = (id: number) => ({
+    id: String(id),
+    name: `Producto ${id}`,
+    sku: `SKU-${id}`,
+    price: 1000,
+    final_price: 1190,
+  });
+
+  const buildItem = (productId: number) => ({
+    product_id: productId,
+    product_name: `Producto ${productId}`,
+    quantity: 1,
+    unit_price: 1000,
+    final_unit_price: 1000,
+    total_price: 1000,
+    tax_amount_item: 190,
+    products: embeddedProduct(productId),
+  });
+
+  beforeEach(() => {
+    productService = jasmine.createSpyObj<PosProductService>(
+      'PosProductService',
+      ['getProductById'],
+    ) as unknown as jasmine.SpyObj<PosProductService>;
+
+    TestBed.configureTestingModule({
+      providers: [
+        PosCartService,
+        { provide: PosProductService, useValue: productService as unknown as PosProductService },
+        { provide: PosApiService, useValue: {} },
+        { provide: PosSaleUnitService, useValue: {} },
+        { provide: PriceResolverService, useValue: {} },
+        { provide: PriceTierCacheService, useValue: {} },
+        {
+          provide: WithholdingTaxService,
+          useValue: {
+            previewWithholding: () => of({ lines: [], total_withholding: 0 }),
+          },
+        },
+        { provide: CurrencyFormatService, useValue: {} },
+        {
+          provide: InvoicingService,
+          useValue: { getPosUvtThreshold: () => of({ data: null }) },
+        },
+        { provide: AuthFacade, useValue: { userStore: () => ({ id: 1 }) } },
+      ],
+    });
+
+    service = TestBed.inject(PosCartService);
+  });
+
+  it('copia los seis campos del envío de la orden, con el costo Decimal en centavos exactos', (done) => {
+    // Borrador `direct_delivery` con flete real: el caso que se perdía.
+    const order = {
+      id: 700,
+      order_number: 'ORD202609190007',
+      state: 'draft',
+      delivery_type: 'direct_delivery',
+      shipping_address_id: 33,
+      billing_address_id: 44,
+      shipping_method_id: 7,
+      shipping_rate_id: 88,
+      // Prisma Decimal → string en la respuesta HTTP.
+      shipping_cost: '12500.50',
+      order_items: [buildItem(1)],
+    };
+
+    service.loadFromOrder(order).subscribe((state) => {
+      expect(state.shippingContext).toEqual({
+        deliveryType: 'direct_delivery',
+        shippingAddressId: 33,
+        billingAddressId: 44,
+        shippingMethodId: 7,
+        shippingRateId: 88,
+        shippingCost: 12500.5,
+      });
+      done();
+    });
+  });
+
+  it('deja ids y costo en null cuando la orden no tiene envío (ausencia ≠ cero)', (done) => {
+    const order = {
+      id: 701,
+      order_number: 'ORD202609190008',
+      state: 'created',
+      delivery_type: 'pickup',
+      shipping_address_id: null,
+      billing_address_id: null,
+      shipping_method_id: null,
+      shipping_rate_id: null,
+      shipping_cost: null,
+      order_items: [buildItem(1)],
+    };
+
+    service.loadFromOrder(order).subscribe((state) => {
+      expect(state.shippingContext).toEqual({
+        deliveryType: 'pickup',
+        shippingAddressId: null,
+        billingAddressId: null,
+        shippingMethodId: null,
+        shippingRateId: null,
+        shippingCost: null,
+      });
+      done();
+    });
+  });
+
+  it('repone el envío también en la rama de orden sin líneas', (done) => {
+    const order = {
+      id: 702,
+      order_number: 'ORD202609190009',
+      state: 'draft',
+      delivery_type: 'home_delivery',
+      shipping_address_id: 12,
+      billing_address_id: null,
+      shipping_method_id: 3,
+      shipping_rate_id: null,
+      shipping_cost: '8000.00',
+      order_items: [],
+    };
+
+    service.loadFromOrder(order).subscribe((state) => {
+      expect(state.items.length).toBe(0);
+      expect(state.shippingContext).toEqual({
+        deliveryType: 'home_delivery',
+        shippingAddressId: 12,
+        billingAddressId: null,
+        shippingMethodId: 3,
+        shippingRateId: null,
+        shippingCost: 8000,
+      });
+      done();
+    });
+  });
+});

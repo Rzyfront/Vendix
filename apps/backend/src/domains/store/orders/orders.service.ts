@@ -1928,9 +1928,35 @@ export class OrdersService {
     //    calcula el costo a partir de la dirección + método + items, y el
     //    cliente puede traer un `shipping_cost` para mostrar UI; si difiere
     //    en más de 0.01, rechaza con `ORD_EDIT_INVALID_SHIPPING_001`.
+    //
+    // F-FLETE — la base NO puede ser 0 incondicional. `shippingCost` arranca
+    // en 0 y aterriza en `:3071` (`shipping_cost: dto.shipping_cost ??
+    // shippingCost`) y en el `grandTotal` de `:2292`. Cuando el DTO no dice
+    // NADA de envío — el caso normal al reabrir un borrador para tocarle una
+    // línea — ese 0 se persistía y se restaba del total: la orden perdía su
+    // flete sin que nadie lo pidiera y el POS respondía "Orden actualizada
+    // correctamente". Una omisión significa "sin cambio", igual que en
+    // `delivery_type`/ids (`:3066-3070`), no "ponlo en cero".
     let shippingCost = 0;
     let resolvedShippingRateId: number | null = null;
     let resolvedDeliveryType: order_delivery_type_enum | null = null;
+
+    // El DTO declara que la orden deja de tener envío: entonces sí, cero.
+    const dtoDropsShipment =
+      dto.delivery_type === order_delivery_type_enum.pickup ||
+      dto.delivery_type === order_delivery_type_enum.dine_in;
+
+    if (
+      !dto.shipping_method_id &&
+      dto.shipping_cost === undefined &&
+      !dtoDropsShipment
+    ) {
+      // Sin método (no hay nada que recalcular), sin costo del cliente (el
+      // guard de tolerancia de `:2056` no aplica) y sin bajarle el carril:
+      // se conserva el flete ya persistido.
+      const persisted = Number(existingOrder.shipping_cost ?? 0);
+      shippingCost = Number.isFinite(persisted) && persisted > 0 ? persisted : 0;
+    }
 
     if (dto.shipping_method_id) {
       const method = await this.prisma.shipping_methods.findFirst({
