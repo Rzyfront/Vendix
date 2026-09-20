@@ -1,4 +1,5 @@
 import { PosFiscalEmissionService } from './pos-fiscal-emission.service';
+import { mockRequestContext } from 'src/testing/prisma-mock';
 
 // Reproduce el defecto reportado: un fallo PERMANENTE de `send()` (no un
 // error transitorio que la cola reintenta solo) llegaba al POS como
@@ -29,6 +30,10 @@ describe('PosFiscalEmissionService', () => {
       invoice_data_requests: {
         findFirst: jest.fn().mockResolvedValue(null),
       },
+      fiscal_operation_events: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 900 }),
+      },
       ...overrides.prisma,
     };
 
@@ -55,17 +60,24 @@ describe('PosFiscalEmissionService', () => {
       ...overrides.retry_queue,
     };
 
+    const fiscal_scope = {
+      findFiscalAccountingEntityId: jest.fn().mockResolvedValue(77),
+      ...overrides.fiscal_scope,
+    };
+
     return {
       service: new PosFiscalEmissionService(
         prisma as any,
         invoicing as any,
         invoice_flow as any,
         retry_queue as any,
+        fiscal_scope as any,
       ),
       prisma,
       invoicing,
       invoice_flow,
       retry_queue,
+      fiscal_scope,
       validatedInvoice,
     };
   };
@@ -138,5 +150,111 @@ describe('PosFiscalEmissionService', () => {
 
     expect(result.state).toBe('pending');
     expect(retry_queue.recordBlocked).not.toHaveBeenCalled();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Cobertura fiscal: la venta cobrada que NUNCA llegó a tener fila de factura.
+  //
+  // `createFromOrder` puede lanzar ANTES de escribir nada (sin resolución
+  // vigente, período cerrado, identidad del emisor incompleta). Entonces no hay
+  // `invoice_id`, y `invoice_retry_queue.invoice_id` es NOT NULL: la cola no
+  // puede guardar la constancia. El documento no existe y el cobro sí — esa es
+  // exactamente la condición que nombra INVOICING_FISCAL_COVERAGE_001.
+  //
+  // Las DOS mitades se afirman por separado, porque son dos mecanismos
+  // distintos y una sola aserción no dice cuál de los dos funciona:
+  //   (a) que la constancia SE ESCRIBE en `fiscal_operation_events`,
+  //   (b) que el semáforo LA LEE y deja de decir «Emitiendo…» para siempre.
+  // ---------------------------------------------------------------------------
+
+  it('(a) escribe la constancia en fiscal_operation_events cuando createFromOrder lanza antes de crear la fila', async () => {
+    mockRequestContext({ organization_id: 10, store_id: 20 });
+    const { service, prisma, invoicing, fiscal_scope } = createService();
+
+    // No hay NINGUNA factura del pedido: ni antes ni después del intento.
+    prisma.invoices.findFirst.mockResolvedValue(null);
+    invoicing.createFromOrder.mockRejectedValue(
+      new Error('No hay resolución de facturación vigente para esta tienda.'),
+    );
+
+    const result = await service.emitForOrder(1);
+
+    expect(result.state).toBe('failed');
+    expect(result.invoice_id).toBeNull();
+
+    // La constancia: quién (org/tienda/entidad fiscal), sobre qué (el pedido) y
+    // por qué (el error tipado + el mensaje que vio el cajero).
+    expect(fiscal_scope.findFiscalAccountingEntityId).toHaveBeenCalledWith({
+      organization_id: 10,
+      store_id: 20,
+    });
+    expect(prisma.fiscal_operation_events.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        organization_id: 10,
+        store_id: 20,
+        accounting_entity_id: 77,
+        event_type: 'pos_sale_without_fiscal_document',
+        resource_type: 'order',
+        resource_id: 1,
+        metadata: expect.objectContaining({
+          error_code: 'INVOICING_FISCAL_COVERAGE_001',
+          error: expect.stringContaining('resolución'),
+        }),
+      }),
+    });
+  });
+
+  it('(b) getStatusForOrder reporta `failed` leyendo la constancia, en vez de «Emitiendo…» para siempre', async () => {
+    mockRequestContext({ organization_id: 10, store_id: 20 });
+    const { service, prisma } = createService();
+
+    // Sigue sin haber factura — es el estado permanente de una venta descubierta.
+    prisma.invoices.findFirst.mockResolvedValue(null);
+    prisma.fiscal_operation_events.findFirst.mockResolvedValue({
+      metadata: {
+        error_code: 'INVOICING_FISCAL_COVERAGE_001',
+        error: 'No hay resolución de facturación vigente para esta tienda.',
+      },
+    });
+
+    const result = await service.getStatusForOrder(1);
+
+    expect(result.state).toBe('failed');
+    expect(result.message).toContain('resolución');
+
+    // La sonda DEBE pedir el campo que la aserción de arriba afirma: si el
+    // `select` no trajera `metadata`, el mensaje se compararía contra
+    // `undefined` y el test pasaría sin que el dato viajara.
+    expect(prisma.fiscal_operation_events.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          event_type: 'pos_sale_without_fiscal_document',
+          resource_type: 'order',
+          resource_id: 1,
+        }),
+        select: expect.objectContaining({ metadata: true }),
+      }),
+    );
+  });
+
+  it('NO-REGRESIÓN: una emisión aceptada sigue devolviendo `issued` y no escribe constancia de fallo', async () => {
+    mockRequestContext({ organization_id: 10, store_id: 20 });
+    const { service, prisma } = createService();
+
+    prisma.invoices.findFirst.mockResolvedValue({
+      id: 5,
+      invoice_number: 'FE-5',
+      status: 'accepted',
+      transmission_status: 'accepted',
+      cufe: 'CUFE-5',
+      pdf_url: null,
+      contingency_deadline: null,
+    });
+
+    const result = await service.emitForOrder(1);
+
+    expect(result.state).toBe('issued');
+    expect(result.invoice_id).toBe(5);
+    expect(prisma.fiscal_operation_events.create).not.toHaveBeenCalled();
   });
 });
