@@ -297,11 +297,13 @@ export class CreditNotesService {
       store_id: gate_context.store_id,
     });
 
-    const { invoice_number, resolution_id } =
-      await this.invoice_number_generator.generateNextNumber({
-        document_type: type,
-        accounting_entity_id: note_accounting_entity_id,
-      });
+    // El armado de líneas, impuestos y totales va ANTES de numerar. No es
+    // cosmético: `derivePartialNoteLinesViaKernel` falla cerrada
+    // (`INVOICING_CALC_005`/`_006`) y su propio docblock dice «el llamador
+    // numera después» — pero el llamador numeraba ANTES, así que una línea
+    // inválida gastaba el consecutivo antes de rechazarse. Además el total
+    // derivado es el insumo de la guarda de saldo acreditable de más abajo,
+    // que por la misma razón tiene que correr antes del generador.
 
     // Nota TOTAL: sin líneas propias se copian las de la factura corregida.
     // Iterar `dto.items` sin este fallback lanzaba un `TypeError` crudo —un 500
@@ -381,6 +383,32 @@ export class CreditNotesService {
       }
       total = subtotal - discount + tax;
     }
+
+    // ANTES de numerar, por la misma razón que las dos guardas de arriba: un
+    // consecutivo gastado no se devuelve. Se mide `new Prisma.Decimal(total)`,
+    // que es EXACTAMENTE la expresión que más abajo aterriza en la columna
+    // `total_amount`: la guarda juzga lo que se va a escribir, no una
+    // aproximación paralela.
+    //
+    // Sólo nota CRÉDITO: la nota débito AUMENTA el valor de la factura, no lo
+    // acredita, así que no consume saldo ni tiene techo que agotar.
+    if (type === 'credit_note') {
+      await this.assertWithinCreditableBalance(
+        {
+          id: related_invoice.id,
+          invoice_number: related_invoice.invoice_number,
+          total_amount: related_invoice.total_amount,
+          accounting_entity_id: note_accounting_entity_id,
+        },
+        new Prisma.Decimal(total),
+      );
+    }
+
+    const { invoice_number, resolution_id } =
+      await this.invoice_number_generator.generateNextNumber({
+        document_type: type,
+        accounting_entity_id: note_accounting_entity_id,
+      });
 
     // Fecha fiscal de la nota: HOY en el huso de la tienda. Derivarla en el
     // navegador es de donde salen los desfases de un día.
@@ -515,6 +543,83 @@ export class CreditNotesService {
       `${type === 'credit_note' ? 'Credit' : 'Debit'} note ${note.invoice_number} created for invoice #${related_invoice.id}`,
     );
     return note;
+  }
+
+  /**
+   * Rechaza la nota crédito que excede el saldo acreditable que le queda a su
+   * factura padre.
+   *
+   * ## El límite es del CONJUNTO, no de cada nota
+   *
+   * Tres notas del 50 % sobre una factura de $100 acreditan $150 sobre $100
+   * facturados, y **cada una cabe por separado**: comparar cada nota contra el
+   * `total_amount` bruto del padre las deja pasar a las tres. Por eso el
+   * cálculo parte del SALDO RESTANTE —total del padre menos lo ya acreditado—
+   * y no del total bruto.
+   *
+   * ## Sólo cuentan las `accepted`
+   *
+   * Una nota es vigente cuando la DIAN la aceptó. `draft` todavía no se
+   * transmitió, `rejected` la devolvieron, y `cancelled`/`voided` dejaron de
+   * surtir efecto: ninguna acreditó un peso, así que ninguna consume saldo.
+   * Contarlas convertiría un borrador abandonado en un techo permanente sobre
+   * la factura.
+   *
+   * ## Helper propio, no `findNotesByRelatedInvoice`
+   *
+   * Aquel método es el lector de las cards de la orden (A.2) y devuelve NC y
+   * ND de TODOS los estados a propósito: el operador tiene que ver la nota
+   * rechazada. Meterle un `status: 'accepted'` para reciclarlo acá le cambiaría
+   * la respuesta a su consumidor de lectura, que es un contrato distinto del
+   * que necesita esta guarda. Se prefiere una consulta propia de diez líneas
+   * antes que un `where` compartido que sirva a medias a dos llamadores.
+   *
+   * Todo en `Decimal`: comparar saldos en `number` es de donde salen los
+   * centavos que se cuelan o se rechazan de más.
+   */
+  private async assertWithinCreditableBalance(
+    parent: {
+      id: number;
+      invoice_number: string;
+      total_amount: Prisma.Decimal;
+      accounting_entity_id: number;
+    },
+    note_total: Prisma.Decimal,
+  ): Promise<void> {
+    const prior_notes = await this.prisma.invoices.findMany({
+      where: {
+        related_invoice_id: parent.id,
+        accounting_entity_id: parent.accounting_entity_id,
+        invoice_type: 'credit_note',
+        status: 'accepted',
+      },
+      select: { id: true, invoice_number: true, total_amount: true },
+    });
+
+    const already_credited = prior_notes.reduce(
+      (acc, note) => acc.plus(new Prisma.Decimal(note.total_amount ?? 0)),
+      new Prisma.Decimal(0),
+    );
+    const parent_total = new Prisma.Decimal(parent.total_amount ?? 0);
+    const remaining = parent_total.minus(already_credited);
+
+    if (note_total.lessThanOrEqualTo(remaining)) return;
+
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_CREDIT_NOTE_001,
+      `La nota crédito de ${note_total.toString()} excede el saldo acreditable de la factura ${parent.invoice_number}: ` +
+        `de ${parent_total.toString()} facturados ya hay ${already_credited.toString()} acreditados en ${prior_notes.length} nota(s) aceptada(s), ` +
+        `así que quedan ${remaining.toString()}. Emite la nota por ese saldo o menos.`,
+      {
+        related_invoice_id: parent.id,
+        related_invoice_number: parent.invoice_number,
+        parent_total: parent_total.toString(),
+        already_credited: already_credited.toString(),
+        remaining: remaining.toString(),
+        attempted: note_total.toString(),
+        accepted_note_ids: prior_notes.map((note) => note.id),
+      },
+    );
   }
 
   /**
