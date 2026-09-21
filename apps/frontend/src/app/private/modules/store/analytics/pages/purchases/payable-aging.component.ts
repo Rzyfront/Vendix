@@ -18,14 +18,13 @@ import {
   PaginationComponent,
   StatsComponent,
   ResponsiveDataViewComponent,
+  InputsearchComponent,
 } from '../../../../../../shared/components';
 import type { TableColumn, ItemListCardConfig } from '../../../../../../shared/components';
 import {
   OptionsDropdownComponent,
 } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import type {
-  FilterConfig,
-  FilterValues,
   DropdownAction,
 } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
@@ -53,6 +52,7 @@ import type {
     StatsComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
+    InputsearchComponent,
     CurrencyPipe,
   ],
   styles: [
@@ -124,19 +124,19 @@ import type {
               Cuentas por Pagar Proveedor
             </span>
           </div>
-          <div class="flex items-end gap-2 flex-wrap shrink-0">
+          <div class="flex items-center gap-2 flex-wrap shrink-0">
+            <app-inputsearch
+              placeholder="Buscar proveedor o NIT..."
+              [debounceTime]="350"
+              (searchChange)="onSearchChange($event)"
+            ></app-inputsearch>
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-              [filters]="filterConfigs"
-              [filterValues]="filterValues"
               [actions]="dropdownActions()"
               [showActions]="true"
               triggerLabel="Acciones"
               triggerIcon="plus"
-              [debounceMs]="350"
               [isLoading]="exporting()"
-              (filterChange)="onFilterChange($event)"
-              (clearAllFilters)="onFilterClearAll()"
               (actionClick)="onActionClick($event)"
             ></app-options-dropdown>
           </div>
@@ -239,6 +239,7 @@ import type {
                     <span>Total Cartera General:</span>
                   </div>
                   <div class="flex flex-wrap items-center gap-6 text-xs md:text-sm">
+                    <span class="text-primary font-medium">Abonado: {{ totals().total_paid | currency }}</span>
                     <span class="text-emerald-600">Corriente: {{ totals().current | currency }}</span>
                     <span class="text-blue-600">1-30d: {{ totals().days_1_30 | currency }}</span>
                     <span class="text-amber-600">31-60d: {{ totals().days_31_60 | currency }}</span>
@@ -284,6 +285,7 @@ export class PayableAgingComponent implements OnInit {
   readonly search = signal<string>('');
 
   readonly totals = signal<PayableAgingTotals>({
+    total_paid: 0,
     current: 0,
     days_1_30: 0,
     days_31_60: 0,
@@ -298,17 +300,6 @@ export class PayableAgingComponent implements OnInit {
     Math.max(1, Math.ceil(this.total() / this.limit())),
   );
 
-  readonly filterConfigs: FilterConfig[] = [
-    {
-      key: 'search',
-      label: 'Buscar Proveedor',
-      type: 'text',
-      placeholder: 'Nombre o NIT...',
-    },
-  ];
-
-  filterValues: FilterValues = {};
-
   readonly dropdownActions = computed<DropdownAction[]>(() => [
     {
       action: 'export-xlsx',
@@ -320,6 +311,13 @@ export class PayableAgingComponent implements OnInit {
   readonly columns: TableColumn[] = [
     { key: 'supplier_name', label: 'Proveedor', priority: 1 },
     { key: 'supplier_document', label: 'Documento (NIT)', priority: 2 },
+    {
+      key: 'total_paid',
+      label: 'Total Abonado',
+      align: 'right',
+      priority: 2,
+      transform: (val: any) => this.currencyService.format(Number(val) || 0),
+    },
     {
       key: 'current',
       label: 'Corriente',
@@ -376,6 +374,12 @@ export class PayableAgingComponent implements OnInit {
     titleKey: 'supplier_name',
     subtitleKey: 'supplier_document',
     detailKeys: [
+      {
+        key: 'total_paid',
+        label: 'Abonado',
+        icon: 'dollar-sign',
+        transform: (val: any) => this.currencyService.format(Number(val) || 0),
+      },
       {
         key: 'current',
         label: 'Corriente',
@@ -449,6 +453,7 @@ export class PayableAgingComponent implements OnInit {
           this.total.set(totalCount);
 
           const totalsData: PayableAgingTotals = res?.meta?.totals ?? {
+            total_paid: list.reduce((sum, r) => sum + (Number(r.total_paid) || 0), 0),
             current: list.reduce((sum, r) => sum + (Number(r.current) || 0), 0),
             days_1_30: list.reduce((sum, r) => sum + (Number(r.days_1_30) || 0), 0),
             days_31_60: list.reduce((sum, r) => sum + (Number(r.days_31_60) || 0), 0),
@@ -465,6 +470,7 @@ export class PayableAgingComponent implements OnInit {
           this.rows.set([]);
           this.total.set(0);
           this.updateChart({
+            total_paid: 0,
             current: 0,
             days_1_30: 0,
             days_31_60: 0,
@@ -485,20 +491,10 @@ export class PayableAgingComponent implements OnInit {
     }
   }
 
-  onFilterChange(values: FilterValues): void {
-    this.filterValues = values;
-    const searchTerm = (values['search'] as string) || '';
+  onSearchChange(term: string): void {
+    const searchTerm = (term || '').trim();
     if (this.search() !== searchTerm) {
       this.search.set(searchTerm);
-      this.page.set(1);
-      this.loadData();
-    }
-  }
-
-  onFilterClearAll(): void {
-    this.filterValues = {};
-    if (this.search() !== '') {
-      this.search.set('');
       this.page.set(1);
       this.loadData();
     }

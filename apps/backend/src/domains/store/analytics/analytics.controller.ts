@@ -1272,6 +1272,7 @@ export class AnalyticsController {
     const columns: ReportColumn[] = [
       { key: 'supplier_name', header: 'Proveedor', type: 'text' },
       { key: 'supplier_document', header: 'Documento', type: 'text' },
+      { key: 'total_paid', header: 'Total Abonado', type: 'currency' },
       { key: 'current', header: 'Corriente', type: 'currency' },
       { key: 'days_1_30', header: '1-30 días', type: 'currency' },
       { key: 'days_31_60', header: '31-60 días', type: 'currency' },
@@ -1288,6 +1289,7 @@ export class AnalyticsController {
       tz,
       {
         supplier_name: 'TOTAL',
+        total_paid: totals.total_paid,
         current: totals.current,
         days_1_30: totals.days_1_30,
         days_31_60: totals.days_31_60,

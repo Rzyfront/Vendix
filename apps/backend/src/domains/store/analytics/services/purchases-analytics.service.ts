@@ -651,6 +651,7 @@ export class PurchasesAnalyticsService {
           supplier_id: sup.id,
           supplier_name: sup.name,
           supplier_document: doc,
+          total_paid: 0,
           current: 0,
           days_1_30: 0,
           days_31_60: 0,
@@ -661,6 +662,8 @@ export class PurchasesAnalyticsService {
         };
         supplierBuckets.set(order.supplier_id, bucket);
       }
+
+      bucket.total_paid = round2(bucket.total_paid + paidAmount);
 
       const effectiveDueDate =
         order.payment_due_date ?? order.order_date ?? order.created_at ?? asOfDate;
@@ -728,6 +731,7 @@ export class PurchasesAnalyticsService {
     rows.sort((a, b) => b.total_outstanding - a.total_outstanding);
 
     const totals: PayableAgingTotals = {
+      total_paid: round2(rows.reduce((sum, r) => sum + r.total_paid, 0)),
       current: round2(rows.reduce((sum, r) => sum + r.current, 0)),
       days_1_30: round2(rows.reduce((sum, r) => sum + r.days_1_30, 0)),
       days_31_60: round2(rows.reduce((sum, r) => sum + r.days_31_60, 0)),

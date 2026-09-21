@@ -6,6 +6,7 @@ export interface PayableAgingRow {
   supplier_id: number;
   supplier_name: string;
   supplier_document: string;
+  total_paid: number;
   current: number;
   days_1_30: number;
   days_31_60: number;
@@ -16,6 +17,7 @@ export interface PayableAgingRow {
 }
 
 export interface PayableAgingTotals {
+  total_paid: number;
   current: number;
   days_1_30: number;
   days_31_60: number;

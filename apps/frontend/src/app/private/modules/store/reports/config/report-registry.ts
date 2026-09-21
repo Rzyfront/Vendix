@@ -175,6 +175,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     columns: [
       { key: 'supplier_name', header: 'Proveedor', type: 'text' },
       { key: 'supplier_document', header: 'Documento', type: 'text' },
+      { key: 'total_paid', header: 'Total Abonado', type: 'currency', footer: 'sum' },
       { key: 'current', header: 'Corriente', type: 'currency', footer: 'sum' },
       { key: 'days_1_30', header: '1-30 días', type: 'currency', footer: 'sum' },
       { key: 'days_31_60', header: '31-60 días', type: 'currency', footer: 'sum' },

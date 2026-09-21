@@ -195,6 +195,7 @@ describe('PurchasesAnalyticsService - Payable Aging (QUI-542)', () => {
     expect(sup2.supplier_id).toBe(2);
     expect(sup2.supplier_name).toBe('Importadora Caribe');
     expect(sup2.supplier_document).toBe('800555666'); // Tax id without DV
+    expect(sup2.total_paid).toBe(500);
     expect(sup2.current).toBe(0);
     expect(sup2.days_1_30).toBe(0);
     expect(sup2.days_31_60).toBe(0);
@@ -207,6 +208,7 @@ describe('PurchasesAnalyticsService - Payable Aging (QUI-542)', () => {
     expect(sup1.supplier_id).toBe(1);
     expect(sup1.supplier_name).toBe('Distribuidora Andina');
     expect(sup1.supplier_document).toBe('900123456-1'); // Formatted tax_id + DV
+    expect(sup1.total_paid).toBe(300);
     expect(sup1.current).toBe(800);
     expect(sup1.days_1_30).toBe(500);
     expect(sup1.days_31_60).toBe(600);
@@ -216,6 +218,7 @@ describe('PurchasesAnalyticsService - Payable Aging (QUI-542)', () => {
     expect(sup1.last_payment_date).toEqual(daysAgo(5));
 
     // Global totals
+    expect(result.meta.totals.total_paid).toBe(800);
     expect(result.meta.totals.current).toBe(800);
     expect(result.meta.totals.days_1_30).toBe(500);
     expect(result.meta.totals.days_31_60).toBe(600);
