@@ -13,6 +13,7 @@ export interface PayableAgingRow {
   days_61_90: number;
   days_over_90: number;
   total_outstanding: number;
+  due_date: string | null;
   last_payment_date: string | null;
 }
 

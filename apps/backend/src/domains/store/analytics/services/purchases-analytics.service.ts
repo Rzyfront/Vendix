@@ -658,12 +658,19 @@ export class PurchasesAnalyticsService {
           days_61_90: 0,
           days_over_90: 0,
           total_outstanding: 0,
+          due_date: null,
           last_payment_date: null,
         };
         supplierBuckets.set(order.supplier_id, bucket);
       }
 
       bucket.total_paid = round2(bucket.total_paid + paidAmount);
+
+      if (order.payment_due_date) {
+        if (!bucket.due_date || order.payment_due_date < bucket.due_date) {
+          bucket.due_date = order.payment_due_date;
+        }
+      }
 
       const effectiveDueDate =
         order.payment_due_date ?? order.order_date ?? order.created_at ?? asOfDate;

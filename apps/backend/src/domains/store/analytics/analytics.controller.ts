@@ -1279,6 +1279,7 @@ export class AnalyticsController {
       { key: 'days_61_90', header: '61-90 días', type: 'currency' },
       { key: 'days_over_90', header: '>90 días', type: 'currency' },
       { key: 'total_outstanding', header: 'Saldo Total', type: 'currency' },
+      { key: 'due_date', header: 'Vencimiento', type: 'date', tz },
       { key: 'last_payment_date', header: 'Último Pago', type: 'date', tz },
     ];
 

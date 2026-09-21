@@ -202,6 +202,7 @@ describe('PurchasesAnalyticsService - Payable Aging (QUI-542)', () => {
     expect(sup2.days_61_90).toBe(1200);
     expect(sup2.days_over_90).toBe(1500);
     expect(sup2.total_outstanding).toBe(2700);
+    expect(sup2.due_date).toEqual(daysAgo(120));
     expect(sup2.last_payment_date).toEqual(daysAgo(60));
 
     const sup1 = result.data[1];
@@ -215,6 +216,7 @@ describe('PurchasesAnalyticsService - Payable Aging (QUI-542)', () => {
     expect(sup1.days_61_90).toBe(0);
     expect(sup1.days_over_90).toBe(0);
     expect(sup1.total_outstanding).toBe(1900);
+    expect(sup1.due_date).toEqual(daysAgo(45));
     expect(sup1.last_payment_date).toEqual(daysAgo(5));
 
     // Global totals

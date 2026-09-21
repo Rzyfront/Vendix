@@ -361,6 +361,14 @@ export class PayableAgingComponent implements OnInit {
       transform: (val: any) => this.currencyService.format(Number(val) || 0),
     },
     {
+      key: 'due_date',
+      label: 'Vencimiento',
+      align: 'right',
+      priority: 2,
+      defaultValue: 'Sin fecha',
+      transform: (val: any) => this.formatDate(val as string | null),
+    },
+    {
       key: 'last_payment_date',
       label: 'Último Pago',
       align: 'right',
@@ -403,6 +411,12 @@ export class PayableAgingComponent implements OnInit {
         label: '>90d',
         icon: 'alert-triangle',
         transform: (val: any) => this.currencyService.format(Number(val) || 0),
+      },
+      {
+        key: 'due_date',
+        label: 'Vencimiento',
+        icon: 'calendar',
+        transform: (val: any) => this.formatDate(val as string | null),
       },
       {
         key: 'last_payment_date',

@@ -182,6 +182,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'days_61_90', header: '61-90 días', type: 'currency', footer: 'sum' },
       { key: 'days_over_90', header: '>90 días', type: 'currency', footer: 'sum' },
       { key: 'total_outstanding', header: 'Saldo Total', type: 'currency', footer: 'sum' },
+      { key: 'due_date', header: 'Vencimiento', type: 'date' },
       { key: 'last_payment_date', header: 'Último Pago', type: 'date' },
     ],
     exportFilename: 'cuentas_por_pagar_aging',
