@@ -1,5 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   S3Client,
   PutObjectCommand,
@@ -50,6 +52,8 @@ export class S3Service {
   private readonly s3Client: S3Client;
   private readonly bucketName: string;
   private readonly logger = new Logger(S3Service.name);
+  private readonly isLocalDev: boolean;
+  private readonly localStorageBaseDir: string;
 
   constructor(
     private readonly configService: ConfigService,
@@ -60,10 +64,25 @@ export class S3Service {
     const secretAccessKey = this.configService.get<string>(
       'AWS_SECRET_ACCESS_KEY',
     );
+    const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
 
     this.bucketName =
       this.configService.get<string>('AWS_S3_BUCKET') ||
       'vendix-assets-storage';
+
+    // Local development fallback: active when not in production and AWS credentials are not configured
+    this.isLocalDev =
+      nodeEnv !== 'production' && (!accessKeyId || !secretAccessKey);
+    this.localStorageBaseDir = path.resolve(process.cwd(), 'storage', 's3');
+
+    if (this.isLocalDev) {
+      this.logger.warn(
+        `AWS credentials not configured in development mode. S3Service fallback to local filesystem storage active (${this.localStorageBaseDir}).`,
+      );
+      if (!fs.existsSync(this.localStorageBaseDir)) {
+        fs.mkdirSync(this.localStorageBaseDir, { recursive: true });
+      }
+    }
 
     const s3Config: any = {
       region,
@@ -78,6 +97,11 @@ export class S3Service {
     }
 
     this.s3Client = new S3Client(s3Config);
+  }
+
+  private getLocalFilePath(key: string): string {
+    const sanitizedKey = key.replace(/^[/\\]+/, '').replace(/\.\.[/\\]/g, '');
+    return path.resolve(this.localStorageBaseDir, sanitizedKey);
   }
 
   /**
@@ -177,6 +201,17 @@ export class S3Service {
     key: string,
     contentType: string,
   ): Promise<void> {
+    if (this.isLocalDev) {
+      const localPath = this.getLocalFilePath(key);
+      const dir = path.dirname(localPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(localPath, file);
+      this.logger.log(`[LocalDevStorage] File saved to ${localPath} (${key})`);
+      return;
+    }
+
     const upload = new Upload({
       client: this.s3Client,
       params: {
@@ -272,6 +307,13 @@ export class S3Service {
   async downloadFile(key: string): Promise<Buffer> {
     this.validateS3Key(key);
 
+    if (this.isLocalDev) {
+      const localPath = this.getLocalFilePath(key);
+      if (fs.existsSync(localPath)) {
+        return fs.readFileSync(localPath);
+      }
+    }
+
     try {
       const response = await this.s3Client.send(
         new GetObjectCommand({ Bucket: this.bucketName, Key: key }),
@@ -300,6 +342,11 @@ export class S3Service {
   async getPresignedUrl(key: string, expiresIn = 3600): Promise<string> {
     try {
       this.validateS3Key(key);
+
+      if (this.isLocalDev) {
+        return `/api/upload/file-preview?key=${encodeURIComponent(key)}`;
+      }
+
       const command = new GetObjectCommand({
         Bucket: this.bucketName,
         Key: key,
@@ -321,6 +368,16 @@ export class S3Service {
   async deleteFile(key: string): Promise<void> {
     try {
       this.validateS3Key(key);
+
+      if (this.isLocalDev) {
+        const localPath = this.getLocalFilePath(key);
+        if (fs.existsSync(localPath)) {
+          fs.unlinkSync(localPath);
+          this.logger.log(`[LocalDevStorage] File deleted: ${localPath}`);
+          return;
+        }
+      }
+
       const command = new DeleteObjectCommand({
         Bucket: this.bucketName,
         Key: key,
@@ -341,6 +398,11 @@ export class S3Service {
    */
   async objectExists(key: string | null | undefined): Promise<boolean> {
     if (!key || !isSafeS3Key(key)) return false;
+
+    if (this.isLocalDev) {
+      const localPath = this.getLocalFilePath(key);
+      if (fs.existsSync(localPath)) return true;
+    }
 
     try {
       await this.s3Client.send(
@@ -365,6 +427,17 @@ export class S3Service {
     key: string | null | undefined,
   ): Promise<{ contentType: string | null; contentLength: number | null } | null> {
     if (!key || !isSafeS3Key(key)) return null;
+
+    if (this.isLocalDev) {
+      const localPath = this.getLocalFilePath(key);
+      if (fs.existsSync(localPath)) {
+        const stats = fs.statSync(localPath);
+        return {
+          contentType: 'application/octet-stream',
+          contentLength: stats.size,
+        };
+      }
+    }
 
     try {
       const response = await this.s3Client.send(
@@ -819,6 +892,15 @@ export class S3Service {
    * @returns Buffer of the image data
    */
   async downloadImage(key: string): Promise<Buffer> {
+    this.validateS3Key(key);
+
+    if (this.isLocalDev) {
+      const localPath = this.getLocalFilePath(key);
+      if (fs.existsSync(localPath)) {
+        return fs.readFileSync(localPath);
+      }
+    }
+
     try {
       const command = new GetObjectCommand({
         Bucket: this.bucketName,

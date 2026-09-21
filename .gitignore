@@ -96,3 +96,7 @@ pnpm-workspace.yaml
 
 # Logs de jest del job backend-test-scoped (se suben como artefacto en CI)
 apps/backend/jest-logs/
+
+# Local filesystem storage fallback (S3Service dev fallback)
+storage/
+apps/backend/storage/

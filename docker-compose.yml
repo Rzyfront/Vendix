@@ -206,6 +206,7 @@ services:
     volumes:
       - ./apps/frontend:/app
       - /app/node_modules
+      - ./apps/backend:/backend:ro
     networks:
       - vendix_net
     logging:

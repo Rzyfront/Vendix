@@ -6,8 +6,12 @@ import {
   Body,
   Get,
   Query,
+  Res,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { Response } from 'express';
+import * as path from 'path';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { S3Service } from '@common/services/s3.service';
 import { RemoteImageService } from '@common/services/remote-image.service';
@@ -15,6 +19,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { ImageContext } from '@common/config/image-presets';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
+import { Public } from '@common/decorators/public.decorator';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import {
   ApiTags,
@@ -291,6 +296,41 @@ export class UploadController {
 
     const url = await this.s3Service.getPresignedUrl(normalizedKey);
     return { url };
+  }
+
+  @Get('file-preview')
+  @Public()
+  @ApiOperation({ summary: 'Preview a locally stored file in development' })
+  async getLocalFilePreview(
+    @Query('key') key: string,
+    @Res() res: Response,
+  ) {
+    if (!key) {
+      throw new BadRequestException('Key is required');
+    }
+    try {
+      const buffer = await this.s3Service.downloadFile(key);
+      const ext = path.extname(key).toLowerCase();
+      const mimeTypes: Record<string, string> = {
+        '.webp': 'image/webp',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+        '.pdf': 'application/pdf',
+        '.xlsx':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.csv': 'text/csv',
+      };
+      res.setHeader(
+        'Content-Type',
+        mimeTypes[ext] || 'application/octet-stream',
+      );
+      res.end(buffer);
+    } catch {
+      res.status(404).send('File not found');
+    }
   }
 
   /**
