@@ -361,12 +361,26 @@ export class PayableAgingComponent implements OnInit {
       transform: (val: any) => this.currencyService.format(Number(val) || 0),
     },
     {
-      key: 'due_date',
+      key: 'due_in_days',
       label: 'Vencimiento',
-      align: 'right',
       priority: 2,
-      defaultValue: 'Sin fecha',
-      transform: (val: any) => this.formatDate(val as string | null),
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorFn: (value: any) => {
+          if (value === null || value === undefined || value === '') return '#9ca3af';
+          const num = Number(value);
+          if (!Number.isFinite(num)) return '#9ca3af';
+          if (num < 0) return '#ef4444';
+          if (num === 0) return '#f97316';
+          if (num <= 7) return '#f59e0b';
+          return '#10b981';
+        },
+      },
+      transform: (value: any, row?: any) =>
+        this.formatDueBadge(row?.due_in_days ?? value),
+      sortable: true,
     },
     {
       key: 'last_payment_date',
@@ -413,10 +427,11 @@ export class PayableAgingComponent implements OnInit {
         transform: (val: any) => this.currencyService.format(Number(val) || 0),
       },
       {
-        key: 'due_date',
+        key: 'due_in_days',
         label: 'Vencimiento',
-        icon: 'calendar',
-        transform: (val: any) => this.formatDate(val as string | null),
+        icon: 'clock',
+        transform: (val: any, row?: any) =>
+          this.formatDueBadge(row?.due_in_days ?? val),
       },
       {
         key: 'last_payment_date',
@@ -629,5 +644,14 @@ export class PayableAgingComponent implements OnInit {
     } catch {
       return dateStr;
     }
+  }
+
+  formatDueBadge(days: number | null | undefined): string {
+    if (days === null || days === undefined) return 'Sin fecha';
+    const num = Number(days);
+    if (!Number.isFinite(num)) return 'Sin fecha';
+    if (num < 0) return `Vencida hace ${Math.abs(num)}d`;
+    if (num === 0) return 'Vence hoy';
+    return `Vence en ${num}d`;
   }
 }

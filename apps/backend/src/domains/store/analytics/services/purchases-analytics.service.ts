@@ -659,6 +659,7 @@ export class PurchasesAnalyticsService {
           days_over_90: 0,
           total_outstanding: 0,
           due_date: null,
+          due_in_days: null,
           last_payment_date: null,
         };
         supplierBuckets.set(order.supplier_id, bucket);
@@ -722,6 +723,17 @@ export class PurchasesAnalyticsService {
 
       for (const [sId, bucket] of supplierBuckets.entries()) {
         bucket.last_payment_date = lastPaymentMap.get(sId) ?? null;
+      }
+    }
+
+    for (const bucket of supplierBuckets.values()) {
+      if (bucket.due_date) {
+        const diffDays =
+          (bucket.due_date.getTime() - asOfDate.getTime()) / 86_400_000;
+        const days = Math.ceil(diffDays);
+        bucket.due_in_days = days === 0 ? 0 : days;
+      } else {
+        bucket.due_in_days = null;
       }
     }
 
