@@ -1282,7 +1282,7 @@ export class AnalyticsController {
     ];
 
     const sheet = this.toSheet(
-      'Cuentas por Pagar Aging',
+      'Cuentas por Pagar Proveedor',
       columns,
       rows,
       tz,

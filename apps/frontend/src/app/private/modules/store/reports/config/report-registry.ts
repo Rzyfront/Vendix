@@ -161,7 +161,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     // Saldo pendiente por proveedor distribuido en buckets (corriente, 1-30, 31-60, 61-90, >90 días).
     id: 'payable-aging',
     category: 'purchases',
-    title: 'Cuentas por Pagar Aging',
+    title: 'Cuentas por Pagar Proveedor',
     description: 'Saldo pendiente a proveedores por edades de vencimiento',
     detailedDescription:
       'Reporte de cartera a proveedores distribuida por antigüedad (corriente, 1-30, 31-60, 61-90 y más de 90 días). Permite priorizar la gestión de pagos y controlar la deuda comercial.',
