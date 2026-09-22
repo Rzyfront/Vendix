@@ -1,3 +1,4 @@
+import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
 import { Injectable, ConflictException, Logger } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import {
@@ -1233,6 +1234,8 @@ export class OrdersService {
 
   async update(id: number, updateOrderDto: UpdateOrderDto) {
     const order = await this.findOne(id);
+    const economicFields = ['items', 'subtotal', 'total_amount', 'tax_amount', 'discount_amount', 'shipping_cost', 'customer_id', 'customer_alias', 'currency'];
+    if (economicFields.some((key) => Object.prototype.hasOwnProperty.call(updateOrderDto, key))) assertNoActiveFinancialSplit(order);
 
     /**
      * QUI-557 — NINGÚN estado puede escribirse en crudo sobre `orders.state`.
@@ -1408,6 +1411,7 @@ export class OrdersService {
 
   async updateOrderItems(id: number, dto: UpdateOrderItemsDto) {
     const order = await this.findOne(id);
+    assertNoActiveFinancialSplit(order);
 
     if (order.state !== 'created' && order.state !== 'draft') {
       throw new VendixHttpException(ErrorCodes.ORD_STATUS_001);
@@ -1793,6 +1797,8 @@ export class OrdersService {
     if (!existingOrder) {
       throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
     }
+
+    assertNoActiveFinancialSplit(existingOrder);
 
     // 2) State gate ANTES del claim atómico. Una orden cancelada/refunded/
     //    shipped nunca debe mutar metadata vía el editor.

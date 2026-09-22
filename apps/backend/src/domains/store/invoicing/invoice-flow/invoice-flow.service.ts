@@ -4271,7 +4271,9 @@ export class InvoiceFlowService {
       withholding_batches,
     );
 
-    this.event_emitter.emit(
+    await (updated.financial_account_id
+      ? this.event_emitter.emitAsync.bind(this.event_emitter)
+      : this.event_emitter.emit.bind(this.event_emitter))(
       is_support_document ? 'support_document.accepted' : 'invoice.accepted',
       {
         invoice_id: id,
@@ -4369,7 +4371,9 @@ export class InvoiceFlowService {
       is_support_document,
     );
 
-    this.event_emitter.emit(
+    await (updated.financial_account_id
+      ? this.event_emitter.emitAsync.bind(this.event_emitter)
+      : this.event_emitter.emit.bind(this.event_emitter))(
       is_support_document ? 'support_document.accepted' : 'invoice.accepted',
       {
         invoice_id: id,
