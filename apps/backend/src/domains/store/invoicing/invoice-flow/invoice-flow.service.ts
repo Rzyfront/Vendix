@@ -619,6 +619,30 @@ export function judgeDraftLineSnapshot(
     return implied_base.minus(snapshot_base_for_carve).abs().greaterThan(0.005);
   });
   if (looks_carved) return { kind: 'skip' };
+  // Forma base: `createFromOrder` persistió `unit_price` YA despejado (la base
+  // que el canal cobró) con `is_inclusive = true` — contra el contrato del
+  // schema, que lee ese flag como «impuesto DENTRO de `unit_price`». Si
+  // `qty × unit_price ÷ div − descuento` (el `gross` de arriba, ya neto del
+  // descuento) ES `total − impuesto`, ese "bruto" es en realidad la base:
+  // despejarlo otra vez facturaba de menos y bloqueaba toda línea POS
+  // inclusiva con INVOICING_CALC_005. En un bruto real la igualdad es
+  // imposible con cuota > 0 (bruto = base + Σ cuotas; `tax_amount` del ítem
+  // es esa Σ también con varias filas); con cuota cero no hay evidencia y el
+  // juicio sigue igual. Va DESPUÉS del carve-out de base fija (su veredicto
+  // manda) y ANTES del cierre del kernel, que es justo lo que doble-despeja.
+  // Centavos exactos en Decimal, nunca flotantes.
+  const declared_quota = toDecimal(item?.tax_amount ?? 0);
+  const declared_base = toDecimal(item?.total_amount ?? 0).minus(
+    declared_quota,
+  );
+  if (
+    declared_quota.greaterThan(0) &&
+    gross
+      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
+      .equals(declared_base.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP))
+  ) {
+    return { kind: 'ok' };
+  }
   if (!kernel.closed_exactly) {
     return {
       kind: 'unclosed_residual',

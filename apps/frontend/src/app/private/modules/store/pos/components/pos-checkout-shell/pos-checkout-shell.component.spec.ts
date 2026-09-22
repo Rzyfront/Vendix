@@ -209,29 +209,42 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
    * shell vería todos los childs como undefined. Se inyectan los stubs
    * montados en los slots viewChild: el shell solo lee su API pública.
    */
+  /**
+   * El slot debe ser UNA señal estable por componente, no un closure nuevo en
+   * cada `wireStubs()`. Un viewChild real es una señal: los `computed()` del
+   * shell (p. ej. `shippingCost`) la rastrean y se recalculan cuando cambia la
+   * instancia. Con un closure plano, un computed que ya corrió queda atado a
+   * las señales del stub ANTERIOR y nunca ve el nuevo — el test mediría un
+   * memo rancio, no el componente.
+   */
+  const bindSlot = (name: string, instance: unknown): void => {
+    const current = (component as any)[name];
+    if (current?.__stubSlot) {
+      current.set(instance);
+      return;
+    }
+    const slot = signal(instance);
+    Object.defineProperty(slot, '__stubSlot', { value: true });
+    Object.defineProperty(component, name, { value: slot, configurable: true });
+  };
+
   const wireStubs = (): void => {
-    const pay = payStub();
-    Object.defineProperty(component, 'paymentStep', {
-      value: () => pay,
-      configurable: true,
-    });
+    bindSlot('paymentStep', payStub());
     const entregaEl = fixture.debugElement.query(By.directive(EntregaStub));
-    const entrega = entregaEl
-      ? entregaEl.componentInstance
-      : TestBed.runInInjectionContext(() => new EntregaStub());
-    Object.defineProperty(component, 'entregaStep', {
-      value: () => entrega,
-      configurable: true,
-    });
+    bindSlot(
+      'entregaStep',
+      entregaEl
+        ? entregaEl.componentInstance
+        : TestBed.runInInjectionContext(() => new EntregaStub()),
+    );
     // Envío solo se monta en delivery: si no está, stub suelto para el slot.
     const shipEl = fixture.debugElement.query(By.directive(ShippingStub));
-    const ship = shipEl
-      ? shipEl.componentInstance
-      : TestBed.runInInjectionContext(() => new ShippingStub());
-    Object.defineProperty(component, 'shippingStep', {
-      value: () => ship,
-      configurable: true,
-    });
+    bindSlot(
+      'shippingStep',
+      shipEl
+        ? shipEl.componentInstance
+        : TestBed.runInInjectionContext(() => new ShippingStub()),
+    );
   };
 
   /** Evento de teclado mínimo; target falsificado para las ramas de Enter. */
