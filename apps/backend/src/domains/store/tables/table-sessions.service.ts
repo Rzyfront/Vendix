@@ -21,8 +21,33 @@ import {
   TypedTaxRate,
 } from '../taxes/utils/final-price.util';
 import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
+// QUI-INC — el enum fiscal canónico. Se importa (en vez de tipar `string`)
+// para que la fila de `order_item_taxes` de la cuenta abierta no pueda
+// persistir un valor que el `tax_type_enum` de Postgres no reconozca, ni
+// caer a un default local.
+import { TaxFiscalType } from '../taxes/dto';
 import { resolvePriceUnitScale } from '../products/services/price-unit.util';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
+
+/**
+ * QUI-INC — fila de impuesto COMPLETA de una línea de cuenta abierta: lo que
+ * `resolveFullTaxRowsByProductId` entrega y `addItems` persiste tal cual en
+ * `order_item_taxes`.
+ *
+ * `tax_type` e `is_inclusive` son OBLIGATORIOS a propósito. Cuando el tipo de
+ * retorno los dejaba en `string` suelto, el punto de escritura los
+ * «completaba» (`?? 'iva'`, `?? false`) y el resultado era una clasificación
+ * fiscal INVENTADA conviviendo con el `tax_rate_id`/`tax_name`/`tax_rate`
+ * reales de otra fila: exactamente el defecto que hizo que la factura
+ * electrónica de la tienda 105 declarara ante la DIAN un «IVA del 8 %» —
+ * tarifa que para IVA no existe en Colombia — sobre un INC. Declarándolos
+ * requeridos, un resolver que no los traiga NO COMPILA.
+ */
+type FullTaxRow = TypedTaxRate & {
+  tax_rate_id: number;
+  name: string;
+  tax_type: TaxFiscalType;
+};
 
 /**
  * Public shape returned by `openSession` and `findOne`.
@@ -889,9 +914,20 @@ export class TableSessionsService {
                       tax_amount: roundMoney2(
                         resolved.taxes[index].amount * lineUnits,
                       ),
-                      tax_type: row.tax_type ?? 'iva',
+                      // QUI-INC — SIN `??`. El default fiscal ya se
+                      // resolvió en la fila fuente
+                      // (`resolveFullTaxRowsByProductId`, contra
+                      // `tax_categories.tax_type`), que es el único sitio
+                      // donde «sin tipar significa IVA» es cierto. Repetirlo
+                      // acá sólo podía enmascarar un hueco del resolver: al
+                      // lado de un `create` no hay forma de distinguir
+                      // «categoría genuinamente sin tipar» de «categoría INC
+                      // cuyo tipo nadie propagó», y convertía la segunda en
+                      // la primera. El tipo de retorno del resolver ahora los
+                      // declara obligatorios, así que el hueco no compila.
+                      tax_type: row.tax_type,
                       is_compound: false,
-                      is_inclusive: row.is_inclusive ?? false,
+                      is_inclusive: row.is_inclusive,
                     })),
                   },
                 }
@@ -2645,13 +2681,8 @@ export class TableSessionsService {
    */
   private async resolveFullTaxRowsByProductId(
     productIds: number[],
-  ): Promise<
-    Map<number, Array<TypedTaxRate & { tax_rate_id: number; name: string; tax_type: string }>>
-  > {
-    const out = new Map<
-      number,
-      Array<TypedTaxRate & { tax_rate_id: number; name: string; tax_type: string }>
-    >();
+  ): Promise<Map<number, FullTaxRow[]>> {
+    const out = new Map<number, FullTaxRow[]>();
     const ids = [...new Set(productIds)];
     if (ids.length === 0) return out;
     const assignments = await this.prisma.product_tax_assignments.findMany({
@@ -2675,7 +2706,16 @@ export class TableSessionsService {
     }>) {
       const rates = assignment.tax_categories?.tax_rates ?? [];
       if (rates.length === 0) continue;
-      const taxType = assignment.tax_categories?.tax_type ?? 'iva';
+      // QUI-INC — ÉSTE es el sitio correcto del default: `tax_categories` es
+      // la dueña única de la columna `tax_type` (ni `tax_rates` ni
+      // `product_tax_assignments` la tienen — ver `schema.prisma`), así que
+      // acá «sin tipar» sí significa IVA, igual que en
+      // `TaxesService.calculateProductTaxes`. Se castea al enum canónico para
+      // que el valor que viaja al snapshot sea uno de los seis que el
+      // `tax_type_enum` de Postgres admite.
+      const taxType =
+        (assignment.tax_categories?.tax_type as TaxFiscalType | null) ??
+        TaxFiscalType.IVA;
       const assignmentInclusive = assignment.is_inclusive ?? undefined;
       const list = out.get(assignment.product_id) ?? [];
       for (const rate of rates) {

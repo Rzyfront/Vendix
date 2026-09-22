@@ -1116,3 +1116,122 @@ describe('InvoicingService.createFromOrder — el escalar de línea escala por u
     expect(data.tax_amount.toString()).toBe('9500');
   });
 });
+
+
+/**
+ * QUI-INC — DÓNDE se resuelve el default de `tax_type`.
+ *
+ * `buildInvoiceTaxCreateInput` es el ÚNICO mapeador de escritura de
+ * `invoice_taxes` y lo comparten TRES productores: el motor
+ * (`CalculatedTax.tax_type`, ya normalizado), la agregación de la orden
+ * (`aggregateOrderTaxes`, que lee `order_item_taxes.tax_type`) y el carril
+ * declarativo (`dto.taxes[]`). Cuando el default vivía ahí (`?? 'iva'`), el
+ * mapeador ya no sabía de cuál de los tres venía la fila: una ausencia por
+ * PÉRDIDA en el camino se veía igual que una ausencia por DECLARACIÓN, y la
+ * primera se convertía en IVA. Así nació el «IVA del 8 %» aceptado por la
+ * DIAN (tienda 105).
+ *
+ * Ahora `InvoiceTaxRowInput.tax_type` es requerido —un cuarto productor que
+ * lo olvide no compila— y cada productor lo resuelve contra su propia fila
+ * fuente.
+ */
+describe('InvoicingService · tax_type se resuelve en la fila fuente (QUI-INC)', () => {
+  // Los tres métodos bajo prueba son puros respecto del grafo de DI: sólo se
+  // llaman entre sí. Se instancia el prototipo para ejercitarlos sin levantar
+  // el módulo entero.
+  const service = Object.create(InvoicingService.prototype) as any;
+
+  it('el mapeador de escritura NO fabrica: persiste exactamente el tipo que recibe', () => {
+    const row = service.buildInvoiceTaxCreateInput({
+      tax_rate_id: 68,
+      tax_name: 'INC',
+      tax_rate: 8,
+      taxable_amount: 100000,
+      tax_amount: 8000,
+      tax_type: 'inc',
+      is_inclusive: false,
+    });
+
+    expect(row.tax_type).toBe('inc');
+    expect(row.tax_name).toBe('INC');
+    expect(row.tax_rate.toString()).toBe('8');
+  });
+
+  it('el carril declarativo resuelve el default contra el propio DTO (fila fuente)', () => {
+    const [row] = service.buildDocumentLevelTaxRows([
+      {
+        tax_name: 'IVA',
+        tax_rate: 19,
+        taxable_amount: 100000,
+        tax_amount: 19000,
+      },
+    ]);
+
+    // Sin tipo declarado, la regla «sin tipar significa IVA» aplica AQUÍ, que
+    // es donde aún se ve que la ausencia es del cliente y no una pérdida.
+    expect(row.tax_type).toBe('iva');
+  });
+
+  it('el carril declarativo respeta el tipo que el cliente SÍ declaró', () => {
+    const [row] = service.buildDocumentLevelTaxRows([
+      {
+        tax_name: 'INC',
+        tax_rate: 8,
+        taxable_amount: 100000,
+        tax_amount: 8000,
+        tax_type: 'inc',
+      },
+    ]);
+
+    expect(row.tax_type).toBe('inc');
+  });
+
+  it('la agregación de la orden propaga el tipo del snapshot hasta la fila escrita', () => {
+    // Reproduce la composición de la fila de producción `order_item_taxes.id=130`
+    // pero YA sana: `tax_rate_id=68` / `INC` / 8 % con `tax_type='inc'`. Antes,
+    // un `tax_type` nulo en esa misma fila salía como `iva` al lado de un
+    // `tax_name='INC'` — el documento se contradecía a sí mismo.
+    const { header_rows } = aggregateOrderTaxes([
+      {
+        total_price: 100000,
+        order_item_taxes: [
+          {
+            tax_rate_id: 68,
+            tax_name: 'INC',
+            tax_rate: 0.08,
+            tax_amount: 8000,
+            tax_type: 'inc',
+            is_inclusive: false,
+          },
+        ],
+      } as any,
+    ]);
+
+    expect(header_rows).toHaveLength(1);
+    expect(header_rows[0].tax_type).toBe('inc');
+
+    const written = service.buildInvoiceTaxCreateInput(header_rows[0]);
+    expect(written.tax_type).toBe('inc');
+    expect(written.tax_name).toBe('INC');
+  });
+
+  it('una fila de orden SIN tipar resuelve a iva en la agregación, no en el escritor', () => {
+    const { header_rows } = aggregateOrderTaxes([
+      {
+        total_price: 100000,
+        order_item_taxes: [
+          {
+            tax_rate_id: 1,
+            tax_name: 'IVA',
+            tax_rate: 0.19,
+            tax_amount: 19000,
+            tax_type: null,
+            is_inclusive: false,
+          },
+        ],
+      } as any,
+    ]);
+
+    expect(header_rows[0].tax_type).toBe('iva');
+  });
+});

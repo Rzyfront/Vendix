@@ -6088,6 +6088,61 @@ export const ErrorCodes = {
     devMessage:
       'La categoría de impuesto de la línea personalizada no existe en esta tienda; sin ella el tipo fiscal (IVA/INC/ICA) del snapshot sería inventado.',
   },
+
+  // QUI-INC — gemelo del anterior en el carril de ÓRDENES
+  // (`POST /store/orders`, `OrdersService.create`). La línea puede declarar
+  // `tax_category_id` cuando su producto no trae `product_tax_assignments`
+  // (o cuando no hay producto): esa categoría es entonces la ÚNICA fila
+  // fuente de la que salen `tax_type` / `tax_name` / `tax_rate` /
+  // `is_inclusive` para `order_item_taxes`. Si el id declarado no existe en
+  // el alcance de la tienda ni de su organización, no hay nada que leer y
+  // cualquier valor que se persista está inventado — y esa fila viaja
+  // literal a `invoice_taxes` (`invoicing.service.ts:createFromOrder`) y de
+  // ahí al XML firmado. Evidencia de producción de lo que cuesta inventarlo:
+  // `order_item_taxes.id=130` (tienda 105, Pollo Árabe) persistió
+  // `tax_rate_id=68` / `tax_name='INC'` / `tax_rate=0.08` junto a un
+  // `tax_type='iva'` fabricado, y la DIAN aceptó un «IVA del 8 %» que no
+  // existe en Colombia. Se rechaza la creación: una orden bloqueada se
+  // reintenta; un documento fiscal con el tributo equivocado, no.
+  ORD_ITEM_TAX_CATEGORY_UNRESOLVABLE_001: {
+    code: 'ORD_ITEM_TAX_CATEGORY_UNRESOLVABLE_001',
+    httpStatus: 422,
+    devMessage:
+      'La categoría de impuesto declarada por una línea de la orden no existe en esta tienda ni en su organización; sin ella el tipo fiscal (IVA/INC/ICA) del desglose sería inventado.',
+  },
+
+  // QUI-INC — el DOCUMENTO SOPORTE de la plataforma
+  // (`vendor_support_documents`) no persiste desglose de tributos: sus únicas
+  // columnas fiscales son los tres escalares de cabecera (`subtotal`,
+  // `tax_amount`, `total`). Cuando la cuota capturada no la reproduce ninguna
+  // tarifa legal de IVA (19 % o 5 %) no hay forma de discriminarla como exige
+  // el art. 4 num. 10 de la Res. DIAN 000167/2021, y el documento va FIRMADO:
+  // antes se escribía `IVA 19,00 %` hardcodeado, así que una compra al 5 %
+  // —o una cuenta con INC, o un par capturado mal— salía declarando una
+  // tarifa que nadie decidió. Se rechaza la transmisión: el consecutivo se
+  // devuelve por rollback (se asigna dentro de la misma transacción) y el
+  // operador corrige el documento origen y reintenta.
+  VENDOR_SUPPORT_DOCUMENT_TAX_UNCLASSIFIABLE_001: {
+    code: 'VENDOR_SUPPORT_DOCUMENT_TAX_UNCLASSIFIABLE_001',
+    httpStatus: 422,
+    devMessage:
+      'El impuesto del documento soporte no corresponde a ninguna tarifa legal de IVA sobre la base capturada; sin tarifa verificable la discriminación exigida por la DIAN sería inventada.',
+  },
+
+  // QUI-INC — una NOTA CRÉDITO/DÉBITO cuyo tributo no se puede clasificar. Es
+  // un documento electrónico que va FIRMADO a la DIAN: si se acredita con IVA
+  // lo que se facturó como INC, la declaración del periodo queda descuadrada y
+  // el error sobrevive al documento. Antes se rellenaba con `?? 'iva'` en el
+  // punto de escritura, que no puede distinguir «tributo genuinamente sin
+  // clasificar» de «tributo INC cuyo tipo nadie propagó». Se agota primero la
+  // cascada de resolución (tipo propio → `tax_rate_id` → `tax_categories`) y
+  // sólo cuando NO hay fila fuente de la cual deducirlo se rechaza la nota.
+  NOTE_TAX_TYPE_UNRESOLVABLE_001: {
+    code: 'NOTE_TAX_TYPE_UNRESOLVABLE_001',
+    httpStatus: 422,
+    devMessage:
+      'El tributo de la nota no declara tax_type y no hay fila de catálogo de la cual resolverlo; inventarlo haría que la nota acredite un tributo distinto al facturado.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

@@ -4416,9 +4416,16 @@ export class PurchaseOrdersService {
     accounting_entity_id: number;
     net_amount: number;
     iva_amount: number;
-    /** F-214 — desglose por tarifa real, una fila de `invoice_taxes` por grupo. */
+    /**
+     * F-214 — desglose por tarifa real, una fila de `invoice_taxes` por grupo.
+     *
+     * QUI-INC — `tax_type` viaja en el grupo y es OBLIGATORIO: sale de
+     * `purchase_order_items.tax_type` (la fila fuente, ver
+     * `buildPurchaseTaxGroups`) y no de un literal en el punto de escritura.
+     */
     tax_groups: Array<{
       tax_rate: number;
+      tax_type: tax_type_enum;
       taxable_amount: number;
       tax_amount: number;
     }>;
@@ -4476,11 +4483,20 @@ export class PurchaseOrdersService {
           // efectiva derivada de iva/neto: ver `buildPurchaseTaxGroups`.
           invoice_taxes: {
             create: params.tax_groups.map((group) => ({
-              tax_name: 'IVA',
+              // QUI-INC — los CUATRO campos fiscales de la fila salen del MISMO
+              // grupo, y el grupo salió de las líneas de la orden de compra.
+              // Antes `tax_name` y `tax_type` eran literales `'IVA'` / `iva`
+              // escritos AQUÍ: una línea tipada INC en
+              // `purchase_order_items.tax_type` se persistía como IVA en un
+              // documento soporte `validated` que alimenta la declaración de
+              // IVA. El nombre se DERIVA del tipo (iva→IVA, inc→INC,
+              // ica→ICA) para que etiqueta y clasificación no puedan
+              // contradecirse entre sí.
+              tax_name: group.tax_type.toUpperCase(),
               tax_rate: group.tax_rate,
               taxable_amount: group.taxable_amount,
               tax_amount: group.tax_amount,
-              tax_type: tax_type_enum.iva,
+              tax_type: group.tax_type,
             })),
           },
         },
@@ -4535,18 +4551,35 @@ export class PurchaseOrdersService {
    * escribir un desglose con una tarifa adivinada. Un documento soporte no
    * materializado es recuperable; uno materializado con una tarifa
    * inexistente y ya `validated` ante la DIAN, no.
+   *
+   * QUI-INC — el grupo lleva TAMBIÉN el `tax_type` de la línea
+   * (`purchase_order_items.tax_type`), porque `materializeVatDocument` lo
+   * escribía como literal `iva` en el punto de escritura. Una línea tipada con
+   * otro tributo aborta la materialización: este documento reconoce IVA
+   * descontable y nada más (ver el comentario junto a la guarda).
    */
   private buildPurchaseTaxGroups(
     items: Array<{
       tax_rate: Prisma.Decimal | number | string | null;
+      tax_type?: tax_type_enum | null;
       quantity_ordered: number;
       unit_cost: Prisma.Decimal | number | string | null;
       deductible_tax_amount: Prisma.Decimal | number | string | null;
     }>,
-  ): Array<{ tax_rate: number; taxable_amount: number; tax_amount: number }> {
+  ): Array<{
+    tax_rate: number;
+    tax_type: tax_type_enum;
+    taxable_amount: number;
+    tax_amount: number;
+  }> {
     const groups = new Map<
-      number,
-      { taxable_amount: number; tax_amount: number }
+      string,
+      {
+        tax_rate: number;
+        tax_type: tax_type_enum;
+        taxable_amount: number;
+        tax_amount: number;
+      }
     >();
 
     for (const item of items) {
@@ -4559,22 +4592,55 @@ export class PurchaseOrdersService {
         );
       }
 
+      // QUI-INC — el tipo fiscal se resuelve AQUÍ, contra la fila fuente
+      // (`purchase_order_items.tax_type`, que es la MISMA que aporta tarifa y
+      // base), y no en `materializeVatDocument`, donde era el literal
+      // `tax_type_enum.iva`. El `?? iva` es el default canónico de una fila
+      // sin tipar (regla «sin tipar significa IVA» de `vendix-tax-typing`) y
+      // acá sí puede aplicarse: se ve la columna, así que «ausente» no se
+      // confunde con «tipada y no propagada».
+      const taxType = item.tax_type ?? tax_type_enum.iva;
+
+      // Caso borde — línea tipada con algo que NO es IVA. Este documento es
+      // el reconocimiento del IVA DESCONTABLE (F2): su importe viaja como
+      // `iva_amount` al evento `purchase.vat_recognized` (DR 240804) y su
+      // desglose alimenta el lado deducible de `calculateVat`. Una línea INC
+      // sólo tiene dos destinos posibles y los dos son falsos: etiquetarla
+      // IVA la hace deducir un impuesto que no es deducible, y tiparla bien
+      // la saca de la declaración pero la deja dentro del asiento, que sigue
+      // usando el mismo escalar. Se falla cerrado, igual que con `tax_rate`
+      // nulo: el `catch` del llamador lo registra y no bloquea la recepción.
+      if (taxType !== tax_type_enum.iva) {
+        throw new Error(
+          `QUI-INC: línea de compra tipada '${taxType}' dentro del documento ` +
+            'de IVA descontable (F2) — este documento sólo reconoce IVA; se ' +
+            'aborta la materialización en vez de declarar el tributo ' +
+            'equivocado.',
+        );
+      }
+
       const rate = Math.round(Number(item.tax_rate) * 100) / 100;
       const taxableAmount =
         Number(item.quantity_ordered ?? 0) * Number(item.unit_cost ?? 0);
       const taxAmount = Number(item.deductible_tax_amount ?? 0);
 
-      const current = groups.get(rate) ?? { taxable_amount: 0, tax_amount: 0 };
+      // La llave incluye el tipo: dos líneas a la misma tarifa pero de tributos
+      // distintos son dos filas de `invoice_taxes`, no una.
+      const key = `${rate}|${taxType}`;
+      const current = groups.get(key) ?? {
+        tax_rate: rate,
+        tax_type: taxType,
+        taxable_amount: 0,
+        tax_amount: 0,
+      };
       current.taxable_amount =
         Math.round((current.taxable_amount + taxableAmount) * 100) / 100;
       current.tax_amount =
         Math.round((current.tax_amount + taxAmount) * 100) / 100;
-      groups.set(rate, current);
+      groups.set(key, current);
     }
 
-    return Array.from(groups.entries())
-      .map(([tax_rate, totals]) => ({ tax_rate, ...totals }))
-      .sort((a, b) => b.tax_rate - a.tax_rate);
+    return Array.from(groups.values()).sort((a, b) => b.tax_rate - a.tax_rate);
   }
 
   // ===== Receptions =====

@@ -1,5 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+// QUI-INC — `tax_type_enum` se importa como VALOR además de como tipo: sus
+// miembros (`tax_type_enum.iva`) tienen el tipo literal que el create de
+// `invoice_taxes` espera, así que la clasificación fiscal llega al escritor
+// sin un solo cast. El `TaxFiscalType` de la capa de dominio refleja los
+// mismos seis valores, pero es un enum NOMINAL de TS y no es asignable a la
+// unión de literales de Prisma — de ahí venía el `as any` de salida.
+import { Prisma, tax_type_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -45,6 +51,42 @@ const INVOICE_INCLUDE = {
     select: { id: true, first_name: true, last_name: true },
   },
 };
+
+/**
+ * QUI-INC — la fila de impuesto de una nota, TAL COMO LLEGA. `tax_type` es
+ * opcional acá porque las tres procedencias posibles lo son en distinto
+ * grado: `dto.taxes[]` lo declara opcional, y las dos copias del documento
+ * padre lo leen de `invoice_taxes.tax_type`, que es una columna NULLABLE.
+ */
+interface IncomingNoteTaxRow {
+  tax_rate_id?: number;
+  tax_name: string;
+  tax_rate: number;
+  taxable_amount?: number;
+  tax_amount?: number;
+  tax_type?: string | null;
+}
+
+/**
+ * QUI-INC — la misma fila DESPUÉS de resolver el tipo fiscal contra su fila
+ * fuente. `tax_type` es obligatorio: una nota crédito es un documento
+ * electrónico FIRMADO que va a la DIAN, y acreditar un tributo distinto del
+ * que se facturó es un descuadre fiscal, no un detalle de forma.
+ */
+interface ResolvedNoteTaxRow extends IncomingNoteTaxRow {
+  tax_type: tax_type_enum;
+}
+
+const TAX_TYPE_VALUES: readonly string[] = Object.values(tax_type_enum);
+
+/**
+ * Guarda de tipo respaldada por una comprobación REAL contra el catálogo de
+ * valores del `tax_type_enum` de Postgres. Es lo que permite estrechar un
+ * `string` suelto sin escribir un cast a ciegas.
+ */
+function isTaxTypeEnum(value: unknown): value is tax_type_enum {
+  return typeof value === 'string' && TAX_TYPE_VALUES.includes(value);
+}
 
 @Injectable()
 export class CreditNotesService {
@@ -350,7 +392,7 @@ export class CreditNotesService {
             this.logger,
           )
         : null;
-    const taxes = dto.taxes?.length
+    const incoming_taxes: IncomingNoteTaxRow[] = dto.taxes?.length
       ? dto.taxes
       : derived_partial
         ? derived_partial.taxes
@@ -362,6 +404,16 @@ export class CreditNotesService {
             tax_amount: Number(t.tax_amount),
             tax_type: t.tax_type,
           }));
+
+    // QUI-INC — el tipo fiscal se resuelve ACÁ, contra la fila fuente, y ANTES
+    // de que `generateNextNumber` consuma un consecutivo: una nota que no
+    // puede clasificar su tributo no debe quemar un número de resolución.
+    const taxes = await this.resolveNoteTaxTypes(
+      incoming_taxes,
+      related_invoice.id,
+      type,
+      context.store_id ?? null,
+    );
 
     // Calculate amounts
     let subtotal = 0;
@@ -519,11 +571,19 @@ export class CreditNotesService {
                   // desambiguador que el escritor de facturas.
                   tax_rate: normalizeInvoiceTaxRate(
                     tax_item.tax_rate,
-                    (tax_item as any).tax_type,
+                    tax_item.tax_type,
                   ),
                   taxable_amount: new Prisma.Decimal(tax_item.taxable_amount),
                   tax_amount: new Prisma.Decimal(tax_item.tax_amount),
-                  tax_type: ((tax_item as any).tax_type ?? 'iva') as any,
+                  // QUI-INC — sin `??` y sin ningún `as`. `resolveNoteTaxTypes`
+                  // ya lo resolvió contra la fila fuente (el propio tributo del
+                  // documento padre, o la `tax_categories` del `tax_rate_id`),
+                  // y si no había de dónde resolverlo la nota no llegó hasta
+                  // acá. El `?? 'iva'` que había en este punto no podía
+                  // distinguir «tributo genuinamente sin tipar» de «tributo INC
+                  // cuyo tipo nadie propagó»: acreditaba con IVA lo que se
+                  // facturó como INC, en un documento que va firmado a la DIAN.
+                  tax_type: tax_item.tax_type,
                 };
               }),
             },
@@ -543,6 +603,108 @@ export class CreditNotesService {
       `${type === 'credit_note' ? 'Credit' : 'Debit'} note ${note.invoice_number} created for invoice #${related_invoice.id}`,
     );
     return note;
+  }
+
+  /**
+   * QUI-INC — resuelve el tipo fiscal de cada tributo de la nota EN SU FILA
+   * FUENTE, nunca en el punto de escritura.
+   *
+   * ## Por qué no vale un `?? 'iva'` junto al `create`
+   *
+   * En la capa de LECTURA «sin tipar significa IVA» es la regla correcta
+   * (`vendix-tax-typing`): toda fila histórica sin `tax_type` se agrega como
+   * IVA. Pero junto a un `prisma.create` ese mismo default deja de ser una
+   * lectura y pasa a ser una ESCRITURA: no puede distinguir «el tributo venía
+   * genuinamente sin clasificar» de «el tributo es INC y nadie propagó su
+   * tipo», y convierte el segundo caso en el primero. Así nació la factura
+   * electrónica de la tienda 105 declarando ante la DIAN un «IVA del 8 %»,
+   * tarifa que para IVA no existe en Colombia.
+   *
+   * ## La cascada
+   *
+   * 1. El tributo YA trae un tipo válido del `tax_type_enum` → se usa. Es el
+   *    caso normal: la copia total y la parcial derivada leen
+   *    `invoice_taxes.tax_type` del documento padre, que es la fila fuente de
+   *    esta nota (lo que se acredita es lo que se facturó).
+   * 2. No lo trae, pero sí un `tax_rate_id` → se resuelve contra el CATÁLOGO
+   *    (`tax_rates` → `tax_categories.tax_type`), que es la dueña única de la
+   *    columna. Ahí el `?? IVA` sí significa algo: es una categoría de verdad
+   *    sin clasificar. Mismo criterio que `payments.service.ts`.
+   * 3. Ni tipo ni id de catálogo → NO se inventa: se rechaza la nota. Una
+   *    nota crédito es un documento electrónico firmado; acreditar un tributo
+   *    distinto del facturado es un descuadre fiscal, no un detalle de forma.
+   *
+   * El lookup del catálogo va `withoutScope()` + filtro explícito de tienda
+   * (tarifa de la tienda o global, `store_id IS NULL`) porque el scope
+   * automático de `StorePrismaService` exige `store_id = <tienda>` y dejaría
+   * invisible la tarifa global/organizacional — que es justamente el caso que
+   * se está intentando resolver.
+   */
+  private async resolveNoteTaxTypes(
+    rows: IncomingNoteTaxRow[],
+    related_invoice_id: number,
+    document_type: 'credit_note' | 'debit_note',
+    store_id: number | null,
+  ): Promise<ResolvedNoteTaxRow[]> {
+    if (rows.length === 0) return [];
+
+    const pending_rate_ids = [
+      ...new Set(
+        rows
+          .filter((row) => !isTaxTypeEnum(row.tax_type))
+          .map((row) => row.tax_rate_id)
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    ];
+
+    const catalog = new Map<number, tax_type_enum>();
+    if (pending_rate_ids.length > 0) {
+      const catalog_rows = await this.prisma.withoutScope().tax_rates.findMany({
+        where: {
+          id: { in: pending_rate_ids },
+          ...(store_id != null
+            ? { OR: [{ store_id }, { store_id: null }] }
+            : {}),
+        },
+        select: {
+          id: true,
+          tax_categories: { select: { tax_type: true } },
+        },
+      });
+      for (const rate of catalog_rows) {
+        // La categoría es la fila fuente: acá —y sólo acá— «sin tipar
+        // significa IVA» es una lectura, no una fabricación.
+        catalog.set(
+          rate.id,
+          rate.tax_categories?.tax_type ?? tax_type_enum.iva,
+        );
+      }
+    }
+
+    return rows.map((row, index) => {
+      if (isTaxTypeEnum(row.tax_type)) {
+        return { ...row, tax_type: row.tax_type };
+      }
+      const resolved =
+        row.tax_rate_id != null ? catalog.get(row.tax_rate_id) : undefined;
+      if (resolved !== undefined) {
+        return { ...row, tax_type: resolved };
+      }
+      throw new VendixHttpException(
+        ErrorCodes.NOTE_TAX_TYPE_UNRESOLVABLE_001,
+        `El impuesto «${row.tax_name}» de la nota no declara tipo fiscal y no hay ` +
+          'fila de catálogo de la cual deducirlo. Envía `tax_type` (iva/inc/ica/...) ' +
+          'o un `tax_rate_id` que exista en esta tienda: una nota que acredita un ' +
+          'tributo distinto del que se facturó descuadra la declaración.',
+        {
+          tax_index: index,
+          tax_name: row.tax_name,
+          tax_rate_id: row.tax_rate_id ?? null,
+          related_invoice_id,
+          document_type,
+        },
+      );
+    });
   }
 
   /**
