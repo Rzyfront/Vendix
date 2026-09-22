@@ -520,7 +520,7 @@ describe('PaymentGatewayService', () => {
       expect(processor.processPayment).toHaveBeenCalledTimes(1);
     });
 
-    it('CreatePaymentDto rechaza is_pos_payment dentro de metadata (forbidNonWhitelisted recurre)', async () => {
+    const validateMetadata = async (metadata: Record<string, unknown>) => {
       // Mismas opciones que el ValidationPipe global de main.ts.
       const dto = plainToInstance(
         CreatePaymentDto,
@@ -530,20 +530,26 @@ describe('PaymentGatewayService', () => {
           currency: 'COP',
           storePaymentMethodId: PAYMENT_METHOD_ID,
           storeId: STORE_ID,
-          metadata: { is_pos_payment: true },
+          metadata,
         },
         { enableImplicitConversion: true },
       );
+      return validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+    };
 
-      const errors = await validate(dto, {
-        whitelist: true,
-        forbidNonWhitelisted: true,
-      });
+    it('CreatePaymentDto rechaza una llave no declarada dentro de metadata (forbidNonWhitelisted recurre)', async () => {
+      const errors = await validateMetadata({ skip_amount_validation: true });
 
       const metadataError = errors.find((e) => e.property === 'metadata');
       expect(metadataError?.children?.map((c) => c.property)).toContain(
-        'is_pos_payment',
+        'skip_amount_validation',
       );
+    });
+
+    it('CreatePaymentDto acepta is_pos_payment del POS anterior (compat de un release; el gateway lo ignora)', async () => {
+      const errors = await validateMetadata({ is_pos_payment: true });
+
+      expect(errors).toEqual([]);
     });
   });
 

@@ -35,6 +35,17 @@ import { payment_methods_type_enum } from '@prisma/client';
  *   eso lo decide el servidor a partir de sus propios datos, no del body.
  */
 export class PaymentMetadataDto {
+  /**
+   * Compatibilidad de UN release: el POS de la versión anterior todavía lo
+   * envía y una pestaña abierta con ese JS recibiría 400 al cobrar hasta que
+   * alguien recargue. Se acepta y NADIE lo lee —el gateway ya no se salta
+   * ninguna validación por él (ver specs "aunque el body traiga
+   * metadata.is_pos_payment")—. Quitar en el release siguiente.
+   */
+  @IsOptional()
+  @IsBoolean()
+  is_pos_payment?: boolean;
+
   /** Marca de auditoría: el cobro viene del POS sobre una orden ya existente. */
   @IsOptional()
   @IsBoolean()
