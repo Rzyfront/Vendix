@@ -7,7 +7,6 @@ import {
   DestroyRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Router, RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { EChartsOption } from 'echarts';
 
@@ -39,7 +38,6 @@ import type {
   standalone: true,
   imports: [
     CommonModule,
-    RouterModule,
     CardComponent,
     ChartComponent,
     IconComponent,
@@ -117,13 +115,6 @@ import type {
             </span>
           </div>
           <div class="flex items-center gap-2 flex-wrap shrink-0">
-            <a
-              routerLink="/admin/reports/purchases/payable-aging"
-              class="inline-flex items-center gap-2 px-3 py-1.5 text-xs md:text-sm font-semibold text-primary bg-primary/10 hover:bg-primary/15 rounded-lg transition-colors"
-            >
-              <app-icon name="table" [size]="16"></app-icon>
-              <span>Ver Reporte de Cartera</span>
-            </a>
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
               [actions]="dropdownActions()"
@@ -204,28 +195,6 @@ import type {
               </div>
             </div>
           </app-card>
-
-          <!-- Navigation Card to Detailed Report -->
-          <div class="p-4 rounded-xl border border-border bg-surface flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                <app-icon name="file-text" [size]="20"></app-icon>
-              </div>
-              <div>
-                <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Detalle granular de cartera por proveedor</h4>
-                <p class="text-xs text-[var(--color-text-secondary)]">
-                  Consulta el listado completo con documento (NIT), saldos pendientes, vencimientos y pagos en la sección de Reportes.
-                </p>
-              </div>
-            </div>
-            <a
-              routerLink="/admin/reports/purchases/payable-aging"
-              class="inline-flex items-center gap-2 px-4 py-2 text-xs md:text-sm font-semibold text-white bg-primary hover:bg-primary-dark rounded-lg transition-colors shrink-0"
-            >
-              <app-icon name="table" [size]="16"></app-icon>
-              <span>Ir al Reporte Detallado</span>
-            </a>
-          </div>
         </div>
       </app-card>
     </div>
@@ -236,7 +205,6 @@ export class PayableAgingComponent implements OnInit {
   private readonly analyticsService = inject(AnalyticsService);
   private readonly toastService = inject(ToastService);
   private readonly currencyService = inject(CurrencyFormatService);
-  private readonly router = inject(Router);
 
   readonly loading = signal<boolean>(false);
   readonly exporting = signal<boolean>(false);
@@ -255,11 +223,6 @@ export class PayableAgingComponent implements OnInit {
   readonly chartOptions = signal<EChartsOption>({});
 
   readonly dropdownActions = computed<DropdownAction[]>(() => [
-    {
-      action: 'view-report',
-      label: 'Ver Reporte de Cartera',
-      icon: 'table',
-    },
     {
       action: 'export-xlsx',
       label: 'Exportar XLSX',
@@ -321,9 +284,7 @@ export class PayableAgingComponent implements OnInit {
   }
 
   onActionClick(action: string): void {
-    if (action === 'view-report') {
-      this.router.navigate(['/admin/reports/purchases/payable-aging']);
-    } else if (action === 'export-xlsx') {
+    if (action === 'export-xlsx') {
       this.exportReport();
     }
   }
