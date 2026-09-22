@@ -15,12 +15,8 @@ import {
   CardComponent,
   ChartComponent,
   IconComponent,
-  PaginationComponent,
   StatsComponent,
-  ResponsiveDataViewComponent,
-  InputsearchComponent,
 } from '../../../../../../shared/components';
-import type { TableColumn, ItemListCardConfig } from '../../../../../../shared/components';
 import {
   OptionsDropdownComponent,
 } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
@@ -35,7 +31,6 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 
 import { AnalyticsService } from '../../services/analytics.service';
 import type {
-  PayableAgingRow,
   PayableAgingTotals,
 } from '../../interfaces/purchases-analytics.interface';
 
@@ -48,11 +43,8 @@ import type {
     CardComponent,
     ChartComponent,
     IconComponent,
-    PaginationComponent,
     StatsComponent,
-    ResponsiveDataViewComponent,
     OptionsDropdownComponent,
-    InputsearchComponent,
     CurrencyPipe,
   ],
   styles: [
@@ -125,11 +117,13 @@ import type {
             </span>
           </div>
           <div class="flex items-center gap-2 flex-wrap shrink-0">
-            <app-inputsearch
-              placeholder="Buscar proveedor o NIT..."
-              [debounceTime]="350"
-              (searchChange)="onSearchChange($event)"
-            ></app-inputsearch>
+            <a
+              routerLink="/admin/reports/purchases/payable-aging"
+              class="inline-flex items-center gap-2 px-3 py-1.5 text-xs md:text-sm font-semibold text-primary bg-primary/10 hover:bg-primary/15 rounded-lg transition-colors"
+            >
+              <app-icon name="table" [size]="16"></app-icon>
+              <span>Ver Reporte de Cartera</span>
+            </a>
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
               [actions]="dropdownActions()"
@@ -211,59 +205,27 @@ import type {
             </div>
           </app-card>
 
-          <!-- Detail Table -->
-          <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
-            <div slot="header" class="results-header flex flex-col">
-              <span class="text-sm font-bold text-[var(--color-text-primary)]">Detalle por Proveedor</span>
-              <span class="text-xs text-[var(--color-text-secondary)]">
-                Mostrando {{ rows().length }} de {{ total() }} proveedores con cartera pendiente
-              </span>
+          <!-- Navigation Card to Detailed Report -->
+          <div class="p-4 rounded-xl border border-border bg-surface flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                <app-icon name="file-text" [size]="20"></app-icon>
+              </div>
+              <div>
+                <h4 class="text-sm font-bold text-[var(--color-text-primary)]">Detalle granular de cartera por proveedor</h4>
+                <p class="text-xs text-[var(--color-text-secondary)]">
+                  Consulta el listado completo con documento (NIT), saldos pendientes, vencimientos y pagos en la sección de Reportes.
+                </p>
+              </div>
             </div>
-            <div class="p-4 space-y-4">
-              <app-responsive-data-view
-                [data]="rows()"
-                [columns]="columns"
-                [cardConfig]="cardConfig"
-                [loading]="loading()"
-                [hoverable]="true"
-                emptyTitle="Sin cuentas por pagar"
-                emptyMessage="No hay saldos pendientes a proveedores en este momento."
-                (rowClick)="openSupplier($event)"
-              ></app-responsive-data-view>
-
-              <!-- Footer Total Bar -->
-              @if (rows().length > 0) {
-                <div class="bg-[var(--color-surface-subtle,#f8fafc)] dark:bg-surface border border-border rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 text-sm font-semibold">
-                  <div class="flex items-center gap-2">
-                    <app-icon name="calculator" [size]="18" class="text-primary"></app-icon>
-                    <span>Total Cartera General:</span>
-                  </div>
-                  <div class="flex flex-wrap items-center gap-6 text-xs md:text-sm">
-                    <span class="text-primary font-medium">Abonado: {{ totals().total_paid | currency }}</span>
-                    <span class="text-emerald-600">Corriente: {{ totals().current | currency }}</span>
-                    <span class="text-blue-600">1-30d: {{ totals().days_1_30 | currency }}</span>
-                    <span class="text-amber-600">31-60d: {{ totals().days_31_60 | currency }}</span>
-                    <span class="text-orange-600">61-90d: {{ totals().days_61_90 | currency }}</span>
-                    <span class="text-rose-600">&gt;90d: {{ totals().days_over_90 | currency }}</span>
-                    <span class="text-base font-bold text-[var(--color-text-primary)] border-l border-border pl-4">
-                      Total: {{ totals().total_outstanding | currency }}
-                    </span>
-                  </div>
-                </div>
-              }
-
-              <!-- Pagination -->
-              @if (totalPages() > 1) {
-                <div class="flex justify-center pt-2">
-                  <app-pagination
-                    [currentPage]="page()"
-                    [totalPages]="totalPages()"
-                    (pageChange)="onPageChange($event)"
-                  ></app-pagination>
-                </div>
-              }
-            </div>
-          </app-card>
+            <a
+              routerLink="/admin/reports/purchases/payable-aging"
+              class="inline-flex items-center gap-2 px-4 py-2 text-xs md:text-sm font-semibold text-white bg-primary hover:bg-primary-dark rounded-lg transition-colors shrink-0"
+            >
+              <app-icon name="table" [size]="16"></app-icon>
+              <span>Ir al Reporte Detallado</span>
+            </a>
+          </div>
         </div>
       </app-card>
     </div>
@@ -278,11 +240,7 @@ export class PayableAgingComponent implements OnInit {
 
   readonly loading = signal<boolean>(false);
   readonly exporting = signal<boolean>(false);
-  readonly rows = signal<PayableAgingRow[]>([]);
   readonly total = signal<number>(0);
-  readonly page = signal<number>(1);
-  readonly limit = signal<number>(10);
-  readonly search = signal<string>('');
 
   readonly totals = signal<PayableAgingTotals>({
     total_paid: 0,
@@ -296,95 +254,18 @@ export class PayableAgingComponent implements OnInit {
 
   readonly chartOptions = signal<EChartsOption>({});
 
-  readonly totalPages = computed(() =>
-    Math.max(1, Math.ceil(this.total() / this.limit())),
-  );
-
   readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      action: 'view-report',
+      label: 'Ver Reporte de Cartera',
+      icon: 'table',
+    },
     {
       action: 'export-xlsx',
       label: 'Exportar XLSX',
       icon: 'download',
     },
   ]);
-
-  readonly columns: TableColumn[] = [
-    { key: 'supplier_name', label: 'Proveedor', priority: 1 },
-    { key: 'supplier_document', label: 'Documento (NIT)', priority: 2 },
-    {
-      key: 'total_paid',
-      label: 'Total Abonado',
-      align: 'right',
-      priority: 2,
-      transform: (val: any) => this.currencyService.format(Number(val) || 0),
-    },
-    {
-      key: 'total_outstanding',
-      label: 'Saldo Total',
-      align: 'right',
-      priority: 1,
-      transform: (val: any) => this.currencyService.format(Number(val) || 0),
-    },
-    {
-      key: 'due_in_days',
-      label: 'Vencimiento',
-      priority: 2,
-      badge: true,
-      badgeConfig: {
-        type: 'custom',
-        size: 'sm',
-        colorFn: (value: any) => {
-          if (value === null || value === undefined || value === '') return '#9ca3af';
-          const num = Number(value);
-          if (!Number.isFinite(num)) return '#9ca3af';
-          if (num < 0) return '#ef4444';
-          if (num === 0) return '#f97316';
-          if (num <= 7) return '#f59e0b';
-          return '#10b981';
-        },
-      },
-      transform: (value: any, row?: any) =>
-        this.formatDueBadge(row?.due_in_days ?? value),
-      sortable: true,
-    },
-    {
-      key: 'last_payment_date',
-      label: 'Último Pago',
-      align: 'right',
-      priority: 3,
-      defaultValue: 'Sin pagos',
-      transform: (val: any) => this.formatDate(val as string | null),
-    },
-  ];
-
-  readonly cardConfig: ItemListCardConfig = {
-    titleKey: 'supplier_name',
-    subtitleKey: 'supplier_document',
-    detailKeys: [
-      {
-        key: 'total_paid',
-        label: 'Abonado',
-        icon: 'dollar-sign',
-        transform: (val: any) => this.currencyService.format(Number(val) || 0),
-      },
-      {
-        key: 'due_in_days',
-        label: 'Vencimiento',
-        icon: 'clock',
-        transform: (val: any, row?: any) =>
-          this.formatDueBadge(row?.due_in_days ?? val),
-      },
-      {
-        key: 'last_payment_date',
-        label: 'Último Pago',
-        icon: 'calendar',
-        transform: (val: any) => this.formatDate(val as string | null),
-      },
-    ],
-    footerKey: 'total_outstanding',
-    footerLabel: 'Saldo Total',
-    footerTransform: (val: any) => this.currencyService.format(Number(val) || 0),
-  };
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -393,43 +274,29 @@ export class PayableAgingComponent implements OnInit {
 
   loadData(): void {
     this.loading.set(true);
-    const query: Record<string, any> = {
-      page: this.page(),
-      limit: this.limit(),
-    };
-    if (this.search().trim()) {
-      query['search'] = this.search().trim();
-    }
 
     this.analyticsService
-      .getPayableAging(query)
+      .getPayableAging({ page: 1, limit: 1 })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res: any) => {
-          const list: PayableAgingRow[] = Array.isArray(res?.data)
-            ? res.data
-            : Array.isArray(res?.data?.data)
-              ? res.data.data
-              : [];
-          this.rows.set(list);
-
           const pagination = res?.meta?.pagination;
           const totalCount =
             typeof pagination?.total === 'number'
               ? pagination.total
               : typeof res?.total === 'number'
                 ? res.total
-                : list.length;
+                : 0;
           this.total.set(totalCount);
 
           const totalsData: PayableAgingTotals = res?.meta?.totals ?? {
-            total_paid: list.reduce((sum, r) => sum + (Number(r.total_paid) || 0), 0),
-            current: list.reduce((sum, r) => sum + (Number(r.current) || 0), 0),
-            days_1_30: list.reduce((sum, r) => sum + (Number(r.days_1_30) || 0), 0),
-            days_31_60: list.reduce((sum, r) => sum + (Number(r.days_31_60) || 0), 0),
-            days_61_90: list.reduce((sum, r) => sum + (Number(r.days_61_90) || 0), 0),
-            days_over_90: list.reduce((sum, r) => sum + (Number(r.days_over_90) || 0), 0),
-            total_outstanding: list.reduce((sum, r) => sum + (Number(r.total_outstanding) || 0), 0),
+            total_paid: 0,
+            current: 0,
+            days_1_30: 0,
+            days_31_60: 0,
+            days_61_90: 0,
+            days_over_90: 0,
+            total_outstanding: 0,
           };
           this.totals.set(totalsData);
 
@@ -437,7 +304,6 @@ export class PayableAgingComponent implements OnInit {
           this.loading.set(false);
         },
         error: () => {
-          this.rows.set([]);
           this.total.set(0);
           this.updateChart({
             total_paid: 0,
@@ -454,37 +320,19 @@ export class PayableAgingComponent implements OnInit {
       });
   }
 
-  onPageChange(newPage: number): void {
-    if (newPage !== this.page() && newPage >= 1 && newPage <= this.totalPages()) {
-      this.page.set(newPage);
-      this.loadData();
-    }
-  }
-
-  onSearchChange(term: string): void {
-    const searchTerm = (term || '').trim();
-    if (this.search() !== searchTerm) {
-      this.search.set(searchTerm);
-      this.page.set(1);
-      this.loadData();
-    }
-  }
-
   onActionClick(action: string): void {
-    if (action === 'export-xlsx') {
+    if (action === 'view-report') {
+      this.router.navigate(['/admin/reports/purchases/payable-aging']);
+    } else if (action === 'export-xlsx') {
       this.exportReport();
     }
   }
 
   exportReport(): void {
     this.exporting.set(true);
-    const query: Record<string, any> = {};
-    if (this.search().trim()) {
-      query['search'] = this.search().trim();
-    }
 
     this.analyticsService
-      .exportPayableAging(query)
+      .exportPayableAging()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
@@ -502,12 +350,6 @@ export class PayableAgingComponent implements OnInit {
           this.toastService.error('No se pudo exportar el reporte');
         },
       });
-  }
-
-  openSupplier(row: PayableAgingRow): void {
-    if (row.supplier_id) {
-      this.router.navigate(['/admin/inventory/suppliers', row.supplier_id]);
-    }
   }
 
   getBucketPercentage(key: keyof PayableAgingTotals): number {
@@ -569,30 +411,5 @@ export class PayableAgingComponent implements OnInit {
         },
       ],
     });
-  }
-
-  private formatDate(dateStr: string | null): string {
-    if (!dateStr) return 'Sin pagos';
-    try {
-      const d = new Date(dateStr);
-      return isNaN(d.getTime())
-        ? dateStr
-        : d.toLocaleDateString('es-CO', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-          });
-    } catch {
-      return dateStr;
-    }
-  }
-
-  formatDueBadge(days: number | null | undefined): string {
-    if (days === null || days === undefined) return 'Sin fecha';
-    const num = Number(days);
-    if (!Number.isFinite(num)) return 'Sin fecha';
-    if (num < 0) return `Vencida hace ${Math.abs(num)}d`;
-    if (num === 0) return 'Vence hoy';
-    return `Vence en ${num}d`;
   }
 }
