@@ -176,11 +176,6 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'supplier_name', header: 'Proveedor', type: 'text' },
       { key: 'supplier_document', header: 'Documento', type: 'text' },
       { key: 'total_paid', header: 'Total Abonado', type: 'currency', footer: 'sum' },
-      { key: 'current', header: 'Corriente', type: 'currency', footer: 'sum' },
-      { key: 'days_1_30', header: '1-30 días', type: 'currency', footer: 'sum' },
-      { key: 'days_31_60', header: '31-60 días', type: 'currency', footer: 'sum' },
-      { key: 'days_61_90', header: '61-90 días', type: 'currency', footer: 'sum' },
-      { key: 'days_over_90', header: '>90 días', type: 'currency', footer: 'sum' },
       { key: 'total_outstanding', header: 'Saldo Total', type: 'currency', footer: 'sum' },
       {
         key: 'due_in_days',
