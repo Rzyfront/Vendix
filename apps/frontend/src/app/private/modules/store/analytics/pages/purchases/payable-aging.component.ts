@@ -128,7 +128,7 @@ import type {
         </div>
 
         <div class="p-4 space-y-6">
-          <!-- Aging Distribution Chart + Summary Badges -->
+          <!-- Aging Distribution Chart -->
           <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
             <div slot="header" class="results-header flex flex-col">
               <span class="text-sm font-bold text-[var(--color-text-primary)]">Distribución por Antigüedad</span>
@@ -136,62 +136,9 @@ import type {
                 Saldos pendientes agrupados por tramos de vencimiento (Corriente, 1-30d, 31-60d, 61-90d, >90d)
               </span>
             </div>
-            <div class="p-4 space-y-4">
+            <div class="p-4">
               <div class="h-72">
                 <app-chart [options]="chartOptions()" [loading]="loading()"></app-chart>
-              </div>
-
-              <!-- Summary Badges by Bucket -->
-              <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col">
-                  <span class="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Corriente</span>
-                  <span class="text-sm md:text-base font-bold text-[var(--color-text-primary)] mt-1">
-                    {{ totals().current | currency }}
-                  </span>
-                  <span class="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                    {{ getBucketPercentage('current') }} % del total
-                  </span>
-                </div>
-
-                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col">
-                  <span class="text-xs font-semibold text-blue-600 dark:text-blue-400">1 - 30 días</span>
-                  <span class="text-sm md:text-base font-bold text-[var(--color-text-primary)] mt-1">
-                    {{ totals().days_1_30 | currency }}
-                  </span>
-                  <span class="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                    {{ getBucketPercentage('days_1_30') }} % del total
-                  </span>
-                </div>
-
-                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col">
-                  <span class="text-xs font-semibold text-amber-600 dark:text-amber-400">31 - 60 días</span>
-                  <span class="text-sm md:text-base font-bold text-[var(--color-text-primary)] mt-1">
-                    {{ totals().days_31_60 | currency }}
-                  </span>
-                  <span class="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                    {{ getBucketPercentage('days_31_60') }} % del total
-                  </span>
-                </div>
-
-                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col">
-                  <span class="text-xs font-semibold text-orange-600 dark:text-orange-400">61 - 90 días</span>
-                  <span class="text-sm md:text-base font-bold text-[var(--color-text-primary)] mt-1">
-                    {{ totals().days_61_90 | currency }}
-                  </span>
-                  <span class="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                    {{ getBucketPercentage('days_61_90') }} % del total
-                  </span>
-                </div>
-
-                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col col-span-2 sm:col-span-1">
-                  <span class="text-xs font-semibold text-rose-600 dark:text-rose-400">&gt; 90 días</span>
-                  <span class="text-sm md:text-base font-bold text-[var(--color-text-primary)] mt-1">
-                    {{ totals().days_over_90 | currency }}
-                  </span>
-                  <span class="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                    {{ getBucketPercentage('days_over_90') }} % del total
-                  </span>
-                </div>
               </div>
             </div>
           </app-card>
@@ -311,13 +258,6 @@ export class PayableAgingComponent implements OnInit {
           this.toastService.error('No se pudo exportar el reporte');
         },
       });
-  }
-
-  getBucketPercentage(key: keyof PayableAgingTotals): number {
-    const total = this.totals().total_outstanding;
-    if (!total || total <= 0) return 0;
-    const value = this.totals()[key] || 0;
-    return Math.round((value / total) * 1000) / 10;
   }
 
   private updateChart(t: PayableAgingTotals): void {
