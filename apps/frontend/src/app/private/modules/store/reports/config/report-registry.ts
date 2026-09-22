@@ -182,7 +182,34 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'days_61_90', header: '61-90 días', type: 'currency', footer: 'sum' },
       { key: 'days_over_90', header: '>90 días', type: 'currency', footer: 'sum' },
       { key: 'total_outstanding', header: 'Saldo Total', type: 'currency', footer: 'sum' },
-      { key: 'due_date', header: 'Vencimiento', type: 'date' },
+      {
+        key: 'due_in_days',
+        header: 'Vencimiento',
+        type: 'text',
+        badge: true,
+        badgeConfig: {
+          type: 'custom',
+          size: 'sm',
+          colorFn: (value: any) => {
+            if (value === null || value === undefined || value === '') return '#9ca3af';
+            const num = Number(value);
+            if (!Number.isFinite(num)) return '#9ca3af';
+            if (num < 0) return '#ef4444';
+            if (num === 0) return '#f97316';
+            if (num <= 7) return '#f59e0b';
+            return '#10b981';
+          },
+        },
+        transform: (value: any, row?: any) => {
+          const days = row?.due_in_days ?? value;
+          if (days === null || days === undefined) return 'Sin fecha';
+          const num = Number(days);
+          if (!Number.isFinite(num)) return 'Sin fecha';
+          if (num < 0) return `Vencida hace ${Math.abs(num)}d`;
+          if (num === 0) return 'Vence hoy';
+          return `Vence en ${num}d`;
+        },
+      },
       { key: 'last_payment_date', header: 'Último Pago', type: 'date' },
     ],
     exportFilename: 'cuentas_por_pagar_aging',
