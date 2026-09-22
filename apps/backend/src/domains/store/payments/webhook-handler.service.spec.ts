@@ -423,36 +423,72 @@ describe('WebhookHandlerService', () => {
       });
     });
 
-    it('mostrador: no emite cuando invoicing.pos.auto_emit es false', async () => {
-      const { flow } = setup({
-        channel: 'pos',
-        deliveryType: 'direct_delivery',
-        posAutoEmit: false,
-      });
-
-      await expect(
-        (service as any).confirmOrderPaid(1),
-      ).resolves.toBeUndefined();
-      expect(flow.validate).not.toHaveBeenCalled();
-      expect(flow.send).not.toHaveBeenCalled();
-      expect(prisma.orders.update).not.toHaveBeenCalledWith({
-        where: { id: 1 },
-        data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
-      });
-    });
-
-    it('mostrador con confirmación aplicada: NO envía aquí (lo emite el listener POS vía confirmPayment)', async () => {
+    // Orden POS con confirmación APLICADA: `confirmPayment` ya disparó
+    // POS_SALE_COMPLETED_EVENT y el listener es el único dueño de la emisión.
+    // posAutoEmit=true a propósito: si la salida temprana faltara, la compuerta
+    // por carril dejaría pasar el envío y el test caería.
+    it('mostrador con confirmación aplicada: NO llama autoSendOrderInvoice ni InvoiceFlow (el listener POS es el dueño)', async () => {
       const { flow } = setup({
         channel: 'pos',
         deliveryType: 'direct_delivery',
         posAutoEmit: true,
       });
+      const autoSend = jest.spyOn(service as any, 'autoSendOrderInvoice');
 
       await expect(
         (service as any).confirmOrderPaid(1),
       ).resolves.toBeUndefined();
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
+      expect(autoSend).not.toHaveBeenCalled();
       expect(flow.validate).not.toHaveBeenCalled();
       expect(flow.send).not.toHaveBeenCalled();
+    });
+
+    describe('mostrador con confirmación NO aplicada (replay: la orden ya estaba confirmada)', () => {
+      beforeEach(() => {
+        orderFlow.confirmPayment.mockResolvedValue({
+          state: 'processing',
+          payment_confirmation_applied: false,
+        });
+      });
+
+      it('conserva el camino previo: con invoicing.pos.auto_emit=true envía por aquí', async () => {
+        const { flow } = setup({
+          channel: 'pos',
+          deliveryType: 'direct_delivery',
+          posAutoEmit: true,
+        });
+        const autoSend = jest.spyOn(service as any, 'autoSendOrderInvoice');
+
+        await expect(
+          (service as any).confirmOrderPaid(1),
+        ).resolves.toBeUndefined();
+        expect(autoSend).toHaveBeenCalledWith(1, 'pos', 'direct_delivery');
+        expect(flow.validate).toHaveBeenCalledWith(50);
+        expect(flow.send).toHaveBeenCalledWith(50);
+      });
+
+      it('conserva el camino previo: con invoicing.pos.auto_emit=false no envía', async () => {
+        const { flow } = setup({
+          channel: 'pos',
+          deliveryType: 'direct_delivery',
+          posAutoEmit: false,
+        });
+        const autoSend = jest.spyOn(service as any, 'autoSendOrderInvoice');
+
+        await expect(
+          (service as any).confirmOrderPaid(1),
+        ).resolves.toBeUndefined();
+        // Llega a la compuerta por carril (no es la salida temprana del
+        // listener) y es ELLA la que corta.
+        expect(autoSend).toHaveBeenCalledWith(1, 'pos', 'direct_delivery');
+        expect(flow.validate).not.toHaveBeenCalled();
+        expect(flow.send).not.toHaveBeenCalled();
+        expect(prisma.orders.update).not.toHaveBeenCalledWith({
+          where: { id: 1 },
+          data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+        });
+      });
     });
 
     it('mesa por QR (channel:ecommerce + delivery_type:dine_in) manda por invoicing.pos.auto_emit, no por ecommerce', async () => {

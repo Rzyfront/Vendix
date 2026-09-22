@@ -614,8 +614,21 @@ export class DianTotalsValidator {
    * subtotales con `cbc:Percent`: un tributo nominal (bolsas, IBUA) declara
    * `cbc:PerUnitAmount` y se calcula por cantidad, no por porcentaje.
    *
-   * Misma tolerancia que el resto de la compuerta: a peso entero (`round()`),
-   * porque así compara la DIAN.
+   * TOLERANCIA ±2.00, NO igualdad a peso entero. Comparar `round(declarado)`
+   * contra `round(base × tarifa)` rechaza cuotas correctas: IVA 19 % sobre
+   * 2.602,61 = 494,4959; la cuota bien redondeada a centavos es 494,50, y a
+   * peso entero (ROUND_HALF_UP) queda 495 frente a 494. Un redondeo legítimo
+   * de medio centavo cruzaba la frontera del medio peso. El Anexo
+   * 1.9 §5.2.1.1 («Holgura en los valores monetarios») fija para los elementos
+   * monetarios una tolerancia de «+ o - 2.00», y esa es la que se aplica:
+   * `|TaxAmount − TaxableAmount × Percent ÷ 100| ≤ 2.00`. Sigue atrapando la
+   * herencia de tarifa con cuota 0 (0 contra 1.200, 0 contra 480), que es el
+   * defecto que esta regla existe para ver.
+   *
+   * No se usa la holgura de ±5.00 del §5.2.1.2: esa es sólo para IVA y sólo
+   * para la aproximación AL MÚLTIPLO DE $10 del art. 1.3.1.1.1 DUR 1625/2016,
+   * que el emisor no practica. Si algún día la practica, esta regla debe
+   * ampliarse a ±5.00 para el esquema 01.
    */
   private static checkLineTaxSubtotalAmounts(
     root: any,
@@ -647,7 +660,8 @@ export class DianTotalsValidator {
             .times(toDecimal(percent_text))
             .dividedBy(100);
           const declared = toDecimal(amount_text);
-          if (this.pesos(declared) === this.pesos(expected)) continue;
+          const difference = declared.minus(expected);
+          if (difference.abs().lte(this.MONETARY_TOLERANCE)) continue;
 
           const [scheme] = category
             ? this.childrenNamed(category, 'cac:TaxScheme')
@@ -662,8 +676,9 @@ export class DianTotalsValidator {
               `La línea ${line_index} declara un tributo ` +
               `${scheme_id ?? ''} de ${amount_text} sobre una base de ` +
               `${taxable_text} al ${percent_text} %, cuando base × tarifa da ` +
-              `${expected.toFixed(2)}. La regla ${rule} exige ` +
-              `round(TaxAmount) = round(TaxableAmount × Percent ÷ 100). Una ` +
+              `${this.exact(expected)} (diferencia ${this.exact(difference)}). ` +
+              `La regla ${rule} exige TaxAmount = TaxableAmount × Percent ÷ 100 ` +
+              `con la holgura de ±2.00 del Anexo 1.9 §5.2.1.1. Una ` +
               `línea que no causa el tributo (envío, propina) no debe informar ` +
               `\`cac:TaxTotal\`.`,
             details: {
@@ -672,8 +687,8 @@ export class DianTotalsValidator {
               percent: percent_text,
               taxable_amount: taxable_text,
               declared: amount_text,
-              expected: expected.toFixed(2),
-              difference: declared.minus(expected).toFixed(2),
+              expected: this.exact(expected),
+              difference: this.exact(difference),
             },
           });
         }
@@ -762,6 +777,20 @@ export class DianTotalsValidator {
    */
   private static pesos(value: ReturnType<typeof toDecimal>): string {
     return value.toDecimalPlaces(0).toString();
+  }
+
+  /**
+   * Anexo 1.9 §5.2.1.1: «Los elementos que definen valores monetarios
+   * permitirán una tolerancia de error + o - 2.00».
+   */
+  private static readonly MONETARY_TOLERANCE = toDecimal('2.00');
+
+  /**
+   * El valor SIN redondear (al menos 2 decimales): un `toFixed(2)` de
+   * 494,4959 imprime 494,50 y esconde por qué dos cifras «iguales» difieren.
+   */
+  private static exact(value: ReturnType<typeof toDecimal>): string {
+    return value.toFixed(Math.max(2, value.decimalPlaces()));
   }
 
   /** Texto del PRIMER descendiente con ese nombre, o `null` si no hay ninguno. */

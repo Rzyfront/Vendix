@@ -752,6 +752,7 @@ describe('DianTotalsValidator', () => {
         taxable_amount: '15000.00',
         declared: '0.00',
         expected: '1200.00',
+        difference: '-1200.00',
       });
       expect(result.valid).toBe(false);
     });
@@ -771,7 +772,7 @@ describe('DianTotalsValidator', () => {
       expect(DianTotalsValidator.validate(xml).violations).toEqual([]);
     });
 
-    it('compara a peso entero, como round(): un céntimo de truncado no es rechazo', () => {
+    it('un céntimo de truncado no es rechazo (holgura ±2.00)', () => {
       // 19 % de 1.000,05 = 190,0095; el emisor trunca a 190,00.
       const xml = invoice(
         taxTotal('1000.05', '190.00') +
@@ -779,6 +780,75 @@ describe('DianTotalsValidator', () => {
           invoiceLine('1000.05', taxTotal('1000.05', '190.00')),
       );
       expect(DianTotalsValidator.validate(xml).violations).toEqual([]);
+    });
+
+    /** Factura de UNA línea con IVA 19 % y la cuota que se quiera declarar. */
+    function iva19SingleLine(taxable: string, amount: string): string {
+      return invoice(
+        taxTotal(taxable, amount) +
+          monetary(taxable, taxable, taxable) +
+          invoiceLine(taxable, taxTotal(taxable, amount)),
+      );
+    }
+
+    function fax07Of(xml: string) {
+      return DianTotalsValidator.validate(xml).violations.filter(
+        (v) => v.rule === 'FAX07',
+      );
+    }
+
+    it('caso límite del medio peso: 19 % de 2.602,61 = 494,4959 con cuota 494,50 pasa (Anexo §5.2.1.1 ±2.00)', () => {
+      // A peso entero serían 495 contra 494: la comparación anterior rechazaba
+      // una cuota correctamente redondeada a centavos.
+      expect(fax07Of(iva19SingleLine('2602.61', '494.50'))).toEqual([]);
+    });
+
+    it('una diferencia de 3 pesos excede la holgura de ±2.00 y se rechaza', () => {
+      // 19 % de 10.000 = 1.900; declarar 1.903 difiere 3,00.
+      const fax07 = fax07Of(iva19SingleLine('10000.00', '1903.00'));
+      expect(fax07).toHaveLength(1);
+      expect(fax07[0].details).toMatchObject({
+        declared: '1903.00',
+        expected: '1900.00',
+        difference: '3.00',
+      });
+    });
+
+    it('2,00 exactos de diferencia están dentro de la holgura', () => {
+      expect(fax07Of(iva19SingleLine('10000.00', '1902.00'))).toEqual([]);
+      expect(fax07Of(iva19SingleLine('10000.00', '1898.00'))).toEqual([]);
+    });
+
+    it('el mensaje muestra la cuota esperada SIN redondeo y la diferencia real', () => {
+      // 19 % de 2.602,61 = 494,4959; declarar 497,00 difiere 2,5041.
+      const [violation] = fax07Of(iva19SingleLine('2602.61', '497.00'));
+      expect(violation.details).toMatchObject({
+        expected: '494.4959',
+        difference: '2.5041',
+      });
+      expect(violation.message).toContain('494.4959');
+      expect(violation.message).toContain('2.5041');
+    });
+
+    it('la herencia de tarifa con cuota 0 sigue rechazándose: 0 contra 480 (8 % de 6.000)', () => {
+      const xml = inc8Invoice(
+        invoiceLine(
+          '6000.00',
+          `<cac:TaxTotal><cbc:TaxAmount currencyID="COP">0.00</cbc:TaxAmount>` +
+            `<cac:TaxSubtotal><cbc:TaxableAmount currencyID="COP">6000.00</cbc:TaxableAmount>` +
+            `<cbc:TaxAmount currencyID="COP">0.00</cbc:TaxAmount>` +
+            `<cac:TaxCategory><cbc:Percent>8.00</cbc:Percent>` +
+            `<cac:TaxScheme><cbc:ID>04</cbc:ID><cbc:Name>INC</cbc:Name></cac:TaxScheme>` +
+            `</cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>`,
+        ),
+      );
+      const fax07 = fax07Of(xml);
+      expect(fax07).toHaveLength(1);
+      expect(fax07[0].details).toMatchObject({
+        declared: '0.00',
+        expected: '480.00',
+        difference: '-480.00',
+      });
     });
 
     it('no juzga los subtotales de CABECERA (eso es FAS07, otra regla)', () => {

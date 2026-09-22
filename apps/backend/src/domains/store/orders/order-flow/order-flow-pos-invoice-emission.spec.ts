@@ -328,12 +328,16 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
         committed = true;
         return out;
       });
+      // El helper de emisión envuelve `emit` en try/catch: un `expect` dentro
+      // del mock se lo tragaría. Se captura el estado y se afirma afuera.
+      const committedAtEmit: boolean[] = [];
       eventEmitter.emit.mockImplementation((name: string) => {
-        if (name === POS_SALE_COMPLETED_EVENT) expect(committed).toBe(true);
+        if (name === POS_SALE_COMPLETED_EVENT) committedAtEmit.push(committed);
       });
 
       await service.confirmPayment(ORDER_ID);
 
+      expect(committedAtEmit).toEqual([true]);
       expect(posEmits()).toHaveLength(1);
       expect(posEmits()[0][1]).toEqual(
         expect.objectContaining({ order_id: ORDER_ID, store_id: STORE_ID }),

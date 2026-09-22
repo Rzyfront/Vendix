@@ -1169,9 +1169,10 @@ export class OrderFlowService {
       // serials (SERIAL_REQUIRED_001), the order stays 'created' and that
       // payment would be orphaned. Business rule (confirmed): keep + compensate
       // — cancel the payment (preserving the audit trail) and propagate the 409.
-      // NOTE: the pending-kitchen guard above intentionally leaves the payment
-      // (the operator finishes once the kitchen delivers), so only the finish
-      // throw compensates here.
+      // NOTE: the pending-kitchen guard above compensates the same way — it
+      // cancels the payment (cancellation_reason 'kitchen_items_pending') and
+      // restores the pre-claim state before throwing; this block covers the
+      // finish throw.
       let updatedOrder;
       try {
         updatedOrder = await this.updateOrderState(orderId, 'finished', {
@@ -4832,7 +4833,10 @@ export class OrderFlowService {
       const context = RequestContextService.getContext();
       let organizationId = context?.organization_id;
       if (typeof organizationId !== 'number') {
-        // Webhooks corren con un contexto de tienda sin organización.
+        // Defensa: los webhooks (webhook-handler → confirmPayment) corren dentro
+        // de `StoreContextRunner.runInStoreContext`, que SÍ fija
+        // organization_id desde la tienda. Este fallback cubre un llamador
+        // futuro que invoque el flujo con un contexto sin organización.
         const store = await this.prisma.stores.findFirst({
           where: { id: order.store_id },
           select: { organization_id: true },
