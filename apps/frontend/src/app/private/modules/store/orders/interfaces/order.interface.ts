@@ -52,6 +52,8 @@ export interface Order {
   order_number: string;
   state: OrderState;
   cancellation_policy?: OrderCancellationPolicy;
+  /** Financial accounts share this physical order; they are not child orders. */
+  active_financial_split_id?: number | null;
   channel?: OrderChannel;
   // A.3 CP-facturacion-fixes: alerta fiscal fijada por el auto-envío del webhook.
   // null = sin alerta conocida. Viaja en el detalle (include fila completa).

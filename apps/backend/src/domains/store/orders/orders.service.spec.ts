@@ -105,19 +105,25 @@ describe('OrdersService', () => {
    * pasó una consulta, y una fuga entre tiendas habría pasado en verde por
    * construcción.
    *
-   * Censo (grep sobre `orders.service.ts`): `OrdersService` no llama a
-   * `withoutScope()` en ningún método cubierto por este spec — el escape
-   * hatch sin scope lo usan `purchase-orders.service.ts` y
-   * `order-auto-fulfillment.listener.ts`, no esta clase. Es decir: HOY
-   * ningún test de este archivo depende del atajo (0 aserciones que migrar).
-   * Este mock deja el arnés listo para cuando `OrdersService` sí lo use, y
-   * el test de seam de abajo demuestra que el atajo peligroso vuelve a
-   * fallar si alguien lo reintroduce.
+   * Censo original: `OrdersService` no llamaba a `withoutScope()` en ningún
+   * método cubierto por este spec. QUI-INC lo cambió: `create` →
+   * `resolveDeclaredTaxCategories` lee `stores` y `tax_categories` por acá,
+   * porque `tax_categories` está en `store_scoped_models` y el cliente con
+   * scope forzaría `store_id = contexto`, dejando fuera las categorías de
+   * nivel ORGANIZACIÓN (`store_id IS NULL`) que la tienda sí puede usar. Por
+   * eso el predicado OR va escrito a mano en el servicio y se verifica abajo.
+   * El test de seam sigue demostrando que el atajo peligroso (devolver el
+   * MISMO objeto con scope) vuelve a fallar si alguien lo reintroduce.
    */
   const mockUnscopedPrismaService = {
     orders: { findFirst: jest.fn(), findMany: jest.fn(), findUnique: jest.fn() },
-    stores: { findFirst: jest.fn() },
+    stores: { findFirst: jest.fn(), findUnique: jest.fn() },
     products: { findFirst: jest.fn(), findMany: jest.fn() },
+    // QUI-INC — segunda fuente de catálogo del desglose fiscal: la categoría
+    // que la línea declara (`tax_category_id`). Default `[]` en el beforeEach:
+    // ninguna spec preexistente declara categoría, así que `create` sigue sin
+    // consultar nada (el servicio corta antes con la lista vacía).
+    tax_categories: { findMany: jest.fn() },
   };
 
   const mockS3Service = {
@@ -234,6 +240,15 @@ describe('OrdersService', () => {
     // guard nuevo no bloquea ninguna spec existente. El spec dedicado abajo
     // sobrescribe esto con una fila para probar el 409.
     mockPrismaService.order_item_taxes.findFirst.mockResolvedValue(null);
+    // QUI-INC — defaults del carril sin scope que usa
+    // `resolveDeclaredTaxCategories`. Sólo se tocan cuando una línea declara
+    // `tax_category_id`; las specs que sí lo hacen los sobrescriben.
+    mockUnscopedPrismaService.stores.findUnique.mockResolvedValue({
+      organization_id: 1,
+    } as any);
+    mockUnscopedPrismaService.tax_categories.findMany.mockResolvedValue(
+      [] as any,
+    );
     mockRequestContextService.getContext.mockReturnValue({
       store_id: 1,
       organization_id: 1,
@@ -2343,15 +2358,66 @@ describe('OrdersService', () => {
       expect(out.create[0].tax_rate_id).toBe(7);
     });
 
-    it('fallback: qty 3 × 1.900/u ⇒ OIT = 5.700 con tax_rate_id null', () => {
-      const out = call(
-        { quantity: 3, tax_amount_item: 1900, tax_rate: 0.19 },
-        null,
-      );
+    /**
+     * QUI-INC — ESTE TEST CODIFICABA EL DEFECTO, por eso cambia de veredicto.
+     *
+     * Versión anterior: «fallback: qty 3 × 1.900/u ⇒ OIT = 5.700 con
+     * tax_rate_id null» — fijaba que, sin ninguna fila fuente, se persistía
+     * igual una fila con `tax_name:'IVA'`, `tax_type:'iva'` y la tarifa del
+     * DTO. Esa fila viaja literal a `invoice_taxes` y al XML firmado
+     * (`invoicing.service.ts:createFromOrder`), que es exactamente como se
+     * emitió el «IVA del 8 %» de la tienda 105. El escalado ×unidades que el
+     * test defendía (F-044/F-046) sigue cubierto por las otras ramas; lo que
+     * ya no se defiende es la existencia de la fila fabricada.
+     */
+    it('sin fila fuente: NO se escribe fila (antes fabricaba tax_type=iva)', () => {
+      expect(
+        call({ quantity: 3, tax_amount_item: 1900, tax_rate: 0.19 }, null),
+      ).toBeUndefined();
+      // Arreglo vacío (categoría declarada SIN tasas) es el mismo veredicto:
+      // tampoco hay `tax_rate_id`/`tax_name`/`tax_rate` que leer.
+      expect(
+        call({ quantity: 3, tax_amount_item: 1900, tax_rate: 0.19 }, []),
+      ).toBeUndefined();
+    });
+
+    /**
+     * QUI-INC — el `?? 'iva'` de la rama resuelta SÍ es legítimo: se aplica
+     * sobre la fila fuente del catálogo, que es donde
+     * `vendix-tax-typing` permite resolver el default «sin tipar ⇒ IVA».
+     * Una categoría TIPADA no pasa por ahí.
+     */
+    it('rama resuelta: una categoría INC persiste tax_type=inc, no iva', () => {
+      const out = call({ quantity: 1, tax_amount_item: 800, tax_rate: 0.08 }, [
+        {
+          id: 68,
+          name: 'INC',
+          rate: 0.08,
+          tax_type: 'inc',
+          is_compound: false,
+          is_inclusive: false,
+        },
+      ]);
 
       expect(out.create).toHaveLength(1);
-      expect(Number(out.create[0].tax_amount)).toBe(5700);
-      expect(out.create[0].tax_rate_id).toBeNull();
+      expect(out.create[0].tax_type).toBe('inc');
+      expect(out.create[0].tax_name).toBe('INC');
+      expect(out.create[0].tax_rate_id).toBe(68);
+    });
+
+    it('rama resuelta: categoría SIN tipar cae al default canónico iva', () => {
+      const out = call({ quantity: 1, tax_amount_item: 1900, tax_rate: 0.19 }, [
+        {
+          id: 10,
+          name: 'IVA 19%',
+          rate: 0.19,
+          tax_type: null,
+          is_compound: false,
+          is_inclusive: false,
+        },
+      ]);
+
+      expect(out.create[0].tax_type).toBe('iva');
     });
 
     /**
@@ -2422,6 +2488,261 @@ describe('OrdersService', () => {
     it('impuesto 0 o ausente ⇒ sin filas', () => {
       expect(call({ quantity: 3, tax_amount_item: 0 }, singleRate)).toBeUndefined();
       expect(call({ quantity: 3 }, singleRate)).toBeUndefined();
+    });
+  });
+
+  /**
+   * QUI-INC — contrato de la CLASIFICACIÓN fiscal en `create`, extremo a
+   * extremo (DTO → `orders.create`), no sólo en el helper.
+   *
+   * Regla canónica (`vendix-tax-typing` v1.1): el default de un campo fiscal
+   * se resuelve en la FILA FUENTE, nunca en el punto de escritura. Como en
+   * lectura «sin tipar significa IVA», un `?? 'iva'` junto al `prisma.create`
+   * no puede distinguir «categoría genuinamente sin tipar» de «categoría INC
+   * que nadie propagó»: convierte la segunda en la primera. Evidencia de
+   * producción de lo que eso cuesta: `order_item_taxes.id=130` (tienda 105,
+   * Pollo Árabe) con `tax_rate_id=68` / `tax_name='INC'` / `tax_rate=0.08` y
+   * `tax_type='iva'` fabricado; la DIAN aceptó un «IVA del 8 %».
+   */
+  describe('create — clasificación fiscal por fila fuente (QUI-INC)', () => {
+    const contextSpy = () =>
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+        organization_id: 7,
+        is_super_admin: false,
+        is_owner: false,
+        user_id: 99,
+        request_id: 'req-test-qui-inc',
+      } as any);
+
+    /** Producto real, SIN `product_tax_assignments`: el hueco que el fallback llenaba. */
+    const arrangeProductWithoutAssignments = () => {
+      mockPrismaService.products.findUnique.mockResolvedValue({
+        id: 1,
+        name: 'Pollo Árabe',
+        product_type: 'prepared',
+        product_variants: [],
+        cost_price: 4000,
+      } as any);
+      mockPrismaService.products.findMany.mockResolvedValue([
+        { id: 1, price_unit_quantity: 1, product_tax_assignments: [] },
+      ] as any);
+      mockPrismaService.orders.create.mockResolvedValue({
+        id: 910,
+        store_id: 1,
+        order_number: 'ORD-QUI-INC-1',
+        grand_total: 10800,
+        currency: 'COP',
+        order_items: [
+          {
+            product_id: 1,
+            product_variant_id: null,
+            quantity: 1,
+            stock_units_consumed: null,
+            products: { track_inventory: false },
+          },
+        ],
+      } as any);
+    };
+
+    const dtoWithLine = (extra: Record<string, unknown>) =>
+      ({
+        order_number: 'ORD-QUI-INC-1',
+        subtotal: 10000,
+        tax_amount: 800,
+        total_amount: 10800,
+        skip_schedule_validation: true,
+        items: [
+          {
+            product_id: 1,
+            product_name: 'Pollo Árabe',
+            quantity: 1,
+            unit_price: 10000,
+            total_price: 10000,
+            tax_amount_item: 800,
+            tax_rate: 0.08,
+            ...extra,
+          },
+        ],
+      }) as any;
+
+    const writtenLine = () => {
+      expect(mockPrismaService.orders.create).toHaveBeenCalledTimes(1);
+      const items = (mockPrismaService.orders.create.mock.calls[0][0] as any)
+        .data.order_items.create;
+      expect(items).toHaveLength(1);
+      return items[0];
+    };
+    const writtenLineTaxes = () => writtenLine().order_item_taxes;
+
+    /* (a) ------------------------------------------------------------- */
+    it('con tax_category_id de una categoría INC, la fila persiste tax_type=inc y NO iva', async () => {
+      const spy = contextSpy();
+      try {
+        arrangeProductWithoutAssignments();
+        // La fila fuente: `tax_categories` es la ÚNICA dueña de `tax_type`.
+        mockUnscopedPrismaService.tax_categories.findMany.mockResolvedValue([
+          {
+            id: 44,
+            tax_type: 'inc',
+            is_inclusive: false,
+            tax_rates: [
+              {
+                id: 68,
+                name: 'INC 8%',
+                rate: 0.08,
+                is_compound: false,
+                is_inclusive: false,
+                priority: 1,
+              },
+            ],
+          },
+        ] as any);
+
+        await service.create(dtoWithLine({ tax_category_id: 44 }), { id: 99 });
+
+        const taxes = writtenLineTaxes();
+        expect(taxes).toBeDefined();
+        expect(taxes.create).toHaveLength(1);
+        // EL punto del ticket: el tributo declarado a la DIAN es INC, no IVA.
+        expect(taxes.create[0].tax_type).toBe('inc');
+        expect(taxes.create[0].tax_type).not.toBe('iva');
+        // Y el resto del snapshot sale de la MISMA fila (no del DTO).
+        expect(taxes.create[0].tax_rate_id).toBe(68);
+        expect(taxes.create[0].tax_name).toBe('INC 8%');
+        expect(Number(taxes.create[0].tax_rate)).toBeCloseTo(0.08, 5);
+        expect(Number(taxes.create[0].tax_amount)).toBe(800);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('el lookup de la categoría declara su alcance multi-tenant a mano (tienda OR organización)', async () => {
+      const spy = contextSpy();
+      try {
+        arrangeProductWithoutAssignments();
+        mockUnscopedPrismaService.stores.findUnique.mockResolvedValue({
+          organization_id: 7,
+        } as any);
+        mockUnscopedPrismaService.tax_categories.findMany.mockResolvedValue([
+          { id: 44, tax_type: 'inc', is_inclusive: false, tax_rates: [] },
+        ] as any);
+
+        await service.create(dtoWithLine({ tax_category_id: 44 }), { id: 99 });
+
+        // Va por el cliente SIN scope (si fuera por el scoped, `store_id` se
+        // forzaría y las categorías de organización quedarían invisibles)…
+        expect(mockPrismaService.withoutScope).toHaveBeenCalled();
+        // …pero con el predicado de tenant escrito explícitamente.
+        const where =
+          mockUnscopedPrismaService.tax_categories.findMany.mock.calls[0][0]
+            .where;
+        expect(where.id).toEqual({ in: [44] });
+        expect(where.OR).toEqual([
+          { store_id: 1 },
+          { organization_id: 7, store_id: null },
+        ]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    /* (b) ------------------------------------------------------------- */
+    it('sin tax_category_id y sin configuración, NO se escribe fila de impuesto', async () => {
+      const spy = contextSpy();
+      try {
+        arrangeProductWithoutAssignments();
+
+        await service.create(dtoWithLine({}), { id: 99 });
+
+        // La línea SÍ se escribe, y sigue llevando su escalar de impuesto —
+        // lo que desaparece es la CLASIFICACIÓN fabricada, no la magnitud.
+        // Así el test no puede pasar por "no se creó ninguna orden".
+        const line = writtenLine();
+        expect(line.product_name).toBe('Pollo Árabe');
+        expect(Number(line.tax_amount_item)).toBe(800);
+        // Antes acá se escribía `{create:[{tax_name:'IVA',tax_type:'iva',…}]}`.
+        expect(line.order_item_taxes).toBeUndefined();
+        // Sin categoría declarada ni siquiera se consulta el catálogo.
+        expect(
+          mockUnscopedPrismaService.tax_categories.findMany,
+        ).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    /* (c) ------------------------------------------------------------- */
+    it('categoría no resoluble en el alcance rechaza con ORD_ITEM_TAX_CATEGORY_UNRESOLVABLE_001', async () => {
+      const spy = contextSpy();
+      try {
+        arrangeProductWithoutAssignments();
+        // El id viaja en el DTO pero no existe para esta tienda/organización.
+        mockUnscopedPrismaService.tax_categories.findMany.mockResolvedValue(
+          [] as any,
+        );
+
+        // Se afirma el `errorCode` exacto: un `toBeInstanceOf` solo pasaría
+        // con cualquier guarda anterior y no fijaría ESTA compuerta.
+        await expect(
+          service.create(dtoWithLine({ tax_category_id: 999 }), { id: 99 }),
+        ).rejects.toMatchObject({
+          errorCode: ErrorCodes.ORD_ITEM_TAX_CATEGORY_UNRESOLVABLE_001.code,
+        });
+        await expect(
+          service.create(dtoWithLine({ tax_category_id: 999 }), { id: 99 }),
+        ).rejects.toBeInstanceOf(VendixHttpException);
+
+        // Falla RUIDOSA y ANTES de escribir: ninguna orden se creó.
+        expect(mockPrismaService.orders.create).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    /* Precedencia ------------------------------------------------------ */
+    it('las asignaciones del producto mandan sobre la categoría declarada (cero regresión)', async () => {
+      const spy = contextSpy();
+      try {
+        arrangeProductWithoutAssignments();
+        // El producto SÍ tiene asignación: IVA 19% del catálogo.
+        mockPrismaService.products.findMany.mockResolvedValue([
+          {
+            id: 1,
+            price_unit_quantity: 1,
+            product_tax_assignments: [
+              {
+                is_inclusive: false,
+                tax_categories: {
+                  tax_type: 'iva',
+                  tax_rates: [
+                    {
+                      id: 10,
+                      name: 'IVA 19%',
+                      rate: 0.19,
+                      is_compound: false,
+                      is_inclusive: false,
+                      priority: 1,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ] as any);
+        mockUnscopedPrismaService.tax_categories.findMany.mockResolvedValue([
+          { id: 44, tax_type: 'inc', is_inclusive: false, tax_rates: [] },
+        ] as any);
+
+        await service.create(dtoWithLine({ tax_category_id: 44 }), { id: 99 });
+
+        const taxes = writtenLineTaxes();
+        expect(taxes.create).toHaveLength(1);
+        expect(taxes.create[0].tax_rate_id).toBe(10);
+        expect(taxes.create[0].tax_type).toBe('iva');
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });

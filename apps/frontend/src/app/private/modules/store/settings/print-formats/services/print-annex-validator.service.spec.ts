@@ -84,3 +84,43 @@ describe('PrintAnnexValidatorService (C.10)', () => {
     }
   });
 });
+
+/**
+ * CP-fiscal-qualities — la regla `emisor_regime` validaba un requisito que no
+ * existe: EXIGÍA la leyenda de régimen para dar por aprobada la revisión de
+ * anexo. Esa leyenda salió del art. 506 E.T., derogado (Ley 1943/2018 art. 122,
+ * Ley 2010/2019 art. 160). El num. 12 del art. 11 de la Res. DIAN 000165/2023
+ * enumera cuatro calidades y sólo «cuando corresponda»: una plantilla que no
+ * imprime ninguna PUEDE estar perfectamente conforme, así que la regla nunca
+ * puede elevarse por encima de `info`.
+ */
+describe('PrintAnnexValidatorService — emisor_regime no exige una leyenda inexistente', () => {
+  const service = new PrintAnnexValidatorService();
+
+  const base: PrintFormatDefinition = {
+    paper: { format: 'a4', width_mm: 210, is_roll: false, copies: 1 },
+    sections: [],
+    columns: [],
+  };
+
+  it('en un formato fiscal la regla es informativa, nunca warning ni error', () => {
+    const summary = service.validate(base, 'fiscal_electronic_invoice');
+    const rule = summary.rules.find((r) => r.id === 'emisor_regime');
+    expect(rule?.severity).toBe('info');
+  });
+
+  it('cita el num. 12 y no el anexo §8.1.1, y no reclama «Responsable de IVA»', () => {
+    const summary = service.validate(base, 'fiscal_electronic_invoice');
+    const rule = summary.rules.find((r) => r.id === 'emisor_regime');
+    expect(rule?.reference).toContain('Num. 12 art. 11 Res. DIAN 000165/2023');
+    expect(rule?.description).not.toContain('responsable del IVA o no responsable');
+    expect(rule?.description).toContain('no se imprime ningún renglón');
+  });
+
+  it('una plantilla sin el renglón de calidades NO vuelve incumplida la revisión', () => {
+    const summary = service.validate(base, 'fiscal_electronic_invoice');
+    const rule = summary.rules.find((r) => r.id === 'emisor_regime');
+    // `info` no puede arrastrar `isCompliant`; si algo lo hace es otra regla.
+    expect(rule?.severity).toBe('info');
+  });
+});

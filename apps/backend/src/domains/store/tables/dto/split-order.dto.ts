@@ -1,7 +1,22 @@
 import {
-  ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsIn, IsObject, Matches, ValidateIf,
-  IsInt, IsNumber, IsOptional, IsString, IsUrl, Max, MaxLength, Min,
-  MinLength, ValidateNested,
+  ArrayMaxSize,
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
+  IsIn,
+  IsObject,
+  Matches,
+  ValidateIf,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -125,7 +140,17 @@ export class CancelFinancialSplitDto {
 
 /** Tokenized Wompi methods only; never accepts raw card/PAN credentials. */
 export class SplitWompiPaymentMethodDto {
-  @IsIn(['CARD', 'NEQUI', 'PSE', 'BANCOLOMBIA_TRANSFER', 'BANCOLOMBIA_COLLECT', 'BANCOLOMBIA_QR', 'DAVIPLATA', 'SU_PLUS', 'PCOL'])
+  @IsIn([
+    'CARD',
+    'NEQUI',
+    'PSE',
+    'BANCOLOMBIA_TRANSFER',
+    'BANCOLOMBIA_COLLECT',
+    'BANCOLOMBIA_QR',
+    'DAVIPLATA',
+    'SU_PLUS',
+    'PCOL',
+  ])
   type!: string;
 
   @ValidateIf((method) => method.type === 'CARD')
@@ -167,7 +192,10 @@ export class SplitWompiPaymentMethodDto {
   @MaxLength(20)
   financial_institution_code?: string;
 
-  @ValidateIf((method) => method.type === 'PSE' || method.payment_description !== undefined)
+  @ValidateIf(
+    (method) =>
+      method.type === 'PSE' || method.payment_description !== undefined,
+  )
   @IsString()
   @MinLength(1)
   @MaxLength(255)

@@ -1,3 +1,5 @@
+import { SplitAccountsPanelComponent } from '../../../restaurant-ops/tables/components/split-accounts-panel/split-accounts-panel.component';
+import type { SplitResult } from '../../../restaurant-ops/tables/interfaces';
 import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { NgClass, DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
@@ -160,6 +162,7 @@ type RefundState =
   selector: 'app-order-details-page',
   standalone: true,
   imports: [
+    SplitAccountsPanelComponent,
     RouterModule,
     ReactiveFormsModule,
     AlertBannerComponent,
@@ -1078,7 +1081,9 @@ export class OrderDetailsPageComponent {
         break;
     }
 
-    return this.applyCancellationPolicy(order, actions);
+    return this.applyCancellationPolicy(order, order.active_financial_split_id
+      ? actions.filter((action) => !['pay', 'credit-payment', 'edit-order'].includes(action.id))
+      : actions);
   });
 
   /** The server owns this policy, including legacy rows and settled gateways. */
@@ -1645,6 +1650,15 @@ export class OrderDetailsPageComponent {
     });
   }
 
+  onFinancialAccountsLoaded(result: SplitResult | null): void {
+    this.order.update((order) => order ? { ...order, active_financial_split_id: result?.split_group_id ?? null } : order);
+  }
+
+  onFinancialAccountsChanged(result: SplitResult | null): void {
+    this.onFinancialAccountsLoaded(result);
+    this.loadData();
+  }
+
   loadData(): void {
     if (!this.orderId) return;
 
@@ -1839,6 +1853,10 @@ export class OrderDetailsPageComponent {
   // ── Flow Actions ───────────────────────────────────────────
 
   openPayModal(): void {
+    if (this.order()?.active_financial_split_id) {
+      this.toastService.info('Cobra desde el panel de cuentas independientes.');
+      return;
+    }
     if (this.paymentMethods().length === 0) {
       this.loadPaymentMethods();
     }
@@ -1847,6 +1865,7 @@ export class OrderDetailsPageComponent {
   }
 
   onPaymentSubmitted(submit: PaymentSubmit): void {
+    if (this.order()?.active_financial_split_id) return;
     if (!this.orderId) return;
 
     // Map the collector's normalized submit → PayOrderDto. A null method id would
@@ -3525,7 +3544,7 @@ export class OrderDetailsPageComponent {
 
   editOrderInPos(): void {
     const order = this.order();
-    if (!order) return;
+    if (!order || order.active_financial_split_id) return;
     this.router.navigate(['/admin/pos'], { queryParams: { editOrder: order.id } });
   }
 
@@ -4873,6 +4892,7 @@ export class OrderDetailsPageComponent {
    * detalle de una ORDEN; el endpoint correcto es el de órdenes.
    */
   createInvoiceFromOrder(): void {
+    if (this.order()?.active_financial_split_id) { this.toastService.info('Crea la factura desde cada cuenta independiente.'); return; }
     if (!this.orderId || this.hasSalesInvoice() || this.isEmittingInvoice()) return;
     this.isEmittingInvoice.set(true);
     this.invoicingService

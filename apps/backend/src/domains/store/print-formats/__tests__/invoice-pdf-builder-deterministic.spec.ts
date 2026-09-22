@@ -42,7 +42,7 @@ const FIXTURE: InvoicePdfData = {
   company_phone: '6015551234',
   company_email: 'facturacion@emisor-prueba.example',
   company_trade_name: 'EMISOR DE PRUEBA',
-  company_tax_regime: 'Responsable de IVA',
+  company_fiscal_qualities: 'Gran contribuyente',
 
   format: 'letter',
 

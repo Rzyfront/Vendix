@@ -2205,6 +2205,175 @@ describe('PaymentsService', () => {
       });
     });
 
+    /**
+     * QUI-INC — la línea AD-HOC (`product_id = NULL`, `item_type='custom'`)
+     * persistía el `tax_rate_id`/`tax_name`/`tax_rate` REALES de la categoría
+     * y fabricaba `tax_type='iva'`, porque `calculateTaxCategoryTaxes` nunca
+     * devolvía el tipo y `buildOrderItemSnapshot` lo completaba con
+     * `?? 'iva'`. Evidencia de producción (tienda 105, Pollo Árabe, sólo
+     * recauda INC): `order_item_taxes.id=130`, `tax_rate_id=68`,
+     * `tax_name='INC'`, `tax_rate=0.08000`, `tax_type='iva'` — mientras la
+     * fila hermana del MISMO `tax_rate_id` nacida del catálogo (`id=111`)
+     * decía `tax_type='inc'`. El XML DIAN transmitió lo persistido y la DIAN
+     * aceptó un "IVA del 8 %" que no existe en Colombia (0/5/19).
+     *
+     * El test fija los CUATRO campos juntos: el defecto no era que faltara
+     * uno, era que unos salían de la fila 68 y otro de un default local.
+     */
+    describe('buildPosOrderItem — la línea ad-hoc hereda el tipo fiscal de su categoría (QUI-INC)', () => {
+      afterEach(() => {
+        jest.restoreAllMocks();
+      });
+
+      // Réplica de `tax_categories.id=96` de la tienda 105: INC, inclusivo
+      // por mandato legal (Art. 512-9 ET: el INC va incluido en el precio al
+      // público), con su única tasa `tax_rates.id=68` al 8 %.
+      const incCategoryTx = () => ({
+        stores: {
+          findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }),
+        },
+        tax_categories: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 96,
+            name: 'INC',
+            tax_type: 'inc',
+            is_inclusive: true,
+            tax_rates: [{ id: 68, name: 'INC', rate: 0.08 }],
+          }),
+        },
+      });
+
+      it('persiste tax_type="inc" e is_inclusive=true (no "iva"/false) para un ítem sin product_id', async () => {
+        const item = {
+          item_type: 'custom',
+          // El defecto vivía justo acá: sin `product_id` no hay
+          // `product_tax_assignments` y la categoría es la única fuente.
+          product_id: null,
+          product_name: 'Test sin factura',
+          quantity: 1,
+          unit_price: 0,
+          final_unit_price: 10800,
+          tax_category_id: 96,
+        };
+
+        const result = await (service as any).buildPosOrderItem(
+          incCategoryTx(),
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+        );
+
+        expect(result.products).toBeUndefined();
+        expect(result.order_item_taxes.create).toHaveLength(1);
+        // Los cuatro campos de la MISMA fila 68 — ninguno inventado.
+        expect(result.order_item_taxes.create[0]).toMatchObject({
+          tax_rate_id: 68,
+          tax_name: 'INC',
+          tax_type: 'inc',
+          is_inclusive: true,
+        });
+        expect(Number(result.order_item_taxes.create[0].tax_rate)).toBeCloseTo(
+          0.08,
+          5,
+        );
+      });
+
+      it('categoría sin tax_type sigue cayendo a "iva" — el default canónico, resuelto en la categoría', async () => {
+        const tx = {
+          stores: {
+            findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }),
+          },
+          tax_categories: {
+            findFirst: jest.fn().mockResolvedValue({
+              id: 9,
+              tax_rates: [{ id: 91, name: 'IVA 19%', rate: 0.19 }],
+            }),
+          },
+        };
+        const item = {
+          item_type: 'custom',
+          product_id: null,
+          product_name: 'Instalación',
+          quantity: 1,
+          unit_price: 150000,
+          tax_category_id: 9,
+        };
+
+        const result = await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+        );
+
+        expect(result.order_item_taxes.create[0]).toMatchObject({
+          tax_rate_id: 91,
+          tax_type: 'iva',
+        });
+      });
+
+      it('categoría no resoluble rechaza con POS_CUSTOM_ITEM_TAX_CATEGORY_UNRESOLVABLE_001 en vez de inventar el tributo', async () => {
+        const tx = {
+          stores: {
+            findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }),
+          },
+          tax_categories: { findFirst: jest.fn().mockResolvedValue(null) },
+        };
+        const item = {
+          item_type: 'custom',
+          product_id: null,
+          product_name: 'Ítem sin categoría válida',
+          quantity: 1,
+          unit_price: 1000,
+          tax_category_id: 4242,
+        };
+
+        // Se afirma el `errorCode` exacto: un `toBeInstanceOf` pasaría con
+        // cualquier guarda anterior y no fijaría esta compuerta.
+        await expect(
+          (service as any).buildPosOrderItem(
+            tx,
+            item,
+            dtoStoreId,
+            posUser,
+            undefined,
+          ),
+        ).rejects.toMatchObject({
+          errorCode:
+            ErrorCodes.POS_CUSTOM_ITEM_TAX_CATEGORY_UNRESOLVABLE_001.code,
+        });
+      });
+
+      it('sin tax_category_id NO escribe fila alguna — ausencia de impuesto, no un IVA inventado', async () => {
+        const tx = {
+          stores: {
+            findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }),
+          },
+          tax_categories: { findFirst: jest.fn() },
+        };
+        const item = {
+          item_type: 'custom',
+          product_id: null,
+          product_name: 'Propina',
+          quantity: 1,
+          unit_price: 5000,
+        };
+
+        const result = await (service as any).buildPosOrderItem(
+          tx,
+          item,
+          dtoStoreId,
+          posUser,
+          undefined,
+        );
+
+        expect(result.order_item_taxes).toBeUndefined();
+        expect(tx.tax_categories.findFirst).not.toHaveBeenCalled();
+      });
+    });
+
     describe('buildOrderItemSnapshot — G-1 gate (ADR-11/B.4): registra, no lanza', () => {
       // G-1 evaluado directo sobre `buildOrderItemSnapshot`, sin pasar por
       // `buildPosOrderItem`: aísla la compuerta del resto del pipeline (el

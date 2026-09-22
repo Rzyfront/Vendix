@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
-import { ErrorCodes, VendixHttpException } from '../errors';
+import { ErrorCodes, FinancialSplitErrors, VendixHttpException } from '../errors';
 import { RequestContextService } from '../context/request-context.service';
 
 /**
@@ -121,6 +121,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
       } else {
         message = exception.message || 'Request failed';
       }
+    } else if (
+      exception instanceof Error &&
+      /FINANCIAL_SPLIT_(LOCKED|ACCOUNT_REQUIRED|INVALID_SOURCE|INVALID_ACCOUNT|INVALID_INVOICE|UNBALANCED|OVERPAYMENT)/.test(exception.message)
+    ) {
+      // Only our named DB invariants: never turn arbitrary Prisma failures into
+      // client errors, and never expose the SQL/request echoed by Prisma.
+      const entry = exception.message.includes('FINANCIAL_SPLIT_OVERPAYMENT')
+        ? FinancialSplitErrors.SPLIT_PAYMENT_AMOUNT
+        : FinancialSplitErrors.SPLIT_ACCOUNT_LOCKED;
+      status = entry.httpStatus;
+      errorCode = entry.code;
+      message = entry.devMessage;
     } else if (
       exception instanceof Prisma.PrismaClientKnownRequestError &&
       exception.code === 'P2020'

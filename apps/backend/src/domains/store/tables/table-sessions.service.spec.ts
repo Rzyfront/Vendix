@@ -428,6 +428,104 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         }),
       );
     });
+
+    /**
+     * QUI-INC — la cuenta abierta de un restaurante es EXACTAMENTE el caso
+     * que produjo el defecto: `tax_categories` INC al 8 % e inclusiva. El
+     * write site tenía un DOBLE default (`row.tax_type ?? 'iva'`,
+     * `row.is_inclusive ?? false`) sobre filas que el resolver ya entregaba
+     * completas; lo único que ese `??` podía hacer era enmascarar un hueco
+     * del resolver y convertir un INC no propagado en el IVA del 8 % que la
+     * DIAN aceptó en la tienda 105.
+     */
+    it('QUI-INC: una categoría INC persiste tax_type="inc" en order_item_taxes, no "iva"', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue({
+        id: 1,
+        order_id: 100,
+        closed_at: null,
+        table_id: 5,
+        order: { state: 'draft', order_items: [] },
+        table: { id: 5, name: 'Mesa 5', zone: null, status: 'occupied' },
+      });
+      prismaMock.products.findMany.mockResolvedValue([
+        {
+          id: 70,
+          name: 'Bandeja paisa',
+          base_price: 1000,
+          is_sellable: true,
+          product_type: 'prepared',
+          track_inventory: false,
+        },
+      ]);
+      prismaMock.product_tax_assignments.findMany.mockResolvedValue([
+        {
+          product_id: 70,
+          is_inclusive: true,
+          tax_categories: {
+            tax_type: 'inc',
+            tax_rates: [{ id: 68, name: 'INC', rate: 0.08, is_inclusive: true }],
+          },
+        },
+      ]);
+      prismaMock.order_items.findMany.mockResolvedValue([]);
+      prismaMock.order_items.create.mockResolvedValue({});
+      prismaMock.orders.update.mockResolvedValue({});
+
+      await service.addItems(1, {
+        items: [{ product_id: 70, quantity: 1 }],
+      } as any);
+
+      const createArgs = (prismaMock.order_items.create as jest.Mock).mock
+        .calls[0][0];
+      const taxRow = createArgs.data.order_item_taxes.create[0];
+      // Los cuatro campos fiscales vienen de la MISMA fila de catálogo: si el
+      // `tax_rate_id` es el 68 (INC), `tax_type` no puede decir otra cosa.
+      expect(taxRow).toMatchObject({
+        tax_rate_id: 68,
+        tax_name: 'INC',
+        tax_type: 'inc',
+        is_inclusive: true,
+      });
+      expect(taxRow.tax_type).not.toBe('iva');
+    });
+
+    /**
+     * QUI-INC — el default canónico («sin tipar significa IVA») vive en el
+     * RESOLVER, contra la `tax_categories` que es dueña de la columna, y no
+     * en el punto de escritura. Esta prueba mira la salida del resolver
+     * directamente: si alguien moviera el default de vuelta al `create`, el
+     * resolver devolvería una fila sin tipo y esto quedaría en rojo.
+     */
+    it('QUI-INC: el default IVA de una categoría sin tipar lo pone el RESOLVER, no el create', async () => {
+      prismaMock.product_tax_assignments.findMany.mockResolvedValue([
+        {
+          product_id: 70,
+          is_inclusive: null,
+          tax_categories: {
+            tax_type: null,
+            tax_rates: [{ id: 9, name: 'Genérico', rate: 0.19, is_inclusive: false }],
+          },
+        },
+      ]);
+
+      const rows = await (
+        service as unknown as {
+          resolveFullTaxRowsByProductId: (
+            ids: number[],
+          ) => Promise<Map<number, Array<Record<string, unknown>>>>;
+        }
+      ).resolveFullTaxRowsByProductId([70]);
+
+      expect(rows.get(70)).toEqual([
+        {
+          tax_rate_id: 9,
+          name: 'Genérico',
+          rate: 0.19,
+          tax_type: 'iva',
+          is_inclusive: false,
+        },
+      ]);
+    });
   });
 
   describe('openTableSessionPublic (QR-por-mesa, Fase 7)', () => {

@@ -80,15 +80,25 @@ export class PrintAnnexValidatorService {
       fixAction: { label: 'Activar NIT en cabecera', sectionId: 'sec_header', fieldKey: 'f_nit', companyFieldKey: 'NIT' },
     });
 
+    // NO existe un requisito de imprimir el régimen. Esta regla EXIGÍA
+    // «Responsable de IVA / No responsable de IVA» para dar por aprobada la
+    // revisión de anexo, y esa leyenda salió del art. 506 E.T., derogado por la
+    // Ley 1943/2018 (art. 122) y la Ley 2010/2019 (art. 160). Lo que el num. 12
+    // del art. 11 de la Res. 000165/2023 enumera son cuatro CALIDADES
+    // —retenedor de IVA, autorretenedor de renta, gran contribuyente, SIMPLE—
+    // y sólo «cuando corresponda»: un emisor que no ostente ninguna cumple
+    // imprimiendo nada. Por eso es `info` y nunca `warning`: la regla informa
+    // dónde se pinta la calidad, no reclama una línea obligatoria.
     rules.push({
       id: 'emisor_regime',
       category: 'emisor',
-      name: 'Régimen Fiscal / Responsabilidad Tributaria',
-      description: 'Identificación de la calidad de responsable del IVA o no responsable.',
-      reference: 'Anexo Técnico 1.9 DIAN §8.1.1',
-      severity: isFiscal ? 'warning' : 'info',
-      passed: isFieldEnabled('regimen') || isFieldEnabled('store.tax_regime') || isFieldEnabled('f_regime') || isSectionTypeEnabled('header'),
-      fixAction: { label: 'Activar Régimen Fiscal', sectionId: 'sec_header', fieldKey: 'f_regime', companyFieldKey: 'regimen' },
+      name: 'Calidades Fiscales del Emisor (cuando corresponda)',
+      description:
+        'Si el emisor es agente retenedor de IVA, autorretenedor de renta, gran contribuyente o del régimen SIMPLE, esa calidad debe figurar. Si no ostenta ninguna, no se imprime ningún renglón: no existe obligación de declarar el régimen de IVA en el papel.',
+      reference: 'Num. 12 art. 11 Res. DIAN 000165/2023 / Art. 617 lit. i) E.T.',
+      severity: 'info',
+      passed: isFieldEnabled('regimen') || isFieldEnabled('store.fiscal_qualities') || isFieldEnabled('store.tax_regime') || isFieldEnabled('f_regime') || isSectionTypeEnabled('header'),
+      fixAction: { label: 'Activar Calidades Fiscales', sectionId: 'sec_header', fieldKey: 'f_regime', companyFieldKey: 'regimen' },
     });
 
     rules.push({

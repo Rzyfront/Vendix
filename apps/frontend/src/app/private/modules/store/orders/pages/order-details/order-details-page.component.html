@@ -150,6 +150,12 @@
       (actionClicked)="onHeaderAction($event)"
     ></app-sticky-header>
 
+    @if (orderData.active_financial_split_id) {
+      <div class="max-w-[1600px] mx-auto mb-4">
+        <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="false" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" />
+      </div>
+    }
+
     <!-- Main Grid: Two columns -->
     <div class="max-w-[1600px] mx-auto">
       <!-- Order summary strip: channel + delivery + credit (ultra-thin) -->

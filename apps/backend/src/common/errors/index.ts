@@ -9,3 +9,5 @@ export {
   VendixHttpException,
   VendixHttpExceptionDetails,
 } from './vendix-http.exception';
+
+export { FinancialSplitErrors } from './financial-split-error-codes';

@@ -1,3 +1,4 @@
+import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
 import { Injectable, ConflictException, Logger } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import {
@@ -397,6 +398,26 @@ export class OrdersService {
         ? await this.resolveLineTaxesForOrder(taxedProductIds)
         : new Map<number, ResolvedLineTax[]>();
 
+    // QUI-INC — segunda fuente CATALOGADA para el desglose: la categoría que
+    // la línea declara explícitamente (`tax_category_id`). Sólo se consulta
+    // cuando el producto no aporta asignaciones; existe para que el hueco
+    // «producto sin configurar» se llene con una fila real del catálogo en vez
+    // de con el `tax_name:'IVA' / tax_type:'iva'` fabricado que tenía el
+    // fallback. Se resuelve ANTES de la transacción y en UN batch, junto al
+    // lookup de arriba. Un id declarado e irresoluble lanza 422 acá — antes de
+    // escribir una sola fila — en vez de degradar a IVA dentro del `create`.
+    const declaredTaxCategoryIds = Array.from(
+      new Set(
+        createOrderDto.items
+          .map((it) => it.tax_category_id)
+          .filter((id): id is number => typeof id === 'number' && id > 0),
+      ),
+    );
+    const declaredTaxCategoryRows = await this.resolveDeclaredTaxCategories(
+      declaredTaxCategoryIds,
+      store_id,
+    );
+
     let retries = 3;
     while (retries > 0) {
       try {
@@ -499,14 +520,28 @@ export class OrdersService {
                     // a la línea, con `tax_rate` como fracción. Si la
                     // línea no trae impuesto (`tax_amount_item <= 0`), no
                     // se emite la fila — coincide con checkout y payments.
+                    //
+                    // QUI-INC — PRECEDENCIA de fuentes, ambas del catálogo:
+                    //   1. `product_tax_assignments` del producto (verdad
+                    //      fiscal propia del producto; régimen histórico
+                    //      intacto, cero regresión).
+                    //   2. `tax_category_id` declarado por la línea, sólo si
+                    //      la primera no devolvió nada.
+                    // Sin ninguna de las dos NO se escribe fila: ver el
+                    // docblock de `buildOrderItemTaxesCreate`.
                     order_item_taxes:
                       Number(item.tax_amount_item ?? 0) > 0
                         ? this.buildOrderItemTaxesCreate(
                             item,
-                            item.product_id
+                            (item.product_id
                               ? lineTaxByProductId.get(item.product_id) ??
                                 null
-                              : null,
+                              : null) ??
+                              (item.tax_category_id
+                                ? declaredTaxCategoryRows.get(
+                                    item.tax_category_id,
+                                  ) ?? null
+                                : null),
                           )
                         : undefined,
                     catalog_unit_price: item.catalog_unit_price,
@@ -1233,6 +1268,8 @@ export class OrdersService {
 
   async update(id: number, updateOrderDto: UpdateOrderDto) {
     const order = await this.findOne(id);
+    const economicFields = ['items', 'subtotal', 'total_amount', 'tax_amount', 'discount_amount', 'shipping_cost', 'customer_id', 'customer_alias', 'currency'];
+    if (economicFields.some((key) => Object.prototype.hasOwnProperty.call(updateOrderDto, key))) assertNoActiveFinancialSplit(order);
 
     /**
      * QUI-557 — NINGÚN estado puede escribirse en crudo sobre `orders.state`.
@@ -1408,6 +1445,7 @@ export class OrdersService {
 
   async updateOrderItems(id: number, dto: UpdateOrderItemsDto) {
     const order = await this.findOne(id);
+    assertNoActiveFinancialSplit(order);
 
     if (order.state !== 'created' && order.state !== 'draft') {
       throw new VendixHttpException(ErrorCodes.ORD_STATUS_001);
@@ -1793,6 +1831,8 @@ export class OrdersService {
     if (!existingOrder) {
       throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
     }
+
+    assertNoActiveFinancialSplit(existingOrder);
 
     // 2) State gate ANTES del claim atómico. Una orden cancelada/refunded/
     //    shipped nunca debe mutar metadata vía el editor.
@@ -3808,8 +3848,9 @@ export class OrdersService {
    * `order_item_taxes` que respalden la cabecera del tiquete, leemos todas
    * las tasas de todas las asignaciones con su `is_inclusive` por
    * asignación (F-012). Si el producto no tiene asignaciones, el `Map`
-   * queda sin entrada y `buildOrderItemTaxesCreate` cae al fallback del
-   * snapshot del DTO (tax_name='IVA', tax_type='iva', tax_rate_id=null).
+   * queda sin entrada y la línea pasa a su segunda fuente de catálogo, la
+   * categoría declarada (`resolveDeclaredTaxCategories`); sin ninguna de las
+   * dos no se escribe desglose (QUI-INC — ya no hay fallback fabricado).
    *
      * NOTA DE CONVERGENCIA (A.4 sobre A.3 ya aterrizado): este lookup lee las
    * MISMAS tablas con la MISMA cadena de flag que
@@ -3888,6 +3929,117 @@ export class OrdersService {
       // tasas viajan como filas propias, cada una con su flag.
       if (rows.length > 0) map.set(p.id, rows);
     }
+    return map;
+  }
+
+  /**
+   * QUI-INC — resuelve las `tax_categories` DECLARADAS por línea
+   * (`CreateOrderItemDto.tax_category_id`) a las mismas `ResolvedLineTax` que
+   * produce `resolveLineTaxesForOrder`, para que ambas fuentes entren por el
+   * MISMO constructor de filas y ninguna necesite un default propio.
+   *
+   * Por qué existe: `buildOrderItemTaxesCreate` tenía un fallback que, sin
+   * asignaciones de producto, escribía `tax_name:'IVA'` + `tax_type:'iva'`
+   * junto al `prisma.create`. Como en la capa de lectura «sin tipar significa
+   * IVA» (`vendix-tax-typing`), ese default no podía distinguir «categoría
+   * genuinamente sin tipar» de «categoría INC que nadie propagó»: convertía la
+   * segunda en la primera, y esa fila viaja intacta a `invoice_taxes` y al XML
+   * firmado. Acá el default se resuelve en la FILA FUENTE: `tax_type` sale de
+   * `tax_categories` (dueña única de la columna — ver `schema.prisma`), que es
+   * la misma fila que aporta nombre, tarifa y flag inclusivo.
+   *
+   * Alcance multi-tenant EXPLÍCITO: `tax_categories` está en
+   * `store_scoped_models`, así que el cliente con scope forzaría
+   * `store_id = contexto` y dejaría fuera las categorías de ORGANIZACIÓN
+   * (`store_id IS NULL`, `organization_id` propio), que son legítimas para la
+   * tienda. Se usa el escape hatch `withoutScope()` con el predicado OR
+   * escrito a mano — exactamente el mismo que `payments.service.ts`
+   * (`calculateTaxCategoryTaxes`) aplica en el carril de cobro.
+   *
+   * Falla RUIDOSA: un id declarado que no se resuelve en ese alcance lanza
+   * `ORD_ITEM_TAX_CATEGORY_UNRESOLVABLE_001` (422) en vez de degradar a IVA.
+   * Un batch (`findMany in:`), no N+1.
+   */
+  private async resolveDeclaredTaxCategories(
+    categoryIds: number[],
+    storeId: number,
+  ): Promise<Map<number, ResolvedLineTax[]>> {
+    const map = new Map<number, ResolvedLineTax[]>();
+    if (categoryIds.length === 0) return map;
+
+    const unscoped = this.prisma.withoutScope();
+    const store = await unscoped.stores.findUnique({
+      where: { id: storeId },
+      select: { organization_id: true },
+    });
+    const organizationId =
+      store?.organization_id ??
+      RequestContextService.getContext()?.organization_id ??
+      null;
+
+    // Mismo alcance que el carril de cobro: la categoría de la tienda, o la
+    // de la organización cuando es de nivel organización (`store_id IS NULL`).
+    const scopeOptions: Prisma.tax_categoriesWhereInput[] = [
+      { store_id: storeId },
+    ];
+    if (organizationId != null) {
+      scopeOptions.push({ organization_id: organizationId, store_id: null });
+    }
+
+    const categories = await unscoped.tax_categories.findMany({
+      where: { id: { in: categoryIds }, OR: scopeOptions },
+      select: {
+        id: true,
+        tax_type: true,
+        is_inclusive: true,
+        tax_rates: {
+          select: {
+            id: true,
+            name: true,
+            rate: true,
+            is_compound: true,
+            is_inclusive: true,
+            priority: true,
+          },
+          orderBy: { priority: 'desc' },
+        },
+      },
+    });
+
+    for (const category of categories) {
+      map.set(
+        category.id,
+        (category.tax_rates ?? []).map((rate) => ({
+          id: rate.id,
+          name: rate.name,
+          rate: rate.rate,
+          is_compound: rate.is_compound ?? false,
+          // La categoría es la ÚNICA dueña de `tax_type` (ni `tax_rates` ni
+          // `product_tax_assignments` tienen la columna). Se propaga tal cual,
+          // incluido el `null`: el default canónico «sin tipar ⇒ IVA» lo
+          // aplica `buildOrderItemTaxesCreate` sobre ESTA fila fuente, no
+          // sobre un hueco anónimo.
+          tax_type: category.tax_type ?? null,
+          // Misma cadena que `resolveLineTaxesForOrder` (la categoría juega el
+          // papel de la asignación: manda, y la tasa aporta el default
+          // canónico). `payments.service.ts` usa `categoría ?? false` en la
+          // línea ad-hoc (F-052); sólo difieren cuando la categoría es NULL y
+          // la tasa marca inclusivo — ahí gana el dato de la tasa, que es la
+          // fila que define el precio.
+          is_inclusive: category.is_inclusive ?? rate.is_inclusive ?? false,
+        })),
+      );
+    }
+
+    const unresolved = categoryIds.filter((id) => !map.has(id));
+    if (unresolved.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_ITEM_TAX_CATEGORY_UNRESOLVABLE_001,
+        undefined,
+        { tax_category_ids: unresolved, store_id: storeId },
+      );
+    }
+
     return map;
   }
 
@@ -3980,11 +4132,15 @@ export class OrdersService {
    *    (orders.tax_amount ≠ Σ order_items.tax_amount). Con N tasas, el
    *    snapshot se reparte a prorrata (`splitTaxSnapshotAcrossRates`) para
    *    que la Σ siga cuadrando al centavo.
-   *  - Si el producto tiene tasas resueltas del catálogo, persistimos UNA
-   *    fila por tasa con FK + nombre + tipo + flag reales; si NO (producto
-   *    sin asignaciones), fallback al snapshot del DTO con
-   *    `tax_name='IVA'`, `tax_type='iva'`, `tax_rate_id=null` para que el
-   *    tiquete al menos pinte la línea.
+   *  - `resolved` son filas del CATÁLOGO, vengan de las asignaciones del
+   *    producto (`resolveLineTaxesForOrder`) o de la categoría declarada por
+   *    la línea (`resolveDeclaredTaxCategories`): una fila por tasa con FK +
+   *    nombre + tipo + flag reales. El `?? 'iva'` de `tax_type` es el default
+   *    canónico «sin tipar ⇒ IVA» aplicado sobre ESA fila fuente, que es donde
+   *    la regla lo permite.
+   *  - QUI-INC: sin ninguna fila fuente NO se escribe fila. El fallback que
+   *    fabricaba `tax_name='IVA'` / `tax_type='iva'` desde el snapshot del DTO
+   *    se eliminó — ver el comentario largo de esa rama abajo.
    */
   private buildOrderItemTaxesCreate(
     item: CreateOrderItemDto,
@@ -4042,27 +4198,49 @@ export class OrdersService {
       };
     }
 
-    // Fallback: producto sin `tax_rates` configuradas. Persistimos el
-    // snapshot del DTO con defaults conservadores para que el tiquete
-    // muestre la línea de IVA en vez de salir en blanco. Sin asignación no
-    // hay verdad inclusiva: la fila es agregada (ERR-03: sin tasa no se
-    // decide impuesto, nunca se lanza). F-044: también se escala a la línea
-    // (`tax_rate_id: null` la sigue marcando como fallback, distinguible de
-    // una fila resuelta contra catálogo).
-    return {
-      create: [
-        {
-          tax_rate_id: null,
-          tax_name: 'IVA',
-          tax_rate: new Prisma.Decimal(
-            item.tax_rate != null ? item.tax_rate : 0,
-          ),
-          tax_amount: new Prisma.Decimal(roundMoney(taxAmount * lineUnits)),
-          tax_type: 'iva' as const,
-          is_compound: false,
-          is_inclusive: false,
-        },
-      ],
-    };
+    // QUI-INC — SIN FILA. Acá no hay ninguna fila fuente: ni
+    // `product_tax_assignments` del producto ni `tax_category_id` declarado
+    // por la línea. El DTO sólo trae números (`tax_rate`, `tax_amount_item`),
+    // que no clasifican nada.
+    //
+    // Antes se escribía `tax_name:'IVA'` + `tax_type:'iva'` + la tarifa del
+    // DTO «para que el tiquete muestre la línea de IVA en vez de salir en
+    // blanco». Esa fila es una AFIRMACIÓN FISCAL, no un adorno de impresión:
+    // `invoicing.service.ts:createFromOrder` la copia literal a
+    // `invoice_taxes` y de ahí sale al XML firmado. Es la misma ruta que ya
+    // produjo un documento ACEPTADO por la DIAN declarando un «IVA del 8 %»
+    // —tarifa que no existe para IVA en Colombia— porque el tipo se completaba
+    // con `?? 'iva'` en el punto de escritura. Regla canónica
+    // (`vendix-tax-typing`): el default de un campo fiscal se resuelve en la
+    // FILA FUENTE, nunca junto al `prisma.create`; como en lectura «sin tipar
+    // significa IVA», un `?? 'iva'` acá no puede distinguir «sin tipar» de
+    // «INC que nadie propagó» y convierte la segunda en la primera. Para que
+    // haya fila, ahora hay que decir de qué fila del catálogo sale: eso es
+    // `tax_category_id`.
+    //
+    // QUÉ PASA CON EL TIQUETE (verificado, no supuesto):
+    //  - `pos-sale-ticket.provider.ts` sigue imprimiendo el impuesto de la
+    //    línea y las columnas en bruto: `resolveOrderLineTaxTotal` /
+    //    `resolveOrderLinePrintedGross` (`taxes/utils/final-price.util.ts`)
+    //    caen al escalar `tax_amount_item × resolveLineUnits` cuando no hay
+    //    filas. La sublínea «IVA: 19%» del ítem sale de `order_items.tax_rate`
+    //    (columna denormalizada), no de estas filas.
+    //  - `totals.tax_total` del tiquete es `orders.tax_amount` (cabecera): no
+    //    se mueve.
+    //  - Lo único que desaparece es la sección agregada «Tributos»
+    //    (`aggregateTaxes`, mismo archivo y `sales-order-invoice.provider.ts`):
+    //    ambos recorren `item.order_item_taxes || []`, así que con cero filas
+    //    simplemente no emiten grupo — no revientan. Un papel que no nombra el
+    //    tributo es honesto; uno que dice «IVA» cuando nadie lo decidió, no.
+    //  - `invoicing.service.ts:aggregateOrderTaxes` ya clasifica este caso
+    //    como su «población 3» (escalar > 0 y cero filas) y lo REPORTA con un
+    //    warn tipado (`F-090`, `tax_scalar_without_breakdown`) sin sintetizar
+    //    la fila que falta. Es decir: el camino de salida ya existía y ya está
+    //    instrumentado; esto sólo deja de alimentarlo con una mentira.
+    //
+    // ERR-03 sigue valiendo: sin tasa no se decide impuesto y esta rama nunca
+    // lanza. Lanzar es exclusivo del id declarado e irresoluble
+    // (`resolveDeclaredTaxCategories` → `ORD_ITEM_TAX_CATEGORY_UNRESOLVABLE_001`).
+    return undefined;
   }
 }
