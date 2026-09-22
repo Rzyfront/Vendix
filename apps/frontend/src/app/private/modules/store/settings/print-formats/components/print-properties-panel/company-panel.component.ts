@@ -23,7 +23,10 @@ const COMPANY_FIELDS: ReadonlyArray<{
 }> = [
   { key: 'NIT', label: 'NIT' },
   { key: 'DV', label: 'DV' },
-  { key: 'regimen', label: 'Régimen' },
+  // La clave se conserva (el composer BE la sigue matcheando y las plantillas
+  // guardadas no se invalidan); lo que cambió es QUÉ pinta: calidades fiscales
+  // del num. 12, no el régimen derogado.
+  { key: 'regimen', label: 'Calidad Fiscal (DIAN)' },
   { key: 'address', label: 'Dirección' },
   { key: 'phone', label: 'Teléfono' },
   { key: 'email', label: 'Email' },

@@ -2416,6 +2416,14 @@
       "sessions": 50,
       "memories": 36,
       "prompts": 0
+    },
+    {
+      "id": "e212faf9",
+      "created_by": "rzy",
+      "created_at": "2026-09-22T15:09:37Z",
+      "sessions": 0,
+      "memories": 3,
+      "prompts": 0
     }
   ]
 }

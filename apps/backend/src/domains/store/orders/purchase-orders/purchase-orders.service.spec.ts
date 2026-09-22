@@ -1490,10 +1490,41 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
       expect(result.items[0].capitalized_tax_amount).toBe(0);
     });
 
-    it('sin señal fiscal: indeterminado, capitaliza y ofrece el asistente', async () => {
-      // 'O-13' es una responsabilidad real que no dice nada sobre IVA: ni O-48
-      // ni O-49, y sin régimen tributario. El sistema NO puede saberlo.
+    it('casilla 53 declarada sin O-48: CONCLUYENTE, capitaliza y NO ofrece el asistente', async () => {
+      // CAMBIO 2026-09-22 — este caso afirmaba `indeterminate: true` y razonaba
+      // que «'O-13' no dice nada sobre IVA, el sistema NO puede saberlo». La
+      // inversión de la jerarquía lo contradice: una casilla 53 DECLARADA que
+      // enumera responsabilidades y no incluye O-48 sí dice algo — dice que el
+      // contribuyente no es responsable de IVA. El tenant ya hizo el trámite
+      // fiscal, así que mandarlo al asistente sería pedirle que corrija algo
+      // que está bien.
+      //
+      // Lo que el usuario VE no cambia: se capitaliza igual, con el mismo
+      // reparto por línea. Cambia el motivo, y con él el texto y el CTA.
       const service = await previewWith({ taxResponsibilities: ['O-13'] });
+      const result: any = await service.getCostPreview({
+        location_id: LOCATION_ID,
+        prices_include_tax: false,
+        items: [item],
+      } as any);
+
+      const fx = result.fiscal_explanation;
+      expect(fx.vat_responsible).toBe(false);
+      expect(fx.indeterminate).toBe(false);
+      expect(fx.treatment).toBe('capitalized');
+      expect(fx.reason).toBe('declared_without_vat_code');
+      expect(fx.source).toBe('tax_responsibilities');
+      expect(fx.cta).toBeUndefined();
+      assertNoForbiddenCitation(fx.legal_basis);
+      expect(result.items[0].deductible_tax_amount).toBe(0);
+      expect(result.items[0].capitalized_tax_amount).toBe(950);
+    });
+
+    it('sin NINGUNA señal fiscal: indeterminado, capitaliza y ofrece el asistente', async () => {
+      // El indeterminado de verdad, que la inversión conserva: casilla 53 vacía
+      // y sin régimen. Aquí el sistema realmente no puede saberlo, y por eso
+      // —y sólo aquí— el CTA al asistente fiscal tiene sentido.
+      const service = await previewWith({ taxResponsibilities: [] });
       const result: any = await service.getCostPreview({
         location_id: LOCATION_ID,
         prices_include_tax: false,

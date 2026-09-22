@@ -6071,6 +6071,23 @@ export const ErrorCodes = {
     devMessage:
       'Esta línea declara un precio bruto y su impuesto tiene base propia (fixed_base): el despeje de bruto declarado no puede repartirla y la base resultante sería incorrecta.',
   },
+
+  // QUI-INC — la línea AD-HOC del POS (`item_type='custom'`, sin
+  // `product_id`) no tiene `product_tax_assignments`: su ÚNICA fuente de
+  // verdad fiscal es la `tax_categories` que el cajero seleccionó. Si esa
+  // categoría no se puede leer en el alcance de la tienda/organización, el
+  // snapshot `order_item_taxes` no tiene de dónde sacar `tax_type` /
+  // `is_inclusive` / `tax_name` / `tax_rate` — y fabricarlos es lo que
+  // produjo una factura electrónica ACEPTADA por la DIAN declarando un "IVA
+  // del 8 %" en un restaurante que sólo recauda INC. Se rechaza el cobro:
+  // un documento fiscal con el tributo equivocado es peor que una venta
+  // bloqueada. Reemplaza un `BadRequestException` crudo (400 sin código).
+  POS_CUSTOM_ITEM_TAX_CATEGORY_UNRESOLVABLE_001: {
+    code: 'POS_CUSTOM_ITEM_TAX_CATEGORY_UNRESOLVABLE_001',
+    httpStatus: 422,
+    devMessage:
+      'La categoría de impuesto de la línea personalizada no existe en esta tienda; sin ella el tipo fiscal (IVA/INC/ICA) del snapshot sería inventado.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

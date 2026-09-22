@@ -393,7 +393,6 @@ describe('FiscalObligationService', () => {
 
       const types = generatedTypes(client);
       expect(types).not.toContain('vat_return');
-      expect(types).toContain('inc_return');
     });
 
     it('generates vat_return on even months for O-48 with default bimonthly periodicity', async () => {
@@ -405,10 +404,58 @@ describe('FiscalObligationService', () => {
 
       const types = generatedTypes(client);
       expect(types).toContain('vat_return');
-      expect(types).toContain('inc_return');
     });
 
-    it('keeps the legacy defaults when responsibilities are absent or empty', async () => {
+    /**
+     * QUI-INC — los dos ejes se separaron. Antes `inc_return` colgaba del
+     * predicado de IVA, así que O-48 arrastraba una declaración de INC que el
+     * contribuyente no debía, y O-33 sin O-48 no generaba la que sí debe.
+     * Son responsabilidades distintas de la misma casilla 53 y se preguntan
+     * por separado.
+     */
+    it('no genera inc_return para O-48 solo: ser responsable de IVA no obliga a declarar INC', async () => {
+      const { service, client } = createInvoicingService({
+        tax_responsibilities: ['O-48'],
+      });
+
+      await generate(service, 4);
+
+      const types = generatedTypes(client);
+      expect(types).toContain('vat_return');
+      expect(types).not.toContain('inc_return');
+    });
+
+    it('genera inc_return (y NO vat_return) para O-33 sin O-48 — el restaurante del Art. 426 ET', async () => {
+      const { service, client } = createInvoicingService({
+        // Casilla 53 real de Pollo Árabe (store 105, producción).
+        tax_responsibilities: [
+          'O-05',
+          'O-07',
+          'O-14',
+          'O-33',
+          'O-42',
+          'O-52',
+          'O-55',
+        ],
+        // El régimen rancio que antes lo volvía responsable de IVA.
+        tax_regime: 'COMUN',
+      });
+
+      await generate(service, 4);
+
+      const types = generatedTypes(client);
+      expect(types).toContain('inc_return');
+      expect(types).not.toContain('vat_return');
+    });
+
+    /**
+     * Sin ninguna señal fiscal el helper es fail-closed (`responsible: false`,
+     * `indeterminate: true`), así que NO se generan declaraciones. La versión
+     * previa de este caso afirmaba lo contrario —«indeterminado ⇒
+     * responsable»— describiendo una rama anti-regresión que ya no existe, y
+     * llevaba tiempo en rojo contra HEAD por eso.
+     */
+    it('no genera declaraciones cuando no hay ninguna señal fiscal declarada', async () => {
       for (const fiscalData of [
         undefined,
         {},
@@ -419,8 +466,9 @@ describe('FiscalObligationService', () => {
         await generate(service, 3);
 
         const types = generatedTypes(client);
-        expect(types).toContain('vat_return');
-        expect(types).toContain('inc_return');
+        expect(types).not.toContain('vat_return');
+        expect(types).not.toContain('inc_return');
+        expect(types).toContain('electronic_invoice_review');
       }
     });
 

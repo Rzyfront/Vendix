@@ -5,7 +5,7 @@ import { purchaseEffectFor } from '../../domains/fiscal-operations/constants/fis
 import { normalizeFiscalResponsibilityCode } from '../constants/fiscal-responsibilities';
 
 /**
- * F4 — Ciclo de vida legal del IVA colombiano.
+ * F4 — Ciclo de vida legal del IVA colombiano (y del INC, su hermano de RUT).
  *
  * Fuente ÚNICA de verdad (backend) para responder si un comercio es
  * "responsable de IVA" ante la DIAN. Reutiliza el patrón ya existente en
@@ -13,13 +13,45 @@ import { normalizeFiscalResponsibilityCode } from '../constants/fiscal-responsib
  * (constante O-48), consolidándolo en un helper puro reutilizable por los
  * puntos de escritura (productos, ventas POS, checkout ecommerce).
  *
- * La definición canónica se deriva de `fiscal_data`:
- *   - `tax_responsibilities` (RUT casilla 53) incluye 'O-48'  ⇒ responsable (true)
- *   - incluye 'O-49' SIN 'O-48'                               ⇒ NO responsable (false)
- *   - fallback por `tax_regime`:
- *       · COMUN / GRAN_CONTRIBUYENTE                          ⇒ responsable (true)
- *       · SIMPLIFICADO                                        ⇒ NO responsable (false)
- *   - indeterminado (sin señales)                             ⇒ NO responsable (false)
+ * =====================================================================
+ * LA JERARQUÍA DE EVIDENCIA — LO DECLARADO GANA A LO INFERIDO
+ * =====================================================================
+ * La definición canónica se deriva de `fiscal_data`, y el orden importa:
+ *
+ *   1. `tax_responsibilities` (RUT casilla 53) NO VACÍA ⇒ AUTORIDAD TOTAL.
+ *        · incluye 'O-48'                        ⇒ responsable (true)
+ *        · incluye O-49 / O-50 / O-53 / R-99-PN  ⇒ NO responsable (false)
+ *        · no incluye ninguno de los anteriores  ⇒ NO responsable (false),
+ *          razón `declared_without_vat_code`
+ *   2. Sólo si la lista está VACÍA o ausente, fallback por `tax_regime`:
+ *        · COMUN / GRAN_CONTRIBUYENTE            ⇒ responsable (true)
+ *        · SIMPLIFICADO                          ⇒ NO responsable (false)
+ *   3. Indeterminado (sin ninguna señal)         ⇒ NO responsable (false)
+ *
+ * POR QUÉ LA LISTA MANDA SOBRE EL RÉGIMEN (cambio 2026-09-22). Antes el
+ * fallback por `tax_regime` se consultaba cuando la lista no traía NI O-48 NI
+ * O-49, de modo que un dato INFERIDO ganaba sobre un dato DECLARADO. Medido en
+ * producción: Pollo Árabe (store 105), restaurante con casilla 53 =
+ * {O-05, O-07, O-14, O-33, O-42, O-52, O-55} — siete responsabilidades reales,
+ * ninguna de ellas O-48 — quedaba clasificado como responsable de IVA porque su
+ * `tax_regime` heredado decía 'COMUN', y su factura electrónica declaraba al
+ * emisor bajo esquema tributario IVA. Una casilla 53 completa que NO enumera
+ * O-48 es una declaración de que el contribuyente no es responsable de IVA; no
+ * es un hueco que el régimen deba rellenar.
+ *
+ * POR QUÉ 'COMUN' NO PUEDE ARBITRAR NADA. El «régimen común» y el «régimen
+ * simplificado» dejaron de existir: la Ley 1943 de 2018 (art. 18) los eliminó y
+ * la Ley 2010 de 2019 (art. 20) consolidó la sustitución por la dicotomía
+ * «responsable / no responsable de IVA». Lo que hoy queda almacenado en
+ * `tax_regime` es vocabulario derogado arrastrado por semillas y formularios
+ * viejos, y por eso sólo puede actuar como último respaldo.
+ *
+ * Y EN EL CASO CONCRETO DE UN RESTAURANTE, LA INFERENCIA ES ADEMÁS ILEGAL: el
+ * Art. 426 ET declara el servicio de expendio de comidas y bebidas EXCLUIDO del
+ * IVA y sujeto al Impuesto Nacional al Consumo. Un restaurante sin contrato de
+ * franquicia no puede ser responsable de IVA por ese servicio, así que inferir
+ * su responsabilidad de un `tax_regime` rancio produce una afirmación que la
+ * norma prohíbe.
  *
  * Cambio de default (2026-08-21): la rama indeterminada pasó de `true` a
  * `false`. Razón: el 100% de los tenants arrancan con el módulo fiscal
@@ -41,6 +73,42 @@ import { normalizeFiscalResponsibilityCode } from '../constants/fiscal-responsib
 export const VAT_RESPONSIBLE_CODE = 'O-48';
 /** RUT casilla 53 — 'O-49' No responsable de IVA. */
 export const VAT_NOT_RESPONSIBLE_CODE = 'O-49';
+
+/**
+ * Códigos de la casilla 53 que DECLARAN no-responsabilidad de IVA.
+ *
+ * El conjunto sólo se consulta DESPUÉS de haber descartado `O-48`, así que
+ * ningún código de aquí puede contradecir una responsabilidad declarada: si la
+ * lista trae O-48 y además uno de estos, gana O-48.
+ *
+ *  · `O-49`    No responsable de IVA — la declaración directa.
+ *  · `O-53`    Persona jurídica no responsable de IVA — la variante para
+ *              sociedades; misma afirmación, otro código.
+ *  · `O-50`    No responsable de consumo (restaurantes y bares). Es un código
+ *              del eje INC, no del eje IVA; se incluye porque el expendio de
+ *              comidas está EXCLUIDO de IVA (Art. 426 ET), de modo que un RUT
+ *              que lo enumera sin O-48 no deja ninguna duda sobre el IVA.
+ *  · `R-99-PN` «No aplica» — el contribuyente no asume responsabilidades.
+ */
+export const VAT_NOT_RESPONSIBLE_CODES: readonly string[] = [
+  VAT_NOT_RESPONSIBLE_CODE,
+  'O-50',
+  'O-53',
+  'R-99-PN',
+];
+
+/**
+ * RUT casilla 53 — 'O-33' Impuesto Nacional al Consumo (INC).
+ *
+ * Es el eje HERMANO del IVA y el que un restaurante colombiano sí declara:
+ * Art. 426 ET excluye de IVA el expendio de comidas y bebidas y lo somete al
+ * INC. Vive en este archivo, y no en uno propio, porque los dos ejes se leen de
+ * la MISMA lista y separarlos garantizaría que un día divergieran en cómo la
+ * normalizan.
+ */
+export const INC_RESPONSIBLE_CODE = 'O-33';
+/** RUT casilla 53 — 'O-50' No responsable de consumo (restaurantes y bares). */
+export const INC_NOT_RESPONSIBLE_CODE = 'O-50';
 
 /** Contexto de la operación bloqueada, viaja en `details.context` del error. */
 export type VatChargeContext = 'product' | 'sale';
@@ -67,6 +135,16 @@ export type VatResponsibilitySource =
 export type VatResponsibilityReason =
   | 'declared_responsible'
   | 'declared_not_responsible'
+  /**
+   * La casilla 53 viene DECLARADA y COMPLETA, y no enumera ningún código del
+   * eje IVA — ni O-48 ni una negación explícita. Es concluyente, no
+   * indeterminado: una lista llena que omite O-48 dice que el contribuyente no
+   * es responsable de IVA. Se distingue de `declared_not_responsible` porque el
+   * texto que ve el operador es distinto (no hay un código que citarle) y
+   * porque es el motivo que permite auditar cuántos tenants están en este
+   * estado sin haber tramitado O-49.
+   */
+  | 'declared_without_vat_code'
   | 'regime_responsible'
   | 'regime_not_responsible'
   | 'no_fiscal_signal'
@@ -95,7 +173,9 @@ const RESULT_MESSAGES: Record<VatResponsibilityReason, string> = {
   declared_responsible:
     'El comercio declaró la responsabilidad O-48 (responsable de IVA).',
   declared_not_responsible:
-    'El comercio declaró la responsabilidad O-49 (no responsable de IVA).',
+    'El comercio declaró una responsabilidad de no-responsabilidad de IVA (O-49, O-50, O-53 o R-99-PN).',
+  declared_without_vat_code:
+    'El RUT del comercio declara sus responsabilidades fiscales y ninguna es O-48 (responsable de IVA). Se toma como NO responsable de IVA.',
   regime_responsible:
     'El régimen tributario declarado (COMÚN / GRAN CONTRIBUYENTE) implica responsabilidad de IVA.',
   regime_not_responsible:
@@ -122,17 +202,41 @@ function buildResult(
 }
 
 /**
+ * Normaliza la casilla 53 a códigos canónicos (`'48'` → `'O-48'`, `'o-33'` →
+ * `'O-33'`). Devuelve `[]` para cualquier entrada que no sea un arreglo — un
+ * `tax_responsibilities` que llega como string suelto es un dato malformado,
+ * no una declaración, y tratarlo como lista lo ascendería a autoridad total.
+ *
+ * Único lector de `tax_responsibilities` en este archivo: los dos ejes (IVA e
+ * INC) parten de aquí para que no puedan normalizar distinto.
+ */
+function readDeclaredResponsibilities(
+  fiscalData: VatFiscalDataInput | null | undefined,
+): string[] {
+  if (!Array.isArray(fiscalData?.tax_responsibilities)) return [];
+  return (fiscalData!.tax_responsibilities as unknown[])
+    .filter((code): code is string => typeof code === 'string')
+    .map((code) => normalizeFiscalResponsibilityCode(code))
+    .filter((code) => !!code);
+}
+
+/**
  * Resuelve la responsabilidad de IVA distinguiendo TRES estados a partir de
  * `fiscal_data`. Es la implementación canónica; `isVatResponsible` proyecta
  * su campo `responsible`.
  *
- * | fiscal_data                                | responsible | indeterminate |
- * | ------------------------------------------ | ----------- | ------------- |
- * | `tax_responsibilities` incluye 'O-48'       | true        | false         |
- * | incluye 'O-49' sin 'O-48'                   | false       | false         |
- * | `tax_regime` COMUN / GRAN_CONTRIBUYENTE     | true        | false         |
- * | `tax_regime` SIMPLIFICADO                   | false       | false         |
- * | sin ninguna señal (null, {}, vacío, basura) | false       | **true**      |
+ * | fiscal_data                                     | responsible | indeterminate |
+ * | ----------------------------------------------- | ----------- | ------------- |
+ * | lista no vacía incluye 'O-48'                    | true        | false         |
+ * | lista no vacía incluye O-49/O-50/O-53/R-99-PN    | false       | false         |
+ * | lista no vacía SIN ningún código del eje IVA     | false       | false         |
+ * | lista vacía + `tax_regime` COMUN / GRAN_CONTRIB. | true        | false         |
+ * | lista vacía + `tax_regime` SIMPLIFICADO          | false       | false         |
+ * | sin ninguna señal (null, {}, vacío, basura)      | false       | **true**      |
+ *
+ * La tercera fila es la que cambió el 2026-09-22: antes caía al fallback por
+ * régimen. Ver el bloque de cabecera para por qué una casilla 53 declarada no
+ * admite que un `tax_regime` derogado la sobrescriba.
  *
  * Nunca lanza. Para el caso "no se pudo LEER `fiscal_data`" —que es distinto
  * de "`fiscal_data` no dice nada"— usa `vatResponsibilityReadFailure()`.
@@ -140,26 +244,39 @@ function buildResult(
 export function resolveVatResponsibility(
   fiscalData: VatFiscalDataInput | null | undefined,
 ): VatResponsibilityResult {
-  const responsibilities = Array.isArray(fiscalData?.tax_responsibilities)
-    ? (fiscalData!.tax_responsibilities as unknown[])
-        .filter((code): code is string => typeof code === 'string')
-        .map((code) => normalizeFiscalResponsibilityCode(code))
-    : [];
+  const responsibilities = readDeclaredResponsibilities(fiscalData);
 
-  // 1) Señal explícita por responsabilidades DIAN (RUT casilla 53).
-  if (responsibilities.includes(VAT_RESPONSIBLE_CODE)) {
-    return buildResult(true, false, 'declared_responsible', 'tax_responsibilities');
-  }
-  if (responsibilities.includes(VAT_NOT_RESPONSIBLE_CODE)) {
+  // 1) LA LISTA DECLARADA ES AUTORIDAD TOTAL. Mientras traiga al menos un
+  //    código, el régimen tributario no se consulta: lo declarado no se corrige
+  //    con lo inferido.
+  if (responsibilities.length) {
+    if (responsibilities.includes(VAT_RESPONSIBLE_CODE)) {
+      return buildResult(
+        true,
+        false,
+        'declared_responsible',
+        'tax_responsibilities',
+      );
+    }
+    if (responsibilities.some((code) => VAT_NOT_RESPONSIBLE_CODES.includes(code))) {
+      return buildResult(
+        false,
+        false,
+        'declared_not_responsible',
+        'tax_responsibilities',
+      );
+    }
+    // Casilla 53 llena que no enumera ningún código del eje IVA. Es el caso de
+    // Pollo Árabe: concluyente y NO responsable, no indeterminado.
     return buildResult(
       false,
       false,
-      'declared_not_responsible',
+      'declared_without_vat_code',
       'tax_responsibilities',
     );
   }
 
-  // 2) Fallback por régimen tributario.
+  // 2) Fallback por régimen tributario — SÓLO con la lista vacía o ausente.
   const regime =
     typeof fiscalData?.tax_regime === 'string'
       ? fiscalData.tax_regime
@@ -173,6 +290,99 @@ export function resolveVatResponsibility(
 
   // 3) Indeterminado ⇒ NO responsable (fail-closed, 2026-08-21).
   return buildResult(false, true, 'no_fiscal_signal', 'absent');
+}
+
+/**
+ * ============================ EJE INC ============================
+ *
+ * Responsabilidad del Impuesto Nacional al Consumo, leída de la MISMA casilla
+ * 53. No hay fallback por `tax_regime`: el vocabulario COMUN/SIMPLIFICADO nunca
+ * habló del INC, así que inferirlo de ahí sería inventar. Sin declaración, el
+ * resultado es indeterminado y fail-closed (`false`): declarar ante la DIAN un
+ * tributo que el contribuyente no enumeró en su RUT es exactamente la clase de
+ * afirmación falsa que este módulo existe para impedir.
+ */
+export type IncResponsibilityReason =
+  | 'declared_inc_responsible'
+  | 'declared_not_inc_responsible'
+  | 'declared_without_inc_code'
+  | 'no_inc_signal';
+
+export interface IncResponsibilityResult {
+  /** Fail-closed: `false` también cuando el estado es indeterminado. */
+  responsible: boolean;
+  /** `true` cuando la casilla 53 no viene declarada. */
+  indeterminate: boolean;
+  reason: IncResponsibilityReason;
+  source: VatResponsibilitySource;
+}
+
+/** Resuelve la responsabilidad de INC. Pura, síncrona, nunca lanza. */
+export function resolveIncResponsibility(
+  fiscalData: VatFiscalDataInput | null | undefined,
+): IncResponsibilityResult {
+  const responsibilities = readDeclaredResponsibilities(fiscalData);
+  if (!responsibilities.length) {
+    return {
+      responsible: false,
+      indeterminate: true,
+      reason: 'no_inc_signal',
+      source: 'absent',
+    };
+  }
+  if (responsibilities.includes(INC_RESPONSIBLE_CODE)) {
+    return {
+      responsible: true,
+      indeterminate: false,
+      reason: 'declared_inc_responsible',
+      source: 'tax_responsibilities',
+    };
+  }
+  if (responsibilities.includes(INC_NOT_RESPONSIBLE_CODE)) {
+    return {
+      responsible: false,
+      indeterminate: false,
+      reason: 'declared_not_inc_responsible',
+      source: 'tax_responsibilities',
+    };
+  }
+  return {
+    responsible: false,
+    indeterminate: false,
+    reason: 'declared_without_inc_code',
+    source: 'tax_responsibilities',
+  };
+}
+
+/** Proyección booleana de `resolveIncResponsibility`. Fail-closed. */
+export function isIncResponsible(
+  fiscalData: VatFiscalDataInput | null | undefined,
+): boolean {
+  return resolveIncResponsibility(fiscalData).responsible;
+}
+
+/**
+ * Los DOS ejes en una sola lectura, que es la forma en que el documento
+ * electrónico los necesita: `cac:PartyTaxScheme/cac:TaxScheme` no admite «IVA»
+ * y «INC» por separado, admite UN par (ID, Name) que los combina
+ * (`resolveDianPartyTaxScheme`, en `constants/dian-tax-codes.ts`).
+ *
+ * Existe para que el emisor no se arme leyendo la casilla 53 dos veces con dos
+ * criterios distintos.
+ */
+export interface FiscalResponsibilityFlags {
+  vat_responsible: boolean;
+  inc_responsible: boolean;
+}
+
+/** Resuelve los dos ejes de una sola pasada. Pura, síncrona, nunca lanza. */
+export function resolveFiscalResponsibilityFlags(
+  fiscalData: VatFiscalDataInput | null | undefined,
+): FiscalResponsibilityFlags {
+  return {
+    vat_responsible: resolveVatResponsibility(fiscalData).responsible,
+    inc_responsible: resolveIncResponsibility(fiscalData).responsible,
+  };
 }
 
 /**
@@ -316,6 +526,25 @@ export function vatTreatmentFromResult(
       treatment: outcome.responsible ? 'deductible' : 'capitalized',
       message: copy.message,
       legal_basis: copy.legal_basis,
+    };
+  }
+
+  // 2.b) Casilla 53 declarada y COMPLETA que no enumera ningún código del eje
+  //      IVA. Es CONCLUYENTE, así que no lleva CTA al wizard: el tenant ya hizo
+  //      el trámite fiscal, y mandarlo a «configurar tu área fiscal» sería
+  //      pedirle que corrija algo que está bien. Lo que sí se le dice es cuál es
+  //      la consecuencia y cómo revertirla si su RUT cambió.
+  if (outcome.reason === 'declared_without_vat_code') {
+    return {
+      ...base,
+      treatment: 'capitalized',
+      message:
+        'Tu RUT declara tus responsabilidades fiscales y ninguna es O-48 (responsable de IVA), así que el IVA de esta compra se suma al costo de tus productos. Si la DIAN te inscribió como responsable de IVA, agrega O-48 a tus responsabilidades en el área fiscal.',
+      legal_basis: [
+        'Art. 437 ET, parágrafo 3 — no responsables del IVA',
+        'Art. 20 Ley 2010 de 2019 — sustitución del régimen común/simplificado por responsable / no responsable de IVA',
+        'Art. 493 ET — el IVA que no es descontable constituye mayor valor del costo o del gasto',
+      ],
     };
   }
 

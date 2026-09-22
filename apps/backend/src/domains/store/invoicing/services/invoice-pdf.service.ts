@@ -15,6 +15,7 @@ import {
   tryResolveTenantFiscalIdentity,
 } from '@common/helpers/fiscal-identity.helper';
 import { RESOLUTION_PUBLIC_SELECT } from '../utils/technical-key.util';
+import { resolveFiscalQualitiesLine } from '../../print-formats/services/fiscal-issuer-identity';
 
 /**
  * El PDF no publica la fila de la resolución —devuelve un buffer—, así que esto
@@ -66,15 +67,6 @@ const INVOICE_PDF_INCLUDE = {
       email: true,
     },
   },
-};
-
-/** Readable labels for the regime stored in `fiscal_data.tax_regime`. */
-const TAX_REGIME_LABELS: Record<string, string> = {
-  COMUN: 'Responsable de IVA',
-  SIMPLIFICADO: 'No responsable de IVA',
-  SIMPLE: 'Regimen Simple de Tributacion (RST)',
-  GRAN_CONTRIBUYENTE: 'Gran contribuyente',
-  NO_RESPONSABLE: 'No responsable de IVA',
 };
 
 @Injectable()
@@ -192,7 +184,7 @@ export class InvoicePdfService {
       company_email: issuer.email,
       company_logo_buffer: logo_buffer,
       company_trade_name: issuer.trade_name,
-      company_tax_regime: issuer.tax_regime,
+      company_fiscal_qualities: issuer.fiscal_qualities,
       company_tax_responsibilities: issuer.tax_responsibilities,
 
       // Paper format configured for this store.
@@ -382,7 +374,7 @@ export class InvoicePdfService {
       company_email: issuer.email,
       company_logo_buffer: logo_buffer,
       company_trade_name: issuer.trade_name,
-      company_tax_regime: issuer.tax_regime,
+      company_fiscal_qualities: issuer.fiscal_qualities,
       company_tax_responsibilities: issuer.tax_responsibilities,
 
       format,
@@ -625,10 +617,13 @@ export class InvoicePdfService {
       phone: identity.phone,
       email: identity.email || org?.email || undefined,
       logo_url: store?.logo_url || org?.logo_url || undefined,
-      tax_regime:
-        TAX_REGIME_LABELS[(identity.tax_regime || '').toUpperCase()] ||
-        identity.tax_regime ||
-        undefined,
+      // Num. 12 art. 11 Res. 000165/2023 — NO el régimen. Esta lectura directa
+      // de `tax_regime` ignoraba las responsabilidades del RUT y ya había
+      // divergido de la del gateway HTML: el mismo emisor imprimía una etiqueta
+      // distinta según la superficie. Hoy ambas llaman a la MISMA función.
+      fiscal_qualities: resolveFiscalQualitiesLine(
+        identity.tax_responsibilities,
+      ),
       tax_responsibilities: identity.tax_responsibilities,
     };
   }
