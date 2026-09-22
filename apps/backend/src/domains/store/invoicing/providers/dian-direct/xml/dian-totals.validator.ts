@@ -113,7 +113,8 @@ import {
  *
  * · **FAX07 / CAX07 / DAX07** (anexo19.txt:23077, fórmula en 5191) — por cada
  *   `<línea>/cac:TaxTotal/cac:TaxSubtotal` con `cbc:Percent`:
- *   `round(cbc:TaxAmount) == round(cbc:TaxableAmount × cbc:Percent ÷ 100)`.
+ *   `|cbc:TaxAmount − cbc:TaxableAmount × cbc:Percent ÷ 100| ≤ 2.00` (holgura
+ *   del Anexo 1.9 §5.2.1.1; a peso entero rechazaba cuotas correctas).
  *   Atrapa la línea que hereda la tarifa de cabecera sin haber causado el
  *   tributo (envío sintético, propina de cuenta dividida): `INC 8 %` sobre base
  *   15000 con cuota 0,00. Un exento (`Percent 0.00`, cuota 0) cuadra por
@@ -770,7 +771,8 @@ export class DianTotalsValidator {
   }
 
   /**
-   * A peso entero, que es la precisión a la que comparan las reglas (`round()`).
+   * A peso entero, la precisión a la que comparan las reglas de totales
+   * (`round()`); FAX07 usa en cambio la holgura ±2.00 (`MONETARY_TOLERANCE`).
    * Comparar con más precisión inventaría rechazos que la DIAN no produce: el
    * truncado hoja por hoja separa dos representaciones del mismo importe en
    * centavos.

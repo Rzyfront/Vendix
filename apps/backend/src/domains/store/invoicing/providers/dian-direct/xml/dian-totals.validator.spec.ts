@@ -700,7 +700,7 @@ describe('DianTotalsValidator', () => {
   // FAX07 — cuota de cada subtotal de LÍNEA = base × tarifa
   // ---------------------------------------------------------------------------
 
-  describe('FAX07 — round(TaxAmount) = round(TaxableAmount × Percent ÷ 100) por línea', () => {
+  describe('FAX07 — TaxAmount = TaxableAmount × Percent ÷ 100 (±2.00) por línea', () => {
     /** Subtotal de línea con esquema y tarifa arbitrarios. */
     function lineTax(
       taxable: string,

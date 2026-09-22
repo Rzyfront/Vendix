@@ -1027,7 +1027,8 @@ export const DIAN_RULES = {
     requirement:
       'En cada línea, el valor de cada subtotal de tributo porcentual debe ser ' +
       'el producto del porcentaje sobre su base imponible: ' +
-      'round(TaxAmount) = round(TaxableAmount × Percent ÷ 100). Una línea que no ' +
+      'TaxAmount = TaxableAmount × Percent ÷ 100, con la holgura de ±2.00 del ' +
+      'Anexo 1.9 §5.2.1.1. Una línea que no ' +
       'causa el tributo no informa el grupo; heredar la tarifa con cuota 0 lo ' +
       'incumple.',
     effect: 'rechazo',
