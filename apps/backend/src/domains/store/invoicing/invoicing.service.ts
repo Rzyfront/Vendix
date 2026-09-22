@@ -2339,24 +2339,17 @@ export class InvoicingService {
     // zero DIAN numbers. `resolution_id` resolves together with the number there.
     // Manual `create()` keeps numbering at creation (explicit human act, ADR-01 scope).
 
-    // A.4 CP-impuesto-incluido-agregado (F-020): herencia asignación→línea.
-    // `order_item_taxes` ya trae `is_inclusive` por fila (N filas por tasa,
-    // decisión F-002); acá se agrega por línea para marcar
-    // `invoice_items.is_inclusive`. Precedencia por fila: el flag persistido
-    // al vender (verdad de la asignación); sin filas, la línea es agregada
-    // (histórico). Espeja el patrón del calculador
-    // (`item.is_inclusive ?? taxes.some(inclusivo)`).
-    // La base YA llega despejada desde los canales (A.3: POS y checkout
-    // persisten la base en `total_price`/`unit_price`): acá no se resta
-    // nada — restar volvería a despejar y facturaría de menos.
-    const orderLineInclusive = (order.order_items || []).map((item: any) => {
-      const rows = (item as any).order_item_taxes || [];
-      return {
-        is_inclusive: rows.some((t: any) => t.is_inclusive === true),
-      };
-    });
-
-    const productItems = (order.order_items || []).map((item: any, index: number) => {
+    // Forma base (incidente Pollo Arabe, INC 8 % incluido): los canales ya
+    // persisten la base DESPEJADA en `unit_price`/`total_price` (A.3), así
+    // que la factura proyectada se expresa en base con `is_inclusive = false`
+    // en `invoice_items` Y en `invoice_taxes` — mismo contrato que
+    // `utils/split-invoice-projection.util.ts`. El schema lee `is_inclusive =
+    // true` como «impuesto DENTRO de `unit_price`»: con la base marcada
+    // inclusiva el gate del borrador, `update()` y la NC parcial despejaban
+    // dos veces. La inclusividad de origen sigue auditable en
+    // `order_item_taxes`, y SÍ decide el split por línea más abajo (incidente
+    // #81), que se conserva para no mover un byte del XML.
+    const productItems = (order.order_items || []).map((item: any) => {
       const description =
         item.description ||
         item.product_name ||
@@ -2394,7 +2387,6 @@ export class InvoicingService {
       const tax = resolveOrderLineTaxTotal(item);
       const total_amount =
         Number(item.total_price || quantity * unit_price - discount) + tax;
-      const lineIncl = orderLineInclusive[index];
       return {
         product_id: item.product_id,
         product_variant_id: item.product_variant_id,
@@ -2404,7 +2396,7 @@ export class InvoicingService {
         discount_amount: new Prisma.Decimal(discount),
         tax_amount: new Prisma.Decimal(tax),
         total_amount: new Prisma.Decimal(total_amount),
-        is_inclusive: lineIncl.is_inclusive,
+        is_inclusive: false,
         // "Empaque por tarifa" snapshot propagated from the order line so the
         // invoice mirrors the order PDF (tier label + packaging units consumed).
         applied_price_tier_name:
@@ -2503,12 +2495,6 @@ export class InvoicingService {
     // alineamiento por posición contra `invoice_items` siga siendo cierto.
     if (shippingCost > 0) orderLineTaxes.push([]);
     const taxGroups = { size: distinctGroupCount };
-    // Se pasa por el mapeador compartido en vez de armar el input a mano: es lo
-    // único que garantiza que `tax_type` —la clave con la que el CUFE arma
-    // ValImp1/2/3— nunca quede ausente, que es como ya se rompió `update()`.
-    const invoiceTaxes = invoiceTaxRows.map((tax_item) =>
-      this.buildInvoiceTaxCreateInput(tax_item),
-    );
 
     // `needsOrderLineTaxSplit`: multi-tributo O cualquier línea inclusiva.
     // Con un solo tributo AGREGADO el emisor produce el mismo XML heredándolo;
@@ -2519,6 +2505,23 @@ export class InvoicingService {
     const split_order_line_taxes = needsOrderLineTaxSplit(
       taxGroups.size,
       orderLineTaxes,
+    );
+    // Forma base (ver arriba): el split ya se decidió con la inclusividad de
+    // ORIGEN; lo que se persiste es base + cuota, así que toda fila de
+    // tributo nace `is_inclusive = false` — el gate lee `tax.is_inclusive`
+    // antes que el de la línea. Montos, tarifa, tipo y `taxable_amount`
+    // intactos: la cabecera, el CUFE y el XML no se mueven.
+    const persistedLineTaxes: DocumentLineTaxes = orderLineTaxes.map((line) =>
+      line.map((tax_item) => ({ ...tax_item, is_inclusive: false })),
+    );
+    const persistedHeaderTaxRows: InvoiceTaxRowInput[] = invoiceTaxRows.map(
+      (tax_item) => ({ ...tax_item, is_inclusive: false }),
+    );
+    // Se pasa por el mapeador compartido en vez de armar el input a mano: es lo
+    // único que garantiza que `tax_type` —la clave con la que el CUFE arma
+    // ValImp1/2/3— nunca quede ausente, que es como ya se rompió `update()`.
+    const invoiceTaxes = persistedHeaderTaxRows.map((tax_item) =>
+      this.buildInvoiceTaxCreateInput(tax_item),
     );
 
     const invoiceDataRequest = order.invoice_data_requests?.[0];
@@ -2621,7 +2624,11 @@ export class InvoicingService {
 
     let created = invoice;
     if (split_order_line_taxes) {
-      await this.persistLineTaxes(invoice.id, orderLineTaxes, invoiceTaxRows);
+      await this.persistLineTaxes(
+        invoice.id,
+        persistedLineTaxes,
+        persistedHeaderTaxRows,
+      );
       created =
         (await this.prisma.invoices.findFirst({
           where: { id: invoice.id },
