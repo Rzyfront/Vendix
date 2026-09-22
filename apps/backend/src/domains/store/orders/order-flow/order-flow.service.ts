@@ -30,6 +30,11 @@ import {
   ReactivateOrderDto,
 } from './dto';
 import { SettingsService } from '../../settings/settings.service';
+import { DEFAULT_POS_AUTO_EMIT } from '../../settings/interfaces/store-settings.interface';
+import {
+  POS_SALE_COMPLETED_EVENT,
+  PosSaleCompletedEvent,
+} from '../../invoicing/pos/pos-sale-completed.event';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../cash-registers/movements/movements.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
@@ -1032,6 +1037,9 @@ export class OrderFlowService {
       // Compute and persist ETA
       await this.computeAndPersistEta(orderId, new Date());
 
+      // Contra entrega de una orden POS: el pago de este cobro la deja saldada.
+      await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.shipped');
+
       return {
         order: updatedOrder,
         payment: { transaction_id: transactionId, change },
@@ -1110,6 +1118,11 @@ export class OrderFlowService {
         // Compute and persist ETA
         await this.computeAndPersistEta(orderId, new Date());
 
+        await this.emitPosSaleCompletedIfFullyPaid(
+          orderId,
+          'pay_order.processing',
+        );
+
         return {
           order: updatedOrder,
           payment: { transaction_id: transactionId, change },
@@ -1139,6 +1152,10 @@ export class OrderFlowService {
             },
           },
         });
+        // El claim del inicio ya movió la orden a `processing`. Sin restaurar,
+        // queda varada en `processing` con el pago anulado: ni cobrable (el
+        // claim sólo acepta draft/created/shipped/pending_payment) ni cerrable.
+        await this.restorePreClaimState(orderId, preClaimState);
         throw this.wrapPaymentFailure(
           'kitchen_pending',
           { order_id: orderId },
@@ -1210,6 +1227,8 @@ export class OrderFlowService {
 
       // Compute and persist ETA
       await this.computeAndPersistEta(orderId, new Date());
+
+      await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.finished');
 
       return {
         order: updatedOrder,
@@ -1319,6 +1338,12 @@ export class OrderFlowService {
       return { order: await this.getOrder(orderId, tx), applied: true, previousState: order.state };
     });
     for (const effect of afterCommit) await effect();
+    // Después del commit: el pago online quedó `succeeded`. Sólo si la
+    // confirmación se aplicó — un no-op (orden ya confirmada o cancelada) no es
+    // una venta nueva que facturar.
+    if (result.applied) {
+      await this.emitPosSaleCompletedIfFullyPaid(orderId, 'confirm_payment');
+    }
     if (result.applied && result.previousState === 'pending_payment') {
       this.eventEmitter.emit('order.status_changed', {
         store_id: result.order.store_id, order_id: orderId,
@@ -4702,8 +4727,8 @@ export class OrderFlowService {
    * falla, el operador ve la orden en `processing` y la mueve a mano (mismo
    * contrato que los rollbacks ya existentes en `payOrder`).
    *
-   * Solo la llama el catch del finish (rama direct → finished): no toca
-   * VALID_TRANSITIONS, guards de pay, F2-guard ni ningún otro flujo.
+   * La llaman el catch del finish y la guarda de cocina (F2-guard), ambas en
+   * la rama direct → finished: no toca VALID_TRANSITIONS ni ningún otro flujo.
    */
   private async restorePreClaimState(
     orderId: number,
@@ -4720,6 +4745,119 @@ export class OrderFlowService {
     } catch (restoreErr) {
       this.logger.error(
         `[payOrder pre-claim state restore failed] order=${orderId}: ${(restoreErr as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Dispara la facturación electrónica de una orden POS cobrada por el flujo
+   * de orden (`flow/pay` desde el detalle, `confirmPayment` del pago online).
+   *
+   * Hasta acá el ÚNICO emisor de `POS_SALE_COMPLETED_EVENT` era
+   * `PaymentsService.processPosPayment` (cobro de mostrador), así que las
+   * órdenes —mesas incluidas— cobradas desde el detalle nunca se facturaban.
+   * Se emite el MISMO evento con el MISMO payload para que
+   * `PosSaleCompletedListener` sea el único dueño de la emisión.
+   *
+   * Compuertas (todas contra la orden PERSISTIDA, después del commit):
+   *  - `channel = 'pos'`: ecommerce se factura por su propio carril.
+   *  - sin `active_financial_split_id`: las cuentas divididas se facturan por
+   *    cuenta (`createFromFinancialAccount`); `createFromOrder` lo rechaza.
+   *  - pagada COMPLETA: Σ pagos `succeeded`/`captured` ≥ `grand_total`. Un
+   *    abono parcial no es una venta cerrada.
+   *  - sin documento ya transmitido/anulado: la última factura de venta debe
+   *    no existir o estar en `draft`/`validated`/`rejected` — exactamente los
+   *    estados sobre los que `PosFiscalEmissionService.runEmission` actúa
+   *    (reusa ese documento, nunca crea otro). `sent`/`accepted` ya salieron;
+   *    `voided`/`cancelled` son una anulación deliberada.
+   *
+   * `auto_emit` se resuelve aquí igual que en payments.service
+   * (`invoicing.pos.auto_emit ?? DEFAULT_POS_AUTO_EMIT`) y lo APLICA el
+   * listener; no hay una segunda lectura del flag.
+   *
+   * Nunca lanza: el pago ya está confirmado y la facturación no puede
+   * revertirlo ni romper la respuesta del cobro.
+   */
+  private async emitPosSaleCompletedIfFullyPaid(
+    orderId: number,
+    source: string,
+  ): Promise<void> {
+    try {
+      const order = await this.prisma.orders.findFirst({
+        where: { id: orderId },
+        select: {
+          id: true,
+          store_id: true,
+          order_number: true,
+          channel: true,
+          grand_total: true,
+          active_financial_split_id: true,
+          payments: { select: { state: true, amount: true } },
+        },
+      });
+      if (!order || order.channel !== 'pos') return;
+      if (order.active_financial_split_id != null) return;
+
+      const paid = (order.payments ?? [])
+        .filter((p) => p.state === 'succeeded' || p.state === 'captured')
+        .reduce(
+          (sum, p) => sum.plus(new Prisma.Decimal(p.amount ?? 0)),
+          new Prisma.Decimal(0),
+        );
+      if (paid.lt(new Prisma.Decimal(order.grand_total ?? 0))) return;
+
+      const latestInvoice = await this.prisma.invoices.findFirst({
+        where: { order_id: orderId, invoice_type: 'sales_invoice' },
+        orderBy: { created_at: 'desc' },
+        select: { id: true, status: true },
+      });
+      if (
+        latestInvoice &&
+        !['draft', 'validated', 'rejected'].includes(latestInvoice.status)
+      ) {
+        return;
+      }
+
+      let autoEmit = DEFAULT_POS_AUTO_EMIT;
+      try {
+        const settings = await this.settingsService.getSettings();
+        const flag = (settings as any)?.invoicing?.pos?.auto_emit;
+        if (typeof flag === 'boolean') autoEmit = flag;
+      } catch (settingsErr) {
+        this.logger.warn(
+          `[pos invoice emit] order=${orderId}: no se pudieron leer los ajustes, se usa el default auto_emit=${DEFAULT_POS_AUTO_EMIT}: ${(settingsErr as Error).message}`,
+        );
+      }
+
+      const context = RequestContextService.getContext();
+      let organizationId = context?.organization_id;
+      if (typeof organizationId !== 'number') {
+        // Webhooks corren con un contexto de tienda sin organización.
+        const store = await this.prisma.stores.findFirst({
+          where: { id: order.store_id },
+          select: { organization_id: true },
+        });
+        organizationId = store?.organization_id ?? undefined;
+      }
+      if (typeof organizationId !== 'number') {
+        this.logger.warn(
+          `[pos invoice emit] order=${orderId}: sin organization_id resoluble; no se dispara la facturación (${source})`,
+        );
+        return;
+      }
+
+      this.eventEmitter.emit(POS_SALE_COMPLETED_EVENT, {
+        organization_id: organizationId,
+        store_id: order.store_id,
+        user_id: context?.user_id,
+        order_id: orderId,
+        order_number: order.order_number,
+        auto_emit: autoEmit,
+      } as PosSaleCompletedEvent);
+    } catch (err) {
+      this.logger.error(
+        `[pos invoice emit] order=${orderId} (${source}) falló al preparar la emisión: ${(err as Error)?.message}`,
+        (err as Error)?.stack,
       );
     }
   }

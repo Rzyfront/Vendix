@@ -42,6 +42,18 @@ import {
 export class PosSaleCompletedListener {
   private readonly logger = new Logger(PosSaleCompletedListener.name);
 
+  /**
+   * Pedidos con una emisión EN CURSO en este proceso. Desde que el flujo de
+   * orden (`flow/pay`, `confirmPayment`) también emite este evento, un doble
+   * clic o un reintento puede entregar dos eventos del mismo pedido casi a la
+   * vez. `PosFiscalEmissionService` reusa la factura existente, pero ese
+   * chequeo (`findLatestSalesInvoice` → `createFromOrder`) no es atómico:
+   * dos corridas simultáneas verían «sin factura» y crearían dos documentos.
+   * Se colapsan aquí; una vez terminada la primera, un evento posterior pasa y
+   * el servicio reusa el documento ya creado.
+   */
+  private readonly inFlight = new Set<string>();
+
   constructor(private readonly emission: PosFiscalEmissionService) {}
 
   @OnEvent(POS_SALE_COMPLETED_EVENT)
@@ -50,6 +62,15 @@ export class PosSaleCompletedListener {
     // venta queda igualmente disponible para emitir bajo demanda desde el POS:
     // no se pierde nada, sólo no se hace automáticamente.
     if (!event.auto_emit) return;
+
+    const key = `${event.store_id}:${event.order_id}`;
+    if (this.inFlight.has(key)) {
+      this.logger.log(
+        `POS: emisión del pedido #${event.order_id} ya en curso; se descarta el evento duplicado.`,
+      );
+      return;
+    }
+    this.inFlight.add(key);
 
     try {
       const status = await RequestContextService.runIsolated(
@@ -83,6 +104,8 @@ export class PosSaleCompletedListener {
         }`,
         error instanceof Error ? error.stack : undefined,
       );
+    } finally {
+      this.inFlight.delete(key);
     }
   }
 }

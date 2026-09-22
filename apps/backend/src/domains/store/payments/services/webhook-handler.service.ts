@@ -637,6 +637,19 @@ export class WebhookHandlerService {
             );
           }
 
+          // Orden POS con confirmación aplicada: `confirmPayment` ya disparó
+          // `POS_SALE_COMPLETED_EVENT` y `PosSaleCompletedListener` es el único
+          // dueño de su emisión (crea/valida/transmite respetando
+          // `invoicing.pos.auto_emit`). Enviar aquí también la misma factura
+          // correría en paralelo con el listener: `InvoiceFlowService.send`
+          // no tiene CAS y la transmitiría dos veces.
+          if (
+            order.channel === order_channel_enum.pos &&
+            (confirmed as any).payment_confirmation_applied === true
+          ) {
+            return;
+          }
+
           // A.3 CP-facturacion-fixes (ADR-03): web auto-send on payment
           // confirmation, parity with POS auto_emit. Best-effort inside the
           // store context: never throws into the confirmation path.

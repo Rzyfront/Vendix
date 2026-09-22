@@ -441,6 +441,20 @@ describe('WebhookHandlerService', () => {
       });
     });
 
+    it('mostrador con confirmación aplicada: NO envía aquí (lo emite el listener POS vía confirmPayment)', async () => {
+      const { flow } = setup({
+        channel: 'pos',
+        deliveryType: 'direct_delivery',
+        posAutoEmit: true,
+      });
+
+      await expect(
+        (service as any).confirmOrderPaid(1),
+      ).resolves.toBeUndefined();
+      expect(flow.validate).not.toHaveBeenCalled();
+      expect(flow.send).not.toHaveBeenCalled();
+    });
+
     it('mesa por QR (channel:ecommerce + delivery_type:dine_in) manda por invoicing.pos.auto_emit, no por ecommerce', async () => {
       const { flow } = setup({
         channel: 'ecommerce',
