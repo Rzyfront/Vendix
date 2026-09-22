@@ -8,6 +8,7 @@ import { RecentDocumentSummary } from '../interfaces/document-index.interface';
 import { StandardPrintDataModel } from '../interfaces/standard-print-data.model';
 import { PrintTokenDefinition } from '../interfaces/print-format.interface';
 import { signStoreLogoUrl } from '../lib/print-logo.util';
+import { resolveFiscalQualitiesLine } from '../services/fiscal-issuer-identity';
 import { mapUserAddress } from '../lib/customer-address';
 import { formatFiscalMoney } from './fiscal-document-print.mapper';
 import {
@@ -288,7 +289,15 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
         email: 'ventas@vendix.com',
         address: 'Calle 100 # 15-20, Oficina 401',
         city: 'Bogotá D.C.',
-        tax_regime: 'Responsable de IVA',
+        // Los datos de muestra NO son inocuos: `PrintGatewayService` cae a
+        // `getSampleData` dentro de un try/catch cuando la lectura real falla,
+        // así que un literal aquí acaba en el papel de un comercio real. Este
+        // bloque imprimía «Responsable de IVA» — una leyenda derogada con el
+        // art. 506 E.T. La muestra deriva ahora sus calidades de sus PROPIAS
+        // responsabilidades con la misma función que el carril real, así que no
+        // puede afirmar una calidad que sus códigos no respalden.
+        fiscal_responsibilities: ['O-48', 'O-42', 'O-52'],
+        fiscal_qualities: resolveFiscalQualitiesLine(['O-48', 'O-42', 'O-52']),
       },
       customer: {
         name: 'Juan Pérez Rodríguez',

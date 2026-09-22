@@ -14,6 +14,10 @@ import {
   CommitResult,
 } from '../inventory/shared/services/order-stock-commit.service';
 import { TaxesService } from '../taxes/taxes.service';
+// QUI-INC — el enum fiscal canónico. Se importa (en vez de tipar `string`)
+// para que el snapshot de la línea ad-hoc no pueda persistir un valor que el
+// `tax_type_enum` de Postgres no reconozca, ni caer a un default local.
+import { TaxFiscalType } from '../taxes/dto';
 import { truncMoney } from '../taxes/utils/tax-inclusive-math.util';
 import { LocationsService } from '../inventory/locations/locations.service';
 import { SellableStockAllocator } from '../inventory/shared/services/sellable-stock-allocator.service';
@@ -2622,6 +2626,18 @@ export class PaymentsService {
       name: string;
       rate: number;
       amount: number;
+      /**
+       * QUI-INC — OBLIGATORIO, no opcional. La opcionalidad era el defecto:
+       * `buildOrderItemSnapshot` completaba el hueco con `?? 'iva'` y una
+       * categoría INC persistía `order_item_taxes.tax_type = 'iva'` con el
+       * `tax_rate_id`/`tax_name`/`tax_rate` correctos de la fila INC al lado
+       * (evidencia de producción: `order_item_taxes.id=130`, tienda 105,
+       * `tax_rate_id=68`, `tax_name='INC'`, `tax_rate=0.08`, `tax_type='iva'`).
+       * El XML DIAN transmitió fielmente lo persistido y la DIAN aceptó un
+       * "IVA del 8 %" que no existe en Colombia. Declarándolo requerido, el
+       * compilador impide que el snapshot vuelva a inventarlo.
+       */
+      tax_type: TaxFiscalType;
       is_inclusive: boolean;
     }[];
   }> {
@@ -2651,8 +2667,18 @@ export class PaymentsService {
     });
 
     if (!taxCategory) {
-      throw new BadRequestException(
-        'La categoría de impuesto seleccionada no existe para esta tienda.',
+      // QUI-INC — falla RUIDOSA y tipada. La línea ad-hoc no tiene
+      // `product_tax_assignments`; sin esta categoría no hay ninguna otra
+      // fuente para `tax_type`/`is_inclusive`/`tax_name`/`tax_rate`, y
+      // continuar sólo puede producir una clasificación inventada en un
+      // documento fiscal. Antes era un `BadRequestException` crudo (400 sin
+      // código de negocio); ahora lleva código explícito para que POS/móvil
+      // distingan esta causa. NO cambia qué se acepta: el mismo input que
+      // antes reventaba, sigue reventando (400 → 422 tipado).
+      throw new VendixHttpException(
+        ErrorCodes.POS_CUSTOM_ITEM_TAX_CATEGORY_UNRESOLVABLE_001,
+        undefined,
+        { tax_category_id: taxCategoryId, store_id: storeId },
       );
     }
 
@@ -2675,6 +2701,17 @@ export class PaymentsService {
     // que ADR-03 llama "el único real" del diseño, vivo justo en la rama que
     // ADR-01 citaba como prueba de que la semántica funciona.
     const categoryIsInclusive = taxCategory.is_inclusive ?? false;
+    // QUI-INC — el tipo fiscal sale de la MISMA fila que el resto del
+    // snapshot (`tax_categories`, dueña única de `tax_type`; ni `tax_rates`
+    // ni `product_tax_assignments` tienen la columna — ver schema.prisma).
+    // El `?? IVA` es el default CANÓNICO de una categoría sin tipar, idéntico
+    // al de `TaxesService.calculateProductTaxes` (regla "untyped rows mean
+    // IVA" de `vendix-tax-typing`): se resuelve AQUÍ, contra la categoría que
+    // también aporta tarifa y nombre, y no aguas abajo en el snapshot, donde
+    // no podía distinguir "categoría sin tipar" de "categoría INC cuyo tipo
+    // nadie propagó" — y por eso convertía la segunda en IVA.
+    const categoryTaxType =
+      (taxCategory.tax_type as TaxFiscalType | null) ?? TaxFiscalType.IVA;
     const taxes = (taxCategory.tax_rates || []).map((rate: any) => {
       const rateValue = Number(rate.rate || 0);
       return {
@@ -2682,6 +2719,7 @@ export class PaymentsService {
         name: rate.name,
         rate: rateValue,
         amount: truncMoney(basePrice * rateValue),
+        tax_type: categoryTaxType,
         is_inclusive: categoryIsInclusive,
       };
     });
@@ -3254,11 +3292,18 @@ export class PaymentsService {
     /**
      * F-010: el desglose viaja con el tipo del resolver
      * (`Awaited<ReturnType<TaxesService['calculateProductTaxes']>>`: por tasa
-     * `{is_inclusive, base, ...}`). La segunda rama es el camino legacy de
-     * ítems custom (`calculateTaxCategoryTaxes`, sin flag): lo tolera hasta
-     * que ese camino lea `is_inclusive` de su categoría. La `base` por tasa
-     * viaja en memoria — `order_item_taxes` no tiene columna de base (solo
+     * `{is_inclusive, base, ...}`). La segunda rama es el camino de ítems
+     * custom (`calculateTaxCategoryTaxes`). La `base` por tasa viaja en
+     * memoria — `order_item_taxes` no tiene columna de base (solo
      * `is_inclusive`), así que en el snapshot persiste el flag, no la base.
+     *
+     * QUI-INC — `tax_type` e `is_inclusive` son OBLIGATORIOS en AMBAS ramas.
+     * Cuando eran opcionales, el snapshot los completaba (`?? 'iva'`,
+     * `?? false`) y el resultado era una clasificación fiscal INVENTADA
+     * conviviendo con el `tax_rate_id`/`tax_name`/`tax_rate` reales de otra
+     * fila: la factura electrónica de la tienda 105 salió con "IVA 8 %"
+     * siendo INC. Requiriéndolos, un resolver que no los traiga no compila —
+     * la divergencia deja de ser posible por construcción.
      */
     taxInfo:
       | Awaited<ReturnType<TaxesService['calculateProductTaxes']>>
@@ -3270,8 +3315,8 @@ export class PaymentsService {
             name: string;
             rate: number;
             amount: number;
-            tax_type?: string;
-            is_inclusive?: boolean;
+            tax_type: TaxFiscalType;
+            is_inclusive: boolean;
             base?: number;
           }[];
         };
@@ -3380,16 +3425,22 @@ export class PaymentsService {
 
     if (params.taxInfo.taxes.length > 0) {
       orderItem.order_item_taxes = {
+        // QUI-INC — los CUATRO campos fiscales de la fila salen del MISMO
+        // objeto `tax`, que a su vez nació de UNA sola fila de catálogo
+        // (`tax_rates` + su `tax_categories`). Ya no hay `??` en este mapeo:
+        // sin defaults locales, `tax_rate_id=68` implica necesariamente el
+        // `tax_name`, `tax_rate`, `tax_type` e `is_inclusive` de la 68.
         create: params.taxInfo.taxes.map((tax) => ({
           tax_rate_id: tax.tax_rate_id,
           tax_name: tax.name,
           tax_rate: this.roundRate(tax.rate),
           tax_amount: this.roundMoney(tax.amount * params.lineUnits),
-          tax_type: tax.tax_type ?? 'iva',
+          tax_type: tax.tax_type,
           is_compound: false,
           // F-010: el flag viaja al snapshot (UNA fila por tasa, decisión
-          // N-filas F-002). Histórico y camino custom = FALSE.
-          is_inclusive: tax.is_inclusive ?? false,
+          // N-filas F-002). Histórico = FALSE; el camino custom lo lee de
+          // `tax_categories.is_inclusive` (F-052).
+          is_inclusive: tax.is_inclusive,
         })),
       };
     }

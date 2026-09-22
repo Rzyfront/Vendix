@@ -276,8 +276,27 @@ export class UblSupportDocumentBuilder {
       postal_code: seller.postal_code || buyer.postal_code,
       phone: seller.phone,
       email: seller.email || buyer.email,
-      tax_regime: seller.tax_regime || '2',
-      tax_scheme: seller.tax_responsibilities?.[0] || 'R-99-PN',
+      // DOS DEFECTOS CORREGIDOS AQUÍ.
+      //
+      // 1) El default era `'2'`. El consumidor de este campo comparaba
+      //    `tax_regime !== '49'`, y `'2' !== '49'` es verdadero: todo vendedor
+      //    sin régimen declarado caía del lado «responsable de IVA». El `'2'`
+      //    venía de confundir este campo con el TIPO DE PERSONA de
+      //    `cbc:AdditionalAccountID` ('1' jurídica / '2' natural), que es otro
+      //    elemento. El default correcto es `'49'`: un documento soporte se le
+      //    expide justamente a quien NO está obligado a facturar, y atribuirle
+      //    responsabilidad de IVA sin que la haya declarado es la afirmación
+      //    que hay que evitar. Fail-closed, igual que `resolveVatResponsibility`.
+      tax_regime: seller.tax_regime === '48' ? '48' : '49',
+      // 2) Se enviaba `tax_responsibilities?.[0]` — la PRIMERA responsabilidad y
+      //    sólo esa. Un vendedor con `['O-05','O-33','O-42']` declaraba 'O-05' y
+      //    el resto desaparecía, incluido el código que dice cuál es su tributo.
+      //    El anexo pide todas separadas por `;` y `toDianTaxLevelCode` ya filtra
+      //    contra la enumeración cerrada aguas abajo, así que recortar aquí sólo
+      //    puede perder información: nunca puede salvar un rechazo.
+      tax_scheme: seller.tax_responsibilities?.length
+        ? seller.tax_responsibilities.join(';')
+        : 'R-99-PN',
     };
   }
 

@@ -244,7 +244,26 @@ export interface InvoiceTaxRowInput {
    * vacía, persiste 0; la fuente de verdad sigue siendo server-side.
    */
   tax_amount?: number | string;
-  tax_type?: TaxFiscalType | string | null;
+  /**
+   * QUI-INC — OBLIGATORIO, y sin `null`. La opcionalidad era el defecto: el
+   * mapeador de escritura (`buildInvoiceTaxCreateInput`) rellenaba el hueco con
+   * `?? 'iva'`, y ahí abajo ya no hay forma de distinguir «la fila fuente no
+   * está tipada» —donde «sin tipar significa IVA» es la regla correcta— de
+   * «la fila fuente dice INC y alguien no lo propagó», que es fabricación.
+   * Así nació la fila de producción `order_item_taxes.id=130` (tienda 105):
+   * `tax_rate_id=68` / `tax_name='INC'` / `tax_rate=0.08` conviviendo con un
+   * `tax_type='iva'` inventado, que viajó literal a `invoice_taxes` y de ahí
+   * al XML firmado —la DIAN aceptó un «IVA del 8 %» que no existe en
+   * Colombia—.
+   *
+   * Cada uno de los TRES productores resuelve su propio default contra la fila
+   * que SÍ conoce: el motor en `normalizeTaxType` (`CalculatedTax.tax_type` es
+   * `string` requerido), la agregación de la orden contra
+   * `order_item_taxes.tax_type`, y el carril declarativo contra el propio DTO
+   * en `resolveDeclaredTaxType`. Declarado requerido, un cuarto productor que
+   * lo olvide NO COMPILA.
+   */
+  tax_type: TaxFiscalType | string;
   is_inclusive?: boolean;
 }
 
@@ -2320,24 +2339,17 @@ export class InvoicingService {
     // zero DIAN numbers. `resolution_id` resolves together with the number there.
     // Manual `create()` keeps numbering at creation (explicit human act, ADR-01 scope).
 
-    // A.4 CP-impuesto-incluido-agregado (F-020): herencia asignación→línea.
-    // `order_item_taxes` ya trae `is_inclusive` por fila (N filas por tasa,
-    // decisión F-002); acá se agrega por línea para marcar
-    // `invoice_items.is_inclusive`. Precedencia por fila: el flag persistido
-    // al vender (verdad de la asignación); sin filas, la línea es agregada
-    // (histórico). Espeja el patrón del calculador
-    // (`item.is_inclusive ?? taxes.some(inclusivo)`).
-    // La base YA llega despejada desde los canales (A.3: POS y checkout
-    // persisten la base en `total_price`/`unit_price`): acá no se resta
-    // nada — restar volvería a despejar y facturaría de menos.
-    const orderLineInclusive = (order.order_items || []).map((item: any) => {
-      const rows = (item as any).order_item_taxes || [];
-      return {
-        is_inclusive: rows.some((t: any) => t.is_inclusive === true),
-      };
-    });
-
-    const productItems = (order.order_items || []).map((item: any, index: number) => {
+    // Forma base (incidente Pollo Arabe, INC 8 % incluido): los canales ya
+    // persisten la base DESPEJADA en `unit_price`/`total_price` (A.3), así
+    // que la factura proyectada se expresa en base con `is_inclusive = false`
+    // en `invoice_items` Y en `invoice_taxes` — mismo contrato que
+    // `utils/split-invoice-projection.util.ts`. El schema lee `is_inclusive =
+    // true` como «impuesto DENTRO de `unit_price`»: con la base marcada
+    // inclusiva el gate del borrador, `update()` y la NC parcial despejaban
+    // dos veces. La inclusividad de origen sigue auditable en
+    // `order_item_taxes`, y SÍ decide el split por línea más abajo (incidente
+    // #81), que se conserva para no mover un byte del XML.
+    const productItems = (order.order_items || []).map((item: any) => {
       const description =
         item.description ||
         item.product_name ||
@@ -2375,7 +2387,6 @@ export class InvoicingService {
       const tax = resolveOrderLineTaxTotal(item);
       const total_amount =
         Number(item.total_price || quantity * unit_price - discount) + tax;
-      const lineIncl = orderLineInclusive[index];
       return {
         product_id: item.product_id,
         product_variant_id: item.product_variant_id,
@@ -2385,7 +2396,7 @@ export class InvoicingService {
         discount_amount: new Prisma.Decimal(discount),
         tax_amount: new Prisma.Decimal(tax),
         total_amount: new Prisma.Decimal(total_amount),
-        is_inclusive: lineIncl.is_inclusive,
+        is_inclusive: false,
         // "Empaque por tarifa" snapshot propagated from the order line so the
         // invoice mirrors the order PDF (tier label + packaging units consumed).
         applied_price_tier_name:
@@ -2484,12 +2495,6 @@ export class InvoicingService {
     // alineamiento por posición contra `invoice_items` siga siendo cierto.
     if (shippingCost > 0) orderLineTaxes.push([]);
     const taxGroups = { size: distinctGroupCount };
-    // Se pasa por el mapeador compartido en vez de armar el input a mano: es lo
-    // único que garantiza que `tax_type` —la clave con la que el CUFE arma
-    // ValImp1/2/3— nunca quede ausente, que es como ya se rompió `update()`.
-    const invoiceTaxes = invoiceTaxRows.map((tax_item) =>
-      this.buildInvoiceTaxCreateInput(tax_item),
-    );
 
     // `needsOrderLineTaxSplit`: multi-tributo O cualquier línea inclusiva.
     // Con un solo tributo AGREGADO el emisor produce el mismo XML heredándolo;
@@ -2500,6 +2505,23 @@ export class InvoicingService {
     const split_order_line_taxes = needsOrderLineTaxSplit(
       taxGroups.size,
       orderLineTaxes,
+    );
+    // Forma base (ver arriba): el split ya se decidió con la inclusividad de
+    // ORIGEN; lo que se persiste es base + cuota, así que toda fila de
+    // tributo nace `is_inclusive = false` — el gate lee `tax.is_inclusive`
+    // antes que el de la línea. Montos, tarifa, tipo y `taxable_amount`
+    // intactos: la cabecera, el CUFE y el XML no se mueven.
+    const persistedLineTaxes: DocumentLineTaxes = orderLineTaxes.map((line) =>
+      line.map((tax_item) => ({ ...tax_item, is_inclusive: false })),
+    );
+    const persistedHeaderTaxRows: InvoiceTaxRowInput[] = invoiceTaxRows.map(
+      (tax_item) => ({ ...tax_item, is_inclusive: false }),
+    );
+    // Se pasa por el mapeador compartido en vez de armar el input a mano: es lo
+    // único que garantiza que `tax_type` —la clave con la que el CUFE arma
+    // ValImp1/2/3— nunca quede ausente, que es como ya se rompió `update()`.
+    const invoiceTaxes = persistedHeaderTaxRows.map((tax_item) =>
+      this.buildInvoiceTaxCreateInput(tax_item),
     );
 
     const invoiceDataRequest = order.invoice_data_requests?.[0];
@@ -2602,7 +2624,11 @@ export class InvoicingService {
 
     let created = invoice;
     if (split_order_line_taxes) {
-      await this.persistLineTaxes(invoice.id, orderLineTaxes, invoiceTaxRows);
+      await this.persistLineTaxes(
+        invoice.id,
+        persistedLineTaxes,
+        persistedHeaderTaxRows,
+      );
       created =
         (await this.prisma.invoices.findFirst({
           where: { id: invoice.id },
@@ -2970,7 +2996,13 @@ export class InvoicingService {
       taxes: line.taxes.map((tax) => ({
         tax_name: tax.tax_name,
         tax_rate: tax.tax_rate,
-        tax_type: TaxFiscalType.IVA,
+        // QUI-INC — el tipo sale del MISMO objeto que aporta nombre y tarifa
+        // (`ContractAiuDraftLine.taxes[]`, derivado del snapshot del contrato),
+        // no de un literal escrito acá. Hoy el borrador sólo emite `iva`
+        // —`ContractAiuSnapshotItem` guarda `tax_rate` y NO `tax_type`, así que
+        // el carril AIU no tiene de dónde tipar otra cosa—, pero el día que lo
+        // guarde, la factura lo seguirá en vez de sobrescribirlo con IVA.
+        tax_type: tax.tax_type as TaxFiscalType,
       })),
     }));
 
@@ -3630,7 +3662,12 @@ export class InvoicingService {
         // misma factura emitida sin editar.
         update_data.invoice_taxes = {
           create: dto.taxes.map((tax_item) =>
-            this.buildInvoiceTaxCreateInput(tax_item),
+            this.buildInvoiceTaxCreateInput({
+              ...tax_item,
+              // QUI-INC — el default se resuelve contra la fila fuente, que en
+              // este carril es el propio DTO. Ver `resolveDeclaredTaxType`.
+              tax_type: this.resolveDeclaredTaxType(tax_item),
+            }),
           ),
         };
       }
@@ -3913,10 +3950,36 @@ export class InvoicingService {
 
       return this.buildInvoiceTaxCreateInput({
         ...tax_item,
+        tax_type: this.resolveDeclaredTaxType(tax_item),
         taxable_amount: tax_item.taxable_amount as number,
         tax_amount: tax_item.tax_amount as number,
       });
     });
+  }
+
+  /**
+   * QUI-INC — tipo fiscal de un impuesto DECLARADO por el cliente A NIVEL DE
+   * DOCUMENTO (`dto.taxes[]`, en `create()` vía `buildDocumentLevelTaxRows` y
+   * en `update()`). Los impuestos de LÍNEA no pasan por aquí: los normaliza el
+   * motor (`InvoiceCalculatorService.normalizeTaxType`) después de que
+   * `applyTaxCatalogToLine` haya dejado ganar al catálogo.
+   *
+   * Acá el `?? 'iva'` SÍ es legítimo y es el único sitio donde lo es en este
+   * carril: la fila fuente ES el DTO. No hay ningún paso previo que haya
+   * podido perder el tipo en el camino, así que «ausente» significa
+   * inequívocamente «el cliente no declaró tipo» — y para esa ausencia la
+   * regla canónica de `vendix-tax-typing` («sin tipar significa IVA») es la
+   * lectura correcta, la misma que aplica `InvoiceCalculatorService
+   * .normalizeTaxType`. Lo que estaba mal era resolverlo AGUAS ABAJO, en
+   * `buildInvoiceTaxCreateInput`, donde las filas del motor y las de la orden
+   * —que ya traen el tipo resuelto contra su propia fila fuente— pasaban por
+   * el mismo `??` y una ausencia por pérdida se veía igual que una ausencia
+   * por declaración.
+   */
+  private resolveDeclaredTaxType(
+    tax: CreateInvoiceTaxDto,
+  ): TaxFiscalType | string {
+    return tax.tax_type ?? TaxFiscalType.IVA;
   }
 
   private buildInvoiceTaxCreateInput(tax: InvoiceTaxRowInput) {
@@ -3931,8 +3994,12 @@ export class InvoicingService {
       // es seguro: el reconciliador de aceptación reescribe el valor real.
       taxable_amount: new Prisma.Decimal(tax.taxable_amount ?? 0),
       tax_amount: new Prisma.Decimal(tax.tax_amount ?? 0),
-      // El default 'iva' es el histórico y se mantiene, pero NUNCA puede
-      // quedar ausente: es la clave con la que el CUFE arma ValImp1/2/3.
+      // QUI-INC — SIN `??`. El default de un campo fiscal se resuelve en la
+      // FILA FUENTE, nunca acá: este mapeador ya no sabe de dónde vino la fila,
+      // así que un `?? 'iva'` en este punto no puede distinguir «fuente sin
+      // tipar» de «fuente tipada INC y no propagada» — y convertía la segunda
+      // en la primera. Ahora `InvoiceTaxRowInput.tax_type` es requerido y el
+      // compilador obliga a cada productor a resolverlo donde sí hay contexto.
       //
       // El puente entre los dos enums es por VALOR, no por tipo: `TaxFiscalType`
       // (enum nominal de TS) y `tax_type_enum` (unión de literales de Prisma)
@@ -3940,7 +4007,7 @@ export class InvoicingService {
       // reteiva, reteica— pero TS los trata como incompatibles. Si alguien
       // añade un valor a uno solo, este cast lo deja pasar y revienta en el
       // INSERT: mantenerlos en paridad es responsabilidad de quien los edite.
-      tax_type: (tax.tax_type ?? 'iva') as unknown as tax_type_enum,
+      tax_type: tax.tax_type as unknown as tax_type_enum,
       is_inclusive: tax.is_inclusive ?? false,
     };
   }

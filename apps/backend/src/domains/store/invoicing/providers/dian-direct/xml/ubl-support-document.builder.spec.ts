@@ -165,4 +165,74 @@ describe('UblSupportDocumentBuilder', () => {
       );
     });
   });
+
+  /**
+   * `sellerAsSupplier` — el vendedor NO OBLIGADO a facturar viaja por la ruta
+   * del emisor (`buildSupplierParty`), así que su `cac:PartyTaxScheme` sale del
+   * mismo resolvedor que el de una factura normal. Tenía dos defectos.
+   */
+  describe('sellerAsSupplier — el vendedor no obligado no puede salir como responsable de IVA', () => {
+    function supplierBlockOf(seller_override: Partial<DianCustomerData>): string {
+      const xml = UblSupportDocumentBuilder.buildDocument({
+        support_document_data: baseDocument,
+        buyer,
+        seller: { ...seller, ...seller_override },
+        software_security,
+        cuds: 'cuds-hash',
+        environment: 'test',
+      });
+      return xml.slice(
+        xml.indexOf('<cac:AccountingSupplierParty>'),
+        xml.indexOf('</cac:AccountingSupplierParty>') +
+          '</cac:AccountingSupplierParty>'.length,
+      );
+    }
+
+    it('sin tax_regime declarado el vendedor sale ZZ / No aplica, no IVA', () => {
+      // DEFECTO 1: el default era `seller.tax_regime || '2'`, y el constructor
+      // decidía con `tax_regime !== '49'`. Como '2' no es '49', TODO vendedor
+      // sin régimen — el caso normal de un no obligado a facturar — quedaba
+      // declarado responsable de IVA. El respaldo correcto es el contrario:
+      // sólo '48' afirma responsabilidad.
+      const block = supplierBlockOf({ tax_regime: undefined });
+
+      expect(block).toMatch(
+        /<cac:TaxScheme>\s*<cbc:ID>ZZ<\/cbc:ID>\s*<cbc:Name>No aplica<\/cbc:Name>/,
+      );
+      expect(block).not.toContain('<cbc:Name>IVA</cbc:Name>');
+    });
+
+    it("tax_regime '2' tampoco afirma IVA", () => {
+      expect(supplierBlockOf({ tax_regime: '2' })).toMatch(
+        /<cac:TaxScheme>\s*<cbc:ID>ZZ<\/cbc:ID>/,
+      );
+    });
+
+    it('conserva TODAS las responsabilidades, no sólo la primera', () => {
+      // DEFECTO 2: `seller.tax_responsibilities?.[0]` descartaba el resto. El
+      // anexo permite varias separadas por ';' y el ejemplo canónico es
+      // 'O-13;O-15'; quedarse con la primera pierde declaraciones reales.
+      const block = supplierBlockOf({
+        tax_responsibilities: ['O-13', 'O-15', 'O-23'],
+      });
+
+      expect(block).toMatch(/TaxLevelCode[^>]*>O-13;O-15;O-23</);
+    });
+
+    it('un vendedor responsable de IVA (O-48) sí declara 01 / IVA', () => {
+      const block = supplierBlockOf({ tax_responsibilities: ['O-48'] });
+
+      expect(block).toMatch(
+        /<cac:TaxScheme>\s*<cbc:ID>01<\/cbc:ID>\s*<cbc:Name>IVA<\/cbc:Name>/,
+      );
+    });
+
+    it('un vendedor responsable de INC (O-33) declara 04 / INC', () => {
+      const block = supplierBlockOf({ tax_responsibilities: ['O-33'] });
+
+      expect(block).toMatch(
+        /<cac:TaxScheme>\s*<cbc:ID>04<\/cbc:ID>\s*<cbc:Name>INC<\/cbc:Name>/,
+      );
+    });
+  });
 });

@@ -198,10 +198,14 @@ export class PaymentGatewayService {
     if (data.bankAccountId) {
       data.bankAccount = await this.resolveAndValidateBankAccount(data.bankAccountId, data.storeId);
     }
-    await this.prisma.payments.updateMany({
-      where: { id: payment.id, state: 'pending', financial_account_id: account.id },
+    const claimed = await this.prisma.payments.updateMany({
+      where: { id: payment.id, state: 'pending', financial_account_id: account.id, gateway_reference: null },
       data: { gateway_reference: reference },
     });
+    if (!claimed.count) {
+      return { success: true, status: 'pending', transactionId: payment.transaction_id ?? undefined,
+        message: 'Pago en proceso; se conciliará con el proveedor.', nextAction: { type: 'await' } };
+    }
     const result = await processor.processPayment(data);
     // A fast APPROVED callback may win while the provider call is in flight.
     // Never regress a terminal state to the HTTP response's older PENDING.

@@ -13,6 +13,11 @@ import {
   resolveVatTreatment,
   vatTreatmentFromResult,
   FISCAL_WIZARD_ROUTE,
+  resolveIncResponsibility,
+  isIncResponsible,
+  resolveFiscalResponsibilityFlags,
+  INC_RESPONSIBLE_CODE,
+  INC_NOT_RESPONSIBLE_CODE,
 } from './vat-responsibility.helper';
 import { purchaseEffectFor } from '../../domains/fiscal-operations/constants/fiscal-responsibilities.catalog';
 
@@ -618,5 +623,201 @@ describe('resolveVatTreatment — las cinco combinaciones de motivo (B.3)', () =
       expect(cite).not.toMatch(/\b86\b/);
       expect(cite).not.toMatch(/2650/);
     }
+  });
+});
+
+/**
+ * INVERSIÓN DE LA JERARQUÍA DE EVIDENCIA (2026-09-22).
+ *
+ * Antes, una casilla 53 declarada que no trajera NI O-48 NI O-49 caía al
+ * respaldo por `tax_regime`. Eso ponía un dato inferido — y además derogado,
+ * porque la Ley 1943 de 2018 art. 18 y la Ley 2010 de 2019 art. 20 eliminaron el
+ * régimen común/simplificado — por encima de lo que el contribuyente declaró.
+ */
+describe('resolveVatResponsibility — la lista declarada manda sobre el régimen', () => {
+  /** Casilla 53 real de Pollo Árabe (store 105). Ninguna es O-48; una es O-33. */
+  const POLLO_ARABE = ['O-05', 'O-07', 'O-14', 'O-33', 'O-42', 'O-52', 'O-55'];
+
+  it('POLLO ÁRABE — lista llena sin O-48 + tax_regime COMUN ⇒ NO responsable', () => {
+    const outcome = resolveVatResponsibility({
+      tax_responsibilities: POLLO_ARABE,
+      tax_regime: 'COMUN',
+    });
+
+    expect(outcome.responsible).toBe(false);
+    // Concluyente, NO indeterminado: el tenant SÍ hizo el trámite fiscal, y su
+    // declaración dice que no es responsable de IVA. Mandarlo al wizard sería
+    // pedirle que corrija algo que está bien.
+    expect(outcome.indeterminate).toBe(false);
+    expect(outcome.reason).toBe('declared_without_vat_code');
+    expect(outcome.source).toBe('tax_responsibilities');
+  });
+
+  it('acepta la casilla 53 en forma numérica cruda (33 ≡ O-33)', () => {
+    const outcome = resolveVatResponsibility({
+      tax_responsibilities: ['05', '07', '14', '33', '42', '52', '55'],
+      tax_regime: 'COMUN',
+    });
+
+    expect(outcome.responsible).toBe(false);
+    expect(outcome.reason).toBe('declared_without_vat_code');
+  });
+
+  it('el respaldo por régimen sigue vivo — sólo con la lista VACÍA', () => {
+    // La inversión degradó el respaldo a último recurso; no lo eliminó.
+    const outcome = resolveVatResponsibility({
+      tax_responsibilities: [],
+      tax_regime: 'COMUN',
+    });
+
+    expect(outcome.responsible).toBe(true);
+    expect(outcome.reason).toBe('regime_responsible');
+    expect(outcome.source).toBe('tax_regime');
+  });
+
+  it('O-53 (persona jurídica no responsable de IVA) es negación explícita', () => {
+    const outcome = resolveVatResponsibility({
+      tax_responsibilities: ['O-13', 'O-53'],
+      tax_regime: 'COMUN',
+    });
+
+    expect(outcome.responsible).toBe(false);
+    expect(outcome.reason).toBe('declared_not_responsible');
+  });
+
+  it('R-99-PN es negación explícita, no una lista sin código de IVA', () => {
+    const outcome = resolveVatResponsibility({
+      tax_responsibilities: ['R-99-PN'],
+    });
+
+    expect(outcome.responsible).toBe(false);
+    expect(outcome.reason).toBe('declared_not_responsible');
+  });
+
+  it('O-48 sigue ganando a cualquier negación del mismo array', () => {
+    expect(
+      resolveVatResponsibility({
+        tax_responsibilities: [VAT_RESPONSIBLE_CODE, 'O-50', 'R-99-PN'],
+      }).responsible,
+    ).toBe(true);
+  });
+
+  it('el texto de declared_without_vat_code explica la consecuencia sin CTA', () => {
+    // Es concluyente: llevar al wizard fiscal a quien ya declaró sería decirle
+    // que le falta un trámite que no le falta.
+    const explanation = resolveVatTreatment({
+      tax_responsibilities: POLLO_ARABE,
+      tax_regime: 'COMUN',
+    });
+
+    expect(explanation.treatment).toBe('capitalized');
+    expect(explanation.vat_responsible).toBe(false);
+    expect(explanation.indeterminate).toBe(false);
+    expect(explanation.cta).toBeUndefined();
+    expect(explanation.message).toContain('O-48');
+    expect(explanation.legal_basis.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * EJE INC — el hermano de RUT del IVA, que hasta ahora ningún código leía.
+ *
+ * O-33 y O-50 ya viajaban dentro de `tax_responsibilities`; lo que faltaba era
+ * un lector. Sin él, un restaurante sólo responsable de INC era indistinguible
+ * de un contribuyente sin ningún tributo.
+ */
+describe('resolveIncResponsibility', () => {
+  it('O-33 declarado ⇒ responsable de INC', () => {
+    const outcome = resolveIncResponsibility({
+      tax_responsibilities: [INC_RESPONSIBLE_CODE],
+    });
+
+    expect(outcome.responsible).toBe(true);
+    expect(outcome.indeterminate).toBe(false);
+    expect(outcome.reason).toBe('declared_inc_responsible');
+    expect(outcome.source).toBe('tax_responsibilities');
+  });
+
+  it('O-50 declarado ⇒ NO responsable de INC (negación explícita)', () => {
+    const outcome = resolveIncResponsibility({
+      tax_responsibilities: [INC_NOT_RESPONSIBLE_CODE],
+    });
+
+    expect(outcome.responsible).toBe(false);
+    expect(outcome.indeterminate).toBe(false);
+    expect(outcome.reason).toBe('declared_not_inc_responsible');
+  });
+
+  it('lista llena sin ningún código del eje INC ⇒ NO responsable, concluyente', () => {
+    const outcome = resolveIncResponsibility({
+      tax_responsibilities: ['O-13', 'O-48'],
+    });
+
+    expect(outcome.responsible).toBe(false);
+    expect(outcome.indeterminate).toBe(false);
+    expect(outcome.reason).toBe('declared_without_inc_code');
+  });
+
+  it('sin casilla 53 ⇒ indeterminado y fail-closed', () => {
+    const outcome = resolveIncResponsibility({ tax_regime: 'COMUN' });
+
+    expect(outcome.responsible).toBe(false);
+    expect(outcome.indeterminate).toBe(true);
+    expect(outcome.reason).toBe('no_inc_signal');
+    expect(outcome.source).toBe('absent');
+  });
+
+  it('NO infiere INC del tax_regime — COMUN nunca habló del consumo', () => {
+    // Declarar ante la DIAN un tributo que el RUT no enumera es exactamente la
+    // afirmación falsa que este módulo existe para impedir.
+    expect(isIncResponsible({ tax_regime: 'COMUN' })).toBe(false);
+    expect(isIncResponsible({ tax_regime: 'GRAN_CONTRIBUYENTE' })).toBe(false);
+  });
+
+  it('isIncResponsible proyecta el mismo resultado — una sola implementación', () => {
+    const data = { tax_responsibilities: ['O-33'] };
+    expect(isIncResponsible(data)).toBe(
+      resolveIncResponsibility(data).responsible,
+    );
+  });
+});
+
+describe('resolveFiscalResponsibilityFlags — los dos ejes en una pasada', () => {
+  it('POLLO ÁRABE ⇒ IVA false, INC true', () => {
+    expect(
+      resolveFiscalResponsibilityFlags({
+        tax_responsibilities: ['O-05', 'O-07', 'O-14', 'O-33', 'O-42', 'O-52', 'O-55'],
+        tax_regime: 'COMUN',
+      }),
+    ).toEqual({ vat_responsible: false, inc_responsible: true });
+  });
+
+  it('franquicia (O-48 sin O-33) ⇒ IVA true, INC false', () => {
+    expect(
+      resolveFiscalResponsibilityFlags({ tax_responsibilities: ['O-48'] }),
+    ).toEqual({ vat_responsible: true, inc_responsible: false });
+  });
+
+  it('mixto (O-48 + O-33) ⇒ los dos ejes en true', () => {
+    expect(
+      resolveFiscalResponsibilityFlags({
+        tax_responsibilities: ['O-33', 'O-48'],
+      }),
+    ).toEqual({ vat_responsible: true, inc_responsible: true });
+  });
+
+  it('sin datos ⇒ los dos ejes en false (fail-closed)', () => {
+    expect(resolveFiscalResponsibilityFlags(null)).toEqual({
+      vat_responsible: false,
+      inc_responsible: false,
+    });
+  });
+
+  it('no divergen de los resolvedores individuales', () => {
+    const data = { tax_responsibilities: ['O-33', 'O-48'], tax_regime: 'COMUN' };
+    const flags = resolveFiscalResponsibilityFlags(data);
+
+    expect(flags.vat_responsible).toBe(resolveVatResponsibility(data).responsible);
+    expect(flags.inc_responsible).toBe(resolveIncResponsibility(data).responsible);
   });
 });

@@ -6,7 +6,15 @@ import {
   DianCustomerData,
   DianIssuerData,
 } from '../interfaces/dian-config.interface';
-import { toDianTaxLevelCode } from '../constants/dian-tax-level-codes';
+import {
+  toDianTaxLevelCode,
+  DIAN_TAX_LEVEL_CODES,
+  DIAN_TAX_LEVEL_CODE_MAX_LENGTH,
+} from '../constants/dian-tax-level-codes';
+import {
+  DIAN_PARTY_TAX_SCHEMES,
+  resolveDianPartyTaxScheme,
+} from '../constants/dian-tax-codes';
 
 describe('UblCommonBuilder.buildSupplierParty', () => {
   /**
@@ -672,5 +680,224 @@ describe('UblCommonBuilder.buildTaxTotals — grupo vacío (FAS01b)', () => {
     expect(countTag(xml, 'cac:TaxTotal')).toBe(1);
     expect(countTag(xml, 'cac:TaxSubtotal')).toBe(1);
     expect(xml).toContain('<cbc:TaxAmount currencyID="COP">190.00</cbc:TaxAmount>');
+  });
+});
+
+
+/**
+ * `cac:PartyTaxScheme/cac:TaxScheme` del EMISOR — tabla 13.2.6.2 del anexo
+ * técnico FEV 1.9, que NO es la tabla 13.2.2 de tributos de línea.
+ *
+ * Cuatro valores y sólo cuatro: `01` IVA, `04` INC, `ZA` IVA e INC, `ZZ` No
+ * aplica. Hasta el 2026-09-22 el constructor emitía dos (`01` o `ZZ`) desde un
+ * booleano — `issuer.tax_regime !== '49'` — de modo que un contribuyente
+ * responsable Únicamente de INC no tenía forma de declararse: salía como IVA.
+ *
+ * `ZA` existe sólo en esta tabla. Buscarlo en `DIAN_TAX_TABLE` no lo encuentra,
+ * y eso es correcto: como tributo de línea no existe.
+ */
+describe('resolveDianPartyTaxScheme — las cuatro combinaciones (13.2.6.2)', () => {
+  it('IVA + INC ⇒ ZA / IVA e INC', () => {
+    expect(
+      resolveDianPartyTaxScheme({ vat_responsible: true, inc_responsible: true }),
+    ).toEqual({ id: 'ZA', name: 'IVA e INC' });
+  });
+
+  it('sólo IVA ⇒ 01 / IVA', () => {
+    expect(
+      resolveDianPartyTaxScheme({ vat_responsible: true, inc_responsible: false }),
+    ).toEqual({ id: '01', name: 'IVA' });
+  });
+
+  it('sólo INC ⇒ 04 / INC', () => {
+    expect(
+      resolveDianPartyTaxScheme({ vat_responsible: false, inc_responsible: true }),
+    ).toEqual({ id: '04', name: 'INC' });
+  });
+
+  it('ninguno ⇒ ZZ / No aplica', () => {
+    expect(
+      resolveDianPartyTaxScheme({ vat_responsible: false, inc_responsible: false }),
+    ).toEqual({ id: 'ZZ', name: 'No aplica' });
+  });
+
+  it('banderas ausentes se leen como false, nunca como responsabilidad', () => {
+    // Un emisor a medio construir no puede terminar afirmando un tributo.
+    expect(resolveDianPartyTaxScheme({})).toEqual(
+      DIAN_PARTY_TAX_SCHEMES.NOT_APPLICABLE,
+    );
+    expect(
+      resolveDianPartyTaxScheme({
+        vat_responsible: undefined,
+        inc_responsible: undefined,
+      }),
+    ).toEqual(DIAN_PARTY_TAX_SCHEMES.NOT_APPLICABLE);
+  });
+
+  it('el cbc:Name acompaña al cbc:ID — el par no se puede separar', () => {
+    expect(DIAN_PARTY_TAX_SCHEMES.IVA).toEqual({ id: '01', name: 'IVA' });
+    expect(DIAN_PARTY_TAX_SCHEMES.INC).toEqual({ id: '04', name: 'INC' });
+    expect(DIAN_PARTY_TAX_SCHEMES.IVA_AND_INC).toEqual({ id: 'ZA', name: 'IVA e INC' });
+    expect(DIAN_PARTY_TAX_SCHEMES.NOT_APPLICABLE).toEqual({ id: 'ZZ', name: 'No aplica' });
+  });
+});
+
+describe('buildSupplierParty — esquema tributario del emisor en el XML', () => {
+  function createRoot(): any {
+    return create({ version: '1.0', encoding: 'UTF-8' }).ele(
+      UBL_NAMESPACES.INVOICE,
+      'Invoice',
+      {
+        'xmlns:cac': UBL_NAMESPACES.CAC,
+        'xmlns:cbc': UBL_NAMESPACES.CBC,
+        'xmlns:ext': UBL_NAMESPACES.EXT,
+      },
+    );
+  }
+
+  function issuer(overrides: Partial<DianIssuerData>): DianIssuerData {
+    return {
+      document_type: '31',
+      nit: '901234567',
+      nit_dv: '1',
+      legal_name: 'Restaurante Pollo Árabe S.A.S.',
+      address_line: 'Calle 10 # 5-20',
+      city_code: '11001',
+      city_name: 'Bogota',
+      department_code: '11',
+      department_name: 'Bogota',
+      country_code: 'CO',
+      email: 'facturacion@polloarabe.test',
+      tax_regime: '49',
+      tax_scheme: 'R-99-PN',
+      ...overrides,
+    };
+  }
+
+  function schemeOf(data: DianIssuerData): { id: string; name: string } {
+    const root = createRoot();
+    UblCommonBuilder.buildSupplierParty(root, data);
+    const xml: string = root.end({ prettyPrint: true });
+    // El emisor tiene UN solo cac:PartyTaxScheme, así que el primer
+    // cac:TaxScheme del fragmento es el suyo.
+    const match = xml.match(
+      /<cac:TaxScheme>\s*<cbc:ID>([^<]*)<\/cbc:ID>\s*<cbc:Name>([^<]*)<\/cbc:Name>/,
+    );
+    if (!match) throw new Error('El emisor no emitió cac:TaxScheme:\n' + xml);
+    return { id: match[1], name: match[2] };
+  }
+
+  it('POLLO ÁRABE — casilla 53 sin O-48 y con O-33 declara 04 / INC', () => {
+    // El defecto en producción: este emisor salía firmado como '01 / IVA'.
+    expect(
+      schemeOf(
+        issuer({
+          party_tax_scheme: { id: '04', name: 'INC' },
+          tax_scheme: 'O-05;O-07;O-14;O-33;O-42;O-52;O-55',
+        }),
+      ),
+    ).toEqual({ id: '04', name: 'INC' });
+  });
+
+  it('deriva el esquema de la casilla 53 cuando el emisor no lo trae resuelto', () => {
+    // Ruta del emisor construido a mano (p. ej. el vendedor sintético del
+    // documento soporte), que no pasa por projectTenantIdentityToDian. Debe
+    // llegar al MISMO valor, o los dos caminos declararían cosas distintas.
+    // `tax_regime '49'` es lo que esa proyección emite para este RUT.
+    expect(
+      schemeOf(
+        issuer({ tax_scheme: 'O-05;O-07;O-14;O-33;O-42;O-52;O-55', tax_regime: '49' }),
+      ),
+    ).toEqual({ id: '04', name: 'INC' });
+  });
+
+  it("tax_regime '48' es afirmación de IVA que la lista no revoca — suma, no resta", () => {
+    // El eje IVA es un OR. Un emisor armado a mano puede traer en `tax_scheme`
+    // una responsabilidad SUELTA que no es la casilla 53 completa; leerla como
+    // completa degradaría a un responsable de IVA real. Con O-33 presente el
+    // resultado correcto es ZA (los dos tributos), nunca sólo INC.
+    expect(schemeOf(issuer({ tax_scheme: 'O-33', tax_regime: '48' }))).toEqual({
+      id: 'ZA',
+      name: 'IVA e INC',
+    });
+    // Y una responsabilidad suelta sin relación con el IVA no lo revoca.
+    expect(schemeOf(issuer({ tax_scheme: 'O-15', tax_regime: '48' }))).toEqual({
+      id: '01',
+      name: 'IVA',
+    });
+  });
+
+  it('FRANQUICIA — O-48 sin O-33 declara 01 / IVA', () => {
+    expect(schemeOf(issuer({ tax_scheme: 'O-13;O-48', tax_regime: '48' }))).toEqual({
+      id: '01',
+      name: 'IVA',
+    });
+  });
+
+  it('MIXTO — O-48 y O-33 declaran ZA / IVA e INC', () => {
+    expect(schemeOf(issuer({ tax_scheme: 'O-33;O-48', tax_regime: '48' }))).toEqual({
+      id: 'ZA',
+      name: 'IVA e INC',
+    });
+  });
+
+  it('NINGUNO — R-99-PN declara ZZ / No aplica', () => {
+    expect(schemeOf(issuer({ tax_scheme: 'R-99-PN', tax_regime: '49' }))).toEqual({
+      id: 'ZZ',
+      name: 'No aplica',
+    });
+  });
+
+  it('sin casilla 53, el tax_regime 48 sigue siendo el respaldo (sin regresión)', () => {
+    // Emisores viejos que sólo transportan el booleano colapsado no pueden
+    // dejar de declarar IVA de un día para otro.
+    expect(schemeOf(issuer({ tax_scheme: '', tax_regime: '48' }))).toEqual({
+      id: '01',
+      name: 'IVA',
+    });
+    expect(schemeOf(issuer({ tax_scheme: '', tax_regime: '49' }))).toEqual({
+      id: 'ZZ',
+      name: 'No aplica',
+    });
+  });
+
+  it('party_tax_scheme precomputado gana a cualquier derivación', () => {
+    // Es el valor que resolvió projectTenantIdentityToDian sobre la identidad
+    // completa; el constructor no debe recalcularlo con menos información.
+    expect(
+      schemeOf(
+        issuer({
+          party_tax_scheme: { id: 'ZA', name: 'IVA e INC' },
+          tax_scheme: 'R-99-PN',
+          tax_regime: '49',
+        }),
+      ),
+    ).toEqual({ id: 'ZA', name: 'IVA e INC' });
+  });
+});
+
+describe('toDianTaxLevelCode — tope de 30 caracteres', () => {
+  it('la unión completa de la enumeración cabe en el tope', () => {
+    // 'O-13;O-15;O-23;O-47;R-99-PN' = 27. El margen es de TRES caracteres: la
+    // guardia existe porque este holgura es accidental, no garantizada.
+    const all = Object.values(DIAN_TAX_LEVEL_CODES).join(';');
+
+    expect(all.length).toBeLessThanOrEqual(DIAN_TAX_LEVEL_CODE_MAX_LENGTH);
+    expect(toDianTaxLevelCode(all).length).toBeLessThanOrEqual(
+      DIAN_TAX_LEVEL_CODE_MAX_LENGTH,
+    );
+  });
+
+  it('la casilla 53 de 34 caracteres que motivó la guardia sale dentro del tope', () => {
+    const raw = 'O-05;O-07;O-14;O-33;O-42;O-52;O-55';
+    expect(raw.length).toBeGreaterThan(DIAN_TAX_LEVEL_CODE_MAX_LENGTH);
+
+    const emitted = toDianTaxLevelCode(raw);
+
+    // Hoy sobrevive porque el filtro la recorta a nada, no porque alguien la
+    // midiera. Si mañana tres de esos códigos entraran a la enumeración, el
+    // recorte dejaría de salvar el documento.
+    expect(emitted).toBe('R-99-PN');
+    expect(emitted.length).toBeLessThanOrEqual(DIAN_TAX_LEVEL_CODE_MAX_LENGTH);
   });
 });

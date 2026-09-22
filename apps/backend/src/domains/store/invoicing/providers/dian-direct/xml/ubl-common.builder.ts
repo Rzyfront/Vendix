@@ -3,6 +3,8 @@ import { UBL_NAMESPACES, UBL_CONSTANTS } from './xml-namespaces';
 import {
   DIAN_TAX_CODES,
   DIAN_TAX_NAMES,
+  DianPartyTaxScheme,
+  resolveDianPartyTaxScheme,
   resolveDianTaxCodeByName,
   resolveDianTaxSchemeCode,
 } from '../constants/dian-tax-codes';
@@ -28,6 +30,7 @@ import {
   resolveDianMunicipality,
 } from '../constants/dian-geography';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { resolveFiscalResponsibilityFlags } from 'src/common/helpers/vat-responsibility.helper';
 import { DIAN_FINAL_CONSUMER_NAME } from '../../../validators/customer-fiscal-identity.validator';
 import { createHash } from 'crypto';
 import {
@@ -599,6 +602,68 @@ export class UblCommonBuilder {
   }
 
   /**
+   * Esquema tributario de la PARTE emisora — `cac:PartyTaxScheme/cac:TaxScheme`,
+   * tabla 13.2.6.2 del anexo (`01` IVA, `04` INC, `ZA` IVA e INC, `ZZ` No aplica).
+   *
+   * DOS ENTRADAS, UNA SOLA REGLA. El emisor real llega con
+   * `party_tax_scheme` ya resuelto por `projectTenantIdentityToDian` desde la
+   * casilla 53 del RUT. Los emisores SINTÉTICOS —el vendedor del documento
+   * soporte, que se fabrica a partir de un tercero no obligado a facturar— no
+   * pasan por esa proyección, así que aquí se deriva de lo que sí traen. Las dos
+   * ramas terminan en `resolveDianPartyTaxScheme`, que es la única que decide.
+   *
+   * La derivación respeta la MISMA jerarquía de evidencia que
+   * `resolveVatResponsibility`: una lista de responsabilidades declarada manda
+   * sobre cualquier otra señal, y sólo cuando está vacía se mira el código
+   * '48'/'49'. El eje INC nunca se infiere de '48'/'49' — ese código no habla
+   * del INC, y declarar ante la DIAN un tributo que el RUT no enumera es
+   * precisamente la afirmación falsa que este resolvedor existe para impedir.
+   */
+  static resolvePartyTaxScheme(issuer: {
+    party_tax_scheme?: { id: string; name: string };
+    tax_scheme?: string;
+    tax_regime?: string;
+  }): DianPartyTaxScheme {
+    if (issuer.party_tax_scheme?.id) return issuer.party_tax_scheme;
+
+    // `tax_scheme` transporta las responsabilidades crudas del RUT unidas con
+    // `;` (la misma cadena que alimenta `cbc:TaxLevelCode` antes de filtrarse).
+    const responsibilities = (issuer.tax_scheme ?? '')
+      .split(';')
+      .map((code) => code.trim())
+      .filter((code) => !!code);
+
+    const flags = resolveFiscalResponsibilityFlags({
+      tax_responsibilities: responsibilities,
+    });
+
+    return resolveDianPartyTaxScheme({
+      // EL EJE IVA ES UN OR, NO UNA PRECEDENCIA — y la asimetría es deliberada.
+      //
+      // `tax_regime === '48'` es una afirmación POSITIVA de responsabilidad que
+      // alguien ya resolvió aguas arriba (en la ruta real sale de
+      // `projectTenantIdentityToDian`, sobre la casilla 53 completa). Una lista
+      // que no enumera O-48 sólo puede REVOCARLA si es una casilla 53 completa,
+      // y por este camino no hay forma de saber si lo es: los emisores armados a
+      // mano suelen poner en `tax_scheme` una responsabilidad SUELTA (`'O-15'`,
+      // autorretenedor) que no pretende ser la lista entera. Leerla como
+      // completa convertiría un dato parcial en una negación inventada y
+      // degradaría a `ZZ` a un responsable de IVA real.
+      //
+      // Esto NO afloja el arreglo del restaurante: por la ruta real el emisor
+      // llega con `party_tax_scheme` ya resuelto y el `return` de arriba corta
+      // antes de llegar aquí; y su `tax_regime` proyectado es '49', no '48'.
+      // Además la dirección del riesgo es la correcta: sobra-declarar IVA se
+      // detecta contra el RUT, sub-declararlo produce un documento firmado que
+      // niega un tributo que el contribuyente sí debe.
+      vat_responsible: issuer.tax_regime === '48' || flags.vat_responsible,
+      // El eje INC NO tiene equivalente a '48': `tax_regime` nunca habló del
+      // consumo. Sale sólo de la casilla 53, o no sale.
+      inc_responsible: flags.inc_responsible,
+    });
+  }
+
+  /**
    * Builds the supplier (emisor) party element.
    *
    * `numbering_prefix` es el prefijo de la resolución de numeración (el mismo
@@ -667,16 +732,19 @@ export class UblCommonBuilder {
     // junto a `cbc:ID` y la DIAN notifica FAJ41 «el contenido de este elemento
     // no corresponde al nombre y código valido» cuando el nombre falta —
     // XPath `/Invoice/cac:AccountingSupplierParty/…/cac:TaxScheme/cbc:Name`.
-    // Si el emisor es no responsable de IVA (régimen '49' / O-49), se declara
-    // tributo ZZ ('No aplica') para evitar que la DIAN lo etiquete como IVA.
-    const is_responsible = issuer.tax_regime !== '49';
+    //
+    // EL DOMINIO SON CUATRO VALORES, NO DOS (tabla 13.2.6.2): `01` IVA, `04`
+    // INC, `ZA` IVA e INC, `ZZ` No aplica. Antes se decidía con el booleano
+    // `issuer.tax_regime !== '49'`, que sólo sabía producir `01` o `ZZ`: un
+    // restaurante responsable ÚNICAMENTE de INC —el caso normal en Colombia,
+    // porque el Art. 426 ET excluye de IVA el expendio de comidas— salía
+    // declarado bajo esquema IVA. Medido en producción sobre facturas ya
+    // firmadas y ACEPTADAS.
+    const issuer_party_scheme =
+      UblCommonBuilder.resolvePartyTaxScheme(issuer);
     const issuer_scheme = tax_scheme.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
-    issuer_scheme
-      .ele(UBL_NAMESPACES.CBC, 'ID')
-      .txt(is_responsible ? DIAN_TAX_CODES.IVA : DIAN_TAX_CODES.OTHER);
-    issuer_scheme
-      .ele(UBL_NAMESPACES.CBC, 'Name')
-      .txt(is_responsible ? DIAN_TAX_NAMES[DIAN_TAX_CODES.IVA] : 'No aplica');
+    issuer_scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(issuer_party_scheme.id);
+    issuer_scheme.ele(UBL_NAMESPACES.CBC, 'Name').txt(issuer_party_scheme.name);
 
     // Party legal entity
     const legal = party.ele(UBL_NAMESPACES.CAC, 'PartyLegalEntity');

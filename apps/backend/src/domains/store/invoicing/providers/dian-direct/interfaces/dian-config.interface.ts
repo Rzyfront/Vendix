@@ -71,6 +71,23 @@ export interface DianIssuerData {
   tax_regime: string; // '48' = Responsable IVA, '49' = No responsable
   tax_scheme: string; // 'O-13' = Gran contribuyente, 'O-15' = Autorretenedor, etc.
   /**
+   * Par (ID, Name) de `cac:PartyTaxScheme/cac:TaxScheme` — tabla 13.2.6.2 del
+   * anexo: `01` IVA, `04` INC, `ZA` IVA e INC, `ZZ` No aplica.
+   *
+   * POR QUÉ NO BASTA `tax_regime`. Ese campo colapsa el dominio en dos estados
+   * ('48'/'49') y no tiene forma de expresar «responsable únicamente de INC»,
+   * que es el caso de todo restaurante colombiano (Art. 426 ET: el expendio de
+   * comidas está excluido de IVA). El builder decidía con `tax_regime !== '49'`
+   * y por eso un restaurante sin O-48 salía declarado bajo esquema IVA.
+   *
+   * OPCIONAL a propósito: los emisores que se arman a mano —el vendedor
+   * sintético del documento soporte— no pasan por
+   * `projectTenantIdentityToDian`. Cuando falta, el builder lo deriva de
+   * `tax_scheme` + `tax_regime` con la MISMA función
+   * (`resolveDianPartyTaxScheme`), así que no hay dos criterios.
+   */
+  party_tax_scheme?: { id: string; name: string };
+  /**
    * DIAN organization/person type for `cbc:AdditionalAccountID`:
    * '1' = Persona Jurídica (default), '2' = Persona Natural.
    * NOTE: this is NOT the tax regime. The regime ('48' Responsable de IVA /

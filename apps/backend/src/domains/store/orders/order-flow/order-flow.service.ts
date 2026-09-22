@@ -1,3 +1,4 @@
+import { assertNoActiveFinancialSplit } from '../shared/financial-split-policy';
 import { lockOrderLifecycle } from './order-lifecycle-lock.util';
 import {
   getCancellationBlocker,
@@ -656,6 +657,7 @@ export class OrderFlowService {
       const probe = await this.prisma.orders.findFirst({
         where: { id: orderId },
         select: {
+          active_financial_split_id: true,
           delivery_type: true,
           shipping_method_id: true,
           order_items: {
@@ -665,6 +667,7 @@ export class OrderFlowService {
           },
         },
       });
+      if (probe) assertNoActiveFinancialSplit(probe);
       const needsDispatch =
         probe?.delivery_type !== 'pickup' &&
         probe?.delivery_type !== 'direct_delivery' &&
@@ -1253,8 +1256,44 @@ export class OrderFlowService {
    * - shipped → shipped (payment confirmed, no state change — logistics already advanced)
    * Called from webhook handlers or manually by admin
    */
+  /** Trusted settlement of the ONE physical source. No new payment is created.
+   * Tables retain their KDS lifecycle/manual close; ordinary POS orders use
+   * existing reservation + idempotent stock-commit services exactly once.
+   */
+  async settleFinancialSplitSource(orderId: number, actorUserId?: number): Promise<void> {
+    const context = RequestContextService.getContext();
+    if (actorUserId && context?.user_id !== actorUserId) {
+      return RequestContextService.runIsolated({ ...context!, user_id: actorUserId },
+        () => this.settleFinancialSplitSource(orderId, actorUserId));
+    }
+    const order = await this.getOrder(orderId);
+    if (!order.active_financial_split_id || ['cancelled', 'refunded'].includes(order.state)) return;
+    const paid = order.payments.filter((p) => ['succeeded', 'captured'].includes(p.state))
+      .reduce((sum, p) => sum.plus(p.amount), new Prisma.Decimal(0));
+    if (paid.lt(order.grand_total)) return;
+    const table = await this.prisma.table_sessions.findFirst({ where: { order_id: orderId, store_id: order.store_id }, select: { id: true } });
+    if (table) return;
+    if (order.state === 'draft') await this.promoteDraftToCreated(orderId);
+    await this.prisma.orders.updateMany({
+      where: { id: orderId, store_id: order.store_id, state: { in: ['created', 'pending_payment'] }, active_financial_split_id: order.active_financial_split_id },
+      data: { state: 'processing', updated_at: new Date() },
+    });
+    const current = await this.prisma.orders.findFirst({
+      where: { id: orderId, store_id: order.store_id },
+      include: { order_items: { include: { products: { select: { requires_serial_numbers: true } } } } },
+    });
+    if (current?.channel === 'pos' && current.delivery_type === 'direct_delivery' &&
+        !current.order_items.some((line) => line.products?.requires_serial_numbers)) {
+      await this.orderStockCommit.commitOrderDelivery(orderId, {
+        movementType: 'sale', blockOnInsufficient: false, consumeSerials: true,
+        reason: 'POS Sale (cuentas financieras cobradas)', userId: actorUserId ?? context?.user_id,
+      });
+    }
+  }
+
   async confirmPayment(orderId: number) {
     const initial = await this.getOrder(orderId);
+    assertNoActiveFinancialSplit(initial);
     const afterCommit: Array<() => Promise<void>> = [];
     const result = await this.prisma.$transaction(async (tx) => {
       await lockOrderLifecycle(tx, orderId, initial.store_id);
@@ -1304,6 +1343,7 @@ export class OrderFlowService {
     cancelledBy: string,
   ) {
     const order = await this.getOrder(orderId);
+    assertNoActiveFinancialSplit(order);
 
     if (!['pending_payment', 'processing'].includes(order.state)) {
       throw new BadRequestException(
@@ -2939,6 +2979,7 @@ export class OrderFlowService {
    */
   async cancelOrder(orderId: number, dto: CancelOrderDto, force = false) {
     const order = await this.getOrder(orderId);
+    assertNoActiveFinancialSplit(order);
     let previousState = order.state as OrderState;
 
     const notCancelableError = () =>

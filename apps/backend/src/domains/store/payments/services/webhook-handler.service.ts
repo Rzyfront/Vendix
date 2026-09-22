@@ -1,3 +1,4 @@
+import { SplitAccountPaymentService } from '../../tables/split-account-payment.service';
 import { lockOrderLifecycle } from '../../orders/order-flow/order-lifecycle-lock.util';
 import {
   Injectable,
@@ -66,6 +67,9 @@ export class WebhookHandlerService {
     @Optional()
     @Inject(forwardRef(() => PaymentLinksService))
     private readonly paymentLinksService?: PaymentLinksService,
+    @Optional()
+    @Inject(forwardRef(() => SplitAccountPaymentService))
+    private readonly financialAccounts?: SplitAccountPaymentService,
   ) {}
 
   async handleWebhook(event: WebhookEvent): Promise<void> {
@@ -289,6 +293,9 @@ export class WebhookHandlerService {
           reconciliation_reason: 'approved_after_local_cancellation',
           previous_payment_state: payment.state,
           order_state: locked.state,
+        } : payment.financial_account_id ? {
+          ...(gatewayResponse && typeof gatewayResponse === 'object' ? gatewayResponse : { gateway_event: gatewayResponse }),
+          financial_request: (prior as any)?.financial_request,
         } : gatewayResponse;
         const cas = await tx.payments.updateMany({
           where: { id: payment.id, order_id: order.id,
@@ -318,7 +325,7 @@ export class WebhookHandlerService {
 
   private async isOrderFullyPaid(tx: Prisma.TransactionClient, orderId: number): Promise<boolean> {
     const order = await tx.orders.findUnique({ where: { id: orderId }, include: { payments: true } });
-    if (!order) return false;
+    if (!order || order.active_financial_split_id) return false;
     const paid = order.payments.filter((p) => ['succeeded', 'captured'].includes(p.state))
       .reduce((total, p) => total.plus(p.amount), new Prisma.Decimal(0));
     return paid.greaterThanOrEqualTo(order.grand_total);
@@ -338,7 +345,7 @@ export class WebhookHandlerService {
     try {
       const client = this.prisma.withoutScope();
       const order = await client.orders.findUnique({ where: { id: orderId } });
-      if (!order) return;
+      if (!order || order.active_financial_split_id) return;
       if (!(ORDER_OPEN_STATES as readonly string[]).includes(order.state)) {
         return;
       }
@@ -399,6 +406,7 @@ export class WebhookHandlerService {
    * theoretically let a second entry slip through.
    */
   private async emitPaymentReceivedAccounting(paymentId: number): Promise<void> {
+    let financial = false;
     try {
       const client = this.prisma.withoutScope();
       const payment = await client.payments.findUnique({
@@ -424,6 +432,12 @@ export class WebhookHandlerService {
 
       const order = payment.orders;
       const storeId = order.store_id;
+      if (payment.financial_account_id) {
+        financial = true;
+        if (!this.financialAccounts) throw new Error('Financial account reconciliation provider unavailable');
+        await this.storeContextRunner.runInStoreContext(storeId, () => this.financialAccounts!.reconcilePayment(payment.id));
+        return;
+      }
 
       // Tax breakdown (typed per fiscal type so accounting posts one journal
       // line per type: IVA → 2408, INC → 2436, ICA → 241205). Mirrors the
@@ -499,6 +513,7 @@ export class WebhookHandlerService {
         `payment.received emitted for webhook payment ${payment.id} (order ${order.id}, method=${paymentMethodLabel})`,
       );
     } catch (error) {
+      if (financial) throw error;
       this.logger.error(
         `Failed to emit payment.received for webhook payment ${paymentId}: ${
           error instanceof Error ? error.message : String(error)

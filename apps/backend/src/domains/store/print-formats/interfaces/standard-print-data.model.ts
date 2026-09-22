@@ -17,7 +17,22 @@ export interface StandardPrintParty {
   city?: string;
   state_province?: string;
   country?: string;
+  /**
+   * SOLO adquirente. El emisor NO lleva leyenda de régimen: la derogatoria del
+   * art. 506 E.T. (Ley 1943/2018 art. 122, Ley 2010/2019 art. 160) dejó sin
+   * base legal «Responsable de IVA» / «No responsable de IVA» en el papel, y el
+   * num. 12 del art. 11 de la Res. 000165/2023 enumera otras cuatro calidades.
+   * Para el emisor use `fiscal_qualities`.
+   */
   tax_regime?: string;
+  /**
+   * Renglón de calidades fiscales del emisor (num. 12 art. 11 Res. DIAN
+   * 000165/2023), derivado de `tax_responsibilities` por
+   * `resolveFiscalQualitiesLine`. AUSENTE cuando no corresponde ninguna — el
+   * compositor omite el renglón por completo, que es el comportamiento que la
+   * norma pide («cuando corresponda»).
+   */
+  fiscal_qualities?: string;
   fiscal_responsibilities?: string[];
   logo_url?: string;
 }

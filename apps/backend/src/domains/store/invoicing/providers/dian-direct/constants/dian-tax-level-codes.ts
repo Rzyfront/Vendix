@@ -55,6 +55,8 @@
  * es la fuente que zanja el asunto — añadir aquí lo que diga y borrar esta nota.
  */
 
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+
 /**
  * Enumeración aceptada por `cbc:TaxLevelCode`, con su significado.
  * Es la definición canónica: cualquier otra capa debe importar de aquí.
@@ -99,6 +101,27 @@ export const DIAN_TAX_LEVEL_CODE_LABELS: Readonly<
   'R-99-PN': 'No aplica / ninguna de las anteriores',
 };
 
+/**
+ * Longitud máxima de `cbc:TaxLevelCode` — 30 caracteres.
+ *
+ * Fuente: el tipo del elemento en el esquema UBL/DIAN. NO es una convención
+ * interna: superarla es un rechazo por esquema, antes de cualquier regla de
+ * negocio.
+ *
+ * POR QUÉ HACE FALTA UNA GUARDIA EXPLÍCITA Y NO BASTA EL FILTRO. Hoy el tope no
+ * se puede alcanzar: la enumeración cerrada tiene cinco valores y su unión
+ * completa con `;` mide 27 caracteres (`O-13;O-15;O-23;O-47;R-99-PN`). Pero eso
+ * es una consecuencia ACCIDENTAL del tamaño de la lista, no una propiedad
+ * garantizada — y la lista está documentada arriba como pendiente de ampliarse
+ * si aparece `13.2.6.1 Responsabilidades fiscales.xlsx`. La casilla 53 real que
+ * motivó esta guardia (un restaurante con `O-05;O-07;O-14;O-33;O-42;O-52;O-55`,
+ * 34 caracteres) sobrevive hoy sólo porque el filtro la recorta a nada: si
+ * mañana tres de esos códigos entraran a la enumeración, el recorte dejaría de
+ * salvar el documento y el fallo aparecería como un rechazo de esquema opaco.
+ * La guardia convierte ese futuro en un error nombrado y en el sitio correcto.
+ */
+export const DIAN_TAX_LEVEL_CODE_MAX_LENGTH = 30;
+
 /** Conjunto de búsqueda. Se construye una vez, no en cada llamada. */
 const TAX_LEVEL_CODE_SET: ReadonlySet<string> = new Set<string>(
   Object.values(DIAN_TAX_LEVEL_CODES),
@@ -137,7 +160,27 @@ export function toDianTaxLevelCode(
       kept.push(trimmed);
     }
   }
-  return kept.length ? kept.join(';') : DIAN_TAX_LEVEL_CODE_NONE;
+  const emitted = kept.length ? kept.join(';') : DIAN_TAX_LEVEL_CODE_NONE;
+
+  // La guardia se aplica DESPUÉS del filtro, que es donde la afirmación tiene
+  // sentido: lo que hay que medir es lo que se va a emitir, no lo que llegó.
+  if (emitted.length > DIAN_TAX_LEVEL_CODE_MAX_LENGTH) {
+    throw new VendixHttpException(
+      ErrorCodes.INVOICING_VALIDATE_001,
+      `Las responsabilidades fiscales ocupan ${emitted.length} caracteres en ` +
+        `cbc:TaxLevelCode y el máximo es ${DIAN_TAX_LEVEL_CODE_MAX_LENGTH}. ` +
+        `Reduce las responsabilidades declaradas a las que la DIAN acepta en ` +
+        `este elemento.`,
+      {
+        element: 'cbc:TaxLevelCode',
+        value: emitted,
+        length: emitted.length,
+        max_length: DIAN_TAX_LEVEL_CODE_MAX_LENGTH,
+      },
+    );
+  }
+
+  return emitted;
 }
 
 /**

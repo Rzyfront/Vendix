@@ -19,7 +19,10 @@ const HEADER: CatalogField[] = [
   { id: 'f_name', key: 'store.name', label: 'Nombre Comercial', format: 'text', position: 'center' },
   { id: 'f_legal', key: 'store.legal_name', label: 'Razón Social', format: 'text', position: 'center' },
   { id: 'f_nit', key: 'store.tax_id', label: 'NIT / RUT', format: 'text', position: 'center' },
-  { id: 'f_regime', key: 'store.tax_regime', label: 'Régimen Fiscal', format: 'text', position: 'center' },
+  // Espeja el catálogo BE: `f_regime` conserva su id (las plantillas guardadas
+  // mantienen su toggle) pero ya no apunta al régimen derogado del art. 506 E.T.
+  // El renglón son las calidades del num. 12 art. 11 Res. DIAN 000165/2023.
+  { id: 'f_regime', key: 'store.fiscal_qualities', label: 'Calidad Fiscal (DIAN)', format: 'text', position: 'center' },
   { id: 'f_addr', key: 'store.address', label: 'Dirección', format: 'text', position: 'center' },
   { id: 'f_addr1', key: 'store.address_line1', label: 'Dirección Línea 1', format: 'text', position: 'center' },
   { id: 'f_addr2', key: 'store.address_line2', label: 'Dirección Línea 2', format: 'text', position: 'center' },

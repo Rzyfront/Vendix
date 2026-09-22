@@ -1436,6 +1436,27 @@ export class AutoEntryService {
     if (!event.store_id || !event.financial_event) {
       throw new Error('Financial accounting requires store and event identity');
     }
+    // A fiscal invoice can be enabled while accounting is intentionally off.
+    // Missing historical journals are only a defect in an active accounting area.
+    if (
+      !(await this.fiscal_gate.isAreaEnabled(
+        event.organization_id,
+        event.store_id,
+        'accounting',
+      ))
+    ) {
+      await this.entry_failure_service.recordSkip({
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        source_type: event.source_type,
+        source_id: event.source_id,
+        cause: 'SKIPPED_AREA_INACTIVE',
+        detail:
+          'Financial account event omitted because the accounting area is inactive.',
+        event_payload: event,
+      });
+      return { id: null, skipped: true, reason: 'accounting_area_inactive' };
+    }
     const account = await tx.order_financial_accounts.findFirst({
       where: {
         id: event.financial_account_id,
@@ -1443,58 +1464,144 @@ export class AutoEntryService {
         store: { organization_id: event.organization_id },
       },
       include: {
-        split: { select: { source_order_id: true } },
-        lines: { orderBy: { id: 'asc' }, include: { taxes: { orderBy: { id: 'asc' } } } },
+        split: {
+          select: { source_order_id: true, original_payment_ids: true },
+        },
+        lines: {
+          orderBy: { id: 'asc' },
+          include: { taxes: { orderBy: { id: 'asc' } } },
+        },
         payments: { select: { id: true, amount: true } },
       },
     });
-    if (!account) throw new Error('Financial account does not belong to the event tenant');
+    if (!account)
+      throw new Error('Financial account does not belong to the event tenant');
 
     const directSource = 'financial_account.payment_revenue';
     const settlementSource = 'financial_account.payment_receivable';
-    const entryScope = { organization_id: event.organization_id, store_id: event.store_id, status: 'posted' };
+    const entryScope = {
+      organization_id: event.organization_id,
+      store_id: event.store_id,
+      status: 'posted',
+    };
     let invoice: any = null;
     let payment: any = null;
     if (event.financial_event === 'invoice') {
       invoice = await tx.invoices.findFirst({
-        where: { id: event.source_id, financial_account_id: account.id,
-          order_id: account.split.source_order_id, organization_id: event.organization_id,
-          store_id: event.store_id, invoice_type: 'sales_invoice', status: 'accepted' },
+        where: {
+          id: event.source_id,
+          financial_account_id: account.id,
+          order_id: account.split.source_order_id,
+          organization_id: event.organization_id,
+          store_id: event.store_id,
+          invoice_type: 'sales_invoice',
+          status: 'accepted',
+        },
         select: { id: true, accounting_entity_id: true },
       });
-      if (!invoice) throw new Error('Financial invoice is not accepted for this account');
+      if (!invoice)
+        throw new Error('Financial invoice is not accepted for this account');
       const posted = await tx.accounting_entries.findFirst({
-        where: { ...entryScope, source_type: 'invoice.validated', source_id: invoice.id },
+        where: {
+          ...entryScope,
+          source_type: 'invoice.validated',
+          source_id: invoice.id,
+        },
       });
       if (posted) return posted;
     } else {
       payment = await tx.payments.findFirst({
-        where: { id: event.source_id, financial_account_id: account.id,
-          order_id: account.split.source_order_id, state: { in: ['succeeded', 'captured'] } },
-        include: { store_payment_method: { include: { system_payment_method: true } } },
+        where: {
+          id: event.source_id,
+          financial_account_id: account.id,
+          order_id: account.split.source_order_id,
+          state: { in: ['succeeded', 'captured'] },
+        },
+        include: {
+          store_payment_method: { include: { system_payment_method: true } },
+        },
       });
-      if (!payment) throw new Error('Financial payment is not settled for this account');
+      if (!payment)
+        throw new Error('Financial payment is not settled for this account');
       const posted = await tx.accounting_entries.findFirst({
-        where: { ...entryScope, source_type: { in: [directSource, settlementSource] }, source_id: payment.id },
+        where: {
+          ...entryScope,
+          source_type: { in: [directSource, settlementSource] },
+          source_id: payment.id,
+        },
       });
       if (posted) return posted;
     }
 
     const markInvoiceCovered = async () => {
       await tx.invoices.updateMany({
-        where: { id: invoice.id, organization_id: event.organization_id, financial_account_id: account.id },
+        where: {
+          id: invoice.id,
+          organization_id: event.organization_id,
+          financial_account_id: account.id,
+        },
         data: { accounting_status: 'not_applicable' },
       });
       await tx.fiscal_transmissions.updateMany({
-        where: { source_type: 'invoice', source_id: invoice.id, accounting_entity_id: invoice.accounting_entity_id },
+        where: {
+          source_type: 'invoice',
+          source_id: invoice.id,
+          accounting_entity_id: invoice.accounting_entity_id,
+        },
         data: { accounting_status: 'not_applicable' },
       });
-      return { id: null, skipped: true, reason: 'financial_account_already_recognized' };
+      return {
+        id: null,
+        skipped: true,
+        reason: 'financial_account_already_recognized',
+      };
     };
     if (account.role === 'paid_original') {
-      if (!invoice) throw new Error('Original paid portion cannot receive a new payment');
+      if (!invoice)
+        throw new Error('Original paid portion cannot receive a new payment');
       // Historical payments and their accounting remain intact. Issuing this
       // document is not another sale and must not create a new receivable.
+      // Do not equate a settled gateway transaction with a posted journal:
+      // recover missing ORIGINAL events instead of inventing invoice revenue.
+      const originalIds: number[] = account.split.original_payment_ids ?? [];
+      const originalPayments = await tx.payments.findMany({
+        where: {
+          id: { in: originalIds },
+          order_id: account.split.source_order_id,
+          financial_account_id: null,
+          state: { in: ['succeeded', 'captured'] },
+        },
+        select: { id: true, amount: true },
+      });
+      if (
+        !originalIds.length ||
+        originalPayments.length !== originalIds.length ||
+        originalPayments.reduce(
+          (sum: bigint, row: any) => sum + getCents(row.amount),
+          0n,
+        ) !== getCents(account.grand_total)
+      ) {
+        throw new Error(
+          'Retained account original payment evidence does not reconcile',
+        );
+      }
+      const originalEntries = await tx.accounting_entries.findMany({
+        where: {
+          ...entryScope,
+          source_type: 'payment.received',
+          source_id: { in: originalIds },
+        },
+        select: { source_id: true },
+      });
+      const recordedIds = new Set(
+        originalEntries.map((entry: any) => entry.source_id),
+      );
+      const missingIds = originalIds.filter((id) => !recordedIds.has(id));
+      if (missingIds.length) {
+        throw new Error(
+          `Retained account requires recovery of ORIGINAL payment.received events [${missingIds.join(', ')}]; invoice recognition is forbidden`,
+        );
+      }
       return markInvoiceCovered();
     }
 
@@ -1503,16 +1610,29 @@ export class AutoEntryService {
     const discount = getCents(account.discount_amount);
     const netRevenue = getCents(account.subtotal_amount) - discount;
     const taxRows = account.lines.flatMap((line: any) => line.taxes ?? []);
-    const components: Array<{ kind: 'revenue' | 'tax' | 'shipping' | 'tip'; amount: bigint; tax_type?: TaxBreakdownItem['tax_type'] }> = [
+    const components: Array<{
+      kind: 'revenue' | 'tax' | 'shipping' | 'tip';
+      amount: bigint;
+      tax_type?: TaxBreakdownItem['tax_type'];
+    }> = [
       { kind: 'revenue', amount: netRevenue },
-      ...taxRows.map((row: any) => ({ kind: 'tax' as const, amount: getCents(row.tax_amount), tax_type: row.tax_type ?? 'iva' })),
+      ...taxRows.map((row: any) => ({
+        kind: 'tax' as const,
+        amount: getCents(row.tax_amount),
+        tax_type: row.tax_type ?? 'iva',
+      })),
       { kind: 'shipping', amount: getCents(account.shipping_cost) },
       { kind: 'tip', amount: getCents(account.tip_amount) },
     ];
     const sumCents = (values: bigint[]) => values.reduce((a, b) => a + b, 0n);
-    if (components.some((row) => row.amount < 0n) || discount < 0n ||
-        sumCents(components.map((row) => row.amount)) !== total ||
-        sumCents(components.filter((row) => row.kind === 'tax').map((row) => row.amount)) !== getCents(account.tax_amount)) {
+    if (
+      components.some((row) => row.amount < 0n) ||
+      discount < 0n ||
+      sumCents(components.map((row) => row.amount)) !== total ||
+      sumCents(
+        components.filter((row) => row.kind === 'tax').map((row) => row.amount),
+      ) !== getCents(account.tax_amount)
+    ) {
       throw new Error('Financial account components do not reconcile');
     }
 
@@ -1520,96 +1640,189 @@ export class AutoEntryService {
     // callback arrival assumptions. Allocating each remaining snapshot avoids
     // the non-monotone cent changes of subtracting independent rounded ratios.
     const previous = await tx.accounting_entries.findMany({
-      where: { ...entryScope, source_type: directSource,
-        source_id: { in: account.payments.map((row: any) => row.id) } },
-      orderBy: { id: 'asc' }, select: { source_id: true },
+      where: {
+        ...entryScope,
+        source_type: directSource,
+        source_id: { in: account.payments.map((row: any) => row.id) },
+      },
+      orderBy: { id: 'asc' },
+      select: { source_id: true },
     });
-    const paymentAmounts = new Map<number, bigint>(account.payments.map((row: any) => [row.id, getCents(row.amount)]));
+    const paymentAmounts = new Map<number, bigint>(
+      account.payments.map((row: any) => [row.id, getCents(row.amount)]),
+    );
     let remaining = components.map((row) => row.amount);
     let remainingDiscount = discount;
     const take = (amount: bigint) => {
       const available = sumCents(remaining);
-      if (amount <= 0n || amount > available) throw new Error('Financial recognition exceeds the remaining account');
+      if (amount <= 0n || amount > available)
+        throw new Error('Financial recognition exceeds the remaining account');
       const matrix = allocateMatrix(remaining, [amount, available - amount]);
       const taken = matrix.map((row) => row[0]);
       const leftover = matrix.map((row) => row[1]);
-      const discounts = proportional(remainingDiscount,
-        remaining[0] > 0n ? [taken[0], leftover[0]] : [amount, available - amount]);
+      const discounts = proportional(
+        remainingDiscount,
+        remaining[0] > 0n
+          ? [taken[0], leftover[0]]
+          : [amount, available - amount],
+      );
       remaining = leftover;
       remainingDiscount = discounts[1];
       return { amounts: taken, discount: discounts[0] };
     };
     for (const entry of previous) {
       const amount = paymentAmounts.get(entry.source_id);
-      if (amount === undefined) throw new Error('Recognized payment is missing from financial account');
+      if (amount === undefined)
+        throw new Error('Recognized payment is missing from financial account');
       take(amount);
     }
 
     let hasPostedInvoice = false;
     if (payment) {
       const accepted = await tx.invoices.findMany({
-        where: { financial_account_id: account.id, order_id: account.split.source_order_id,
-          organization_id: event.organization_id, store_id: event.store_id,
-          invoice_type: 'sales_invoice', status: 'accepted' },
+        where: {
+          financial_account_id: account.id,
+          order_id: account.split.source_order_id,
+          organization_id: event.organization_id,
+          store_id: event.store_id,
+          invoice_type: 'sales_invoice',
+          status: 'accepted',
+        },
         select: { id: true },
       });
       if (accepted.length) {
         hasPostedInvoice = !!(await tx.accounting_entries.findFirst({
-          where: { ...entryScope, source_type: 'invoice.validated', source_id: { in: accepted.map((row: any) => row.id) } },
+          where: {
+            ...entryScope,
+            source_type: 'invoice.validated',
+            source_id: { in: accepted.map((row: any) => row.id) },
+          },
           select: { id: true },
         }));
       }
     }
 
     const amount = payment ? getCents(payment.amount) : sumCents(remaining);
-    if (payment && (amount <= 0n || amount > total)) throw new Error('Invalid settled financial payment amount');
+    if (payment && (amount <= 0n || amount > total))
+      throw new Error('Invalid settled financial payment amount');
     if (invoice && amount === 0n) return markInvoiceCovered();
-    const sourceType = invoice ? 'invoice.validated' : hasPostedInvoice ? settlementSource : directSource;
+    const sourceType = invoice
+      ? 'invoice.validated'
+      : hasPostedInvoice
+        ? settlementSource
+        : directSource;
     const description = `Cuenta financiera #${account.id} - ${invoice ? 'Factura' : 'Pago'} #${event.source_id}`;
     const lines: (AutoEntryLine | null)[] = [];
-    lines.push(await this.resolveAccountLine(
-      event.organization_id,
-      payment ? this.resolveCashBankKey(payment.store_payment_method?.system_payment_method?.type) : 'invoice.validated.accounts_receivable',
-      description, asMoney(amount), 0, event.store_id,
-      invoice ? event.financial_customer : undefined,
-    ));
+    lines.push(
+      await this.resolveAccountLine(
+        event.organization_id,
+        payment
+          ? this.resolveCashBankKey(
+              payment.store_payment_method?.system_payment_method?.type,
+            )
+          : 'invoice.validated.accounts_receivable',
+        description,
+        asMoney(amount),
+        0,
+        event.store_id,
+        invoice ? event.financial_customer : undefined,
+      ),
+    );
     if (hasPostedInvoice) {
-      lines.push(await this.resolveAccountLine(event.organization_id, 'payment.received.accounts_receivable',
-        description, 0, asMoney(amount), event.store_id, event.financial_customer));
+      lines.push(
+        await this.resolveAccountLine(
+          event.organization_id,
+          'payment.received.accounts_receivable',
+          description,
+          0,
+          asMoney(amount),
+          event.store_id,
+          event.financial_customer,
+        ),
+      );
     } else {
       const recognized = take(amount);
       const prefix = invoice ? 'invoice.validated' : 'payment.received';
-      if (recognized.discount > 0n) lines.push(await this.resolveAccountLine(
-        event.organization_id, 'payment.received.sales_discount', description,
-        asMoney(recognized.discount), 0, event.store_id, event.financial_customer));
-      lines.push(await this.resolveAccountLine(event.organization_id, `${prefix}.revenue`, description,
-        0, asMoney(recognized.amounts[0] + recognized.discount), event.store_id, event.financial_customer));
+      if (recognized.discount > 0n)
+        lines.push(
+          await this.resolveAccountLine(
+            event.organization_id,
+            'payment.received.sales_discount',
+            description,
+            asMoney(recognized.discount),
+            0,
+            event.store_id,
+            event.financial_customer,
+          ),
+        );
+      lines.push(
+        await this.resolveAccountLine(
+          event.organization_id,
+          `${prefix}.revenue`,
+          description,
+          0,
+          asMoney(recognized.amounts[0] + recognized.discount),
+          event.store_id,
+          event.financial_customer,
+        ),
+      );
       const taxBreakdown: TaxBreakdownItem[] = [];
       components.forEach((component, index) => {
         if (component.kind === 'tax' && recognized.amounts[index] > 0n) {
-          taxBreakdown.push({ tax_type: component.tax_type!, tax_amount: asMoney(recognized.amounts[index]) });
+          taxBreakdown.push({
+            tax_type: component.tax_type!,
+            tax_amount: asMoney(recognized.amounts[index]),
+          });
         }
       });
-      lines.push(...await this.resolveTaxLines({
-        organization_id: event.organization_id, store_id: event.store_id,
-        prefix, suffix: 'payable', side: 'credit',
-        total: taxBreakdown.reduce((sum, row) => sum + row.tax_amount, 0), breakdown: taxBreakdown,
-        legacyKey: `${prefix}.vat_payable`, label: 'Impuesto de participación financiera',
-        source_type: sourceType, source_id: event.source_id,
-      }));
+      lines.push(
+        ...(await this.resolveTaxLines({
+          organization_id: event.organization_id,
+          store_id: event.store_id,
+          prefix,
+          suffix: 'payable',
+          side: 'credit',
+          total: taxBreakdown.reduce((sum, row) => sum + row.tax_amount, 0),
+          breakdown: taxBreakdown,
+          legacyKey: `${prefix}.vat_payable`,
+          label: 'Impuesto de participación financiera',
+          source_type: sourceType,
+          source_id: event.source_id,
+        })),
+      );
       for (let index = 0; index < components.length; index += 1) {
         const kind = components[index].kind;
-        if ((kind === 'shipping' || kind === 'tip') && recognized.amounts[index] > 0n) {
-          lines.push(await this.resolveAccountLine(event.organization_id,
-            kind === 'tip' ? 'payment.received.tip_payable' : `${prefix}.shipping_income`,
-            kind === 'tip' ? 'Propina por pagar' : 'Ingreso por flete',
-            0, asMoney(recognized.amounts[index]), event.store_id));
+        if (
+          (kind === 'shipping' || kind === 'tip') &&
+          recognized.amounts[index] > 0n
+        ) {
+          lines.push(
+            await this.resolveAccountLine(
+              event.organization_id,
+              kind === 'tip'
+                ? 'payment.received.tip_payable'
+                : `${prefix}.shipping_income`,
+              kind === 'tip' ? 'Propina por pagar' : 'Ingreso por flete',
+              0,
+              asMoney(recognized.amounts[index]),
+              event.store_id,
+            ),
+          );
         }
       }
     }
-    const entry = await this.postAutoEntry({ ...event, source_type: sourceType,
-      accounting_entity_id: invoice?.accounting_entity_id ?? event.accounting_entity_id,
-      description, lines }, transaction, true);
+    const entry = await this.postAutoEntry(
+      {
+        ...event,
+        source_type: sourceType,
+        accounting_entity_id:
+          invoice?.accounting_entity_id ?? event.accounting_entity_id,
+        description,
+        lines,
+      },
+      transaction,
+      true,
+    );
     if (!entry) throw new Error('Financial account journal was not posted');
     return entry;
   }

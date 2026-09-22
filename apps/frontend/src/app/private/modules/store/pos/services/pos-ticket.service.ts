@@ -13,6 +13,7 @@ import { PrintFormat } from '../../../../../core/models/store-settings.interface
 import { PrintFormatType } from '../../../../../core/models/print-formats.model';
 import { DocumentPrintService } from '../../../../../shared/services/print';
 import { PrintGatewayClientService } from '../../../../../shared/services/print/print-gateway-client.service';
+import { normalizeFiscalResponsibilityCode } from '../../../../../shared/constants/fiscal-responsibilities.constants';
 
 /**
  * Ticket-specific CSS handed to `DocumentPrintService`. The `@page` rule is NOT
@@ -29,16 +30,49 @@ const TICKET_PRINT_STYLES = `
             }`;
 
 /**
- * Regime label printed on the ticket. Mirrors `TAX_REGIME_LABELS` in
- * invoice-pdf.service.ts so both documents word the same fact identically.
+ * CALIDADES FISCALES IMPRIMIBLES — num. 12 del art. 11 de la Res. DIAN
+ * 000165/2023. Espejo declarado de `PRINTABLE_FISCAL_QUALITIES` en
+ * `apps/backend/.../print-formats/services/fiscal-issuer-identity.ts`; es una
+ * re-implementación y no un import porque ninguna librería compartida es dueña
+ * de esto hoy, igual que el gemelo de `apps/mobile`.
+ *
+ * Este bloque imprimía antes «Responsable de IVA» a partir de `tax_regime`.
+ * Esa leyenda salía del art. 506 E.T., DEROGADO por la Ley 1943/2018 (art. 122)
+ * y la Ley 2010/2019 (art. 160): un restaurante responsable únicamente de INC
+ * recibía en su tiquete una obligación tributaria que no tiene. El art. 617
+ * lit. i) E.T. sólo exige indicar la calidad de retenedor, y el num. 12
+ * enumera EXACTAMENTE estas cuatro, «cuando corresponda». Si no corresponde
+ * ninguna, NO se imprime renglón alguno — la leyenda se elimina, no se
+ * reemplaza por «No responsable de IVA».
  */
-const TAX_REGIME_LABELS: Record<string, string> = {
-  COMUN: 'Responsable de IVA',
-  SIMPLIFICADO: 'No responsable de IVA',
-  SIMPLE: 'Regimen Simple de Tributacion (RST)',
-  GRAN_CONTRIBUYENTE: 'Gran contribuyente',
-  NO_RESPONSABLE: 'No responsable de IVA',
-};
+const PRINTABLE_FISCAL_QUALITIES: ReadonlyArray<{ code: string; label: string }> = [
+  { code: 'O-23', label: 'Agente retenedor del Impuesto sobre las Ventas (IVA)' },
+  { code: 'O-15', label: 'Autorretenedor del Impuesto sobre la Renta y Complementarios' },
+  { code: 'O-13', label: 'Gran contribuyente' },
+  { code: 'O-47', label: 'Contribuyente del Régimen Simple de Tributación (SIMPLE)' },
+];
+
+/**
+ * Renglón de calidades del emisor, o `''` cuando no ostenta ninguna (el header
+ * ya descarta las líneas vacías con `.filter(Boolean)`).
+ *
+ * Normaliza antes de comparar porque `fiscal_data.tax_responsibilities` guarda
+ * lo que el tenant cargó: la casilla 53 cruda (`'13'`) o el código canónico
+ * (`'O-13'`).
+ */
+export function resolveFiscalQualitiesLine(
+  taxResponsibilities: unknown,
+): string {
+  const codes = new Set(
+    (Array.isArray(taxResponsibilities) ? taxResponsibilities : [])
+      .filter((code): code is string => typeof code === 'string')
+      .map((code) => normalizeFiscalResponsibilityCode(code))
+      .filter(Boolean),
+  );
+  return PRINTABLE_FISCAL_QUALITIES.filter((q) => codes.has(q.code))
+    .map((q) => q.label)
+    .join(' | ');
+}
 
 /**
  * Tickets rendered before handing the main thread back. Rendering is pure string
@@ -174,7 +208,8 @@ export class PosTicketService {
     legal_name: string;
     nit: string;
     address: string;
-    tax_regime: string;
+    /** Num. 12 art. 11 Res. 000165/2023; `''` cuando no corresponde ninguna. */
+    fiscal_qualities: string;
     ciiu: string;
   } {
     const fiscal = (this.authFacade.fiscalData() ?? {}) as Record<string, any>;
@@ -200,10 +235,9 @@ export class PosTicketService {
       address: [fiscal['fiscal_address'], fiscal['city'], fiscal['department']]
         .filter(Boolean)
         .join(', '),
-      tax_regime:
-        TAX_REGIME_LABELS[String(fiscal['tax_regime'] ?? '').toUpperCase()] ||
-        fiscal['tax_regime'] ||
-        '',
+      fiscal_qualities: resolveFiscalQualitiesLine(
+        fiscal['tax_responsibilities'],
+      ),
       ciiu: fiscal['ciiu_code'] || fiscal['ciiu'] || '',
     };
   }
@@ -422,7 +456,9 @@ export class PosTicketService {
         trade_name,
         issuer.nit ? `NIT ${issuer.nit}` : '',
         address,
-        issuer.tax_regime,
+        // Never the derogated regime legend: only the num. 12 qualities, and
+        // only when one applies — `filter(Boolean)` drops the empty line.
+        issuer.fiscal_qualities,
         // Never the store id: that was printed as a CIIU code and is not one.
         issuer.ciiu ? `CIIU: ${issuer.ciiu}` : '',
       ].filter(Boolean);

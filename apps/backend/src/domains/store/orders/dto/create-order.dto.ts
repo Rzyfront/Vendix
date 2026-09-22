@@ -82,6 +82,34 @@ export class CreateOrderItemDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   tax_amount_item?: number;
 
+  /**
+   * QUI-INC — categoría fiscal DECLARADA para esta línea (`tax_categories.id`).
+   *
+   * El DTO sólo trae el snapshot agregado del impuesto (`tax_rate`,
+   * `tax_amount_item`): números, sin clasificación. La clasificación
+   * (`tax_type`: IVA / INC / ICA …) vive ÚNICAMENTE en `tax_categories`, y
+   * `OrdersService.create` la resuelve normalmente desde
+   * `product_tax_assignments` del producto. Cuando el producto no tiene
+   * asignaciones —línea sin `product_id`, producto sin configurar— ese camino
+   * no devuelve nada y antes se fabricaba un `tax_type: 'iva'` junto al
+   * `prisma.create`. Este campo es la alternativa honesta: el cliente declara
+   * DE QUÉ FILA del catálogo sale el impuesto y el servidor lee ahí
+   * `tax_type` / `tax_name` / `tax_rate` / `is_inclusive`.
+   *
+   * Opcional y no autoritativo: si el producto SÍ tiene asignaciones, éstas
+   * mandan (cero regresión). Si el id no existe en el alcance de la tienda ni
+   * de su organización, la creación se rechaza con
+   * `ORD_ITEM_TAX_CATEGORY_UNRESOLVABLE_001` (422) — nunca se inventa el tipo.
+   *
+   * Mismo campo y misma semántica que `PosItemDto.tax_category_id` del carril
+   * de cobro (`POST /store/payments/pos`), que el POS web ya emite hoy desde
+   * `pos-order.service.ts:mapCartItemForPos`.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  tax_category_id?: number;
+
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 2 })

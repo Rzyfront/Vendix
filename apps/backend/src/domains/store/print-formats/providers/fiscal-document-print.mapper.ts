@@ -448,7 +448,7 @@ export function mapFiscalDocumentToPrintData(
       address: issuer.fiscal_address || undefined,
       city: issuer.city || undefined,
       logo_url: options.signedLogoUrl,
-      tax_regime: issuer.tax_regime,
+      fiscal_qualities: issuer.fiscal_qualities,
       fiscal_responsibilities: issuer.tax_responsibilities.length
         ? issuer.tax_responsibilities
         : undefined,
