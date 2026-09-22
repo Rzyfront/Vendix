@@ -2019,6 +2019,40 @@ export class UblCommonBuilder {
    * contablemente más justo — si la cabecera "corrigiera" el doble conteo, el
    * documento sería rechazado por declarar menos base de la que suman sus líneas.
    */
+  /**
+   * ¿La línea sin desglose propio calla su `cac:TaxTotal` en vez de heredar el
+   * primer tributo de la cabecera?
+   *
+   * Calla en dos casos:
+   *
+   * · no hay cabecera de la que heredar (documento sin ningún tributo, FAS01b);
+   * · la línea NO causó impuesto (`tax_amount = 0`) y la tarifa que heredaría NO
+   *   es cero. Es la línea sintética de envío (`product_id` null), la propina o
+   *   el envío de una cuenta dividida, o un ítem libre excluido dentro de una
+   *   factura gravada. Heredar publicaría `TaxAmount 0,00` sobre
+   *   `TaxableAmount × Percent / 100 ≠ 0` y la DIAN rechaza por FAX07
+   *   (`round(TaxAmount) = round(TaxableAmount × Percent / 100)`). El Anexo 1.9
+   *   (FAX01/FAX05) es explícito: una línea que no causa el tributo NO informa
+   *   `cac:TaxTotal`.
+   *
+   * Una línea con cuota 0 bajo una cabecera de tarifa 0 (exento IVA 0 %) SÍ
+   * hereda: `Percent 0.00` con cuota 0 cuadra FAX07 y es la forma aceptada del
+   * exento.
+   *
+   * La usan `buildLineTaxTotal` (qué emite la línea) y `lineTaxableContribution`
+   * (qué suma la cabecera para FAU04): una sola condición para los dos lados.
+   */
+  static inheritsNothingFromHeader(
+    item: ProviderInvoiceItem,
+    header_taxes: ProviderInvoiceTax[],
+  ): boolean {
+    if (header_taxes.length === 0) return true;
+    return (
+      toDecimal(item.tax_amount).isZero() &&
+      !toDecimal(header_taxes[0].tax_rate).isZero()
+    );
+  }
+
   static lineTaxableContribution(
     item: ProviderInvoiceItem,
     header_taxes: ProviderInvoiceTax[],
@@ -2028,10 +2062,14 @@ export class UblCommonBuilder {
 
     const line_taxes = line.taxes ?? [];
 
-    // MISMA guarda que `buildLineTaxTotal`: sin tributo propio NI de cabecera del
-    // que heredar, la línea calla, y una línea callada no tiene ningún
-    // `cbc:TaxableAmount` que sumar.
-    if (line_taxes.length === 0 && header_taxes.length === 0) return null;
+    // MISMA guarda que `buildLineTaxTotal`: sin tributo propio y sin nada que
+    // heredar de la cabecera (ver `inheritsNothingFromHeader`), la línea calla, y
+    // una línea callada no tiene ningún `cbc:TaxableAmount` que sumar.
+    if (
+      line_taxes.length === 0 &&
+      UblCommonBuilder.inheritsNothingFromHeader(line, header_taxes)
+    )
+      return null;
 
     // Sin desglose propio la línea emite UN subtotal cuya base es su importe.
     if (line_taxes.length === 0) return dianLineExtension(line);
@@ -2353,7 +2391,13 @@ export class UblCommonBuilder {
    * con `dianRate` sin el saneamiento por-mil del ICA, al contrario que el camino
    * nuevo. Cambiarlo alteraría documentos históricos.
    *
-   * ## 3. Sin desglose Y sin cabecera — la línea NO emite el grupo
+   * Excepción: la línea con cuota 0 bajo una tarifa de cabecera NO nula no
+   * hereda (cae al caso 3). Heredar publicaba `TaxAmount 0,00` sobre base ×
+   * tarifa ≠ 0, que la DIAN rechaza por FAX07 — ningún documento aceptado pudo
+   * tomar esa forma, así que callarla no altera nada emitido. Ver
+   * `inheritsNothingFromHeader`.
+   *
+   * ## 3. Sin desglose y nada que heredar — la línea NO emite el grupo
    *
    * Antes este caso caía a una tarifa cableada de IVA 19 % con cuota 0,00, así
    * que una factura sin ningún tributo salía afirmando un impuesto inexistente en
@@ -2381,7 +2425,15 @@ export class UblCommonBuilder {
     // Callar la línea la deja como las que ya usan `omit_tax_total` (FAX01), y es
     // coherente con la guarda de cabecera de `buildTaxTotals`. NO afecta al camino
     // histórico: ése hereda de `header_taxes[0]`, que acá por definición no existe.
-    if (line_taxes.length === 0 && header_taxes.length === 0) {
+    //
+    // La misma regla cubre la línea que NO causó impuesto bajo una cabecera de
+    // tarifa no nula (envío sintético, propina/envío de cuenta dividida): heredar
+    // publicaría cuota 0 sobre base × tarifa ≠ 0 → FAX07. Ver
+    // `inheritsNothingFromHeader`, que comparte con `lineTaxableContribution`.
+    if (
+      line_taxes.length === 0 &&
+      UblCommonBuilder.inheritsNothingFromHeader(item, header_taxes)
+    ) {
       return;
     }
 
@@ -2397,14 +2449,17 @@ export class UblCommonBuilder {
       // resolved tax_type-first for correctness on single-tax invoices (a pure
       // INC restaurant bill emits scheme 04, not 01).
       //
-      // UNA CUENTA MIXTA NO LLEGA ACÁ, y no porque la cabecera la concilie. Esa
-      // era la afirmación anterior de este comentario y era falsa: FAX02 es una
-      // regla POR LÍNEA y el `cac:TaxTotal` de cabecera es otra (FAS02), así que
-      // conciliar arriba no exime a la línea de nada. Lo que hace correcto este
-      // camino es que un documento con ≥2 tributos SIEMPRE persiste el desglose
-      // por línea (`InvoicingService.needsPersistedLineTaxes`), de modo que acá
-      // sólo cae el documento de un tributo único — donde heredar el primero es
-      // heredar el único.
+      // A ESTE CAMINO NO SÓLO LLEGA EL DOCUMENTO DE UN TRIBUTO ÚNICO. Un
+      // documento con desglose por línea también trae líneas sin filas propias:
+      // la línea sintética de envío (`product_id` null, cuota 0) y la propina o
+      // el envío de una cuenta dividida. Que una cuenta mixta persista su
+      // desglose (`InvoicingService.needsPersistedLineTaxes`) no impide que
+      // esas líneas aterricen acá con `header_taxes[0]` de cualquier tarifa.
+      // Lo que las saca es la guarda de arriba: una línea con cuota 0 bajo una
+      // tarifa no nula calla (FAX07). Acá sólo llega la línea que SÍ causó el
+      // tributo de cabecera —el documento histórico de un tributo único, donde
+      // heredar el primero es heredar el único— o la que hereda una tarifa 0
+      // (exento, `Percent 0.00`, cuota 0), que cuadra FAX07 por construcción.
       const tax_rate = header_taxes[0].tax_rate;
       const tax_code = UblCommonBuilder.resolveTaxCodeFromTax(header_taxes[0]);
 

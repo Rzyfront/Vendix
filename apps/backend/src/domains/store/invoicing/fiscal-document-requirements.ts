@@ -1022,6 +1022,40 @@ export const DIAN_RULES = {
     },
   },
 
+  // --- Tributos de línea (§8.2.x TaxTotal de línea) -------------------------
+  line_tax_subtotal_amount: {
+    requirement:
+      'En cada línea, el valor de cada subtotal de tributo porcentual debe ser ' +
+      'el producto del porcentaje sobre su base imponible: ' +
+      'round(TaxAmount) = round(TaxableAmount × Percent ÷ 100). Una línea que no ' +
+      'causa el tributo no informa el grupo; heredar la tarifa con cuota 0 lo ' +
+      'incumple.',
+    effect: 'rechazo',
+    by_root: {
+      Invoice: {
+        id: 'FAX07',
+        dian_message:
+          'El valor del tributo correspondiente a una de las tarifas correspondientes es diferente del producto del porcentaje aplicado sobre la base imponible',
+        xpath: '/Invoice/cac:InvoiceLine/cac:TaxTotal/cac:TaxSubtotal/cbc:TaxAmount',
+        annex_line: 23077,
+      },
+      CreditNote: {
+        id: 'CAX07',
+        dian_message:
+          'El valor del tributo correspondiente a una de las tarifas correspondientes es diferente del producto del porcentaje aplicado sobre la base imponible.',
+        xpath: '../cac:TaxTotal/TaxSubtotal/cbc:TaxAmount',
+        annex_line: 26797,
+      },
+      DebitNote: {
+        id: 'DAX07',
+        dian_message:
+          'El valor del tributo correspondiente a una de las tarifas correspondientes, es diferente del producto del porcentaje aplicado sobre la base imponible.',
+        xpath: '../cac:TaxTotal/TaxSubtotal/cbc:TaxAmount',
+        annex_line: 30179,
+      },
+    },
+  },
+
   // --- Líneas (§8.2.1 / §8.3.1 / §8.4.1) ------------------------------------
   line_group_required: {
     requirement: 'Debe existir al menos un grupo de línea.',

@@ -32,7 +32,7 @@ import {
  * compuerta, y esta es. Corre en el mismo punto obligado que la estructural
  * (`signXml`, antes de firmar), donde abortar todavía no cuesta el consecutivo.
  *
- * LAS CINCO REGLAS
+ * LAS SEIS REGLAS
  * ----------------
  *
  * Las cuatro de totales (`AU02`, `AU04`, `AU06`, `AU14`) forman una CADENA: cada
@@ -111,6 +111,15 @@ import {
  *   recomputa: así un `TaxInclusiveAmount` mal escrito produce UNA violación
  *   (FAU06) y no dos, y el hallazgo apunta al eslabón que falló.
  *
+ * · **FAX07 / CAX07 / DAX07** (anexo19.txt:23077, fórmula en 5191) — por cada
+ *   `<línea>/cac:TaxTotal/cac:TaxSubtotal` con `cbc:Percent`:
+ *   `round(cbc:TaxAmount) == round(cbc:TaxableAmount × cbc:Percent ÷ 100)`.
+ *   Atrapa la línea que hereda la tarifa de cabecera sin haber causado el
+ *   tributo (envío sintético, propina de cuenta dividida): `INC 8 %` sobre base
+ *   15000 con cuota 0,00. Un exento (`Percent 0.00`, cuota 0) cuadra por
+ *   construcción. Los tributos nominales (`cbc:PerUnitAmount`, sin `Percent`)
+ *   se calculan de otra forma y no se juzgan aquí.
+ *
  * Se implementan sobre el DOM y no con la aritmética del emisor a propósito: el
  * valor de esta compuerta está en LEER lo que se va a transmitir, no en
  * recalcularlo por segunda vez desde la misma fuente.
@@ -185,6 +194,7 @@ export type DianTotalsViolationKind =
   | 'tax-exclusive-base-mismatch'
   | 'tax-inclusive-total-mismatch'
   | 'payable-amount-mismatch'
+  | 'line-tax-amount-mismatch'
   | 'malformed';
 
 export interface DianTotalsViolation {
@@ -264,6 +274,7 @@ export class DianTotalsValidator {
     this.checkTaxExclusiveBase(root, root_name, family, violations);
     this.checkTaxInclusiveTotal(root, root_name, family, violations);
     this.checkPayableAmount(root, root_name, family, violations);
+    this.checkLineTaxSubtotalAmounts(root, root_name, family, violations);
 
     return { valid: violations.length === 0, violations, root: root_name };
   }
@@ -589,6 +600,85 @@ export class DianTotalsValidator {
         prepaid_informed: prepaid.toFixed(2),
       },
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // FAX07 — cuota de cada subtotal de línea = base × tarifa
+  // ---------------------------------------------------------------------------
+
+  /**
+   * `every $i in //<línea>/cac:TaxTotal/cac:TaxSubtotal satisfies
+   *  round($i/cbc:TaxAmount) = round($i/cbc:TaxableAmount * $i/cac:TaxCategory/cbc:Percent div 100)`.
+   *
+   * Sólo líneas: el mismo cálculo sobre la cabecera es otra regla (FAS07). Sólo
+   * subtotales con `cbc:Percent`: un tributo nominal (bolsas, IBUA) declara
+   * `cbc:PerUnitAmount` y se calcula por cantidad, no por porcentaje.
+   *
+   * Misma tolerancia que el resto de la compuerta: a peso entero (`round()`),
+   * porque así compara la DIAN.
+   */
+  private static checkLineTaxSubtotalAmounts(
+    root: any,
+    root_name: string,
+    family: DocumentFamily,
+    violations: DianTotalsViolation[],
+  ): void {
+    const rule = this.ruleId('line_tax_subtotal_amount', root_name);
+    if (!rule) return;
+
+    let line_index = 0;
+    for (const line of this.childrenNamed(root, family.line_element)) {
+      line_index += 1;
+      let subtotal_index = 0;
+      for (const tax_total of this.childrenNamed(line, 'cac:TaxTotal')) {
+        for (const subtotal of this.childrenNamed(tax_total, 'cac:TaxSubtotal')) {
+          subtotal_index += 1;
+          const [category] = this.childrenNamed(subtotal, 'cac:TaxCategory');
+          const percent_text = category
+            ? this.textOfChild(category, 'cbc:Percent')
+            : null;
+          if (percent_text === null) continue; // tributo nominal u otra forma
+
+          const taxable_text = this.textOfChild(subtotal, 'cbc:TaxableAmount');
+          const amount_text = this.textOfChild(subtotal, 'cbc:TaxAmount');
+          if (taxable_text === null || amount_text === null) continue;
+
+          const expected = toDecimal(taxable_text)
+            .times(toDecimal(percent_text))
+            .dividedBy(100);
+          const declared = toDecimal(amount_text);
+          if (this.pesos(declared) === this.pesos(expected)) continue;
+
+          const [scheme] = category
+            ? this.childrenNamed(category, 'cac:TaxScheme')
+            : [];
+          const scheme_id = scheme ? this.textOfChild(scheme, 'cbc:ID') : null;
+
+          violations.push({
+            rule,
+            kind: 'line-tax-amount-mismatch',
+            path: `${root_name}/${family.line_element}[${line_index}]/cac:TaxTotal/cac:TaxSubtotal[${subtotal_index}]/cbc:TaxAmount`,
+            message:
+              `La línea ${line_index} declara un tributo ` +
+              `${scheme_id ?? ''} de ${amount_text} sobre una base de ` +
+              `${taxable_text} al ${percent_text} %, cuando base × tarifa da ` +
+              `${expected.toFixed(2)}. La regla ${rule} exige ` +
+              `round(TaxAmount) = round(TaxableAmount × Percent ÷ 100). Una ` +
+              `línea que no causa el tributo (envío, propina) no debe informar ` +
+              `\`cac:TaxTotal\`.`,
+            details: {
+              line: line_index,
+              scheme_id,
+              percent: percent_text,
+              taxable_amount: taxable_text,
+              declared: amount_text,
+              expected: expected.toFixed(2),
+              difference: declared.minus(expected).toFixed(2),
+            },
+          });
+        }
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
