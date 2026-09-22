@@ -32,6 +32,8 @@ import { AnalyticsService } from '../../services/analytics.service';
 import type {
   PayableAgingTotals,
 } from '../../interfaces/purchases-analytics.interface';
+import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
+import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 
 @Component({
   selector: 'vendix-payable-aging',
@@ -44,6 +46,7 @@ import type {
     StatsComponent,
     OptionsDropdownComponent,
     CurrencyPipe,
+    AnalyticsCardComponent,
   ],
   styles: [
     `
@@ -140,59 +143,16 @@ import type {
               <div class="h-72">
                 <app-chart [options]="chartOptions()" [loading]="loading()"></app-chart>
               </div>
+            </div>
+          </app-card>
 
-              <!-- Summary Badges by Bucket -->
-              <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
-                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col">
-                  <span class="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Corriente</span>
-                  <span class="text-sm md:text-base font-bold text-[var(--color-text-primary)] mt-1">
-                    {{ totals().current | currency }}
-                  </span>
-                  <span class="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                    {{ getBucketPercentage('current') }} % del total
-                  </span>
-                </div>
-
-                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col">
-                  <span class="text-xs font-semibold text-blue-600 dark:text-blue-400">1 - 30 días</span>
-                  <span class="text-sm md:text-base font-bold text-[var(--color-text-primary)] mt-1">
-                    {{ totals().days_1_30 | currency }}
-                  </span>
-                  <span class="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                    {{ getBucketPercentage('days_1_30') }} % del total
-                  </span>
-                </div>
-
-                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col">
-                  <span class="text-xs font-semibold text-amber-600 dark:text-amber-400">31 - 60 días</span>
-                  <span class="text-sm md:text-base font-bold text-[var(--color-text-primary)] mt-1">
-                    {{ totals().days_31_60 | currency }}
-                  </span>
-                  <span class="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                    {{ getBucketPercentage('days_31_60') }} % del total
-                  </span>
-                </div>
-
-                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col">
-                  <span class="text-xs font-semibold text-orange-600 dark:text-orange-400">61 - 90 días</span>
-                  <span class="text-sm md:text-base font-bold text-[var(--color-text-primary)] mt-1">
-                    {{ totals().days_61_90 | currency }}
-                  </span>
-                  <span class="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                    {{ getBucketPercentage('days_61_90') }} % del total
-                  </span>
-                </div>
-
-                <div class="p-3 rounded-xl border border-border bg-surface flex flex-col col-span-2 sm:col-span-1">
-                  <span class="text-xs font-semibold text-rose-600 dark:text-rose-400">&gt; 90 días</span>
-                  <span class="text-sm md:text-base font-bold text-[var(--color-text-primary)] mt-1">
-                    {{ totals().days_over_90 | currency }}
-                  </span>
-                  <span class="text-xs text-[var(--color-text-secondary)] mt-0.5">
-                    {{ getBucketPercentage('days_over_90') }} % del total
-                  </span>
-                </div>
-              </div>
+          <!-- Quick Links -->
+          <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Compras</span>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+              @for (view of purchasesViews; track view.key) {
+                <app-analytics-card [view]="view"></app-analytics-card>
+              }
             </div>
           </app-card>
         </div>
@@ -221,6 +181,10 @@ export class PayableAgingComponent implements OnInit {
   });
 
   readonly chartOptions = signal<EChartsOption>({});
+
+  readonly purchasesViews: AnalyticsView[] = getViewsByCategory('purchases').filter(
+    (v) => v.key !== 'purchases_payable_aging',
+  );
 
   readonly dropdownActions = computed<DropdownAction[]>(() => [
     {
@@ -313,11 +277,17 @@ export class PayableAgingComponent implements OnInit {
       });
   }
 
-  getBucketPercentage(key: keyof PayableAgingTotals): number {
-    const total = this.totals().total_outstanding;
-    if (!total || total <= 0) return 0;
-    const value = this.totals()[key] || 0;
-    return Math.round((value / total) * 1000) / 10;
+  // Etiquetas cortas para el eje en móvil ($1,2 M / $45 mil).
+  // El tooltip mantiene el valor completo, no se pierde información.
+  private formatCompact(value: number): string {
+    const abs = Math.abs(value);
+    if (abs >= 1_000_000) {
+      const m = value / 1_000_000;
+      const text = m >= 100 ? `${Math.round(m)}` : `${Math.round(m * 10) / 10}`;
+      return `$${text.replace('.', ',')} M`;
+    }
+    if (abs >= 1_000) return `$${Math.round(value / 1_000)} mil`;
+    return this.currencyService.format(value);
   }
 
   private updateChart(t: PayableAgingTotals): void {
@@ -338,19 +308,47 @@ export class PayableAgingComponent implements OnInit {
       grid: {
         top: 20,
         right: 25,
-        bottom: 30,
+        bottom: 60,
         left: 80,
         containLabel: true,
+      },
+      // El icono del legend hereda el primer color de la paleta de la serie.
+      color: ['#10b981'],
+      legend: {
+        show: true,
+        left: 'center',
+        bottom: 0,
       },
       xAxis: {
         type: 'value',
         axisLabel: {
+          hideOverlap: true,
           formatter: (value: number) => this.currencyService.format(value),
         },
         splitLine: {
           lineStyle: { color: 'var(--color-border, #e2e8f0)', type: 'dashed' },
         },
       },
+      media: [
+        {
+          query: { maxWidth: 640 },
+          option: {
+            grid: {
+              left: 40,
+              right: 15,
+            },
+            xAxis: {
+              axisLabel: {
+                fontSize: 10,
+                formatter: (value: number) => this.formatCompact(value),
+              },
+            },
+            yAxis: {
+              axisLabel: { fontSize: 11 },
+            },
+          },
+        },
+      ],
       yAxis: {
         type: 'category',
         data: categories,
