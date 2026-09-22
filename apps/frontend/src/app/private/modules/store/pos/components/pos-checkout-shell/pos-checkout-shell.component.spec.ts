@@ -197,6 +197,13 @@ class CreditFieldsStub {
 describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBOARD)', () => {
   let fixture: ComponentFixture<PosCheckoutShellComponent>;
   let component: PosCheckoutShellComponent;
+  /**
+   * Slot estable para el paso de Envío: solo se monta en delivery, así que
+   * `wireStubs()` lo re-enlaza entre aperturas. Si el slot fuera un closure
+   * nuevo, los computeds que lo leen (`shippingCost`, `totalToPay`) jamás se
+   * invalidarían y el total quedaría clavado en el flete original.
+   */
+  let shippingSlot: WritableSignal<ShippingStub | undefined>;
   let integrationMock: { isRestaurantMode: () => boolean; currentTableSession: () => null };
   let settingsMock: { pos: () => null; checkout: () => null };
   let restaurantMode: WritableSignal<boolean>;
@@ -224,12 +231,15 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       configurable: true,
     });
     // Envío solo se monta en delivery: si no está, stub suelto para el slot.
+    // Se publica con `.set()` sobre la misma señal para que los computeds
+    // del shell se invaliden al re-enlazar (un closure nuevo no avisa).
     const shipEl = fixture.debugElement.query(By.directive(ShippingStub));
     const ship = shipEl
-      ? shipEl.componentInstance
+      ? (shipEl.componentInstance as ShippingStub)
       : TestBed.runInInjectionContext(() => new ShippingStub());
+    shippingSlot.set(ship);
     Object.defineProperty(component, 'shippingStep', {
-      value: () => ship,
+      value: shippingSlot.asReadonly(),
       configurable: true,
     });
   };
@@ -299,6 +309,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     await TestBed.compileComponents();
     fixture = TestBed.createComponent(PosCheckoutShellComponent);
     component = fixture.componentInstance;
+    shippingSlot = signal<ShippingStub | undefined>(undefined);
     fixture.componentRef.setInput('isOpen', true);
     fixture.componentRef.setInput('mode', 'create-payment');
     fixture.detectChanges();
