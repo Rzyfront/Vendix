@@ -140,4 +140,57 @@ describe('StoreOrdersService — typed error contract', () => {
         });
     });
   });
+
+  it('propaga el motivo tipado de un abono a crédito', (done) => {
+    service.flowCreditPayment('500', {
+      store_payment_method_id: 1,
+      payment_type: 'direct',
+      amount: 1000,
+    }).subscribe({
+      next: () => done.fail('no debe emitir éxito'),
+      error: (err: Error & { errorCode: string; details: unknown }) => {
+        expect(err.errorCode).toBe('ORD_SHIP_CHARGE_001');
+        expect(err.details).toEqual({ delivery_type: 'home_delivery' });
+        expect(err.message).toBeTruthy();
+        done();
+      },
+    });
+
+    const req = httpMock.expectOne(
+      `${environment.apiUrl}/store/orders/500/flow/credit-payment`,
+    );
+    expect(req.request.method).toBe('POST');
+    req.flush(
+      {
+        error_code: 'ORD_SHIP_CHARGE_001',
+        message: 'Shipping method is required before payment',
+        details: { delivery_type: 'home_delivery' },
+      },
+      { status: 422, statusText: 'Unprocessable Entity' },
+    );
+  });
+
+  it('propaga el motivo tipado al rechazar una cancelación', (done) => {
+    service.flowCancelOrder('500', { reason: 'Prueba de estado' }).subscribe({
+      next: () => done.fail('no debe emitir éxito'),
+      error: (err: Error & { errorCode: string; details: unknown }) => {
+        expect(err.errorCode).toBe('ORD_CANCEL_STOCK_COMMITTED_001');
+        expect(err.details).toEqual({ state: 'delivered' });
+        done();
+      },
+    });
+
+    const req = httpMock.expectOne(
+      `${environment.apiUrl}/store/orders/500/flow/cancel`,
+    );
+    expect(req.request.method).toBe('POST');
+    req.flush(
+      {
+        error_code: 'ORD_CANCEL_STOCK_COMMITTED_001',
+        message: 'Cannot cancel a delivered order',
+        details: { state: 'delivered' },
+      },
+      { status: 409, statusText: 'Conflict' },
+    );
+  });
 });

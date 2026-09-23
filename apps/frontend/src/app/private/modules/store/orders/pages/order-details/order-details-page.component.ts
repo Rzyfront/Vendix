@@ -648,6 +648,7 @@ export class OrderDetailsPageComponent {
   readonly showShippingAssignment = computed(() => {
     const order = this.order();
     if (!order) return false;
+    if (order.delivery_type === 'dine_in') return false;
     const terminalStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
     if (terminalStates.includes(order.state as OrderState)) return false;
     if (order.delivery_type === 'direct_delivery') return false;
@@ -673,6 +674,7 @@ export class OrderDetailsPageComponent {
   readonly canEditShipping = computed(() => {
     const order = this.order();
     if (!order) return false;
+    if (order.delivery_type === 'dine_in') return false;
     const lockedStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
     return !lockedStates.includes(order.state as OrderState) && order.delivery_type !== 'direct_delivery';
   });
@@ -1124,9 +1126,12 @@ export class OrderDetailsPageComponent {
 
   private cancellationPolicyMessage(order: Order | null): string {
     const code = order?.cancellation_policy?.reason_code;
-    return code
-      ? ERROR_MESSAGES[code]
-      : 'No se puede anular esta orden o su pago. Recarga el detalle para consultar las acciones disponibles.';
+    if (code) {
+      return ERROR_MESSAGES[code] ?? 'No se puede cancelar esta orden. Recarga el detalle para consultar el motivo.';
+    }
+    return order
+      ? `La orden en estado ${this.formatStatus(order.state)} no admite cancelación. Recarga el detalle para consultar las acciones disponibles.`
+      : 'Recarga el detalle para consultar las acciones disponibles.';
   }
 
   // ── Ship Modal Config (delivery-type aware) ────────────────
@@ -1745,7 +1750,7 @@ export class OrderDetailsPageComponent {
           this.isLoading.set(false);
 
           // Load payment methods if order can accept payment
-          const needsPayment = orderData.state === 'created' ||
+          const needsPayment = orderData.state === 'draft' || orderData.state === 'created' ||
             orderData.payment_form === '2' ||
             (orderData.state === 'shipped' && !(orderData.payments || []).some((p: any) => p.state === 'succeeded'));
           if (needsPayment) {
@@ -2549,7 +2554,16 @@ export class OrderDetailsPageComponent {
             },
             error: (err) => {
               this.isProcessingAction.set(false);
-              this.toastService.error(err.message || 'Error al finalizar la orden');
+              const pendingKitchen = (err as { errorCode?: string | null })?.errorCode ===
+                'ORDER_HAS_PENDING_KITCHEN_ITEMS';
+              const dishes = pendingKitchen
+                ? this.undeliveredKitchenItems().map((item) => item.product_name)
+                : [];
+              this.toastService.error(
+                dishes.length > 0
+                  ? `Entrega o cancela estos platos antes de finalizar: ${dishes.join(', ')}`
+                  : (err as Error)?.message || 'Error al finalizar la orden',
+              );
             },
           });
       });
@@ -2717,7 +2731,7 @@ export class OrderDetailsPageComponent {
           this.toastService.error(
             forbidden
               ? 'Requiere permiso de cancelar comandas (owner/admin)'
-              : parsed.userMessage || 'Error al cancelar la orden',
+              : (err as Error)?.message || parsed.userMessage || 'Error al cancelar la orden',
           );
         },
       });
