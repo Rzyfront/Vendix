@@ -165,3 +165,150 @@ describe('pos-sale-ticket — C.6 base leída en aggregateTaxes', () => {
     expect(byName['IVA'].base_amount + byName['INC'].base_amount).toBeCloseTo(10000, 8);
   });
 });
+
+/**
+ * Envío duplicado en la tirilla con factura.
+ *
+ * `invoices.subtotal_amount` YA incluye la línea «Envio» (Σ bases de ítems +
+ * envío, `computeOrderInvoiceSubtotal`). El override pintaba ese subtotal y,
+ * al lado, el `shipping_cost` BRUTO de la orden: el envío salía dos veces y
+ * la suma de filas no daba el TOTAL. Ahora: productos = subtotal − envío y la
+ * fila Envío = `invoices.shipping_amount` (la BASE neta cuando el domicilio
+ * lleva INC incluido, cuyo tributo ya viaja en `tax_amount`).
+ */
+describe('pos-sale-ticket — envío con factura: subtotal sin envío, envío = base fiscal', () => {
+  const store = {
+    name: 'Tienda Test',
+    organizations: { tax_id: '900.000.000-1' },
+    addresses: [],
+  };
+
+  const order = (over: any = {}) => ({
+    id: 11,
+    order_number: 'POS-0011',
+    created_at: new Date('2026-09-20T18:00:00.000Z'),
+    state: 'finished',
+    order_items: [],
+    users: null,
+    stores: store,
+    table_sessions: [],
+    ...over,
+  });
+
+  const makeProvider = (orderRow: any, invoice: any) =>
+    new PosSaleTicketDataProvider({
+      orders: { findFirst: jest.fn().mockResolvedValue(orderRow) },
+      invoices: { findFirst: jest.fn().mockResolvedValue(invoice) },
+    } as any);
+
+  const rowsSum = (t: any) =>
+    Math.round(
+      (t.subtotal - t.discount_total + t.tax_total + t.shipping_total) * 100,
+    ) / 100;
+
+  it('domicilio con INC 8 % incluido: subtotal sin envío, envío = base 13888.89, filas suman el total', async () => {
+    // Plato $50.000 con INC 8 % incluido (46296.30 + 3703.70) y domicilio
+    // $15.000 con INC 8 % incluido (13888.89 + 1111.11).
+    const orderRow = order({
+      subtotal_amount: 46296.3,
+      discount_amount: 0,
+      tax_amount: 3703.7,
+      shipping_cost: 15000,
+      grand_total: 65000,
+    });
+    const invoice = {
+      id: 21,
+      status: 'accepted',
+      subtotal_amount: 60185.19,
+      discount_amount: 0,
+      tax_amount: 4814.81,
+      shipping_amount: 13888.89,
+      total_amount: 65000,
+      invoice_taxes: [
+        { tax_name: 'INC', tax_rate: 8, tax_amount: 4814.81, taxable_amount: 60185.19 },
+      ],
+    };
+
+    const { totals } = await makeProvider(orderRow, invoice).fetchDocumentData(10, 11);
+
+    expect(totals.subtotal).toBe(46296.3);
+    expect(totals.subtotal_formatted).toBe(formatFiscalMoney(46296.3));
+    expect(totals.shipping_total).toBe(13888.89);
+    expect(totals.shipping_total_formatted).toBe(formatFiscalMoney(13888.89));
+    expect(totals.tax_total).toBe(4814.81);
+    expect(totals.grand_total).toBe(65000);
+    expect(rowsSum(totals)).toBe(65000);
+  });
+
+  it('factura actual (envío bruto sin impuesto): el envío deja de contarse dos veces', async () => {
+    const orderRow = order({
+      subtotal_amount: 10000,
+      discount_amount: 0,
+      tax_amount: 1900,
+      shipping_cost: 5000,
+      grand_total: 16900,
+    });
+    const invoice = {
+      id: 22,
+      status: 'accepted',
+      subtotal_amount: 15000,
+      discount_amount: 0,
+      tax_amount: 1900,
+      shipping_amount: 5000,
+      total_amount: 16900,
+      invoice_taxes: [
+        { tax_name: 'IVA', tax_rate: 19, tax_amount: 1900, taxable_amount: 10000 },
+      ],
+    };
+
+    const { totals } = await makeProvider(orderRow, invoice).fetchDocumentData(10, 11);
+
+    expect(totals.subtotal).toBe(10000);
+    expect(totals.shipping_total).toBe(5000);
+    expect(rowsSum(totals)).toBe(16900);
+    expect(totals.grand_total).toBe(16900);
+  });
+
+  it('factura sin envío (shipping_amount 0 o ausente): subtotal entero, envío 0', async () => {
+    const orderRow = order({
+      subtotal_amount: 4629.62,
+      discount_amount: 0,
+      tax_amount: 370.36,
+      shipping_cost: 0,
+      grand_total: 5000,
+    });
+    const base = {
+      id: 23,
+      status: 'accepted',
+      subtotal_amount: 4629.63,
+      discount_amount: 0,
+      tax_amount: 370.37,
+      total_amount: 5000,
+      invoice_taxes: [],
+    };
+
+    for (const invoice of [base, { ...base, shipping_amount: 0 }]) {
+      const { totals } = await makeProvider(orderRow, invoice).fetchDocumentData(10, 11);
+      expect(totals.subtotal).toBe(4629.63);
+      expect(totals.shipping_total).toBe(0);
+      expect(rowsSum(totals)).toBe(5000);
+    }
+  });
+
+  it('tirilla SIN factura: igual que hoy (subtotal y envío de la orden)', async () => {
+    const orderRow = order({
+      subtotal_amount: 10000,
+      discount_amount: 0,
+      tax_amount: 1900,
+      shipping_cost: 5000,
+      grand_total: 16900,
+    });
+
+    for (const invoice of [null, { id: 24, status: 'draft', subtotal_amount: 15000, shipping_amount: 5000 }]) {
+      const { totals } = await makeProvider(orderRow, invoice).fetchDocumentData(10, 11);
+      expect(totals.subtotal).toBe(10000);
+      expect(totals.shipping_total).toBe(5000);
+      expect(totals.grand_total).toBe(16900);
+    }
+  });
+});

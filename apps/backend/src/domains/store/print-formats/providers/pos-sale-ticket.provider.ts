@@ -187,9 +187,27 @@ export class PosSaleTicketDataProvider implements IDocumentDataProvider {
       const discount = Number((invoice as any).discount_amount);
       const tax = Number((invoice as any).tax_amount);
       const total = Number((invoice as any).total_amount);
+      // El `subtotal_amount` de la factura YA incluye la línea «Envio» (ver
+      // `computeOrderInvoiceSubtotal`: Σ bases de ítems + envío). Pintarlo tal
+      // cual junto al `shipping_total` de la ORDEN mostraba el envío dos veces
+      // —y con INC del domicilio, el bruto de la orden encima de una base que
+      // ya lo despejó—. La tirilla separa: productos = subtotal − envío, y la
+      // fila Envío = `shipping_amount` de la factura (la base neta cuando el
+      // envío lleva impuesto, cuyo tributo ya viaja en `tax_amount`). Así
+      // subtotal − descuento + impuestos + envío == total en ambos casos.
+      // `shipping_amount` no finito o ausente ⇒ 0: el subtotal queda entero y
+      // la fila Envío no duplica nada.
+      const rawShipping = Number((invoice as any).shipping_amount);
+      const shipping = Number.isFinite(rawShipping) ? rawShipping : 0;
       if (Number.isFinite(subtotal)) {
-        model.totals.subtotal = subtotal;
-        model.totals.subtotal_formatted = formatFiscalMoney(subtotal);
+        // Resta en centavos: dos Decimal(12,2) leídos como double no restan
+        // exacto (23888.89 − 13888.89 ≠ 10000).
+        const productsSubtotal =
+          (Math.round(subtotal * 100) - Math.round(shipping * 100)) / 100;
+        model.totals.subtotal = productsSubtotal;
+        model.totals.subtotal_formatted = formatFiscalMoney(productsSubtotal);
+        model.totals.shipping_total = shipping;
+        model.totals.shipping_total_formatted = formatFiscalMoney(shipping);
       }
       if (Number.isFinite(discount)) {
         model.totals.discount_total = discount;
