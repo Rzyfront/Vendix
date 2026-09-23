@@ -41,6 +41,7 @@ import { VendixHttpException } from '@common/errors';
 import { ErrorCodes } from '@common/errors/error-codes';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { Prisma } from '@prisma/client';
 import {
   CancelOrderItemDto,
   CancelDeliveredOrderItemDto,
@@ -142,6 +143,24 @@ export class OrderFlowController {
     const payEnabled = isDraft || !!payAction?.enabled;
 
     if (!payEnabled) {
+      // The action gate runs before payOrder's locked validator. After a
+      // successful payment, `processing`/`shipped` may no longer advertise
+      // `pay`; return the specific fully-paid code rather than masking it
+      // behind the generic unavailable-action error. The service still owns
+      // the atomic check for concurrent requests that pass this preflight.
+      if (['created', 'shipped', 'processing'].includes(orderRow.state)) {
+        const settledAmount = (orderRow.payments ?? [])
+          .filter((payment) =>
+            payment.state === 'succeeded' || payment.state === 'captured',
+          )
+          .reduce(
+            (sum, payment) => sum.plus(payment.amount),
+            new Prisma.Decimal(0),
+          );
+        if (settledAmount.gte(orderRow.grand_total)) {
+          throw new VendixHttpException(ErrorCodes.ORD_PAY_ALREADY_PAID_001);
+        }
+      }
       // Mirror the canonical error shape so the cashier sees the same code
       // the editor / order-detail pages already handle, AND the timeline is
       // left clean of `payment.attempt` rows for terminal states.
