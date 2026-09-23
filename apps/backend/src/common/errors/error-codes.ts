@@ -5624,6 +5624,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La mesa ya tiene una sesión abierta',
   },
+  // B.5 / ERR-39 — aviso de una apertura exitosa, nunca se lanza como excepción.
+  TABLE_REOPENED_FROM_CLEANING_001: {
+    code: 'TABLE_REOPENED_FROM_CLEANING_001',
+    httpStatus: 200,
+    devMessage: 'La mesa estaba en limpieza antes de abrir la cuenta',
+  },
   TABLE_SESSION_CLOSED: {
     code: 'TABLE_SESSION_CLOSED',
     httpStatus: 409,

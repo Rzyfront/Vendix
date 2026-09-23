@@ -1084,6 +1084,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Aún no hay una cuenta abierta para esta mesa. Llama al mesero para que la abra.',
   TABLE_SESSION_ALREADY_OPEN:
     'Esta mesa ya tiene una cuenta abierta.',
+  // B.5 / ERR-39 — aviso de apertura exitosa, no error ni confirmación.
+  TABLE_REOPENED_FROM_CLEANING_001:
+    'Esta mesa estaba en limpieza. Verifica que esté lista para atender.',
   TABLE_SESSION_CLOSED:
     'La cuenta de esta mesa ya fue cerrada.',
   POS_TABLE_SESSION_PROJECTION_FAILED_001:

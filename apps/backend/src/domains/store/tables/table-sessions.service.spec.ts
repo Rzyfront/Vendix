@@ -32,6 +32,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
     prismaMock = {
       tables: {
         findFirst: jest.fn(),
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ status: 'available' }),
         update: jest.fn(),
       },
       table_sessions: {
@@ -294,6 +295,11 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       } as any);
 
       expect(result.id).toBe(77);
+      expect(result.previous_table_status).toBe('available');
+      expect(prismaMock.tables.findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: 5 },
+        select: { status: true },
+      });
       expect(prismaMock.orders.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -307,6 +313,42 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           data: expect.objectContaining({ status: 'occupied' }),
         }),
       );
+    });
+
+    it('opens a cleaning table and returns its prior status without blocking', async () => {
+      (tablesService.getById as jest.Mock).mockResolvedValue({
+        id: 5,
+        status: 'cleaning',
+      });
+      prismaMock.orders.create.mockResolvedValue({ id: 9001 });
+      prismaMock.table_sessions.create.mockResolvedValue({
+        id: 77,
+        order_id: 9001,
+        table_id: 5,
+        opened_by: USER_ID,
+        opened_at: new Date(),
+      });
+      prismaMock.tables.findUniqueOrThrow.mockResolvedValue({
+        status: 'cleaning',
+      });
+      prismaMock.tables.update.mockImplementation(async () => {
+        expect(prismaMock.tables.findUniqueOrThrow).toHaveBeenCalledWith({
+          where: { id: 5 },
+          select: { status: true },
+        });
+        return { status: 'occupied' };
+      });
+      jest.spyOn(service, 'findOne').mockResolvedValue({ id: 77 } as any);
+
+      const result = await service.openSession({ table_id: 5 } as any);
+
+      expect(result.previous_table_status).toBe('cleaning');
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+      expect(prismaMock.tables.update).toHaveBeenCalledWith({
+        where: { id: 5 },
+        data: { status: 'occupied', updated_at: expect.any(Date) },
+      });
+      expect(prismaMock.table_sessions.create).toHaveBeenCalledTimes(1);
     });
 
     it('rejects when the table already has an open session', async () => {

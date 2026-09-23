@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, table_status_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -61,6 +61,8 @@ export interface TableSessionView {
   opened_at: Date;
   closed_at: Date | null;
   guest_count: number | null;
+  /** Only present in the response that creates a session, never persisted. */
+  previous_table_status?: table_status_enum;
   order?: {
     id: number;
     state: string;
@@ -201,6 +203,7 @@ export interface CreatedOpenSession {
   table_id: number;
   opened_at: Date;
   opened_by: number | null;
+  previous_table_status: table_status_enum;
 }
 
 /**
@@ -460,6 +463,12 @@ export class TableSessionsService {
       throw error;
     }
 
+    // B.5 — capture the status in the same transaction that occupies the table.
+    // The existing status write remains unchanged; this is response-only data.
+    const previousTable = await tx.tables.findUniqueOrThrow({
+      where: { id: args.tableId },
+      select: { status: true },
+    });
     await tx.tables.update({
       where: { id: args.tableId },
       data: { status: 'occupied', updated_at: new Date() },
@@ -471,6 +480,7 @@ export class TableSessionsService {
       table_id: newSession.table_id,
       opened_at: newSession.opened_at,
       opened_by: newSession.opened_by,
+      previous_table_status: previousTable.status,
     };
   }
 
@@ -549,7 +559,10 @@ export class TableSessionsService {
       `Table session opened: session=${session.id} table=${dto.table_id} order=${session.order_id} user=${userId}`,
     );
 
-    return this.findOne(session.id);
+    return {
+      ...(await this.findOne(session.id)),
+      previous_table_status: session.previous_table_status,
+    };
   }
 
   /**
