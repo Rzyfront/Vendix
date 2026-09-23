@@ -1036,12 +1036,18 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Este enlace ya recibió tus datos y sólo se puede usar una vez. La tienda está emitiendo tu factura.',
 
   // Kitchen tickets (Restaurant Suite Fase K audit jun-2026)
+  KDS_STATION_LOCKED:
+    'Otro operador tiene esta estación. Pídele que cierre su turno o solicita a un administrador que tome la estación.',
+  KITCHEN_TICKET_NOT_TAKEAWAY:
+    'Este ticket incluye platos de mesa. Entrégalos desde la mesa, no desde cocina.',
+  ORDER_ITEM_NOT_DELIVERABLE:
+    'Cocina aún no marca este plato como listo. Espera a que aparezca listo en el KDS antes de entregarlo.',
   KITCHEN_TICKET_NOT_READY:
-    'No se puede marcar como entregado: el plato aun esta pendiente en cocina. Espera a que el KDS lo marque como listo.',
+    'Este plato aún no está listo. Espera a que cocina lo marque como listo en el KDS antes de entregarlo.',
   KITCHEN_TICKET_ALREADY_DELIVERED:
-    'Este plato ya fue marcado como entregado.',
+    'Este plato ya estaba entregado. Actualiza el tablero para ver su estado actual.',
   KITCHEN_TICKET_ALREADY_CANCELLED:
-    'Este plato fue cancelado en cocina y no puede modificarse.',
+    'Este plato fue cancelado en cocina. Revisa el ticket antes de intentar entregarlo.',
   KITCHEN_TICKET_ALREADY_IN_PREPARATION:
     'El ticket ya esta en preparacion.',
   KITCHEN_TICKET_ALREADY_READY:

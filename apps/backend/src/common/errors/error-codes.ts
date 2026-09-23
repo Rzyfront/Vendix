@@ -5549,9 +5549,7 @@ export const ErrorCodes = {
     devMessage:
       'La estación está siendo gestionada por otro operador. Solo el dueño del turno o un administrador pueden actuar sobre sus tickets.',
   },
-  // QUI-652 — la entrega es un hecho de servicio y aplica a todo item, pero un
-  // plato preparado sigue exigiendo estado 'ready' en cocina: dejar que el
-  // mesero marque entregado un plato sin cocinar haria mentir al KDS.
+  /** @deprecated Sin lanzadores; usar ORDER_ITEM_NOT_DELIVERABLE para la entrega por ítem. */
   TABLE_SESSION_ITEM_NOT_DELIVERABLE: {
     code: 'TABLE_SESSION_ITEM_NOT_DELIVERABLE',
     httpStatus: 409,
@@ -5731,6 +5729,13 @@ export const ErrorCodes = {
     code: 'KITCHEN_TICKET_INVALID_STATE',
     httpStatus: 409,
     devMessage: 'Transición de estado del ticket no permitida',
+  },
+  // La entrega desde cocina solo acepta tickets enteramente para llevar.
+  KITCHEN_TICKET_NOT_TAKEAWAY: {
+    code: 'KITCHEN_TICKET_NOT_TAKEAWAY',
+    httpStatus: 422,
+    devMessage:
+      'El ticket contiene platos que no son para llevar; en cocina solo se entregan pedidos takeaway',
   },
   // Restaurant Suite — Fase K audit jun-2026: explicit operator-friendly
   // codes for the common invalid transitions surfaced by the table-session

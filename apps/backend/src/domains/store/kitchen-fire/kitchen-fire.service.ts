@@ -73,19 +73,6 @@ const KITCHEN_TICKET_INCLUDE = {
 } satisfies Prisma.kitchen_ticketsInclude;
 
 /**
- * Paso 3 (takeaway-only KDS): `markDelivered` solo entrega tickets 100 %
- * para llevar. Entrada local —no en `error-codes.ts`— por scope del paso
- * (solo este archivo + su spec); promoverla al catálogo central si otro
- * dominio la necesita.
- */
-const KITCHEN_TICKET_NOT_TAKEAWAY_ENTRY = {
-  code: 'KITCHEN_TICKET_NOT_TAKEAWAY',
-  httpStatus: 422,
-  devMessage:
-    'El ticket contiene platos que no son para llevar; en cocina solo se entregan pedidos takeaway',
-};
-
-/**
  * Result of {@link KitchenFireService.fireOrderItems}. Returned to the
  * controller and (eventually) the POS UI to confirm the fire was
  * accepted and which items were actually consumed.
@@ -2659,7 +2646,7 @@ export class KitchenFireService {
     );
     if (nonTakeaway.length > 0) {
       throw new VendixHttpException(
-        KITCHEN_TICKET_NOT_TAKEAWAY_ENTRY,
+        ErrorCodes.KITCHEN_TICKET_NOT_TAKEAWAY,
         undefined,
         {
           from: ticket.status,
