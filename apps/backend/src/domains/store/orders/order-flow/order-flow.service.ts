@@ -3,6 +3,7 @@ import { lockOrderLifecycle } from './order-lifecycle-lock.util';
 import {
   getCancellationBlocker,
   getOrderCancellationPolicy,
+  SETTLED_PAYMENT_STATES,
 } from './order-cancellation-policy.util';
 import {
   Injectable,
@@ -2329,7 +2330,7 @@ export class OrderFlowService {
    *
    * Reglas:
    *   1. GUARDS — espejo del seam: bloquea si la orden está cobrada o en
-   *      estado terminal (`completed`/`cancelled`/`refunded`).
+   *      estado terminal (`finished`/`cancelled`/`refunded`).
    *   2. MOTIVO obligatorio (mín 3) + DESTINO obligatorio (`restock` |
    *      `waste`): el DTO lo exige (400/422 sin ellos); la validación acá
    *      queda como defensa en profundidad para callers directos.
@@ -2355,24 +2356,23 @@ export class OrderFlowService {
     reason: string,
     destination: 'restock' | 'waste',
   ) {
-    // 1. Orden debe existir en la tienda del contexto + guards paid/terminal
-    //    (espejo exacto del seam `cancelOrderItem`).
+    // 1. Orden debe existir en la tienda del contexto; no recalcular una
+    //    venta cobrada ni una orden terminal antes de abrir la transacción.
     const order = await this.getOrder(orderId);
 
-    const BLOCKED_STATES = ['completed', 'cancelled', 'refunded'] as const;
-    const isPaid =
-      (order as any).payment_status === 'paid' ||
-      (order as any).payment_status === 'succeeded';
-    if (isPaid) {
+    if (order.payments?.some((payment) =>
+      SETTLED_PAYMENT_STATES.has(payment.state),
+    )) {
       throw new VendixHttpException(
-        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
-        'No se puede reversar la entrega de un ítem de una orden ya cobrada',
+        ErrorCodes.ORD_ITEM_CANCEL_PAID_001,
+        'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
       );
     }
-    if (BLOCKED_STATES.includes(order.state as any)) {
+    if (['cancelled', 'refunded', 'finished'].includes(order.state)) {
       throw new VendixHttpException(
-        ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
-        `No se puede reversar la entrega de un ítem en estado '${order.state}'`,
+        ErrorCodes.ORD_ITEM_CANCEL_STATE_001,
+        `No se puede cancelar un plato de una orden en estado '${order.state}'.`,
+        { state: order.state },
       );
     }
 

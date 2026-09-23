@@ -2,6 +2,7 @@ import {
   getCancellationBlocker,
   getOrderCancellationPolicy,
   OrderCancellationSnapshot,
+  SETTLED_PAYMENT_STATES,
 } from './order-cancellation-policy.util';
 
 const STOCK_BLOCKER = 'ORD_CANCEL_STOCK_COMMITTED_001';
@@ -27,6 +28,12 @@ function payment(
 }
 
 describe('Order cancellation policy', () => {
+  it('expone el mismo conjunto de pagos liquidados al guard de cancelación de ítem', () => {
+    expect([...SETTLED_PAYMENT_STATES].sort()).toEqual([
+      'captured', 'partially_refunded', 'refunded', 'succeeded',
+    ]);
+    expect(SETTLED_PAYMENT_STATES.has('pending')).toBe(false);
+  });
   it.each(['created', 'pending_payment', 'processing'])(
     'permits cancellation of %s with reservations only',
     (state) => {

@@ -1481,6 +1481,46 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
     return { service, prismaMock, txMock, stockLevelManager, auditService };
   };
 
+  it.each(['succeeded', 'captured', 'partially_refunded', 'refunded'])(
+    '409 tipado si hay pago %s, sin tocar totales, stock ni auditoría',
+    async (state) => {
+      const { service, prismaMock, stockLevelManager, auditService } = buildService({
+        order: { state: 'finished', payments: [{ state }] },
+      });
+
+      await expect(service.cancelDeliveredOrderItem(
+        ORDER_ID, ITEM_ID, 'mosca en el plato', 'waste',
+      )).rejects.toMatchObject({ errorCode: 'ORD_ITEM_CANCEL_PAID_001' });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(auditService.logCustom).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['cancelled', 'refunded', 'finished'])(
+    '409 tipado para estado terminal %s sin pago',
+    async (state) => {
+      const { service, prismaMock } = buildService({ order: { state, payments: [] } });
+      const error = await service.cancelDeliveredOrderItem(
+        ORDER_ID, ITEM_ID, 'mosca en el plato', 'waste',
+      ).catch((caught) => caught);
+
+      expect(error.errorCode).toBe('ORD_ITEM_CANCEL_STATE_001');
+      expect(error.getResponse()).toMatchObject({ details: { state } });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it('pago pendiente no impide cancelar un plato de cuenta abierta', async () => {
+    const { service, prismaMock } = buildService({
+      order: { state: 'processing', payments: [{ state: 'pending' }] },
+    });
+    await service.cancelDeliveredOrderItem(
+      ORDER_ID, ITEM_ID, 'mosca en el plato', 'waste',
+    );
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+  });
+
   it('restock: devuelve stock, cancela suave y audita con destino', async () => {
     const { service, txMock, stockLevelManager, auditService } = buildService(
       {},

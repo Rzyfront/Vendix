@@ -5639,6 +5639,16 @@ export const ErrorCodes = {
     devMessage:
       'Cannot remove an item already being prepared in the kitchen',
   },
+  ORD_ITEM_CANCEL_PAID_001: {
+    code: 'ORD_ITEM_CANCEL_PAID_001',
+    httpStatus: 409,
+    devMessage: 'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
+  },
+  ORD_ITEM_CANCEL_STATE_001: {
+    code: 'ORD_ITEM_CANCEL_STATE_001',
+    httpStatus: 409,
+    devMessage: 'No se puede cancelar un plato de una orden en estado terminal.',
+  },
   TABLE_GUEST_COUNT_EXCEEDS_CAPACITY: {
     code: 'TABLE_GUEST_COUNT_EXCEEDS_CAPACITY',
     httpStatus: 422,

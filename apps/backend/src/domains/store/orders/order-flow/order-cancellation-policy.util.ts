@@ -32,7 +32,7 @@ export interface OrderCancellationPolicy {
 const CANCELABLE_STATES = new Set(['created', 'pending_payment', 'processing']);
 const PAYMENT_CANCELABLE_STATES = new Set(['pending_payment', 'processing']);
 const DELIVERED_STATES = new Set(['delivered', 'finished', 'refunded']);
-const SETTLED_PAYMENT_STATES = new Set([
+export const SETTLED_PAYMENT_STATES: ReadonlySet<string> = new Set([
   'succeeded', 'captured', 'partially_refunded', 'refunded',
 ]);
 const LEGACY_DIRECT_METHOD_TYPES = new Set([
