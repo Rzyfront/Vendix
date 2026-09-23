@@ -134,14 +134,11 @@ export class TaxesService {
    * fiscales de productos con líneas de mesa abiertas; al cerrar la cuenta,
    * la normalización tomaba el retorno como «producto exento» y emitía el
    * documento con base inflada e IVA cero (sub-declaración DIAN invisible).
-   * El llamador que persiste el documento final (hoy `payments.service.ts`,
-   * fuera del alcance de este cambio) es quien debe leer este campo y
-   * lanzar `POS_TABLE_LINE_TAX_UNRESOLVABLE_001` cuando
-   * `has_tax_assignment === false` en una línea que sí esperaba impuesto,
-   * en vez de normalizar a IVA cero en silencio. Este método NO lanza ese
-   * error ni cambia su comportamiento por defecto: lo consumen POS,
-   * vitrina, checkout y órdenes, y romper ese contrato es una regresión
-   * mayor fuera de este alcance.
+   * ADR-10: esta bandera describe solo el catálogo ACTUAL. No demuestra
+   * que una línea nueva perdió un impuesto ni justifica bloquear su cobro.
+   * Una línea previamente gravada se conserva por su snapshot persistido;
+   * diagnosticar una pérdida real exige evidencia histórica independiente.
+   * El resolver no lanza ni cambia su comportamiento por defecto.
    */
   // CAVEAT (QUI-772 / 2026-08-31). Este resolver SUMA todas las tasas de
   // todas las categorías. El otro camino,

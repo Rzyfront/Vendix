@@ -825,7 +825,6 @@ export class PaymentsService {
         | {
             allow_anonymous_sales?: boolean;
             allow_alias_sales?: boolean;
-            tax_line_gate?: 'block' | 'warn' | 'off';
           }
         | undefined;
       const allowAnonymousSales = posSettings?.allow_anonymous_sales === true;
@@ -833,35 +832,6 @@ export class PaymentsService {
       // requiere el flag POS y un alias no vacío.
       const allowAliasSales = posSettings?.allow_alias_sales === true;
       const hasAlias = !!createPosPaymentDto.customer_alias;
-
-      // ----------------------------------------------------------------
-      // F-127 — severidad de la compuerta fiscal bloqueante del carril POS.
-      //
-      // Hoy, si `POS_TABLE_LINE_TAX_UNRESOLVABLE_001` dispara en una tienda
-      // por una combinación de catálogo no contemplada, esa tienda NO PUEDE
-      // COBRAR hasta que se abra un revert, se mergee y corra la tubería de
-      // despliegue completa (`deploy-backend-ec2.yml`: docker stop, sleep
-      // 40, espera de worker hasta 90s, seeds) con la caja parada.
-      // `settings.pos.tax_line_gate` es la válvula de escape: baja la
-      // severidad de esa compuerta SIN redeploy, por tienda, con un simple
-      // cambio de settings.
-      //
-      // Se resuelve UNA sola vez acá (settings ya está en memoria por
-      // `require_session_for_sales`, línea ~727) y se encadena por
-      // parámetro hasta `buildPosOrderItem` — releerla ahí adentro
-      // multiplicaría `SettingsService.getSettings()` (dos `findUnique` sin
-      // caché) por cada línea del carrito, dentro del `Promise.all` que ya
-      // sostiene locks de la transacción (mismo patrón de N+1 que P2028).
-      //
-      // Default `'block'` = comportamiento de HOY sin configurar: ninguna
-      // tienda cambia de comportamiento por default. Bajar a 'warn'/'off'
-      // es una MEDIDA TEMPORAL DE EMERGENCIA, no un ajuste permanente — ver
-      // el comentario junto al throw en `buildPosOrderItem`.
-      const taxLineGateSeverity: 'block' | 'warn' | 'off' =
-        posSettings?.tax_line_gate === 'warn' ||
-        posSettings?.tax_line_gate === 'off'
-          ? posSettings.tax_line_gate
-          : 'block';
 
       if (
         requireCustomerData &&
@@ -911,7 +881,6 @@ export class PaymentsService {
           tx,
           createPosPaymentDto,
           user,
-          taxLineGateSeverity,
         ))!;
         const order = orderCreation.order;
         // QUI-431 — ¿la venta tiene productos serializados? Calculado UNA vez
@@ -2768,24 +2737,6 @@ export class PaymentsService {
     // `session.order_id` (cierre de mesa, orden ya existe) u `orderNumber`
     // (venta nueva, recién generado antes de mapear los ítems).
     orderRef?: string | number | null,
-    // F-065 (B.3→B.4): distingue el cierre de cuenta de mesa —líneas que
-    // pueden llevar tiempo abiertas y perder su asignación fiscal entre la
-    // apertura y el cierre (población real: purga de Roma Motos)— de la
-    // venta fresca (POS directo/checkout), que F-065 deja fuera a propósito:
-    // ese carril puede depender de productos legítimamente sin categoría
-    // asignada y auditarlo es un cambio aparte (evidence/B3-taxes-ejecucion.md).
-    isTableSessionLine = false,
-    // F-127: severidad de la compuerta `POS_TABLE_LINE_TAX_UNRESOLVABLE_001`,
-    // resuelta UNA sola vez en `processPosPayment` (settings ya está en
-    // memoria ahí, `payments.service.ts:726`) y encadenada por los dos
-    // llamadores (`createOrUpdateOrderFromPos` / `applyPosPaymentToTableSession`)
-    // en vez de releerse por ítem: `SettingsService.getSettings()` hace dos
-    // `findUnique` sin caché y este método corre dentro de un
-    // `Promise.all` por línea — releerla aquí multiplicaría consultas
-    // exactamente en el punto que P2028 (memoria del equipo) ya señaló
-    // como el cuello de botella del carril de cobro. Default `'block'`
-    // para que un llamador nuevo que no la pase se comporte como hoy.
-    taxLineGateSeverity: 'block' | 'warn' | 'off' = 'block',
   ): Promise<any> {
     const isCustomItem = item.item_type === 'custom' || !item.product_id;
     const lineUnits = this.getPosLineUnits(item);
@@ -2989,59 +2940,9 @@ export class PaymentsService {
       )),
       resolved_from: 'catalog',
     };
-    // F-065 (B.3→B.4): al cerrar una cuenta de mesa, un producto que perdió
-    // su `product_tax_assignments` entre la apertura y el cierre resolvía en
-    // silencio a IVA cero sobre base inflada — sub-declaración a la DIAN sin
-    // ninguna señal. `has_tax_assignment` (TaxesService, F-065) discrimina:
-    // `false` es "nunca tuvo asignación o la perdió", nunca "tasa 0%
-    // explícita" (una asignación viva a categoría 0% sigue siendo `true`).
-    // Acotado a `isTableSessionLine` a propósito: el carril de venta
-    // fresca/checkout puede depender de productos legítimamente sin
-    // categoría asignada y auditarlo es un cambio aparte, no éste.
-    //
-    // F-127 — válvula de escape por tienda para esta compuerta.
-    //
-    // Sin esta rama, una tienda que dispara esta excepción por una
-    // combinación de catálogo no contemplada queda SIN PODER COBRAR hasta
-    // abrir un revert, mergearlo y esperar `deploy-backend-ec2.yml`
-    // completo (docker stop, sleep 40, espera de worker hasta 90s, seeds)
-    // con la caja parada. `settings.pos.tax_line_gate` (`'block' | 'warn' |
-    // 'off'`, default `'block'`) permite bajarla en caliente, por tienda,
-    // sin tocar código ni desplegar:
-    //   - 'block' (default = comportamiento de HOY): lanza y revierte la
-    //     transacción, exactamente como antes de F-127.
-    //   - 'warn': NO lanza — registra el mismo detalle (tienda, orden,
-    //     usuario, producto) que hoy sólo viaja en el mensaje de la
-    //     excepción, vía `this.logger.warn` con el mismo shape de evento
-    //     estructurado que usa `invertDeclaredGross` más abajo
-    //     (`payments.unclosed_residual_cents`), y deja pasar la línea
-    //     normalizando el impuesto a cero.
-    //   - 'off': ni lanza ni registra — silencio total.
-    // Bajar a 'warn'/'off' es una MEDIDA TEMPORAL DE EMERGENCIA para poder
-    // seguir cobrando mientras se corrige el catálogo, no un ajuste
-    // permanente: toda venta que pasa por 'warn'/'off' sigue siendo una
-    // venta con IVA potencialmente sub-declarado a la DIAN (F-065).
-    if (isTableSessionLine && catalogTaxInfo.has_tax_assignment === false) {
-      if (taxLineGateSeverity === 'block') {
-        throw new VendixHttpException(
-          ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001,
-          `El producto "${product.name}" perdió su asignación fiscal; no se puede cerrar la cuenta normalizando el impuesto a cero.`,
-        );
-      }
-      if (taxLineGateSeverity === 'warn') {
-        this.logger.warn({
-          event: 'payments.pos_table_line_tax_unresolvable',
-          code: ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001.code,
-          severity: 'warn',
-          store_id: dtoStoreId,
-          user_id: user?.id ?? null,
-          order_ref: orderRef ?? null,
-          product_id: product.id,
-          product_name: product.name,
-        });
-      }
-      // 'off': ni lanza ni registra, a propósito.
-    }
+    // ADR-10: una línea NUEVA de POS puede venderse sin impuesto, también
+    // desde mesa. La ausencia de asignación actual no demuestra que antes
+    // tuviera una. Las líneas anteriores conservan su snapshot persistido.
     // F-001: el precio publicado YA contiene lo inclusivo — el total NO crece.
     // Con todo inclusivo, `total === catalogUnitPrice` (119000, no 141610); lo
     // agregado sí suma encima vía el resolver.
@@ -3225,10 +3126,8 @@ export class PaymentsService {
     // a la DIAN saldría mal, EN SILENCIO y sin compuerta que lo note — el
     // eje (a) del hallazgo. Hoy ninguna tasa AIU alcanza el carril de línea
     // POS, así que el radio de explosión es cero; el día que alguna llegue,
-    // esto corta en vez de sub-declarar. NO va bajo `settings.pos.
-    // tax_line_gate` (F-127) a propósito: aquella válvula existe para no
-    // dejar la caja parada por un dato de catálogo, y nunca debe poder
-    // apagar una compuerta de aritmética fiscal.
+    // esto corta en vez de sub-declarar. ADR-10 retira la antigua válvula
+    // `tax_line_gate`; esta compuerta de aritmética fiscal permanece intacta.
     const fixedBaseTax = source.taxes.find(
       (tax) =>
         (tax as { fixed_base?: unknown }).fixed_base !== undefined &&
@@ -3610,9 +3509,6 @@ export class PaymentsService {
     dto: CreatePosPaymentDto,
     user: any,
     dtoStoreId: number,
-    // F-127: encadenada desde `processPosPayment` hasta `buildPosOrderItem`
-    // — ver comentario de la firma de ese método.
-    taxLineGateSeverity: 'block' | 'warn' | 'off' = 'block',
   ): Promise<{
     order: any;
     // QUI-431 — alineado con la rama de venta fresca (`createOrUpdateOrderFromPos`)
@@ -3738,9 +3634,6 @@ export class PaymentsService {
                 user,
                 tierSnapshots[index],
                 session.order_id,
-                // F-065: esta rama SÍ es cierre de cuenta de mesa.
-                true,
-                taxLineGateSeverity,
               ),
             ),
           )
@@ -4181,9 +4074,6 @@ export class PaymentsService {
     tx: any,
     dto: CreatePosPaymentDto,
     user: any,
-    // F-127: encadenada desde `processPosPayment` hasta `buildPosOrderItem`
-    // — ver comentario de la firma de ese método.
-    taxLineGateSeverity: 'block' | 'warn' | 'off' = 'block',
   ) {
     // store_id is guaranteed by processPosPayment (line ~612) which copies it
     // from RequestContext. Re-assert here so downstream typing is non-null and
@@ -4205,7 +4095,6 @@ export class PaymentsService {
         dto,
         user,
         dtoStoreId,
-        taxLineGateSeverity,
       );
     }
 
@@ -4238,7 +4127,6 @@ export class PaymentsService {
         { ...dto, table_session_id: resolvedSessionId },
         user,
         dtoStoreId,
-        taxLineGateSeverity,
       );
     }
 
@@ -4343,10 +4231,6 @@ export class PaymentsService {
               user,
               tierSnapshots[index],
               orderNumber,
-              // F-065: venta fresca, no es cierre de cuenta de mesa — la
-              // compuerta de abajo no aplica en este carril a propósito.
-              false,
-              taxLineGateSeverity,
             ),
           ),
         );
