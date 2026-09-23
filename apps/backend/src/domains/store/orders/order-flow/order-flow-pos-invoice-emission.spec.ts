@@ -67,6 +67,7 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
       store_id: STORE_ID,
       order_number: 'ORD-0001',
       channel: 'pos',
+      delivery_type: 'direct_delivery',
       grand_total: 4000,
       active_financial_split_id: null,
       payments: [{ state: 'succeeded', amount: 4000 }],
@@ -192,8 +193,40 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
     expect(posEmits()).toHaveLength(0);
   });
 
-  it('canal ecommerce NO emite por este camino', async () => {
+  it.each(['home_delivery', 'pickup', 'other'])(
+    'orden ecommerce %s NO emite por este camino (se factura por el carril web)',
+    async (deliveryType) => {
+      emissionRow.channel = 'ecommerce';
+      emissionRow.delivery_type = deliveryType;
+
+      await service.payOrder(ORDER_ID, DIRECT_DTO);
+
+      expect(posEmits()).toHaveLength(0);
+    },
+  );
+
+  it('mesa abierta por QR (ecommerce + dine_in) pagada completa desde el detalle emite como venta POS', async () => {
     emissionRow.channel = 'ecommerce';
+    emissionRow.delivery_type = 'dine_in';
+    emissionRow.order_number = 'ORD-QR-7';
+
+    await service.payOrder(ORDER_ID, DIRECT_DTO);
+
+    expect(posEmits()).toHaveLength(1);
+    expect(posEmits()[0][1]).toEqual({
+      organization_id: ORG_ID,
+      store_id: STORE_ID,
+      user_id: USER_ID,
+      order_id: ORDER_ID,
+      order_number: 'ORD-QR-7',
+      auto_emit: true,
+    });
+  });
+
+  it('mesa por QR con pago parcial NO emite', async () => {
+    emissionRow.channel = 'ecommerce';
+    emissionRow.delivery_type = 'dine_in';
+    emissionRow.payments = [{ state: 'succeeded', amount: 3999 }];
 
     await service.payOrder(ORDER_ID, DIRECT_DTO);
 
@@ -352,8 +385,21 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
       expect(posEmits()).toHaveLength(0);
     });
 
-    it('confirmación de orden ecommerce NO emite por este camino', async () => {
+    it('confirmación del pago online de una mesa QR (ecommerce + dine_in) emite una vez', async () => {
       emissionRow.channel = 'ecommerce';
+      emissionRow.delivery_type = 'dine_in';
+
+      await service.confirmPayment(ORDER_ID);
+
+      expect(posEmits()).toHaveLength(1);
+      expect(posEmits()[0][1]).toEqual(
+        expect.objectContaining({ order_id: ORDER_ID, auto_emit: true }),
+      );
+    });
+
+    it('confirmación de orden ecommerce de domicilio NO emite por este camino', async () => {
+      emissionRow.channel = 'ecommerce';
+      emissionRow.delivery_type = 'home_delivery';
 
       await service.confirmPayment(ORDER_ID);
 

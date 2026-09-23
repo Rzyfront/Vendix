@@ -81,7 +81,24 @@ export class PosSaleCompletedListener {
           is_super_admin: false,
           is_owner: false,
         },
-        () => this.emission.emitForOrder(event.order_id),
+        async () => {
+          let result: Awaited<
+            ReturnType<PosFiscalEmissionService['emitForOrder']>
+          >;
+          try {
+            result = await this.emission.emitForOrder(event.order_id);
+          } catch (error) {
+            // Igual que `autoSendOrderInvoice`: cualquier error del envío
+            // automático deja el banner. Dentro del contexto aislado: la
+            // escritura necesita la tienda del evento.
+            await this.emission.markAutoSendFailedAlert(event.order_id);
+            throw error;
+          }
+          // Sólo la emisión AUTOMÁTICA marca el banner; `emitForOrder` ya lo
+          // limpió si el documento quedó aceptado.
+          await this.emission.markAutoSendFailedAlert(event.order_id, result);
+          return result;
+        },
       );
 
       if (status.state === 'failed') {

@@ -18,8 +18,42 @@ describe('PosSaleCompletedListener', () => {
     ...overrides,
   });
 
+  let markAutoSendFailedAlert: jest.Mock;
+  beforeEach(() => {
+    markAutoSendFailedAlert = jest.fn().mockResolvedValue(undefined);
+  });
+
   const makeListener = (emitForOrder: jest.Mock) =>
-    new PosSaleCompletedListener({ emitForOrder } as any);
+    new PosSaleCompletedListener({ emitForOrder, markAutoSendFailedAlert } as any);
+
+  describe('banner fiscal_alert_code de la emisión automática', () => {
+    it('emisión automática fallida entrega el estado failed a markAutoSendFailedAlert del mismo pedido', async () => {
+      const failed = { state: 'failed', message: 'Sin resolución vigente', invoice_id: null };
+      const emitForOrder = jest.fn().mockResolvedValue(failed);
+
+      await makeListener(emitForOrder).handlePosSaleCompleted(event({ order_id: 321 }));
+
+      expect(markAutoSendFailedAlert).toHaveBeenCalledTimes(1);
+      expect(markAutoSendFailedAlert).toHaveBeenCalledWith(321, failed);
+    });
+
+    it('un error inesperado de emitForOrder marca el banner sin estado (como autoSendOrderInvoice) y no lanza', async () => {
+      const emitForOrder = jest.fn().mockRejectedValue(new Error('boom'));
+
+      await expect(
+        makeListener(emitForOrder).handlePosSaleCompleted(event({ order_id: 55 })),
+      ).resolves.toBeUndefined();
+
+      expect(markAutoSendFailedAlert).toHaveBeenCalledTimes(1);
+      expect(markAutoSendFailedAlert).toHaveBeenCalledWith(55);
+    });
+
+    it('auto_emit=false no toca el banner', async () => {
+      const emitForOrder = jest.fn();
+      await makeListener(emitForOrder).handlePosSaleCompleted(event({ auto_emit: false }));
+      expect(markAutoSendFailedAlert).not.toHaveBeenCalled();
+    });
+  });
 
   it('auto_emit=false NO emite', async () => {
     const emitForOrder = jest.fn();

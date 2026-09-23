@@ -22,6 +22,10 @@ import { PaymentLinksService } from '../../payment-links/payment-links.service';
 import { TableSessionsService } from '../../tables/table-sessions.service';
 import { InvoicingService } from '../../invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../invoicing/invoice-flow/invoice-flow.service';
+import {
+  INVOICE_AUTO_SEND_FAILED_ALERT,
+  isPresentialPosSale,
+} from '../../invoicing/pos/presential-pos-sale';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
 import { buildTaxBreakdown } from '@common/interfaces/tax-breakdown.interface';
 
@@ -637,14 +641,16 @@ export class WebhookHandlerService {
             );
           }
 
-          // Orden POS con confirmación aplicada: `confirmPayment` ya disparó
-          // `POS_SALE_COMPLETED_EVENT` y `PosSaleCompletedListener` es el único
-          // dueño de su emisión (crea/valida/transmite respetando
-          // `invoicing.pos.auto_emit`). Enviar aquí también la misma factura
+          // Venta presencial (POS o mesa QR `dine_in`, ver `isPresentialPosSale`)
+          // con confirmación aplicada: `confirmPayment` ya disparó
+          // `POS_SALE_COMPLETED_EVENT` con la MISMA compuerta y
+          // `PosSaleCompletedListener` es el único dueño de su emisión
+          // (crea/valida/transmite respetando `invoicing.pos.auto_emit`, y marca
+          // `fiscal_alert_code` si falla). Enviar aquí también la misma factura
           // correría en paralelo con el listener: `InvoiceFlowService.send`
           // no tiene CAS y la transmitiría dos veces.
           if (
-            order.channel === order_channel_enum.pos &&
+            isPresentialPosSale(order) &&
             (confirmed as any).payment_confirmation_applied === true
           ) {
             return;
@@ -819,17 +825,14 @@ export class WebhookHandlerService {
       }
 
       // Compuerta de auto-emisión: el carril lo decide DÓNDE se consume la
-      // venta, no el medio de pago ni el tipo de pedido. `pos` es siempre
-      // mostrador; `dine_in` también, aunque el `channel` sea `ecommerce`
-      // porque una mesa abierta por QR nace con channel:'ecommerce' +
-      // delivery_type:'dine_in' (table-sessions.service.ts) para que los
-      // reportes distingan la cuenta iniciada por QR de la iniciada en caja.
-      // El comensal está en el local y lo cobra el mesero: sin la mitad
-      // `dine_in` aquí, apagar "tienda en línea" dejaría sin facturar las
+      // venta, no el medio de pago ni el tipo de pedido. Definición única en
+      // `isPresentialPosSale` (pos, o mesa QR ecommerce + dine_in): sin la
+      // mitad `dine_in`, apagar "tienda en línea" dejaría sin facturar las
       // mesas de un restaurante entero.
-      const isCounterLane =
-        channel === order_channel_enum.pos ||
-        deliveryType === order_delivery_type_enum.dine_in;
+      const isCounterLane = isPresentialPosSale({
+        channel,
+        delivery_type: deliveryType,
+      });
       const invoicingSettings = isCounterLane
         ? await this.invoicing.getPosInvoicingSettings()
         : await this.invoicing.getEcommerceInvoicingSettings();
@@ -879,7 +882,7 @@ export class WebhookHandlerService {
         }
         await this.prisma.orders.update({
           where: { id: orderId },
-          data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+          data: { fiscal_alert_code: INVOICE_AUTO_SEND_FAILED_ALERT },
         });
       } catch (flagErr) {
         this.logger.warn(

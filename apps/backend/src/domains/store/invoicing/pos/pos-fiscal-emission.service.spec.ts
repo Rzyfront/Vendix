@@ -23,6 +23,7 @@ describe('PosFiscalEmissionService', () => {
     const prisma = {
       orders: {
         findFirst: jest.fn().mockResolvedValue({ id: 1 }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       invoices: {
         findFirst: jest.fn().mockResolvedValue(validatedInvoice),
@@ -256,5 +257,108 @@ describe('PosFiscalEmissionService', () => {
     expect(result.state).toBe('issued');
     expect(result.invoice_id).toBe(5);
     expect(prisma.fiscal_operation_events.create).not.toHaveBeenCalled();
+  });
+
+  describe('banner INVOICE_AUTO_SEND_FAILED (orders.fiscal_alert_code)', () => {
+    const MARK = {
+      where: {
+        id: 1,
+        OR: [
+          { fiscal_alert_code: null },
+          { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+        ],
+      },
+      data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+    };
+    const CLEAR = {
+      where: { id: 1, fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+      data: { fiscal_alert_code: null },
+    };
+    const failedStatus: any = { order_id: 1, state: 'failed', message: 'x', invoice_id: 5 };
+
+    it('emisión aceptada LIMPIA sólo su propio código', async () => {
+      const { service, prisma } = createService();
+      prisma.invoices.findFirst.mockResolvedValue({
+        id: 5, invoice_number: 'FE-5', status: 'accepted',
+        transmission_status: 'accepted', cufe: 'CUFE-5', pdf_url: null,
+        contingency_deadline: null,
+      });
+
+      const result = await service.emitForOrder(1);
+
+      expect(result.state).toBe('issued');
+      expect(prisma.orders.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.orders.updateMany).toHaveBeenCalledWith(CLEAR);
+    });
+
+    it('emisión fallida desde emitForOrder NO marca (sólo el listener automático marca)', async () => {
+      const { service, prisma, invoice_flow } = createService();
+      invoice_flow.send.mockRejectedValue(new Error('El certificado de firma expiró.'));
+
+      const result = await service.emitForOrder(1);
+
+      expect(result.state).toBe('failed');
+      expect(prisma.orders.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('markAutoSendFailedAlert con estado failed y factura validated marca INVOICE_AUTO_SEND_FAILED sin pisar códigos ajenos', async () => {
+      const { service, prisma } = createService();
+
+      await service.markAutoSendFailedAlert(1, failedStatus);
+
+      expect(prisma.orders.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.orders.updateMany).toHaveBeenCalledWith(MARK);
+    });
+
+    it('markAutoSendFailedAlert sin factura (createFromOrder lanzó) también marca', async () => {
+      const { service, prisma } = createService();
+      prisma.invoices.findFirst.mockResolvedValue(null);
+
+      await service.markAutoSendFailedAlert(1, { ...failedStatus, invoice_id: null });
+
+      expect(prisma.orders.updateMany).toHaveBeenCalledWith(MARK);
+    });
+
+    it.each(['pending', 'contingency', 'not_applicable', 'issued'])(
+      'markAutoSendFailedAlert con estado %s no escribe nada',
+      async (state) => {
+        const { service, prisma } = createService();
+
+        await service.markAutoSendFailedAlert(1, { ...failedStatus, state });
+
+        expect(prisma.orders.updateMany).not.toHaveBeenCalled();
+      },
+    );
+
+    it('markAutoSendFailedAlert que relee la factura ya accepted LIMPIA en vez de marcar', async () => {
+      const { service, prisma } = createService();
+      prisma.invoices.findFirst.mockResolvedValue({ id: 5, status: 'accepted' });
+
+      await service.markAutoSendFailedAlert(1, failedStatus);
+
+      expect(prisma.orders.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.orders.updateMany).toHaveBeenCalledWith(CLEAR);
+    });
+
+    it.each(['voided', 'cancelled'])(
+      'markAutoSendFailedAlert sobre factura %s no marca (anulación deliberada)',
+      async (status) => {
+        const { service, prisma } = createService();
+        prisma.invoices.findFirst.mockResolvedValue({ id: 5, status });
+
+        await service.markAutoSendFailedAlert(1, failedStatus);
+
+        expect(prisma.orders.updateMany).not.toHaveBeenCalled();
+      },
+    );
+
+    it('markAutoSendFailedAlert nunca lanza aunque la escritura falle', async () => {
+      const { service, prisma } = createService();
+      prisma.orders.updateMany.mockRejectedValue(new Error('db down'));
+
+      await expect(
+        service.markAutoSendFailedAlert(1, failedStatus),
+      ).resolves.toBeUndefined();
+    });
   });
 });

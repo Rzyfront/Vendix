@@ -491,7 +491,51 @@ describe('WebhookHandlerService', () => {
       });
     });
 
-    it('mesa por QR (channel:ecommerce + delivery_type:dine_in) manda por invoicing.pos.auto_emit, no por ecommerce', async () => {
+    // Mesa abierta por QR y pagada online por el comensal: `confirmPayment`
+    // ya disparó POS_SALE_COMPLETED_EVENT (misma compuerta
+    // `isPresentialPosSale`). Enviar aquí también sería la doble transmisión
+    // que la salida temprana existe para impedir. ecommerceAutoEmit=true y
+    // posAutoEmit=true a propósito: ninguna compuerta de carril cortaría.
+    it('mesa por QR (ecommerce + dine_in) con confirmación aplicada: NO llama autoSendOrderInvoice (el listener POS es el dueño)', async () => {
+      const { flow } = setup({
+        channel: 'ecommerce',
+        deliveryType: 'dine_in',
+        posAutoEmit: true,
+        ecommerceAutoEmit: true,
+      });
+      const autoSend = jest.spyOn(service as any, 'autoSendOrderInvoice');
+
+      await expect(
+        (service as any).confirmOrderPaid(1),
+      ).resolves.toBeUndefined();
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
+      expect(autoSend).not.toHaveBeenCalled();
+      expect(flow.validate).not.toHaveBeenCalled();
+      expect(flow.send).not.toHaveBeenCalled();
+    });
+
+    it('ecommerce de domicilio con confirmación aplicada: SIGUE por autoSendOrderInvoice (carril tienda en línea)', async () => {
+      const { flow } = setup({
+        channel: 'ecommerce',
+        deliveryType: 'home_delivery',
+        posAutoEmit: false,
+        ecommerceAutoEmit: true,
+      });
+      const autoSend = jest.spyOn(service as any, 'autoSendOrderInvoice');
+
+      await expect(
+        (service as any).confirmOrderPaid(1),
+      ).resolves.toBeUndefined();
+      expect(autoSend).toHaveBeenCalledWith(1, 'ecommerce', 'home_delivery');
+      expect(flow.validate).toHaveBeenCalledWith(50);
+      expect(flow.send).toHaveBeenCalledWith(50);
+    });
+
+    it('mesa por QR con confirmación NO aplicada (replay) manda por invoicing.pos.auto_emit, no por ecommerce', async () => {
+      orderFlow.confirmPayment.mockResolvedValue({
+        state: 'processing',
+        payment_confirmation_applied: false,
+      });
       const { flow } = setup({
         channel: 'ecommerce',
         deliveryType: 'dine_in',

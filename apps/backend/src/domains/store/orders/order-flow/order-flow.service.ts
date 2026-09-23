@@ -35,6 +35,7 @@ import {
   POS_SALE_COMPLETED_EVENT,
   PosSaleCompletedEvent,
 } from '../../invoicing/pos/pos-sale-completed.event';
+import { isPresentialPosSale } from '../../invoicing/pos/presential-pos-sale';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../cash-registers/movements/movements.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
@@ -4761,7 +4762,10 @@ export class OrderFlowService {
    * `PosSaleCompletedListener` sea el único dueño de la emisión.
    *
    * Compuertas (todas contra la orden PERSISTIDA, después del commit):
-   *  - `channel = 'pos'`: ecommerce se factura por su propio carril.
+   *  - venta presencial (`isPresentialPosSale`): `channel = 'pos'` o mesa
+   *    abierta por QR (`channel = 'ecommerce'` + `delivery_type = 'dine_in'`),
+   *    que se factura como venta de mostrador. El ecommerce de domicilio /
+   *    recogida se factura por su propio carril (checkout + webhook).
    *  - sin `active_financial_split_id`: las cuentas divididas se facturan por
    *    cuenta (`createFromFinancialAccount`); `createFromOrder` lo rechaza.
    *  - pagada COMPLETA: Σ pagos `succeeded`/`captured` ≥ `grand_total`. Un
@@ -4791,12 +4795,13 @@ export class OrderFlowService {
           store_id: true,
           order_number: true,
           channel: true,
+          delivery_type: true,
           grand_total: true,
           active_financial_split_id: true,
           payments: { select: { state: true, amount: true } },
         },
       });
-      if (!order || order.channel !== 'pos') return;
+      if (!order || !isPresentialPosSale(order)) return;
       if (order.active_financial_split_id != null) return;
 
       const paid = (order.payments ?? [])
