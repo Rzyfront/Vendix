@@ -127,6 +127,14 @@ import {
   type FiscalAlertEntry,
 } from '../../utils/fiscal-alert-dictionary';
 
+// Misma política de cobro que SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES en
+// order-flow.service.ts: estas entregas no necesitan método de envío.
+const SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES = new Set<string>([
+  'pickup',
+  'direct_delivery',
+  'dine_in',
+]);
+
 export interface LifecycleStep {
   key: string;
   label: string;
@@ -695,7 +703,8 @@ export class OrderDetailsPageComponent {
   readonly blockedByMissingShipping = computed(() => {
     const o = this.order();
     if (!o) return false;
-    const needsShipping = o.delivery_type !== 'direct_delivery' && o.delivery_type !== 'other';
+    const needsShipping = !o.delivery_type ||
+      !SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES.has(o.delivery_type);
     const terminal = ['cancelled', 'refunded', 'finished'].includes(o.state);
     return needsShipping && !o.shipping_method_id && !terminal;
   });
