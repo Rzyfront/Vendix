@@ -47,6 +47,7 @@ import { PosOrderCreateResult } from '../../models/order.model';
 // división que `pos-payment.service.ts`/`pos-order.service.ts` ya usan.
 import { resolveLineUnits } from '../../utils/line-units.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { StoreOrdersService } from '../../../orders/services/store-orders.service';
@@ -2042,6 +2043,15 @@ export class PosCheckoutShellComponent {
           }
           // Mantiene al POS al día con la sesión recién abierta.
           this.onTableSessionOpened(result);
+          // El picker del checkout solo selecciona la mesa: la apertura real
+          // ocurre aquí al guardar el borrador, no en el modal de selección.
+          if (result.previous_table_status === 'cleaning') {
+            this.toastService.warning(
+              ERROR_MESSAGES['TABLE_REOPENED_FROM_CLEANING_001'],
+              undefined,
+              5000,
+            );
+          }
           this.appendToTableAndFire(state, session);
         },
         error: (err) => {

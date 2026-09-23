@@ -17,6 +17,7 @@ import { PaymentMethodsCatalogService } from '../../../../../../shared/services/
 import type { PaymentMethod } from '../../../../../../shared/models/payment-method.model';
 import { deliveryTypeToEntregaChoice } from '../../models/cart.model';
 import { shouldAutoPrintDispatchTicket } from '../../../../../../shared/services/print/dispatch-ticket-autoprint';
+import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 
 /**
  * CP-POS-CHECKOUT-KEYBOARD — matriz teclado × paso del modal de pago.
@@ -733,6 +734,36 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     expect(component.currentStepKey()).toBe('envio');
     expect(component.submittingDraft()).toBeFalse();
   });
+
+  for (const previousStatus of ['cleaning', 'available'] as const) {
+    it(`al guardar borrador sobre mesa ${previousStatus} avisa solo si venía de limpieza`, () => {
+      const warning = jasmine.createSpy('warning');
+      const opened = {
+        previous_table_status: previousStatus,
+        session: { id: 108, order_id: 1125, table_id: 15 },
+        order: { id: 1125, state: 'draft', grand_total: 0 },
+      };
+      const openTableSession = jasmine.createSpy('openTableSession').and.returnValue(of(opened));
+      Object.assign(TestBed.inject(PosRestaurantIntegrationService), { openTableSession });
+      Object.assign(TestBed.inject(ToastService), { warning });
+      const append = spyOn<any>(component, 'appendToTableAndFire').and.stub();
+      const state = { items: [{ product: { id: '302' }, quantity: 1 }] } as any;
+
+      (component as any).openPickedTableThenAppend(15, state);
+
+      expect(openTableSession).toHaveBeenCalledTimes(1);
+      expect(append).toHaveBeenCalledOnceWith(state, opened.session);
+      if (previousStatus === 'cleaning') {
+        expect(warning).toHaveBeenCalledOnceWith(
+          ERROR_MESSAGES['TABLE_REOPENED_FROM_CLEANING_001'],
+          undefined,
+          5000,
+        );
+      } else {
+        expect(warning).not.toHaveBeenCalled();
+      }
+    });
+  }
 
   it('visitar Envío y Actualizar omite todas las claves y conserva el total original', () => {
     const { update } = prepareShippingEdit();
