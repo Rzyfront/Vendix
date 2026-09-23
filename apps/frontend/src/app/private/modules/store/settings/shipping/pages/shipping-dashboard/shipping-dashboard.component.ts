@@ -286,6 +286,7 @@ import {
           [edit_rate]="rate_wizard_edit_rate()"
           (close)="closeRateWizard()"
           (saved)="onRateSaved()"
+          (zones_changed)="onZonesChanged()"
         />
       }
     </div>
@@ -773,6 +774,13 @@ export class ShippingDashboardComponent implements OnInit {
     this.loadZoneStats();
     this.loadShippingMethodStats();
     this.closeRateWizard();
+  }
+
+  /** Una zona editada desde el wizard: recargar zonas y tarifas cacheadas. */
+  onZonesChanged(): void {
+    this.method_zones_cache.set(new Map());
+    this.loadStoreZones();
+    this.loadZoneStats();
   }
 
   // ===== HELPERS =====

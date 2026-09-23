@@ -48,6 +48,18 @@ export interface ShippingRateMethod {
   logo_url?: string;
 }
 
+/**
+ * Categoría de impuesto asignada a una tarifa (lectura). El impuesto va
+ * SIEMPRE incluido en el precio de la tarifa: lo que paga el cliente no
+ * cambia al asignarlo.
+ */
+export interface ShippingRateTaxCategory {
+  id: number;
+  name: string;
+  tax_type: 'iva' | 'inc';
+  rate_percent: number;
+}
+
 export interface ShippingRate {
   id: number;
   shipping_zone_id: number;
@@ -61,6 +73,9 @@ export interface ShippingRate {
   free_shipping_threshold?: number;
   is_active: boolean;
   shipping_method?: ShippingRateMethod;
+  /** Impuesto opcional de la tarifa; null = sin impuesto. */
+  tax_category_id?: number | null;
+  tax_category?: ShippingRateTaxCategory | null;
 
   // Copy tracking fields
   copied_from_system_rate_id?: number;
@@ -108,6 +123,36 @@ export interface ZoneWithRates {
   rate: ShippingRate; // The rate for this method+zone combination
 }
 
+// ===== IMPUESTO DE LA TARIFA (GET shipping-zones/rates/tax-options) =====
+
+export interface ShippingRateTaxOptionCategory {
+  id: number;
+  name: string;
+  /** 'iva' | 'inc' | otros (los otros llegan como no elegibles). */
+  tax_type: string | null;
+  /** 8, 19; null si la categoría no tiene una tarifa única. */
+  rate_percent: number | null;
+  eligible: boolean;
+  /** Motivo en español cuando `eligible` es false. */
+  reason?: string;
+}
+
+export interface ShippingRateTaxOptions {
+  categories: ShippingRateTaxOptionCategory[];
+  issuer: {
+    vat_responsible: boolean;
+    inc_responsible: boolean;
+    is_restaurant: boolean;
+  };
+  /** Sugerencia no vinculante: nunca se preselecciona. */
+  suggestion?: {
+    tax_type: 'inc';
+    category_id: number | null;
+    message: string;
+  };
+  warnings?: string[];
+}
+
 // ===== DTOs =====
 
 export interface CreateZoneDto {
@@ -133,6 +178,8 @@ export interface CreateRateDto {
   max_val?: number | null;
   free_shipping_threshold?: number | null;
   is_active?: boolean;
+  /** null = sin impuesto (o quitarlo en edición). */
+  tax_category_id?: number | null;
 }
 
 export interface UpdateRateDto extends Partial<
