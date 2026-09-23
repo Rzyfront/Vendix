@@ -36,7 +36,7 @@ describe('OrdersService.assignShipping — impuesto del envío', () => {
         findFirst: jest.fn().mockResolvedValue({ id: 4, store_id: 1, type: 'delivery', is_active: true }),
       },
       shipping_rates: {
-        findFirst: jest.fn().mockResolvedValue({ id: 31, shipping_method_id: 4, base_cost: 15000, is_active: true }),
+        findFirst: jest.fn().mockResolvedValue({ id: 31, shipping_method_id: 4, type: 'flat', base_cost: 15000, is_active: true }),
       },
     };
     snapshotForRate = jest.fn().mockResolvedValue({ ...INC_SNAPSHOT });
@@ -44,6 +44,7 @@ describe('OrdersService.assignShipping — impuesto del envío', () => {
     service.prisma = prisma;
     service.eventEmitter = { emit: jest.fn() };
     service.shippingTaxService = { snapshotForRate };
+    service.logger = { warn: jest.fn() };
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -93,5 +94,99 @@ describe('OrdersService.assignShipping — impuesto del envío', () => {
     };
     await service.assignShipping(10, { shipping_method_id: 4, auto_calculate: true });
     expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 9000, { store_id: 1 });
+  });
+
+  /**
+   * Tarifa explícita NO flat: el costo esperado lo recalcula el servidor con
+   * `ShippingCalculatorService` (mismo contrato que
+   * `PaymentsService.resolvePosShippingTax`), no `base_cost`.
+   */
+  describe('tarifa explícita calculada (no flat)', () => {
+    const orderRow = {
+      id: 10, store_id: 1, state: 'created',
+      subtotal_amount: 10000, tax_amount: 800, discount_amount: 0,
+    };
+    const orderForCalc = {
+      addresses_orders_shipping_address_idToaddresses: { country_code: 'CO', city: 'Bogotá' },
+      order_items: [
+        {
+          product_id: 5, quantity: 2, total_price: 10000, weight: null,
+          products: { id: 5, weight: 1.5, product_type: 'physical' },
+          order_item_taxes: [{ tax_amount: 800 }],
+        },
+      ],
+    };
+    let calculateRates: jest.Mock;
+    const arrange = (type: string, quotedCost: number | null) => {
+      prisma.shipping_rates.findFirst.mockResolvedValue({
+        id: 31, shipping_method_id: 4, type, base_cost: 15000, is_active: true,
+      });
+      prisma.orders.findFirst
+        .mockResolvedValueOnce(orderRow)
+        .mockResolvedValueOnce(orderForCalc);
+      calculateRates = jest.fn().mockResolvedValue(
+        quotedCost == null ? [] : [{ method_id: 4, rate_id: 31, cost: quotedCost }],
+      );
+      service.shippingCalculatorService = { calculateRates };
+    };
+
+    it('weight_based: costo cobrado = recalculado ⇒ copia de la tarifa (líneas en bruto)', async () => {
+      arrange('weight_based', 9000);
+      await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31, shipping_cost: 9000 });
+      expect(calculateRates).toHaveBeenCalledWith(
+        1,
+        [{ product_id: 5, quantity: 2, price: 10800, weight: 3, product_type: 'physical' }],
+        expect.objectContaining({ country_code: 'CO', city: 'Bogotá' }),
+      );
+      expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 9000, { store_id: 1 });
+      expect(prisma.orders.update.mock.calls[0][0].data.shipping_tax_amount).toBe(1111.11);
+    });
+
+    it('weight_based sin costo en el DTO: toma el recalculado, no base_cost', async () => {
+      arrange('weight_based', 9000);
+      await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31 });
+      const data = prisma.orders.update.mock.calls[0][0].data;
+      expect(data.shipping_cost).toBe(9000);
+      expect(snapshotForRate).toHaveBeenCalled();
+    });
+
+    it('price_based: costo igual a base_cost pero ≠ recalculado (≥1 ¢) ⇒ manual ⇒ copia vacía', async () => {
+      arrange('price_based', 9000);
+      await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31, shipping_cost: 15000 });
+      expect(snapshotForRate).not.toHaveBeenCalled();
+      expect(prisma.orders.update.mock.calls[0][0].data).toMatchObject({
+        ...EMPTY_SHIPPING_TAX, shipping_cost: 15000, shipping_rate_id: 31,
+      });
+    });
+
+    it('un centavo de diferencia basta para copia vacía', async () => {
+      arrange('weight_based', 9000);
+      await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31, shipping_cost: 9000.01 });
+      expect(snapshotForRate).not.toHaveBeenCalled();
+    });
+
+    it('carrier_calculated: sin cotización determinista ⇒ copia vacía', async () => {
+      arrange('carrier_calculated', null);
+      await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31, shipping_cost: 15000 });
+      expect(snapshotForRate).not.toHaveBeenCalled();
+      expect(prisma.orders.update.mock.calls[0][0].data).toMatchObject({
+        ...EMPTY_SHIPPING_TAX, shipping_cost: 15000,
+      });
+    });
+
+    it('fallo del calculador ⇒ copia vacía (nunca inventa impuesto)', async () => {
+      arrange('weight_based', 9000);
+      calculateRates.mockRejectedValue(new Error('boom'));
+      await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31, shipping_cost: 9000 });
+      expect(snapshotForRate).not.toHaveBeenCalled();
+      expect(service.logger.warn).toHaveBeenCalled();
+    });
+
+    it('flat no consulta el calculador', async () => {
+      arrange('flat', 9000);
+      await service.assignShipping(10, { shipping_method_id: 4, shipping_rate_id: 31, shipping_cost: 15000 });
+      expect(calculateRates).not.toHaveBeenCalled();
+      expect(snapshotForRate).toHaveBeenCalledWith(null, 31, 15000, { store_id: 1 });
+    });
   });
 });

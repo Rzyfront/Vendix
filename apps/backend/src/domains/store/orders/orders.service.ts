@@ -3680,50 +3680,12 @@ export class OrdersService {
 
     // Auto-calculate: resolve rate + cost from customer's shipping address
     if (dto.auto_calculate && !dto.shipping_rate_id) {
-      const orderForCalc = await this.prisma.orders.findFirst({
-        where: { id: orderId },
-        include: {
-          addresses_orders_shipping_address_idToaddresses: true,
-          order_items: {
-            include: {
-              products: {
-                select: { id: true, weight: true, product_type: true },
-              },
-            },
-          },
-        },
-      });
-
-      const address =
-        orderForCalc?.addresses_orders_shipping_address_idToaddresses;
-      if (!address || !address.country_code) {
+      const options = await this.quoteOrderShippingOptions(orderId, storeId);
+      if (!options) {
         throw new VendixHttpException(
           ErrorCodes.ORD_SHIP_NO_RATE_FOR_ADDRESS_001,
         );
       }
-
-      const items = (orderForCalc?.order_items ?? []).map((it) => ({
-        product_id: it.product_id,
-        quantity: Number(it.quantity),
-        price: Number(it.total_price),
-        weight: it.weight
-          ? Number(it.weight)
-          : it.products?.weight
-            ? Number(it.products.weight) * Number(it.quantity)
-            : undefined,
-        product_type: it.products?.product_type || undefined,
-      }));
-
-      const options = await this.shippingCalculatorService.calculateRates(
-        storeId,
-        items,
-        {
-          country_code: address.country_code,
-          state_province: address.state_province || undefined,
-          city: address.city || undefined,
-          postal_code: address.postal_code || undefined,
-        },
-      );
 
       const match = options.find((o) => o.method_id === method.id);
       if (!match) {
@@ -3746,9 +3708,30 @@ export class OrdersService {
         throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
       }
 
-      rateCost = Number(rate.base_cost);
+      // Costo esperado de la tarifa (mismo contrato que
+      // `PaymentsService.resolvePosShippingTax`, 16081a2ab):
+      //  - `flat`: `base_cost`.
+      //  - calculadas (`weight_based`, `price_based`, `free`): se RECALCULA
+      //    en el servidor con `ShippingCalculatorService` sobre la dirección y
+      //    las líneas de ESTA orden, y se toma la opción de ESTA tarifa. Antes
+      //    se comparaba contra `base_cost`, que en una tarifa calculada no es
+      //    el costo real: el costo correcto se leía como manual (sin
+      //    impuesto) y uno arbitrario igual a `base_cost` heredaba impuesto.
+      //  - `carrier_calculated`: sin cotización determinista (el calculador
+      //    no la devuelve) ⇒ `null` ⇒ copia vacía. Igual sin dirección
+      //    resoluble o si el calculador no ofrece la tarifa.
+      if (rate.type === 'flat') {
+        rateCost = Number(rate.base_cost);
+      } else {
+        const options = await this.quoteOrderShippingOptions(
+          orderId,
+          storeId,
+        );
+        const match = options?.find((o) => o.rate_id === rate.id);
+        rateCost = match ? Number(match.cost) : null;
+      }
       if (dto.shipping_cost === undefined) {
-        shippingCost = Number(rate.base_cost);
+        shippingCost = rateCost ?? Number(rate.base_cost);
       }
     }
 
@@ -3859,6 +3842,75 @@ export class OrdersService {
     });
 
     return updated;
+  }
+
+  /**
+   * Opciones de envío que el calculador del servidor cotiza para esta orden
+   * (dirección de envío + líneas persistidas). `null` si la orden no tiene
+   * dirección con país; `[]` / `null` en fallo del calculador se tratan como
+   * «sin cotización» por el llamador (fallo seguro: nunca se inventa un
+   * impuesto). El precio de cada línea es el BRUTO (base + Σ
+   * `order_item_taxes`), como en checkout y `PaymentsService`: ADR-08 deja
+   * `total_price` en NETO.
+   */
+  private async quoteOrderShippingOptions(
+    orderId: number,
+    storeId: number,
+  ): Promise<Array<{ method_id: number; rate_id: number; cost: unknown }> | null> {
+    const orderForCalc = await this.prisma.orders.findFirst({
+      where: { id: orderId },
+      include: {
+        addresses_orders_shipping_address_idToaddresses: true,
+        order_items: {
+          include: {
+            products: {
+              select: { id: true, weight: true, product_type: true },
+            },
+            order_item_taxes: { select: { tax_amount: true } },
+          },
+        },
+      },
+    });
+
+    const address =
+      orderForCalc?.addresses_orders_shipping_address_idToaddresses;
+    if (!address || !address.country_code) return null;
+
+    const items = (orderForCalc?.order_items ?? []).map((it: any) => {
+      const lineTax = (it.order_item_taxes ?? []).reduce(
+        (sum: number, t: any) => sum + Number(t.tax_amount || 0),
+        0,
+      );
+      return {
+        product_id: it.product_id,
+        quantity: Number(it.quantity),
+        price: roundMoney(Number(it.total_price) + lineTax),
+        weight: it.weight
+          ? Number(it.weight)
+          : it.products?.weight
+            ? Number(it.products.weight) * Number(it.quantity)
+            : undefined,
+        product_type: it.products?.product_type || undefined,
+      };
+    });
+
+    try {
+      return await this.shippingCalculatorService.calculateRates(
+        storeId,
+        items,
+        {
+          country_code: address.country_code,
+          state_province: address.state_province || undefined,
+          city: address.city || undefined,
+          postal_code: address.postal_code || undefined,
+        },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `[assignShipping] no se pudo cotizar el envío de la orden #${orderId}: ${(error as Error)?.message}`,
+      );
+      return null;
+    }
   }
 
   async remove(id: number) {
