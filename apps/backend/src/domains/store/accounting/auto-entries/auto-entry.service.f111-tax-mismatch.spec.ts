@@ -26,6 +26,9 @@ describe('AutoEntryService · resolveTaxLines compuerta F-111', () => {
       // F-111, que vive en `resolveTaxLines`.
       withoutScope: jest.fn().mockReturnValue({
         invoice_items: { findMany: jest.fn().mockResolvedValue([]) },
+        // `findPriorSaleRecognition`: factura sin orden ⇒ no hay venta previa
+        // que cubrir y el asiento de la factura se arma como siempre.
+        invoices: { findFirst: jest.fn().mockResolvedValue(null) },
       }),
       ...overrides.prisma,
     };

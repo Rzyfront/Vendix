@@ -760,6 +760,16 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Store context required',
   },
+  ADDR_PRIMARY_REQUIRES_CUSTOMER_001: {
+    code: 'ADDR_PRIMARY_REQUIRES_CUSTOMER_001',
+    httpStatus: 400,
+    devMessage: 'A primary address requires a customer',
+  },
+  ADDR_CUSTOMER_NOT_IN_STORE_001: {
+    code: 'ADDR_CUSTOMER_NOT_IN_STORE_001',
+    httpStatus: 400,
+    devMessage: 'Customer does not belong to this store',
+  },
 
   // Marketing
   MKT_AD_STORAGE_001: {
@@ -1070,6 +1080,36 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Invalid order status',
   },
+  ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001: {
+    code: 'ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'A user-provided reason is required to return a delivered order to processing',
+  },
+  ORD_DELIVERED_REVERSAL_OWNER_001: {
+    code: 'ORD_DELIVERED_REVERSAL_OWNER_001',
+    httpStatus: 400,
+    devMessage: 'Only the kitchen reversal bridge may use delivered to processing as a legal transition',
+  },
+  ORD_CANCEL_STOCK_COMMITTED_001: {
+    code: 'ORD_CANCEL_STOCK_COMMITTED_001',
+    httpStatus: 409,
+    devMessage: 'Order has committed inventory or delivery evidence; cancellation requires reconciliation or a formal return',
+  },
+  ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001: {
+    code: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001',
+    httpStatus: 409,
+    devMessage: 'Confirmed payment requires a processor reversal or reconciliation, not local cancellation',
+  },
+  ORD_CANCEL_OPEN_TABLE_001: {
+    code: 'ORD_CANCEL_OPEN_TABLE_001',
+    httpStatus: 409,
+    devMessage: 'La orden pertenece a una mesa abierta; cierra la cuenta desde Mesas antes de cancelarla.',
+  },
+  ORD_STOCK_COMMIT_STATE_001: {
+    code: 'ORD_STOCK_COMMIT_STATE_001',
+    httpStatus: 409,
+    devMessage: 'No se puede entregar inventario de una orden cancelada o reembolsada.',
+  },
   ORD_SHIP_001: {
     code: 'ORD_SHIP_001',
     httpStatus: 404,
@@ -1276,6 +1316,11 @@ export const ErrorCodes = {
     devMessage:
       'A draft (is_draft=true) cannot be combined with requires_payment=true; save the order first, then charge it via flow/pay',
   },
+  POS_DRAFT_DUPLICATE_ORDER_001: {
+    code: 'POS_DRAFT_DUPLICATE_ORDER_001',
+    httpStatus: 409,
+    devMessage: 'The referenced POS order has already been paid or cannot be charged',
+  },
   // CP-POS-SVC-PERF-001 / C.4 hardening — atomic booking requires a
   // customer. `bookings.customer_id` is NOT NULL in the schema; an
   // anonymous order carrying a `booking` block would violate FK and
@@ -1378,6 +1423,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'Order payment could not be processed; the order remains ready-to-pay',
+  },
+  ORD_PAY_ALREADY_PAID_001: {
+    code: 'ORD_PAY_ALREADY_PAID_001',
+    httpStatus: 409,
+    devMessage: 'Order is already fully paid',
   },
   // CP-POS-MODAL-SCOPE-001 / Phase C.4 — edit→pay sin cliente cuando el escape
   // hatch está apagado. 409: el cashier debe seleccionar cliente (vía
@@ -3064,6 +3114,52 @@ export const ErrorCodes = {
     code: 'INVOICING_DELIVERY_003',
     httpStatus: 502,
     devMessage: 'Email provider failed to send the invoice delivery',
+  },
+  /**
+   * LA NOTA CRÉDITO EXCEDE EL SALDO ACREDITABLE DE SU FACTURA — la suma de
+   * esta nota más las notas ya `accepted` contra la misma factura padre supera
+   * el `total_amount` de esa factura.
+   *
+   * POR QUÉ ACUMULADO Y NO NOTA A NOTA. Validar cada nota contra el total de
+   * la factura deja pasar N notas que individualmente caben y en conjunto no:
+   * tres notas del 50 % sobre una factura de $100 son $150 acreditados sobre
+   * $100 facturados. El límite es del CONJUNTO, así que el cálculo tiene que
+   * partir del saldo restante, no del total bruto.
+   *
+   * POR QUÉ SÓLO LAS `accepted` CUENTAN. Una nota en `draft` o `rejected` no
+   * acreditó nada: incluirla bloquearía notas legítimas por documentos que la
+   * DIAN nunca recibió o devolvió. El saldo se mide por lo que efectivamente
+   * quedó emitido.
+   *
+   * 422 y no 400: el cuerpo está bien formado y es válido por sí mismo; lo que
+   * falla es la regla de negocio contra el estado acumulado del padre.
+   */
+  INVOICING_CREDIT_NOTE_001: {
+    code: 'INVOICING_CREDIT_NOTE_001',
+    httpStatus: 422,
+    devMessage:
+      'Credit note exceeds the remaining creditable balance of its parent invoice',
+  },
+  /**
+   * VENTA COBRADA SIN DOCUMENTO FISCAL — el dinero entró pero la venta no
+   * quedó respaldada por ningún documento fiscal emitido.
+   *
+   * POR QUÉ EXISTE ESTE CÓDIGO. El carril de emisión abandonaba en silencio
+   * cuando no había factura que emitir, de modo que una venta cobrada podía
+   * quedarse sin respaldo sin que nada lo registrara. Un abandono silencioso
+   * es indistinguible de un éxito: sin un código propio, la constancia de que
+   * la venta quedó descubierta no existe en ninguna parte y nadie puede
+   * reclamarla después.
+   *
+   * 409 y no 422: no es un cuerpo que se pueda corregir y reenviar, sino un
+   * conflicto entre dos hechos ya ocurridos — el cobro existe, el documento
+   * no. La acción correctiva es emitir el documento faltante, no reformular la
+   * petición.
+   */
+  INVOICING_FISCAL_COVERAGE_001: {
+    code: 'INVOICING_FISCAL_COVERAGE_001',
+    httpStatus: 409,
+    devMessage: 'Sale was charged without an issued fiscal document',
   },
   /**
    * IDENTIDAD FISCAL DEL EMISOR INCOMPLETA — lo lanza el resolvedor estricto
@@ -5468,9 +5564,7 @@ export const ErrorCodes = {
     devMessage:
       'La estación está siendo gestionada por otro operador. Solo el dueño del turno o un administrador pueden actuar sobre sus tickets.',
   },
-  // QUI-652 — la entrega es un hecho de servicio y aplica a todo item, pero un
-  // plato preparado sigue exigiendo estado 'ready' en cocina: dejar que el
-  // mesero marque entregado un plato sin cocinar haria mentir al KDS.
+  /** @deprecated Sin lanzadores; usar ORDER_ITEM_NOT_DELIVERABLE para la entrega por ítem. */
   TABLE_SESSION_ITEM_NOT_DELIVERABLE: {
     code: 'TABLE_SESSION_ITEM_NOT_DELIVERABLE',
     httpStatus: 409,
@@ -5543,6 +5637,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La mesa ya tiene una sesión abierta',
   },
+  // B.5 / ERR-39 — aviso de una apertura exitosa, nunca se lanza como excepción.
+  TABLE_REOPENED_FROM_CLEANING_001: {
+    code: 'TABLE_REOPENED_FROM_CLEANING_001',
+    httpStatus: 200,
+    devMessage: 'La mesa estaba en limpieza antes de abrir la cuenta',
+  },
   TABLE_SESSION_CLOSED: {
     code: 'TABLE_SESSION_CLOSED',
     httpStatus: 409,
@@ -5573,6 +5673,16 @@ export const ErrorCodes = {
     devMessage:
       'Cannot remove an item already being prepared in the kitchen',
   },
+  ORD_ITEM_CANCEL_PAID_001: {
+    code: 'ORD_ITEM_CANCEL_PAID_001',
+    httpStatus: 409,
+    devMessage: 'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
+  },
+  ORD_ITEM_CANCEL_STATE_001: {
+    code: 'ORD_ITEM_CANCEL_STATE_001',
+    httpStatus: 409,
+    devMessage: 'No se puede cancelar un plato de una orden en estado terminal.',
+  },
   TABLE_GUEST_COUNT_EXCEEDS_CAPACITY: {
     code: 'TABLE_GUEST_COUNT_EXCEEDS_CAPACITY',
     httpStatus: 422,
@@ -5589,6 +5699,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage:
       'La sesión de mesa ya fue cobrada; no se puede cobrar dos veces',
+  },
+  POS_TABLE_SESSION_PROJECTION_FAILED_001: {
+    code: 'POS_TABLE_SESSION_PROJECTION_FAILED_001',
+    httpStatus: 409,
+    devMessage:
+      'La orden tiene sesiones de mesa, pero ninguna permanece abierta para proyectar el cobro',
   },
   // ── Split Order (Restaurant Suite Fase E) ────────────────────
   SPLIT_ORDER_NOT_FOUND: {
@@ -5628,6 +5744,13 @@ export const ErrorCodes = {
     code: 'KITCHEN_TICKET_INVALID_STATE',
     httpStatus: 409,
     devMessage: 'Transición de estado del ticket no permitida',
+  },
+  // La entrega desde cocina solo acepta tickets enteramente para llevar.
+  KITCHEN_TICKET_NOT_TAKEAWAY: {
+    code: 'KITCHEN_TICKET_NOT_TAKEAWAY',
+    httpStatus: 422,
+    devMessage:
+      'El ticket contiene platos que no son para llevar; en cocina solo se entregan pedidos takeaway',
   },
   // Restaurant Suite — Fase K audit jun-2026: explicit operator-friendly
   // codes for the common invalid transitions surfaced by the table-session
@@ -5974,17 +6097,8 @@ export const ErrorCodes = {
       'total_price de la línea no cuadra con unit_price × line_units fuera de tolerancia (I-1).',
   },
 
-  // B.3 (plan CP-pos-exclusive-tax-double-charge, QUI-832) — F-065 / ERR-23
-  // del registro del plan. `TaxesService.calculateProductTaxes` ahora expone
-  // `has_tax_assignment` para que el llamador distinga «producto sin
-  // impuestos asignados» de «producto con impuestos resueltos a cero»; este
-  // código es lo que ese llamador debe lanzar cuando `has_tax_assignment ===
-  // false` en un contexto donde la línea ya tenía impuesto (p. ej. al cerrar
-  // una cuenta de mesa cuyo producto perdió su `product_tax_assignments`
-  // — caso real: purga de Roma Motos). Sitio de lanzamiento identificado
-  // (`payments.service.ts`, fuera del alcance de este cambio — ver BLOCKER
-  // REPORT del paso B.3 en evidence/B3-taxes-ejecucion.md): aún no está
-  // cableado.
+  // ADR-10: código legado reservado, sin lanzador. La falta de una asignación
+  // fiscal ACTUAL no demuestra que una línea nueva perdió un impuesto.
   POS_TABLE_LINE_TAX_UNRESOLVABLE_001: {
     code: 'POS_TABLE_LINE_TAX_UNRESOLVABLE_001',
     httpStatus: 422,
@@ -5999,16 +6113,85 @@ export const ErrorCodes = {
   // `fixed_base: undefined` en esta ruta (F-021, `tax-inclusive-math.ts:133`),
   // así que una tasa AIU que llegara acá perdería su carve-out EN SILENCIO y
   // la base declarada a la DIAN saldría mal, sin compuerta que lo note. Se
-  // rechaza en vez de resolver mal. No entra bajo la válvula
-  // `settings.pos.tax_line_gate` (F-127) a propósito: aquella baja una
-  // compuerta de DATOS del catálogo para no dejar la caja parada; ésta
-  // protege de una aritmética fiscal incorrecta, que es lo que la válvula
-  // nunca debe poder apagar.
+  // rechaza en vez de resolver mal. La antigua `tax_line_gate` fue retirada
+  // por ADR-10; esta compuerta de aritmética fiscal permanece activa.
   POS_DECLARED_GROSS_FIXED_BASE_001: {
     code: 'POS_DECLARED_GROSS_FIXED_BASE_001',
     httpStatus: 422,
     devMessage:
       'Esta línea declara un precio bruto y su impuesto tiene base propia (fixed_base): el despeje de bruto declarado no puede repartirla y la base resultante sería incorrecta.',
+  },
+
+  // QUI-INC — la línea AD-HOC del POS (`item_type='custom'`, sin
+  // `product_id`) no tiene `product_tax_assignments`: su ÚNICA fuente de
+  // verdad fiscal es la `tax_categories` que el cajero seleccionó. Si esa
+  // categoría no se puede leer en el alcance de la tienda/organización, el
+  // snapshot `order_item_taxes` no tiene de dónde sacar `tax_type` /
+  // `is_inclusive` / `tax_name` / `tax_rate` — y fabricarlos es lo que
+  // produjo una factura electrónica ACEPTADA por la DIAN declarando un "IVA
+  // del 8 %" en un restaurante que sólo recauda INC. Se rechaza el cobro:
+  // un documento fiscal con el tributo equivocado es peor que una venta
+  // bloqueada. Reemplaza un `BadRequestException` crudo (400 sin código).
+  POS_CUSTOM_ITEM_TAX_CATEGORY_UNRESOLVABLE_001: {
+    code: 'POS_CUSTOM_ITEM_TAX_CATEGORY_UNRESOLVABLE_001',
+    httpStatus: 422,
+    devMessage:
+      'La categoría de impuesto de la línea personalizada no existe en esta tienda; sin ella el tipo fiscal (IVA/INC/ICA) del snapshot sería inventado.',
+  },
+
+  // QUI-INC — gemelo del anterior en el carril de ÓRDENES
+  // (`POST /store/orders`, `OrdersService.create`). La línea puede declarar
+  // `tax_category_id` cuando su producto no trae `product_tax_assignments`
+  // (o cuando no hay producto): esa categoría es entonces la ÚNICA fila
+  // fuente de la que salen `tax_type` / `tax_name` / `tax_rate` /
+  // `is_inclusive` para `order_item_taxes`. Si el id declarado no existe en
+  // el alcance de la tienda ni de su organización, no hay nada que leer y
+  // cualquier valor que se persista está inventado — y esa fila viaja
+  // literal a `invoice_taxes` (`invoicing.service.ts:createFromOrder`) y de
+  // ahí al XML firmado. Evidencia de producción de lo que cuesta inventarlo:
+  // `order_item_taxes.id=130` (tienda 105, Pollo Árabe) persistió
+  // `tax_rate_id=68` / `tax_name='INC'` / `tax_rate=0.08` junto a un
+  // `tax_type='iva'` fabricado, y la DIAN aceptó un «IVA del 8 %» que no
+  // existe en Colombia. Se rechaza la creación: una orden bloqueada se
+  // reintenta; un documento fiscal con el tributo equivocado, no.
+  ORD_ITEM_TAX_CATEGORY_UNRESOLVABLE_001: {
+    code: 'ORD_ITEM_TAX_CATEGORY_UNRESOLVABLE_001',
+    httpStatus: 422,
+    devMessage:
+      'La categoría de impuesto declarada por una línea de la orden no existe en esta tienda ni en su organización; sin ella el tipo fiscal (IVA/INC/ICA) del desglose sería inventado.',
+  },
+
+  // QUI-INC — el DOCUMENTO SOPORTE de la plataforma
+  // (`vendor_support_documents`) no persiste desglose de tributos: sus únicas
+  // columnas fiscales son los tres escalares de cabecera (`subtotal`,
+  // `tax_amount`, `total`). Cuando la cuota capturada no la reproduce ninguna
+  // tarifa legal de IVA (19 % o 5 %) no hay forma de discriminarla como exige
+  // el art. 4 num. 10 de la Res. DIAN 000167/2021, y el documento va FIRMADO:
+  // antes se escribía `IVA 19,00 %` hardcodeado, así que una compra al 5 %
+  // —o una cuenta con INC, o un par capturado mal— salía declarando una
+  // tarifa que nadie decidió. Se rechaza la transmisión: el consecutivo se
+  // devuelve por rollback (se asigna dentro de la misma transacción) y el
+  // operador corrige el documento origen y reintenta.
+  VENDOR_SUPPORT_DOCUMENT_TAX_UNCLASSIFIABLE_001: {
+    code: 'VENDOR_SUPPORT_DOCUMENT_TAX_UNCLASSIFIABLE_001',
+    httpStatus: 422,
+    devMessage:
+      'El impuesto del documento soporte no corresponde a ninguna tarifa legal de IVA sobre la base capturada; sin tarifa verificable la discriminación exigida por la DIAN sería inventada.',
+  },
+
+  // QUI-INC — una NOTA CRÉDITO/DÉBITO cuyo tributo no se puede clasificar. Es
+  // un documento electrónico que va FIRMADO a la DIAN: si se acredita con IVA
+  // lo que se facturó como INC, la declaración del periodo queda descuadrada y
+  // el error sobrevive al documento. Antes se rellenaba con `?? 'iva'` en el
+  // punto de escritura, que no puede distinguir «tributo genuinamente sin
+  // clasificar» de «tributo INC cuyo tipo nadie propagó». Se agota primero la
+  // cascada de resolución (tipo propio → `tax_rate_id` → `tax_categories`) y
+  // sólo cuando NO hay fila fuente de la cual deducirlo se rechaza la nota.
+  NOTE_TAX_TYPE_UNRESOLVABLE_001: {
+    code: 'NOTE_TAX_TYPE_UNRESOLVABLE_001',
+    httpStatus: 422,
+    devMessage:
+      'El tributo de la nota no declara tax_type y no hay fila de catálogo de la cual resolverlo; inventarlo haría que la nota acredite un tributo distinto al facturado.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

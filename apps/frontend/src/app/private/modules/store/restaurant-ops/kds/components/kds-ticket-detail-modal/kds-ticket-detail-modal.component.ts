@@ -148,6 +148,17 @@ export class KdsTicketDetailModalComponent {
 
   readonly ticketDisplay = computed(() => this.ticket());
 
+  readonly deliveryBadgeLabel = computed(() => {
+    switch (this.ticketDisplay()?.order?.delivery_type) {
+      case 'home_delivery':
+        return 'ENVÍO';
+      case 'direct_delivery':
+        return 'PARA LLEVAR';
+      default:
+        return null;
+    }
+  });
+
   readonly statusLabel = computed(() => {
     const t = this.ticketDisplay();
     return t ? KitchenTicketsService.statusLabel(t.status) : '';

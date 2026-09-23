@@ -63,6 +63,10 @@ export function resolveIssuerFiscalIdentity(
     // Derivado de las responsabilidades, nunca de una columna almacenada.
     tax_regime: dianProjection.tax_regime,
     tax_scheme: dianProjection.tax_scheme,
+    // El par (ID, Name) de `cac:PartyTaxScheme/cac:TaxScheme`, ya resuelto sobre
+    // los DOS ejes (IVA y INC). Viaja resuelto y no como dos booleanos para que
+    // el builder no tenga que volver a combinarlos —y poder combinarlos distinto.
+    party_tax_scheme: dianProjection.party_tax_scheme,
     person_type: dianProjection.person_type,
   };
 }

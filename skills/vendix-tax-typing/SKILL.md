@@ -10,7 +10,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Adding a new tax_type value to the fiscal system"
@@ -44,6 +44,17 @@ mechanics of posting entries (`vendix-auto-entries`). This skill governs only th
 - **Untyped rows mean IVA.** Every read filter and breakdown builder treats a
   `null`/missing `tax_type` as `'iva'`. Backfill heuristic order:
   reteiva/reteica before withholding; ica/inc before iva; ELSE iva.
+- **Resolve the default at the SOURCE ROW, never at the write point.** Because
+  untyped means IVA, a `?? 'iva'` next to a `prisma.create` cannot tell «category
+  genuinely untyped» from «category typed INC and nobody propagated it» — it turns
+  the second into the first. Measured: `calculateTaxCategoryTaxes` omitted
+  `tax_type`, `buildOrderItemSnapshot` filled it with `?? 'iva'`, and
+  `order_item_taxes` persisted the right `tax_rate_id`/`tax_name`/`tax_rate` from
+  an INC row beside a fabricated `tax_type='iva'` — DIAN then accepted an «8 % IVA»
+  that does not exist in Colombia. Make `tax_type` **required** in the resolver's
+  return type so a resolver that omits it does not compile, and let an unresolvable
+  category throw instead of persisting an invented classification. This antipattern
+  was found in 5 places in one sweep.
 - **A tax must be typed in ALL layers or none.** Half-typing is the bug. If the
   calculation emits `tax_type` but the journal line ignores it, INC posts to 2408.
 - **`support_document.accepted` DOES post a full accounting entry** — it is not
@@ -73,7 +84,7 @@ the failure mode.
 | --- | --- | --- | --- |
 | 1 | Enum + column | `prisma/schema.prisma` + own migration | `ALTER TYPE tax_type_enum ADD VALUE IF NOT EXISTS`; column on `tax_categories`, `order_item_taxes`, `invoice_taxes` |
 | 2 | Calculation | `calculateProductTaxes` | Return `tax_type` per tax row |
-| 3 | Persistence | every tax-row create site | Carry `tax_type` (checkout, payments, createFromOrder, manual, credit-notes, quick-create) |
+| 3 | Persistence | every tax-row create site | Carry `tax_type` (checkout, payments, createFromOrder, manual, credit-notes, quick-create). **No `??` at the create site** — the resolver must return it required |
 | 4 | Event | accounting emits | Add `tax_breakdown` built via `buildTaxBreakdown(rows)` |
 | 5 | Journal line | `auto-entry.service.ts` `resolveTaxLines` | Map key `{prefix}.{tax_type}_{suffix}` + **dual-source** mapping (const + seed) |
 | 6 | Declaration | `tax-declaration-draft.service.ts` | Dispatcher route + `calculateX` filtering by `tax_type` |
@@ -207,6 +218,7 @@ Withholding source of truth:
 
 - `vendix-auto-entries` — event-driven journal posting mechanics (`resolveTaxLines` lives here)
 - `vendix-accounting-rules` — debit/credit logic and PUC account selection
+- `vendix-dian-issuer-identity` — the *issuer's* fiscal identity (IVA/INC responsibility, PartyTaxScheme, printable calidades); this skill types the *tax*, that one types the *merchant*
 - `vendix-fiscal-scope` — NIT ownership and accounting entity resolution
 - `vendix-prisma-migrations` — enum ADD VALUE in its own migration
 - `vendix-prisma-seed` — seeding the mirrored mapping defaults

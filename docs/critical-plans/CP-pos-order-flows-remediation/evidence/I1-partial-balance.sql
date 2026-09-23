@@ -1,0 +1,1 @@
+select o.id,o.state,o.grand_total,o.total_paid,o.remaining_balance,coalesce(sum(p.amount) filter (where p.state in ('succeeded','captured')),0) as settled_payments from orders o left join payments p on p.order_id=o.id where o.id=1116 group by o.id;

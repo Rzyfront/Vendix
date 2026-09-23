@@ -1,0 +1,35 @@
+{
+  "success": true,
+  "message": "Orden obtenida exitosamente",
+  "data": {
+    "id": 1105,
+    "store_id": 10,
+    "state": "draft",
+    "cancellation_policy": {
+      "can_cancel": false,
+      "can_cancel_payment": false,
+      "reason_code": "ORD_CANCEL_OPEN_TABLE_001"
+    },
+    "table_sessions": [
+      {
+        "id": 103,
+        "table_id": 11,
+        "opened_at": "2026-09-23T04:13:57.196Z",
+        "closed_at": null,
+        "guest_count": null,
+        "table": {
+          "id": 11,
+          "name": "QA A4 open table 20260923",
+          "zone": "QA A4",
+          "capacity": 2,
+          "status": "occupied"
+        },
+        "opener": {
+          "id": 241,
+          "first_name": "Mesero",
+          "last_name": "E2E"
+        }
+      }
+    ]
+  }
+}

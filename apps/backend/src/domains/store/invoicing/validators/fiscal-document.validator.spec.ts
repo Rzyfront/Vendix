@@ -279,7 +279,7 @@ describe('FiscalDocumentValidator', () => {
       ).toMatchObject({ dian_tax_code: '07' });
     });
 
-    it('denuncia dos tarifas del mismo tributo: el emisor las fusiona en UN subtotal', () => {
+    it('dos tarifas del mismo tributo NO bloquean: el emisor abre un subtotal por tarifa', () => {
       const report = validator.validate(
         baseInput({
           tax_amount: '240.00',
@@ -303,8 +303,10 @@ describe('FiscalDocumentValidator', () => {
         }),
       );
 
-      expect(blockerCodesOf(report)).toEqual(['TAX_SCHEME_RATE_COLLISION']);
-      expect(report.blockers[0].details).toMatchObject({ dian_tax_code: '01' });
+      // `UblCommonBuilder.buildTaxTotals` publica IVA 19 % y 5 % en dos
+      // `cac:TaxSubtotal` (ver `ubl-shipping-tax-line.spec.ts`); cada fila
+      // cuadra su `base × tarifa`.
+      expect(blockerCodesOf(report)).toEqual([]);
     });
 
     it('denuncia un impuesto con importe y sin tarifa', () => {

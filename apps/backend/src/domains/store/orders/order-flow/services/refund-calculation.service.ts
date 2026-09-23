@@ -4,6 +4,8 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { Prisma } from '@prisma/client';
+import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 
 export interface RefundItemRequest {
   order_item_id: number;
@@ -36,6 +38,16 @@ export interface RefundCalculationResult {
   subtotal_refund: number;
   tax_refund: number;
   shipping_refund: number;
+  /**
+   * Impuesto del envío contenido en `shipping_refund` (que es BRUTO): la
+   * parte proporcional de la copia `orders.shipping_tax_amount`, a centavos.
+   * 0 si la orden no tiene copia o no se devuelve envío. NO se suma a
+   * `total_refund` (ya va dentro de `shipping_refund`) ni a `tax_refund`
+   * (impuesto de productos, como `orders.tax_amount`).
+   */
+  shipping_tax_refund: number;
+  /** Tipo fiscal de la copia del envío (null sin copia). */
+  shipping_tax_type: string | null;
   total_refund: number;
   is_full_refund: boolean;
   already_refunded: number;
@@ -54,11 +66,12 @@ export class RefundCalculationService {
 
   async calculate(
     params: CalculateRefundParams,
+    client: Prisma.TransactionClient | StorePrismaService = this.prisma,
   ): Promise<RefundCalculationResult> {
     const { order_id, items, include_shipping } = params;
 
     // Load order with items, taxes, and previous refunds
-    const order = await this.prisma.orders.findFirst({
+    const order = await client.orders.findFirst({
       where: { id: order_id },
       include: {
         order_items: {
@@ -86,6 +99,19 @@ export class RefundCalculationService {
 
     if (!order) {
       throw new NotFoundException(`Order #${order_id} not found`);
+    }
+
+    // Internal callers can bypass the DTO. Do not merge duplicate lines:
+    // their inventory actions or destinations may contradict each other.
+    const requestedQtyMap = new Map<number, number>();
+    for (const item of items) {
+      if (requestedQtyMap.has(item.order_item_id)) {
+        throw new VendixHttpException(
+          ErrorCodes.REF_VALIDATE_001,
+          `Order item #${item.order_item_id} appears more than once in the refund request`,
+        );
+      }
+      requestedQtyMap.set(item.order_item_id, item.quantity);
     }
 
     // Build map of already-refunded quantities per order_item
@@ -212,33 +238,110 @@ export class RefundCalculationService {
 
     const total_refund = subtotal_refund + tax_refund + shipping_refund;
 
+    // Impuesto del envío: proporcional a lo devuelto del envío BRUTO, sobre
+    // la copia congelada de la orden (nunca la tarifa actual), en centavos.
+    const shipping_refund_cents = Math.round(shipping_refund * 100);
+    const shipping_cost_cents = Math.round((Number(order.shipping_cost) || 0) * 100);
+    const shipping_tax_cents = Math.round(
+      (Number(order.shipping_tax_amount) || 0) * 100,
+    );
+    // Lo ya devuelto del impuesto del envío no está persistido: se reconstruye
+    // con la MISMA fórmula sobre el `shipping_refund` de cada devolución
+    // completada (determinista). Si con ésta el envío queda devuelto por
+    // completo, se devuelve el REMANENTE exacto de la copia: la suma de las
+    // devoluciones cierra al centavo contra `shipping_tax_amount` en vez de
+    // arrastrar ±1 ¢ de redondeo por cada parcial.
+    const proportionalShippingTax = (refund_cents: number) =>
+      Math.round((shipping_tax_cents * refund_cents) / shipping_cost_cents);
+    let shipping_tax_refund_cents = 0;
+    if (shipping_refund_cents > 0 && shipping_cost_cents > 0 && shipping_tax_cents > 0) {
+      let prior_shipping_cents = 0;
+      let prior_shipping_tax_cents = 0;
+      for (const refund of order.refunds ?? []) {
+        const refund_cents = Math.round(Number(refund.shipping_refund ?? 0) * 100);
+        if (refund_cents <= 0) continue;
+        prior_shipping_cents += refund_cents;
+        prior_shipping_tax_cents += proportionalShippingTax(refund_cents);
+      }
+      const remaining_tax_cents = Math.max(
+        0,
+        shipping_tax_cents - prior_shipping_tax_cents,
+      );
+      shipping_tax_refund_cents =
+        prior_shipping_cents + shipping_refund_cents >= shipping_cost_cents
+          ? remaining_tax_cents
+          : Math.min(remaining_tax_cents, proportionalShippingTax(shipping_refund_cents));
+    }
+
     if (total_refund > max_refundable + 0.01) {
       throw new BadRequestException(
         `Total refund (${total_refund.toFixed(2)}) exceeds max refundable amount (${max_refundable.toFixed(2)})`,
       );
     }
 
-    // Check if this is a full refund (all items, all quantities)
-    const totalOrderQty = order.order_items.reduce(
-      (sum, oi) => sum + oi.quantity,
-      0,
+    // Coverage is per original line. Excess historical units of one product
+    // must never stand in for units still outstanding on another product.
+    const is_full_refund = order.order_items.every(
+      (item) =>
+        (refundedQtyMap.get(item.id) || 0) +
+          (requestedQtyMap.get(item.id) || 0) >=
+        item.quantity,
     );
-    const totalRefundedQty = Array.from(refundedQtyMap.values()).reduce(
-      (sum, q) => sum + q,
-      0,
-    );
-    const thisRefundQty = items.reduce((sum, i) => sum + i.quantity, 0);
-    const is_full_refund = totalRefundedQty + thisRefundQty >= totalOrderQty;
 
     return {
       items: calculatedItems,
       subtotal_refund: Math.round(subtotal_refund * 100) / 100,
       tax_refund: Math.round(tax_refund * 100) / 100,
       shipping_refund: Math.round(shipping_refund * 100) / 100,
+      shipping_tax_refund: shipping_tax_refund_cents / 100,
+      shipping_tax_type:
+        shipping_tax_refund_cents > 0
+          ? (order.shipping_tax_type ?? null)
+          : null,
       total_refund: Math.round(total_refund * 100) / 100,
       is_full_refund,
       already_refunded,
       max_refundable: Math.round(max_refundable * 100) / 100,
+    };
+  }
+
+  /** Cancellation refunds are payment-scoped, not item-return requests. Keep
+   * the grand_total ceiling and prior completed refunds in the same calculator
+   * used by the ordinary refund flow, under the caller's order lock/transaction.
+   */
+  async calculateCancellationCashRefund(
+    orderId: number,
+    paidAmount: Prisma.Decimal,
+    client: Prisma.TransactionClient,
+    totals: {
+      grand_total: Prisma.Decimal;
+      tax_amount: Prisma.Decimal;
+      shipping_cost: Prisma.Decimal;
+      shipping_tax_amount: Prisma.Decimal;
+      shipping_tax_type: string | null;
+    },
+  ) {
+    const ceiling = await this.calculate(
+      { order_id: orderId, items: [], include_shipping: false }, client,
+    );
+    const amount = new Prisma.Decimal(paidAmount);
+    if (amount.lessThanOrEqualTo(0) || amount.greaterThan(ceiling.max_refundable)) {
+      throw new VendixHttpException(
+        ErrorCodes.REF_VALIDATE_001,
+        `Cash refund ${amount.toString()} exceeds the remaining refundable total ${ceiling.max_refundable.toFixed(2)}`,
+      );
+    }
+    const ratio = amount.div(totals.grand_total);
+    const tax = new Prisma.Decimal(totals.tax_amount).mul(ratio).toDecimalPlaces(2);
+    const shipping = new Prisma.Decimal(totals.shipping_cost).mul(ratio).toDecimalPlaces(2);
+    const shippingTax = new Prisma.Decimal(totals.shipping_tax_amount).mul(ratio).toDecimalPlaces(2);
+    return {
+      amount,
+      subtotal: amount.minus(tax).minus(shipping),
+      tax,
+      shipping,
+      shippingTax,
+      shippingTaxType: totals.shipping_tax_type,
     };
   }
 }

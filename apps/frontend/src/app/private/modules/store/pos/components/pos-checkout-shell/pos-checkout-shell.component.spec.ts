@@ -15,6 +15,9 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
 import { PaymentCollectorComponent } from '../../../../../../shared/components/payment-collector/payment-collector.component';
 import { PaymentMethodsCatalogService } from '../../../../../../shared/services/payment-methods-catalog.service';
 import type { PaymentMethod } from '../../../../../../shared/models/payment-method.model';
+import { deliveryTypeToEntregaChoice } from '../../models/cart.model';
+import { shouldAutoPrintDispatchTicket } from '../../../../../../shared/services/print/dispatch-ticket-autoprint';
+import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 
 /**
  * CP-POS-CHECKOUT-KEYBOARD — matriz teclado × paso del modal de pago.
@@ -124,12 +127,19 @@ class PaymentStub {
 @Component({ selector: 'app-pos-shipping-step', standalone: true, template: `` })
 class ShippingStub {
   readonly cartState = input<unknown>(null);
+  readonly editingOrderId = input<number | null>(null);
   readonly shippingCompleted = output<unknown>();
   readonly shippingCost = signal(0);
   readonly shipSubStep = signal(0);
   readonly shipSubSteps = signal<any[]>([]);
   readonly canConfirm = signal(true);
   readonly shipIsProcessing = signal(false);
+  readonly isProcessing = this.shipIsProcessing;
+  readonly hasShippingChanges = signal(false);
+  readonly editorValidationError = signal<string | null>(null);
+  readonly preservationWarning = signal<string | null>(null);
+  readonly shippingContext = signal<any>(null);
+  buildShippingContext(): any { return this.shippingContext(); }
   attemptNextSubStep(): boolean {
     return true;
   }
@@ -203,29 +213,42 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
    * shell vería todos los childs como undefined. Se inyectan los stubs
    * montados en los slots viewChild: el shell solo lee su API pública.
    */
+  /**
+   * El slot debe ser UNA señal estable por componente, no un closure nuevo en
+   * cada `wireStubs()`. Un viewChild real es una señal: los `computed()` del
+   * shell (p. ej. `shippingCost`) la rastrean y se recalculan cuando cambia la
+   * instancia. Con un closure plano, un computed que ya corrió queda atado a
+   * las señales del stub ANTERIOR y nunca ve el nuevo — el test mediría un
+   * memo rancio, no el componente.
+   */
+  const bindSlot = (name: string, instance: unknown): void => {
+    const current = (component as any)[name];
+    if (current?.__stubSlot) {
+      current.set(instance);
+      return;
+    }
+    const slot = signal(instance);
+    Object.defineProperty(slot, '__stubSlot', { value: true });
+    Object.defineProperty(component, name, { value: slot, configurable: true });
+  };
+
   const wireStubs = (): void => {
-    const pay = payStub();
-    Object.defineProperty(component, 'paymentStep', {
-      value: () => pay,
-      configurable: true,
-    });
+    bindSlot('paymentStep', payStub());
     const entregaEl = fixture.debugElement.query(By.directive(EntregaStub));
-    const entrega = entregaEl
-      ? entregaEl.componentInstance
-      : TestBed.runInInjectionContext(() => new EntregaStub());
-    Object.defineProperty(component, 'entregaStep', {
-      value: () => entrega,
-      configurable: true,
-    });
+    bindSlot(
+      'entregaStep',
+      entregaEl
+        ? entregaEl.componentInstance
+        : TestBed.runInInjectionContext(() => new EntregaStub()),
+    );
     // Envío solo se monta en delivery: si no está, stub suelto para el slot.
     const shipEl = fixture.debugElement.query(By.directive(ShippingStub));
-    const ship = shipEl
-      ? shipEl.componentInstance
-      : TestBed.runInInjectionContext(() => new ShippingStub());
-    Object.defineProperty(component, 'shippingStep', {
-      value: () => ship,
-      configurable: true,
-    });
+    bindSlot(
+      'shippingStep',
+      shipEl
+        ? shipEl.componentInstance
+        : TestBed.runInInjectionContext(() => new ShippingStub()),
+    );
   };
 
   /** Evento de teclado mínimo; target falsificado para las ramas de Enter. */
@@ -268,7 +291,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
         { provide: PosCartService, useValue: {} },
         { provide: PosPaymentService, useValue: {} },
         { provide: PosRestaurantIntegrationService, useValue: integrationMock },
-        { provide: StoreOrdersService, useValue: {} },
+        { provide: StoreOrdersService, useValue: { getOrderById: (id: string) => of({ id: Number(id) }) } },
         { provide: ToastService, useValue: {} },
         { provide: CurrencyFormatService, useValue: { loadCurrency: () => {} } },
       ],
@@ -653,6 +676,221 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       jasmine.objectContaining({ product_id: 10, is_takeaway: true }),
     );
   });
+
+  const prepareShippingEdit = () => {
+    const state = {
+      items: [{ product: { id: '7', name: 'Producto' }, quantity: 1,
+        unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 }],
+      customer: { id: 99, first_name: 'Cliente' }, summary: { total: 1000 },
+      appliedDiscounts: [], linkedOrderId: 700,
+      shippingContext: { orderId: 700, customerId: 99, deliveryType: 'direct_delivery',
+        shippingAddressId: 33, shippingMethodId: 7, shippingRateId: 88, shippingCost: 12500.5 },
+    };
+    const update = jasmine.createSpy('updateOrderFromEditor').and.returnValue(of({ id: 700 }));
+    (TestBed.inject(StoreOrdersService) as any).updateOrderFromEditor = update;
+    const error = jasmine.createSpy('error');
+    Object.assign(TestBed.inject(ToastService), { error, success: () => {}, warning: () => {} });
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.detectChanges();
+    fixture.componentRef.setInput('mode', 'edit');
+    fixture.componentRef.setInput('editingOrderId', 700);
+    fixture.componentRef.setInput('initialEntrega', 'enviar');
+    fixture.componentRef.setInput('cartState', state);
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+    wireStubs();
+    fixture.detectChanges();
+    const ship = (component as any).shippingStep() as ShippingStub;
+    // Deliberately wrong automatic defaults recreate the previously destructive child.
+    ship.shippingCost.set(100);
+    ship.shippingContext.set({ deliveryType: 'home_delivery', shippingMethodId: 1,
+      shippingAddressId: 1, shippingCost: 100, shippingRateId: 2 });
+    return { state, update, error, ship };
+  };
+
+  it('no guarda un borrador de envío como venta de mostrador cuando falta el método', () => {
+    const saveDraft = jasmine.createSpy('saveDraft');
+    const warning = jasmine.createSpy('warning');
+    Object.assign(TestBed.inject(PosPaymentService), { saveDraft });
+    Object.assign(TestBed.inject(ToastService), { warning });
+    fixture.componentRef.setInput('cartState', {
+      items: [{ product: { id: '7', name: 'Producto' }, quantity: 1,
+        unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 }],
+      customer: { id: 99, first_name: 'Cliente' }, summary: { total: 1000 },
+      appliedDiscounts: [],
+    });
+    component.entregaChoice.set('enviar');
+    fixture.detectChanges();
+    wireStubs();
+    const ship = (component as any).shippingStep() as ShippingStub;
+    ship.shippingContext.set(null);
+    component.currentStep.set(component.stepKeys().indexOf('envio'));
+    fixture.detectChanges();
+
+    expect(component.draftDeliveryBlocked()).toBeTrue();
+    component.onSaveDraft();
+    expect(saveDraft).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(jasmine.stringMatching(/método de envío/));
+    expect(component.currentStepKey()).toBe('envio');
+    expect(component.submittingDraft()).toBeFalse();
+  });
+
+  for (const previousStatus of ['cleaning', 'available'] as const) {
+    it(`al guardar borrador sobre mesa ${previousStatus} avisa solo si venía de limpieza`, () => {
+      const warning = jasmine.createSpy('warning');
+      const opened = {
+        previous_table_status: previousStatus,
+        session: { id: 108, order_id: 1125, table_id: 15 },
+        order: { id: 1125, state: 'draft', grand_total: 0 },
+      };
+      const openTableSession = jasmine.createSpy('openTableSession').and.returnValue(of(opened));
+      Object.assign(TestBed.inject(PosRestaurantIntegrationService), { openTableSession });
+      Object.assign(TestBed.inject(ToastService), { warning });
+      const append = spyOn<any>(component, 'appendToTableAndFire').and.stub();
+      const state = { items: [{ product: { id: '302' }, quantity: 1 }] } as any;
+
+      (component as any).openPickedTableThenAppend(15, state);
+
+      expect(openTableSession).toHaveBeenCalledTimes(1);
+      expect(append).toHaveBeenCalledOnceWith(state, opened.session);
+      if (previousStatus === 'cleaning') {
+        expect(warning).toHaveBeenCalledOnceWith(
+          ERROR_MESSAGES['TABLE_REOPENED_FROM_CLEANING_001'],
+          undefined,
+          5000,
+        );
+      } else {
+        expect(warning).not.toHaveBeenCalled();
+      }
+    });
+  }
+
+  it('la confirmación del borrador usa el snapshot completo releído, no solo el id', () => {
+    const persisted = {
+      id: 1132,
+      order_number: 'T-1132',
+      customer_alias: 'Mesa de Ana',
+      subtotal_amount: '38000',
+      tax_amount: '0',
+      grand_total: '38000',
+      order_items: [{ id: 1, product_name: 'Coca-Cola 400ml', quantity: 1 }],
+    };
+    const getOrderById = jasmine.createSpy('getOrderById').and.returnValue(of(persisted));
+    Object.assign(TestBed.inject(StoreOrdersService), { getOrderById });
+    const finish = spyOn<any>(component, 'finishDraft').and.stub();
+
+    (component as any).finishPersistedDraft(1132, [1], false, { id: 1132 });
+
+    expect(getOrderById).toHaveBeenCalledOnceWith('1132');
+    expect(finish).toHaveBeenCalledOnceWith(persisted, [1], false);
+  });
+
+  it('visitar Envío y Actualizar omite todas las claves y conserva el total original', () => {
+    const { update } = prepareShippingEdit();
+    expect(component.totalToPay()).toBe(13500.5);
+    component.currentStep.set(component.stepKeys().indexOf('envio'));
+    fixture.detectChanges();
+    component.attemptNextStep();
+    expect(component.currentStepKey()).toBe('cobro');
+    component.onPrimaryConfirm();
+    expect(update).toHaveBeenCalledTimes(1);
+    const payload = update.calls.mostRecent().args[1];
+    for (const key of ['delivery_type', 'shipping_address_id', 'shipping_method_id', 'shipping_rate_id', 'shipping_cost']) {
+      expect(Object.prototype.hasOwnProperty.call(payload, key)).withContext(key).toBeFalse();
+    }
+  });
+
+  it('solo una edición explícita envía método, dirección, tarifa y costo', () => {
+    const { update, ship } = prepareShippingEdit();
+    ship.hasShippingChanges.set(true);
+    component.onPrimaryConfirm();
+    expect(update.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      delivery_type: 'home_delivery', shipping_method_id: 1,
+      shipping_address_id: 1, shipping_rate_id: 2, shipping_cost: 100,
+    }));
+    expect(component.totalToPay()).toBe(1100);
+  });
+
+  for (const [choice, deliveryType] of [
+    ['llevar', 'direct_delivery'],
+    ['mesa', 'dine_in'],
+  ] as const) {
+    it(`edición explícita de ${choice} estampa ${deliveryType} sin flete`, () => {
+      const { update } = prepareShippingEdit();
+      component.entregaChoice.set(choice);
+      fixture.detectChanges();
+      component.onPrimaryConfirm();
+      expect(update.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+        delivery_type: deliveryType, shipping_cost: 0,
+      }));
+    });
+  }
+
+  it('reabre direct_delivery sin flete como Para llevar y pickup real como Enviar', () => {
+    const context = {
+      deliveryType: 'direct_delivery', shippingMethodId: null, shippingCost: 0,
+    };
+    expect(deliveryTypeToEntregaChoice(context as any)).toBe('llevar');
+    expect(deliveryTypeToEntregaChoice({ ...context, deliveryType: 'pickup', shippingMethodId: 7 } as any)).toBe('enviar');
+  });
+
+  it('preserva pickup histórico sin método al editar sin tocar Envío', () => {
+    const { state, ship } = prepareShippingEdit();
+    component.entregaChoice.set('enviar');
+    ship.shippingContext.set(null);
+    ship.editorValidationError.set('Selecciona un método de envío');
+    const result = (component as any).buildEditorShippingPayload({
+      ...state,
+      shippingContext: {
+        ...state.shippingContext, deliveryType: 'pickup',
+        shippingAddressId: null, shippingMethodId: null, shippingRateId: null, shippingCost: null,
+      },
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.payload).toEqual({});
+  });
+
+  it('autoimprime Para llevar con opt-in de mostrador sin cambiar pickup real', () => {
+    const context = { printDispatchTicketEnabled: true, printDispatchTicketAuto: true, counterEnabled: true };
+    expect(shouldAutoPrintDispatchTicket('automatic', { ...context, deliveryType: 'direct_delivery' })).toBeTrue();
+    expect(shouldAutoPrintDispatchTicket('automatic', { ...context, deliveryType: 'pickup' })).toBeTrue();
+    expect(shouldAutoPrintDispatchTicket('automatic', { ...context, deliveryType: 'dine_in' })).toBeFalse();
+  });
+
+  for (const message of ['Espera a que termine el cálculo del envío', 'Selecciona una dirección del nuevo cliente', 'Guarda la dirección en la ficha del cliente']) {
+    it(`bloquea el PUT sin fallback cuando: ${message}`, () => {
+      const { update, error, ship } = prepareShippingEdit();
+      ship.hasShippingChanges.set(true);
+      ship.editorValidationError.set(message);
+      component.onPrimaryConfirm();
+      expect(update).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(message);
+      expect(component.currentStepKey()).toBe('envio');
+    });
+  }
+
+  it('no permite heredar la dirección del antiguo cliente cambiando a pickup', () => {
+    const { update, error, state } = prepareShippingEdit();
+    fixture.componentRef.setInput('cartState', { ...state, customer: { id: 100, first_name: 'Otro' } });
+    component.entregaChoice.set('llevar');
+    fixture.detectChanges();
+    component.onPrimaryConfirm();
+    expect(update).not.toHaveBeenCalled();
+    expect(error.calls.mostRecent().args[0]).toContain('Cambiaste el cliente');
+  });
+
+  it('deja avanzar y preservar envío no reconstruible aunque canConfirm sea false', () => {
+    const { update, ship } = prepareShippingEdit();
+    ship.canConfirm.set(false);
+    ship.preservationWarning.set('Método original inactivo; envío conservado');
+    component.currentStep.set(component.stepKeys().indexOf('envio'));
+    component.attemptNextStep();
+    expect(component.currentStepKey()).toBe('cobro');
+    component.onPrimaryConfirm();
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.calls.mostRecent().args[1].shipping_method_id).toBeUndefined();
+  });
+
 });
 
 describe('PaymentCollectorComponent.handleEnter — CP-pos-checkout-enter-focus', () => {

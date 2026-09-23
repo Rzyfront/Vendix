@@ -409,6 +409,12 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '1305',
     description: 'Cuentas por Cobrar (reversa nota crédito)',
   },
+  // NC sobre venta POS ya cobrada y sin refund: el dinero sigue en caja; se
+  // debe al cliente hasta que refund.completed lo pague (cruza este pasivo).
+  'credit_note.accepted.customer_refund_payable': {
+    code: '2805',
+    description: 'Saldo a favor del cliente (nota crédito sin reembolso)',
+  },
   // Phase 2: Sales discounts (POS coupons, manual discounts)
   'payment.received.sales_discount': {
     code: '4175',

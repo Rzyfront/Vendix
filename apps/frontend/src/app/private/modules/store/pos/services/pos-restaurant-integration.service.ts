@@ -6,16 +6,20 @@ import type {
 import { industriesSupportIngredients } from '../../../../../shared/constants/industry-modules.constant';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of, throwError } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { catchError, map, switchMap } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import { environment } from '../../../../../../environments/environment';
 import { selectStoreSettings } from '../../../../../core/store/auth/auth.selectors';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { TablesService } from '../../restaurant-ops/tables/services/tables.service';
 import { MenusService } from '../../restaurant-ops/menus/services/menus.service';
+import { PosPaymentService } from './pos-payment.service';
+import type { CartState } from '../models/cart.model';
 import type { MenuFull } from '../../restaurant-ops/menus/interfaces';
 import type {
   Table,
+  TableStatus,
   TableSession,
   OpenTableSessionDto,
   AddItemsToTableSessionDto,
@@ -24,6 +28,7 @@ import type {
   SplitByAmountDto,
   SplitResult,
   SplitMode,
+  SplitPreviewDto,
 } from '../../restaurant-ops/tables/interfaces';
 
 interface FireOrderItemsResponse {
@@ -45,32 +50,32 @@ export interface PosFireItemNote {
   notes: string;
 }
 
-/** A single line to seed a counter (table-less) draft order before firing. */
-export interface CounterOrderLine {
-  product_id: number;
-  product_variant_id?: number;
-  product_name: string;
-  quantity: number;
-  unit_price: number;
-  total_price: number;
-  tax_rate?: number;
-}
-
-/** Shape returned by POST /store/orders (subset used by the counter-fire flow). */
+/**
+ * Borrador de mostrador ya persistido, releído de `GET /store/orders/:id`
+ * (subconjunto que consume el flujo de envío a cocina). `product_type` se
+ * aplana desde la relación `products` para que los llamadores filtren los
+ * `prepared` sin conocer la forma del include.
+ */
 export interface CounterOrderResult {
   id: number;
   order_number?: string;
   state?: string;
+  subtotal_amount?: number | string;
+  tax_amount?: number | string;
+  grand_total?: number | string;
+  customer_alias?: string | null;
   order_items: Array<{
     id: number;
     product_id: number | null;
     product_variant_id?: number | null;
     product_name: string;
     quantity: number;
+    product_type: string | null;
   }>;
 }
 
 export interface OpenTableSessionResult {
+  previous_table_status: TableStatus;
   session: TableSession;
   order: {
     id: number;
@@ -146,6 +151,7 @@ export class PosRestaurantIntegrationService {
   private readonly store = inject(Store);
   private readonly destroyRef = inject(DestroyRef);
   private readonly menusService = inject(MenusService);
+  private readonly posPayment = inject(PosPaymentService);
   // T10 A2: el predicado de industria delega en el canónico de AuthFacade.
   // El facade cubre la cascada completa (settings → login → []) y la ventana
   // de arranque (storeSettings$ null mientras el store hidrata) que el signal
@@ -348,53 +354,76 @@ export class PosRestaurantIntegrationService {
   /**
    * Create a draft counter (table-less) order so its `prepared` items can be
    * fired to the kitchen without opening a table. Used for mostrador / para
-   * llevar flows where there is no `table_session`. The backend creates the
-   * `orders` row in `draft` state and returns the persisted `order_items`
-   * with their ids — those ids are what `fireOrderItems` consumes.
+   * llevar flows where there is no `table_session`.
    *
-   * Stock for tracked products is reserved (non-restrictive: availability is
-   * NOT validated, matching the existing POS create path); the prepared
-   * ingredient consumption happens later at fire, never here.
+   * P0-3 (auditoría impuestos por producto) — el borrador viaja por el MISMO
+   * carril que «Guardar borrador» (`POST /store/payments/pos` con
+   * `is_draft=true`, vía `PosPaymentService.saveDraft`). Ese carril resuelve
+   * en servidor el impuesto de catálogo de cada línea (`buildPosOrderItem`:
+   * `tax_amount_item`, `order_item_taxes` por tasa, cabecera = Σ líneas) y
+   * cae al precio de catálogo salvo edición real del cajero. El carril
+   * anterior (`POST /store/orders`) mandaba `subtotal` con el impuesto
+   * incluido, `total_amount = subtotal` y ninguna línea de impuesto: la orden
+   * nacía con impuesto 0 y sin desglose (INC 8 % incluido sobre 18.500 debía
+   * dar 1.370,37 y daba 0), y el cobro posterior heredaba ese cero.
+   *
+   * El borrador por este carril no reserva stock ni emite eventos (igual que
+   * cualquier borrador POS, ver E.2 de CP-pos-order-flows-remediation); el
+   * consumo de insumos de los `prepared` ocurre al disparar a cocina. La
+   * respuesta del borrador no trae `order_items`, así que se relee la orden
+   * para obtener los ids que consume `fireOrderItems`.
+   *
+   * Errores: se emiten como `string` (mismo contrato que antes) para que los
+   * llamadores los pinten en el toast sin cambios.
    */
   createCounterDraftOrder(
-    customerId: number,
-    lines: CounterOrderLine[],
-    notes?: string,
+    cartState: CartState,
     customerAlias?: string,
   ): Observable<CounterOrderResult> {
-    const subtotal = lines.reduce((sum, l) => sum + (l.total_price || 0), 0);
-    // `customer_id` is optional on the backend (Bug 4 / Fase K): POS
-    // counter flows can omit it for an anonymous Consumidor Final sale.
-    // We only include it when the caller actually provided a positive id.
-    // QUI-737 (B.4) — el alias es una tercera identidad ("sin cliente formal"),
-    // mutuamente excluyente con customer_id; nunca ''.
-    const effectiveAlias = (customerAlias ?? '').trim() || undefined;
-    const body: Record<string, any> = {
-      state: 'created',
-      ...(customerId && customerId > 0 ? { customer_id: customerId } : {}),
-      ...(effectiveAlias && !(customerId > 0) ? { customer_alias: effectiveAlias } : {}),
-      subtotal: Number(subtotal.toFixed(2)),
-      total_amount: Number(subtotal.toFixed(2)),
-      internal_notes: notes,
-      items: lines.map((l) => ({
-        product_id: l.product_id,
-        product_variant_id: l.product_variant_id,
-        item_type: 'product',
-        product_name: l.product_name,
-        quantity: l.quantity,
-        unit_price: Number((l.unit_price || 0).toFixed(2)),
-        total_price: Number((l.total_price || 0).toFixed(2)),
-        tax_rate: l.tax_rate,
-      })),
-    };
-    return this.http
-      .post<ApiResponse<CounterOrderResult>>(`${this.apiUrl}/store/orders`, body)
+    const fallback = 'No se pudo crear la orden de mostrador';
+    return this.posPayment
+      .saveDraft(cartState, 'current_user', customerAlias)
       .pipe(
-        map((res) => res.data),
+        switchMap((res: any) => {
+          const orderId = Number(res?.order?.id);
+          if (!Number.isFinite(orderId) || orderId <= 0) {
+            return throwError(() => fallback);
+          }
+          return this.http
+            .get<ApiResponse<any>>(`${this.apiUrl}/store/orders/${orderId}`)
+            .pipe(map((r) => this.toCounterOrderResult(orderId, r?.data)));
+        }),
         catchError((err) =>
-          throwError(() => this.toMessage(err, 'No se pudo crear la orden de mostrador')),
+          throwError(() =>
+            typeof err === 'string'
+              ? err
+              : err instanceof Error && err.message
+                ? err.message
+                : this.toMessage(err, fallback),
+          ),
         ),
       );
+  }
+
+  private toCounterOrderResult(orderId: number, order: any): CounterOrderResult {
+    return {
+      id: Number(order?.id ?? orderId),
+      order_number: order?.order_number,
+      state: order?.state,
+      subtotal_amount: order?.subtotal_amount,
+      tax_amount: order?.tax_amount,
+      grand_total: order?.grand_total,
+      customer_alias: order?.customer_alias,
+      order_items: (order?.order_items ?? []).map((it: any) => ({
+        id: Number(it.id),
+        product_id: it.product_id ?? null,
+        product_variant_id: it.product_variant_id ?? null,
+        product_name: it.product_name,
+        quantity: Number(it.quantity),
+        product_type:
+          it.products?.product_type ?? it.product?.product_type ?? it.product_type ?? null,
+      })),
+    };
   }
 
   // ─── Tables / open checks ────────────────────────────────────────
@@ -508,6 +537,16 @@ export class PosRestaurantIntegrationService {
       );
   }
 
+  private readonly financialTables = inject(TablesService);
+
+  getFinancialSplit(orderId: number): Observable<SplitResult | null> {
+    return this.financialTables.getFinancialSplit(orderId);
+  }
+
+  previewFinancialSplit(orderId: number, dto: SplitPreviewDto): Observable<SplitResult> {
+    return this.financialTables.previewFinancialSplit(orderId, dto);
+  }
+
   // ─── Split order (financial) ──────────────────────────────────────
 
   splitByItems(orderId: number, dto: SplitByItemsDto): Observable<SplitResult> {
@@ -529,8 +568,9 @@ export class PosRestaurantIntegrationService {
     mode: SplitMode,
     nSplits: number,
     amounts?: number[],
+    context: Pick<SplitByAmountDto, 'source_version' | 'idempotency_key' | 'accounts'> = {},
   ): Observable<SplitResult> {
-    const dto: SplitByAmountDto = { mode, n_splits: nSplits, amounts };
+    const dto: SplitByAmountDto = { mode, n_splits: nSplits, amounts, ...context };
     return this.http
       .post<ApiResponse<SplitResult>>(
         `${this.apiUrl}/store/orders/${orderId}/split-by-amount`,

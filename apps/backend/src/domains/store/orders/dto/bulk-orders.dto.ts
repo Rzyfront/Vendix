@@ -2,7 +2,7 @@ import {
   ArrayMaxSize,
   ArrayNotEmpty,
   IsArray,
-  IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -69,11 +69,15 @@ export const MAX_BULK_ORDERS_IDS = 300;
  * forzada en `internal_notes._flow_metadata.forced_transition`, así que el
  * carril masivo hereda ambas garantías sin re-implementarlas.
  */
+export const BULK_ORDER_TRANSITION_TARGETS = [
+  'finished',
+  'shipped',
+  'delivered',
+  'cancelled',
+] as const satisfies readonly order_state_enum[];
+
 export type BulkOrderTransitionTarget =
-  | 'finished'
-  | 'shipped'
-  | 'delivered'
-  | 'cancelled';
+  (typeof BULK_ORDER_TRANSITION_TARGETS)[number];
 
 /**
  * Cuerpo de `POST /store/orders/bulk/transition`.
@@ -90,9 +94,8 @@ export class BulkTransitionOrdersDto {
   @Type(() => Number)
   ids: number[];
 
-  @IsEnum(order_state_enum, {
-    message:
-      'targetState debe ser uno de: finished, shipped, delivered, cancelled',
+  @IsIn(BULK_ORDER_TRANSITION_TARGETS, {
+    message: `targetState debe ser uno de: ${BULK_ORDER_TRANSITION_TARGETS.join(', ')}`,
   })
   targetState: BulkOrderTransitionTarget;
 

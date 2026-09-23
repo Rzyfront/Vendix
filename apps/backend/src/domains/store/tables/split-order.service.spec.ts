@@ -1,308 +1,604 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
+import { ValidationPipe } from '@nestjs/common';
 import { SplitOrderService } from './split-order.service';
-import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import {
+  SplitPreviewDto,
+  SplitByAmountDto,
+  SplitAccountPayDto,
+} from './dto/split-order.dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from 'src/common/errors';
 
-describe('SplitOrderService — splitByItems + splitByAmount (Fase E smoke)', () => {
+/** Unit ledger harness. SQL locking itself is covered by the integration suite. */
+describe('SplitOrderService financial ledger', () => {
   let service: SplitOrderService;
-  let prismaMock: any;
-  let context: any;
+  let db: any;
+  let source: any;
+  let groups: any[];
+  let accounts: any[];
+  let lines: any[];
+  let taxes: any[];
+  let sourcePayments: any[];
+  let newPayments: any[];
+  let invoices: any[];
+  const context = {
+    store_id: 10,
+    organization_id: 6,
+    user_id: 15,
+    is_super_admin: false,
+    is_owner: true,
+  };
 
-  const STORE_ID = 100;
-
-  // 4-item order, $200 total (50+50+50+50). Used by both test groups.
-  const buildSourceOrder = (overrides: any = {}) => ({
-    id: 9001,
-    store_id: STORE_ID,
-    customer_id: 42,
-    currency: 'COP',
-    channel: 'pos',
-    delivery_type: 'direct_delivery',
-    order_number: 'T-1',
-    state: 'draft',
-    grand_total: new Prisma.Decimal(200),
-    subtotal_amount: new Prisma.Decimal(200),
-    tax_amount: new Prisma.Decimal(0),
-    discount_amount: new Prisma.Decimal(0),
-    order_items: [
-      {
-        id: 1,
-        product_id: 100,
-        product_variant_id: null,
-        product_name: 'Plato A',
-        description: null,
-        variant_sku: null,
-        variant_attributes: null,
-        variant_image_url: null,
-        quantity: 1,
-        unit_price: new Prisma.Decimal(50),
-        total_price: new Prisma.Decimal(50),
-        tax_rate: null,
-        tax_amount_item: null,
-        cost_price: null,
-        catalog_unit_price: null,
-        catalog_final_price: null,
-        final_unit_price: null,
-        is_price_overridden: false,
-        price_override_reason: null,
-        price_overridden_by_user_id: null,
-        weight: null,
-        weight_unit: null,
-        item_type: 'prepared',
-        applied_price_tier_id: null,
-        applied_price_tier_name_snapshot: null,
-        stock_units_consumed: null,
-        inventory_consumed_at_fire: true,
-      },
-      {
-        id: 2,
-        product_id: 101,
-        product_name: 'Plato B',
-        quantity: 1,
-        unit_price: new Prisma.Decimal(50),
-        total_price: new Prisma.Decimal(50),
-        tax_amount_item: null,
-        item_type: 'prepared',
-        inventory_consumed_at_fire: true,
-        applied_price_tier_id: null,
-        applied_price_tier_name_snapshot: null,
-        stock_units_consumed: null,
-        cost_price: null,
-        catalog_unit_price: null,
-        catalog_final_price: null,
-        final_unit_price: null,
-        is_price_overridden: false,
-        price_override_reason: null,
-        price_overridden_by_user_id: null,
-        weight: null,
-        weight_unit: null,
-        variant_sku: null,
-        variant_attributes: null,
-        variant_image_url: null,
-        product_variant_id: null,
-        description: null,
-        tax_rate: null,
-      },
-      {
-        id: 3,
-        product_id: 102,
-        product_name: 'Plato C',
-        quantity: 1,
-        unit_price: new Prisma.Decimal(50),
-        total_price: new Prisma.Decimal(50),
-        tax_amount_item: null,
-        item_type: 'prepared',
-        inventory_consumed_at_fire: true,
-        applied_price_tier_id: null,
-        applied_price_tier_name_snapshot: null,
-        stock_units_consumed: null,
-        cost_price: null,
-        catalog_unit_price: null,
-        catalog_final_price: null,
-        final_unit_price: null,
-        is_price_overridden: false,
-        price_override_reason: null,
-        price_overridden_by_user_id: null,
-        weight: null,
-        weight_unit: null,
-        variant_sku: null,
-        variant_attributes: null,
-        variant_image_url: null,
-        product_variant_id: null,
-        description: null,
-        tax_rate: null,
-      },
-      {
-        id: 4,
-        product_id: 103,
-        product_name: 'Plato D',
-        quantity: 1,
-        unit_price: new Prisma.Decimal(50),
-        total_price: new Prisma.Decimal(50),
-        tax_amount_item: null,
-        item_type: 'prepared',
-        inventory_consumed_at_fire: true,
-        applied_price_tier_id: null,
-        applied_price_tier_name_snapshot: null,
-        stock_units_consumed: null,
-        cost_price: null,
-        catalog_unit_price: null,
-        catalog_final_price: null,
-        final_unit_price: null,
-        is_price_overridden: false,
-        price_override_reason: null,
-        price_overridden_by_user_id: null,
-        weight: null,
-        weight_unit: null,
-        variant_sku: null,
-        variant_attributes: null,
-        variant_image_url: null,
-        product_variant_id: null,
-        description: null,
-        tax_rate: null,
-      },
-    ],
-    ...overrides,
-  });
+  const matches = (row: any, where: any): boolean =>
+    Object.entries(where ?? {}).every(([key, value]: [string, any]) => {
+      if (value && typeof value === 'object') {
+        if ('in' in value) return value.in.includes(row[key]);
+        if ('notIn' in value) return !value.notIn.includes(row[key]);
+      }
+      return row[key] === value;
+    });
 
   beforeEach(() => {
-    context = {
-      store_id: STORE_ID,
-      organization_id: 1,
-      user_id: 1,
-      is_super_admin: false,
-    };
-
-    prismaMock = {
-      orders: {
-        findFirst: jest.fn(),
-        create: jest.fn(),
-        update: jest.fn(),
-      },
-      order_items: {
-        create: jest.fn(),
-      },
-      $transaction: jest.fn(async (cb: any) => cb(prismaMock)),
-    };
-
-    jest
-      .spyOn(RequestContextService, 'getContext')
-      .mockReturnValue(context);
-
-    // Plan KDS fire-flows: SplitOrderService now takes a KitchenFireService
-// for the auto-fire path inside runSplit. The existing tests in this
-// file do not exercise the auto-fire path; we pass a minimal stub so
-// the constructor compiles without dragging in the full module.
-service = new SplitOrderService(prismaMock as any, {
-  prepareFireContext: jest.fn(),
-  fireOrderItemsInTx: jest.fn(),
-  emitKitchenFiredAfterCommit: jest.fn(),
-} as any);
-  });
-
-  afterEach(() => jest.clearAllMocks());
-
-  describe('splitByItems', () => {
-    it('rejects overlap / partial coverage with VendixHttpException', async () => {
-      prismaMock.orders.findFirst.mockResolvedValueOnce(buildSourceOrder());
-      await expect(
-        service.splitByItems(9001, {
-          item_groups: [
-            { order_item_ids: [1, 2] },
-            { order_item_ids: [2, 3] }, // overlap
-          ],
-        } as any),
-      ).rejects.toBeInstanceOf(VendixHttpException);
-    });
-
-    it('creates 2 sub-orders, each with its share of items + propagates the fire flag', async () => {
-      prismaMock.orders.findFirst.mockResolvedValueOnce(buildSourceOrder());
-      prismaMock.orders.create
-        .mockResolvedValueOnce({ id: 10001 })
-        .mockResolvedValueOnce({ id: 10002 });
-      prismaMock.order_items.create.mockResolvedValue({});
-      prismaMock.orders.update.mockResolvedValue({});
-
-      const result = await service.splitByItems(9001, {
-        item_groups: [
-          { order_item_ids: [1, 2] },
-          { order_item_ids: [3, 4] },
+    groups = [];
+    accounts = [];
+    lines = [];
+    taxes = [];
+    newPayments = [];
+    invoices = [];
+    sourcePayments = [
+      { id: 1, amount: '40.00', state: 'succeeded', order_id: 100 },
+    ];
+    source = {
+      id: 100,
+      store_id: 10,
+      state: 'draft',
+      order_number: 'QA-F006',
+      currency: 'COP',
+      customer_id: 8,
+      customer_alias: null,
+      active_financial_split_id: null,
+      subtotal_amount: '100.00',
+      discount_amount: '0.00',
+      tax_amount: '19.00',
+      shipping_cost: '5.00',
+      tip_amount: '6.00',
+      grand_total: '130.00',
+      total_paid: '40.00',
+      payments: sourcePayments,
+      invoices: [],
+      refunds: [],
+      order_installments: [],
+      order_items: [1, 2].map((id) => ({
+        id,
+        product_id: 1000 + id,
+        product_name: `Item ${id}`,
+        quantity: 1,
+        unit_price: '50.00',
+        total_price: '50.00',
+        inventory_consumed_at_fire: true,
+        order_item_taxes: [
+          {
+            id,
+            tax_rate_id: 3,
+            tax_name: 'IVA',
+            tax_type: 'iva',
+            tax_rate: '0.19',
+            tax_amount: '9.50',
+            is_inclusive: false,
+            is_compound: false,
+          },
         ],
-      } as any);
-
-      expect(result.sub_orders).toHaveLength(2);
-      // Each sub-order receives 2 order_items.
-      expect(prismaMock.order_items.create).toHaveBeenCalledTimes(4);
-      // The fire flag is propagated to every sub-order_item (CRITICAL).
-      const allCalls = prismaMock.order_items.create.mock.calls;
-      for (const call of allCalls) {
-        expect(call[0].data.inventory_consumed_at_fire).toBe(true);
-      }
-      // Source order is marked cancelled (superseded by sub-orders).
-      expect(prismaMock.orders.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { id: 9001 },
-          data: expect.objectContaining({ state: 'cancelled' }),
+      })),
+    };
+    db = {
+      $queryRaw: jest.fn(async () => [{ id: 100 }]),
+      $transaction: jest.fn(async (callback) => callback(db)),
+      orders: {
+        findFirst: jest.fn(async ({ where }) =>
+          where.id === source.id && where.store_id === source.store_id
+            ? source
+            : null,
+        ),
+        create: jest.fn(),
+        updateMany: jest.fn(async ({ where, data }) => {
+          if (!matches(source, where)) return { count: 0 };
+          Object.assign(source, data);
+          return { count: 1 };
         }),
-      );
+      },
+      order_items: { create: jest.fn(), updateMany: jest.fn() },
+      accounts_receivable: { findFirst: jest.fn(async () => null) },
+      users: {
+        findFirst: jest.fn(async ({ where }) =>
+          where.organization_id === 6 && where.id === 8 ? { id: 8 } : null,
+        ),
+      },
+      payments: {
+        findMany: jest.fn(async ({ where }) =>
+          newPayments.filter((p) => matches(p, where)),
+        ),
+        count: jest.fn(
+          async ({ where }) =>
+            newPayments.filter((p) => matches(p, where)).length,
+        ),
+        updateMany: jest.fn(),
+      },
+      invoices: {
+        findMany: jest.fn(async ({ where }) =>
+          invoices.filter((i) => matches(i, where)),
+        ),
+        count: jest.fn(
+          async ({ where }) => invoices.filter((i) => matches(i, where)).length,
+        ),
+      },
+      order_financial_splits: {
+        findFirst: jest.fn(async ({ where, include, orderBy }) => {
+          const list = groups.filter((g) => matches(g, where));
+          const group = orderBy
+            ? list.sort((a, b) => b.version - a.version)[0]
+            : list[0];
+          return (
+            group && {
+              ...group,
+              ...(include
+                ? { accounts: accounts.filter((a) => a.split_id === group.id) }
+                : {}),
+            }
+          );
+        }),
+        create: jest.fn(async ({ data }) => {
+          const row = { id: groups.length + 1, ...data };
+          groups.push(row);
+          return row;
+        }),
+        updateMany: jest.fn(async ({ where, data }) => {
+          groups
+            .filter((g) => matches(g, where))
+            .forEach((g) => Object.assign(g, data));
+          return { count: 1 };
+        }),
+      },
+      order_financial_accounts: {
+        findFirst: jest.fn(async ({ where }) =>
+          accounts.find((a) => matches(a, where)),
+        ),
+        create: jest.fn(async ({ data }) => {
+          const row = { id: accounts.length + 1, ...data };
+          accounts.push(row);
+          return row;
+        }),
+        updateMany: jest.fn(async ({ where, data }) => {
+          accounts
+            .filter((a) => matches(a, where))
+            .forEach((a) => Object.assign(a, data));
+          return { count: 1 };
+        }),
+      },
+      order_financial_lines: {
+        create: jest.fn(async ({ data }) => {
+          const row = { id: lines.length + 1, ...data };
+          lines.push(row);
+          return row;
+        }),
+      },
+      order_financial_line_taxes: {
+        create: jest.fn(async ({ data }) => {
+          taxes.push(data);
+          return data;
+        }),
+      },
+    };
+    jest.spyOn(RequestContextService, 'getContext').mockReturnValue(context);
+    service = new SplitOrderService(db);
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  async function confirm(extra: Partial<SplitByAmountDto> = {}) {
+    const preview = await service.preview(100, { mode: 'equal', n_splits: 2 });
+    return service.splitByAmount(100, {
+      mode: 'equal',
+      n_splits: 2,
+      source_version: preview.source_version,
+      idempotency_key: 'same-source-key',
+      ...extra,
+    });
+  }
+
+  it('previews only R=90 with P=40 retained, without writes', async () => {
+    const result = await service.preview(100, { mode: 'equal', n_splits: 2 });
+    expect(result).toMatchObject({
+      original_total: '130.00',
+      preserved_paid: '40.00',
+      pending_to_split: '90.00',
+      kitchen_fire: null,
+    });
+    expect(result.accounts.map((a) => a.grand_total)).toEqual([
+      '45.00',
+      '45.00',
+    ]);
+    expect(result.retained_account).toMatchObject({
+      grand_total: '40.00',
+      payment_state: 'paid',
+    });
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('persists immutable financial snapshots, never child orders/items or rewrites prior payments', async () => {
+    const paymentsBefore = JSON.stringify(sourcePayments);
+    const itemsBefore = JSON.stringify(source.order_items);
+    const result = await confirm({
+      accounts: [
+        { customer_id: 8, label: 'Titular A' },
+        { customer_alias: 'Invitado' },
+      ],
+    });
+    expect(result.accounts).toHaveLength(2);
+    expect(result.accounts[0]).toMatchObject({
+      customer_id: 8,
+      total_paid: '0.00',
+    });
+    expect(result.accounts[1]).toMatchObject({
+      customer_id: null,
+      customer_alias: 'Invitado',
+    });
+    expect(result.retained_account).toMatchObject({
+      customer_id: 8,
+      total_paid: '40.00',
+    });
+    expect(source.state).toBe('draft');
+    expect(source.grand_total).toBe('130.00');
+    expect(JSON.stringify(sourcePayments)).toBe(paymentsBefore);
+    expect(JSON.stringify(source.order_items)).toBe(itemsBefore);
+    expect(db.orders.create).not.toHaveBeenCalled();
+    expect(db.order_items.create).not.toHaveBeenCalled();
+    expect(db.order_items.updateMany).not.toHaveBeenCalled();
+    expect(db.payments.updateMany).not.toHaveBeenCalled();
+    expect(groups[0].original_payment_ids).toEqual([1]);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(
+      taxes.every((tax) => tax.tax_type === 'iva' && tax.tax_rate === '0.19'),
+    ).toBe(true);
+    expect(db.$queryRaw.mock.calls[0].slice(1)).toEqual([100, 10]);
+  });
+
+  it('never silently copies source customer into payable accounts', async () => {
+    const result = await confirm();
+    expect(
+      result.accounts.every(
+        (a) => a.customer_id === null && a.customer_alias === null,
+      ),
+    ).toBe(true);
+  });
+
+  it('idempotent confirm returns same group and refuses changed allocation with same key', async () => {
+    const first = await confirm();
+    const same = await service.splitByAmount(100, {
+      mode: 'equal',
+      n_splits: 2,
+      source_version: first.source_version,
+      idempotency_key: 'same-source-key',
+    });
+    expect(same.split_group_id).toBe(first.split_group_id);
+    expect(groups).toHaveLength(1);
+    await expect(
+      service.splitByAmount(100, {
+        mode: 'equal',
+        n_splits: 3,
+        source_version: first.source_version,
+        idempotency_key: 'same-source-key',
+      }),
+    ).rejects.toBeInstanceOf(VendixHttpException);
+    expect(groups).toHaveLength(1);
+  });
+
+  it('maps simultaneous cross-order split key collision to canonical 409', async () => {
+    db.$transaction.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('unique', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: ['store_id', 'idempotency_key'] },
+      }),
+    );
+    await expect(confirm()).rejects.toMatchObject({
+      errorCode: 'SPLIT_IDEMPOTENCY_CONFLICT',
+      status: 409,
     });
   });
 
-  describe('splitByAmount — equal mode', () => {
-    it('splits the grand_total into N equal parts; sums match exactly', async () => {
-      prismaMock.orders.findFirst.mockResolvedValueOnce(buildSourceOrder());
-      prismaMock.orders.create
-        .mockResolvedValueOnce({ id: 10001 })
-        .mockResolvedValueOnce({ id: 10002 });
-      prismaMock.order_items.create.mockResolvedValue({});
-      prismaMock.orders.update.mockResolvedValue({});
+  it('rejects stale source version after a new received payment', async () => {
+    const preview = await service.preview(100, { mode: 'equal', n_splits: 2 });
+    source.payments.push({ id: 2, amount: '10.00', state: 'succeeded' });
+    await expect(
+      service.splitByAmount(100, {
+        n_splits: 2,
+        source_version: preview.source_version,
+        idempotency_key: 'stale-source-key',
+      }),
+    ).rejects.toThrow('cambió');
+    expect(groups).toHaveLength(0);
+  });
 
-      const result = await service.splitByAmount(9001, {
+  it.each([
+    'pending',
+    'authorized',
+    'partially_refunded',
+    'refunded',
+    'disputed',
+  ])('rejects source payment state %s', async (state) => {
+    source.payments.push({ id: 2, amount: '5.00', state });
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).rejects.toBeInstanceOf(VendixHttpException);
+  });
+
+  it.each(['draft', 'validated', 'accepted', 'sent'])(
+    'rejects live source invoice including %s',
+    async (status) => {
+      source.invoices = [{ id: 1, status }];
+      await expect(
+        service.preview(100, { mode: 'equal', n_splits: 2 }),
+      ).rejects.toThrow('fiscal');
+    },
+  );
+
+  it.each([
+    { payment_form: '2' },
+    { credit_type: 'free' },
+    { order_installments: [{ id: 1 }] },
+    { refunds: [{ id: 1 }] },
+  ])('rejects materialized debt/refunds %j', async (extra) => {
+    Object.assign(source, extra);
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).rejects.toBeInstanceOf(VendixHttpException);
+  });
+
+  it('rejects materialized receivable and foreign customer/store', async () => {
+    db.accounts_receivable.findFirst.mockResolvedValueOnce({ id: 1 });
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).rejects.toThrow('cartera');
+    await expect(
+      service.preview(100, {
         mode: 'equal',
         n_splits: 2,
-      } as any);
+        accounts: [{ customer_id: 999 }, {}],
+      }),
+    ).rejects.toThrow('organización');
+    await expect(
+      service.preview(999, { mode: 'equal', n_splits: 2 }),
+    ).rejects.toBeInstanceOf(VendixHttpException);
+  });
 
-      expect(result.sub_orders).toHaveLength(2);
-      // 200/2 = 100 each.
-      expect(Number(result.sub_orders[0].grand_total)).toBe(100);
-      expect(Number(result.sub_orders[1].grand_total)).toBe(100);
-    });
+  it('rejects overpaid source, stale denormalized amount does not determine P', async () => {
+    source.total_paid = '999.99';
+    expect(
+      (await service.preview(100, { mode: 'equal', n_splits: 2 }))
+        .preserved_paid,
+    ).toBe('40.00');
+    source.payments[0].amount = '140.00';
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).rejects.toBeInstanceOf(VendixHttpException);
+  });
 
-    it('validates custom amounts sum == grand_total', async () => {
-      prismaMock.orders.findFirst.mockResolvedValueOnce(buildSourceOrder());
-      await expect(
-        service.splitByAmount(9001, {
+  it('rejects scalar-only or untyped fiscal taxes rather than inventing IVA', async () => {
+    source.order_items[0].order_item_taxes[0].tax_type = null;
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).rejects.toThrow('desglose fiscal');
+    source.order_items[0].order_item_taxes = [];
+    source.order_items[0].tax_amount_item = '9.50';
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).rejects.toThrow('desglose fiscal');
+  });
+
+  it('rechaza dividir una orden cuyo envío lleva impuesto; sin copia se divide como hoy', async () => {
+    // Fixture base: envío 5 sin copia de impuesto ⇒ se divide.
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).resolves.toMatchObject({ original_total: '130.00' });
+
+    // Mismo envío con copia INC 8 % congelada en la orden.
+    source.shipping_tax_rate_id = 68;
+    source.shipping_tax_name = 'INC 8%';
+    source.shipping_tax_type = 'inc';
+    source.shipping_tax_rate = '0.08000';
+    source.shipping_tax_amount = '0.37';
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).rejects.toThrow('envío con impuesto');
+
+    // Copia vacía (default de la columna) ⇒ vuelve a dividirse.
+    source.shipping_tax_amount = '0.00';
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).resolves.toMatchObject({ original_total: '130.00' });
+  });
+
+  it('supports items and custom remainder, rejecting duplicate/omitted items', async () => {
+    expect(
+      (
+        await service.preview(100, {
           mode: 'custom',
           n_splits: 2,
-          amounts: [100, 50], // sums to 150, not 200
-        } as any),
-      ).rejects.toBeInstanceOf(VendixHttpException);
-    });
+          amounts: [30, 60],
+        })
+      ).accounts.map((a) => a.grand_total),
+    ).toEqual(['30.00', '60.00']);
+    expect(
+      (
+        await service.preview(100, {
+          mode: 'items',
+          item_groups: [{ order_item_ids: [1] }, { order_item_ids: [2] }],
+        })
+      ).accounts,
+    ).toHaveLength(2);
+    await expect(
+      service.preview(100, {
+        mode: 'items',
+        item_groups: [{ order_item_ids: [1] }, { order_item_ids: [1] }],
+      }),
+    ).rejects.toBeInstanceOf(VendixHttpException);
+  });
 
-    // F-222 — la tolerancia declarada arriba ("1 cent tolerance") es la que
-    // manda: el umbral no se movió, sólo dejó de medirse con `Math.abs` sobre
-    // floats. El par 2425.00 / 2424.99 es UN centavo real y el `> 0.01` viejo
-    // lo RECHAZABA (0.01000000000021 > 0.01) mientras que 13603.13 / 13603.12
-    // —el mismo centavo— lo aceptaba: la cuenta se partía o no según cuánto
-    // costaba la mesa.
-    it('F-222: 1¢ real (2425.00 vs total 2424.99) se TOLERA — el float lo rechazaba', async () => {
-      expect(Math.abs(2425.0 - 2424.99) > 0.01).toBe(true); // el defecto viejo
-      prismaMock.orders.findFirst.mockResolvedValueOnce(
-        buildSourceOrder({ grand_total: new Prisma.Decimal(2424.99) }),
-      );
-      prismaMock.orders.create
-        .mockResolvedValueOnce({ id: 10001 })
-        .mockResolvedValueOnce({ id: 10002 });
-      prismaMock.order_items.create.mockResolvedValue({});
-      prismaMock.orders.update.mockResolvedValue({});
+  it('cancel restores editability with original P intact, then allows a new version', async () => {
+    const group = await confirm();
+    await service.cancel(100, { source_version: group.source_version });
+    expect(source.active_financial_split_id).toBeNull();
+    expect(source.payments).toEqual(sourcePayments);
+    expect(groups[0].state).toBe('cancelled');
+    await confirm({ idempotency_key: 'second-group-key' });
+    expect(groups[1].version).toBe(2);
+  });
 
-      const result = await service.splitByAmount(9001, {
-        mode: 'custom',
-        n_splits: 2,
-        amounts: [1212.5, 1212.5], // suma 2425.00 — 1 centavo sobre el total
-      } as any);
-
-      expect(result.sub_orders).toHaveLength(2);
-    });
-
-    it('F-222: 2¢ reales (13603.14 vs total 13603.12) SÍ rechaza — el float los dejaba pasar', async () => {
-      // El `> 0.02` no aplica acá, pero el par sirve igual: el float de la
-      // resta (0.0199999999986) muestra por qué la comparación no puede vivir
-      // en dobles. `n_splits` válido a propósito: con `1` el servicio lanza
-      // antes por "partes >= 2" y el test pasaría sin tocar la suma.
-      expect(Math.abs(13603.14 - 13603.12) > 0.01).toBe(true);
-      prismaMock.orders.findFirst.mockResolvedValueOnce(
-        buildSourceOrder({ grand_total: new Prisma.Decimal(13603.12) }),
-      );
+  it.each(['pending', 'authorized', 'succeeded', 'captured'])(
+    'does not cancel when a new account has %s payment',
+    async (state) => {
+      const result = await confirm();
+      newPayments.push({
+        id: 10,
+        financial_account_id: result.accounts[0].id,
+        state,
+        amount: '5.00',
+        order_id: 100,
+      });
       await expect(
-        service.splitByAmount(9001, {
-          mode: 'custom',
-          n_splits: 2,
-          amounts: [6801.57, 6801.57], // suma 13603.14 — 2 centavos sobre
-        } as any),
-      ).rejects.toMatchObject({ errorCode: 'SPLIT_ORDER_ITEMS_MISSING' });
+        service.cancel(100, { source_version: result.source_version }),
+      ).rejects.toThrow('pagos nuevos');
+      expect(source.active_financial_split_id).toBe(result.split_group_id);
+    },
+  );
+
+  it('cannot cancel invoice or change payer after collection; label-only retains payer', async () => {
+    const result = await confirm({ accounts: [{ customer_id: 8 }, {}] });
+    const accountId = result.accounts[0].id!;
+    await service.updateCustomer(100, accountId, { label: 'Mesa A' });
+    expect(accounts.find((a) => a.id === accountId).customer_id).toBe(8);
+    invoices.push({
+      id: 9,
+      financial_account_id: accountId,
+      order_id: 100,
+      status: 'draft',
     });
+    await expect(
+      service.cancel(100, { source_version: result.source_version }),
+    ).rejects.toThrow('documentos');
+    await expect(
+      service.updateCustomer(100, accountId, { customer_alias: 'Otro' }),
+    ).rejects.toThrow('titular');
+  });
+
+  it('read derives account balances from real payments and distinguishes pending/manual gateway', async () => {
+    const result = await confirm();
+    newPayments.push(
+      {
+        id: 10,
+        order_id: 100,
+        financial_account_id: result.accounts[0].id,
+        amount: '10.00',
+        state: 'succeeded',
+      },
+      {
+        id: 11,
+        order_id: 100,
+        financial_account_id: result.accounts[0].id,
+        amount: '5.00',
+        state: 'pending',
+        store_payment_method: {
+          system_payment_method: { type: 'wompi', processing_mode: 'ONLINE' },
+        },
+      },
+    );
+    const read = await service.getSplit(100);
+    expect(read!.accounts[0]).toMatchObject({
+      total_paid: '10.00',
+      remaining_balance: '35.00',
+      available_to_pay: '30.00',
+      payment_state: 'partial',
+    });
+    expect(read!.accounts[0].payments[1].can_confirm).toBe(false);
+  });
+});
+
+describe('financial split DTO input boundary', () => {
+  const pipe = new ValidationPipe({
+    transform: true,
+    whitelist: true,
+    forbidNonWhitelisted: true,
+  });
+  const validate = (value: any, metatype: any) =>
+    pipe.transform(value, { type: 'body', metatype });
+  it('accepts preview and tokenized Wompi object', async () => {
+    await expect(
+      validate({ mode: 'equal', n_splits: 2 }, SplitPreviewDto),
+    ).resolves.toBeInstanceOf(SplitPreviewDto);
+    await expect(
+      validate(
+        {
+          amount: 10,
+          store_payment_method_id: 1,
+          idempotency_key: 'wompi-001',
+          wompi_payment_method: { type: 'NEQUI', phone_number: '3000000000' },
+        },
+        SplitAccountPayDto,
+      ),
+    ).resolves.toBeInstanceOf(SplitAccountPayDto);
+  });
+  it.each([-1, 0, 0.001, 'NaN', Infinity])(
+    'rejects payment amount %s',
+    async (amount) => {
+      await expect(
+        validate(
+          {
+            amount,
+            store_payment_method_id: 1,
+            idempotency_key: 'request-001',
+          },
+          SplitAccountPayDto,
+        ),
+      ).rejects.toThrow();
+    },
+  );
+  it.each([
+    {},
+    { type: 'NEQUI' },
+    { type: 'CARD', token: 'PAN-123', installments: 1 },
+    { type: 'PSE', user_type: 5 },
+    {
+      type: 'NEQUI',
+      phone_number: '3000000000',
+      card_number: 'never-accepted',
+    },
+  ])('rejects malformed Wompi payload %j', async (wompi_payment_method) => {
+    await expect(
+      validate(
+        {
+          amount: 10,
+          store_payment_method_id: 1,
+          idempotency_key: 'request-001',
+          wompi_payment_method,
+        },
+        SplitAccountPayDto,
+      ),
+    ).rejects.toThrow();
+  });
+  it('rejects excess splits, duplicate IDs and external financial fields', async () => {
+    await expect(
+      validate({ mode: 'equal', n_splits: 21 }, SplitPreviewDto),
+    ).rejects.toThrow();
+    await expect(
+      validate(
+        {
+          mode: 'items',
+          item_groups: [{ order_item_ids: [1, 1] }, { order_item_ids: [2] }],
+        },
+        SplitPreviewDto,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      validate({ mode: 'equal', n_splits: 2, grand_total: 1 }, SplitPreviewDto),
+    ).rejects.toThrow();
   });
 });

@@ -1,0 +1,2 @@
+select o.id,o.subtotal_amount,o.tax_amount,o.grand_total,oi.id as item_id,oi.product_id,oi.total_price,oi.tax_amount_item,oit.tax_rate_id,oit.tax_type,oit.tax_amount,p.id as payment_id,p.state,p.amount from orders o join order_items oi on oi.order_id=o.id left join order_item_taxes oit on oit.order_item_id=oi.id left join payments p on p.order_id=o.id where o.id=1126;
+select product_id,tax_category_id,is_inclusive from product_tax_assignments where product_id=2471;

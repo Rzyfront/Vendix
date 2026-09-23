@@ -130,9 +130,6 @@ export function getDefaultStoreSettings(): StoreSettings {
       // DTO garantiza que nunca se guarde true con allow_alias_sales=false.
       allow_alias_sales: false,
       alias_sales_as_default: false,
-      // F-127 — la compuerta fiscal por linea nace BLOQUEANTE: sin esta
-      // clave configurada el comportamiento es identico al de siempre.
-      tax_line_gate: 'block' as const,
       business_hours: getDefaultBusinessHours(),
       schedule_mode: 'continuous',
       enable_schedule_validation: false,

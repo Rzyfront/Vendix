@@ -26,6 +26,23 @@ import {
 const SETTINGS_KEY = 'vendor_support_fiscal';
 const DECIMAL_ZERO = new Prisma.Decimal(0);
 
+/**
+ * QUI-INC — las tarifas de IVA vigentes en Colombia (E.T. arts. 468, 468-1,
+ * 468-3 y 477 ss.). Es un catálogo CERRADO de tres valores; el 0 % no se lista
+ * porque `buildTaxRows` ya sale antes cuando no hay cuota que discriminar.
+ * Se recorre de mayor a menor para que la resolución sea determinista.
+ */
+const LEGAL_VAT_RATES: readonly Prisma.Decimal[] = [
+  new Prisma.Decimal('19'),
+  new Prisma.Decimal('5'),
+];
+
+/**
+ * Holgura de la verificación tarifa×base contra la cuota capturada, en unidades
+ * monetarias. Ver `resolveVatRateFromCapturedPair`.
+ */
+const VAT_RATE_TOLERANCE = new Prisma.Decimal('1');
+
 export interface VendorSupportFiscalSettings {
   is_enabled: boolean;
   auto_transmit: boolean;
@@ -741,19 +758,120 @@ export class VendorSupportFiscalService {
     };
   }
 
+  /**
+   * QUI-INC — el tributo del DOCUMENTO SOPORTE, que va FIRMADO a la DIAN.
+   *
+   * ## Por qué no hay "fila fuente" que leer
+   *
+   * `vendor_support_documents` no tiene desglose de tributos: sus únicas
+   * columnas fiscales son los tres escalares de cabecera —`subtotal`,
+   * `tax_amount`, `total`— (ver `schema.prisma`). No hay `tax_rate`, no hay
+   * `tax_type`, no hay filas hijas ni FK hacia una compra que las tenga:
+   * `CreateVendorSupportDocumentDto` captura tres números y un `account_code`.
+   * Así que aquí NO existe la fila fuente contra la que
+   * `vendix-tax-typing` manda resolver el default.
+   *
+   * Antes se escribía `IVA / 19.00 / iva` HARDCODEADO. La tarifa no salía de
+   * ningún dato del documento: una compra al 5 % viajaba firmada declarando
+   * 19 %, y el art. 4 num. 10 de la Res. DIAN 000167/2021 exige que el IVA
+   * vaya DISCRIMINADO —o sea, con su tarifa real— cuando a ello hubiere lugar.
+   *
+   * ## Lo que se descartó
+   *
+   * Derivar la tarifa del cociente `tax_amount / subtotal` y escribir lo que
+   * salga. Ese es exactamente el defecto ya medido en producción en el otro
+   * documento soporte del repo (`purchase-orders.service.ts`, F-214): 17,92 %
+   * y 0,04 % escritos en documentos ya `validated`, porcentajes que no existen
+   * en ningún catálogo tributario colombiano.
+   *
+   * ## Lo que se hace
+   *
+   * El cociente se usa SOLO como candidato a verificar, nunca como resultado:
+   * se prueba cada tarifa legal de IVA contra el par capturado y se emite la
+   * fila únicamente si una de ellas REPRODUCE la cuota. La diferencia con el
+   * antipatrón es que de aquí jamás puede salir una tarifa inexistente.
+   *
+   * Y el contraste vale también como verificación de TIPO: el IVA colombiano
+   * tiene tres tarifas cerradas —0 %, 5 %, 19 %— y ninguna colisiona con las
+   * del INC (4 %, 8 %, 16 %), así que una cuota que reproduce el 19 % o el 5 %
+   * no puede ser INC. Cualquier otra cosa —tarifa mezclada, INC, un par
+   * capturado mal— cae al rechazo.
+   *
+   * ## Por qué LANZA en vez de omitir la fila
+   *
+   * `buildProviderData` ya manda `tax_amount` en la CABECERA del
+   * `ProviderInvoiceData`. Devolver `[]` con una cabecera con impuesto emite un
+   * documento cuyo `cac:TaxTotal` no cuadra contra la suma de sus
+   * `cac:TaxSubtotal` —rechazo estructural de la DIAN— o, peor, un documento
+   * firmado que declara un total con un tributo que no discrimina. Lanzar es
+   * recuperable: `ensureTransmission` invoca este constructor DENTRO de la
+   * misma transacción que incrementa `invoice_resolutions.current_number`, así
+   * que el rollback devuelve el consecutivo y el operador puede corregir el
+   * documento origen y reintentar. Un consecutivo autorizado gastado en un
+   * documento con un tributo inventado, no.
+   */
   private buildTaxRows(doc: VendorDocForFiscal) {
     const tax = new Prisma.Decimal(doc.tax_amount ?? 0);
     if (tax.lessThanOrEqualTo(DECIMAL_ZERO)) return [];
-    const subtotal = doc.subtotal ?? doc.total;
+    const subtotal = new Prisma.Decimal(doc.subtotal ?? doc.total);
+    const resolved = this.resolveVatRateFromCapturedPair(subtotal, tax);
+
+    if (!resolved) {
+      throw new VendixHttpException(
+        ErrorCodes.VENDOR_SUPPORT_DOCUMENT_TAX_UNCLASSIFIABLE_001,
+        undefined,
+        {
+          vendor_support_document_id: doc.id,
+          subtotal: subtotal.toString(),
+          tax_amount: tax.toString(),
+          legal_vat_rates: LEGAL_VAT_RATES.map((rate) => rate.toString()),
+        },
+      );
+    }
+
     return [
       {
+        // `IVA` / `iva` siguen escritos como literales, pero ya no son una
+        // AFIRMACIÓN independiente: esta rama sólo se alcanza cuando la
+        // aritmética demostró que la cuota reproduce una tarifa legal de IVA
+        // —y ninguna de ellas coincide con una del INC—. Antes los tres
+        // campos eran literales sueltos y podían contradecir al documento.
         tax_name: 'IVA',
-        tax_rate: '19.00',
+        tax_rate: resolved.toFixed(2),
         taxable_amount: this.money(subtotal),
         tax_amount: this.money(tax),
         tax_type: 'iva',
       },
     ];
+  }
+
+  /**
+   * ¿Qué tarifa legal de IVA REPRODUCE la cuota capturada? `null` si ninguna.
+   *
+   * La tolerancia existe porque los dos escalares se capturan YA redondeados a
+   * la unidad monetaria, cada uno por su lado: con una base redondeada a la
+   * baja y una cuota redondeada al alza, `base × tarifa` puede separarse de la
+   * cuota hasta ~1 unidad sin que nada esté mal. Se compara `<=` contra 1,00,
+   * o sea 1,00 exacto SÍ se acepta.
+   *
+   * Dos tarifas legales no pueden empatar en la práctica: 19 % y 5 % se separan
+   * en el 14 % de la base, que supera la tolerancia para cualquier base mayor a
+   * ~14 unidades. Se recorre en orden descendente y gana la primera, así que el
+   * resultado es determinista incluso en ese borde teórico.
+   */
+  private resolveVatRateFromCapturedPair(
+    subtotal: Prisma.Decimal,
+    tax: Prisma.Decimal,
+  ): Prisma.Decimal | null {
+    if (subtotal.lessThanOrEqualTo(DECIMAL_ZERO)) return null;
+
+    for (const rate of LEGAL_VAT_RATES) {
+      const expected = subtotal.times(rate).dividedBy(100);
+      if (expected.minus(tax).abs().lessThanOrEqualTo(VAT_RATE_TOLERANCE)) {
+        return rate;
+      }
+    }
+    return null;
   }
 
   // ─────────────────────────────────────────────────────────

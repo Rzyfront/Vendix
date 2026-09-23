@@ -129,8 +129,9 @@ export class AccountingEventsListener {
     return false;
   }
 
-  @OnEvent('invoice.accepted')
+  @OnEvent('invoice.accepted', { suppressErrors: false })
   async handleInvoiceAccepted(event: {
+    financial_account_id?: number;
     invoice_id: number;
     invoice_number: string;
     invoice_type?: string;
@@ -178,6 +179,7 @@ export class AccountingEventsListener {
       }
 
       await this.auto_entry_service.onInvoiceValidated({
+        financial_account_id: event.financial_account_id,
         invoice_id: event.invoice_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
@@ -201,6 +203,7 @@ export class AccountingEventsListener {
         `Failed to create auto-entry for invoice.accepted #${event.invoice_id}: ${error.message}`,
         error.stack,
       );
+      if (event.financial_account_id) throw error;
     }
   }
 
@@ -254,8 +257,9 @@ export class AccountingEventsListener {
     }
   }
 
-  @OnEvent('payment.received')
+  @OnEvent('payment.received', { suppressErrors: false })
   async handlePaymentReceived(event: {
+    financial_account_id?: number;
     payment_id: number;
     store_id: number;
     organization_id: number;
@@ -267,6 +271,11 @@ export class AccountingEventsListener {
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
+    /**
+     * Flete NETO (`shipping_cost − shipping_tax_amount`) para 414505 en la
+     * rama sin factura. Sin él el asiento no cuadra cuando hay envío.
+     */
+    shipping_amount?: number;
     /** GAP-6 — propina (sin IVA): pasivo custodio, línea CR en el asiento. */
     tip_amount?: number;
     currency: string;
@@ -285,6 +294,7 @@ export class AccountingEventsListener {
       )
         return;
       await this.auto_entry_service.onPaymentReceived({
+        financial_account_id: event.financial_account_id,
         payment_id: event.payment_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
@@ -304,6 +314,10 @@ export class AccountingEventsListener {
           event.discount_amount != null
             ? Number(event.discount_amount)
             : undefined,
+        shipping_amount:
+          event.shipping_amount != null
+            ? Number(event.shipping_amount)
+            : undefined,
         tip_amount:
           event.tip_amount != null ? Number(event.tip_amount) : undefined,
         user_id: event.user_id,
@@ -317,6 +331,7 @@ export class AccountingEventsListener {
         `Failed to create auto-entry for payment.received: ${error.message}`,
         error.stack,
       );
+      if (event.financial_account_id) throw error;
     }
   }
 
@@ -338,6 +353,8 @@ export class AccountingEventsListener {
      */
     shipping_amount?: number;
     total_amount: number;
+    /** Propina (sin IVA) incluida en total_amount; se acredita a su pasivo. */
+    tip_amount?: number;
     user_id?: number;
   }) {
     try {
@@ -364,6 +381,7 @@ export class AccountingEventsListener {
             : undefined,
         shipping_amount: Number(event.shipping_amount ?? 0),
         total_amount: Number(event.total_amount),
+        tip_amount: Number(event.tip_amount ?? 0),
         user_id: event.user_id,
       });
       this.logger.log(
@@ -714,6 +732,16 @@ export class AccountingEventsListener {
     // REFUND OVERHAUL — emitted by RefundFlowService since step 3. Drives
     // the credit-side mapping key in onRefundCompleted (1105/1110/2335).
     refund_method?: string;
+    /** Base de productos devuelta; separa la base neta del envío. */
+    subtotal?: number;
+    /** Envío devuelto BRUTO; su base neta se reversa contra 414505. */
+    shipping?: number;
+    /** Canal EFECTIVO de salida del dinero (resolveEffectiveRefundChannel). */
+    effective_channel?: string;
+    /** Orden del refund (refund-flow) o de la devolución (return-orders). */
+    order_id?: number;
+    /** `return_order` ⇒ `refund_id` es `return_orders.id`. */
+    source?: 'return_order';
   }) {
     try {
       if (
@@ -735,6 +763,11 @@ export class AccountingEventsListener {
         return_type: event.return_type,
         user_id: event.user_id,
         refund_method: event.refund_method,
+        subtotal: event.subtotal != null ? Number(event.subtotal) : undefined,
+        shipping: event.shipping != null ? Number(event.shipping) : undefined,
+        effective_channel: event.effective_channel,
+        order_id: event.order_id != null ? Number(event.order_id) : undefined,
+        source: event.source === 'return_order' ? 'return_order' : undefined,
       });
       this.logger.log(
         `Auto-entry created for refund.completed #${event.refund_id}`,

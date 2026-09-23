@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { OrderValidationResult } from '../interfaces';
+import { ErrorCodes } from '../../../../common/errors/error-codes';
+
+type TypedOrderValidationResult = OrderValidationResult & { errorCode?: string };
 
 @Injectable()
 export class PaymentValidatorService {
@@ -9,7 +12,7 @@ export class PaymentValidatorService {
   async validateOrder(
     orderId: number,
     storeId: number,
-  ): Promise<OrderValidationResult> {
+  ): Promise<TypedOrderValidationResult> {
     try {
       const order = await this.prisma.orders.findUnique({
         where: { id: orderId },
@@ -59,9 +62,10 @@ export class PaymentValidatorService {
       const totalPaid = order.payments
         .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
         .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+      const alreadyPaid = totalPaid >= Number(order.grand_total);
 
-      if (totalPaid >= Number(order.grand_total)) {
-        warnings.push('Order is already fully paid');
+      if (alreadyPaid) {
+        errors.push('Order is already fully paid');
       }
 
       if (order.order_items.length === 0) {
@@ -79,6 +83,9 @@ export class PaymentValidatorService {
         order,
         errors: errors.length > 0 ? errors : undefined,
         warnings: warnings.length > 0 ? warnings : undefined,
+        ...(alreadyPaid && {
+          errorCode: ErrorCodes.ORD_PAY_ALREADY_PAID_001.code,
+        }),
       };
     } catch (error) {
       return {
@@ -122,6 +129,7 @@ export class PaymentValidatorService {
   async validatePaymentAmount(
     amount: number,
     orderId: number,
+    excludedPaymentId?: number,
   ): Promise<boolean> {
     try {
       const order = await this.prisma.orders.findUnique({
@@ -129,8 +137,9 @@ export class PaymentValidatorService {
         include: {
           payments: {
             where: {
+              ...(excludedPaymentId ? { id: { not: excludedPaymentId } } : {}),
               state: {
-                in: ['succeeded', 'captured', 'pending'],
+                in: ['succeeded', 'captured', 'pending', 'authorized'],
               },
             },
           },

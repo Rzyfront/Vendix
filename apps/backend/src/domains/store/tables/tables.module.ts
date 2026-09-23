@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { SettingsModule } from '../settings/settings.module';
@@ -15,6 +15,8 @@ import { TableSessionsController } from './table-sessions.controller';
 import { TableSessionsService } from './table-sessions.service';
 import { SplitOrderController } from './split-order.controller';
 import { SplitOrderService } from './split-order.service';
+import { SplitAccountPaymentService } from './split-account-payment.service';
+import { PaymentsModule } from '../payments/payments.module';
 
 /**
  * TablesModule — Restaurant Suite Fase E
@@ -38,6 +40,7 @@ import { SplitOrderService } from './split-order.service';
  */
 @Module({
   imports: [
+    forwardRef(() => PaymentsModule),
     ResponseModule,
     PrismaModule,
     SettingsModule,
@@ -57,12 +60,14 @@ import { SplitOrderService } from './split-order.service';
     TablesService,
     TableSessionsService,
     SplitOrderService,
+    SplitAccountPaymentService,
     QrService,
   ],
   exports: [
     TablesService,
     TableSessionsService,
     SplitOrderService,
+    SplitAccountPaymentService,
   ],
 })
 export class TablesModule {}

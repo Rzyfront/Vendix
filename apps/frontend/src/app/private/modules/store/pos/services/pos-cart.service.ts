@@ -23,6 +23,7 @@ import {
   ApplyDiscountRequest,
   CartValidationError,
   PendingBooking,
+  ShippingContext,
 } from '../models/cart.model';
 
 // Re-export types for component usage
@@ -671,6 +672,8 @@ export class PosCartService {
    *  - Restore `appliedDiscounts` from `order.order_promotions`.
    *  - Restore `appliedCoupon` from `order.coupons` / `order.coupon_code`.
    *  - Restore `customer` from `order.users` (NOT from cartState default).
+   *  - F-FLETE: restore `shippingContext` (delivery_type + ids + costo). Ver
+   *    {@link buildShippingContextFromOrder}.
    */
   loadFromOrder(order: any): Observable<CartState> {
     if (!order?.order_items || order.order_items.length === 0) {
@@ -694,6 +697,9 @@ export class PosCartService {
         appliedCoupon: this.mapOrderCouponsToAppliedCoupon(order),
         customer: this.mapOrderUsersToCustomer(order),
         summary: this.calculateSummary([], this.mapOrderPromotionsToDiscounts(order)),
+        // F-FLETE — la rama vacía también repone el envío: editar una orden
+        // sin líneas no puede ser la puerta trasera que borra el flete.
+        shippingContext: this.buildShippingContextFromOrder(order),
         updatedAt: new Date(),
       };
       this.cartState.set(built);
@@ -924,6 +930,74 @@ export class PosCartService {
       // explicitly clears it; the editor uses this for re-load + save.
       linkedOrderId: order?.id ?? null,
       linkedOrderNumber: order?.order_number ?? null,
+      // F-FLETE — snapshot de fulfillment. Sin él el carril vivo de edición
+      // no tiene contra qué comparar y rearma el envío desde cero.
+      shippingContext: this.buildShippingContextFromOrder(order),
+    };
+  }
+
+  /**
+   * F-FLETE — snapshot de fulfillment de la orden que se está editando.
+   *
+   * `GET /store/orders/:id` ya trae los seis campos; el POS los descartaba y
+   * el shell terminaba mandando `delivery_type: 'pickup'` con el envío
+   * ausente. El editor del backend lee `shipping_cost` ausente como CERO
+   * (`orders.service.ts:1931` → `:3071`) y ese cero ENTRA al `grand_total`
+   * (`:2292`): reabrir un borrador con flete le borraba el flete y el cajero
+   * leía "Orden actualizada correctamente".
+   *
+   * Normalización:
+   *  - Ids: sólo enteros positivos; cualquier otra cosa es `null`. El DTO los
+   *    valida con `@IsInt() @Min(1)`, así que un 0 o un `NaN` sería un 400.
+   *  - Costo: Prisma serializa `Decimal` como STRING (`"12500.50"`). Se
+   *    convierte a número conservando los centavos. `null`/`''` se quedan en
+   *    `null` — ausencia NO es cero: un `shipping_cost: 0` explícito borraría
+   *    el flete, mientras que la clave ausente significa "sin cambio".
+   */
+  private buildShippingContextFromOrder(order: any): ShippingContext {
+    const toId = (value: any): number | null => {
+      if (value == null || value === '') return null;
+      const n = Number(value);
+      return Number.isFinite(n) && n >= 1 ? Math.trunc(n) : null;
+    };
+    const toMoney = (value: any): number | null => {
+      if (value == null || value === '') return null;
+      const n = Number(value);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    const addressId = toId(order?.shipping_address_id);
+    // Never fall back to the customer's primary address: it may not be the
+    // destination persisted on this order.
+    const address = order?.addresses_orders_shipping_address_idToaddresses
+      ?? order?.users?.addresses?.find((a: { id: number }) => Number(a.id) === addressId)
+      ?? null;
+    const method = order?.shipping_method;
+    return {
+      orderId: toId(order?.id),
+      customerId: toId(order?.customer_id ?? order?.users?.id),
+      shippingAddress: address ? {
+        address_line1: address.address_line1 ?? null,
+        address_line2: address.address_line2 ?? null,
+        city: address.city ?? null,
+        state_province: address.state_province ?? null,
+        country_code: address.country_code ?? null,
+        postal_code: address.postal_code ?? null,
+        phone_number: address.phone_number ?? order?.users?.phone ?? null,
+        latitude: toMoney(address.latitude),
+        longitude: toMoney(address.longitude),
+        municipality_code: address.municipality_code ?? null,
+      } : null,
+      shippingMethod: method ? {
+        id: Number(method.id), name: method.name, type: method.type,
+        is_active: method.is_active !== false,
+      } : null,
+      deliveryType: order?.delivery_type ?? null,
+      shippingAddressId: toId(order?.shipping_address_id),
+      billingAddressId: toId(order?.billing_address_id),
+      shippingMethodId: toId(order?.shipping_method_id),
+      shippingRateId: toId(order?.shipping_rate_id),
+      shippingCost: toMoney(order?.shipping_cost),
     };
   }
 

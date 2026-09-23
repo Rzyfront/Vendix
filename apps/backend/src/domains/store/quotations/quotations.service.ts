@@ -17,7 +17,19 @@ import { QuotationProfilesService } from '../backend-quotations-profiles/quotati
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { EmailService } from '../../../email/email.service';
 import { generateQuotationEmailHtml } from '../../../email/templates/quotation-email.template';
-import { resolveTierSnapshotsForItems } from '../products/services/tier-snapshot.util';
+import {
+  resolveTierSnapshotsForItems,
+  type TierSnapshot,
+} from '../products/services/tier-snapshot.util';
+import { PriceResolverService } from '../products/services/price-resolver.service';
+import { TaxesService } from '../taxes/taxes.service';
+import {
+  matchesCatalogPrice,
+  resolveQuotationLine,
+  summarizeQuotationLines,
+  type QuotationLineRate,
+  type ResolvedQuotationLine,
+} from './quotation-line-tax.util';
 import { resolvePackSize } from '../products/services/packaging.util';
 import {
   normalizePriceUnitLines,
@@ -54,14 +66,32 @@ export function resolveGrossLineTotals(
   );
 }
 
+/** Tasas y semántica de precio de una línea, resueltas antes de persistir. */
+type QuotationLineTaxContext = {
+  rates: QuotationLineRate[];
+  declared_gross: boolean;
+};
+
+type QuotationTaxableItem = {
+  product_id?: number | null;
+  product_variant_id?: number | null;
+  unit_price: unknown;
+  quantity: unknown;
+  discount_amount?: unknown;
+  tax_rate?: unknown;
+};
+
 @Injectable()
 export class QuotationsService {
+  private readonly priceResolver = new PriceResolverService();
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly ordersService: OrdersService,
     private readonly eventEmitter: EventEmitter2,
     private readonly emailService: EmailService,
     private readonly profilesService: QuotationProfilesService,
+    private readonly taxesService?: TaxesService,
   ) {}
 
   // VALID_TRANSITIONS state machine
@@ -81,7 +111,18 @@ export class QuotationsService {
   private readonly QUOTATION_INCLUDE = {
     quotation_items: {
       include: {
-        product: true,
+        // P1-1: las asignaciones viajan para que el modal, al reabrir una
+        // cotización, estime el impuesto con el flag incluido/agregado y el
+        // tipo fiscal reales en vez de sumar `tax_rate` a ciegas.
+        product: {
+          include: {
+            product_tax_assignments: {
+              include: {
+                tax_categories: { include: { tax_rates: true } },
+              },
+            },
+          },
+        },
         product_variant: true,
       },
     },
@@ -144,18 +185,23 @@ export class QuotationsService {
         ) > 1,
     });
 
-    const grossByIndex = resolveGrossLineTotals(items, priceUnits);
-
-    const subtotal = grossByIndex.reduce((sum, total) => sum + total, 0);
-    const totalDiscount = items.reduce(
-      (sum, item) => sum + Number(item.discount_amount || 0),
-      0,
+    // P1-1: el impuesto lo resuelve el servidor con las tasas asignadas al
+    // producto (incluido vs agregado, tipo real). Lo que mande el cliente en
+    // `tax_amount_item` ya no decide nada.
+    const taxContexts = await this.loadLineTaxContexts(items, tierSnapshots);
+    const resolvedLines = this.resolveLines(
+      items,
+      taxContexts,
+      priceUnits.priceUnitByIndex,
     );
-    const totalTax = items.reduce(
-      (sum, item) => sum + Number(item.tax_amount_item || 0),
-      0,
+    const header = summarizeQuotationLines(
+      resolvedLines,
+      items.map((item) => item.discount_amount),
     );
-    const grand_total = subtotal - totalDiscount + totalTax;
+    const subtotal = header.subtotal;
+    const totalDiscount = header.discount;
+    const totalTax = header.tax;
+    const grand_total = header.grand_total;
 
     // F-003 — precarga desde el perfil con la version congelada. Solo
     // rellena vacios: lo digitado manda. `resolveForQuotation` valida el
@@ -221,9 +267,7 @@ export class QuotationsService {
               quantity: item.quantity,
               unit_price: item.unit_price,
               discount_amount: item.discount_amount || 0,
-              tax_rate: item.tax_rate,
-              tax_amount_item: item.tax_amount_item,
-              total_price: grossByIndex[index],
+              ...this.lineTaxColumns(resolvedLines[index]),
               notes: item.notes,
               // Multi-tarifa snapshot
               applied_price_tier_id: tierSnap?.tier_id ?? null,
@@ -343,6 +387,12 @@ export class QuotationsService {
         updateQuotationDto.items,
         ctx,
       );
+      // Fuera de la transacción: las tasas se leen por el cliente scoped y no
+      // ocupan una segunda conexión mientras `tx` sostiene locks.
+      const taxContexts = await this.loadLineTaxContexts(
+        updateQuotationDto.items,
+        tierSnapshots,
+      );
 
       return this.prisma.$transaction(async (tx) => {
         await tx.quotation_items.deleteMany({ where: { quotation_id: id } });
@@ -358,18 +408,19 @@ export class QuotationsService {
               tierSnapshots[index]?.override_units_per_package,
             ) > 1,
         });
-        const grossByIndex = resolveGrossLineTotals(items, priceUnits);
-
-        const subtotal = grossByIndex.reduce((sum, total) => sum + total, 0);
-        const totalDiscount = items.reduce(
-          (sum, item) => sum + Number(item.discount_amount || 0),
-          0,
+        const resolvedLines = this.resolveLines(
+          items,
+          taxContexts,
+          priceUnits.priceUnitByIndex,
         );
-        const totalTax = items.reduce(
-          (sum, item) => sum + Number(item.tax_amount_item || 0),
-          0,
+        const header = summarizeQuotationLines(
+          resolvedLines,
+          items.map((item) => item.discount_amount),
         );
-        const grand_total = subtotal - totalDiscount + totalTax;
+        const subtotal = header.subtotal;
+        const totalDiscount = header.discount;
+        const totalTax = header.tax;
+        const grand_total = header.grand_total;
 
         return tx.quotations.update({
           where: { id },
@@ -402,9 +453,7 @@ export class QuotationsService {
                   quantity: item.quantity,
                   unit_price: item.unit_price,
                   discount_amount: item.discount_amount || 0,
-                  tax_rate: item.tax_rate,
-                  tax_amount_item: item.tax_amount_item,
-                  total_price: grossByIndex[index],
+                  ...this.lineTaxColumns(resolvedLines[index]),
                   notes: item.notes,
                   applied_price_tier_id: tierSnap?.tier_id ?? null,
                   applied_price_tier_name_snapshot:
@@ -533,34 +582,92 @@ export class QuotationsService {
 
     const context = RequestContextService.getContext();
 
+    // P1-1: la línea de orden sigue ADR-08 — `unit_price` es la BASE neta
+    // por unidad de precio y `tax_amount_item` el impuesto POR UNIDAD de
+    // precio. `orders.create` escala ese escalar por `line_units` al escribir
+    // `order_item_taxes`, así que mandarle el impuesto de LÍNEA (lo que guarda
+    // `quotation_items.tax_amount_item`) lo multiplicaba otra vez por la
+    // cantidad. Se re-resuelve con el mismo resolver que usó la cotización
+    // (precio declarado + tasas del producto): cotizaciones viejas, grabadas
+    // con el impuesto sumado a ciegas, se convierten con el impuesto correcto.
+    const quotationItems: any[] = quotation.quotation_items;
+    const tierSnapshots = await resolveTierSnapshotsForItems(
+      this.prisma,
+      quotationItems.map((item) => ({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id,
+        quantity: item.quantity,
+        applied_price_tier_id: item.applied_price_tier_id,
+      })),
+      context,
+    );
+    const taxContexts = await this.loadLineTaxContexts(
+      quotationItems.map((item) => ({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id,
+        unit_price: Number(item.unit_price),
+        quantity: item.quantity,
+        discount_amount: Number(item.discount_amount || 0),
+        tax_rate: item.tax_rate != null ? Number(item.tax_rate) : undefined,
+      })),
+      tierSnapshots,
+    );
+    const priceUnitByIndex = quotationItems.map((item) =>
+      item.price_unit_quantity != null ? Number(item.price_unit_quantity) : null,
+    );
+    const resolvedLines = this.resolveLines(
+      quotationItems,
+      taxContexts,
+      priceUnitByIndex,
+    );
+    const header = summarizeQuotationLines(
+      resolvedLines,
+      quotationItems.map((item) => Number(item.discount_amount || 0)),
+    );
+
     // Map quotation items to order items format. B.3: sin producto viaja
     // como linea `custom` (el DTO de orden lo admite con product_id ausente).
-    const orderItems = quotation.quotation_items.map((item: any) => ({
-      ...(item.product_id == null ? { item_type: 'custom' } : {}),
-      product_id: item.product_id,
-      product_variant_id: item.product_variant_id,
-      product_name: item.product_name,
-      variant_sku: item.variant_sku,
-      quantity: item.quantity,
-      unit_price: Number(item.unit_price),
-      total_price: Number(item.total_price),
-      tax_rate: item.tax_rate ? Number(item.tax_rate) : undefined,
-      tax_amount_item: item.tax_amount_item
-        ? Number(item.tax_amount_item)
-        : undefined,
-      // Multi-tarifa: propagar el tier elegido al convertir cotización a orden.
-      applied_price_tier_id: item.applied_price_tier_id ?? undefined,
-    }));
+    const orderItems = quotationItems.map((item: any, index: number) => {
+      const line = resolvedLines[index];
+      return {
+        ...(item.product_id == null ? { item_type: 'custom' } : {}),
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id,
+        product_name: item.product_name,
+        variant_sku: item.variant_sku,
+        quantity: item.quantity,
+        unit_price: line.unit_base_price,
+        total_price: line.line_net_total,
+        tax_rate: line.tax_rate > 0 ? line.tax_rate : undefined,
+        tax_amount_item:
+          line.unit_tax_amount > 0 ? line.unit_tax_amount : undefined,
+        // Escala de la línea: `orders.create` la lee para `line_units` al
+        // escalar el impuesto por unidad a `order_item_taxes`.
+        price_unit_quantity: priceUnitByIndex[index],
+        // Bruto por unidad explícito: sin él `orders.create` lo deriva de
+        // `unit_price` con las tasas de catálogo, que para un precio manual
+        // (bruto declarado, todo incluido) no reproduce lo cotizado.
+        final_unit_price: line.unit_final_price,
+        ...(line.declared_gross
+          ? {
+              is_price_overridden: true,
+              price_override_reason: `Precio de cotización ${quotation.quotation_number}`,
+            }
+          : {}),
+        // Multi-tarifa: propagar el tier elegido al convertir cotización a orden.
+        applied_price_tier_id: item.applied_price_tier_id ?? undefined,
+      };
+    });
 
     // Create order using OrdersService
     const order = await this.ordersService.create(
       {
         customer_id: quotation.customer_id!,
         items: orderItems,
-        subtotal: Number(quotation.subtotal_amount),
-        tax_amount: Number(quotation.tax_amount),
-        discount_amount: Number(quotation.discount_amount),
-        total_amount: Number(quotation.grand_total),
+        subtotal: header.subtotal,
+        tax_amount: header.tax,
+        discount_amount: header.discount,
+        total_amount: header.grand_total,
         internal_notes: `Convertida desde cotización ${quotation.quotation_number}`,
         channel: quotation.channel,
       } as any,
@@ -740,6 +847,218 @@ export class QuotationsService {
       },
       include: this.QUOTATION_INCLUDE,
     });
+  }
+
+  /**
+   * P1-1 — tasas de cada línea y si su precio es de catálogo o manual.
+   *
+   * Producto: las tasas salen de `calculateProductTaxes` (asignación ?? tasa
+   * para `is_inclusive`, tipo fiscal de la categoría). El precio es de
+   * CATÁLOGO si coincide al centavo con alguno publicado (base, oferta,
+   * override de variante, precio de la tarifa aplicada); si no, es MANUAL y se
+   * trata como bruto declarado (regla del POS).
+   *
+   * Línea libre (sin producto): la tasa que digitó el usuario, agregada sobre
+   * el precio (así la rotula el modal: «% IVA» sobre el precio neto). Sin
+   * categoría no hay tipo fiscal que afirmar: `tax_type` queda `null`.
+   */
+  private async loadLineTaxContexts(
+    items: QuotationTaxableItem[],
+    tierSnapshots: Array<TierSnapshot | null | undefined>,
+  ): Promise<QuotationLineTaxContext[]> {
+    const productIds = Array.from(
+      new Set(
+        items
+          .map((item) => item.product_id)
+          .filter((id): id is number => id != null)
+          .map(Number),
+      ),
+    );
+    const variantIds = Array.from(
+      new Set(
+        items
+          .map((item) => item.product_variant_id)
+          .filter((id): id is number => id != null)
+          .map(Number),
+      ),
+    );
+
+    const [products, variants] = await Promise.all([
+      productIds.length > 0
+        ? this.prisma.products.findMany({
+            where: { id: { in: productIds } },
+            select: {
+              id: true,
+              base_price: true,
+              is_on_sale: true,
+              sale_price: true,
+            },
+          })
+        : Promise.resolve([] as any[]),
+      variantIds.length > 0
+        ? this.prisma.product_variants.findMany({
+            where: { id: { in: variantIds } },
+            select: {
+              id: true,
+              product_id: true,
+              price_override: true,
+              is_on_sale: true,
+              sale_price: true,
+            },
+          })
+        : Promise.resolve([] as any[]),
+    ]);
+    const productById = new Map<number, any>(
+      (products as any[]).map((p) => [Number(p.id), p]),
+    );
+    const variantById = new Map<number, any>(
+      (variants as any[]).map((v) => [Number(v.id), v]),
+    );
+
+    const ratesByProduct = new Map<number, QuotationLineRate[]>();
+    for (const productId of productIds) {
+      const info = this.taxesService
+        ? await this.taxesService.calculateProductTaxes(productId, 0)
+        : { taxes: [] as any[] };
+      ratesByProduct.set(
+        productId,
+        (info.taxes ?? [])
+          .filter((t: any) => Number(t.rate) > 0)
+          .map((t: any) => ({
+            rate: Number(t.rate),
+            is_inclusive: t.is_inclusive === true,
+            tax_type: t.tax_type ?? null,
+            name: t.name ?? null,
+            tax_rate_id: t.tax_rate_id ?? null,
+          })),
+      );
+    }
+
+    return items.map((item, index) => {
+      const unitPrice = Number(item.unit_price) || 0;
+      if (item.product_id == null) {
+        const rate = Number(item.tax_rate || 0);
+        return {
+          rates:
+            rate > 0
+              ? [
+                  {
+                    rate,
+                    is_inclusive: false,
+                    tax_type: null,
+                    name: null,
+                    tax_rate_id: null,
+                  },
+                ]
+              : [],
+          declared_gross: false,
+        };
+      }
+
+      const productId = Number(item.product_id);
+      const product = productById.get(productId);
+      const variant =
+        item.product_variant_id != null
+          ? variantById.get(Number(item.product_variant_id))
+          : undefined;
+      const rates = ratesByProduct.get(productId) ?? [];
+      if (!product || rates.length === 0) {
+        // Sin producto resoluble o sin impuestos asignados no hay nada que
+        // despejar: el precio es la base.
+        return { rates, declared_gross: false };
+      }
+
+      const num = (v: unknown): number | null =>
+        v != null && Number.isFinite(Number(v)) ? Number(v) : null;
+      const candidates: Array<number | null> = [
+        num(product.base_price),
+        product.is_on_sale ? num(product.sale_price) : null,
+        num(variant?.price_override),
+        variant?.is_on_sale ? num(variant?.sale_price) : null,
+      ];
+      const tierSnap = tierSnapshots[index];
+      if (tierSnap) {
+        candidates.push(
+          this.priceResolver.resolveWithTier({
+            product: {
+              base_price: Number(product.base_price || 0),
+              is_on_sale: !!product.is_on_sale,
+              sale_price: num(product.sale_price),
+              track_inventory: true,
+              has_multiple_price_tiers: true,
+            },
+            variant: variant
+              ? {
+                  id: variant.id,
+                  price_override: num(variant.price_override),
+                  is_on_sale: !!variant.is_on_sale,
+                  sale_price: num(variant.sale_price),
+                  track_inventory_override: null,
+                }
+              : undefined,
+            priceTier: {
+              id: tierSnap.tier_id,
+              name: tierSnap.tier_name,
+              discount_percentage: tierSnap.discount_percentage,
+              is_package_unit: tierSnap.is_package_unit,
+              units_per_package: tierSnap.units_per_package,
+            },
+            tierOverrides: [
+              {
+                variant_id: item.product_variant_id ?? null,
+                override_price: tierSnap.override_price,
+                override_units_per_package: tierSnap.override_units_per_package,
+              },
+            ],
+            taxRate: 0,
+          }).unitPrice,
+        );
+      }
+
+      return {
+        rates,
+        declared_gross: !matchesCatalogPrice(unitPrice, candidates),
+      };
+    });
+  }
+
+  private resolveLines(
+    items: QuotationTaxableItem[],
+    contexts: QuotationLineTaxContext[],
+    priceUnitByIndex: Array<number | null>,
+  ): ResolvedQuotationLine[] {
+    return items.map((item, index) =>
+      resolveQuotationLine(
+        {
+          unit_price: Number(item.unit_price) || 0,
+          quantity: Number(item.quantity) || 0,
+          discount_amount: Number(item.discount_amount || 0),
+          price_unit_quantity: priceUnitByIndex[index] ?? null,
+        },
+        contexts[index]?.rates ?? [],
+        { declared_gross: contexts[index]?.declared_gross ?? false },
+      ),
+    );
+  }
+
+  /**
+   * Columnas fiscales de `quotation_items`. Contrato que leen el impreso
+   * (`quotation.provider.ts`, agrupa por tarifa sumando `tax_amount_item` con
+   * base `total_price`) y el snapshot de contratos:
+   *  - `unit_price` (no se toca acá): el precio DECLARADO de la línea, el que
+   *    el modal vuelve a cargar al editar.
+   *  - `total_price`: base NETA de la línea antes del descuento (INV-0).
+   *  - `tax_amount_item`: impuesto de la LÍNEA completa. A diferencia de
+   *    `order_items` (ADR-08, por unidad), aquí es total de línea porque así
+   *    lo suma el impreso; `convertToOrder` lo re-expresa por unidad.
+   *  - `tax_rate`: Σ de fracciones.
+   */
+  private lineTaxColumns(line: ResolvedQuotationLine) {
+    return {
+      tax_rate: line.tax_rate > 0 ? line.tax_rate : null,
+      tax_amount_item: line.line_tax_total,
+      total_price: line.line_net_total,
+    };
   }
 
   private async generateQuotationNumber(storeId: number): Promise<string> {

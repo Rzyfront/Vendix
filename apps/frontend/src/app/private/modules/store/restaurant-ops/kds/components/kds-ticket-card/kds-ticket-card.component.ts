@@ -43,6 +43,16 @@ import {
 })
 export class KdsTicketCardComponent {
   readonly ticket = input.required<KitchenTicket>();
+  readonly deliveryBadgeLabel = computed(() => {
+    switch (this.ticket().order?.delivery_type) {
+      case 'home_delivery':
+        return 'ENVÍO';
+      case 'direct_delivery':
+        return 'PARA LLEVAR';
+      default:
+        return null;
+    }
+  });
   /**
    * Takeaway-only KDS: "Entregar" se habilita solo cuando TODOS los items
    * visibles del ticket son para llevar (`order_item.is_takeaway`). El dato

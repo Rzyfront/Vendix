@@ -267,6 +267,31 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     );
   });
 
+  it('C.4 — snapshot and ticket list select order delivery_type without changing takeaway selection', async () => {
+    const ticket = {
+      id: 1,
+      order: { order_number: 'ORD-1', delivery_type: 'home_delivery' },
+      items: [{ order_item: { is_takeaway: true } }],
+    };
+    prismaMock.kitchen_tickets = {
+      findMany: jest.fn().mockResolvedValue([ticket]),
+      count: jest.fn().mockResolvedValue(1),
+    };
+    jest.spyOn(service as any, 'getBusinessDate').mockResolvedValue('2026-09-22');
+
+    const snapshot = await service.getActiveTicketsSnapshot();
+    const list = await service.findTickets({ order_id: 100 });
+
+    expect(snapshot.data[0].order.delivery_type).toBe('home_delivery');
+    expect(list.data[0].order.delivery_type).toBe('home_delivery');
+    for (const [query] of prismaMock.kitchen_tickets.findMany.mock.calls) {
+      expect(query.include).toMatchObject({
+        order: { select: { delivery_type: true } },
+        items: { include: { order_item: { select: { is_takeaway: true } } } },
+      });
+    }
+  });
+
   it('consumes 3 leaf components (merma + sub-recipe + direct), flips flag, emits kitchen.fired with COGS', async () => {
     // Order has 1 prepared order_item (id=10, product=50) and the
     // operator asked to fire only that one. The other 2 items in the
@@ -1216,6 +1241,114 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
 
       expect(result).toMatchObject({ id: 555 });
       expect(prismaMock.kitchen_tickets.update).toHaveBeenCalled();
+    });
+  });
+
+  describe('C.2 — revertTicket delivery stamp invariant', () => {
+    const lines: Array<{
+      id: number;
+      orderId: number;
+      ticketId: number;
+      deliveredAt: Date | null;
+      deliveredBy: number | null;
+    }> = [
+      { id: 21, orderId: 100, ticketId: 555, deliveredAt: new Date(), deliveredBy: 42 },
+      { id: 22, orderId: 100, ticketId: 556, deliveredAt: new Date(), deliveredBy: 42 },
+    ];
+    let ticketStatus: string;
+    let tx: any;
+
+    beforeEach(() => {
+      ticketStatus = 'delivered';
+      for (const line of lines) {
+        line.deliveredAt = new Date();
+        line.deliveredBy = 42;
+      }
+      (service as any).kdsSessionsService = {
+        assertCanMutateStationTicket: jest.fn().mockResolvedValue(undefined),
+      };
+      prismaMock.kitchen_tickets = {
+        findFirst: jest.fn().mockImplementation(async () => ({
+          id: 555,
+          store_id: 1,
+          order_id: 100,
+          kds_id: 1,
+          status: ticketStatus,
+          items: [],
+        })),
+      };
+      prismaMock.orders.findFirst.mockResolvedValue({ state: 'delivered' });
+      tx = {
+        kitchen_tickets: {
+          update: jest.fn().mockImplementation(async ({ data }: any) => {
+            ticketStatus = data.status;
+          }),
+        },
+        kitchen_ticket_items: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        order_items: {
+          updateMany: jest.fn().mockImplementation(async ({ where, data }: any) => {
+            // Model the Prisma relation filter, not a global order_id update.
+            for (const line of lines) {
+              if (line.ticketId === where.kitchen_ticket_items?.some?.kitchen_ticket_id &&
+                  line.deliveredAt != null) {
+                line.deliveredAt = data.delivered_at;
+                line.deliveredBy = data.delivered_by_user_id;
+              }
+            }
+            return { count: 1 };
+          }),
+        },
+      };
+      prismaMock.$transaction.mockImplementation(async (cb: any) => cb(tx));
+    });
+
+    it('clears only this delivered ticket’s line stamps inside the ticket transaction, then emits the reversal', async () => {
+      await service.revertTicket(555);
+
+      expect(tx.kitchen_ticket_items.updateMany).toHaveBeenCalledWith({
+        where: { kitchen_ticket_id: 555 },
+        data: { status: 'ready', updated_at: expect.any(Date) },
+      });
+      expect(tx.order_items.updateMany).toHaveBeenCalledWith({
+        where: {
+          kitchen_ticket_items: { some: { kitchen_ticket_id: 555 } },
+          delivered_at: { not: null },
+        },
+        data: {
+          delivered_at: null,
+          delivered_by_user_id: null,
+          updated_at: expect.any(Date),
+        },
+      });
+      expect(lines[0]).toMatchObject({ deliveredAt: null, deliveredBy: null });
+      expect(lines[1].deliveredAt).toBeInstanceOf(Date);
+      expect(lines[1].deliveredBy).toBe(42);
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        'kitchen.order_delivery_reverted',
+        { orderId: 100, storeId: 1 },
+      );
+    });
+
+    it('does not erase a dispatch/single-line stamp on non-delivered ticket reversals', async () => {
+      ticketStatus = 'ready';
+      await service.revertTicket(555);
+
+      expect(tx.order_items.updateMany).not.toHaveBeenCalled();
+      expect(lines[0].deliveredAt).toBeInstanceOf(Date);
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith(
+        'kitchen.order_delivery_reverted',
+        expect.anything(),
+      );
+    });
+
+    it('rejects finished orders without clearing any line or starting a transaction', async () => {
+      prismaMock.orders.findFirst.mockResolvedValue({ state: 'finished' });
+
+      await expect(service.revertTicket(555)).rejects.toMatchObject({
+        errorCode: 'KITCHEN_TICKET_REVERT_ORDER_FINISHED',
+      });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(lines[0].deliveredAt).toBeInstanceOf(Date);
     });
   });
 });

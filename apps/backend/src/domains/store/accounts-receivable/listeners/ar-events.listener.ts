@@ -15,6 +15,7 @@ export class ArEventsListener {
   // ─── CREDIT SALE CREATED ───────────────────────────────────
   @OnEvent('credit_sale.created')
   async handleCreditSaleCreated(event: {
+    financial_account_id?: number;
     order_id: number;
     customer_id?: number;
     total_amount: number;
@@ -36,7 +37,7 @@ export class ArEventsListener {
     try {
       // The dispatch-route flow has its own CashSettlementService that
       // creates the AR row directly. Skip the duplicate here.
-      if (event.source_type === 'dispatch_route') return;
+      if (event.source_type === 'dispatch_route' || event.financial_account_id) return;
 
       let customerId = event.customer_id;
       let documentNumber = event.document_number || event.order_number;
@@ -107,6 +108,7 @@ export class ArEventsListener {
   // ─── PAYMENT RECEIVED ─────────────────────────────────────
   @OnEvent('payment.received')
   async handlePaymentReceived(event: {
+    financial_account_id?: number;
     payment_id: number;
     order_id: number;
     amount: number;
@@ -130,7 +132,9 @@ export class ArEventsListener {
       // (PaymentFromDispatchRouteListener) and emits with order_id=null
       // and source_type='dispatch_route'. Bailing out here keeps the AR
       // listener strictly for legacy / POS / order-level payments.
-      if (event.source_type === 'dispatch_route' || !event.order_id) return;
+      // Financial accounts keep order_id for physical/source tracing, not as
+      // permission to pay down a legacy receivable belonging to that source.
+      if (event.source_type === 'dispatch_route' || event.financial_account_id || !event.order_id) return;
 
       const ar = await this.prisma.accounts_receivable.findFirst({
         where: {

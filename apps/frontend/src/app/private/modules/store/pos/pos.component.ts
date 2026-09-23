@@ -55,7 +55,13 @@ import {
   CartState,
   CartItem,
 } from './services/pos-cart.service';
-import { AddCustomItemRequest, CartSummary } from './models/cart.model';
+import {
+  AddCustomItemRequest,
+  CartSummary,
+  deliveryTypeToEntregaChoice,
+} from './models/cart.model';
+import { PosSplitBillModalComponent } from './components/pos-split-bill-modal.component';
+import type { SplitSourceItem } from '../restaurant-ops/tables/interfaces';
 import { PosCustomItemModalComponent } from './components/pos-custom-item-modal/pos-custom-item-modal.component';
 import { resolveSaleQuantity } from './utils/line-units.util';
 import { environment } from '../../../../../environments/environment';
@@ -123,7 +129,6 @@ import { BookingSchedulerModalComponent } from '../../../../shared/components/bo
 import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.component';
 import {
   PosRestaurantIntegrationService,
-  CounterOrderLine,
   PosFireItemNote,
 } from './services/pos-restaurant-integration.service';
 import { TaxesService } from '../products/services/taxes.service';
@@ -145,6 +150,19 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
   totalItems: 0,
 };
 
+export function resolvePosPaymentCustomerName(
+  order: { customer_alias?: string | null; customer_name?: string | null } | null | undefined,
+  selectedCustomer: Pick<PosCustomer, 'first_name' | 'last_name'> | null | undefined,
+  isAnonymousSale: boolean,
+): string {
+  // The persisted alias identifies a quick sale even when the payment event
+  // carries the anonymous flag; it must reach both confirmation and receipt.
+  if (order?.customer_alias) return order.customer_alias;
+  if (isAnonymousSale) return 'Consumidor Final';
+  return order?.customer_name ||
+    (selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : '');
+}
+
 @Component({
   selector: 'app-pos',
   standalone: true,
@@ -154,6 +172,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     ButtonComponent,
     IconComponent,
     PosCustomItemModalComponent,
+    PosSplitBillModalComponent,
     SpinnerComponent,
     CardComponent,
     PosProductSelectionComponent,
@@ -188,6 +207,14 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         }
       -->
 
+
+      @if (isRestaurantMode() && splitSourceOrderId()) {
+        <div class="flex-none flex items-center justify-between gap-2 p-2 bg-surface border-b border-border">
+          <span class="text-sm text-text-secondary">Orden guardada · cuentas independientes</span>
+          <app-button variant="outline" size="sm" (clicked)="showSplitAccounts.set(true)">Dividir / cobrar cuentas</app-button>
+        </div>
+      }
+      <app-pos-split-bill-modal [(isOpen)]="showSplitAccounts" [sourceOrderId]="splitSourceOrderId()" [items]="splitSourceItems()" />
 
       <!-- Main POS Interface: Two flush columns directly at root (Stitch favorite design) -->
       <div
@@ -496,18 +523,6 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         </div>
       }
 
-      <!-- Modals -->
-      <app-pos-customer-modal
-        [isOpen]="showCustomerModal()"
-        [customer]="editingCustomer()"
-        [queueEnabled]="queueEnabled()"
-        [openInQueueMode]="openInQueueMode()"
-        (closed)="onCustomerModalClosed()"
-        (customerCreated)="onCustomerCreated($event)"
-        (customerUpdated)="onCustomerUpdated($event)"
-        (customerSelected)="onCustomerSelected($event)"
-      ></app-pos-customer-modal>
-
       <!-- Fase 5·B3: SHELL de checkout con stepper — único checkout del POS
            (cobro, cliente, envío y "Guardar borrador" en el footer). El paso
            Cobro autocarga sus métodos, por eso no se bindea [paymentMethods]. -->
@@ -651,6 +666,17 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       (closed)="onChargeModalClosed()"
       (paymentSubmitted)="onPaymentSubmitted($event)"
     ></app-order-payment-modal>
+
+    <app-pos-customer-modal
+      [isOpen]="showCustomerModal()"
+      [customer]="editingCustomer()"
+      [queueEnabled]="queueEnabled()"
+      [openInQueueMode]="openInQueueMode()"
+      (closed)="onCustomerModalClosed()"
+      (customerCreated)="onCustomerCreated($event)"
+      (customerUpdated)="onCustomerUpdated($event)"
+      (customerSelected)="onCustomerSelected($event)"
+    ></app-pos-customer-modal>
   `,
   styles: [
     `
@@ -994,6 +1020,14 @@ export class PosComponent {
 
   // Edit mode
   isEditMode = signal(false);
+  readonly showSplitAccounts = signal(false);
+  readonly splitSourceOrderId = computed(() => Number(
+    this.restaurantIntegration.currentTableSession()?.order_id ?? this.editingOrderId() ?? this.readyToPayOrder()?.id ?? 0,
+  ) || null);
+  readonly splitSourceItems = computed<SplitSourceItem[]>(() => {
+    const rows = this.restaurantIntegration.currentTableSession()?.order?.order_items ?? this.editingOrder()?.order_items ?? this.readyToPayOrder()?.order_items ?? [];
+    return rows.map((item) => ({ id: Number(item.id), product_name: item.product_name, quantity: Number(item.quantity), cancelled_at: item.cancelled_at ?? null }));
+  });
   editingOrderId = signal<string | null>(null);
   editingOrderNumber = signal<string | null>(null);
   /**
@@ -1854,6 +1888,7 @@ export class PosComponent {
     }
     const sc = this.selectedCustomer();
     const customerName =
+      result.order?.customer_alias ||
       result.order?.customer_name ||
       (result.order?.customer?.first_name
         ? `${result.order.customer.first_name} ${result.order.customer.last_name || ''}`.trim()
@@ -2172,55 +2207,50 @@ export class PosComponent {
    */
   private fireCounterOrder(): void {
     const cart = this.cartState();
-    const preparedLines: CounterOrderLine[] = [];
-    for (const it of cart?.items ?? []) {
-      if (it.itemType === 'custom') continue;
-      if (it.product?.product_type !== 'prepared') continue;
-      const productId = parseInt(
-        typeof it.product.id === 'string'
-          ? it.product.id
-          : String(it.product.id),
-        10,
-      );
-      if (!Number.isFinite(productId)) continue;
-      const line: CounterOrderLine = {
-        product_id: productId,
-        product_name: it.product.name,
-        quantity: it.quantity,
-        unit_price: Number(it.unitPrice ?? 0),
-        total_price: Number(it.totalPrice ?? 0),
-        tax_rate: it.taxRate,
-      };
-      if (it.variant_id != null) {
-        line.product_variant_id = it.variant_id;
-      }
-      // Restaurant Suite — Fase K Gap 1: items flagged skipKds
-      // (cashier chose "Usar stock") are excluded from the kitchen
-      // dispatch list. Their product stock is consumed at payment.
-      if (it.skipKds) continue;
-      preparedLines.push(line);
-    }
+    // Solo los `prepared` que van a cocina: los que el cajero marcó "usar
+    // stock" (skipKds, Fase K Gap 1) se consumen al cobrar, no aquí.
+    const preparedItems = (cart?.items ?? []).filter(
+      (it) =>
+        it.itemType !== 'custom' &&
+        it.product?.product_type === 'prepared' &&
+        !it.skipKds &&
+        Number.isFinite(Number(it.product?.id)),
+    );
 
-    if (preparedLines.length === 0) {
+    if (!cart || preparedItems.length === 0) {
       this.toastService.warning(
         'No hay platos preparados en el carrito para enviar a cocina',
       );
       return;
     }
 
-    // Bug 4 (Fase K): orders.customer_id is optional. Only forward the
-    // id when the operator actually picked a customer; otherwise the
-    // integration service omits the field and the backend stores an
-    // anonymous Consumidor Final order.
-    const customer = this.selectedCustomer();
-    const customerId =
-      customer && Number.isFinite(Number(customer.id)) && Number(customer.id) > 0
-        ? Number(customer.id)
-        : 0;
+    // P0-3 — el borrador de mostrador viaja por `/store/payments/pos` con
+    // `is_draft` (ver `createCounterDraftOrder`), que resuelve en servidor el
+    // impuesto de catálogo y el precio de cada línea. La cabecera se recalcula
+    // en servidor; la que se manda aquí solo describe el subconjunto enviado.
+    // Sin promociones ni cupón: aplicarían sobre líneas que no viajan.
+    const taxAmount = preparedItems.reduce((sum, it) => sum + (it.taxAmount || 0), 0);
+    const total = preparedItems.reduce((sum, it) => sum + (it.totalPrice || 0), 0);
+    const counterState: CartState = {
+      ...cart,
+      items: preparedItems,
+      customer: this.selectedCustomer(),
+      appliedDiscounts: [],
+      appliedCoupon: undefined,
+      summary: {
+        ...cart.summary,
+        subtotal: total - taxAmount,
+        taxAmount,
+        discountAmount: 0,
+        total,
+        itemCount: preparedItems.length,
+        totalItems: preparedItems.reduce((sum, it) => sum + it.quantity, 0),
+      },
+    };
 
     this.loading.set(true);
     this.restaurantIntegration
-      .createCounterDraftOrder(customerId, preparedLines, cart?.notes)
+      .createCounterDraftOrder(counterState)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (order) => {
@@ -2275,6 +2305,40 @@ export class PosComponent {
     if (!open) this.focusSearchSoon();
   }
 
+  /**
+   * F-FLETE — carril del wizard con el que se abre el shell al editar.
+   *
+   * Había DOS copias de `delivery_type === 'home_delivery' ? 'enviar' :
+   * 'llevar'` (en `onCheckout` y en `onCharge`). Esa forma:
+   *  - no reconocía `dine_in` → una mesa QR se abría como "llevar";
+   *  - colapsaba `direct_delivery` y `other` a "llevar", que es lo que
+   *    empujaba al shell a forzar `delivery_type: 'pickup'`.
+   *
+   * Ahora hay UNA sola definición ({@link deliveryTypeToEntregaChoice}) y la
+   * entrada es el snapshot que `loadFromOrder` dejó en el carrito — el mismo
+   * dato con el que el shell decide qué mandar, así que no pueden divergir.
+   * Fallback a `editingOrder()` para el caso en que el carrito aún no haya
+   * hidratado (carrito libre adoptando una orden).
+   */
+  private entregaChoiceForEditingOrder(): EntregaChoice {
+    const context =
+      this.cartState()?.shippingContext ??
+      (() => {
+        const order = this.editingOrder() as any;
+        if (!order) return null;
+        return {
+          deliveryType: order.delivery_type ?? null,
+          shippingAddressId: null,
+          billingAddressId: null,
+          shippingMethodId: order.shipping_method_id ?? null,
+          shippingRateId: null,
+          shippingCost:
+            order.shipping_cost == null ? null : Number(order.shipping_cost),
+        };
+      })();
+    return deliveryTypeToEntregaChoice(context);
+  }
+
   onCheckout(): void {
     if (!this.cartState() || this.isEmpty) return;
 
@@ -2286,9 +2350,7 @@ export class PosComponent {
     // validar") is removed in favour of the shell handler.
     if (this.isEditMode()) {
       this.mode.set('edit');
-      const initialChoice: EntregaChoice =
-        this.editingOrder()?.delivery_type === 'home_delivery' ? 'enviar' : 'llevar';
-      this.initialEntrega.set(initialChoice);
+      this.initialEntrega.set(this.entregaChoiceForEditingOrder());
       this.showCheckoutModal.set(true);
       return;
     }
@@ -2343,9 +2405,7 @@ export class PosComponent {
     // the legacy OrderPaymentModalComponent for non-edit flows.
     if (this.isEditMode()) {
       this.mode.set('edit');
-      const initialChoice: EntregaChoice =
-        this.editingOrder()?.delivery_type === 'home_delivery' ? 'enviar' : 'llevar';
-      this.initialEntrega.set(initialChoice);
+      this.initialEntrega.set(this.entregaChoiceForEditingOrder());
       this.showCheckoutModal.set(true);
       return;
     }
@@ -2694,10 +2754,11 @@ export class PosComponent {
         discount_amount:
           paymentData.order?.discount_amount || csm.discountAmount,
         total_amount: paymentData.order?.total_amount || csm.total,
-        customer_name: paymentData.isAnonymousSale
-          ? 'Consumidor Final'
-          : paymentData.order?.customer_name ||
-            (sc ? `${sc.first_name} ${sc.last_name}` : ''),
+        customer_name: resolvePosPaymentCustomerName(
+          paymentData.order,
+          sc,
+          !!paymentData.isAnonymousSale,
+        ),
         customer_email:
           !paymentData.isAnonymousSale && sc?.email
             ? sc.email
@@ -4012,10 +4073,20 @@ export class PosComponent {
    * `POS_CUSTOMER_REQUIRED_001` locally — saves a round-trip and matches
    * the backend's authoritative rejection.
    *
-   * Shipping fields: forwarded from `state.shippingContext` (populated by
-   * `loadFromOrder`). Undefined keys are omitted, not nulled — the editor
-   * endpoint treats absent keys as "no change" and any explicit `null`
-   * could clear a value the cashier did not intend to clear.
+   * Shipping fields: forwarded from `state.shippingContext`. Hasta F-FLETE
+   * esta nota mentía — decía "populated by `loadFromOrder`" cuando NADIE lo
+   * escribía y este bloque nunca podía emitir una sola clave de envío. Hoy el
+   * escritor existe (`PosCartService.buildShippingContextFromOrder`).
+   *
+   * OJO: este método es el carril LEGADO. Su único llamador,
+   * `updateExistingOrder()`, es privado y no lo invoca nadie — el carril vivo
+   * es `PosCheckoutShellComponent.buildEditorShippingPayload`, que consume el
+   * MISMO `state.shippingContext`. Si cambias la política de flete, cámbiala
+   * allí también o los dos carriles divergen.
+   *
+   * Undefined keys are omitted, not nulled — the editor endpoint treats
+   * absent keys as "no change" and any explicit `null` could clear a value
+   * the cashier did not intend to clear.
    *
    * `saveDraft` keeps using the cart-shaped builder in `PosPaymentService` —
    * drafts are a different endpoint with a different contract.

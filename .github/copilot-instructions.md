@@ -81,6 +81,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a menu entry to the store module catalog | `vendix-panel-ui` |
 | Adding a monthly or daily Redis quota counter | `vendix-redis-quota` |
 | Adding a new AI provider | `vendix-ai-platform-core` |
+| Adding a new RUT responsibility code to forms, scanners or seeds | `vendix-dian-issuer-identity` |
 | Adding a new consumption tax (IBUA, ICUI, INC variant) | `vendix-tax-typing` |
 | Adding a new tax_type value to the fiscal system | `vendix-tax-typing` |
 | Adding a per-domain BullMQ scan queue (receipt-scan, expense-scan) | `vendix-ai-queue` |
@@ -214,6 +215,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging a tax posting to the wrong PUC account | `vendix-tax-typing` |
 | Debugging agent loop issues | `vendix-ai-agent-tools` |
 | Debugging an endpoint that answers HTTP 200 with success:false in the body | `vendix-error-handling` |
+| Debugging an invoice that declares an obligation the merchant does not have | `vendix-dian-issuer-identity` |
 | Debugging embedding generation | `vendix-ai-embeddings-rag` |
 | Debugging free-plan invoices, pending credits, or proration flows | `vendix-saas-billing` |
 | Debugging missing accounting entries | `vendix-auto-entries` |
@@ -221,6 +223,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging records that appear one day or one month off in analytics | `vendix-analytics-metrics` |
 | Debugging route-map unlocated stops or resolveStopCoordinates cascade | `vendix-address-geocoding` |
 | Debugging stale templates, missing re-renders, or change detection issues | `vendix-zoneless-signals` |
+| Deciding whether a merchant may charge IVA or INC | `vendix-dian-issuer-identity` |
 | Deciding which Vendix skill owns a pattern | `vendix-core` |
 | Deciding which order or expense states count for a period | `vendix-analytics-metrics` |
 | Decisive business-rule analysis before planning revenue, billing, subscriptions, pricing, commissions, checkout, inventory, accounting, or payments changes | `vendix-business-analysis` |
@@ -249,6 +252,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing `store_settings.restaurant.{qr_scan_behavior, qr_auto_fire, enable_table_checkout}` | `vendix-restaurant-table-qr` |
 | Editing `tables.public_token`, mesa QR generation, or qr_code_url regeneration | `vendix-restaurant-table-qr` |
 | Editing backend ecommerce/geocoding proxy (Nominatim/Overpass) | `vendix-address-geocoding` |
+| Editing cac:PartyTaxScheme, cbc:TaxLevelCode or the issuer party block in UBL | `vendix-dian-issuer-identity` |
 | Editing dispatch_note customer_address snapshot or PATCH /store/dispatch-notes/:id/address | `vendix-address-geocoding` |
 | Editing dispatch_routes or dispatch_route_stops schema or service | `vendix-dispatch-routes` |
 | Editing files in apps/backend/, creating modules, or working with Prisma | `vendix-backend` |
@@ -343,6 +347,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Poniendo un gateway, CDN, ALB o WAF delante del backend | `vendix-trust-proxy-chain` |
 | Preparing a bulk product upload file for a Vendix store | `product-catalog-normalizer` |
 | Printing documents with date fields | `vendix-date-timezone` |
+| Printing the issuer's fiscal status on an invoice, ticket or PDF | `vendix-dian-issuer-identity` |
 | Producing a strategic gap map of what mobile has vs what it lacks relative to web | `mobile-parity-audit` |
 | Producing an animated flow view of a feature to share as a Claude Artifact | `user-story-flows` |
 | Protecting backend endpoints with auth, roles, or permissions | `vendix-backend-auth` |
@@ -356,6 +361,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Re-developing solutions identified by a code review below 80% | `pr-code-review` |
 | Reaching the app via the local vhost vendix.com instead of localhost | `how-to-test` |
 | Reading frontend compile errors without a vendix_frontend container | `buildcheck-dev` |
+| Reading or writing fiscal_data.tax_responsibilities or tax_regime | `vendix-dian-issuer-identity` |
 | Reclaiming disk space taken by executed plans | `purge-plans` |
 | Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo | `linear-connect` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |

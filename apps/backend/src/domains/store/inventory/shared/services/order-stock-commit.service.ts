@@ -1,3 +1,4 @@
+import { lockOrderLifecycle } from '../../../orders/order-flow/order-lifecycle-lock.util';
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
@@ -22,6 +23,8 @@ import { resolveLineStockUnits } from '../../../products/services/packaging.util
  * note delivered) so stock deduction is uniform across all delivery paths.
  */
 export interface CommitOpts {
+  /** Events owned by the outer transaction, when one is supplied. */
+  afterCommit?: Array<() => void>;
   /**
    * Inventory movement recorded on `updateStock`:
    * - `'sale'`   → order-flow / POS / credit close (a retail/ecommerce sale).
@@ -139,7 +142,28 @@ export class OrderStockCommitService {
     opts: CommitOpts,
     tx?: Prisma.TransactionClient,
   ): Promise<CommitResult> {
-    const db: any = tx ?? this.prisma;
+    if (!tx) {
+      const afterCommit: Array<() => void> = [];
+      const result = await this.prisma.$transaction(
+        (client) => this.commitOrderDelivery(orderId, { ...opts, afterCommit }, client),
+        { timeout: 20000 },
+      );
+      for (const publish of afterCommit) {
+        try { publish(); } catch (error) {
+          this.logger.warn(`Stock committed; notification failed: ${(error as Error).message}`);
+        }
+      }
+      return result;
+    }
+    const db = tx;
+    const scopedOrder = await db.orders.findFirst({
+      where: { id: orderId }, select: { id: true, store_id: true },
+    });
+    if (!scopedOrder) return { totalCost: 0, committedItemCount: 0 };
+    const locked = await lockOrderLifecycle(tx, orderId, scopedOrder.store_id);
+    if (['cancelled', 'refunded'].includes(locked.state)) {
+      throw new VendixHttpException(ErrorCodes.ORD_STOCK_COMMIT_STATE_001);
+    }
 
     const order = await db.orders.findUnique({
       where: { id: orderId },
@@ -541,6 +565,7 @@ export class OrderStockCommitService {
           user_id: opts.userId ?? RequestContextService.getUserId() ?? undefined,
           order_item_id: line.order_item_id ?? undefined,
           create_movement: true,
+          afterCommit: opts.afterCommit,
         },
         tx,
       );

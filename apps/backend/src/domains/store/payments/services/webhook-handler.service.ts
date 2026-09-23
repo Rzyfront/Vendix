@@ -1,3 +1,5 @@
+import { SplitAccountPaymentService } from '../../tables/split-account-payment.service';
+import { lockOrderLifecycle } from '../../orders/order-flow/order-lifecycle-lock.util';
 import {
   Injectable,
   Logger,
@@ -20,7 +22,20 @@ import { PaymentLinksService } from '../../payment-links/payment-links.service';
 import { TableSessionsService } from '../../tables/table-sessions.service';
 import { InvoicingService } from '../../invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../invoicing/invoice-flow/invoice-flow.service';
-import { buildTaxBreakdown } from '@common/interfaces/tax-breakdown.interface';
+import {
+  INVOICE_AUTO_SEND_FAILED_ALERT,
+  isPresentialPosSale,
+} from '../../invoicing/pos/presential-pos-sale';
+import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
+import { buildOrderSaleTaxPayload } from '../utils/order-sale-tax-payload.util';
+
+interface WebhookPaymentTransition {
+  paymentId: number | null;
+  orderId: number | null;
+  transitioned: boolean;
+  shouldConfirmOrder: boolean;
+  reconciliationRequired: boolean;
+}
 
 // States considered terminal for compare-and-swap and idempotency checks.
 const PAYMENT_TERMINAL_STATES = [
@@ -44,20 +59,24 @@ export class WebhookHandlerService {
     private readonly storeContextRunner: StoreContextRunner,
     @Inject(forwardRef(() => OrderFlowService))
     private orderFlowService: OrderFlowService,
-    // Restaurant Suite (Obj 6): reconcile a deferred table close when a POS
-    // digital payment (wompi/wallet) is confirmed by the gateway webhook.
+    // Restaurant payment projection after gateway confirmation.
     private readonly tableSessionsService: TableSessionsService,
     // A.3 CP-facturacion-fixes: web auto-send on payment confirmation (ADR-03).
     // InvoicingModule exports both; PaymentsModule imports it (no cycle: the
     // invoicing graph never imports payments/orders/tables).
     private readonly invoicing: InvoicingService,
     private readonly invoiceFlow: InvoiceFlowService,
+    private readonly orderStockCommit: OrderStockCommitService,
     @Optional()
     @Inject(forwardRef(() => PaymentLinksService))
     private readonly paymentLinksService?: PaymentLinksService,
+    @Optional()
+    @Inject(forwardRef(() => SplitAccountPaymentService))
+    private readonly financialAccounts?: SplitAccountPaymentService,
   ) {}
 
   async handleWebhook(event: WebhookEvent): Promise<void> {
+    let claimedDedupKey: string | null = null;
     try {
       // Deduplication: INSERT ON CONFLICT DO NOTHING at the start of every
       // webhook handler. If this event was already processed, return 200
@@ -79,6 +98,7 @@ export class WebhookHandlerService {
         }
       }
 
+      claimedDedupKey = dedupKey;
       this.logger.log(
         `Processing webhook from ${event.processor}: ${event.eventType}`,
       );
@@ -104,6 +124,12 @@ export class WebhookHandlerService {
         `Webhook processed successfully: ${event.processor}:${event.eventType}`,
       );
     } catch (error) {
+      if (claimedDedupKey) {
+        await this.prisma.withoutScope().$executeRaw`
+          DELETE FROM webhook_event_dedup
+          WHERE processor = ${event.processor} AND event_id = ${claimedDedupKey}
+        `;
+      }
       this.logger.error(
         `Error processing webhook: ${error.message}`,
         error.stack,
@@ -119,6 +145,10 @@ export class WebhookHandlerService {
    */
   private extractDedupKey(event: WebhookEvent): string | null {
     const data = event.data;
+    // Wompi sends several statuses for the SAME transaction id.
+    if (event.processor === 'wompi' && data?.transaction?.id && data.transaction.status) {
+      return `${data.transaction.id}:${data.transaction.status}`;
+    }
 
     if (data?.id && typeof data.id === 'string') {
       return data.id;
@@ -225,162 +255,83 @@ export class WebhookHandlerService {
     status: string,
     gatewayResponse: any,
     options?: { matchedPayment?: any; extraUpdate?: Record<string, any> },
-  ): Promise<{
-    paymentId: number | null;
-    orderId: number | null;
-    transitioned: boolean;
-    shouldConfirmOrder: boolean;
-  }> {
-    try {
-      const result = await this.prisma
-        .withoutScope()
-        .$transaction(async (tx) => {
-          // Resolve the payment row. If the caller already located it via the
-          // Wompi multi-key priority (`findWompiPayment`), reuse that row to
-          // avoid a redundant lookup and guarantee both code paths target the
-          // exact same record.
-          let payment = options?.matchedPayment ?? null;
-          if (!payment) {
-            payment = await tx.payments.findFirst({
-              where: { gateway_reference: transactionId },
-            });
-            if (!payment) {
-              payment = await tx.payments.findFirst({
-                where: { transaction_id: transactionId },
-              });
-            }
-          }
-
-          if (!payment) {
-            this.logger.warn(
-              `Payment not found for transaction: ${transactionId}`,
-            );
-            return {
-              paymentId: null,
-              orderId: null,
-              transitioned: false,
-              shouldConfirmOrder: false,
-            };
-          }
-
-          // Idempotency: short-circuit if already in a terminal state.
-          if (
-            (PAYMENT_TERMINAL_STATES as readonly string[]).includes(
-              payment.state,
-            )
-          ) {
-            this.logger.log(
-              `Payment ${payment.id} already in final state '${payment.state}', skipping duplicate webhook`,
-            );
-            return {
-              paymentId: payment.id,
-              orderId: payment.order_id,
-              transitioned: false,
-              shouldConfirmOrder: false,
-            };
-          }
-
-          const updateData: any = {
-            state: status,
-            gateway_response: gatewayResponse,
-            updated_at: new Date(),
-            ...(options?.extraUpdate ?? {}),
-          };
-
-          if (status === 'succeeded' || status === 'captured') {
-            updateData.paid_at = new Date();
-          }
-
-          // Compare-and-swap: only update if the row is still NOT in a terminal
-          // state. If `count === 0`, another concurrent webhook already
-          // finalized this payment — log and let the other transaction own
-          // the order-state transition.
-          const cas = await tx.payments.updateMany({
-            where: {
-              id: payment.id,
-              state: { notIn: [...PAYMENT_TERMINAL_STATES] },
-            },
-            data: updateData,
-          });
-
-          if (cas.count === 0) {
-            this.logger.log(
-              `Payment ${payment.id} concurrent update detected, skipping (state changed mid-flight)`,
-            );
-            return {
-              paymentId: payment.id,
-              orderId: payment.order_id,
-              transitioned: false,
-              shouldConfirmOrder: false,
-            };
-          }
-
-          // Within the tx we only DECIDE whether the order should be confirmed
-          // (read-only aggregate against the just-updated payment). The actual
-          // confirmPayment call happens AFTER the tx commits — see below —
-          // because OrderFlowService opens its own tx and would deadlock here.
-          let shouldConfirmOrder = false;
-          if (status === 'succeeded' || status === 'captured') {
-            shouldConfirmOrder = await this.updateOrderStatus(
-              payment.order_id,
-              tx,
-            );
-          }
-
-          return {
-            paymentId: payment.id,
-            orderId: payment.order_id,
-            transitioned: true,
-            shouldConfirmOrder,
-          };
+  ): Promise<WebhookPaymentTransition> {
+    const client = this.prisma.withoutScope();
+    const initial = options?.matchedPayment ??
+      await client.payments.findFirst({ where: { gateway_reference: transactionId } }) ??
+      await client.payments.findFirst({ where: { transaction_id: transactionId } });
+    const noChange = { paymentId: null as number | null, orderId: null as number | null,
+      transitioned: false, shouldConfirmOrder: false, reconciliationRequired: false };
+    if (!initial) return noChange;
+    const order = await client.orders.findUnique({ where: { id: initial.order_id } });
+    if (!order) return noChange;
+    const approved = status === 'succeeded' || status === 'captured';
+    const result = await this.storeContextRunner.runInStoreContext<WebhookPaymentTransition>(order.store_id, () =>
+      this.prisma.$transaction(async (tx) => {
+        const locked = await lockOrderLifecycle(tx, order.id, order.store_id);
+        // matchedPayment and the initial lookup are hints, NOT authority after
+        // waiting for an order lock. In particular cancelPayment may have won.
+        const payment = await tx.payments.findFirst({
+          where: { id: initial.id, order_id: order.id },
         });
-
-      // Post-commit side effects: confirm or cancel the order via
-      // OrderFlowService, which manages its own tx, events, and audit log.
-      if (result.transitioned && result.orderId) {
-        if (result.shouldConfirmOrder) {
-          await this.confirmOrderPaid(result.orderId);
-        } else if (status === 'failed' || status === 'cancelled') {
-          await this.cancelOrderIfOpen(result.orderId, status, gatewayResponse);
+        if (!payment) return noChange;
+        const base = { ...noChange, paymentId: payment.id, orderId: payment.order_id };
+        const lateApproval = approved && (payment.state === 'cancelled' ||
+          ['cancelled', 'refunded'].includes(locked.state));
+        if ((PAYMENT_TERMINAL_STATES as readonly string[]).includes(payment.state) &&
+            !(approved && payment.state === 'cancelled')) {
+          // Resume a failed post-commit stock step on replay, without emitting
+          // a second monetary receipt. Never reopen a terminal order.
+          const needsReconciliation = (payment.gateway_response as Record<string, unknown> | null)?.reconciliation_required === true;
+          const resume = approved && !needsReconciliation && ['succeeded', 'captured'].includes(payment.state) &&
+            ['pending_payment', 'processing'].includes(locked.state);
+          return { ...base, shouldConfirmOrder: resume &&
+            await this.isOrderFullyPaid(tx, payment.order_id) };
         }
-      }
-
-      // C4 — emit `payment.received` so the accounting pipeline (auto-entries,
-      // AR, notifications) sees webhook-driven payments. Previously this event
-      // was emitted by the POS path (`payments.service.ts`) and the dispatch
-      // route cash-settlement path (`cash-settlement.service.ts`), but NEVER
-      // by the webhook path — so ecommerce / Wompi / Stripe / PayPal / bank
-      // transfer confirmations left the order paid WITHOUT posting the journal
-      // entry (DR banco 1110 / CR CxC o ingreso+IVA).
-      //
-      // The compare-and-swap above already guarantees `result.transitioned`
-      // is true for at most ONE webhook per payment; the accounting service's
-      // app-level duplicate guard on
-      // (org, source_type='payment.received', source_id=payment_id) is the
-      // second layer of defense. The helper itself is try/catch'd so a
-      // malformed payment row never poisons the webhook response — Wompi in
-      // particular would otherwise retry and could race the duplicate guard.
-      if (
-        result.transitioned &&
-        result.paymentId &&
-        (status === 'succeeded' || status === 'captured')
-      ) {
-        await this.emitPaymentReceivedAccounting(result.paymentId);
-      }
-
-      if (result.paymentId) {
-        this.logger.log(
-          `Payment ${result.paymentId} updated to status: ${status}`,
-        );
-      }
-      return result;
-    } catch (error) {
-      this.logger.error(
-        `Error updating payment status: ${error.message}`,
-        error.stack,
-      );
-      throw error;
+        const prior = payment.gateway_response;
+        const response = lateApproval ? {
+          ...(prior && typeof prior === 'object' && !Array.isArray(prior) ? prior : {}),
+          gateway_event: gatewayResponse,
+          reconciliation_required: true,
+          reconciliation_reason: 'approved_after_local_cancellation',
+          previous_payment_state: payment.state,
+          order_state: locked.state,
+        } : payment.financial_account_id ? {
+          ...(gatewayResponse && typeof gatewayResponse === 'object' ? gatewayResponse : { gateway_event: gatewayResponse }),
+          financial_request: (prior as any)?.financial_request,
+        } : gatewayResponse;
+        const cas = await tx.payments.updateMany({
+          where: { id: payment.id, order_id: order.id,
+            state: lateApproval ? payment.state : { notIn: [...PAYMENT_TERMINAL_STATES] } },
+          data: { state: status, gateway_response: response, updated_at: new Date(),
+            ...(approved ? { paid_at: new Date() } : {}), ...(options?.extraUpdate ?? {}) },
+        });
+        if (cas.count === 0) return base;
+        return { ...base, transitioned: true, reconciliationRequired: lateApproval,
+          shouldConfirmOrder: approved && !lateApproval &&
+            ['pending_payment', 'processing'].includes(locked.state) &&
+            await this.isOrderFullyPaid(tx, payment.order_id) };
+      }),
+    );
+    // Money is recorded independently from delivery. An approval after a local
+    // cancellation needs reconciliation, NOT the regular sale-revenue event.
+    if (result.transitioned && approved && !result.reconciliationRequired && result.paymentId) {
+      await this.emitPaymentReceivedAccounting(result.paymentId);
     }
+    if (result.orderId && result.shouldConfirmOrder) {
+      await this.confirmOrderPaid(result.orderId, result.paymentId!);
+    } else if (result.transitioned && result.orderId && ['failed', 'cancelled'].includes(status)) {
+      await this.cancelOrderIfOpen(result.orderId, status, gatewayResponse);
+    }
+    return result;
+  }
+
+  private async isOrderFullyPaid(tx: Prisma.TransactionClient, orderId: number): Promise<boolean> {
+    const order = await tx.orders.findUnique({ where: { id: orderId }, include: { payments: true } });
+    if (!order || order.active_financial_split_id) return false;
+    const paid = order.payments.filter((p) => ['succeeded', 'captured'].includes(p.state))
+      .reduce((total, p) => total.plus(p.amount), new Prisma.Decimal(0));
+    return paid.greaterThanOrEqualTo(order.grand_total);
   }
 
   /**
@@ -397,7 +348,7 @@ export class WebhookHandlerService {
     try {
       const client = this.prisma.withoutScope();
       const order = await client.orders.findUnique({ where: { id: orderId } });
-      if (!order) return;
+      if (!order || order.active_financial_split_id) return;
       if (!(ORDER_OPEN_STATES as readonly string[]).includes(order.state)) {
         return;
       }
@@ -458,6 +409,7 @@ export class WebhookHandlerService {
    * theoretically let a second entry slip through.
    */
   private async emitPaymentReceivedAccounting(paymentId: number): Promise<void> {
+    let financial = false;
     try {
       const client = this.prisma.withoutScope();
       const payment = await client.payments.findUnique({
@@ -483,6 +435,12 @@ export class WebhookHandlerService {
 
       const order = payment.orders;
       const storeId = order.store_id;
+      if (payment.financial_account_id) {
+        financial = true;
+        if (!this.financialAccounts) throw new Error('Financial account reconciliation provider unavailable');
+        await this.storeContextRunner.runInStoreContext(storeId, () => this.financialAccounts!.reconcilePayment(payment.id));
+        return;
+      }
 
       // Tax breakdown (typed per fiscal type so accounting posts one journal
       // line per type: IVA → 2408, INC → 2436, ICA → 241205). Mirrors the
@@ -498,6 +456,11 @@ export class WebhookHandlerService {
         where: { order_id: order.id },
         select: {
           total_price: true,
+          // Descuento de orden: ver `buildOrderSaleTaxPayload`.
+          quantity: true,
+          tax_amount_item: true,
+          weight: true,
+          price_unit_quantity: true,
           // `is_inclusive` no se lee: `total_price` ya es el NETO en
           // ambas ramas del escritor. Ver el comentario extenso en
           // `payments.service.ts`.
@@ -506,8 +469,12 @@ export class WebhookHandlerService {
           },
         },
       });
-      const tax_breakdown = buildTaxBreakdown(
-        orderItemsWithTaxes.flatMap((item) =>
+      // Impuesto del envío (copia congelada en la orden): el helper
+      // compartido con el POS separa el flete NETO (414505) del impuesto
+      // (2408/2436) y lo suma al desglose. Antes este emisor omitía
+      // `shipping_amount`: el asiento de una orden con envío no cuadraba.
+      const sale_tax = buildOrderSaleTaxPayload({
+        product_tax_rows: orderItemsWithTaxes.flatMap((item) =>
           (item.order_item_taxes || []).map((tax) => ({
             ...tax,
             // F-111 — misma regla documentada en `payments.service.ts`: la
@@ -516,7 +483,9 @@ export class WebhookHandlerService {
             taxable_amount: Number(item.total_price || 0),
           })),
         ),
-      );
+        order,
+        order_items: orderItemsWithTaxes,
+      });
 
       const systemPaymentMethod =
         payment.store_payment_method?.system_payment_method;
@@ -535,14 +504,16 @@ export class WebhookHandlerService {
         order_number: order.order_number,
         amount: Number(payment.amount),
         subtotal_amount: Number(order.subtotal_amount || 0),
-        tax_amount: Number(order.tax_amount || 0),
-        tax_breakdown,
+        tax_amount: sale_tax.tax_amount,
+        shipping_amount: sale_tax.shipping_amount,
+        tax_breakdown: sale_tax.tax_breakdown,
         // Webhooks do not compute suffered withholding on the fly (the POS
         // path resolves it via `WithholdingFlow.resolveSuffered` inside its
         // transaction). Leave the breakdown empty; the listener + auto-entry
         // handle `undefined` / `[]` as "no withholding lines".
         withholding_breakdown: [],
-        discount_amount: Number(order.discount_amount || 0),
+        // Parte de BASE del descuento de orden (impuesto neto proyectado).
+        discount_amount: sale_tax.discount_amount,
         tip_amount: Number(order.tip_amount || 0),
         currency: payment.currency || order.currency || 'COP',
         payment_method: paymentMethodLabel,
@@ -558,6 +529,7 @@ export class WebhookHandlerService {
         `payment.received emitted for webhook payment ${payment.id} (order ${order.id}, method=${paymentMethodLabel})`,
       );
     } catch (error) {
+      if (financial) throw error;
       this.logger.error(
         `Failed to emit payment.received for webhook payment ${paymentId}: ${
           error instanceof Error ? error.message : String(error)
@@ -642,33 +614,59 @@ export class WebhookHandlerService {
    * Invokes OrderFlowService.confirmPayment in store context. Used after
    * the payment-update tx commits so we don't nest transactions.
    */
-  private async confirmOrderPaid(orderId: number): Promise<void> {
+  private async confirmOrderPaid(orderId: number, paymentId?: number): Promise<void> {
     try {
       const client = this.prisma.withoutScope();
       const order = await client.orders.findUnique({ where: { id: orderId } });
       if (!order) return;
-      if (order.state !== 'pending_payment') return;
+      if (!['pending_payment', 'processing'].includes(order.state)) return;
 
       await this.storeContextRunner.runInStoreContext(
         order.store_id,
         async () => {
-          await this.orderFlowService.confirmPayment(orderId);
+          const confirmed = await this.orderFlowService.confirmPayment(orderId);
+          if (!confirmed || !['processing', 'shipped'].includes(confirmed.state)) return;
 
-          // Restaurant Suite (Obj 6): if this order backs a still-open table
-          // session, the POS deferred its close for a digital payment
-          // (wompi/wallet). Now that the gateway confirmed the charge, close
-          // the session — `closeSession` flips the table to `cleaning` and
-          // emits `session_closed` to staff + comensal streams. No-op for
-          // non-restaurant / non-table orders (findFirst returns null).
-          const openSession = await this.prisma.table_sessions.findFirst({
-            where: { order_id: orderId, closed_at: null },
-            select: { id: true },
-          });
-          if (openSession) {
-            await this.tableSessionsService.closeSession(openSession.id);
-            this.logger.log(
-              `Table session ${openSession.id} closed after digital payment confirmation of order ${orderId}`,
-            );
+          // El pago y la confirmación ya hicieron commit. Una mesa pagada
+          // permanece abierta y ocupada hasta que el mesero la cierre.
+          if (paymentId != null) {
+            try {
+              await this.tableSessionsService.projectOrderPaymentToTableSession(
+                orderId,
+                paymentId,
+              );
+            } catch (projectionError) {
+              // El webhook no debe deshacer ni reintentar un cobro confirmado.
+              // La proyección tipada queda registrada para conciliación.
+              this.logger.error(
+                `POS_TABLE_SESSION_PROJECTION_FAILED_001 order=${orderId} payment=${paymentId}: ${(projectionError as Error)?.message ?? String(projectionError)}`,
+                projectionError instanceof Error ? projectionError.stack : undefined,
+              );
+            }
+          }
+
+          // El dinero acaba de ENTRAR: éste es el punto donde el inventario
+          // del carril digital diferido puede salir. Ver
+          // `commitConfirmedPosStock`. Va inmediatamente después de
+          // `confirmPayment` (el pago ya es `succeeded` y la orden dejó
+          // `pending_payment`) y antes de cerrar la mesa o mandar la factura,
+          // porque el movimiento de stock es el hecho económico y esos dos son
+          // consecuencias. Un fallo de entrega no deshace el dinero recibido.
+          await this.commitConfirmedPosStock(orderId);
+
+          // Venta presencial (POS o mesa QR `dine_in`, ver `isPresentialPosSale`)
+          // con confirmación aplicada: `confirmPayment` ya disparó
+          // `POS_SALE_COMPLETED_EVENT` con la MISMA compuerta y
+          // `PosSaleCompletedListener` es el único dueño de su emisión
+          // (crea/valida/transmite respetando `invoicing.pos.auto_emit`, y marca
+          // `fiscal_alert_code` si falla). Enviar aquí también la misma factura
+          // correría en paralelo con el listener: `InvoiceFlowService.send`
+          // no tiene CAS y la transmitiría dos veces.
+          if (
+            isPresentialPosSale(order) &&
+            (confirmed as any).payment_confirmation_applied === true
+          ) {
+            return;
           }
 
           // A.3 CP-facturacion-fixes (ADR-03): web auto-send on payment
@@ -689,6 +687,125 @@ export class WebhookHandlerService {
         `Failed to confirm order ${orderId} after payment: ${err.message}`,
         err.stack,
       );
+      throw err;
+    }
+  }
+
+  /**
+   * Ancla del consumo de stock para el carril de pago DIFERIDO a pasarela.
+   *
+   * `PaymentsService.processPosPayment` ya no descuenta stock cuando el método
+   * es digital (`wompi` / `wallet`): en ese momento el pago sólo está
+   * PROMETIDO y la orden queda en `pending_payment`. El inventario sale aquí,
+   * cuando el gateway confirma el cargo — un solo hecho económico, un solo
+   * movimiento.
+   *
+   * La compuerta reproduce, contra la orden PERSISTIDA, el mismo predicado que
+   * el POS evaluaba al cobrar (`isDirectDeliveryFinished`):
+   *
+   *  - `channel = 'pos'` — sólo el mostrador da por entregada la mercancía al
+   *    cobrar. Una orden de ecommerce conserva su reserva hasta que el flujo
+   *    de orden llega a `finished`; consumirla aquí sería adelantar la salida
+   *    de un pedido que todavía no se despachó.
+   *  - `delivery_type ≠ home_delivery` — el domicilio difiere la entrega al
+   *    despacho.
+   *  - sin líneas serializadas (QUI-431) — el serializado se cobra pero se
+   *    entrega por remisión, con su propio ciclo de seriales.
+   *
+   * `requires_payment` no se reevalúa: un pago digital sólo existe si era
+   * verdadero (ver `isDeferredDigitalMethod`, que devuelve `false` sin él).
+   *
+   * Idempotente por construcción: `commitOrderDelivery` reclama cada línea con
+   * un UPDATE condicional sobre `order_items.inventory_committed`, así que ni
+   * un webhook repetido, ni una orden que más tarde alcance `finished`, ni una
+   * orden legada que ya descontó al cobrar vuelven a mover stock.
+   *
+   * `blockOnInsufficient: false` — a diferencia del cobro en banda, aquí el
+   * dinero YA entró y la transacción del pago ya commiteó: lanzar
+   * `INV_STOCK_002` no desharía el cargo, sólo dejaría el libro peor (plata
+   * adentro, mercancía sin mover). El faltante residual se descuenta con piso
+   * 0 y queda logueado como alerta, la misma semántica que la entrega de
+   * remisión. En el caso normal no hay faltante: la reserva creada al cobrar
+   * sigue activa y `commitOrderDelivery` la libera antes de asignar.
+   *
+   * Un fallo se registra para conciliación y se propaga al llamador. La
+   * pasarela puede recibir ACK según su controlador; esto no promete retry
+   * automático. Un replay puede reanudar sin duplicar el cobro ni el claim.
+   */
+  private async commitConfirmedPosStock(orderId: number): Promise<void> {
+    try {
+      const order = await this.prisma.withoutScope().orders.findUnique({
+        where: { id: orderId },
+        select: {
+          id: true,
+          channel: true,
+          delivery_type: true,
+          order_items: {
+            select: {
+              products: { select: { requires_serial_numbers: true } },
+            },
+          },
+        },
+      });
+      if (!order) return;
+
+      if (order.channel !== order_channel_enum.pos) return;
+      if (order.delivery_type === order_delivery_type_enum.home_delivery) {
+        return;
+      }
+      const hasSerialized = (order.order_items ?? []).some(
+        (item) => item.products?.requires_serial_numbers === true,
+      );
+      if (hasSerialized) return;
+
+      const commit = await this.orderStockCommit.commitOrderDelivery(orderId, {
+        movementType: 'sale',
+        blockOnInsufficient: false,
+        consumeSerials: true,
+        reason: 'POS Sale (pago digital confirmado)',
+      });
+
+      await this.recordStockReconciliation(orderId, null);
+      if (commit.committedItemCount > 0) {
+        this.logger.log(
+          `Order ${orderId}: stock consumido tras confirmación del gateway — ` +
+            `${commit.committedItemCount} línea(s), costo ${commit.totalCost}`,
+        );
+      }
+    } catch (err: any) {
+      await this.recordStockReconciliation(orderId, err.message);
+      this.logger.error(
+        `Order ${orderId}: falló el consumo de stock tras confirmar el pago digital: ${err.message}`,
+        err.stack,
+      );
+      throw err;
+    }
+  }
+
+  /** Persistent, order-scoped recovery signal; a warning alone is not a queue. */
+  private async recordStockReconciliation(orderId: number, error: string | null): Promise<void> {
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        const initial = await tx.orders.findFirst({ where: { id: orderId }, select: { store_id: true } });
+        if (!initial) return;
+        await lockOrderLifecycle(tx, orderId, initial.store_id);
+        const order = await tx.orders.findFirst({ where: { id: orderId }, select: { internal_notes: true } });
+        let notes: Record<string, any> = {};
+        try { notes = order?.internal_notes ? JSON.parse(order.internal_notes) : {}; }
+        catch { notes = { notes: order?.internal_notes ?? '' }; }
+        if (!notes || typeof notes !== 'object' || Array.isArray(notes)) notes = { notes: order?.internal_notes ?? '' };
+        const metadata = notes._flow_metadata ?? {};
+        if (error === null && !metadata.stock_reconciliation_required) return;
+        await tx.orders.updateMany({
+          where: { id: orderId, store_id: initial.store_id },
+          data: { internal_notes: JSON.stringify({ ...notes, _flow_metadata: {
+            ...metadata, stock_reconciliation_required: error !== null,
+            stock_reconciliation_error: error, stock_reconciliation_at: new Date().toISOString(),
+          } }) },
+        });
+      });
+    } catch (recordError) {
+      this.logger.error(`Order ${orderId}: failed to persist stock reconciliation: ${(recordError as Error).message}`);
     }
   }
 
@@ -721,17 +838,14 @@ export class WebhookHandlerService {
       }
 
       // Compuerta de auto-emisión: el carril lo decide DÓNDE se consume la
-      // venta, no el medio de pago ni el tipo de pedido. `pos` es siempre
-      // mostrador; `dine_in` también, aunque el `channel` sea `ecommerce`
-      // porque una mesa abierta por QR nace con channel:'ecommerce' +
-      // delivery_type:'dine_in' (table-sessions.service.ts) para que los
-      // reportes distingan la cuenta iniciada por QR de la iniciada en caja.
-      // El comensal está en el local y lo cobra el mesero: sin la mitad
-      // `dine_in` aquí, apagar "tienda en línea" dejaría sin facturar las
+      // venta, no el medio de pago ni el tipo de pedido. Definición única en
+      // `isPresentialPosSale` (pos, o mesa QR ecommerce + dine_in): sin la
+      // mitad `dine_in`, apagar "tienda en línea" dejaría sin facturar las
       // mesas de un restaurante entero.
-      const isCounterLane =
-        channel === order_channel_enum.pos ||
-        deliveryType === order_delivery_type_enum.dine_in;
+      const isCounterLane = isPresentialPosSale({
+        channel,
+        delivery_type: deliveryType,
+      });
       const invoicingSettings = isCounterLane
         ? await this.invoicing.getPosInvoicingSettings()
         : await this.invoicing.getEcommerceInvoicingSettings();
@@ -781,7 +895,7 @@ export class WebhookHandlerService {
         }
         await this.prisma.orders.update({
           where: { id: orderId },
-          data: { fiscal_alert_code: 'INVOICE_AUTO_SEND_FAILED' },
+          data: { fiscal_alert_code: INVOICE_AUTO_SEND_FAILED_ALERT },
         });
       } catch (flagErr) {
         this.logger.warn(

@@ -126,6 +126,7 @@ import {
 } from './services/product-search-trigram.util';
 import type { SearchRankMeta } from '@common/responses/response.interface';
 import { createHash } from 'node:crypto';
+import { assertProductTaxComboValid } from './services/product-tax-combination.util';
 import type { SearchTextFieldMap } from '@common/utils/search-text.util';
 import type {
   ActiveProductPromotion,
@@ -1199,8 +1200,11 @@ export class ProductsService {
                 id: true,
                 tax_type: true,
                 is_inclusive: true,
+                name: true,
                 tax_rates: {
-                  select: { is_inclusive: true },
+                  // `store_id` alimenta la regla «una tarifa por categoría»
+                  // (P1-4): solo cuentan las tarifas de la tienda + globales.
+                  select: { is_inclusive: true, store_id: true },
                   orderBy: { id: 'asc' },
                 },
               },
@@ -1213,6 +1217,10 @@ export class ProductsService {
               );
               throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_001);
             }
+
+            // P1-4 — combinación legal: una categoría por tax_type, IVA⊕INC,
+            // sin retenciones, una tarifa por categoría (400 PROD_TAX_COMBO_001).
+            assertProductTaxComboValid(tax_categories, { storeId: store_id });
 
             // F4 — comercio no responsable de IVA no puede asignar IVA.
             await this.assertProductVatAssignmentAllowed(tax_categories);
@@ -4164,8 +4172,11 @@ export class ProductsService {
                 id: true,
                 tax_type: true,
                 is_inclusive: true,
+                name: true,
                 tax_rates: {
-                  select: { is_inclusive: true },
+                  // `store_id` alimenta la regla «una tarifa por categoría»
+                  // (P1-4): solo cuentan las tarifas de la tienda + globales.
+                  select: { is_inclusive: true, store_id: true },
                   orderBy: { id: 'asc' },
                 },
               },
@@ -4173,6 +4184,11 @@ export class ProductsService {
             if (tax_categories.length !== tax_category_ids.length) {
               throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_001);
             }
+            // P1-4 — misma regla de combinación que el create, ANTES de tocar
+            // las asignaciones (ids vacíos = limpiar, siempre válido).
+            assertProductTaxComboValid(tax_categories, {
+              storeId: existingProduct.store_id,
+            });
             // F4 — resolver tax_type de las categorías para bloquear IVA en
             // comercios no responsables antes de escribir las asignaciones.
             await this.assertProductVatAssignmentAllowed(tax_categories);

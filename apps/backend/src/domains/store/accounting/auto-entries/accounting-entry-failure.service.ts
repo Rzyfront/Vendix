@@ -37,6 +37,12 @@ export interface AccountingEntryRetryJob {
  * - `SKIPPED_MISSING_MAPPING` menos de dos líneas válidas: falta la clave de
  *                              mapeo o la cuenta PUC. Es un DEFECTO de
  *                              configuración contable, no una decisión.
+ * - `SKIPPED_PARTIAL_COVERAGE_UNSCALABLE` factura de una orden a medio
+ *                              pagar cuyo asiento no se puede escalar al saldo
+ *                              no cubierto (asiento de entrada descuadrado o
+ *                              retención mayor que el saldo). Postearla
+ *                              completa duplicaría lo ya reconocido por los
+ *                              pagos; requiere revisión manual.
  * - `DETECTED_TAX_MISMATCH`   F-111 (CP-pos-exclusive-tax-double-charge) —
  *                              EXCEPCIÓN deliberada al contrato `SKIPPED_*`
  *                              de arriba: acá NO se omitió nada, el asiento
@@ -62,6 +68,7 @@ export type AutoEntrySkipCause =
   | 'SKIPPED_FLOW_DISABLED'
   | 'SKIPPED_AREA_INACTIVE'
   | 'SKIPPED_MISSING_MAPPING'
+  | 'SKIPPED_PARTIAL_COVERAGE_UNSCALABLE'
   | 'DETECTED_TAX_MISMATCH';
 
 /** Contexto mínimo para dejar rastro de una omisión sin asiento. */

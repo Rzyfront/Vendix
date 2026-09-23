@@ -162,6 +162,7 @@ describe('PopOrderConfirmationModalComponent', () => {
     ) as HTMLButtonElement;
     expect(closeBtn).not.toBeNull();
     closeBtn.click();
+    fixture.detectChanges();
 
     expect(newPurchaseEmitted).toBe(true);
     expect(viewOrderEmitted).toBe(false);

@@ -1,0 +1,58 @@
+{
+  "success": true,
+  "message": "Items agregados a la cuenta",
+  "data": {
+    "id": 102,
+    "store_id": 10,
+    "table_id": 10,
+    "order_id": 1102,
+    "opened_by": 241,
+    "opened_at": "2026-09-23T04:04:12.626Z",
+    "closed_at": null,
+    "paid_at": null,
+    "guest_count": null,
+    "created_at": "2026-09-23T04:04:12.626Z",
+    "updated_at": "2026-09-23T04:04:12.624Z",
+    "table": {
+      "id": 10,
+      "name": "QA ADR10 Mesas 20260923",
+      "zone": "QA ADR10",
+      "status": "occupied",
+      "waiter": null
+    },
+    "order": {
+      "id": 1102,
+      "state": "draft",
+      "grand_total": "10000",
+      "subtotal_amount": "10000",
+      "tax_amount": "0",
+      "discount_amount": "0",
+      "customer": null,
+      "customer_alias": "QA ADR10 Mesas",
+      "is_mixed_order": false,
+      "order_items": [
+        {
+          "id": 1813,
+          "product_id": 425,
+          "product_variant_id": null,
+          "variant_label": null,
+          "product_name": "Test de servicio ",
+          "quantity": 1,
+          "unit_price": "10000",
+          "total_price": "10000",
+          "final_unit_price": 10000,
+          "final_total_price": 10000,
+          "inventory_consumed_at_fire": false,
+          "item_type": "service",
+          "is_takeaway": false,
+          "delivered_at": null,
+          "delivered_by_user_id": null,
+          "cancelled_at": null,
+          "cancellation_reason": null,
+          "cancellation_type": null,
+          "kitchen_ticket_items": []
+        }
+      ]
+    }
+  }
+}

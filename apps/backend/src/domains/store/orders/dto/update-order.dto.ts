@@ -58,6 +58,13 @@ export class UpdateOrderDto extends PartialType(CreateOrderDto) {
   @MaxLength(1000)
   internal_notes?: string;
 
+  // Motivo aportado por el operador al forzar delivered -> processing.
+  // No es una columna de orders; OrdersService lo extrae antes del update.
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  reason?: string;
+
   @IsOptional()
   @IsInt()
   shipping_method_id?: number;

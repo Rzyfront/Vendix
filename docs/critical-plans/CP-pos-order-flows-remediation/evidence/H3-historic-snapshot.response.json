@@ -1,0 +1,7 @@
+{
+  "success": true,
+  "message": "POS payment processed successfully",
+  "error_code": null,
+  "order_id": 1126,
+  "payment_id": 822
+}

@@ -15,6 +15,10 @@ describe('AutoEntryService credit note reversal', () => {
       chart_of_accounts: {
         findFirst: jest.fn().mockResolvedValue({ id: 1 }),
       },
+      // NC sin factura de origen omitida ⇒ carril histórico (CR 1305).
+      withoutScope: jest.fn().mockReturnValue({
+        invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+      }),
       ...overrides.prisma,
     };
     const accountMapping = {

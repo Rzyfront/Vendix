@@ -15,7 +15,12 @@ import {
   IsDateString,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
-import { order_state_enum, payments_state_enum } from '@prisma/client';
+import {
+  order_channel_enum,
+  order_delivery_type_enum,
+  order_state_enum,
+  payments_state_enum,
+} from '@prisma/client';
 
 export class CreateOrderItemDto {
   @IsOptional()
@@ -81,6 +86,34 @@ export class CreateOrderItemDto {
   @Transform(({ value }) => parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 2 })
   tax_amount_item?: number;
+
+  /**
+   * QUI-INC — categoría fiscal DECLARADA para esta línea (`tax_categories.id`).
+   *
+   * El DTO sólo trae el snapshot agregado del impuesto (`tax_rate`,
+   * `tax_amount_item`): números, sin clasificación. La clasificación
+   * (`tax_type`: IVA / INC / ICA …) vive ÚNICAMENTE en `tax_categories`, y
+   * `OrdersService.create` la resuelve normalmente desde
+   * `product_tax_assignments` del producto. Cuando el producto no tiene
+   * asignaciones —línea sin `product_id`, producto sin configurar— ese camino
+   * no devuelve nada y antes se fabricaba un `tax_type: 'iva'` junto al
+   * `prisma.create`. Este campo es la alternativa honesta: el cliente declara
+   * DE QUÉ FILA del catálogo sale el impuesto y el servidor lee ahí
+   * `tax_type` / `tax_name` / `tax_rate` / `is_inclusive`.
+   *
+   * Opcional y no autoritativo: si el producto SÍ tiene asignaciones, éstas
+   * mandan (cero regresión). Si el id no existe en el alcance de la tienda ni
+   * de su organización, la creación se rechaza con
+   * `ORD_ITEM_TAX_CATEGORY_UNRESOLVABLE_001` (422) — nunca se inventa el tipo.
+   *
+   * Mismo campo y misma semántica que `PosItemDto.tax_category_id` del carril
+   * de cobro (`POST /store/payments/pos`), que el POS web ya emite hoy desde
+   * `pos-order.service.ts:mapCartItemForPos`.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  tax_category_id?: number;
 
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
@@ -203,12 +236,17 @@ export class CreateOrderDto {
   /**
    * Bug 7 — Tipo de entrega de la orden. Necesario para que
    * `resolveInitialOrderState` decida si la orden va a `pending_delivery`
-   * cuando además incluye un item `product_type='prepared'`. Default histórico
-   * (no enviado) se trata como `pickup`.
+   * cuando además incluye un item `product_type='prepared'`. Si se omite,
+   * `orders.create` persiste `direct_delivery`, igual que el default del schema.
    */
   @IsOptional()
-  @IsIn(['pickup', 'home_delivery', 'direct_delivery', 'other', 'dine_in'])
-  delivery_type?: 'pickup' | 'home_delivery' | 'direct_delivery' | 'other' | 'dine_in';
+  @IsEnum(order_delivery_type_enum)
+  delivery_type?: order_delivery_type_enum;
+
+  /** Canal de origen; si se omite, `orders.create` persiste `pos`. */
+  @IsOptional()
+  @IsEnum(order_channel_enum)
+  channel?: order_channel_enum;
 
   @IsOptional()
   @IsEnum(payments_state_enum)

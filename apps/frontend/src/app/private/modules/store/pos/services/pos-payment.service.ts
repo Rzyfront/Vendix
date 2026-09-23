@@ -18,8 +18,21 @@ import {
 import {
   PosShippingAddress,
   PosShippingSaleData,
+  posShippingRateIdForPayload,
 } from '../models/shipping.model';
 import { PosApiService } from './pos-api.service';
+import type { TableStatus } from '../../restaurant-ops/tables/interfaces';
+
+export interface PosSalePaymentResponse {
+  /** flow/pay reuses the checkout step but has no success flag. */
+  success?: boolean;
+  order?: any;
+  payment?: any;
+  message?: string;
+  change?: number;
+  nextAction?: { type: 'redirect' | '3ds' | 'await' | 'none'; url?: string; data?: any };
+  previous_table_status?: TableStatus;
+}
 
 // Re-export types for component usage
 export type {
@@ -380,7 +393,7 @@ export class PosPaymentService {
     // QUI-653 — decisión "Para llevar" de la orden (el shell la computa como
     // `isTakeawayOrder`). Se estampa en las líneas sin mutar el carrito.
     takeawayOrder?: boolean | null,
-  ): Observable<any> {
+  ): Observable<PosSalePaymentResponse> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
 
@@ -515,6 +528,9 @@ export class PosPaymentService {
 
           return {
             success: true,
+            ...(data.previous_table_status != null
+              ? { previous_table_status: data.previous_table_status as TableStatus }
+              : {}),
             order: data.order,
             payment: mappedPayment,
             message: data.message,
@@ -545,6 +561,7 @@ export class PosPaymentService {
       initial_payment: number;
       initial_payment_method_id?: number;
     },
+    editingOrderId?: number | null,
   ): Observable<any> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
@@ -578,6 +595,11 @@ export class PosPaymentService {
       customer_email: cartState.customer.email,
       customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
+      // A reopened draft is already a persisted order. Reuse its id instead
+      // of materializing a second row when this shipping checkout charges it.
+      ...((editingOrderId ?? cartState.linkedOrderId) != null
+        ? { order_id: editingOrderId ?? cartState.linkedOrderId }
+        : {}),
       // QUI-653 — el envío (recoger en tienda o domicilio) siempre se empaca
       // para llevar: estampa `is_takeaway` en todas las líneas para que el
       // ticket KDS lo muestre. Esta función solo sirve al flujo de envío.
@@ -599,6 +621,9 @@ export class PosPaymentService {
       shipping_address_snapshot: shippingData.shippingAddress,
       ...(shippingData.shippingAddressId
         ? { shipping_address_id: shippingData.shippingAddressId }
+        : {}),
+      ...(posShippingRateIdForPayload(shippingData) != null
+        ? { shipping_rate_id: posShippingRateIdForPayload(shippingData) }
         : {}),
       // POS meta
       register_id: register_id,
@@ -623,11 +648,9 @@ export class PosPaymentService {
         initial_payment_method_id: creditConfig.initial_payment_method_id,
       };
     } else if (paymentRequest) {
-      // Pago del método elegido. Incluye cash_on_delivery: su
-      // `store_payment_method_id` se envía igual y el processor backend
-      // (cash-on-delivery.processor) devuelve 'pending', dejando la orden en
-      // pending_payment. Ya NO existe el eje "contra entrega" sin pago: siempre
-      // se envía el pago producido por el collector.
+      // Pago del método elegido. Incluye contra entrega: el backend usa el
+      // `processing_mode` del método para crear el pago `pending`, conservar
+      // el saldo y dejar la orden en `pending_payment` hasta el recaudo.
       sale_data['requires_payment'] = true;
       sale_data['payment_form'] = '1'; // DIAN: contado
       sale_data['store_payment_method_id'] = parseInt(
@@ -918,6 +941,9 @@ export class PosPaymentService {
             ...(shipping.shippingAddressId
               ? { shipping_address_id: shipping.shippingAddressId }
               : {}),
+            ...(posShippingRateIdForPayload(shipping) != null
+              ? { shipping_rate_id: posShippingRateIdForPayload(shipping) }
+              : {}),
           }
         : {}),
       ...(register_id ? { register_id } : {}),
@@ -1089,8 +1115,15 @@ export class PosPaymentService {
       // `tableId` como keys de primer nivel (rechaza 400 SYS_VALIDATION_001).
       // Los anidamos en `metadata` para que el backend los consuma como
       // snake_case en el evento de cierre de mesa, no como body-level fields.
+      //
+      // `metadata` es carga OPACA de auditoría y su contrato está CERRADO en
+      // `PaymentMetadataDto` (backend): una llave no declarada se rechaza con
+      // 400. Aquí ya NO viaja `is_pos_payment`: esa bandera desactivaba en el
+      // servidor la validación de orden y la compuerta anti-sobrepago, o sea
+      // que el cliente elegía qué validaciones corrían. El cobro de orden
+      // adoptada no la necesita — su monto es el saldo pendiente de la orden,
+      // que es justo lo que el servidor valida.
       metadata: {
-        is_pos_payment: true,
         is_adopted_order: true,
         register_id,
         seller_user_id: user_id,

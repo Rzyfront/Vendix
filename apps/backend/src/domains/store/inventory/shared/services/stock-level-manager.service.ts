@@ -41,6 +41,9 @@ export type ReservationRefType =
   | 'dispatch_note';
 
 export interface UpdateStockParams {
+  /** Optional transaction-owner queue: publish only after its commit succeeds. */
+  afterCommit?: Array<() => void>;
+
   product_id: number;
   variant_id?: number;
   location_id: number;
@@ -345,7 +348,7 @@ export class StockLevelManager {
     await this.syncProductStock(prisma, params.product_id, params.variant_id);
 
     // 8. Emitir evento
-    this.eventEmitter.emit('stock.updated', {
+    const publishUpdated = () => this.eventEmitter.emit('stock.updated', {
       product_id: params.product_id,
       variant_id: params.variant_id,
       location_id: params.location_id,
@@ -354,6 +357,8 @@ export class StockLevelManager {
       movement_type: params.movement_type,
       user_id: params.user_id,
     } as StockUpdatedEvent);
+    if (params.afterCommit) params.afterCommit.push(publishUpdated);
+    else publishUpdated();
 
     // 9. Emitir alerta de stock bajo si aplica
     const settings = await this.loadMergedSettingsForStore(
@@ -369,7 +374,7 @@ export class StockLevelManager {
       updated_stock.quantity_available >= 0
     ) {
       if (productForTracking.store_id) {
-        this.eventEmitter.emit('stock.low', {
+        const publishLow = () => this.eventEmitter.emit('stock.low', {
           store_id: productForTracking.store_id,
           location_id: params.location_id,
           product_id: params.product_id,
@@ -377,6 +382,8 @@ export class StockLevelManager {
           quantity: updated_stock.quantity_available,
           threshold: low_threshold,
         });
+        if (params.afterCommit) params.afterCommit.push(publishLow);
+        else publishLow();
       }
     }
 

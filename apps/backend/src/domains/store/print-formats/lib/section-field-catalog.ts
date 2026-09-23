@@ -31,7 +31,11 @@ const HEADER_FIELDS: SectionFieldCatalogEntry[] = [
   { id: 'f_name', key: 'store.name', label: 'Nombre Comercial', format: 'text', position: 'center' },
   { id: 'f_legal', key: 'store.legal_name', label: 'Razón Social', format: 'text', position: 'center' },
   { id: 'f_nit', key: 'store.tax_id', label: 'NIT / RUT', format: 'text', position: 'center' },
-  { id: 'f_regime', key: 'store.tax_regime', label: 'Régimen Fiscal', format: 'text', position: 'center' },
+  // `f_regime` conserva su id para no invalidar las plantillas ya guardadas
+  // (el toggle sigue siendo el mismo), pero su contenido cambió: ya no es el
+  // régimen —leyenda derogada con el art. 506 E.T.— sino el renglón de
+  // calidades del num. 12 del art. 11 de la Res. DIAN 000165/2023.
+  { id: 'f_regime', key: 'store.fiscal_qualities', label: 'Calidad Fiscal (DIAN)', format: 'text', position: 'center' },
   { id: 'f_resp', key: 'store.fiscal_responsibilities', label: 'Responsabilidades Fiscales', format: 'text', position: 'center' },
   { id: 'f_addr', key: 'store.address', label: 'Dirección', format: 'text', position: 'center' },
   { id: 'f_addr1', key: 'store.address_line1', label: 'Dirección Línea 1', format: 'text', position: 'center' },

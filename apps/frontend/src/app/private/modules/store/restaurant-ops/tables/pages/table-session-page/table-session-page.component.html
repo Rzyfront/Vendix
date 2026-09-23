@@ -5,7 +5,8 @@
       'Sesión #' +
       (session()?.id ?? '') +
       ' — ' +
-      (isClosed() ? 'Cerrada' : 'Cuenta abierta')
+      (isClosed() ? 'Cerrada' : 'Cuenta abierta') +
+      (waiterName() ? ' — Mesero: ' + waiterName() : '')
     "
     icon="receipt"
     variant="glass"
@@ -52,6 +53,13 @@
         <p>Cargando sesión…</p>
       </div>
     } @else if (session()) {
+      @if (session()?.order_id; as sourceId) {
+        <app-split-accounts-panel
+          [sourceOrderId]="sourceId" [items]="items()" [allowCreate]="false"
+          [refreshKey]="splitRefreshKey()" (loaded)="onFinancialSplitLoaded($event)"
+          (changed)="onFinancialSplitChanged($event)"
+        />
+      }
       <div class="grid gap-3 lg:gap-5 lg:grid-cols-12">
         <!-- ── Resumen (Sidebar) ────────────────────────────────────── -->
         <div class="lg:col-span-4 summary-column">
@@ -554,12 +562,7 @@
                               variant="success"
                               size="sm"
                               customClasses="!h-11"
-                              [loading]="
-                                deliveringItemId() === item.id ||
-                                (deliveringTicketId() != null &&
-                                  needsKitchen(item) &&
-                                  kitchenStatusFor(item) !== 'delivered')
-                              "
+                              [loading]="deliveringItemId() === item.id"
                               [attr.title]="deliverHint(item)"
                               (clicked)="markDelivered(item)"
                             >
@@ -692,13 +695,10 @@
   />
 
   <app-split-order-modal
-    [isOpen]="isSplitOpen()"
-    [loading]="isSplitting()"
+    [(isOpen)]="isSplitOpen"
+    [orderId]="session()?.order_id ?? null"
     [items]="items()"
-    [orderTotal]="orderTotal()"
-    (isOpenChange)="isSplitOpen.set($event)"
-    (splitByItems)="onSplitByItems($event)"
-    (splitByAmount)="onSplitByAmount($event)"
+    (splitCompleted)="onSplitCompleted($event)"
   />
 
   <app-transfer-table-modal

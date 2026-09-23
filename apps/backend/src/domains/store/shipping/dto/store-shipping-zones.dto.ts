@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsNumber,
   IsEnum,
+  IsInt,
   Min,
   ValidateIf,
 } from 'class-validator';
@@ -176,6 +177,26 @@ export class CreateRateDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Optional tax category (IVA/INC, exactly one rate > 0) always INCLUDED in the rate price. null = no tax.',
+    nullable: true,
+    example: 12,
+  })
+  @IsOptional()
+  // Lee el crudo (`obj[key]`): con `enableImplicitConversion` el `value` ya
+  // llega coaccionado y `null` (= quitar el impuesto) no debe volverse 0.
+  @Transform(({ obj, key }) => {
+    const raw = obj?.[key];
+    if (raw === undefined) return undefined;
+    if (raw === null || raw === '') return null;
+    return Number(raw);
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsInt()
+  @Min(1)
+  tax_category_id?: number | null;
 }
 
 export class UpdateRateDto extends PartialType(CreateRateDto) {}

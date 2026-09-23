@@ -150,6 +150,12 @@
       (actionClicked)="onHeaderAction($event)"
     ></app-sticky-header>
 
+    @if (orderData.active_financial_split_id) {
+      <div class="max-w-[1600px] mx-auto mb-4">
+        <app-split-accounts-panel [sourceOrderId]="orderData.id" [items]="orderData.order_items || []" [allowCreate]="false" (loaded)="onFinancialAccountsLoaded($event)" (changed)="onFinancialAccountsChanged($event)" />
+      </div>
+    }
+
     <!-- Main Grid: Two columns -->
     <div class="max-w-[1600px] mx-auto">
       <!-- Order summary strip: channel + delivery + credit (ultra-thin) -->
@@ -175,9 +181,10 @@
           <button
             type="button"
             (click)="focusGestionEnvio()"
-            title="Editar envío: ir a Gestión de Envío"
-            aria-label="Editar envío: ir a Gestión de Envío"
-            class="flex items-center gap-1.5 text-text-primary font-medium cursor-pointer hover:underline underline-offset-2"
+            [disabled]="orderData.delivery_type === 'dine_in'"
+            [title]="orderData.delivery_type === 'dine_in' ? 'Consumo en mesa: no requiere envío' : 'Editar envío: ir a Gestión de Envío'"
+            [attr.aria-label]="orderData.delivery_type === 'dine_in' ? 'Consumo en mesa: no requiere envío' : 'Editar envío: ir a Gestión de Envío'"
+            class="flex items-center gap-1.5 text-text-primary font-medium enabled:cursor-pointer enabled:hover:underline underline-offset-2"
           >
             <app-icon
               [name]="deliveryConfig().icon"
@@ -188,7 +195,9 @@
             <span class="text-text-secondary font-normal">{{
               deliveryConfig().label
             }}</span>
-            <app-icon name="pencil" size="11" class="text-text-secondary"></app-icon>
+            @if (orderData.delivery_type !== 'dine_in') {
+              <app-icon name="pencil" size="11" class="text-text-secondary"></app-icon>
+            }
           </button>
           <!-- T10 B2 — la sección "Mesa" sólo aparece en tiendas restaurante
                Y si la orden trae sesión de mesa. Hoy se pintaba con sólo
@@ -2232,6 +2241,16 @@
                   orderData.shipping_cost || 0 | currency
                 }}</span>
               </div>
+              @if (shippingTaxAmount() > 0) {
+                <div class="flex justify-between items-center text-xs -mt-1">
+                  <span class="text-text-secondary pl-3"
+                    >Incluye {{ shippingTaxLabel() }}:</span
+                  >
+                  <span class="text-text-secondary">{{
+                    shippingTaxAmount() | currency
+                  }}</span>
+                </div>
+              }
               <!-- C.7 (§5.3, base gross): sin fila de impuesto que sume; con
                    desglose respaldado, nota informativa fuera de la aritmética. -->
               @if (showDetailVatNote()) {
@@ -2783,11 +2802,11 @@
       [isOpen]="showDeliverModal()"
       (closed)="showDeliverModal.set(false); isManualDeliverMode.set(false)"
       [title]="
-        isManualDeliverMode()
-          ? orderData.delivery_type === 'pickup'
-            ? 'Entregar directamente al cliente'
-            : 'Entregar sin confirmar pago'
-          : 'Marcar como Entregado'
+        orderData.delivery_type === 'pickup'
+          ? 'Confirmar recogida en tienda'
+          : isManualDeliverMode()
+            ? 'Entregar sin confirmar pago'
+            : 'Marcar como Entregado'
       "
       size="md"
     >
@@ -2804,12 +2823,12 @@
             <div>
               @if (orderData.delivery_type === "pickup") {
                 <p class="text-sm font-bold text-orange-800">
-                  Entrega directa al cliente
+                  Recogida en tienda
                 </p>
                 <p class="text-xs text-orange-600 mt-0.5">
-                  Se omitira el paso "Lista para recoger" y la orden se marcara
-                  como entregada directamente. Si el pago esta confirmado, la
-                  orden se finalizara automaticamente.
+                  Se omitirá el estado "Lista para recogida" y la orden se
+                  marcará como recogida. Si el pago está confirmado, la orden
+                  se finalizará automáticamente.
                 </p>
               } @else {
                 <p class="text-sm font-bold text-orange-800">
@@ -2948,10 +2967,10 @@
           ></app-icon>
           <div>
             <p class="text-sm font-bold text-red-800">
-              Esta accion no se puede deshacer
+              Confirma la cancelación
             </p>
             <p class="text-xs text-red-600 mt-0.5">
-              La orden sera cancelada permanentemente.
+              La orden quedará cancelada y conservará su historial. Para reactivarla necesitarás permisos.
             </p>
           </div>
         </div>

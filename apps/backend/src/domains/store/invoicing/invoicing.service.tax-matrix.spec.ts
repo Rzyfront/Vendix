@@ -25,6 +25,13 @@ import {
   toDecimal,
 } from './utils/dian-money.util';
 import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
+import { resolveOrderLineTaxTotal } from '../taxes/utils/final-price.util';
+import {
+  createPrismaMock,
+  mockRequestContext,
+  type PrismaMock,
+} from '../../../testing/prisma-mock';
+import { buildOrder, buildOrderItem } from '../../../testing/money-fixtures';
 
 /**
  * MATRIZ FISCAL — `createFromOrder` + split + prevalidador.
@@ -97,8 +104,12 @@ interface OrderLineFixture {
   quantity: number;
   /** Unidad NETA ya despejada (2 dec), como persisten POS y checkout. */
   unit_price: number;
-  discount_amount: number;
-  /** `total_price`: base neta de descuento de TODA la línea. */
+  /**
+   * `total_price`: base de TODA la línea. `order_items` NO tiene columna de
+   * descuento: el único descuento de una orden es el de cabecera
+   * (`orders.discount_amount`), que `createFromOrder` reparte con
+   * `projectOrderInvoiceLines` (ver `invoicing.service.order-discount.spec`).
+   */
   total_price: number;
   /** Snapshot de impuesto POR UNIDAD (`tax_amount_item`, `Decimal(12,2)`). */
   tax_amount_item: number;
@@ -145,8 +156,8 @@ const SHAPES: TaxMatrixShape[] = [
       ],
     },
     order_lines: [
-      { description: 'Pan', quantity: 3, unit_price: 10000, discount_amount: 0, total_price: 30000, tax_amount_item: 0, taxes: [] },
-      { description: 'Café', quantity: 2, unit_price: 25000, discount_amount: 0, total_price: 50000, tax_amount_item: 0, taxes: [] },
+      { description: 'Pan', quantity: 3, unit_price: 10000, total_price: 30000, tax_amount_item: 0, taxes: [] },
+      { description: 'Café', quantity: 2, unit_price: 25000, total_price: 50000, tax_amount_item: 0, taxes: [] },
     ],
     expect_split: false,
   },
@@ -161,8 +172,8 @@ const SHAPES: TaxMatrixShape[] = [
       ],
     },
     order_lines: [
-      { description: 'Camisa', quantity: 2, unit_price: 50000, discount_amount: 0, total_price: 100000, tax_amount_item: 9500, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 19000, is_inclusive: false, tax_rate_id: IVA_ID }] },
-      { description: 'Pantalón', quantity: 1, unit_price: 100000, discount_amount: 0, total_price: 100000, tax_amount_item: 19000, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 19000, is_inclusive: false, tax_rate_id: IVA_ID }] },
+      { description: 'Camisa', quantity: 2, unit_price: 50000, total_price: 100000, tax_amount_item: 9500, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 19000, is_inclusive: false, tax_rate_id: IVA_ID }] },
+      { description: 'Pantalón', quantity: 1, unit_price: 100000, total_price: 100000, tax_amount_item: 19000, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 19000, is_inclusive: false, tax_rate_id: IVA_ID }] },
     ],
     expect_split: false,
   },
@@ -185,8 +196,8 @@ const SHAPES: TaxMatrixShape[] = [
       ],
     },
     order_lines: [
-      { description: 'Postre', quantity: 3, unit_price: 925.93, discount_amount: 0, total_price: 2777.79, tax_amount_item: 74.07, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 222.21, is_inclusive: true, tax_rate_id: INC_ID }], channel_gross: { unit_price: 1000, rates: [{ rate: 0.08, is_inclusive: true }] } },
-      { description: 'Jugo', quantity: 2, unit_price: 462.96, discount_amount: 0, total_price: 925.92, tax_amount_item: 37.03, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 74.06, is_inclusive: true, tax_rate_id: INC_ID }], channel_gross: { unit_price: 499.99, rates: [{ rate: 0.08, is_inclusive: true }] } },
+      { description: 'Postre', quantity: 3, unit_price: 925.93, total_price: 2777.79, tax_amount_item: 74.07, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 222.21, is_inclusive: true, tax_rate_id: INC_ID }], channel_gross: { unit_price: 1000, rates: [{ rate: 0.08, is_inclusive: true }] } },
+      { description: 'Jugo', quantity: 2, unit_price: 462.96, total_price: 925.92, tax_amount_item: 37.03, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 74.06, is_inclusive: true, tax_rate_id: INC_ID }], channel_gross: { unit_price: 499.99, rates: [{ rate: 0.08, is_inclusive: true }] } },
     ],
     expect_split: true,
   },
@@ -217,7 +228,6 @@ const SHAPES: TaxMatrixShape[] = [
         description: 'Servicio gravado',
         quantity: 1,
         unit_price: 100000,
-        discount_amount: 0,
         total_price: 100000,
         tax_amount_item: 19700,
         taxes: [
@@ -240,28 +250,31 @@ const SHAPES: TaxMatrixShape[] = [
       ],
     },
     order_lines: [
-      { description: 'Camisa', quantity: 1, unit_price: 50000, discount_amount: 0, total_price: 50000, tax_amount_item: 9500, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 9500, is_inclusive: false, tax_rate_id: IVA_ID }] },
-      { description: 'Licor', quantity: 2, unit_price: 500, discount_amount: 0, total_price: 1000, tax_amount_item: 40, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 80, is_inclusive: true, tax_rate_id: INC_ID }] },
+      { description: 'Camisa', quantity: 1, unit_price: 50000, total_price: 50000, tax_amount_item: 9500, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 9500, is_inclusive: false, tax_rate_id: IVA_ID }] },
+      { description: 'Licor', quantity: 2, unit_price: 500, total_price: 1000, tax_amount_item: 40, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 80, is_inclusive: true, tax_rate_id: INC_ID }] },
     ],
     expect_split: true,
   },
   {
-    // 6. Multi-tasa AGREGADO (IVA 19 % + INC 8 %, distintos esquemas DIAN)
-    // con descuento POR LÍNEA. Dos grupos → parte; el descuento vive en
-    // la línea, así que el allowance de pie es cero.
-    // (Dos tarifas del MISMO esquema no entran acá a propósito: el emisor
-    // las fusiona en un `TaxSubtotal` y el prevalidador las frena con
-    // `TAX_SCHEME_RATE_COLLISION` por diseño, no por aritmética.)
-    name: 'agregado multi-tasa (IVA 19 % + INC 8 %) + descuento por línea',
+    // 6. Multi-tasa AGREGADO (IVA 19 % + INC 8 %, distintos esquemas DIAN),
+    // qty > 1. Dos grupos → parte. Antes esta forma llevaba un
+    // `discount_amount` POR LÍNEA que `order_items` no tiene: el servicio
+    // leía esa columna inexistente y el descuento real de la orden
+    // desaparecía de la factura (P0-2). El descuento de orden se cubre con el
+    // reparto real en `invoicing.service.order-discount.spec`.
+    // (Dos tarifas del MISMO esquema se cubren en `ubl-shipping-tax-line.spec`:
+    // el emisor abre un `TaxSubtotal` por tarifa y el prevalidador ya no emite
+    // `TAX_SCHEME_RATE_COLLISION`.)
+    name: 'agregado multi-tasa (IVA 19 % + INC 8 %)',
     channel_input: {
       items: [
-        { description: 'Camisa', quantity: 2, unit_price: 50000, discount_amount: 5000, taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }] },
-        { description: 'Licor', quantity: 1, unit_price: 100000, discount_amount: 10000, taxes: [{ tax_name: 'INC', tax_rate: 8, tax_type: 'inc' }] },
+        { description: 'Camisa', quantity: 2, unit_price: 50000, taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }] },
+        { description: 'Licor', quantity: 1, unit_price: 100000, taxes: [{ tax_name: 'INC', tax_rate: 8, tax_type: 'inc' }] },
       ],
     },
     order_lines: [
-      { description: 'Camisa', quantity: 2, unit_price: 50000, discount_amount: 5000, total_price: 95000, tax_amount_item: 9025, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 18050, is_inclusive: false, tax_rate_id: IVA_ID }] },
-      { description: 'Licor', quantity: 1, unit_price: 100000, discount_amount: 10000, total_price: 90000, tax_amount_item: 7200, taxes: [{ tax_name: 'INC', tax_rate: 8e-2, tax_type: 'inc', tax_amount: 7200, is_inclusive: false, tax_rate_id: INC_ID }] },
+      { description: 'Camisa', quantity: 2, unit_price: 50000, total_price: 100000, tax_amount_item: 9500, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 19000, is_inclusive: false, tax_rate_id: IVA_ID }] },
+      { description: 'Licor', quantity: 1, unit_price: 100000, total_price: 100000, tax_amount_item: 8000, taxes: [{ tax_name: 'INC', tax_rate: 8e-2, tax_type: 'inc', tax_amount: 8000, is_inclusive: false, tax_rate_id: INC_ID }] },
     ],
     expect_split: true,
   },
@@ -276,6 +289,22 @@ const SHAPES: TaxMatrixShape[] = [
  * spec—; sólo las sumas flotantes de cabecera y el mapeo de ítems se
  * replican con sus expresiones exactas (documentadas en cada línea).
  */
+/**
+ * Impuesto TOTAL de una línea del fixture, con el helper REAL que
+ * `createFromOrder` consume (`resolveOrderLineTaxTotal`): Σ `order_item_taxes`
+ * cuando hay desglose, y si no el escalar × `resolveLineUnits`. Antes acá se
+ * replicaba `tax_amount_item × quantity`, que era el defecto del servicio: el
+ * espejo habría seguido afirmando una fórmula que el servicio ya no tiene.
+ * Para estas formas (sin `price_unit_quantity` ni peso) el valor es idéntico
+ * al que el espejo producía antes — por eso ninguna cambia de número.
+ */
+const orderLineTaxTotal = (line: OrderLineFixture) =>
+  resolveOrderLineTaxTotal({
+    quantity: line.quantity,
+    tax_amount_item: line.tax_amount_item,
+    order_item_taxes: line.taxes,
+  });
+
 function mapOrderToDocument(order_lines: OrderLineFixture[]) {
   const line_inclusive = order_lines.map((line) =>
     line.taxes.some((t) => t.is_inclusive === true),
@@ -286,12 +315,11 @@ function mapOrderToDocument(order_lines: OrderLineFixture[]) {
     (acc, line) => acc + Number(line.quantity) * Number(line.unit_price),
     0,
   );
-  const discount = order_lines.reduce(
-    (acc, line) => acc + Number(line.discount_amount),
-    0,
-  );
+  // Sin columna de descuento en `order_items` (ver `OrderLineFixture`) y sin
+  // descuento de orden en estas formas: ninguna línea se proyecta.
+  const discount = 0;
   const tax = order_lines.reduce(
-    (acc, line) => acc + Number(line.tax_amount_item || 0) * Number(line.quantity),
+    (acc, line) => acc + orderLineTaxTotal(line),
     0,
   );
   const total = subtotal - discount + tax;
@@ -393,13 +421,10 @@ describe('InvoicingService · matriz fiscal createFromOrder+split+prevalidador',
       description: line.description,
       quantity: new Prisma.Decimal(line.quantity),
       unit_price: new Prisma.Decimal(line.unit_price),
-      discount_amount: new Prisma.Decimal(line.discount_amount),
-      tax_amount: new Prisma.Decimal(
-        Number(line.tax_amount_item || 0) * Number(line.quantity),
-      ),
+      discount_amount: new Prisma.Decimal(0),
+      tax_amount: new Prisma.Decimal(orderLineTaxTotal(line)),
       total_amount: new Prisma.Decimal(
-        Number(line.quantity) * Number(line.unit_price) -
-          Number(line.discount_amount),
+        Number(line.quantity) * Number(line.unit_price),
       ),
       is_inclusive: mapped.line_inclusive[index],
     }));
@@ -493,9 +518,9 @@ describe('InvoicingService · matriz fiscal createFromOrder+split+prevalidador',
           expect(channel.taxes.map((t) => t.amount)).toEqual(
             order.taxes.map(() => order.tax_amount_item),
           );
-          // …y es coherente consigo misma: total == qty×unidad − descuento
+          // …y es coherente consigo misma: total == qty×unidad
           // (la incoherencia unidad↔total no la persiste ningún canal).
-          expect(dbRound2(order.quantity * order.unit_price - order.discount_amount)).toBe(
+          expect(dbRound2(order.quantity * order.unit_price)).toBe(
             order.total_price,
           );
           expect(dbRound2(order.tax_amount_item * order.quantity)).toBe(
@@ -632,7 +657,6 @@ describe('InvoicingService · matriz fiscal createFromOrder+split+prevalidador',
             description: 'Plato #81',
             quantity: 1,
             unit_price: 4629.63,
-            discount_amount: 0,
             total_price: 4629.63,
             tax_amount_item: 370.37,
             taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 370.37, is_inclusive: true, tax_rate_id: INC_ID }],
@@ -872,5 +896,345 @@ describe('aggregateOrderTaxes — tax_scalar_without_breakdown (población 3, F-
     expect(withScalarField.distinct_group_count).toBe(
       withoutScalarField.distinct_group_count,
     );
+  });
+});
+
+/**
+ * `createFromOrder` — EL ESCALAR DE LÍNEA CONTRA EL MULTIPLICADOR DE ESCALA.
+ *
+ * `order_items.tax_amount_item` es el impuesto POR UNIDAD DE PRECIO (ADR-10),
+ * y la unidad de precio NO es siempre la unidad de stock: el propio
+ * `schema.prisma` fija que «el total de la línea es
+ * `unit_price * quantity / price_unit_quantity`». `createFromOrder` derivaba
+ * el escalar de la línea de factura multiplicando ese impuesto por
+ * `quantity` a secas, así que una caja x12 vendida como caja —`quantity` 12,
+ * `price_unit_quantity` 12, UNA unidad de precio— declaraba DOCE veces el
+ * impuesto que se cobró, y una línea por PESO (donde el multiplicador real es
+ * `order_items.weight`) declaraba el de un solo kilo.
+ *
+ * El desglose de cabecera (`aggregateOrderTaxes`, que suma
+ * `order_item_taxes.tax_amount`) siempre fue correcto, así que el defecto se
+ * manifiesta como una DIVERGENCIA interna del documento: el escalar dice una
+ * cosa y los cubos de cabecera otra. `checkTaxInclusiveTotal` (FAU06) la
+ * detecta y aborta dentro de `signXml` — pero el consecutivo DIAN ya se
+ * consumió en `validate()`, así que la venta queda sin documento fiscal y con
+ * un número quemado. Por eso esto es dinero y no cosmética.
+ *
+ * Estas pruebas corren el código REAL de `createFromOrder` (Prisma mockeado,
+ * contexto stub) y afirman el impuesto esperado con VALOR LITERAL calculado a
+ * mano — nunca contra otro consumidor del mismo kernel, que sería `f(x)`
+ * contra `f(x)`.
+ */
+describe('InvoicingService.createFromOrder — el escalar de línea escala por unidades de precio, no por quantity', () => {
+  const ORDER_ID = 9001;
+  const STORE_ID = 100;
+  const ORGANIZATION_ID = 1;
+  const USER_ID = 7;
+  const ACCOUNTING_ENTITY_ID = 3;
+
+  /** Todo importe monetario viaja como `Decimal`, igual que la fila real. */
+  const money = (value: number | string) => new Prisma.Decimal(value);
+
+  /** Fila `order_item_taxes` de IVA 19 % agregado, con la cuota de LA LÍNEA. */
+  const ivaRow = (tax_amount: number) => ({
+    tax_rate_id: IVA_ID,
+    tax_name: 'IVA',
+    tax_rate: money('0.19'),
+    tax_amount: money(tax_amount),
+    tax_type: 'iva',
+    is_inclusive: false,
+  });
+
+  let prisma: PrismaMock;
+  let service: InvoicingService;
+
+  beforeEach(() => {
+    mockRequestContext({
+      store_id: STORE_ID,
+      organization_id: ORGANIZATION_ID,
+      user_id: USER_ID,
+    });
+
+    prisma = createPrismaMock({
+      orders: ['findFirst'],
+      invoices: ['findFirst', 'create'],
+    });
+    // Sin factura previa: `assertNotAlreadyInvoiced` deja pasar.
+    prisma.invoices.findFirst.mockResolvedValue(null);
+    prisma.invoices.create.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({
+        ...data,
+        id: 7001,
+        invoice_number: null,
+      }),
+    );
+
+    service = new InvoicingService(
+      prisma as any,
+      // A.1: la factura nacida de orden NO numera al crear — el generador
+      // no se toca en este camino.
+      {} as any,
+      { emit: jest.fn() } as any,
+      {
+        resolveAccountingEntityForFiscal: jest
+          .fn()
+          .mockResolvedValue({ id: ACCOUNTING_ENTITY_ID }),
+      } as any,
+      {} as any, // retry_queue
+      {} as any, // fiscalGate
+      { assertAreaActive: jest.fn().mockResolvedValue(undefined) } as any,
+      {} as any, // fiscalInvoiceThreshold
+      {} as any, // calculator
+      {} as any, // trm
+      {} as any, // withholdingFlow
+    );
+    // El warn de población 3 (F-090) y el log de creación son ruido acá.
+    jest
+      .spyOn((service as any).logger, 'warn')
+      .mockImplementation(() => undefined);
+    jest
+      .spyOn((service as any).logger, 'log')
+      .mockImplementation(() => undefined);
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  /** Corre el camino real y devuelve el `data` que se iba a persistir. */
+  const persistedInvoiceData = async (order: Record<string, unknown>) => {
+    prisma.orders.findFirst.mockResolvedValue(order);
+    await service.createFromOrder(ORDER_ID);
+    return prisma.invoices.create.mock.calls[0][0].data;
+  };
+
+  it('caja x12 CON desglose: declara los $11.400 cobrados, no 12 × $11.400', async () => {
+    // Caja de 12 unidades a $60.000 la caja, IVA 19 % agregado.
+    //   unidades de precio = quantity / price_unit_quantity = 12 / 12 = 1
+    //   impuesto de línea  = $11.400 (el desglose persistido, cuota de la caja)
+    //   total de línea     = $60.000 + $11.400 = $71.400
+    // El defecto multiplicaba por `quantity`: 11.400 × 12 = $136.800.
+    const data = await persistedInvoiceData(
+      buildOrder({
+        order_items: [
+          buildOrderItem({
+            quantity: 12,
+            price_unit_quantity: 12,
+            unit_price: money(60000),
+            total_price: money(60000),
+            tax_amount_item: money(11400),
+            order_item_taxes: [ivaRow(11400)],
+          }),
+        ],
+      }),
+    );
+
+    const [line] = data.invoice_items.create;
+    expect(line.tax_amount.toString()).toBe('11400');
+    expect(line.total_amount.toString()).toBe('71400');
+    // La cabecera escalar hereda la suma de las líneas.
+    expect(data.tax_amount.toString()).toBe('11400');
+    expect(data.total_amount.toString()).toBe('71400');
+    // …y coincide con el cubo de cabecera, que SIEMPRE fue correcto: es
+    // justo esa divergencia la que FAU06 usaba para abortar la firma.
+    const [headerTax] = data.invoice_taxes.create;
+    expect(headerTax.tax_amount.toString()).toBe('11400');
+    expect(headerTax.taxable_amount.toString()).toBe('60000');
+  });
+
+  it('NO-REGRESIÓN price_unit_quantity = 1: la línea ordinaria sigue declarando $28.500', async () => {
+    // 3 unidades a $50.000, IVA 19 % ⇒ $9.500 por unidad, $28.500 de línea.
+    // Sin escala el multiplicador ES `quantity`: este caso vale lo mismo
+    // antes y después del arreglo, y está acá para probarlo.
+    const data = await persistedInvoiceData(
+      buildOrder({
+        order_items: [
+          buildOrderItem({
+            quantity: 3,
+            price_unit_quantity: 1,
+            unit_price: money(50000),
+            total_price: money(150000),
+            tax_amount_item: money(9500),
+            order_item_taxes: [ivaRow(28500)],
+          }),
+        ],
+      }),
+    );
+
+    const [line] = data.invoice_items.create;
+    expect(line.tax_amount.toString()).toBe('28500');
+    expect(line.total_amount.toString()).toBe('178500');
+    expect(data.tax_amount.toString()).toBe('28500');
+  });
+
+  it('caja x24 SIN desglose: el escalar cae al fallback y escala por unidades de precio ($8.000)', async () => {
+    // Caja de 24 a $100.000, IVA 19 % ⇒ $8.000 aprox. por caja, UNA caja.
+    // Sin filas `order_item_taxes` (población 3, F-090) el único dato es el
+    // escalar: el multiplicador correcto sigue siendo 24 / 24 = 1, no 24.
+    // El defecto declaraba 8.000 × 24 = $192.000.
+    const data = await persistedInvoiceData(
+      buildOrder({
+        order_items: [
+          buildOrderItem({
+            quantity: 24,
+            price_unit_quantity: 24,
+            unit_price: money(100000),
+            total_price: money(100000),
+            tax_amount_item: money(8000),
+            order_item_taxes: [],
+          }),
+        ],
+      }),
+    );
+
+    const [line] = data.invoice_items.create;
+    expect(line.tax_amount.toString()).toBe('8000');
+    expect(line.total_amount.toString()).toBe('108000');
+    expect(data.tax_amount.toString()).toBe('8000');
+  });
+
+  it('línea por PESO: el multiplicador es `weight` (2,5 kg) ⇒ $9.500, no $3.800', async () => {
+    // 2,5 kg a $20.000/kg = $50.000 de base, IVA 19 % ⇒ $3.800 por kilo y
+    // $9.500 de línea. `quantity` vale 1 acá, así que el defecto declaraba
+    // el impuesto de UN solo kilo ($3.800). Esta es la rama que un helper
+    // de sola escala (`quantity / price_unit_quantity`) pierde.
+    const data = await persistedInvoiceData(
+      buildOrder({
+        order_items: [
+          buildOrderItem({
+            quantity: 1,
+            price_unit_quantity: 1,
+            weight: money('2.500'),
+            weight_unit: 'kg',
+            unit_price: money(20000),
+            total_price: money(50000),
+            tax_amount_item: money(3800),
+            order_item_taxes: [],
+          }),
+        ],
+      }),
+    );
+
+    const [line] = data.invoice_items.create;
+    expect(line.tax_amount.toString()).toBe('9500');
+    expect(line.total_amount.toString()).toBe('59500');
+    expect(data.tax_amount.toString()).toBe('9500');
+  });
+});
+
+
+/**
+ * QUI-INC — DÓNDE se resuelve el default de `tax_type`.
+ *
+ * `buildInvoiceTaxCreateInput` es el ÚNICO mapeador de escritura de
+ * `invoice_taxes` y lo comparten TRES productores: el motor
+ * (`CalculatedTax.tax_type`, ya normalizado), la agregación de la orden
+ * (`aggregateOrderTaxes`, que lee `order_item_taxes.tax_type`) y el carril
+ * declarativo (`dto.taxes[]`). Cuando el default vivía ahí (`?? 'iva'`), el
+ * mapeador ya no sabía de cuál de los tres venía la fila: una ausencia por
+ * PÉRDIDA en el camino se veía igual que una ausencia por DECLARACIÓN, y la
+ * primera se convertía en IVA. Así nació el «IVA del 8 %» aceptado por la
+ * DIAN (tienda 105).
+ *
+ * Ahora `InvoiceTaxRowInput.tax_type` es requerido —un cuarto productor que
+ * lo olvide no compila— y cada productor lo resuelve contra su propia fila
+ * fuente.
+ */
+describe('InvoicingService · tax_type se resuelve en la fila fuente (QUI-INC)', () => {
+  // Los tres métodos bajo prueba son puros respecto del grafo de DI: sólo se
+  // llaman entre sí. Se instancia el prototipo para ejercitarlos sin levantar
+  // el módulo entero.
+  const service = Object.create(InvoicingService.prototype) as any;
+
+  it('el mapeador de escritura NO fabrica: persiste exactamente el tipo que recibe', () => {
+    const row = service.buildInvoiceTaxCreateInput({
+      tax_rate_id: 68,
+      tax_name: 'INC',
+      tax_rate: 8,
+      taxable_amount: 100000,
+      tax_amount: 8000,
+      tax_type: 'inc',
+      is_inclusive: false,
+    });
+
+    expect(row.tax_type).toBe('inc');
+    expect(row.tax_name).toBe('INC');
+    expect(row.tax_rate.toString()).toBe('8');
+  });
+
+  it('el carril declarativo resuelve el default contra el propio DTO (fila fuente)', () => {
+    const [row] = service.buildDocumentLevelTaxRows([
+      {
+        tax_name: 'IVA',
+        tax_rate: 19,
+        taxable_amount: 100000,
+        tax_amount: 19000,
+      },
+    ]);
+
+    // Sin tipo declarado, la regla «sin tipar significa IVA» aplica AQUÍ, que
+    // es donde aún se ve que la ausencia es del cliente y no una pérdida.
+    expect(row.tax_type).toBe('iva');
+  });
+
+  it('el carril declarativo respeta el tipo que el cliente SÍ declaró', () => {
+    const [row] = service.buildDocumentLevelTaxRows([
+      {
+        tax_name: 'INC',
+        tax_rate: 8,
+        taxable_amount: 100000,
+        tax_amount: 8000,
+        tax_type: 'inc',
+      },
+    ]);
+
+    expect(row.tax_type).toBe('inc');
+  });
+
+  it('la agregación de la orden propaga el tipo del snapshot hasta la fila escrita', () => {
+    // Reproduce la composición de la fila de producción `order_item_taxes.id=130`
+    // pero YA sana: `tax_rate_id=68` / `INC` / 8 % con `tax_type='inc'`. Antes,
+    // un `tax_type` nulo en esa misma fila salía como `iva` al lado de un
+    // `tax_name='INC'` — el documento se contradecía a sí mismo.
+    const { header_rows } = aggregateOrderTaxes([
+      {
+        total_price: 100000,
+        order_item_taxes: [
+          {
+            tax_rate_id: 68,
+            tax_name: 'INC',
+            tax_rate: 0.08,
+            tax_amount: 8000,
+            tax_type: 'inc',
+            is_inclusive: false,
+          },
+        ],
+      } as any,
+    ]);
+
+    expect(header_rows).toHaveLength(1);
+    expect(header_rows[0].tax_type).toBe('inc');
+
+    const written = service.buildInvoiceTaxCreateInput(header_rows[0]);
+    expect(written.tax_type).toBe('inc');
+    expect(written.tax_name).toBe('INC');
+  });
+
+  it('una fila de orden SIN tipar resuelve a iva en la agregación, no en el escritor', () => {
+    const { header_rows } = aggregateOrderTaxes([
+      {
+        total_price: 100000,
+        order_item_taxes: [
+          {
+            tax_rate_id: 1,
+            tax_name: 'IVA',
+            tax_rate: 0.19,
+            tax_amount: 19000,
+            tax_type: null,
+            is_inclusive: false,
+          },
+        ],
+      } as any,
+    ]);
+
+    expect(header_rows[0].tax_type).toBe('iva');
   });
 });

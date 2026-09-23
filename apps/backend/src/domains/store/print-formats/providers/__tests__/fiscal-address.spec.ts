@@ -23,7 +23,7 @@ jest.mock('../../services/fiscal-issuer-identity', () => ({
     email: 'emisor@test.co',
     fiscal_address: 'Calle 1 # 1-01',
     city: 'Bogotá D.C.',
-    tax_regime: 'Régimen Común',
+    fiscal_qualities: 'Gran contribuyente',
     tax_responsibilities: [],
   }),
 }));

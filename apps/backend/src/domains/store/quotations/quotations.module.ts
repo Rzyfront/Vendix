@@ -6,6 +6,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
 import { EmailModule } from '../../../email/email.module';
 import { QuotationProfilesModule } from '../backend-quotations-profiles/quotation-profiles.module';
+import { TaxesModule } from '../taxes/taxes.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { QuotationProfilesModule } from '../backend-quotations-profiles/quotatio
     OrdersModule,
     EmailModule,
     QuotationProfilesModule,
+    TaxesModule,
   ],
   controllers: [QuotationsController],
   providers: [QuotationsService],

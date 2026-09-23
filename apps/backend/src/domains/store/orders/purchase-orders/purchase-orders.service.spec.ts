@@ -1490,10 +1490,41 @@ describe('PurchaseOrdersService.getCostPreview()', () => {
       expect(result.items[0].capitalized_tax_amount).toBe(0);
     });
 
-    it('sin señal fiscal: indeterminado, capitaliza y ofrece el asistente', async () => {
-      // 'O-13' es una responsabilidad real que no dice nada sobre IVA: ni O-48
-      // ni O-49, y sin régimen tributario. El sistema NO puede saberlo.
+    it('casilla 53 declarada sin O-48: CONCLUYENTE, capitaliza y NO ofrece el asistente', async () => {
+      // CAMBIO 2026-09-22 — este caso afirmaba `indeterminate: true` y razonaba
+      // que «'O-13' no dice nada sobre IVA, el sistema NO puede saberlo». La
+      // inversión de la jerarquía lo contradice: una casilla 53 DECLARADA que
+      // enumera responsabilidades y no incluye O-48 sí dice algo — dice que el
+      // contribuyente no es responsable de IVA. El tenant ya hizo el trámite
+      // fiscal, así que mandarlo al asistente sería pedirle que corrija algo
+      // que está bien.
+      //
+      // Lo que el usuario VE no cambia: se capitaliza igual, con el mismo
+      // reparto por línea. Cambia el motivo, y con él el texto y el CTA.
       const service = await previewWith({ taxResponsibilities: ['O-13'] });
+      const result: any = await service.getCostPreview({
+        location_id: LOCATION_ID,
+        prices_include_tax: false,
+        items: [item],
+      } as any);
+
+      const fx = result.fiscal_explanation;
+      expect(fx.vat_responsible).toBe(false);
+      expect(fx.indeterminate).toBe(false);
+      expect(fx.treatment).toBe('capitalized');
+      expect(fx.reason).toBe('declared_without_vat_code');
+      expect(fx.source).toBe('tax_responsibilities');
+      expect(fx.cta).toBeUndefined();
+      assertNoForbiddenCitation(fx.legal_basis);
+      expect(result.items[0].deductible_tax_amount).toBe(0);
+      expect(result.items[0].capitalized_tax_amount).toBe(950);
+    });
+
+    it('sin NINGUNA señal fiscal: indeterminado, capitaliza y ofrece el asistente', async () => {
+      // El indeterminado de verdad, que la inversión conserva: casilla 53 vacía
+      // y sin régimen. Aquí el sistema realmente no puede saberlo, y por eso
+      // —y sólo aquí— el CTA al asistente fiscal tiene sentido.
+      const service = await previewWith({ taxResponsibilities: [] });
       const result: any = await service.getCostPreview({
         location_id: LOCATION_ID,
         prices_include_tax: false,
@@ -2474,6 +2505,84 @@ describe('PurchaseOrdersService.create() — nacimiento de la orden', () => {
     expect(meta.shipping_cost_allocation_requested).toBe('expense');
     expect(meta.shipping_cost_allocation_applied).toBe('expense');
   });
+
+  /**
+   * P1-4 (auditoría impuestos por producto) — la OC escribe
+   * `product_tax_assignments` del producto de cada línea. Antes lo hacía sin
+   * validar la combinación: un producto podía nacer con IVA + INC o dos IVA y
+   * cobrarse dos veces en POS. Misma regla que products (PROD_TAX_COMBO_001).
+   */
+  describe('P1-4: combinación de impuestos del producto', () => {
+    const categories = [
+      { id: 1, name: 'IVA 19%', tax_type: 'iva', tax_rates: [{ store_id: null }] },
+      { id: 2, name: 'INC 8%', tax_type: 'inc', tax_rates: [{ store_id: null }] },
+      { id: 3, name: 'IVA 5%', tax_type: null, tax_rates: [{ store_id: STORE_ID }] },
+      {
+        id: 4,
+        name: 'Retefuente',
+        tax_type: 'withholding',
+        tax_rates: [{ store_id: null }],
+      },
+    ];
+    const arrangeCategories = () => {
+      const findMany = jest.fn(({ where }: any) =>
+        Promise.resolve(categories.filter((c) => where.id.in.includes(c.id))),
+      );
+      prismaService.withoutScope = jest
+        .fn()
+        .mockReturnValue({ tax_categories: { findMany } });
+      return findMany;
+    };
+    const dtoWithTaxes = (tax_category_ids: unknown) => ({
+      ...baseDto(),
+      items: [
+        {
+          product_id: PRODUCT_ID,
+          quantity: 1,
+          unit_price: 1000,
+          tax_category_ids,
+        },
+      ],
+    });
+    const expectComboRejection = async (dto: any, reason: string) => {
+      let caught: any = null;
+      try {
+        await service.create(dto);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).not.toBeNull();
+      expect(caught.errorCode).toBe('PROD_TAX_COMBO_001');
+      expect(caught.getStatus()).toBe(400);
+      expect(caught.getResponse().details.reason).toBe(reason);
+      // Rechazo ANTES de la transacción: ningún producto ni orden escrito.
+      expect(prismaService.$transaction).not.toHaveBeenCalled();
+    };
+
+    it('rechaza IVA + INC con 400 PROD_TAX_COMBO_001', async () => {
+      arrangeCategories();
+      await expectComboRejection(dtoWithTaxes([1, 2]), 'iva_inc_exclusive');
+    });
+
+    it('rechaza dos categorías IVA (tax_type NULL cuenta como IVA)', async () => {
+      arrangeCategories();
+      await expectComboRejection(dtoWithTaxes('1;3'), 'duplicate_tax_type');
+    });
+
+    it('rechaza una retención asignada al producto', async () => {
+      arrangeCategories();
+      await expectComboRejection(
+        dtoWithTaxes([4]),
+        'withholding_not_assignable',
+      );
+    });
+
+    it('acepta una sola categoría IVA: la orden nace', async () => {
+      arrangeCategories();
+      const tx: any = await runCreate(dtoWithTaxes([1]));
+      expect(tx.purchase_orders.create).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 /**
@@ -2675,7 +2784,11 @@ describe('PurchaseOrdersService.buildPurchaseTaxGroups() — F-214', () => {
     ]);
 
     expect(groups).toEqual([
-      { tax_rate: 19, taxable_amount: 10000, tax_amount: 1900 },
+      // QUI-INC — el grupo lleva ahora el `tax_type` de la línea fuente
+      // (`purchase_order_items.tax_type`), que antes era un literal en el
+      // punto de escritura. La línea no lo declara ⇒ `iva` por la regla
+      // «sin tipar significa IVA», resuelta contra la fila, no aguas abajo.
+      { tax_rate: 19, tax_type: 'iva', taxable_amount: 10000, tax_amount: 1900 },
     ]);
   });
 
@@ -2690,7 +2803,7 @@ describe('PurchaseOrdersService.buildPurchaseTaxGroups() — F-214', () => {
     ]);
 
     expect(groups).toEqual([
-      { tax_rate: 0, taxable_amount: 240720, tax_amount: 0 },
+      { tax_rate: 0, tax_type: 'iva', taxable_amount: 240720, tax_amount: 0 },
     ]);
   });
 
@@ -2742,7 +2855,7 @@ describe('PurchaseOrdersService.buildPurchaseTaxGroups() — F-214', () => {
     ]);
 
     expect(groups).toEqual([
-      { tax_rate: 19, taxable_amount: 5000, tax_amount: 950 },
+      { tax_rate: 19, tax_type: 'iva', taxable_amount: 5000, tax_amount: 950 },
     ]);
   });
 
@@ -2778,8 +2891,83 @@ describe('PurchaseOrdersService.buildPurchaseTaxGroups() — F-214', () => {
     expect(rates).not.toContain(0.04);
 
     expect(groups).toEqual([
-      { tax_rate: 19, taxable_amount: 3985813.08, tax_amount: 757304.49 },
-      { tax_rate: 0, taxable_amount: 240720, tax_amount: 0 },
+      {
+        tax_rate: 19,
+        tax_type: 'iva',
+        taxable_amount: 3985813.08,
+        tax_amount: 757304.49,
+      },
+      { tax_rate: 0, tax_type: 'iva', taxable_amount: 240720, tax_amount: 0 },
+    ]);
+  });
+
+  /**
+   * QUI-INC — el tipo fiscal se resuelve en la FILA FUENTE
+   * (`purchase_order_items.tax_type`), nunca en el punto de escritura. Antes
+   * `materializeVatDocument` escribía `tax_name: 'IVA'` / `tax_type: iva`
+   * como literales, así que la columna de la línea no tenía ningún lector y
+   * una línea tipada de otra forma salía declarada como IVA en un documento
+   * `validated` que alimenta la declaración de IVA.
+   */
+  it('QUI-INC: propaga el tax_type declarado en la línea fuente', () => {
+    const groups = buildGroups([
+      {
+        tax_rate: 19,
+        tax_type: 'iva',
+        quantity_ordered: 1,
+        unit_cost: 1000,
+        deductible_tax_amount: 190,
+      },
+    ]);
+
+    expect(groups).toEqual([
+      { tax_rate: 19, tax_type: 'iva', taxable_amount: 1000, tax_amount: 190 },
+    ]);
+  });
+
+  it('QUI-INC: línea tipada NO-IVA falla cerrado en vez de declararse como IVA', () => {
+    // El documento F2 reconoce IVA DESCONTABLE: su importe viaja como
+    // `iva_amount` al asiento DR 240804 y su desglose al lado deducible de
+    // `calculateVat`. Una línea INC no puede entrar ni etiquetada IVA (deduce
+    // lo no deducible) ni bien tipada (saldría de la declaración pero seguiría
+    // dentro del asiento, que usa el mismo escalar).
+    expect(() =>
+      buildGroups([
+        {
+          tax_rate: 8,
+          tax_type: 'inc',
+          quantity_ordered: 1,
+          unit_cost: 1000,
+          deductible_tax_amount: 80,
+        },
+      ]),
+    ).toThrow(/QUI-INC/);
+  });
+
+  it('QUI-INC: línea sin tipar y línea tipada iva comparten llave (sin tipar = IVA)', () => {
+    // La llave del agrupador es `tarifa|tipo`. El default se resuelve ANTES de
+    // llavear, contra la columna de la línea, así que una fila histórica sin
+    // `tax_type` y una explícitamente `iva` caen en el MISMO grupo en vez de
+    // partir el desglose en dos filas idénticas.
+    const groups = buildGroups([
+      {
+        tax_rate: 5,
+        tax_type: 'iva',
+        quantity_ordered: 1,
+        unit_cost: 1000,
+        deductible_tax_amount: 50,
+      },
+      {
+        tax_rate: 5,
+        tax_type: null,
+        quantity_ordered: 1,
+        unit_cost: 2000,
+        deductible_tax_amount: 100,
+      },
+    ]);
+
+    expect(groups).toEqual([
+      { tax_rate: 5, tax_type: 'iva', taxable_amount: 3000, tax_amount: 150 },
     ]);
   });
 });
@@ -2825,8 +3013,16 @@ describe('PurchaseOrdersService.materializeVatDocument() — F-214', () => {
 
   it('escribe una fila de invoice_taxes por cada grupo, con la tarifa del catálogo (no derivada)', async () => {
     const tax_groups = [
-      { tax_rate: 19, taxable_amount: 3985813.08, tax_amount: 757304.49 },
-      { tax_rate: 0, taxable_amount: 240720, tax_amount: 0 },
+      // QUI-INC — el grupo declara su propio `tax_type`; el escritor ya no
+      // lo inventa. Lo produce `buildPurchaseTaxGroups` leyendo
+      // `purchase_order_items.tax_type`.
+      {
+        tax_rate: 19,
+        tax_type: 'iva',
+        taxable_amount: 3985813.08,
+        tax_amount: 757304.49,
+      },
+      { tax_rate: 0, tax_type: 'iva', taxable_amount: 240720, tax_amount: 0 },
     ];
 
     await (service as any).materializeVatDocument({
@@ -2875,5 +3071,43 @@ describe('PurchaseOrdersService.materializeVatDocument() — F-214', () => {
       (row: { tax_rate: number }) => row.tax_rate,
     );
     expect(writtenRates).not.toContain(17.92);
+  });
+
+  /**
+   * QUI-INC — `tax_name` y `tax_type` salen del GRUPO, no de dos literales
+   * escritos en el `create`. Se ejercita el escritor con un grupo que no es
+   * IVA —composición que la guarda de `buildPurchaseTaxGroups` no deja llegar
+   * hoy— justamente porque es la única forma de distinguir «deriva» de
+   * «escribe siempre IVA y coincide»: con el literal anterior esta prueba
+   * fallaba, con la derivación pasa.
+   */
+  it('QUI-INC: deriva tax_name y tax_type del grupo en vez de escribir IVA literal', async () => {
+    await (service as any).materializeVatDocument({
+      purchase_order_id: 642,
+      order_number: 'PO-20260820-242',
+      supplier_invoice_number: null,
+      supplier_invoice_date: null,
+      supplier: { id: 5, name: 'Proveedor Test', tax_id: '900123456' },
+      organization_id: 1,
+      store_id: 66,
+      accounting_entity_id: 77,
+      net_amount: 1000,
+      iva_amount: 80,
+      tax_groups: [
+        { tax_rate: 8, tax_type: 'inc', taxable_amount: 1000, tax_amount: 80 },
+      ],
+      user_id: 9,
+    });
+
+    const createArgs = prismaService.invoices.create.mock.calls[0][0];
+    expect(createArgs.data.invoice_taxes.create).toEqual([
+      {
+        tax_name: 'INC',
+        tax_rate: 8,
+        taxable_amount: 1000,
+        tax_amount: 80,
+        tax_type: 'inc',
+      },
+    ]);
   });
 });

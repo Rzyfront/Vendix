@@ -1,7 +1,12 @@
-import { Component, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { of } from 'rxjs';
+import { catchError, distinctUntilChanged, map, switchMap } from 'rxjs/operators';
+import { InvoicingService } from './services/invoicing.service';
+import { ToastService } from '../../../../shared/components';
+import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
+import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
 import { Store } from '@ngrx/store';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 
 import {
   clearDianRejection,
@@ -96,6 +101,10 @@ export class InvoicingComponent {
   private currencyService = inject(CurrencyFormatService);
   private store = inject(Store);
   private router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+  private readonly invoiceApi = inject(InvoicingService);
+  private readonly toast = inject(ToastService);
+  private readonly destroyRef = inject(DestroyRef);
   /** Modal compartido de requisitos fiscales (accedido desde el template). */
   readonly fiscalReq = inject(FiscalRequirementsService);
 
@@ -139,6 +148,18 @@ export class InvoicingComponent {
     this.store.dispatch(loadInvoiceStats());
     this.store.dispatch(loadResolutions());
     this.store.dispatch(loadDianConfigs());
+    this.route.queryParamMap.pipe(
+      map((params) => Number(params.get('invoiceId'))),
+      distinctUntilChanged(),
+      switchMap((id) => Number.isSafeInteger(id) && id > 0
+        ? this.invoiceApi.getInvoice(id).pipe(catchError((error) => {
+            this.toast.error(extractApiErrorMessage(error));
+            return of(null);
+          }))
+        : of(null)),
+      takeUntilDestroyed(this.destroyRef),
+    ).subscribe((response) => { if (response?.data) this.viewInvoice(response.data); });
+
   }
 
   /**

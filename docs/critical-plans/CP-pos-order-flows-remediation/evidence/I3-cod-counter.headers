@@ -1,0 +1,18 @@
+HTTP/1.1 201 Created
+X-Powered-By: Express
+Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate
+Pragma: no-cache
+Expires: 0
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Access-Control-Expose-Headers: Authorization,Cache-Control,Pragma,Content-Disposition
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 299
+X-RateLimit-Reset: 60
+X-Request-Id: 949b179b-fc7f-4eea-ab2b-7978ee2b8573
+Content-Type: application/json; charset=utf-8
+Content-Length: 709
+ETag: W/"2c5-fgN9WJ3SYJIWjt6pJtPO6tAY0JY"
+Date: Wed, 23 Sep 2026 06:25:11 GMT
+Connection: keep-alive
+Keep-Alive: timeout=65

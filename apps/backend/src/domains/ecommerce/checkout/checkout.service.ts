@@ -1,8 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { CartService } from '../cart/cart.service';
 import { TaxesService } from '../../store/taxes/taxes.service';
+// QUI-INC — el enum fiscal canónico, importado (no `string`) para que una
+// clasificación que el `tax_type_enum` de Postgres no reconozca no compile.
+import { TaxFiscalType } from '../../store/taxes/dto';
 // A.4 (F-003): dueño único del despeje. Se importa la función pura —el
 // método del servicio delega en ella con números idénticos— para no cambiar
 // el contrato mockeado del servicio en los specs (la pura se ejecuta de
@@ -55,6 +58,46 @@ import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availabil
 import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 import { CheckoutIdempotencyService } from './checkout-idempotency.service';
+import { ShippingTaxService } from '../../store/shipping/services/shipping-tax.service';
+import {
+  EMPTY_SHIPPING_TAX,
+  type ShippingTaxSnapshot,
+} from '../../store/shipping/utils/shipping-tax.util';
+
+/**
+ * QUI-INC — la fila de catálogo que `TaxesService.calculateProductTaxes`
+ * devuelve por tasa. Se nombra el tipo (en vez de castear a `any` en cada
+ * lectura) porque `tax_type` e `is_inclusive` ya son OBLIGATORIOS ahí: el
+ * default fiscal se resuelve en la FILA FUENTE —la `tax_categories` dueña de
+ * la columna— y no aguas abajo. Un `?? 'iva'` en el punto de escritura no
+ * puede distinguir «categoría genuinamente sin tipar» de «categoría INC cuyo
+ * tipo nadie propagó», y convierte la segunda en la primera: así nació la
+ * factura electrónica de la tienda 105 declarando un «IVA del 8 %» que en
+ * Colombia no existe (`order_item_taxes.id=130`, `tax_rate_id=68`,
+ * `tax_name='INC'`, `tax_rate=0.08`, `tax_type='iva'`).
+ */
+type CatalogTaxRow = Awaited<
+  ReturnType<TaxesService['calculateProductTaxes']>
+>['taxes'][number];
+
+/**
+ * QUI-INC — forma EXACTA de la fila de impuesto de línea del checkout, la que
+ * termina en `order_item_taxes`. Se declara con nombre y se usa como tipo de
+ * retorno del `map` porque el objeto de línea se arma con `...item` sobre un
+ * `cart_item` sin tipo, y ese spread colapsa el literal a `any`: el punto de
+ * escritura deja de estar mirado por el compilador. Anclando AQUÍ el
+ * productor, `tax_type` vuelve a ser obligatorio y tipado — si
+ * `calculateProductTaxes` dejara de devolverlo, esto no compila.
+ */
+interface CheckoutLineTaxSnapshot {
+  tax_rate_id: number;
+  name: string;
+  rate: number;
+  amount: number;
+  base: number;
+  tax_type: TaxFiscalType;
+  is_inclusive: boolean;
+}
 
 @Injectable()
 export class CheckoutService {
@@ -160,7 +203,46 @@ export class CheckoutService {
     private readonly fiscalInvoiceThreshold: FiscalInvoiceThresholdService,
     // A.4 CP-facturacion-fixes: Idempotency-Key store (same module, no cycle).
     private readonly checkoutIdempotency: CheckoutIdempotencyService,
+    // Impuesto opcional por tarifa de envío: copia congelada en la orden.
+    // `@Optional()` para no romper los TestingModule existentes; sin él (sólo
+    // en specs) el envío sale sin impuesto.
+    @Optional() private readonly shippingTaxService?: ShippingTaxService,
   ) {}
+
+  /**
+   * Copia del impuesto del envío para una orden cuyo costo salió de la tarifa
+   * `rate_id` (checkout y WhatsApp). Sin tarifa o sin servicio ⇒ vacía. Nunca
+   * lanza (ver `ShippingTaxService.snapshotForRate`).
+   */
+  private async resolveCheckoutShippingTax(
+    rate_id: number | null,
+    shipping_cost: number,
+    store_id: number | null | undefined,
+  ): Promise<ShippingTaxSnapshot> {
+    if (!rate_id || !store_id || !this.shippingTaxService) {
+      return { ...EMPTY_SHIPPING_TAX };
+    }
+    return this.shippingTaxService.snapshotForRate(null, rate_id, shipping_cost, {
+      store_id,
+    });
+  }
+
+  /**
+   * Proyección de la copia del envío como «línea» para la compuerta F4 de
+   * IVA: el IVA del envío también es IVA cobrado en la venta.
+   */
+  private static shippingTaxGuardLine(snapshot: ShippingTaxSnapshot): {
+    item_taxes: Array<{ tax_type: string | null; amount: number }>;
+  } {
+    return {
+      item_taxes: [
+        {
+          tax_type: snapshot.shipping_tax_type,
+          amount: Number(snapshot.shipping_tax_amount || 0),
+        },
+      ],
+    };
+  }
 
   /**
    * MIME types accepted as payment receipts attached to checkout. Aligned with
@@ -1525,15 +1607,32 @@ export class CheckoutService {
           tax_amount_item: unitTotals.total_tax_amount,
           total_tax: Number(lineTaxDec.toFixed(2, Prisma.Decimal.ROUND_DOWN)),
           total_net: Number(lineBaseDec.toFixed(2, Prisma.Decimal.ROUND_DOWN)),
-          item_taxes: unitTotals.taxes.map((t, taxIndex) => ({
-            tax_rate_id: (taxInfo.taxes[taxIndex] as any)?.tax_rate_id ?? null,
-            name: (taxInfo.taxes[taxIndex] as any)?.name ?? '',
-            rate: t.rate,
-            amount: t.amount,
-            base: t.base,
-            tax_type: (taxInfo.taxes[taxIndex] as any)?.tax_type ?? 'iva',
-            is_inclusive: t.is_inclusive,
-          })),
+          item_taxes: unitTotals.taxes.map(
+            (t, taxIndex): CheckoutLineTaxSnapshot => {
+              // QUI-INC — la fila de catálogo va TIPADA: sin `as any` y sin
+              // `??`. El índice es seguro POR CONSTRUCCIÓN — el kernel
+              // (`resolveInclusiveClearing`) mapea 1:1 sobre el arreglo que
+              // recibe, y ese arreglo es exactamente `taxInfo.taxes.map(...)`
+              // unas líneas más arriba: misma longitud y mismo orden. El
+              // `as any` hacía pasar por «defensivo» un acceso que ya estaba
+              // garantizado, y el `?? 'iva'` de atrás fabricaba la
+              // clasificación fiscal en el punto de ESCRITURA, donde ya no se
+              // puede distinguir «categoría sin tipar» de «categoría INC cuyo
+              // tipo nadie propagó». `calculateProductTaxes` YA lo resuelve
+              // contra la fila fuente (`tax_categories.tax_type ?? iva`), que
+              // es el único sitio donde ese default significa algo.
+              const catalogTax: CatalogTaxRow = taxInfo.taxes[taxIndex];
+              return {
+                tax_rate_id: catalogTax.tax_rate_id,
+                name: catalogTax.name,
+                rate: t.rate,
+                amount: t.amount,
+                base: t.base,
+                tax_type: catalogTax.tax_type,
+                is_inclusive: t.is_inclusive,
+              };
+            },
+          ),
           applied_price_tier_id: line.applied_price_tier_id,
           applied_price_tier_name_snapshot: line.applied_price_tier_name,
           stock_units_consumed: stockUnitsConsumed,
@@ -1548,8 +1647,20 @@ export class CheckoutService {
       itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0),
     );
 
+    // Copia del impuesto del envío (tarifa elegida). Va incluido en
+    // `shipping_cost`: no cambia `grand_total`.
+    const shipping_tax = await this.resolveCheckoutShippingTax(
+      shipping_rate_id,
+      shipping_cost,
+      store_id,
+    );
+
     // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
-    await this.assertCheckoutVatAllowed(itemsWithTaxes);
+    // El IVA del envío cuenta igual que el de los productos.
+    await this.assertCheckoutVatAllowed([
+      ...itemsWithTaxes,
+      CheckoutService.shippingTaxGuardLine(shipping_tax),
+    ]);
 
     // Restaurant fire-to-kitchen deferral: prepared items with an active
     // recipe are excluded from reservation (computed once for the whole cart).
@@ -1624,6 +1735,8 @@ export class CheckoutService {
         shipping_cost: shipping_cost,
         shipping_method_id: shipping_method_id,
         shipping_rate_id: shipping_rate_id,
+        // Copia congelada del impuesto del envío (vacía sin tarifa gravada).
+        ...shipping_tax,
         delivery_type: delivery_type,
         grand_total: grand_total,
         shipping_address_id,
@@ -1665,7 +1778,13 @@ export class CheckoutService {
                 tax_amount: t.amount * item.quantity,
                 tax_type: t.tax_type,
                 // A.4 (F-002): el flag viaja por fila (N filas por tasa).
-                is_inclusive: t.is_inclusive ?? false,
+                // QUI-INC — sin `?? false`. `CheckoutLineTaxSnapshot` ya lo
+                // declara obligatorio y el kernel lo devuelve por tasa: el
+                // default local sólo podía enmascarar un hueco del productor,
+                // y `is_inclusive` decide cómo parte el XML DIAN la línea
+                // (ADR-03), así que un `false` inventado descuadra el
+                // documento con los importes cuadrando igual.
+                is_inclusive: t.is_inclusive,
               })),
             },
           })),
@@ -2278,15 +2397,32 @@ export class CheckoutService {
           tax_amount_item: waUnitTotals.total_tax_amount,
           total_tax: Number(waLineTaxDec.toFixed(2, Prisma.Decimal.ROUND_DOWN)),
           total_net: Number(waLineBaseDec.toFixed(2, Prisma.Decimal.ROUND_DOWN)),
-          item_taxes: waUnitTotals.taxes.map((t, taxIndex) => ({
-            tax_rate_id: (taxInfo.taxes[taxIndex] as any)?.tax_rate_id ?? null,
-            name: (taxInfo.taxes[taxIndex] as any)?.name ?? '',
-            rate: t.rate,
-            amount: t.amount,
-            base: t.base,
-            tax_type: (taxInfo.taxes[taxIndex] as any)?.tax_type ?? 'iva',
-            is_inclusive: t.is_inclusive,
-          })),
+          item_taxes: waUnitTotals.taxes.map(
+            (t, taxIndex): CheckoutLineTaxSnapshot => {
+              // QUI-INC — la fila de catálogo va TIPADA: sin `as any` y sin
+              // `??`. El índice es seguro POR CONSTRUCCIÓN — el kernel
+              // (`resolveInclusiveClearing`) mapea 1:1 sobre el arreglo que
+              // recibe, y ese arreglo es exactamente `taxInfo.taxes.map(...)`
+              // unas líneas más arriba: misma longitud y mismo orden. El
+              // `as any` hacía pasar por «defensivo» un acceso que ya estaba
+              // garantizado, y el `?? 'iva'` de atrás fabricaba la
+              // clasificación fiscal en el punto de ESCRITURA, donde ya no se
+              // puede distinguir «categoría sin tipar» de «categoría INC cuyo
+              // tipo nadie propagó». `calculateProductTaxes` YA lo resuelve
+              // contra la fila fuente (`tax_categories.tax_type ?? iva`), que
+              // es el único sitio donde ese default significa algo.
+              const catalogTax: CatalogTaxRow = taxInfo.taxes[taxIndex];
+              return {
+                tax_rate_id: catalogTax.tax_rate_id,
+                name: catalogTax.name,
+                rate: t.rate,
+                amount: t.amount,
+                base: t.base,
+                tax_type: catalogTax.tax_type,
+                is_inclusive: t.is_inclusive,
+              };
+            },
+          ),
           applied_price_tier_id: line.applied_price_tier_id,
           applied_price_tier_name_snapshot: line.applied_price_tier_name,
           stock_units_consumed: stockUnitsConsumed,
@@ -2374,6 +2510,17 @@ export class CheckoutService {
       wa_delivery_type = deriveDeliveryType(method.type);
     }
 
+    // Copia del impuesto del envío (endpoint WhatsApp antiguo). La compuerta
+    // F4 de productos ya corrió arriba; aquí se evalúa el IVA del envío.
+    const wa_shipping_tax = await this.resolveCheckoutShippingTax(
+      wa_shipping_rate_id,
+      wa_shipping_cost,
+      wa_store_id,
+    );
+    await this.assertCheckoutVatAllowed([
+      CheckoutService.shippingTaxGuardLine(wa_shipping_tax),
+    ]);
+
     const grand_total = this.roundMoney(
       Math.max(
         0,
@@ -2407,6 +2554,8 @@ export class CheckoutService {
         shipping_cost: wa_shipping_cost,
         shipping_method_id: wa_shipping_method_id,
         shipping_rate_id: wa_shipping_rate_id,
+        // Copia congelada del impuesto del envío (vacía sin tarifa gravada).
+        ...wa_shipping_tax,
         delivery_type: wa_delivery_type,
         grand_total: grand_total,
         shipping_address_id,
@@ -2448,7 +2597,13 @@ export class CheckoutService {
                 tax_amount: t.amount * item.quantity,
                 tax_type: t.tax_type,
                 // A.4 (F-002): el flag viaja por fila (N filas por tasa).
-                is_inclusive: t.is_inclusive ?? false,
+                // QUI-INC — sin `?? false`. `CheckoutLineTaxSnapshot` ya lo
+                // declara obligatorio y el kernel lo devuelve por tasa: el
+                // default local sólo podía enmascarar un hueco del productor,
+                // y `is_inclusive` decide cómo parte el XML DIAN la línea
+                // (ADR-03), así que un `false` inventado descuadra el
+                // documento con los importes cuadrando igual.
+                is_inclusive: t.is_inclusive,
               })),
             },
           })),

@@ -212,6 +212,105 @@ describe('VendorSupportFiscalService', () => {
       );
       expect(data.taxes).toEqual([]);
     });
+
+    /**
+     * QUI-INC — la tarifa del documento soporte ya no es el literal
+     * `'19.00'`. `vendor_support_documents` no tiene desglose (sólo los tres
+     * escalares de cabecera), así que la única tarifa que puede declararse es
+     * la que REPRODUCE la cuota capturada; cualquier otra cosa se rechaza en
+     * vez de firmarse ante la DIAN con una clasificación que nadie decidió.
+     */
+    it('QUI-INC: declara el 5 % cuando el par capturado reproduce el 5 %, no el 19 % literal', () => {
+      const { service } = createService();
+      const data = (service as any).buildProviderData(
+        {
+          ...baseDoc,
+          subtotal: new Prisma.Decimal('100000'),
+          tax_amount: new Prisma.Decimal('5000'),
+          total: new Prisma.Decimal('105000'),
+        },
+        'DSP101',
+      );
+
+      expect(data.taxes).toHaveLength(1);
+      expect(data.taxes[0].tax_rate).toBe('5.00');
+      expect(data.taxes[0].tax_name).toBe('IVA');
+      expect(data.taxes[0].tax_type).toBe('iva');
+    });
+
+    it('QUI-INC: tolera el redondeo de la captura (la base y la cuota se digitan ya redondeadas)', () => {
+      const { service } = createService();
+      // 3.333.333 × 19 % = 633.333,27 — la cuota se captura como 633.333.
+      const data = (service as any).buildProviderData(
+        {
+          ...baseDoc,
+          subtotal: new Prisma.Decimal('3333333'),
+          tax_amount: new Prisma.Decimal('633333'),
+          total: new Prisma.Decimal('3966666'),
+        },
+        'DSP101',
+      );
+      expect(data.taxes[0].tax_rate).toBe('19.00');
+    });
+
+    it('QUI-INC: rechaza en vez de inventar la tarifa cuando ninguna legal reproduce la cuota', () => {
+      const { service } = createService();
+      // Composición de las PO 641/647/679 medidas en producción: el cociente
+      // daba 17,92 %, una tarifa que no existe en ningún catálogo.
+      expect(() =>
+        (service as any).buildProviderData(
+          {
+            ...baseDoc,
+            subtotal: new Prisma.Decimal('4226533.08'),
+            tax_amount: new Prisma.Decimal('757304.49'),
+            total: new Prisma.Decimal('4983837.57'),
+          },
+          'DSP101',
+        ),
+      ).toThrow(
+        expect.objectContaining({
+          errorCode: 'VENDOR_SUPPORT_DOCUMENT_TAX_UNCLASSIFIABLE_001',
+        }),
+      );
+    });
+
+    it('QUI-INC: rechaza una cuota del 8 % (INC), que el literal 19 % habría declarado como IVA', () => {
+      const { service } = createService();
+      expect(() =>
+        (service as any).buildProviderData(
+          {
+            ...baseDoc,
+            subtotal: new Prisma.Decimal('100000'),
+            tax_amount: new Prisma.Decimal('8000'),
+            total: new Prisma.Decimal('108000'),
+          },
+          'DSP101',
+        ),
+      ).toThrow(
+        expect.objectContaining({
+          errorCode: 'VENDOR_SUPPORT_DOCUMENT_TAX_UNCLASSIFIABLE_001',
+        }),
+      );
+    });
+
+    it('QUI-INC: rechaza cuando hay cuota pero la base es cero (no hay contra qué verificar)', () => {
+      const { service } = createService();
+      expect(() =>
+        (service as any).buildProviderData(
+          {
+            ...baseDoc,
+            subtotal: new Prisma.Decimal('0'),
+            tax_amount: new Prisma.Decimal('19000'),
+            total: new Prisma.Decimal('19000'),
+          },
+          'DSP101',
+        ),
+      ).toThrow(
+        expect.objectContaining({
+          errorCode: 'VENDOR_SUPPORT_DOCUMENT_TAX_UNCLASSIFIABLE_001',
+        }),
+      );
+    });
   });
 
   describe('transmit', () => {

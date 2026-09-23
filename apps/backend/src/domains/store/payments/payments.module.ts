@@ -55,6 +55,7 @@ import { InventorySerialNumbersModule } from '../inventory/serial-numbers/invent
 import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.module';
 import { TablesModule } from '../tables/tables.module';
 import { InvoicingModule } from '../invoicing/invoicing.module';
+import { ShippingModule } from '../shipping/shipping.module';
 
 @Module({
   imports: [
@@ -82,10 +83,13 @@ import { InvoicingModule } from '../invoicing/invoicing.module';
     InventorySerialNumbersModule,
     // Restaurant Suite — table close-out / Wompi reconciliation needs
     // TableSessionsService (session_closed emit + deferred-close reconcile).
-    TablesModule,
+    forwardRef(() => TablesModule),
     // A.3 CP-facturacion-fixes: InvoicingService + InvoiceFlowService for the
     // webhook auto-send. No cycle: the invoicing graph never imports payments.
     InvoicingModule,
+    // Copia del impuesto del envío (ShippingTaxService) en la venta POS a
+    // domicilio. Sin ciclo: ShippingModule solo importa Prisma/Response/Settings.
+    ShippingModule,
   ],
   controllers: [
     // CP-POLLO-ARABE-727 (verificación E2E) — `BankAccountsController` va ANTES

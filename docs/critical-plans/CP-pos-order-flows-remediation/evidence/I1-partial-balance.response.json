@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "message": "Order paid successfully",
+  "order": {
+    "id": 1116,
+    "state": "finished",
+    "total_paid": "10000",
+    "remaining_balance": "0",
+    "grand_total": "10000"
+  },
+  "payment": {
+    "transaction_id": "TXN-1790145642575-4GTKIWDO1",
+    "change": 0
+  }
+}

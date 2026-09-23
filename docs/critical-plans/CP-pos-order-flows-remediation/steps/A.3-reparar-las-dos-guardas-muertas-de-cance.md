@@ -1,0 +1,48 @@
+---
+id: A.3
+title: "Reparar las dos guardas muertas de cancelación de línea entregada"
+phase: A
+status: in-progress
+owner: Fabio
+updated: 2026-09-22
+contracts: [FB-27, ERR-14, ERR-15, ERR-16, DB-02, DB-13, DB-37, DB-44]
+adrs: [ADR-02]
+skills: [vendix-backend, vendix-error-handling, vendix-prisma-scopes, vendix-restaurant-ops, how-to-test]
+---
+# A.3 — Reparar las dos guardas muertas de cancelación de línea entregada
+
+- **Skills:** `vendix-backend` (el método vive en `OrderFlowService`; el guard va antes de abrir la transacción) · `vendix-error-handling` (dos códigos nuevos en `error-codes.ts` y `VendixHttpException`, nunca `BadRequestException` cruda) · `vendix-prisma-scopes` (la derivación lee `payments` por la relación de la orden ya cargada, sin consulta cruda ni `withoutScope`) · `vendix-restaurant-ops` (el caso de negocio es «la mosca en la comida» y el carril post-cobro es el reembolso) · `how-to-test` (el test de rechazo DEBE fijar el `errorCode`).
+- **Resources:** `apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:2316` (`cancelDeliveredOrderItem`), `:2326-2341` (las dos guardas muertas) y `:2438-2470` (el recálculo que baja `subtotal_amount`, `tax_amount` y `grand_total`) · `apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:156-177` (`getOrder` ya trae `payments` con `store_payment_method.system_payment_method{type, processing_mode}`: la forma exacta de `OrderCancellationSnapshot`) y `:178-181` (`assertCancellationAllowed`, el precedente de cómo se invoca la política) · `apps/backend/src/domains/store/orders/order-flow/order-cancellation-policy.util.ts:34-36` (`SETTLED_PAYMENT_STATES`, hoy **no exportado**) y `:1-5,56,92` (lo que sí exporta) · `apps/backend/src/domains/store/orders/order-flow/order-cancellation-policy.util.spec.ts` (suite donde se prueba la derivación sin montar servicio) · `apps/backend/prisma/schema.prisma:3847-3860` (`order_state_enum` sin `completed`) y modelo `orders` (sin columna `payment_status`) · `apps/backend/src/common/errors/error-codes.ts` · `apps/frontend/src/app/private/modules/store/orders/pages/order-details/order-details-page.component.ts:4155` · ADR-02 (vinculante) · ficha de auditoría de origen: el punto N11 del reporte del dueño, implementado y commiteado en `3442b1a1c` con los dos guards muertos por dentro (hub §Context).
+- **Business decision:** Cancelar una línea ya entregada se **bloquea** cuando la orden ya se cobró. Lo decidió el dueño el 2026-09-20 ante tres alternativas (bloquear · permitir con nota crédito · permitir con saldo a favor) y quedó fijado en ADR-02: *"Bloquear si ya se cobró"*. «Cobrada» se deriva de los pagos reales de la orden (`succeeded | captured | partially_refunded | refunded`), nunca de una columna de estado. El camino post-cobro es el reembolso existente, no la mutación del total. El caso real —la mosca en la comida— se resuelve antes de cobrar, que es cuando ocurre.
+- **Why:** Las dos guardas que debían proteger el dinero no protegen nada. La primera lee `(order as any).payment_status`: `orders` no tiene esa columna en el esquema y `getOrder` no la selecciona, así que la expresión es `undefined === 'paid'` y evalúa a `false` siempre. La segunda compara contra `BLOCKED_STATES = ['completed','cancelled','refunded']`, y `completed` **no es** un valor de `order_state_enum` — el estado terminal real de una venta POS cobrada es `finished`, que no está en la lista. Con las dos muertas, cancelar una línea de una orden ya cobrada y `finished` recalcula `grand_total` hacia abajo y deja un descuadre permanente contra `Σ payments succeeded`; si además la orden se facturó, el XML aceptado por la DIAN deja de corresponder a la orden. El docblock del método espejo (`:1995-2000`) ya admite por escrito que el guard es muerto y lo dejó como follow-up: este paso es ese follow-up.
+- **Output:** `cancelDeliveredOrderItem` rechaza con `ORD_ITEM_CANCEL_PAID_001` (409) cuando la orden tiene un pago en `SETTLED_PAYMENT_STATES`, y con `ORD_ITEM_CANCEL_STATE_001` (409) cuando el estado es `cancelled`, `refunded` o `finished`, llevando el estado real en `details.state`. `SETTLED_PAYMENT_STATES` (o un predicado `isOrderSettled(payments)` construido sobre él) se **exporta** desde `order-cancellation-policy.util.ts` en vez de duplicar el conjunto; el símbolo muerto `payment_status` y el estado inexistente `completed` desaparecen del método. Los dos códigos quedan registrados en `error-codes.ts` y mapeados en `error-messages.ts`. Specs que fallan antes del fix y que fijan el `errorCode`.
+- **Contracts touched:** FB-27 (cambia el código de error del endpoint), ERR-14 (cede el caso), ERR-15 y ERR-16 (códigos nuevos), DB-02 (la invariante que deja de violarse), DB-13 (`tax_amount` deja de recalcularse sobre orden cobrada), DB-37 (la factura aceptada deja de divergir) y DB-44 (la fila de auditoría sigue escribiéndose en el camino que sí procede).
+- **Data impact:** none — el paso solo **impide** escrituras. No crea ni modifica filas por sí mismo, no requiere DDL y no repara descuadres históricos: las órdenes cuyo `grand_total` ya bajó por debajo de lo recaudado se cuantifican con la consulta de DB-02 y se entregan al dueño como decisión aparte, tal como fija el hub en §Data Integrity Plan.
+- **Blast radius:** Si la derivación se escribe demasiado ancha (por ejemplo tomando también pagos `pending`), un mesero deja de poder cancelar un plato de una cuenta abierta sin cobrar y el flujo de restaurante se traba en la mesa: lo nota el mesero de inmediato. Si queda demasiado estrecha, el descuadre sigue ocurriendo en silencio y lo nota contabilidad semanas después. Superficies: cancelar línea entregada desde el detalle de orden, el recálculo de totales, la factura emitida y la auditoría de la cancelación.
+- **Rollback:** Revertir el commit del paso. Las dos guardas vuelven a su forma muerta y el comportamiento regresa al de hoy; como el paso no escribe filas, no hay nada que deshacer. ADR-02 declara la reversibilidad de la política como trivial: abrirla después (con nota crédito) es aditivo.
+- **Verification:**
+  - `curl -sk -o ../evidence/A.3-cancel-delivered-paid.json -w '%{http_code}\n' -X POST "https://api.vendix.com/api/store/orders/$PAID_ORDER/flow/items/$ITEM/cancel-delivered" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"reason":"mosca en el plato","destination":"waste"}'` (espera 409 `ORD_ITEM_CANCEL_PAID_001`)
+  - `curl -sk -o ../evidence/A.3-cancel-delivered-refunded.json -w '%{http_code}\n' -X POST "https://api.vendix.com/api/store/orders/$REFUNDED_ORDER/flow/items/$ITEM/cancel-delivered" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"reason":"prueba de estado","destination":"waste"}'` (espera 409 `ORD_ITEM_CANCEL_STATE_001` con `details.state`)
+  - `curl -sk -o ../evidence/A.3-cancel-delivered-open.json -w '%{http_code}\n' -X POST "https://api.vendix.com/api/store/orders/$OPEN_ORDER/flow/items/$ITEM/cancel-delivered" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"reason":"mosca en el plato","destination":"waste"}'` (espera 200)
+  - `psql "$DATABASE_URL" -c "SELECT p.order_id FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.state IN ('succeeded','captured') GROUP BY p.order_id,o.grand_total HAVING SUM(p.amount) > o.grand_total + 0.01;"` (debe devolver 0 filas nuevas tras el paso)
+  - `psql "$DATABASE_URL" -c "SELECT count(*) FROM audit_logs WHERE action='order_item.cancel_delivered' AND resource_id=$ITEM;"`
+  - `npm --prefix apps/backend run test:path -- src/domains/store/orders/order-flow/order-cancellation-policy.util.spec.ts`
+  - `npm --prefix apps/backend run test:path -- src/domains/store/orders/order-flow/order-flow.service.spec.ts`
+  - `grep -n "payment_status\|'completed'" apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts` → cero apariciones dentro de `cancelDeliveredOrderItem`
+  - Playwright MCP — recorrido 4 del hub: cancelar un plato entregado sobre orden cobrada (rechaza) y sobre orden sin cobrar (acepta); guardar en `evidence/A.3-e2e-recorrido4.md`
+- **Acceptance checklist:**
+  - [ ] `cancelDeliveredOrderItem` ya no referencia `payment_status` ni el estado `completed`
+  - [ ] La derivación de «orden cobrada» usa el conjunto exportado desde `order-cancellation-policy.util.ts`, sin duplicarlo
+  - [ ] `SETTLED_PAYMENT_STATES` (o su predicado) queda exportado y con su caso en el spec del util
+  - [ ] `ORD_ITEM_CANCEL_PAID_001` está en `error-codes.ts` con HTTP 409 y se lanza con `VendixHttpException`
+  - [ ] `ORD_ITEM_CANCEL_STATE_001` está en `error-codes.ts` con HTTP 409 y lleva el estado real en `details.state`
+  - [ ] La lista de estados bloqueados es `cancelled`, `refunded` y `finished`, todos valores reales de `order_state_enum`
+  - [ ] El guard corre ANTES de abrir la transacción del recálculo: un rechazo no escribe nada
+  - [ ] Cancelar una línea de una orden SIN cobrar sigue funcionando y sigue recalculando totales
+  - [ ] Hay un test de rechazo que fija el `errorCode`, no solo `toBeInstanceOf(VendixHttpException)`
+  - [ ] Hay un test que falla contra el código actual (la guarda vieja lo dejaría pasar)
+  - [ ] `error-messages.ts` mapea los dos códigos nuevos con la CTA al reembolso
+  - [ ] La fila de auditoría `order_item.cancel_delivered` se sigue escribiendo en el camino aceptado
+  - [ ] El espejo de las mismas dos guardas en `cancelOrderItem` queda declarado como deuda de la fase D, no arreglado aquí
+  - [ ] Las filas FB-27, ERR-14, ERR-15, ERR-16, DB-02, DB-13, DB-37 y DB-44 quedan marcadas con evidencia
+- **Status:** in-progress
