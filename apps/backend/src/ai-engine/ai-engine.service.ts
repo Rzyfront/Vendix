@@ -41,6 +41,7 @@ export class AIEngineService implements OnModuleInit {
   private readonly logger = new Logger(AIEngineService.name);
   private providers: Map<number, AIProvider> = new Map();
   private configSettings: Map<number, Record<string, any>> = new Map();
+  private configModelTypes: Map<number, AIModelType> = new Map();
   private defaultConfigId: number | null = null;
 
   constructor(
@@ -60,6 +61,7 @@ export class AIEngineService implements OnModuleInit {
   private async loadConfigurations() {
     this.providers.clear();
     this.configSettings.clear();
+    this.configModelTypes.clear();
     this.defaultConfigId = null;
 
     try {
@@ -69,6 +71,13 @@ export class AIEngineService implements OnModuleInit {
 
       for (const config of configs) {
         this.initializeProvider(config);
+        const configModelType =
+          config.model_type && this.isAIModelType(config.model_type)
+            ? (config.model_type as AIModelType)
+            : this.getModelTypeFromSettings(
+                (config.settings as Record<string, any>) || {},
+              );
+        this.configModelTypes.set(config.id, configModelType);
         if (config.is_default) {
           this.defaultConfigId = config.id;
         }
@@ -173,6 +182,54 @@ export class AIEngineService implements OnModuleInit {
       throw new VendixHttpException(ErrorCodes.AI_PROVIDER_002);
     }
     return provider;
+  }
+
+  /**
+   * Resolves the provider for an application that ships without an explicit
+   * `config_id`.
+   *
+   * Most seeded applications have `config_id = null`, and only a text
+   * configuration may be set as the global default (`AI_CONFIG_003`). A
+   * non-text application (image, speech, video, …) would therefore resolve to
+   * the text default when present, or fail with `AI_PROVIDER_002` when absent
+   * — even if an active configuration of its own `model_type` exists. This
+   * preference order mirrors the seed's `linkImageAppsWhenAvailable`:
+   *
+   *   1. explicit `app.config_id`
+   *   2. first active configuration matching the app `model_type`
+   *   3. the global default configuration
+   *   4. `AI_PROVIDER_002`
+   */
+  private resolveProviderForApp(app: {
+    config_id: number | null;
+    model_type: string | null;
+  }): { provider: AIProvider; configId: number | null } {
+    if (app.config_id) {
+      const provider = this.providers.get(app.config_id);
+      if (provider) {
+        return { provider, configId: app.config_id };
+      }
+      throw new VendixHttpException(ErrorCodes.AI_CONFIG_001);
+    }
+
+    const appModelType =
+      app.model_type && this.isAIModelType(app.model_type)
+        ? (app.model_type as AIModelType)
+        : null;
+
+    if (appModelType) {
+      for (const [configId, configModelType] of this.configModelTypes) {
+        if (configModelType === appModelType) {
+          const provider = this.providers.get(configId);
+          if (provider) {
+            return { provider, configId };
+          }
+        }
+      }
+    }
+
+    const defaultProvider = this.getDefaultProvider();
+    return { provider: defaultProvider, configId: this.defaultConfigId };
   }
 
   async chat(
@@ -692,15 +749,7 @@ export class AIEngineService implements OnModuleInit {
       await this.checkRateLimit(app);
 
       resolvedConfigId = app.config_id || this.defaultConfigId;
-      const provider = app.config_id
-        ? this.providers.get(app.config_id)
-        : this.getDefaultProvider();
-
-      if (!provider) {
-        throw new VendixHttpException(
-          app.config_id ? ErrorCodes.AI_CONFIG_001 : ErrorCodes.AI_PROVIDER_002,
-        );
-      }
+      const { provider } = this.resolveProviderForApp(app);
 
       if (!provider.generateImage) {
         logResponse = {
@@ -810,12 +859,12 @@ export class AIEngineService implements OnModuleInit {
       await this.checkRateLimit(app);
 
       resolvedConfigId = app.config_id || this.defaultConfigId;
-      const provider = app.config_id
-        ? this.providers.get(app.config_id)
-        : this.getDefaultProvider();
-
-      if (!provider) {
-        lastChunk = { type: 'error', error: 'No AI provider configured' };
+      const provider = this.resolveProviderForApp(app).provider;
+      if (!provider.generateImage) {
+        lastChunk = {
+          type: 'error',
+          error: 'Image generation not supported by this provider',
+        };
         yield lastChunk;
         return;
       }
