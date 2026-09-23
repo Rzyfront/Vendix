@@ -521,6 +521,19 @@ export class CreatePosPaymentDto {
   shipping_cost?: number;
 
   /**
+   * Tarifa de envío de la que salió `shipping_cost`. El frontend la envía
+   * SOLO cuando el costo viene de la tarifa (sin override manual). Con ella el
+   * backend valida que la tarifa sea del método y de la tienda y congela la
+   * copia del impuesto del envío en la orden; sin ella (costo digitado a
+   * mano) el envío queda sin impuesto.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  shipping_rate_id?: number;
+
+  /**
    * GAP-6 (QR mesa dine-in) — Propina opcional. Aditiva al grand_total igual
    * que shipping_cost, PERO sin IVA: NO entra a subtotal_amount ni tax_amount.
    * Se contabiliza como pasivo custodio (propinas por pagar), no como ingreso.
