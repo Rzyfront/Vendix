@@ -1,0 +1,11 @@
+ table_id |  status  | session_id | order_id |    order_number     |                     customer_alias                     | subtotal_amount | tax_amount | grand_total | item_count 
+----------+----------+------------+----------+---------------------+--------------------------------------------------------+-----------------+------------+-------------+------------
+       23 | occupied |        115 |     1133 | T-1790152166311-841 | QA B5 borrador aviso QA B5 draft confirm 20260923      |        38000.00 |       0.00 |    38000.00 |          1
+       24 | occupied |        116 |     1134 | T-1790152198948-440 | QA B5 borrador aviso QA B5 draft free control 20260923 |        38000.00 |       0.00 |    38000.00 |          1
+(2 rows)
+
+ open_session_status_mismatch 
+------------------------------
+                            0
+(1 row)
+
