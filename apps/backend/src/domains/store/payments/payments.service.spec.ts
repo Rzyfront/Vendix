@@ -1478,13 +1478,16 @@ describe('PaymentsService', () => {
 
       await (service as any).createOrderInstallments(
         { credit_type: 'free', installment_terms: { interest_rate: 0 } },
-        { id: 41, total_amount: new Prisma.Decimal(1500) },
+        { id: 41, total_amount: new Prisma.Decimal('1500.01') },
       );
 
-      expect(update).toHaveBeenCalledWith({
-        where: { id: 41 },
-        data: { credit_type: 'free', remaining_balance: 1500, total_paid: 0 },
-      });
+      const write = update.mock.calls[0][0];
+      expect(write.where).toEqual({ id: 41 });
+      expect(write.data).toEqual(expect.objectContaining({
+        credit_type: 'free', total_paid: 0,
+      }));
+      expect(write.data.remaining_balance).toBeInstanceOf(Prisma.Decimal);
+      expect(write.data.remaining_balance.equals('1500.01')).toBe(true);
     });
 
     it('finances installments from projected result.order.total_amount', async () => {

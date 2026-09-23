@@ -2244,11 +2244,12 @@ export class PaymentsService {
       typeof order.id === 'object' ? Number(order.id) : Number(order.id);
     // processPosPayment projects persisted orders.grand_total as
     // result.order.total_amount; this is not the client's DTO estimate.
-    const orderTotal = Number(order.total_amount);
+    const persistedTotal = new Prisma.Decimal(order.total_amount);
+    const orderTotal = persistedTotal.toNumber();
 
     const updateData: Record<string, any> = {
       credit_type: creditType,
-      remaining_balance: orderTotal,
+      remaining_balance: persistedTotal,
       total_paid: 0,
     };
 
