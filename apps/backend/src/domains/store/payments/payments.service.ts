@@ -2237,15 +2237,18 @@ export class PaymentsService {
    */
   private async createOrderInstallments(
     dto: CreatePosPaymentDto,
-    order: { id: number | bigint; total_amount?: any },
+    order: { id: number | bigint; grand_total: any },
   ) {
     const creditType = dto.credit_type || 'installments';
     const orderId =
       typeof order.id === 'object' ? Number(order.id) : Number(order.id);
+    // The persisted orders row has grand_total, not total_amount (which is
+    // only a POS request estimate). Credit balances must use the final sale.
+    const orderTotal = Number(order.grand_total);
 
     const updateData: Record<string, any> = {
       credit_type: creditType,
-      remaining_balance: order.total_amount || 0,
+      remaining_balance: orderTotal,
       total_paid: 0,
     };
 
@@ -2265,7 +2268,7 @@ export class PaymentsService {
         const initialPayment = terms.initial_payment || 0;
         // Subtract initial payment from total BEFORE calculating installments
         const amountToFinance =
-          Math.round((Number(order.total_amount) - initialPayment) * 100) / 100;
+          Math.round((orderTotal - initialPayment) * 100) / 100;
 
         const schedule = calculateSchedule({
           total_amount: amountToFinance,
@@ -2328,9 +2331,9 @@ export class PaymentsService {
       } else {
         // Free credit - just set interest fields if applicable
         if (interestRate > 0) {
-          const totalInterest = Number(order.total_amount) * interestRate;
+          const totalInterest = orderTotal * interestRate;
           updateData.total_with_interest =
-            Math.round((Number(order.total_amount) + totalInterest) * 100) /
+            Math.round((orderTotal + totalInterest) * 100) /
             100;
           updateData.remaining_balance = updateData.total_with_interest;
         }

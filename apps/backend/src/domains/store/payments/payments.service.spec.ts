@@ -1471,6 +1471,47 @@ describe('PaymentsService', () => {
     });
   });
 
+  describe('createOrderInstallments — persisted POS credit total', () => {
+    it('records free-credit balance from grand_total rather than absent order.total_amount', async () => {
+      const update = jest.fn().mockResolvedValue({});
+      (prisma as any).orders = { update };
+
+      await (service as any).createOrderInstallments(
+        { credit_type: 'free', installment_terms: { interest_rate: 0 } },
+        { id: 41, grand_total: new Prisma.Decimal(1500) },
+      );
+
+      expect(update).toHaveBeenCalledWith({
+        where: { id: 41 },
+        data: { credit_type: 'free', remaining_balance: 1500, total_paid: 0 },
+      });
+    });
+
+    it('finances installments from grand_total after an initial payment', async () => {
+      const update = jest.fn().mockResolvedValue({});
+      const create = jest.fn().mockResolvedValue({});
+      (prisma as any).orders = { update };
+      (prisma as any).order_installments = { create };
+
+      await (service as any).createOrderInstallments(
+        { credit_type: 'installments', installment_terms: {
+          num_installments: 2, frequency: 'monthly',
+          first_installment_date: '2026-10-23', interest_rate: 0,
+          initial_payment: 0,
+        } },
+        { id: 42, grand_total: new Prisma.Decimal(1500) },
+      );
+
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 42 },
+        data: expect.objectContaining({
+          credit_type: 'installments', remaining_balance: 1500,
+        }),
+      }));
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Table lifecycle contract: a POS sale (deferred or not) MUST NOT close the
   // table session or flip `tables.status` to 'cleaning'. Only the canonical
