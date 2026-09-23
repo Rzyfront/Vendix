@@ -15,6 +15,10 @@ import { PromotionEngineService } from '../promotions/promotion-engine/promotion
 import { CouponsService } from '../coupons/coupons.service';
 import { AuditService } from '@common/audit/audit.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
+import { order_channel_enum, order_delivery_type_enum, order_state_enum } from '@prisma/client';
+import { CreateOrderDto } from './dto/create-order.dto';
 
 describe('OrdersService', () => {
   let service: OrdersService;
@@ -697,6 +701,67 @@ describe('OrdersService', () => {
    * Ahora deriva el bruto server-side con `resolveFinalUnitPriceServerSide`
    * (mismas tasas de catálogo que ya resuelve para `order_item_taxes`).
    */
+  describe('create — E.3 delivery type and channel', () => {
+    let contextSpy: jest.SpyInstance;
+    const makeDto = (extra: Record<string, unknown> = {}) => ({
+      order_number: 'ORD-E3-1',
+      subtotal: 100,
+      total_amount: 100,
+      skip_schedule_validation: true,
+      items: [{ product_name: 'Custom item', quantity: 1, unit_price: 100, total_price: 100 }],
+      ...extra,
+    }) as CreateOrderDto;
+
+    beforeEach(() => {
+      contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1, organization_id: 1, user_id: 99, request_id: 'req-e3',
+      } as any);
+      mockPrismaService.orders.create.mockImplementation(async ({ data }: any) => ({
+        id: 930,
+        store_id: 1,
+        order_number: data.order_number,
+        delivery_type: data.delivery_type ?? order_delivery_type_enum.direct_delivery,
+        channel: data.channel ?? order_channel_enum.pos,
+        state: data.state,
+        grand_total: data.grand_total,
+        currency: data.currency,
+        order_items: [{ product_id: null, product_variant_id: null, quantity: 1, products: null }],
+      }));
+    });
+
+    afterEach(() => contextSpy.mockRestore());
+
+    it('persists dine_in and whatsapp instead of falling through to schema defaults', async () => {
+      const order = await service.create(makeDto({ delivery_type: order_delivery_type_enum.dine_in, channel: order_channel_enum.whatsapp }), { id: 99 });
+      expect(order).toMatchObject({ delivery_type: order_delivery_type_enum.dine_in, channel: order_channel_enum.whatsapp, state: order_state_enum.created });
+      expect(mockPrismaService.orders.create.mock.calls[0][0].data).toMatchObject({ delivery_type: order_delivery_type_enum.dine_in, channel: order_channel_enum.whatsapp });
+    });
+
+    it('writes explicit direct_delivery/pos defaults and never pickup when omitted', async () => {
+      const order = await service.create(makeDto(), { id: 99 });
+      expect(order).toMatchObject({ delivery_type: order_delivery_type_enum.direct_delivery, channel: order_channel_enum.pos });
+      expect(mockPrismaService.orders.create.mock.calls[0][0].data).toMatchObject({ delivery_type: order_delivery_type_enum.direct_delivery, channel: order_channel_enum.pos });
+    });
+
+    it('keeps home_delivery + prepared in pending_delivery', async () => {
+      const dto = makeDto({ delivery_type: order_delivery_type_enum.home_delivery });
+      dto.items[0].product_type = 'prepared';
+      const order = await service.create(dto, { id: 99 });
+      expect(order).toMatchObject({ delivery_type: order_delivery_type_enum.home_delivery, state: order_state_enum.pending_delivery });
+    });
+
+    it('accepts every schema channel and rejects an invalid channel and unknown field through DTO validation', () => {
+      for (const channel of Object.values(order_channel_enum)) {
+        const dto = plainToInstance(CreateOrderDto, makeDto({ channel }));
+        expect(validateSync(dto, { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
+      }
+      for (const extra of [{ channel: 'telegram' }, { canal: 'pos' }, { delivery_type: 'takeaway' }]) {
+        const dto = plainToInstance(CreateOrderDto, makeDto(extra));
+        expect(validateSync(dto, { whitelist: true, forbidNonWhitelisted: true }).length).toBeGreaterThan(0);
+      }
+    });
+  });
+
   describe('create — F-006 final_unit_price server-side (C.8)', () => {
     const contextSpy = () =>
       jest.spyOn(RequestContextService, 'getContext').mockReturnValue({

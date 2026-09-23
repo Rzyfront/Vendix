@@ -12,6 +12,7 @@ import {
 } from './dto';
 import {
   Prisma,
+  order_channel_enum,
   order_state_enum,
   order_delivery_type_enum,
 } from '@prisma/client';
@@ -477,6 +478,9 @@ export class OrdersService {
             store_id: store_id, // Force strict store_id
             order_number: createOrderDto.order_number,
             state: orderState,
+            delivery_type:
+              createOrderDto.delivery_type ?? order_delivery_type_enum.direct_delivery,
+            channel: createOrderDto.channel ?? order_channel_enum.pos,
             subtotal_amount: createOrderDto.subtotal,
             tax_amount: createOrderDto.tax_amount || 0,
             shipping_cost: createOrderDto.shipping_cost || 0,
