@@ -6,3 +6,4 @@
 | 2026-09-22 | A1-pos-draft | A.1 | Backend parcial en be9015d3d y c0a50ab70; frontend espera commit de hunks ajenos en archivos compartidos. No cerrar el paso. | payments.service.spec.ts: 79/79 en esta sesión |
 | 2026-09-22 | A2-dinein-gate | A.2 | Backend y UI parcial en b917b5d18 y 290067e7b; se corrigió expansión accidental de tipo en d3a63db50. Falta E2E real. | order-flow.service.spec.ts: 74/74; watch FE OK |
 | 2026-09-22 | Orquestador | A.3 | Guardas backend reparadas en 1a60d333a; frontend y E2E pendientes. No cerrar el paso. | 2 suites/126 tests; error codes 409 tipados |
+| 2026-09-22 | Orquestador | H.1/H.2 | Falso gate retirado en ed49e8472; settings legacy inerte y default nuevo ausente. Falta E2E POS/Mesas antes de cerrar. | payments.service.spec.ts: 75/75; backend compiló |

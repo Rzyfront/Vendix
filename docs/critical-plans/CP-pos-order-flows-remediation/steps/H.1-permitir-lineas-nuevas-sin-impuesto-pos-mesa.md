@@ -2,8 +2,8 @@
 id: H.1
 title: "Permitir líneas nuevas sin impuesto al cobrar desde POS mesa"
 phase: H
-status: pending
-owner: none
+status: in-progress
+owner: Fabio
 updated: 2026-09-22
 contracts: [FB-03, FB-66, FB-67, DB-13, DB-43, ERR-01, ERR-02]
 adrs: [ADR-10]
@@ -33,4 +33,4 @@ skills: [vendix-backend, vendix-tax-typing, vendix-error-handling, how-to-test]
   - [ ] Líneas antiguas gravadas no se recalculan a cero aunque cambie el catálogo.
   - [ ] `POS_TABLE_LINE_TAX_UNRESOLVABLE_001` no se lanza por ausencia de asignación actual en una línea nueva.
   - [ ] Evidencia de Jest, curl, SQL de orden/pago y logs vinculada bajo `evidence/`.
-- **Status:** pending
+- **Status:** in-progress

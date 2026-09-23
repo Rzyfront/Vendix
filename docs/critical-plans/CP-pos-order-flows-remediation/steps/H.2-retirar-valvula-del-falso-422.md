@@ -2,8 +2,8 @@
 id: H.2
 title: "Retirar la válvula del falso 422 sin exponerla al comerciante"
 phase: H
-status: pending
-owner: none
+status: in-progress
+owner: Fabio
 updated: 2026-09-22
 contracts: [FB-64, FB-65, DB-42, ERR-01]
 adrs: [ADR-10]
@@ -31,4 +31,4 @@ skills: [vendix-backend, vendix-settings-system, vendix-error-handling, how-to-t
   - [ ] Un JSON histórico con `tax_line_gate` sigue siendo aceptable al guardar settings y no se borra masivamente.
   - [ ] La clave no aparece en defaults de tiendas nuevas y el código legado no tiene lanzador activo.
   - [ ] Evidencia de grep, Jest y PATCH/GET local guardada bajo `evidence/`.
-- **Status:** pending
+- **Status:** in-progress
