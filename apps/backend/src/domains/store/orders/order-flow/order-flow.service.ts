@@ -1419,12 +1419,13 @@ export class OrderFlowService {
       };
     }
     } catch (error) {
-      // A persisted succeeded/pending payment owns its reservation, even if a
-      // later projection (ERR-33) fails. Only a pre-payment failure or an
-      // explicitly cancelled payment can unwind a claimed draft.
-      if (preClaimState === 'draft' && (!paymentPersisted || paymentCompensated)) {
+      // A persisted succeeded/pending payment owns its claim, even if a later
+      // projection fails. A pre-payment failure must reopen every claimed
+      // state, not only draft: otherwise an invalid payment method strands a
+      // created order in processing with zero payments (and allows finishing).
+      if (!paymentPersisted || paymentCompensated) {
         try {
-          if (draftStoreId != null) {
+          if (preClaimState === 'draft' && draftStoreId != null) {
             await this.compensateClaimedDraftPayment(
               orderId,
               draftStoreId,
@@ -1437,7 +1438,7 @@ export class OrderFlowService {
           // The transaction rolls back the releases too. Keep processing
           // claimed (no retry/double charge) and preserve the original error.
           this.logger.error(
-            `[payOrder draft compensation failed] order=${orderId}: ${(compensationError as Error).message}`,
+            `[payOrder claim compensation failed] order=${orderId}: ${(compensationError as Error).message}`,
           );
         }
       }
@@ -5064,8 +5065,8 @@ export class OrderFlowService {
    * falla, el operador ve la orden en `processing` y la mueve a mano (mismo
    * contrato que los rollbacks ya existentes en `payOrder`).
    *
-   * La llaman el catch del finish y la guarda de cocina (F2-guard), ambas en
-   * la rama direct → finished: no toca VALID_TRANSITIONS ni ningún otro flujo.
+   * También la llama el catch externo si el cobro falla antes de crear pago.
+   * Sólo restaura desde `processing`: no pisa un estado que otra operación ganó.
    */
   private async restorePreClaimState(
     orderId: number,
@@ -5076,7 +5077,7 @@ export class OrderFlowService {
     }
     try {
       await this.prisma.orders.updateMany({
-        where: { id: orderId },
+        where: { id: orderId, state: 'processing' },
         data: { state: preClaimState, updated_at: new Date() },
       });
     } catch (restoreErr) {

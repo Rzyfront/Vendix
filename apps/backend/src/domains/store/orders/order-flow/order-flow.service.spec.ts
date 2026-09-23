@@ -166,6 +166,24 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.getState()).toBe('created');
   });
 
+  it.each(['created', 'shipped'] as const)(
+    'método de pago inválido restaura %s tras el claim, sin pago ni finish',
+    async (state) => {
+      const h = harness(false, state);
+      h.prismaMock.store_payment_methods.findFirst.mockResolvedValue(null);
+
+      await expect(h.service.payOrder(1, DTO)).rejects.toMatchObject({
+        errorCode: 'ORD_FLOW_PAYMENT_FAILED_001',
+        response: expect.objectContaining({
+          details: expect.objectContaining({ stage: 'payment_method_not_found' }),
+        }),
+      });
+      expect(h.getState()).toBe(state);
+      expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+      expect(h.stateUpdates).toEqual([]);
+    },
+  );
+
   it('rechaza orden shipped ya saldada y conserva su estado logístico', async () => {
     const h = harness(false, 'shipped', [{ state: 'captured', amount: 40 }, { state: 'succeeded', amount: 60 }]);
     const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
@@ -2419,7 +2437,7 @@ describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 
     );
     expect(restoreCalls.length).toBeGreaterThanOrEqual(1);
     expect(restoreCalls[0][0]).toEqual({
-      where: { id: 1 },
+      where: { id: 1, state: 'processing' },
       data: expect.objectContaining({ state: 'created' }),
     });
   });
