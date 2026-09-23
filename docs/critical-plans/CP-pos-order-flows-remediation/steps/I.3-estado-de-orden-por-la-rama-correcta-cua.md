@@ -2,8 +2,8 @@
 id: I.3
 title: "Estado de orden por la rama correcta cuando el pago queda pendiente"
 phase: I
-status: in-progress
-owner: Hypatia
+status: done
+owner: Fabio
 updated: 2026-09-23
 contracts: [FB-01, DB-03, DB-14, ERR-20]
 adrs: []
@@ -36,4 +36,4 @@ skills: [vendix-backend, vendix-payment-processors, vendix-error-handling, how-t
   - [x] El comentario del cliente POS describe la conducta real del backend
   - [x] El procesador COD sigue registrado para el gateway genérico; POS escribe pending de forma transaccional sin invocarlo, y la razón queda documentada
   - [x] La consulta que cruza estado de orden contra estado de pago no devuelve ninguna venta terminada sin cobro
-- **Status:** in-progress — `evidence/I3-cod-home-20260923.md`: COD domicilio #1167 201, orden/pago pendientes, saldo $10.000 y remisión #227 201; mostrador #1115 ya probado. PaymentsService 106/106; SQL de nuevas órdenes `finished`+pago `pending` = 0. Negativo de método inexistente descubrió 500 no tipado en POS; corregir y revalidar antes de cerrar.
+- **Status:** done — `evidence/I3-cod-home-20260923.md`: COD domicilio #1167 201, orden/pago pendientes, saldo $10.000 y remisión #227 201; mostrador #1115 ya probado. PaymentsService 108/108; SQL de nuevas órdenes `finished`+pago `pending` = 0. `4ef91b0e7` convierte método ausente/ajeno/inexistente de 500 a 400 tipado sin escritura. No se reescribieron órdenes históricas.
