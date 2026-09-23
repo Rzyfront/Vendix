@@ -4,7 +4,7 @@ title: "Cobrar y finalizar desde el detalle sin callejones"
 phase: E
 status: in-progress
 owner: Fabio
-updated: 2026-09-20
+updated: 2026-09-23
 contracts: [FB-04, FB-05, FB-20, FB-22, ERR-03, ERR-18, ERR-36]
 adrs: [ADR-01]
 skills: [vendix-backend, vendix-error-handling, vendix-frontend, vendix-zoneless-signals, how-to-test]
@@ -29,14 +29,14 @@ skills: [vendix-backend, vendix-error-handling, vendix-frontend, vendix-zoneless
   - `curl -s -X DELETE "$API/store/orders/$PAID_ID" -H "Authorization: Bearer $TOKEN" | tee evidence/E.4-delete-con-pagos.json` → rechazo; y `grep -rn "this.http.delete" apps/frontend/src/app/private/modules/store/orders` sin llamadores nuevos.
   - Playwright MCP contra `https://vendix.com`: abrir mesa → pedir → cobrar desde el detalle de la orden; y crear borrador POS → abandonarlo → cancelarlo desde la lista. Capturas en `evidence/E.4-detalle-e2e/`.
 - **Acceptance checklist:**
-  - [ ] Una orden de mesa se cobra desde el detalle sin pedir método de envío.
-  - [ ] Una orden con envío y sin método sigue rechazando el cobro con su código tipado.
-  - [ ] El fiado sobre una orden de mesa hereda la exención y no rechaza.
-  - [ ] Un borrador abandonado se cancela desde la UI y queda en estado cancelado.
-  - [ ] Cancelar sobre un estado no cancelable devuelve código tipado con el estado en el detalle.
-  - [ ] El claim atómico de la cancelación se conserva: dos cancelaciones concurrentes dejan una sola.
-  - [ ] El borrado duro rechaza sobre una orden con pagos y no tiene llamadores nuevos en el frontend.
-  - [ ] Finalizar con platos pendientes devuelve la lista de platos en el detalle del error.
-  - [ ] Cada test de rechazo fija el código del error, no solo el tipo de excepción.
+  - [x] Una orden de mesa se cobra desde el detalle sin pedir método de envío.
+  - [x] Una orden con envío y sin método sigue rechazando el cobro con su código tipado.
+  - [x] El fiado sobre una orden de mesa hereda la exención y no rechaza.
+  - [x] Un borrador abandonado se cancela desde la UI y queda en estado cancelado.
+  - [x] Cancelar sobre un estado no cancelable devuelve código tipado con el estado en el detalle.
+  - [x] El claim atómico de la cancelación se conserva: dos cancelaciones concurrentes dejan una sola.
+  - [x] El borrado duro rechaza sobre una orden con pagos y no tiene llamadores nuevos en el frontend.
+  - [x] Finalizar con platos pendientes devuelve la lista de platos en el detalle del error.
+  - [x] Cada test de rechazo fija el código del error, no solo el tipo de excepción.
   - [ ] Los cuatro carriles de cobro verificados sobre esta pantalla, con evidencia por carril.
-- **Status:** in-progress — UI adf8bddd0; backend 26a7d7205; 220 tests, DELETE pagado rechazado en API; falta E2E.
+- **Status:** in-progress — `evidence/E4-closeout-20260923.md` documenta UI/APIs, 121 tests de flujo, 3 de detalle, claim concurrente y el 404 de transporte corregido. Falta recorrido fresco mesa→pedido→detalle→cobro y rechazo específico de `refunded`; cuatro carriles heredados de `evidence/A2-four-lane-matrix.md`, no reejecutados íntegramente aquí. La orden QA pre-fix #1165 no fue reparada por SQL.
