@@ -37,7 +37,7 @@ skills: [vendix-backend, vendix-dispatch-routes, vendix-error-handling, vendix-f
   - [x] «Para llevar» y la recogida en tienda siguen cobrando sin método de envío.
   - [ ] El gate de tipo de entrega de la remisión no se relaja: la entrega en el acto sigue sin generar remisión.
   - [ ] El gate de estado de la remisión no se relaja y su mensaje nombra el estado real.
-  - [ ] Una venta con envío y método genera remisión y el badge del detalle la muestra.
+  - [x] Una venta con envío y método genera remisión y el badge del detalle la muestra.
   - [x] El conteo de órdenes huérfanas históricas queda registrado como evidencia.
   - [ ] Ninguna venta con envío nueva queda sin dirección con FK y snapshot.
-- **Status:** in-progress — API local: sin método 400 tipado (dos variantes), con método 201 orden #1119 `processing`, remisión #226 201 y `by-order` devuelve una fila; mostrador #1120 y pickup #1121 siguen 201. Evidencia `evidence/E5-*`. Falta UI E2E/badge y DB-07: #1119 tiene snapshot pero `shipping_address_id` nulo por el contrato alias+dirección pendiente de ADR-05/F.2.
+- **Status:** in-progress · Fabio · 2026-09-23 · API local: sin método 400 tipado, con método 201 orden #1119 `processing`, remisión #226 201 y by-order 200; mostrador #1120 y pickup #1121 siguen 201. Playwright `evidence/E5-ui-order-remision.md`: detalle muestra método, dirección, badge REM2609230001 y «Ver remisión» navega a #226 con dirección/ítem/total. Falta UI negativa y DB-07: #1119 tiene snapshot pero `shipping_address_id=NULL`, pendiente ADR-05/F.2.

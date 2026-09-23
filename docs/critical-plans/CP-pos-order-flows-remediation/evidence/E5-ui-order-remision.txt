@@ -1,0 +1,9 @@
+  id  | delivery_type | shipping_method_id | shipping_address_id | has_snapshot |   state    | total_paid | grand_total
+------+---------------+--------------------+---------------------+--------------+------------+------------+-------------
+ 1119 | home_delivery |                  9 |                     | t            | processing |   10000.00 |    10000.00
+(1 row)
+
+ id  | order_id | status | has_address
+-----+----------+--------+-------------
+ 226 |     1119 | draft  | t
+(1 row)
