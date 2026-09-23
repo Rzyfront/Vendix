@@ -1504,39 +1504,79 @@ export class OrderFlowService {
         shippingCost = Number(rate.base_cost);
       }
 
-      // Impuesto del envío: copia congelada de la tarifa (incluido en su
-      // precio). Sin tarifa ⇒ copia vacía. El `grand_total` se recalcula
-      // cambiando el costo anterior por el nuevo: el impuesto va DENTRO del
-      // costo, así que no se suma aparte (orders.tax_amount no lo incluye).
-      const shippingTax: ShippingTaxSnapshot =
-        dto.shipping_rate_id && this.shippingTaxService
-          ? await this.shippingTaxService.snapshotForRate(
-              null,
-              dto.shipping_rate_id,
-              shippingCost,
-              { store_id: order.store_id },
-            )
-          : { ...EMPTY_SHIPPING_TAX };
-      const previousShippingCents = Math.round(
-        Number(order.shipping_cost ?? 0) * 100,
+      // Orden ya cobrada (o con un cobro en curso): su `grand_total` y su
+      // `shipping_cost` son los que el cliente pagó. Asignar el método NO
+      // puede moverlos ni cambiar la copia fiscal. Si la tarifa elegida trae
+      // otro costo ⇒ 400 explícito; si coincide ⇒ se liga método/tarifa y se
+      // conservan costo y copia existentes.
+      const chargedPayment = (order.payments ?? []).some(
+        (p: { state?: string | null }) =>
+          !!p?.state && p.state !== 'failed' && p.state !== 'cancelled',
       );
-      const grandTotalCents =
-        Math.round(Number(order.grand_total ?? 0) * 100) -
-        previousShippingCents +
-        Math.round(shippingCost * 100);
+      const paymentStatus = (order as { payment_status?: string | null })
+        .payment_status;
+      const orderIsCharged =
+        chargedPayment || (paymentStatus != null && paymentStatus !== 'pending');
 
-      await this.prisma.orders.update({
-        where: { id: orderId },
-        data: {
-          shipping_method_id: method.id,
-          shipping_rate_id: dto.shipping_rate_id ?? null,
-          delivery_type: deliveryType,
-          shipping_cost: shippingCost,
-          ...shippingTax,
-          grand_total: new Prisma.Decimal(grandTotalCents).div(100),
-          updated_at: new Date(),
-        },
-      });
+      if (orderIsCharged) {
+        const chargedShippingCents = Math.round(
+          Number(order.shipping_cost ?? 0) * 100,
+        );
+        if (Math.round(shippingCost * 100) !== chargedShippingCents) {
+          throw new VendixHttpException(
+            ErrorCodes.ORD_SHIP_RATE_MISMATCH_001,
+            'La orden ya tiene un cobro: el costo de la tarifa elegida no coincide con el envío cobrado',
+            {
+              order_id: orderId,
+              charged_shipping_cost: chargedShippingCents / 100,
+              rate_shipping_cost: shippingCost,
+            },
+          );
+        }
+        await this.prisma.orders.update({
+          where: { id: orderId },
+          data: {
+            shipping_method_id: method.id,
+            shipping_rate_id: dto.shipping_rate_id ?? null,
+            delivery_type: deliveryType,
+            updated_at: new Date(),
+          },
+        });
+      } else {
+        // Impuesto del envío: copia congelada de la tarifa (incluido en su
+        // precio). Sin tarifa ⇒ copia vacía. El `grand_total` se recalcula
+        // cambiando el costo anterior por el nuevo: el impuesto va DENTRO del
+        // costo, así que no se suma aparte (orders.tax_amount no lo incluye).
+        const shippingTax: ShippingTaxSnapshot =
+          dto.shipping_rate_id && this.shippingTaxService
+            ? await this.shippingTaxService.snapshotForRate(
+                null,
+                dto.shipping_rate_id,
+                shippingCost,
+                { store_id: order.store_id },
+              )
+            : { ...EMPTY_SHIPPING_TAX };
+        const previousShippingCents = Math.round(
+          Number(order.shipping_cost ?? 0) * 100,
+        );
+        const grandTotalCents =
+          Math.round(Number(order.grand_total ?? 0) * 100) -
+          previousShippingCents +
+          Math.round(shippingCost * 100);
+
+        await this.prisma.orders.update({
+          where: { id: orderId },
+          data: {
+            shipping_method_id: method.id,
+            shipping_rate_id: dto.shipping_rate_id ?? null,
+            delivery_type: deliveryType,
+            shipping_cost: shippingCost,
+            ...shippingTax,
+            grand_total: new Prisma.Decimal(grandTotalCents).div(100),
+            updated_at: new Date(),
+          },
+        });
+      }
     }
 
     if (!force) {

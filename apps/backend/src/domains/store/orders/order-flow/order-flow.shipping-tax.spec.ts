@@ -68,6 +68,55 @@ describe('OrderFlowService.shipOrder — impuesto del envío', () => {
     expect(new Prisma.Decimal(data.grand_total).toNumber()).toBe(10800);
   });
 
+  describe('orden ya cobrada', () => {
+    const charged = (overrides: Record<string, unknown> = {}) => ({
+      id: 10, store_id: 1, state: 'processing', delivery_type: 'home_delivery',
+      shipping_method_id: null, shipping_cost: 15000, grand_total: 25800,
+      payments: [{ id: 1, state: 'succeeded' }],
+      ...overrides,
+    });
+
+    it('costo de la tarifa igual al cobrado: liga método/tarifa y NO toca costo, total ni copia', async () => {
+      service.getOrder.mockResolvedValue(charged());
+      await service.shipOrder(10, { shipping_method_id: 4, shipping_rate_id: 31 });
+      expect(snapshotForRate).not.toHaveBeenCalled();
+      const data = prisma.orders.update.mock.calls[0][0].data;
+      expect(data).toMatchObject({ shipping_method_id: 4, shipping_rate_id: 31 });
+      expect('grand_total' in data).toBe(false);
+      expect('shipping_cost' in data).toBe(false);
+      expect('shipping_tax_amount' in data).toBe(false);
+    });
+
+    it('costo distinto al cobrado: 400 sin escribir la orden', async () => {
+      service.getOrder.mockResolvedValue(charged({ shipping_cost: 5000, grand_total: 15800 }));
+      let caught: any;
+      try {
+        await service.shipOrder(10, { shipping_method_id: 4, shipping_rate_id: 31 });
+      } catch (error) { caught = error; }
+      expect(caught?.getStatus?.()).toBe(400);
+      expect(caught?.errorCode).toBe('ORD_SHIP_RATE_MISMATCH_001');
+      expect(prisma.orders.update).not.toHaveBeenCalled();
+      expect(service.updateOrderState).not.toHaveBeenCalled();
+    });
+
+    it('pago pendiente también cuenta como cobro; pago fallido no', async () => {
+      service.getOrder.mockResolvedValue(charged({
+        shipping_cost: 0, grand_total: 10800, payments: [{ id: 1, state: 'pending' }],
+      }));
+      await expect(
+        service.shipOrder(10, { shipping_method_id: 4, shipping_rate_id: 31 }),
+      ).rejects.toMatchObject({ errorCode: 'ORD_SHIP_RATE_MISMATCH_001' });
+
+      prisma.orders.update.mockClear();
+      service.getOrder.mockResolvedValue(charged({
+        shipping_cost: 0, grand_total: 10800, payments: [{ id: 1, state: 'failed' }],
+      }));
+      await service.shipOrder(10, { shipping_method_id: 4, shipping_rate_id: 31 });
+      const data = prisma.orders.update.mock.calls[0][0].data;
+      expect(new Prisma.Decimal(data.grand_total).toNumber()).toBe(25800);
+    });
+  });
+
   it('reemplaza un costo anterior en el grand_total', async () => {
     service.getOrder.mockResolvedValue({
       id: 10, store_id: 1, state: 'processing', delivery_type: 'home_delivery',
