@@ -817,6 +817,91 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
       expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
     });
 
+    it('venta a crédito con propina: CR propina por pagar y el asiento cuadra; sin propina idéntico', async () => {
+      const TIP = 1690;
+      const base = {
+        order_id: SALE.order_id,
+        organization_id: 1,
+        store_id: 2,
+        subtotal_amount: SALE.subtotal,
+        tax_amount: SALE.tax,
+        shipping_amount: SALE.shipping,
+        tax_breakdown: [{ tax_type: 'iva' as const, tax_amount: SALE.tax }],
+      };
+      const { service, createAutoEntry } = build({ payments: [] });
+
+      await service.onCreditSaleCreated({
+        ...base,
+        total_amount: SALE.total + TIP,
+        tip_amount: TIP,
+      });
+      const withTip = linesOf(createAutoEntry.mock.calls[0]);
+      expect(withTip).toContainEqual(
+        expect.objectContaining({ account_code: '1305', debit_amount: SALE.total + TIP }),
+      );
+      expect(creditOn(withTip, '238005')).toBe(TIP);
+      expect(creditOn(withTip, '4135')).toBe(SALE.subtotal);
+      expect(sum(withTip, 'debit_amount')).toBe(sum(withTip, 'credit_amount'));
+
+      await service.onCreditSaleCreated({ ...base, total_amount: SALE.total });
+      await service.onCreditSaleCreated({
+        ...base,
+        total_amount: SALE.total,
+        tip_amount: 0,
+      });
+      const noTip = linesOf(createAutoEntry.mock.calls[1]);
+      expect(linesOf(createAutoEntry.mock.calls[2])).toEqual(noTip);
+      expect(noTip.some((l) => l.account_code === '238005')).toBe(false);
+      expect(sum(noTip, 'debit_amount')).toBe(sum(noTip, 'credit_amount'));
+    });
+
+    it('crédito con propina + factura + cobro: factura omitida, propina una vez, 1305 en 0', async () => {
+      const TIP = 1690;
+      const { service, createAutoEntry } = build({ payments: [] });
+      await service.onCreditSaleCreated({
+        order_id: SALE.order_id,
+        organization_id: 1,
+        store_id: 2,
+        subtotal_amount: SALE.subtotal,
+        tax_amount: SALE.tax,
+        shipping_amount: SALE.shipping,
+        tax_breakdown: [{ tax_type: 'iva', tax_amount: SALE.tax }],
+        total_amount: SALE.total + TIP,
+        tip_amount: TIP,
+      });
+      const creditLines = linesOf(createAutoEntry.mock.calls[0]);
+
+      const later = build({
+        payments: [],
+        entries: [asPostedEntry(601, 'credit_sale.created', creditLines)],
+        firstBySource: { 'credit_sale.created': { id: 601 } },
+      });
+      const invoice: any = await later.service.onInvoiceValidated(invoiceEvent);
+      expect(invoice).toEqual(
+        expect.objectContaining({ skipped: true, reason: 'sale_already_recognized' }),
+      );
+      later.service['prisma'].invoices.findFirst = jest
+        .fn()
+        .mockResolvedValue({ id: SALE.invoice_id });
+      await later.service.onPaymentReceived({
+        payment_id: 906,
+        organization_id: 1,
+        store_id: 2,
+        order_id: SALE.order_id,
+        amount: SALE.total + TIP,
+        tip_amount: TIP,
+      });
+      expect(later.createAutoEntry).toHaveBeenCalledTimes(1);
+      const all = [...creditLines, ...linesOf(later.createAutoEntry.mock.calls[0])];
+      expect(creditOn(all, '238005')).toBe(TIP);
+      expect(creditOn(all, '4135')).toBe(SALE.subtotal);
+      const net1305 =
+        sum(all.filter((l) => l.account_code === '1305'), 'debit_amount') -
+        creditOn(all, '1305');
+      expect(net1305).toBe(0);
+      expect(sum(all, 'debit_amount')).toBe(sum(all, 'credit_amount'));
+    });
+
     it('sin credit_sale.created ni factura sigue siendo venta directa', async () => {
       const { service, createAutoEntry } = build();
 

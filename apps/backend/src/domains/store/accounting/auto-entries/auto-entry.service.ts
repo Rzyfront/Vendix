@@ -3294,6 +3294,7 @@ export class AutoEntryService {
     // Check if this payment's order has an associated invoice
     let has_invoice = false;
     let has_real_invoice = false;
+    let has_credit_sale = false;
     if (data.order_id) {
       const invoice = await this.prisma.invoices.findFirst({
         where: {
@@ -3304,24 +3305,24 @@ export class AutoEntryService {
       });
       has_invoice = !!invoice;
       has_real_invoice = !!invoice;
-      // Venta a crédito sin factura: `credit_sale.created` ya reconoció el
-      // ingreso + impuestos contra 1305. El cobro posterior sólo cruza cartera
-      // (DR caja / CR 1305); por la rama «sin factura» reconocería la venta
-      // otra vez.
-      if (!has_invoice) {
-        const credit_sale = await this.prisma
-          .withoutScope()
-          .accounting_entries.findFirst({
-            where: {
-              organization_id: data.organization_id,
-              source_type: 'credit_sale.created',
-              source_id: data.order_id,
-              status: 'posted',
-            },
-            select: { id: true },
-          });
-        has_invoice = !!credit_sale;
-      }
+      // Venta a crédito: `credit_sale.created` ya reconoció el ingreso +
+      // impuestos contra 1305 (con propina incluida en la 1305 y acreditada a su
+      // pasivo). El cobro posterior sólo cruza cartera (DR caja / CR 1305); por
+      // la rama «sin factura» reconocería la venta otra vez, y con factura no
+      // debe volver a separar la propina.
+      const credit_sale = await this.prisma
+        .withoutScope()
+        .accounting_entries.findFirst({
+          where: {
+            organization_id: data.organization_id,
+            source_type: 'credit_sale.created',
+            source_id: data.order_id,
+            status: 'posted',
+          },
+          select: { id: true },
+        });
+      has_credit_sale = !!credit_sale;
+      has_invoice = has_invoice || has_credit_sale;
     }
 
     const payment_desc = data.payment_method
@@ -3336,8 +3337,10 @@ export class AutoEntryService {
       // Invoice exists: Debit Cash/Bank, Credit AR (invoice.validated already recognized revenue+IVA)
       // La propina NO está en la factura (ni en su 1305): con factura, la
       // porción de propina del cobro va a su pasivo y la 1305 sólo cruza la
-      // venta. Sin esto la 1305 queda negativa por la propina.
-      const collection_tip = has_real_invoice
+      // venta. Sin esto la 1305 queda negativa por la propina. Si la venta la
+      // reconoció `credit_sale.created`, la propina ya está en su 1305 y en el
+      // pasivo: el cobro cruza la 1305 completa.
+      const collection_tip = has_real_invoice && !has_credit_sale
         ? Math.min(
             Math.max(0, Number(data.tip_amount || 0)),
             Number(data.amount || 0),
@@ -3525,6 +3528,12 @@ export class AutoEntryService {
      */
     shipping_amount?: number;
     total_amount: number;
+    /**
+     * Propina de la orden (sin IVA). `total_amount` (= grand_total) ya la
+     * incluye en el DR 1305; se acredita al mismo pasivo custodio que
+     * payment.received (`payment.received.tip_payable`) para que cuadre.
+     */
+    tip_amount?: number;
     user_id?: number;
     /** Snapshot del cliente de la venta a crédito. Ver onPaymentReceived. */
     customer?: { id: number; name?: string; tax_id?: string };
@@ -3631,6 +3640,22 @@ export class AutoEntryService {
         side: 'debit',
       })),
     );
+
+    // Propina: la 1305 (grand_total) la incluye; sin este CR el asiento no
+    // cuadra y el guard de balance lo rechaza. Mismo pasivo que el carril POS.
+    const tip = Number(data.tip_amount || 0);
+    if (tip > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'payment.received.tip_payable',
+          `Propina por pagar${order_ref}`,
+          0,
+          tip,
+          data.store_id,
+        ),
+      );
+    }
 
     return this.createAutoEntry({
       source_type: 'credit_sale.created',

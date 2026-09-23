@@ -1717,6 +1717,9 @@ export class PaymentsService {
               // Parte de BASE del descuento de orden (ver payment.received).
               discount_amount: sale_tax.discount_amount,
               total_amount: Number(order.grand_total || 0),
+              // Propina incluida en grand_total: el asiento la acredita a su
+              // pasivo custodio (sin ella el DR 1305 no cuadra).
+              tip_amount: Number(order.tip_amount || 0),
               user_id: user.id,
             });
 

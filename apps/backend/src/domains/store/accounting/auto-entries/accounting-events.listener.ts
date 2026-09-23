@@ -353,6 +353,8 @@ export class AccountingEventsListener {
      */
     shipping_amount?: number;
     total_amount: number;
+    /** Propina (sin IVA) incluida en total_amount; se acredita a su pasivo. */
+    tip_amount?: number;
     user_id?: number;
   }) {
     try {
@@ -379,6 +381,7 @@ export class AccountingEventsListener {
             : undefined,
         shipping_amount: Number(event.shipping_amount ?? 0),
         total_amount: Number(event.total_amount),
+        tip_amount: Number(event.tip_amount ?? 0),
         user_id: event.user_id,
       });
       this.logger.log(
