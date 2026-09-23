@@ -775,6 +775,7 @@ export class PosPaymentResponseDto {
   order?: {
     id: number;
     order_number: string;
+    customer_alias?: string | null;
     status: string;
     payment_status: string;
     total_amount: number;

@@ -1876,6 +1876,9 @@ export class PaymentsService {
           order: {
             id: order.id,
             order_number: order.order_number,
+            // The POS confirmation prints this persisted identity. Omitting it
+            // made an alias sale render as "Consumidor Final" after payment.
+            customer_alias: order.customer_alias ?? null,
             status: order.state,
             payment_status: payment
               ? payment.state
