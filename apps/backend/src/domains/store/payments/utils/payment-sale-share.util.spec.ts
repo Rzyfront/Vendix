@@ -293,4 +293,63 @@ describe('resolvePaymentReceivedSaleFields', () => {
     expect(typed('iva')).toBe(c(1900 + 190));
     expect(typed('inc')).toBe(c(800));
   });
+  it('M6 · tres pagos desiguales: cada tipo de impuesto cierra al centavo entre pagos', async () => {
+    // IVA 19 % 1.900,01 + INC 8 % 800,03 + envío IVA 190 ⇒ 23.890,04.
+    const order = {
+      subtotal_amount: 20000,
+      discount_amount: 0,
+      tax_amount: 2700.04,
+      shipping_cost: 1190,
+      shipping_tax_type: 'iva',
+      shipping_tax_rate: 0.19,
+      shipping_tax_amount: 190,
+      tip_amount: 0,
+      grand_total: 23890.04,
+      order_items: [
+        {
+          quantity: 3,
+          total_price: 10000,
+          tax_amount_item: 633.34,
+          order_item_taxes: [{ tax_type: 'iva', tax_rate: 0.19, tax_amount: 1900.01 }],
+        },
+        {
+          quantity: 7,
+          total_price: 10000,
+          tax_amount_item: 114.29,
+          order_item_taxes: [{ tax_type: 'inc', tax_rate: 0.08, tax_amount: 800.03 }],
+        },
+      ],
+    };
+    const c = (n: number) => Math.round(n * 100);
+    const amounts = [7777.77, 3333.33, 12778.94];
+    const shares: Awaited<ReturnType<typeof resolvePaymentReceivedSaleFields>>[] = [];
+    for (let i = 0; i < amounts.length; i += 1) {
+      shares.push(
+        await resolvePaymentReceivedSaleFields(
+          {
+            orders: { findUnique: jest.fn().mockResolvedValue(order) },
+            payments: {
+              findMany: jest
+                .fn()
+                .mockResolvedValue(amounts.slice(0, i).map((amount) => ({ amount }))),
+            },
+          },
+          { order_id: 72, payment_id: i + 1, amount: amounts[i] },
+        ),
+      );
+    }
+    for (const fields of shares) {
+      expect(fields.tax_breakdown).toBeDefined();
+      expect(
+        fields.tax_breakdown!.reduce((acc, row) => acc + c(row.tax_amount), 0),
+      ).toBe(c(fields.tax_amount));
+    }
+    const typed = (type: string) =>
+      shares
+        .flatMap((f) => f.tax_breakdown ?? [])
+        .filter((row) => row.tax_type === type)
+        .reduce((acc, row) => acc + c(row.tax_amount), 0);
+    expect(typed('iva')).toBe(c(1900.01) + c(190));
+    expect(typed('inc')).toBe(c(800.03));
+  });
 });

@@ -260,8 +260,17 @@ export async function resolvePaymentReceivedSaleFields(
   };
   const share = computePaymentSaleShare(legacy_share_input);
   if (!share) return legacy;
-  const tax_breakdown = typedShareBreakdown(order, args.order_id, share, (tax_rows) =>
-    computePaymentSaleShare({ ...legacy_share_input, tax_rows }),
+  const tax_breakdown = typedShareBreakdown(
+    order,
+    args.order_id,
+    share,
+    [...legacy_share_input.prior_amounts, legacy_share_input.amount],
+    (index, amounts) =>
+      computePaymentSaleShare({
+        ...legacy_share_input,
+        amount: amounts[index],
+        prior_amounts: amounts.slice(0, index),
+      }),
   );
   return tax_breakdown ? { ...share, tax_breakdown } : share;
 }
@@ -279,9 +288,9 @@ function typedShareBreakdown(
   order: any,
   order_id: number,
   share: PaymentSaleShare,
-  shareWithRows: (
-    tax_rows: Array<Pick<TaxBreakdownItem, 'tax_type' | 'tax_amount'>>,
-  ) => PaymentSaleShare | null,
+  /** Montos de los pagos liquidados en orden; el último es ESTE pago. */
+  sequence: number[],
+  legacyShareAt: (index: number, amounts: number[]) => PaymentSaleShare | null,
 ): TaxBreakdownItem[] | undefined {
   const items: any[] = Array.isArray(order.order_items) ? order.order_items : [];
   const product_tax_rows = items.flatMap((item) =>
@@ -318,21 +327,20 @@ function typedShareBreakdown(
   ) {
     return undefined;
   }
-  // Preferente: el reparto por filas del mismo historial de pagos (el último
-  // pago cierra cada fila al centavo). Si su impuesto difiere del de la
-  // porción histórica, se reparte el de la porción por peso de fila.
-  const with_rows = shareWithRows(rows);
-  const tax_cents =
-    with_rows?.tax_breakdown &&
-    toCents(with_rows.tax_amount) === share_tax_cents
-      ? rows.map(
-          (row) =>
-            toCents(
-              with_rows.tax_breakdown!.find((r) => r.tax_type === row.tax_type)
-                ?.tax_amount,
-            ),
-        )
-      : allocate(share_tax_cents, row_cents);
+  // Se reproducen los pagos en orden: cada uno reparte su impuesto histórico
+  // sobre el REMANENTE de cada tipo (mayor residuo). Así cada tipo cierra al
+  // centavo entre pagos: el que completa la orden toma el residuo por tipo.
+  let remaining = [...row_cents];
+  let tax_cents: number[] = [];
+  for (let index = 0; index < sequence.length; index += 1) {
+    const step =
+      index === sequence.length - 1 ? share : legacyShareAt(index, sequence);
+    if (!step) return undefined;
+    const step_tax = toCents(step.tax_amount);
+    if (step_tax > remaining.reduce((a, b) => a + b, 0)) return undefined;
+    tax_cents = allocate(step_tax, remaining);
+    remaining = remaining.map((value, i) => value - tax_cents[i]);
+  }
   if (tax_cents.reduce((a, b) => a + b, 0) !== share_tax_cents) {
     return undefined;
   }
