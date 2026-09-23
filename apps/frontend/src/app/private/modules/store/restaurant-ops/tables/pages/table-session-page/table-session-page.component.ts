@@ -1257,75 +1257,22 @@ export class TableSessionPageComponent implements OnInit {
   // ── Mark delivered ─────────────────────────────────────────────────────
 
   /**
-   * Restaurant Suite — Fase K audit jun-2026:
-   *  - The success toast ONLY fires when the response payload actually
-   *    confirms the new state (`status === 'delivered'` or `ready`). If the
-   *    backend silently no-ops or returns an unexpected shape, the
-   *    optimistic merge still runs but the toast is suppressed — the
-   *    operator won't be told "success" when the kitchen wasn't updated.
-   *  - The error path uses `parseApiError` so SPECIFIC error codes
-   *    (`KITCHEN_TICKET_NOT_READY`, `KITCHEN_TICKET_ALREADY_DELIVERED`,
-   *    `KITCHEN_TICKET_ALREADY_CANCELLED`) map to actionable Spanish
-   *    messages instead of the generic "Transición de estado no permitida".
+   * La entrega desde la mesa siempre se dirige a una línea de pedido, incluso
+   * si el plato es para llevar. El seam de mesa sincroniza su estado de cocina
+   * sin entregar por accidente las demás líneas del mismo ticket. El endpoint
+   * de entrega de cocina queda reservado al tablero KDS.
    */
   markDelivered(item: TableSessionOrderItem): void {
-    // Dos caminos, una sola verdad (`order_items.delivered_at`). Solo el
-    // preparado para llevar avanza su ticket de cocina — ese endpoint es
-    // takeaway-only y rechaza dine-in con KITCHEN_TICKET_NOT_TAKEAWAY (422).
-    // El dine-in, pase o no por cocina, se entrega por el seam de mesa, que
-    // exige `ready` para preparados y sincroniza el ticket solo.
-    if (!(item.is_takeaway === true && this.needsKitchen(item))) {
-      this.deliverTableSessionItem(item);
-      return;
-    }
-
-    const ticketId = this.ticketIdFor(item);
-    if (ticketId == null) {
-      this.toastService.error('Este plato no tiene un ticket de cocina');
-      return;
-    }
-    this.deliveringTicketId.set(ticketId);
-    this.kitchenService
-      .markDelivered(ticketId)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (ticket) => {
-          this.deliveringTicketId.set(null);
-          // Only merge + toast when the backend CONFIRMS the new state.
-          // Defensive against silent no-ops: a successful HTTP 200 with a
-          // stale `status` (e.g. the SSE reconciler already advanced it to
-          // `delivered` moments ago) is treated as success but the toast
-          // still fires to confirm the operator's intent.
-          const confirmed =
-            ticket?.status === 'delivered' || ticket?.status === 'ready';
-          if (confirmed) {
-            this.liveKitchenState.update((prev) => {
-              const next = new Map(prev);
-              next.set(item.id, ticket.status);
-              return next;
-            });
-            this.toastService.success('Plato marcado como entregado');
-          }
-          // Refetch by SESSION id. The route /store/table-sessions/:id expects
-          // the session row id, not the order row id (H2 fix).
-          const sessionId = this.session()?.id;
-          if (sessionId) this.loadSession(sessionId, { silent: true });
-        },
-        error: (err: unknown) => {
-          this.deliveringTicketId.set(null);
-          this.onKitchenMutationError(err);
-        },
-      });
+    this.deliverTableSessionItem(item);
   }
 
   /**
    * Entrega por el seam de mesa (`PATCH .../items/:id/deliver`): escribe el
    * hecho de servicio contra la línea de pedido y sincroniza el ticket.
    *
-   * Cubre dos casos: (QUI-652) el item que NO pasa por cocina (una cerveza,
-   * un agua, algo de nevera — no hay ticket que avanzar) y el preparado
-   * dine-in en `ready` (el endpoint de cocina es takeaway-only y lo
-   * rechazaría con 422).
+   * Cubre items sin cocina y preparados en `ready`, tanto dine-in como
+   * takeaway. El endpoint de cocina es takeaway-only y actúa por ticket;
+   * el mesero siempre entrega una sola línea por clic.
    *
    * Usa `deliveringItemId` en vez de `deliveringTicketId` porque la entrega
    * se dirige a la línea de pedido, y reutilizar la señal del ticket dejaría
