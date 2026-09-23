@@ -371,6 +371,18 @@ export class OrderDetailsPageComponent {
     return this.authFacade.printsVatBreakdown() && tax > 0;
   });
   /**
+   * Impuesto del envío (copia congelada de la tarifa al vender). Va SIEMPRE
+   * incluido en `shipping_cost`, así que es una nota informativa: no suma al
+   * total. 0 = envío sin impuesto (tarifa sin impuesto o costo manual).
+   */
+  readonly shippingTaxAmount = computed<number>(() => {
+    const amount = Number(this.order()?.shipping_tax_amount ?? 0);
+    return Number.isFinite(amount) && amount > 0 ? amount : 0;
+  });
+  readonly shippingTaxLabel = computed<string>(
+    () => this.order()?.shipping_tax_name?.trim() || 'impuesto',
+  );
+  /**
    * Plan KDS fire-flows (F3): show the per-plate kitchen dispatch UI only
    * for restaurant stores, when there is at least one pending prepared
    * item, and the order is not in a terminal state (cancelled/refunded).

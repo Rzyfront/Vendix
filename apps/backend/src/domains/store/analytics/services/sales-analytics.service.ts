@@ -240,6 +240,7 @@ export class SalesAnalyticsService {
             subtotal_amount: true,
             discount_amount: true,
             shipping_cost: true,
+            shipping_tax_amount: true,
             tax_amount: true,
             tip_amount: true,
           },
@@ -260,6 +261,7 @@ export class SalesAnalyticsService {
             subtotal_amount: true,
             discount_amount: true,
             shipping_cost: true,
+            shipping_tax_amount: true,
             tax_amount: true,
             tip_amount: true,
           },
@@ -306,15 +308,21 @@ export class SalesAnalyticsService {
       subtotal: Number(currentPeriod._sum.subtotal_amount || 0),
       discounts: Number(currentPeriod._sum.discount_amount || 0),
       shipping: Number(currentPeriod._sum.shipping_cost || 0),
+      shipping_tax: Number(currentPeriod._sum.shipping_tax_amount || 0),
       tax: Number(currentPeriod._sum.tax_amount || 0),
     });
-    const totalTaxes = Number(currentPeriod._sum.tax_amount || 0);
+    // Collected taxes = line taxes (`orders.tax_amount`) + the tax embedded in
+    // the freight (`shipping_tax_amount`), which revenue above excludes.
+    const totalTaxes =
+      Number(currentPeriod._sum.tax_amount || 0) +
+      Number(currentPeriod._sum.shipping_tax_amount || 0);
     const totalTips = Number(currentPeriod._sum.tip_amount || 0);
     const totalOrders = currentPeriod._count.id || 0;
     const previousRevenue = computeOperatingRevenue({
       subtotal: Number(previousPeriod._sum.subtotal_amount || 0),
       discounts: Number(previousPeriod._sum.discount_amount || 0),
       shipping: Number(previousPeriod._sum.shipping_cost || 0),
+      shipping_tax: Number(previousPeriod._sum.shipping_tax_amount || 0),
       tax: Number(previousPeriod._sum.tax_amount || 0),
     });
     const previousOrders = previousPeriod._count.id || 0;
@@ -1072,6 +1080,7 @@ export class SalesAnalyticsService {
         subtotal_amount: true,
         discount_amount: true,
         shipping_cost: true,
+        shipping_tax_amount: true,
       },
       _count: {
         id: true,
@@ -1091,6 +1100,7 @@ export class SalesAnalyticsService {
         subtotal: Number(r._sum.subtotal_amount || 0),
         discounts: Number(r._sum.discount_amount || 0),
         shipping: Number(r._sum.shipping_cost || 0),
+        shipping_tax: Number(r._sum.shipping_tax_amount || 0),
         tax: 0,
       });
       return { r, revenue };
@@ -1161,6 +1171,7 @@ export class SalesAnalyticsService {
         subtotal_amount: true,
         discount_amount: true,
         shipping_cost: true,
+        shipping_tax_amount: true,
       },
       _count: { id: true },
     });
@@ -1179,6 +1190,7 @@ export class SalesAnalyticsService {
         subtotal: Number(r._sum.subtotal_amount || 0),
         discounts: Number(r._sum.discount_amount || 0),
         shipping: Number(r._sum.shipping_cost || 0),
+        shipping_tax: Number(r._sum.shipping_tax_amount || 0),
         tax: 0,
       }),
     }));

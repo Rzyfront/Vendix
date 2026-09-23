@@ -22,6 +22,7 @@ import {
   buildCostCoverage,
   computeGrowth,
   computeOperatingRevenue,
+  SHIPPING_TAX_SQL,
   round2,
   sqlStateList,
 } from '../analytics-metrics.contract';
@@ -66,6 +67,7 @@ export class OverviewAnalyticsService {
         subtotal_amount: true,
         discount_amount: true,
         shipping_cost: true,
+        shipping_tax_amount: true,
         tax_amount: true,
       },
     });
@@ -174,9 +176,14 @@ export class OverviewAnalyticsService {
       subtotal: Number(currentOrders._sum.subtotal_amount || 0),
       discounts: Number(currentOrders._sum.discount_amount || 0),
       shipping: Number(currentOrders._sum.shipping_cost || 0),
+      shipping_tax: Number(currentOrders._sum.shipping_tax_amount || 0),
       tax: Number(currentOrders._sum.tax_amount || 0),
     });
-    const totalTaxes = Number(currentOrders._sum.tax_amount || 0);
+    // Collected taxes include the tax embedded in the freight, which
+    // `orders.tax_amount` does not carry and revenue above excludes.
+    const totalTaxes =
+      Number(currentOrders._sum.tax_amount || 0) +
+      Number(currentOrders._sum.shipping_tax_amount || 0);
     const totalCogs = currentCogs.cogs;
 
     // The full chain, in order: revenue → gross (after cost of goods) → net
@@ -195,9 +202,12 @@ export class OverviewAnalyticsService {
       subtotal: Number(previousOrders._sum.subtotal_amount || 0),
       discounts: Number(previousOrders._sum.discount_amount || 0),
       shipping: Number(previousOrders._sum.shipping_cost || 0),
+      shipping_tax: Number(previousOrders._sum.shipping_tax_amount || 0),
       tax: Number(previousOrders._sum.tax_amount || 0),
     });
-    const prevTaxes = Number(previousOrders._sum.tax_amount || 0);
+    const prevTaxes =
+      Number(previousOrders._sum.tax_amount || 0) +
+      Number(previousOrders._sum.shipping_tax_amount || 0);
     const prevNetProfit = prevIncome - previousCogs.cogs - previousExpenses;
 
     return {
@@ -260,9 +270,9 @@ export class OverviewAnalyticsService {
     >`
       SELECT
         ${salesPeriodSql} AS period,
-        COALESCE(SUM(o.subtotal_amount - COALESCE(o.discount_amount, 0) + COALESCE(o.shipping_cost, 0)), 0) AS revenue,
+        COALESCE(SUM(o.subtotal_amount - COALESCE(o.discount_amount, 0) + COALESCE(o.shipping_cost, 0) - ${SHIPPING_TAX_SQL}), 0) AS revenue,
         COALESCE(SUM(COALESCE(oi.cogs, 0)), 0) AS cost_of_goods,
-        COALESCE(SUM(COALESCE(o.tax_amount, 0)), 0) AS taxes,
+        COALESCE(SUM(COALESCE(o.tax_amount, 0) + ${SHIPPING_TAX_SQL}), 0) AS taxes,
         COALESCE(SUM(COALESCE(oi.units, 0)), 0) AS units,
         COALESCE(SUM(COALESCE(oi.units_without_cost, 0)), 0) AS units_without_cost
       FROM orders o

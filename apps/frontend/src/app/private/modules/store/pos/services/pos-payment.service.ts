@@ -18,6 +18,7 @@ import {
 import {
   PosShippingAddress,
   PosShippingSaleData,
+  posShippingRateIdForPayload,
 } from '../models/shipping.model';
 import { PosApiService } from './pos-api.service';
 
@@ -600,6 +601,9 @@ export class PosPaymentService {
       ...(shippingData.shippingAddressId
         ? { shipping_address_id: shippingData.shippingAddressId }
         : {}),
+      ...(posShippingRateIdForPayload(shippingData) != null
+        ? { shipping_rate_id: posShippingRateIdForPayload(shippingData) }
+        : {}),
       // POS meta
       register_id: register_id,
       seller_user_id: user_id,
@@ -917,6 +921,9 @@ export class PosPaymentService {
             shipping_address_snapshot: shipping.shippingAddress,
             ...(shipping.shippingAddressId
               ? { shipping_address_id: shipping.shippingAddressId }
+              : {}),
+            ...(posShippingRateIdForPayload(shipping) != null
+              ? { shipping_rate_id: posShippingRateIdForPayload(shipping) }
               : {}),
           }
         : {}),

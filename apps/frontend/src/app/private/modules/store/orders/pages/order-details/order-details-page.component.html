@@ -2238,6 +2238,16 @@
                   orderData.shipping_cost || 0 | currency
                 }}</span>
               </div>
+              @if (shippingTaxAmount() > 0) {
+                <div class="flex justify-between items-center text-xs -mt-1">
+                  <span class="text-text-secondary pl-3"
+                    >Incluye {{ shippingTaxLabel() }}:</span
+                  >
+                  <span class="text-text-secondary">{{
+                    shippingTaxAmount() | currency
+                  }}</span>
+                </div>
+              }
               <!-- C.7 (§5.3, base gross): sin fila de impuesto que sume; con
                    desglose respaldado, nota informativa fuera de la aritmética. -->
               @if (showDetailVatNote()) {

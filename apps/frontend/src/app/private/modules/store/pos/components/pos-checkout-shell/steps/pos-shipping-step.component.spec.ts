@@ -9,7 +9,11 @@ import { PosShippingService } from '../../../services/pos-shipping.service';
 import { PosPaymentService } from '../../../services/pos-payment.service';
 import { CustomersService } from '../../../../customers/services/customers.service';
 import { CartState } from '../../../models/cart.model';
-import { PosShippingMethod, PosShippingOption } from '../../../models/shipping.model';
+import {
+  PosShippingMethod,
+  PosShippingOption,
+  posShippingRateIdForPayload,
+} from '../../../models/shipping.model';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { CountryService } from '../../../../../../../core/services/country.service';
@@ -262,5 +266,41 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     latestQuote().next([quote(1, 7000)]);
     fixture.detectChanges();
     expect(component.shippingCost()).toBe(7000);
+  });
+
+  it('rate-sourced cost: the context carries the rate and the payload keeps shipping_rate_id', () => {
+    mount();
+    component.selectSavedAddress(1);
+    fixture.detectChanges();
+    latestQuote().next([quote(7, 9000, 93)]);
+    fixture.detectChanges();
+    const context = component.buildShippingContext()!;
+    expect(context.manualCostOverride).toBeFalse();
+    expect(posShippingRateIdForPayload(context)).toBe(93);
+  });
+
+  it('manual cost override: the payload drops shipping_rate_id (no tax snapshot)', () => {
+    mount();
+    component.selectSavedAddress(1);
+    fixture.detectChanges();
+    latestQuote().next([quote(7, 9000, 93)]);
+    fixture.detectChanges();
+    component.shippingCost.set(5000);
+    component.onShippingCostChange();
+    const context = component.buildShippingContext()!;
+    expect(context.manualCostOverride).toBeTrue();
+    // El editor sigue leyendo la tarifa cruda; la venta/borrador no la manda.
+    expect(context.shippingRateId).toBe(93);
+    expect(posShippingRateIdForPayload(context)).toBeUndefined();
+  });
+});
+
+describe('posShippingRateIdForPayload', () => {
+  it('sends the rate only when there is one and the cost is not manual', () => {
+    expect(posShippingRateIdForPayload({ shippingRateId: 5, manualCostOverride: false })).toBe(5);
+    expect(posShippingRateIdForPayload({ shippingRateId: 5 })).toBe(5);
+    expect(posShippingRateIdForPayload({ shippingRateId: 5, manualCostOverride: true })).toBeUndefined();
+    expect(posShippingRateIdForPayload({ shippingRateId: null })).toBeUndefined();
+    expect(posShippingRateIdForPayload(null)).toBeUndefined();
   });
 });

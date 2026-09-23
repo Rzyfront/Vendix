@@ -788,6 +788,9 @@ export class PosShippingStepComponent {
       shippingAddress: this.buildShippingAddress(),
       deliveryNotes: this.notesControl.value || undefined,
       shippingAddressId: this.isPickupMethod() ? undefined : (this.addressId() ?? undefined),
+      // El borrador aplica `posShippingRateIdForPayload`; el editor lee
+      // `shippingRateId` crudo (su backend ya rechaza costo manual vs tarifa).
+      manualCostOverride: this.manualCostOverride(),
     };
   }
 
@@ -942,6 +945,8 @@ export class PosShippingStepComponent {
           shippingAddress,
           deliveryNotes: this.notesControl.value || undefined,
           shippingAddressId: addressId,
+          shippingRateId: this.shippingRateId(),
+          manualCostOverride: this.manualCostOverride(),
         },
         paymentRequest,
         'current_user',

@@ -195,43 +195,75 @@ export class FinancialAnalyticsService {
       taxable_amount: string | number;
     }>>(Prisma.sql`
       SELECT
-        COALESCE(oit.tax_type::text, 'unclassified') AS tax_type,
-        oit.tax_name AS tax_name,
-        oit.tax_rate AS tax_rate,
-        COALESCE(oit.is_compound, false) AS is_compound,
-        SUM(oit.tax_amount)::decimal AS total_tax,
-        CASE
-          WHEN oit.tax_rate > 0
-            -- F-117: order_item_taxes.tax_rate es Decimal(6,5) y guarda una
-            -- FRACCION (0.19), nunca un porcentaje (19). Un divisor con un
-            -- cien de mas en el denominador infla la base gravable 100x.
-            -- El escritor (payments.service.ts roundRate) persiste la
-            -- fraccion tal cual; aqui se deshace con el mismo divisor,
-            -- sin reescalar.
-            THEN SUM(oit.tax_amount) / oit.tax_rate
-          ELSE 0
-        END::decimal AS taxable_amount
-      FROM order_item_taxes oit
-      -- The join from order_item_taxes to order_items is a per-item fan-in
-      -- (each tax row belongs to exactly one item); SUM aggregates per-tax rows
-      -- AFTER GROUP BY, not order-level columns, so the order fan-out rule
-      -- does not apply here.
-      JOIN order_items oi ON oit.order_item_id = oi.id -- tz-audit:ignore
-      JOIN orders o ON oi.order_id = o.id
-      WHERE o.store_id = ${storeId}
-        AND o.state IN (${revenueStates})
-        AND o.created_at >= ${startDate}
-        AND o.created_at <= ${endDate}
-        -- F-117: excluir items cancelados — la consulta de ingresos gravados
-        -- (revenueRows, mas abajo) ya lo hace; taxRows quedaba desalineada y
-        -- podia contar el impuesto de una linea que la analitica de ingresos
-        -- ya excluia.
-        AND oi.cancelled_at IS NULL
-      GROUP BY
-        COALESCE(oit.tax_type::text, 'unclassified'),
-        oit.tax_name,
-        oit.tax_rate,
-        COALESCE(oit.is_compound, false)
+        t.tax_type,
+        t.tax_name,
+        t.tax_rate,
+        t.is_compound,
+        SUM(t.tax_amount)::decimal AS total_tax,
+        SUM(t.taxable_amount)::decimal AS taxable_amount
+      FROM (
+        SELECT
+          COALESCE(oit.tax_type::text, 'unclassified') AS tax_type,
+          oit.tax_name AS tax_name,
+          oit.tax_rate AS tax_rate,
+          COALESCE(oit.is_compound, false) AS is_compound,
+          SUM(oit.tax_amount) AS tax_amount,
+          CASE
+            WHEN oit.tax_rate > 0
+              -- F-117: order_item_taxes.tax_rate es Decimal(6,5) y guarda una
+              -- FRACCION (0.19), nunca un porcentaje (19). Un divisor con un
+              -- cien de mas en el denominador infla la base gravable 100x.
+              -- El escritor (payments.service.ts roundRate) persiste la
+              -- fraccion tal cual; aqui se deshace con el mismo divisor,
+              -- sin reescalar.
+              THEN SUM(oit.tax_amount) / oit.tax_rate
+            ELSE 0
+          END AS taxable_amount
+        FROM order_item_taxes oit
+        -- The join from order_item_taxes to order_items is a per-item fan-in
+        -- (each tax row belongs to exactly one item); SUM aggregates per-tax rows
+        -- AFTER GROUP BY, not order-level columns, so the order fan-out rule
+        -- does not apply here.
+        JOIN order_items oi ON oit.order_item_id = oi.id -- tz-audit:ignore
+        JOIN orders o ON oi.order_id = o.id
+        WHERE o.store_id = ${storeId}
+          AND o.state IN (${revenueStates})
+          AND o.created_at >= ${startDate}
+          AND o.created_at <= ${endDate}
+          -- F-117: excluir items cancelados — la consulta de ingresos gravados
+          -- (revenueRows, mas abajo) ya lo hace; taxRows quedaba desalineada y
+          -- podia contar el impuesto de una linea que la analitica de ingresos
+          -- ya excluia.
+          AND oi.cancelled_at IS NULL
+        GROUP BY
+          COALESCE(oit.tax_type::text, 'unclassified'),
+          oit.tax_name,
+          oit.tax_rate,
+          COALESCE(oit.is_compound, false)
+        UNION ALL
+        -- Impuesto del envio: copia congelada en la orden (no vive en
+        -- order_item_taxes). Siempre incluido en shipping_cost, asi que su
+        -- base es shipping_cost - shipping_tax_amount (exacta, sin dividir).
+        -- orders.shipping_tax_rate es FRACCION, como order_item_taxes.tax_rate.
+        SELECT
+          COALESCE(o.shipping_tax_type::text, 'unclassified') AS tax_type,
+          COALESCE(o.shipping_tax_name, 'Impuesto envío') AS tax_name,
+          COALESCE(o.shipping_tax_rate, 0) AS tax_rate,
+          false AS is_compound,
+          SUM(o.shipping_tax_amount) AS tax_amount,
+          SUM(o.shipping_cost - o.shipping_tax_amount) AS taxable_amount
+        FROM orders o
+        WHERE o.store_id = ${storeId}
+          AND o.state IN (${revenueStates})
+          AND o.created_at >= ${startDate}
+          AND o.created_at <= ${endDate}
+          AND o.shipping_tax_amount > 0
+        GROUP BY
+          COALESCE(o.shipping_tax_type::text, 'unclassified'),
+          COALESCE(o.shipping_tax_name, 'Impuesto envío'),
+          COALESCE(o.shipping_tax_rate, 0)
+      ) t
+      GROUP BY t.tax_type, t.tax_name, t.tax_rate, t.is_compound
     `);
 
     // Defect 3: separate the period's line totals into "items that carry at
@@ -244,7 +276,19 @@ export class FinancialAnalyticsService {
       exempt_revenue: string | number;
     }>>(Prisma.sql`
       SELECT
-        COALESCE(SUM(CASE WHEN taxed.id IS NOT NULL THEN oi.total_price END), 0)::decimal
+        (
+          COALESCE(SUM(CASE WHEN taxed.id IS NOT NULL THEN oi.total_price END), 0)
+          -- Base gravada del envio con impuesto (shipping_cost es bruto).
+          + (
+            SELECT COALESCE(SUM(so.shipping_cost - so.shipping_tax_amount), 0)
+            FROM orders so
+            WHERE so.store_id = ${storeId}
+              AND so.state IN (${revenueStates})
+              AND so.created_at >= ${startDate}
+              AND so.created_at <= ${endDate}
+              AND so.shipping_tax_amount > 0
+          )
+        )::decimal
           AS taxable_revenue,
         COALESCE(SUM(CASE WHEN taxed.id IS NULL THEN oi.total_price END), 0)::decimal
           AS exempt_revenue
@@ -692,6 +736,7 @@ export class FinancialAnalyticsService {
         discount_amount: true,
         tax_amount: true,
         shipping_cost: true,
+        shipping_tax_amount: true,
         grand_total: true,
       },
       _count: {
@@ -860,7 +905,11 @@ export class FinancialAnalyticsService {
         SELECT
           ppo.paid_in_window,
           COALESCE(LEAST(ppo.paid_in_window / NULLIF(o.grand_total, 0), 1), 0) AS pay_ratio,
-          COALESCE(ot.passthrough_tax, 0) AS passthrough_tax,
+          -- The freight tax (IVA/INC of a taxed shipping rate) lives on the
+          -- order, not in order_item_taxes: it is passthrough money too.
+          COALESCE(ot.passthrough_tax, 0)
+            + CASE WHEN o.shipping_tax_type::text IN (${taxTypes})
+                THEN COALESCE(o.shipping_tax_amount, 0) ELSE 0 END AS passthrough_tax,
           COALESCE(oc.cogs, 0) AS cogs,
           COALESCE(oc.units, 0) AS units,
           COALESCE(oc.units_without_cost, 0) AS units_without_cost
@@ -1165,8 +1214,14 @@ export class FinancialAnalyticsService {
     const revenue = Number(orderAggregates._sum.subtotal_amount || 0);
     const discounts = Number(orderAggregates._sum.discount_amount || 0);
     const netRevenue = revenue - discounts;
-    const taxCollected = Number(orderAggregates._sum.tax_amount || 0);
-    const shippingRevenue = Number(orderAggregates._sum.shipping_cost || 0);
+    const shippingCharged = Number(orderAggregates._sum.shipping_cost || 0);
+    // Tax embedded in the freight of a taxed shipping rate. `orders.tax_amount`
+    // does NOT carry it, so it is added to the collected taxes here and taken
+    // out of the freight's revenue (`shipping_revenue` is the freight BASE).
+    const shippingTax = Number(orderAggregates._sum.shipping_tax_amount || 0);
+    const taxCollected =
+      Number(orderAggregates._sum.tax_amount || 0) + shippingTax;
+    const shippingRevenue = shippingCharged - shippingTax;
 
     // OPERATING REVENUE — the single figure every "Ingresos" card shows:
     // subtotal − discounts + freight charged, VAT excluded. It is also the ONE
@@ -1176,7 +1231,8 @@ export class FinancialAnalyticsService {
     const operatingRevenue = computeOperatingRevenue({
       subtotal: revenue,
       discounts,
-      shipping: shippingRevenue,
+      shipping: shippingCharged,
+      shipping_tax: shippingTax,
       tax: taxCollected,
     });
 
@@ -1222,6 +1278,9 @@ export class FinancialAnalyticsService {
       subtotal: Number(previousOrderAggregates._sum.subtotal_amount || 0),
       discounts: Number(previousOrderAggregates._sum.discount_amount || 0),
       shipping: Number(previousOrderAggregates._sum.shipping_cost || 0),
+      shipping_tax: Number(
+        previousOrderAggregates._sum.shipping_tax_amount || 0,
+      ),
       tax: Number(previousOrderAggregates._sum.tax_amount || 0),
     });
     const previousNetProfit =
@@ -1533,6 +1592,7 @@ export class FinancialAnalyticsService {
         subtotal_amount: true,
         discount_amount: true,
         shipping_cost: true,
+        shipping_tax_amount: true,
         tax_amount: true,
       },
     });
@@ -1545,6 +1605,7 @@ export class FinancialAnalyticsService {
         subtotal_amount: true,
         discount_amount: true,
         shipping_cost: true,
+        shipping_tax_amount: true,
         tax_amount: true,
       },
     });
@@ -1553,12 +1614,14 @@ export class FinancialAnalyticsService {
       subtotal: Number(currentPeriodRevenue._sum.subtotal_amount || 0),
       discounts: Number(currentPeriodRevenue._sum.discount_amount || 0),
       shipping: Number(currentPeriodRevenue._sum.shipping_cost || 0),
+      shipping_tax: Number(currentPeriodRevenue._sum.shipping_tax_amount || 0),
       tax: Number(currentPeriodRevenue._sum.tax_amount || 0),
     });
     const previousRevenue = computeOperatingRevenue({
       subtotal: Number(previousPeriodRevenue._sum.subtotal_amount || 0),
       discounts: Number(previousPeriodRevenue._sum.discount_amount || 0),
       shipping: Number(previousPeriodRevenue._sum.shipping_cost || 0),
+      shipping_tax: Number(previousPeriodRevenue._sum.shipping_tax_amount || 0),
       tax: Number(previousPeriodRevenue._sum.tax_amount || 0),
     });
 
