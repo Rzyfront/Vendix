@@ -2,7 +2,7 @@
 id: F.3
 title: "Alias y dirección visibles en remisión, ruta y documento impreso"
 phase: F
-status: pending
+status: in-progress
 owner: none
 updated: 2026-09-20
 contracts: [FB-60, FB-61, FB-62, FB-63, DB-35, DB-36, ERR-21]
@@ -31,15 +31,15 @@ skills: [vendix-dispatch-routes, vendix-address-geocoding, vendix-backend, how-t
   - Daño histórico: `SELECT count(*) FROM dispatch_notes WHERE customer_id IS NULL AND coalesce(customer_name,'')='';` → `evidence/F.3-remisiones-sin-nombre.txt`.
   - Playwright MCP contra `https://vendix.com`: venta con alias → generar remisión → armar ruta → ver la parada en el mapa → descargar el PDF de ruta. Capturas y PDF en `evidence/F.3-alias-ruta-e2e/`.
 - **Acceptance checklist:**
-  - [ ] Existe un test que falla antes del arreglo: la remisión de una venta con alias nacía sin nombre.
-  - [ ] La remisión copia el nombre de referencia al crearse y no lo resuelve en cada lectura.
-  - [ ] La remisión de una venta con alias deja el cliente nulo, sin inventar ninguna ficha.
+  - [x] Existe un test que falla antes del arreglo: la remisión de una venta con alias nacía sin nombre.
+  - [x] La remisión copia el nombre de referencia al crearse y no lo resuelve en cada lectura.
+  - [x] La remisión de una venta con alias deja el cliente nulo, sin inventar ninguna ficha.
   - [ ] El rechazo por falta de dirección no se dispara en una venta con alias.
-  - [ ] La lista de paradas de la ruta muestra el nombre de referencia.
-  - [ ] La parada resuelve coordenadas por la copia o por la clave foránea, sin depender del cliente.
-  - [ ] El PDF de ruta imprime el nombre de referencia en vez del guión.
-  - [ ] El documento impreso de la remisión declara el campo de nombre de referencia en el catálogo.
+  - [x] La lista de paradas de la ruta muestra el nombre de referencia (spec).
+  - [x] La parada resuelve coordenadas por la copia o por la clave foránea, sin depender del cliente (spec).
+  - [x] El PDF de ruta imprime el nombre de referencia en vez del guión (spec).
+  - [x] El documento impreso de la remisión declara el campo de nombre de referencia en el catálogo (spec).
   - [ ] Una venta con alias entra al pool de despacho con nombre y dirección legibles.
   - [ ] Ninguna remisión existente se reescribe durante el paso.
   - [ ] El conteo de remisiones históricas sin nombre queda registrado como evidencia.
-- **Status:** pending
+- **Status:** in-progress — escritor + lectores/catálogo `4549a0a28`, 6 suites Jest/39 tests. Falta API/SQL real, PDF descargado, ruta y Playwright; Docker/Colima cayó durante pruebas paralelas y se recuperará antes de E2E.

@@ -40,4 +40,4 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-prisma-scopes, vendix-err
   - [ ] El endpoint toma `lockOrderLifecycle`; si el util no está en el árbol, el paso queda bloqueado y se dice en el log
   - [ ] El modal de traslado ofrece la acción solo cuando la orden es elegible, y el mapa de mensajes cubre los cinco rechazos
   - [ ] Todo test de rechazo fija el `errorCode` y el conteo de filas antes/después
-- **Status:** in-progress — endpoint atómico y QA real `evidence/G2-reassign-backend-20260923.md`, `G2-reassign-runtime-20260923.md`: HTTP201 misma orden + nueva sesión, add-items 201, 409/400 tipados, 2 sesiones históricas, QA cerrada/mesas disponibles. Falta KDS con ticket y UI modal.
+- **Status:** in-progress — backend/QA real `evidence/G2-reassign-backend-20260923.md`, `G2-reassign-runtime-20260923.md`: HTTP201 misma orden + nueva sesión, add-items 201, rechazos 409/400 y 2 sesiones históricas. UI modal/guard de orden+plano integrada en `042b5aa5b`; Angular 22/22. Faltan E2E visual y re-estampado KDS con ticket real.

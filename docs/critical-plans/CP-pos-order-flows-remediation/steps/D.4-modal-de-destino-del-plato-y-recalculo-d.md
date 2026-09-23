@@ -2,7 +2,7 @@
 id: D.4
 title: "Modal de destino del plato y recálculo de propina"
 phase: D
-status: pending
+status: in-progress
 owner: none
 updated: 2026-09-20
 contracts: [FB-25, FB-26, FB-27, FB-28, DB-02, DB-44, ERR-15, ERR-42]
@@ -30,8 +30,8 @@ skills: [vendix-frontend-modal, vendix-zoneless-signals, vendix-currency-formatt
   - `curl -s -X POST "$API/store/orders/$OID_COBRADA/flow/items/$IID/cancel-delivered" -H "Authorization: Bearer $TOKEN" -d '{"reason":"prueba post cobro","destination":"waste"}' -o evidence/D.4-post-cobro.json -w '%{http_code}\n'` → 409 derivando al reembolso.
   - Playwright MCP: abrir el modal desde el detalle de orden y desde la mesa, verificar foco, cierre con Escape y que no queda tapado por el shell; capturas a `evidence/D.4-modal/`.
 - **Acceptance checklist:**
-  - [ ] El flujo de cancelación usa el modal de la aplicación; no queda ningún `confirm()` nativo en ese camino.
-  - [ ] El modal nombra las dos opciones con su consecuencia y trae desechar preseleccionado.
+  - [x] El flujo de cancelación preparada usa el modal de la aplicación; no queda `confirm()` nativo en la reversa.
+  - [x] El modal nombra las dos opciones con su consecuencia y trae desechar preseleccionado (reuso ordinario deshabilitado hasta D.3).
   - [ ] El modal muestra el nuevo total y la nueva propina antes de confirmar.
   - [ ] Los dos carriles envían motivo y destino en el cuerpo; el backend deja de derivar el destino por su cuenta.
   - [ ] Una propina porcentual se recalcula sobre el subtotal vivo tras excluir la línea cancelada.
@@ -40,4 +40,4 @@ skills: [vendix-frontend-modal, vendix-zoneless-signals, vendix-currency-formatt
   - [ ] Sobre una orden ya cobrada la acción no se ofrece, y forzada por API responde con el rechazo que deriva al reembolso.
   - [ ] El modal es operable con teclado y no queda tapado por el shell en el detalle de orden ni en la mesa.
   - [ ] F-001 — AUDIT F-031 - propina porcentual sobre un plato cancelado (major)
-- **Status:** pending
+- **Status:** in-progress — modal/frontend `6131c702a`, tests 8/8. Reversa entregada ofrece ambos destinos; cancelación ordinaria oculta reuso hasta que D.3 acepte `after_fire_reused`. Faltan preview de total/propina, recálculo backend y Playwright.
