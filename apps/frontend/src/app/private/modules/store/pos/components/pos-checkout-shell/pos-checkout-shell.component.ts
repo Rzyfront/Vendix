@@ -1278,9 +1278,17 @@ export class PosCheckoutShellComponent {
     };
     const items = state.items.map((it: any) => {
       const booking = buildBooking(it);
+      // Hydrated custom lines carry a local `custom-<uuid>` cart id, not a
+      // catalog product id. The editor DTO accepts only positive integer
+      // product_id values; sending that synthetic string rejects the entire
+      // reopened order with SYS_VALIDATION_001 before the cashier can charge.
+      const productId = Number(it.product?.id);
       return {
         item_type: it.itemType ?? 'product',
-        product_id: it.product?.id ?? null,
+        product_id:
+          it.itemType !== 'custom' && Number.isSafeInteger(productId) && productId > 0
+            ? productId
+            : undefined,
         product_variant_id: it.variant_id ?? null,
         product_name: it.product?.name ?? '',
         product_sku: it.product?.sku ?? null,

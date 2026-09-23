@@ -708,6 +708,28 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     return { state, update, error, ship };
   };
 
+  it('omits synthetic custom cart ids from the editor request for a reopened shipping draft', () => {
+    const { state, update } = prepareShippingEdit();
+    fixture.componentRef.setInput('cartState', {
+      ...state,
+      items: [
+        { itemType: 'custom', product: { id: 'custom-82002fa7', name: 'Servicio QA' },
+          quantity: 1, unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 },
+        { itemType: 'product', product: { id: '7', name: 'Producto real' },
+          quantity: 1, unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 },
+      ],
+    });
+    fixture.detectChanges();
+
+    component.onPrimaryConfirm();
+
+    expect(update).toHaveBeenCalledTimes(1);
+    const items = update.calls.mostRecent().args[1].items;
+    expect(items[0].item_type).toBe('custom');
+    expect(items[0].product_id).toBeUndefined();
+    expect(items[1].product_id).toBe(7);
+  });
+
   it('no guarda un borrador de envío como venta de mostrador cuando falta el método', () => {
     const saveDraft = jasmine.createSpy('saveDraft');
     const warning = jasmine.createSpy('warning');
