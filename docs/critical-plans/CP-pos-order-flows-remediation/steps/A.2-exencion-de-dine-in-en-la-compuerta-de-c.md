@@ -2,9 +2,9 @@
 id: A.2
 title: "Exención de dine_in en la compuerta de cobro de envío"
 phase: A
-status: in-progress
+status: done
 owner: A2-dinein-gate
-updated: 2026-09-22
+updated: 2026-09-23
 contracts: [FB-04, FB-05, FB-20, ERR-03]
 adrs: []
 skills: [vendix-backend, vendix-error-handling, vendix-restaurant-ops, vendix-frontend, vendix-zoneless-signals, how-to-test]
@@ -40,6 +40,6 @@ skills: [vendix-backend, vendix-error-handling, vendix-restaurant-ops, vendix-fr
   - [x] Hay un test que falla antes del fix y que fija `errorCode` sobre `home_delivery` sin método de envío
   - [x] Hay un test que afirma la AUSENCIA de `ORD_SHIP_CHARGE_001` al cobrar una orden `dine_in`
   - [x] `registerCreditPayment` no adquiere la compuerta: el fiado sobre mesa responde sin 422 de envío
-  - [ ] Los cuatro carriles de cobro quedan verificados con su evidencia en `evidence/`
+  - [x] Los cuatro carriles de cobro quedan verificados con su evidencia en `evidence/`
   - [x] Las filas FB-04, FB-05, FB-20 y ERR-03 quedan marcadas con su evidencia enlazada
-- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/A2-flowpay-matrix.md`: Playwright mesa #25/orden #1141 `dine_in` sin método mostró Registrar Pago, POST 200/pago único y sesión #117 pagada; home_delivery #1144 sin método 422/cero writes, con PATCH método #9 pagó 200; crédito parcial #1146 pagó 200 y sobrepago 400 sin mutar. OrderFlowService 114/114, health/watch OK. Falta consolidar evidencia cruzada de los cuatro carriles POS/adoptado/detalle para el último checkbox.
+- **Status:** done · Fabio · 2026-09-23 · `evidence/A2-flowpay-matrix.md`, `A2-four-lane-matrix.md`: mesa #25/orden #1141 `dine_in` sin método mostró Registrar Pago, POST 200/pago único y sesión #117 pagada; `home_delivery` #1144 sin método 422/cero writes, con PATCH método #9 pagó 200; crédito parcial #1146 pagó 200 y sobrepago 400 sin mutar. Matriz cruzada POS directo, borrador reabierto, detalle y orden adoptada enlazada. OrderFlowService 114/114, health/watch OK.
