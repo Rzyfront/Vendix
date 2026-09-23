@@ -167,6 +167,14 @@ export class PosShippingStepComponent {
     return !!m && m.type !== 'pickup';
   });
 
+  /** Keep the missing-method reason visible for a delivery address, not only
+   * during the short validation flash shown after an attempted charge. */
+  readonly missingShippingMethodReason = computed<string | null>(() =>
+    this.address()?.address_line1 && !this.selectedShippingMethod()
+      ? 'Selecciona un método de envío antes de guardar o cobrar esta entrega a domicilio.'
+      : null,
+  );
+
   readonly addressSummary = computed<string>(() => {
     const a = this.address();
     if (!a) return 'Sin dirección';
@@ -628,7 +636,7 @@ export class PosShippingStepComponent {
     const method = this.selectedShippingMethod();
     if (!method || method.is_active === false || (this.methodsLoaded() &&
       !this.shippingMethods().some((m) => m.id === method.id && m.is_active !== false))) {
-      return { section: 'shipping-method', message: 'Selecciona un método de envío activo' };
+      return { section: 'shipping-method', message: this.missingShippingMethodReason() ?? 'Selecciona un método de envío activo' };
     }
     if (this.isCalculatingShipping()) {
       return { section: 'shipping-method', message: 'Espera a que termine el cálculo del envío' };

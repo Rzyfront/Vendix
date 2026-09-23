@@ -268,6 +268,37 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(component.shippingCost()).toBe(7000);
   });
 
+  it('keeps a declared delivery address visibly invalid without a shipping method and does not charge', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    mount(state);
+    component.shippingMethods.set([]);
+    component.selectedShippingMethod.set(null);
+    fixture.detectChanges();
+
+    expect(component.missingShippingMethodReason()).toContain('antes de guardar o cobrar');
+    expect(fixture.nativeElement.textContent).toContain('Selecciona un método de envío antes de guardar o cobrar');
+    expect(component.canConfirm()).toBeFalse();
+    expect(component.buildShippingContext()).toBeNull();
+    component.execute({ mode: 'contado' } as any);
+    expect(component.isProcessing()).toBeFalse();
+  });
+
+  it('does not require a delivery address for an explicitly selected pickup method', () => {
+    mount();
+    const pickup: PosShippingMethod = { id: 9, name: 'Recoger', type: 'pickup', is_active: true };
+    component.shippingMethods.set([...component.shippingMethods(), pickup]);
+    component.selectShippingMethod(pickup);
+    component.address.set(null);
+    component.addressValid.set(false);
+    fixture.detectChanges();
+
+    expect(component.missingShippingMethodReason()).toBeNull();
+    expect(component.canConfirm()).toBeTrue();
+    expect(component.buildShippingContext()?.deliveryType).toBe('pickup');
+  });
+
   it('rate-sourced cost: the context carries the rate and the payload keeps shipping_rate_id', () => {
     mount();
     component.selectSavedAddress(1);

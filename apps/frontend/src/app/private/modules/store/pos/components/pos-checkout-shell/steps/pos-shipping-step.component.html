@@ -13,6 +13,9 @@
   @if (quoteError()) {
     <div class="flash-banner" role="alert">{{ quoteError() }}</div>
   }
+  @if (missingShippingMethodReason()) {
+    <div class="flash-banner" role="alert">{{ missingShippingMethodReason() }}</div>
+  }
 
   <!-- Sub-wizard vertical: opciones a la izquierda · steps-line a la derecha.
        Sub-pasos: 0=Método · 1=Costo (terminal). Espeja Cobro. El "cuándo paga"
