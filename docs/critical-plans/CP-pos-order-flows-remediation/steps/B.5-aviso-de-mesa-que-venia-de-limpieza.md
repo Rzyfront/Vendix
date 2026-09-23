@@ -30,17 +30,17 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-error-handling, vendix-fr
   - `npm --prefix apps/backend run test:path -- src/domains/store/tables/table-sessions.service.spec.ts`
   - Playwright MCP — abrir una cuenta sobre una mesa en limpieza desde el POS y confirmar que aparece el aviso y que la apertura se completa sin confirmación extra; guardar en `evidence/B.5-e2e-limpieza.md`
 - **Acceptance checklist:**
-  - [ ] El estado previo de la mesa se lee dentro de la misma transacción que la apertura
-  - [ ] La escritura del estado de mesa no cambia: sigue fijando ocupada
-  - [ ] El retorno de creación de sesión incluye el estado previo
-  - [ ] El contrato de apertura declara el campo nuevo
-  - [ ] Abrir sobre una mesa en limpieza devuelve respuesta exitosa, nunca un rechazo
-  - [ ] El tile de una mesa en limpieza sigue siendo clicable
+  - [x] El estado previo de la mesa se lee dentro de la misma transacción que la apertura
+  - [x] La escritura del estado de mesa no cambia: sigue fijando ocupada
+  - [x] El retorno de creación de sesión incluye el estado previo
+  - [x] El contrato de apertura declara el campo nuevo
+  - [x] Abrir sobre una mesa en limpieza devuelve respuesta exitosa, nunca un rechazo
+  - [x] El tile de una mesa en limpieza sigue siendo clicable
   - [ ] El modal de apertura muestra un aviso cuando la mesa venía de limpieza
-  - [ ] El aviso no interrumpe el flujo ni exige confirmación adicional
+  - [x] El aviso no interrumpe el flujo ni exige confirmación adicional
   - [ ] Abrir sobre una mesa libre no muestra ningún aviso
-  - [ ] El código de aviso está registrado con su mensaje de frontend
-  - [ ] No se añade columna, migración ni historial de transiciones de mesa
-  - [ ] Hay un test que cubre los dos caminos: mesa en limpieza y mesa libre
+  - [x] El código de aviso está registrado con su mensaje de frontend
+  - [x] No se añade columna, migración ni historial de transiciones de mesa
+  - [x] Hay un test que cubre los dos caminos: mesa en limpieza y mesa libre
   - [ ] Las filas FB-46, DB-21 y ERR-39 quedan marcadas con su evidencia enlazada
-- **Status:** in-progress — backend/modal/contrato en c72634710, 640ba2bcc, 627ab494a; 45+3 tests; falta E2E.
+- **Status:** in-progress — backend/modal/contrato en `c72634710`, `640ba2bcc`, `627ab494a`; carril implícito de checkout POS corregido en `a1531ae4c` (100 backend/12 frontend). Playwright real cobró mesa #19 que estaba en limpieza: HTTP 201/orden #1129, `previous_table_status=cleaning`, toast no bloqueante y mesa ocupada/pagada (`evidence/B5-direct-pos-cleaning.*`). Falta E2E del **modal explícito** de apertura y control visual de mesa libre sin aviso; registry pendiente.
