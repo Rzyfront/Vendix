@@ -166,6 +166,41 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.getState()).toBe('created');
   });
 
+  it('rechaza orden shipped ya saldada y conserva su estado logístico', async () => {
+    const h = harness(false, 'shipped', [{ state: 'captured', amount: 40 }, { state: 'succeeded', amount: 60 }]);
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_PAY_ALREADY_PAID_001');
+    expect(error.getStatus()).toBe(409);
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.getState()).toBe('shipped');
+  });
+
+  it('no reclama processing ni cobra otra vez una orden saldada', async () => {
+    const h = harness(false, 'processing', [{ state: 'succeeded', amount: 100 }]);
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.getStatus()).toBe(409);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.getState()).toBe('processing');
+  });
+
+  it('dos flow/pay concurrentes sobre created crean solo un pago', async () => {
+    const h = harness(false, 'created');
+    const results = await Promise.allSettled([
+      h.service.payOrder(1, DTO),
+      h.service.payOrder(1, DTO),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((result) => result.status === 'rejected');
+    expect(rejected).toMatchObject({
+      reason: expect.objectContaining({ errorCode: 'ORD_FLOW_PAYMENT_FAILED_001' }),
+    });
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    expect(h.getState()).toBe('finished');
+  });
+
   it('permite un abono parcial y cobra solo el saldo pendiente', async () => {
     const h = harness(false, 'created', [{ state: 'succeeded', amount: 40 }]);
     const result = await h.service.payOrder(1, DTO);
