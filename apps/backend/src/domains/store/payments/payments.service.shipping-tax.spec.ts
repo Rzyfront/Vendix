@@ -35,7 +35,7 @@ describe('PaymentsService — impuesto del envío en la venta POS', () => {
   let service: any;
   let snapshotForRate: jest.Mock;
 
-  const tx = (rate: any = { id: 9, shipping_method_id: 5 }) => ({
+  const tx = (rate: any = { id: 9, shipping_method_id: 5, type: 'flat', base_cost: 15000 }) => ({
     orders: {
       findFirst: jest.fn().mockResolvedValue(order),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -103,6 +103,29 @@ describe('PaymentsService — impuesto del envío en la venta POS', () => {
       shipping_cost: 12000,
       grand_total: 22000,
     }));
+  });
+
+  it('tarifa fija con costo digitado distinto (costo manual): copia vacía, liga la tarifa', async () => {
+    const client = tx();
+    await service.createOrUpdateOrderFromPos(
+      client, dto({ shipping_rate_id: 9, shipping_cost: 12000 }), user,
+    );
+    expect(snapshotForRate).not.toHaveBeenCalled();
+    const data = client.orders.update.mock.calls[0][0].data;
+    expect(data).toEqual(expect.objectContaining({
+      ...EMPTY_SHIPPING_TAX,
+      shipping_rate_id: 9,
+      shipping_cost: 12000,
+      grand_total: 22000,
+    }));
+  });
+
+  it('tarifa calculada (peso): acepta el costo del calculador y copia la tarifa', async () => {
+    const client = tx({ id: 9, shipping_method_id: 5, type: 'weight_based', base_cost: 5000 });
+    await service.createOrUpdateOrderFromPos(
+      client, dto({ shipping_rate_id: 9, shipping_cost: 15000 }), user,
+    );
+    expect(snapshotForRate).toHaveBeenCalledWith(client, 9, 15000, { store_id: 1 });
   });
 
   it('tarifa que no es del método o de la tienda: 400 sin escribir la orden', async () => {

@@ -4049,7 +4049,7 @@ export class PaymentsService {
           OR: [{ store_id }, { is_system: true, store_id: null }],
         },
       },
-      select: { id: true, shipping_method_id: true },
+      select: { id: true, shipping_method_id: true, type: true, base_cost: true },
     });
     if (!rate || !dto.shipping_method_id) {
       throw new VendixHttpException(
@@ -4062,11 +4062,22 @@ export class PaymentsService {
       );
     }
 
-    const snapshot = this.shippingTaxService
-      ? await this.shippingTaxService.snapshotForRate(tx, rate.id, shipping_cost, {
-          store_id,
-        })
-      : { ...EMPTY_SHIPPING_TAX };
+    // Costo manual: si la tarifa es de costo fijo (`flat`) y el cajero cobró
+    // otro valor, el envío NO es el de la tarifa ⇒ copia vacía (contrato: un
+    // costo manual no lleva impuesto). Misma regla que `costComesFromRate`
+    // de `OrdersService.assignShipping`. Las tarifas calculadas
+    // (peso/precio/transportadora) no tienen un costo fijo contra el que
+    // comparar aquí: su costo viene del calculador y se acepta.
+    const isManualCost =
+      rate.type === 'flat' &&
+      differsByAtLeastCents(shipping_cost, Number(rate.base_cost ?? 0), 1);
+
+    const snapshot =
+      this.shippingTaxService && !isManualCost
+        ? await this.shippingTaxService.snapshotForRate(tx, rate.id, shipping_cost, {
+            store_id,
+          })
+        : { ...EMPTY_SHIPPING_TAX };
     return { snapshot, rate_id: rate.id };
   }
 
