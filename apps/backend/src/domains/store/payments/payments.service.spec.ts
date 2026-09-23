@@ -2110,6 +2110,48 @@ describe('PaymentsService', () => {
      * (invoicing) partía el XML DIAN al revés con los importes cuadrando
      * igual — el modo de falla que ADR-03 llama "el único real" del diseño.
      */
+    /**
+     * P2-3 — la base del ítem personalizado sale del kernel: truncada a
+     * centavos y con base + cuota = bruto persistido. Antes `final / 1.19`
+     * persistía 840.3361344… y el bruto `unit_price × 1.19` sin truncar.
+     */
+    describe('buildPosOrderItem — ítem custom con base del kernel (P2-3)', () => {
+      afterEach(() => jest.restoreAllMocks());
+      const txFor = () => ({
+        stores: { findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }) },
+        tax_categories: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 9, is_inclusive: true,
+            tax_rates: [{ id: 91, name: 'IVA 19%', rate: 0.19 }],
+          }),
+        },
+      });
+
+      it('bruto declarado 1000 IVA 19%: base 840.34, cuota 159.66, bruto 1000', async () => {
+        const result = await (service as any).buildPosOrderItem(
+          txFor(),
+          { item_type: 'custom', product_name: 'Servicio', quantity: 1, unit_price: 0, final_unit_price: 1000, tax_category_id: 9 },
+          dtoStoreId, posUser, undefined,
+        );
+        expect(result.unit_price).toBe(840.34);
+        expect(result.tax_amount_item).toBe(159.66);
+        expect(result.final_unit_price).toBe(1000);
+        expect(Math.round(result.unit_price * 100) + Math.round(result.tax_amount_item * 100))
+          .toBe(Math.round(result.final_unit_price * 100));
+      });
+
+      it('precio base 999.99 IVA 19%: base exacta, cuota truncada, bruto = base + cuota', async () => {
+        const result = await (service as any).buildPosOrderItem(
+          txFor(),
+          { item_type: 'custom', product_name: 'Servicio', quantity: 1, unit_price: 999.99, tax_category_id: 9 },
+          dtoStoreId, posUser, undefined,
+        );
+        expect(result.unit_price).toBe(999.99);
+        expect(result.tax_amount_item).toBe(189.99);
+        expect(result.final_unit_price).toBe(1189.98);
+      });
+    });
+
     describe('buildPosOrderItem — ítem custom persiste is_inclusive de la categoría (F-052)', () => {
       afterEach(() => {
         jest.restoreAllMocks();
@@ -2460,18 +2502,15 @@ describe('PaymentsService', () => {
         expect(mismatchCalls).toHaveLength(0);
       });
 
-      // F-222/F-223 — el umbral de esta compuerta NO cambió con la migración.
-      // El original era `Math.abs(grossMismatchDelta) > 0.02` sobre un delta
-      // que YA venía redondeado a centavos por `roundMoney`, así que 2¢
-      // exactos no disparaban (`0.02 > 0.02` es falso): tolera 2¢ y registra
-      // desde 3¢. En centavos enteros eso es `differsByAtLeastCents(..., 3)`.
-      // Los dos tests de abajo fijan los dos lados del borde.
-      it('F-222: delta exacto de 2¢ (13603.14 vs 13603.12) NO registra — sigue tolerado', () => {
+      // P2-3 — umbral alineado con la compuerta de dinero (1 ¢, en centavos
+      // enteros). Antes toleraba 2 ¢ (`>= 3`, herencia del `> 0.02` en
+      // floats). El residuo closest-below que el kernel ya reportó no se
+      // duplica como error.
+      it('P2-3: delta de 0¢ no registra', () => {
         const errorSpy = jest.spyOn((service as any).logger, 'error');
-
         (service as any).buildOrderItemSnapshot({
           ...baseParams,
-          unitBasePrice: 13603.14,
+          unitBasePrice: 13603.12,
           finalUnitPrice: 13603.12,
           isPriceOverridden: false,
           productId: 10,
@@ -2479,20 +2518,17 @@ describe('PaymentsService', () => {
           userId: 42,
           taxInfo: { total_rate: 0, total_tax_amount: 0, taxes: [] },
         });
-
         const mismatchCalls = errorSpy.mock.calls.filter(
-          ([payload]) =>
-            (payload as any)?.event === 'pos.line_gross_mismatch',
+          ([payload]) => (payload as any)?.event === 'pos.line_gross_mismatch',
         );
         expect(mismatchCalls).toHaveLength(0);
       });
 
-      it('F-222: delta de 3¢ (13603.15 vs 13603.12) SÍ registra — el borde es determinista', () => {
+      it('P2-3: delta de 1¢ (13603.13 vs 13603.12) SÍ registra — antes se toleraba', () => {
         const errorSpy = jest.spyOn((service as any).logger, 'error');
-
         (service as any).buildOrderItemSnapshot({
           ...baseParams,
-          unitBasePrice: 13603.15,
+          unitBasePrice: 13603.13,
           finalUnitPrice: 13603.12,
           isPriceOverridden: false,
           productId: 10,
@@ -2500,13 +2536,31 @@ describe('PaymentsService', () => {
           userId: 42,
           taxInfo: { total_rate: 0, total_tax_amount: 0, taxes: [] },
         });
-
         const mismatchCalls = errorSpy.mock.calls.filter(
-          ([payload]) =>
-            (payload as any)?.event === 'pos.line_gross_mismatch',
+          ([payload]) => (payload as any)?.event === 'pos.line_gross_mismatch',
         );
         expect(mismatchCalls).toHaveLength(1);
-        expect(mismatchCalls[0][0]).toMatchObject({ delta: 0.03 });
+        expect(mismatchCalls[0][0]).toMatchObject({ delta: 0.01 });
+      });
+
+      it('P2-3: 1¢ explicado por el residuo closest-below ya reportado no se duplica', () => {
+        const errorSpy = jest.spyOn((service as any).logger, 'error');
+        (service as any).buildOrderItemSnapshot({
+          ...baseParams,
+          unitBasePrice: 13603.11,
+          finalUnitPrice: 13603.12,
+          isPriceOverridden: false,
+          productId: 10,
+          storeId: 3,
+          userId: 42,
+          taxInfo: {
+            total_rate: 0, total_tax_amount: 0, taxes: [], unclosed_residual_cents: 1,
+          },
+        });
+        const mismatchCalls = errorSpy.mock.calls.filter(
+          ([payload]) => (payload as any)?.event === 'pos.line_gross_mismatch',
+        );
+        expect(mismatchCalls).toHaveLength(0);
       });
     });
   });

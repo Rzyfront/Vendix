@@ -2766,19 +2766,65 @@ export class PaymentsService {
         dtoStoreId,
       );
       const declaredGross = this.resolveDeclaredGrossUnitPrice(item);
-      const finalUnitPrice =
-        declaredGross ??
-        Number(item.unit_price || 0) * (1 + rateProbe.total_rate);
-      const unitBasePrice =
-        rateProbe.total_rate > 0
-          ? finalUnitPrice / (1 + rateProbe.total_rate)
-          : finalUnitPrice;
-      const taxInfo = await this.calculateTaxCategoryTaxes(
-        tx,
-        item.tax_category_id,
-        unitBasePrice,
-        dtoStoreId,
-      );
+      // P2-3 — la base del ítem personalizado sale del KERNEL, no de una
+      // división en float. Antes `final / (1 + tasa)` dejaba una base con
+      // decimales arbitrarios (p. ej. 840.3361344…) que el snapshot
+      // persistía sin truncar, y el bruto `unit_price × (1 + tasa)` tampoco
+      // se truncaba: base + cuota truncada ≠ bruto guardado.
+      //  - Bruto declarado con impuesto ⇒ `resolveLineTotals` con TODAS las
+      //    tasas inclusivas (ADR-01, mismo despeje que `invertDeclaredGross`):
+      //    base y cuotas truncadas DIAN; el bruto persistido es el que el
+      //    kernel cierra (closest-below si no hay base exacta) y el residuo se
+      //    registra igual que en el carril de catálogo.
+      //  - Precio base (sin bruto declarado) ⇒ la base ES ese precio, a
+      //    centavos; la cuota se trunca en `calculateTaxCategoryTaxes` y el
+      //    bruto es base + cuota.
+      let unitBasePrice: number;
+      let finalUnitPrice: number;
+      let taxInfo: Awaited<ReturnType<PaymentsService['calculateTaxCategoryTaxes']>>;
+      if (declaredGross != null && rateProbe.total_rate > 0) {
+        const resolved = this.taxes_service.resolveLineTotals(
+          declaredGross,
+          rateProbe.taxes.map((tax) => ({ rate: tax.rate, is_inclusive: true })),
+        );
+        if ((resolved.unclosed_residual_cents ?? 0) !== 0) {
+          this.logger.warn({
+            event: 'payments.unclosed_residual_cents',
+            store_id: dtoStoreId ?? null,
+            user_id: user?.id ?? null,
+            order_ref: orderRef ?? null,
+            product_id: null,
+            quantity: item.quantity ?? null,
+            final_price: declaredGross,
+            rates: rateProbe.taxes.map((tax) => ({ rate: tax.rate, is_inclusive: true })),
+            residual_cents: resolved.unclosed_residual_cents,
+            invalid_inputs: resolved.invalid_inputs,
+          });
+        }
+        unitBasePrice = resolved.base;
+        finalUnitPrice = resolved.total;
+        taxInfo = {
+          total_rate: rateProbe.total_rate,
+          total_tax_amount: resolved.total_tax_amount,
+          taxes: rateProbe.taxes.map((tax, index) => ({
+            ...tax,
+            amount: resolved.taxes[index].amount,
+          })),
+        };
+      } else {
+        unitBasePrice = this.roundMoney(
+          declaredGross ?? Number(item.unit_price || 0),
+        );
+        taxInfo = await this.calculateTaxCategoryTaxes(
+          tx,
+          item.tax_category_id,
+          unitBasePrice,
+          dtoStoreId,
+        );
+        finalUnitPrice = this.roundMoney(
+          unitBasePrice + taxInfo.total_tax_amount,
+        );
+      }
 
       return this.buildOrderItemSnapshot({
         item,
@@ -3393,17 +3439,24 @@ export class PaymentsService {
     const grossMismatchDelta = this.roundMoney(
       computedGrossUnitPrice - orderItem.final_unit_price,
     );
-    // F-222: MISMO umbral que el `> 0.02` original (tolera 2 centavos), pero
-    // medido en centavos enteros: `>= 3` ¢. El `> 0.02` en floats fallaba en el
-    // borde exacto según la magnitud (13603.14 − 13603.12 = 0.0199999999986, no
-    // disparaba; 551.07 − 551.05 = 0.0200000000001, sí). Solo registra, no
-    // lanza (ADR-11/B.4).
+    // P2-3 — umbral alineado con la compuerta de dinero del cobro: 1 ¢ en
+    // centavos enteros (antes `>= 3` ¢ heredado del `> 0.02` en floats, que
+    // dejaba pasar sin rastro los descuadres de 1-2 ¢ que la compuerta sí
+    // mide). El único descuadre legítimo es el residuo closest-below que el
+    // kernel ya reportó (`unclosed_residual_cents`, warn propio): ese delta
+    // exacto no se vuelve a registrar como error. Solo registra, no lanza
+    // (ADR-11/B.4).
+    const knownResidualCents = Math.abs(
+      Number((params.taxInfo as any).unclosed_residual_cents ?? 0),
+    );
+    const grossMismatchCents = Math.abs(Math.round(grossMismatchDelta * 100));
     if (
       differsByAtLeastCents(
         computedGrossUnitPrice,
         orderItem.final_unit_price,
-        3,
-      )
+        1,
+      ) &&
+      !(knownResidualCents > 0 && grossMismatchCents === knownResidualCents)
     ) {
       this.logger.error({
         event: 'pos.line_gross_mismatch',
