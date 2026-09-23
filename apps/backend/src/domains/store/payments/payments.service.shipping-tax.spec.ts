@@ -120,12 +120,62 @@ describe('PaymentsService — impuesto del envío en la venta POS', () => {
     }));
   });
 
-  it('tarifa calculada (peso): acepta el costo del calculador y copia la tarifa', async () => {
-    const client = tx({ id: 9, shipping_method_id: 5, type: 'weight_based', base_cost: 5000 });
-    await service.createOrUpdateOrderFromPos(
-      client, dto({ shipping_rate_id: 9, shipping_cost: 15000 }), user,
-    );
-    expect(snapshotForRate).toHaveBeenCalledWith(client, 9, 15000, { store_id: 1 });
+  describe('tarifas calculadas: costo recalculado en el servidor', () => {
+    const calcTx = (type: string) => {
+      const client: any = tx({ id: 9, shipping_method_id: 5, type, base_cost: 5000 });
+      client.addresses = {
+        findFirst: jest.fn().mockResolvedValue({ country_code: 'CO', city: 'Bogotá' }),
+      };
+      client.products = { findMany: jest.fn().mockResolvedValue([]) };
+      return client;
+    };
+    let calculateRates: jest.Mock;
+    beforeEach(() => {
+      calculateRates = jest.fn();
+      service.shippingCalculatorService = { calculateRates };
+    });
+
+    it('weight_based con costo igual al recalculado: copia la tarifa', async () => {
+      calculateRates.mockResolvedValue([{ rate_id: 9, method_id: 5, cost: 15000 }]);
+      const client = calcTx('weight_based');
+      await service.createOrUpdateOrderFromPos(
+        client, dto({ shipping_rate_id: 9, shipping_cost: 15000, shipping_address_id: 3 }), user,
+      );
+      expect(calculateRates).toHaveBeenCalledWith(
+        1, expect.any(Array), expect.objectContaining({ country_code: 'CO', city: 'Bogotá' }),
+      );
+      expect(snapshotForRate).toHaveBeenCalledWith(client, 9, 15000, { store_id: 1 });
+    });
+
+    it('price_based con costo distinto al recalculado: costo manual, copia vacía', async () => {
+      calculateRates.mockResolvedValue([{ rate_id: 9, method_id: 5, cost: 8000 }]);
+      const client = calcTx('price_based');
+      await service.createOrUpdateOrderFromPos(
+        client, dto({ shipping_rate_id: 9, shipping_cost: 15000, shipping_address_id: 3 }), user,
+      );
+      expect(snapshotForRate).not.toHaveBeenCalled();
+      expect(client.orders.update.mock.calls[0][0].data).toEqual(expect.objectContaining({
+        ...EMPTY_SHIPPING_TAX, shipping_rate_id: 9, shipping_cost: 15000,
+      }));
+    });
+
+    it('carrier_calculated (el calculador no la cotiza): copia vacía', async () => {
+      calculateRates.mockResolvedValue([]);
+      const client = calcTx('carrier_calculated');
+      await service.createOrUpdateOrderFromPos(
+        client, dto({ shipping_rate_id: 9, shipping_cost: 15000, shipping_address_id: 3 }), user,
+      );
+      expect(snapshotForRate).not.toHaveBeenCalled();
+    });
+
+    it('sin dirección resoluble: no recalcula y la copia queda vacía', async () => {
+      const client = calcTx('weight_based');
+      await service.createOrUpdateOrderFromPos(
+        client, dto({ shipping_rate_id: 9, shipping_cost: 15000 }), user,
+      );
+      expect(calculateRates).not.toHaveBeenCalled();
+      expect(snapshotForRate).not.toHaveBeenCalled();
+    });
   });
 
   it('tarifa que no es del método o de la tienda: 400 sin escribir la orden', async () => {

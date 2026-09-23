@@ -90,6 +90,7 @@ import {
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
+import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -177,6 +178,11 @@ export class PaymentsService {
     // a domicilio. `@Optional()` para no romper los TestingModule existentes;
     // sin él (sólo en specs) el envío sale sin impuesto.
     @Optional() private readonly shippingTaxService?: ShippingTaxService,
+    // Recalcula en el servidor el costo de una tarifa calculada (peso/precio)
+    // para decidir si el costo cobrado es el de la tarifa o uno manual.
+    // `@Optional()` por la misma razón; sin él una tarifa calculada sale sin
+    // impuesto (fallo seguro: nunca se inventa un impuesto).
+    @Optional() private readonly shippingCalculatorService?: ShippingCalculatorService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -4008,6 +4014,7 @@ export class PaymentsService {
     dto: CreatePosPaymentDto,
     store_id: number,
     shipping_cost: number,
+    order_items: ReadonlyArray<any> = [],
   ): Promise<{ snapshot: ShippingTaxSnapshot; rate_id: number | null }> {
     const rate_id = dto.shipping_rate_id ?? null;
     if (!rate_id) return { snapshot: { ...EMPTY_SHIPPING_TAX }, rate_id: null };
@@ -4035,15 +4042,26 @@ export class PaymentsService {
       );
     }
 
-    // Costo manual: si la tarifa es de costo fijo (`flat`) y el cajero cobró
-    // otro valor, el envío NO es el de la tarifa ⇒ copia vacía (contrato: un
-    // costo manual no lleva impuesto). Misma regla que `costComesFromRate`
-    // de `OrdersService.assignShipping`. Las tarifas calculadas
-    // (peso/precio/transportadora) no tienen un costo fijo contra el que
-    // comparar aquí: su costo viene del calculador y se acepta.
+    // Costo manual: si el costo cobrado no es el de la tarifa, el envío NO
+    // sale de ella ⇒ copia vacía (contrato: un costo manual no lleva
+    // impuesto). Misma regla que `costComesFromRate` de
+    // `OrdersService.assignShipping`:
+    //  - `flat`: el costo esperado es `base_cost`.
+    //  - calculadas (`weight_based`, `price_based`, `free`): se RECALCULA en
+    //    el servidor con `ShippingCalculatorService.calculateRates` (la misma
+    //    lógica del checkout y de `assignShipping`) sobre la dirección y las
+    //    líneas de esta venta; se toma la opción de ESTA tarifa.
+    //  - `carrier_calculated`: el calculador no la soporta (no hay cotización
+    //    determinista), así que nunca aparece entre las opciones ⇒ copia
+    //    vacía. Igual para cualquier tarifa sin dirección resoluble o que el
+    //    calculador no devuelva.
+    const expected_cost =
+      rate.type === 'flat'
+        ? Number(rate.base_cost ?? 0)
+        : await this.recalculatePosRateCost(tx, dto, store_id, rate.id, order_items);
     const isManualCost =
-      rate.type === 'flat' &&
-      differsByAtLeastCents(shipping_cost, Number(rate.base_cost ?? 0), 1);
+      expected_cost == null ||
+      differsByAtLeastCents(shipping_cost, expected_cost, 1);
 
     const snapshot =
       this.shippingTaxService && !isManualCost
@@ -4052,6 +4070,96 @@ export class PaymentsService {
           })
         : { ...EMPTY_SHIPPING_TAX };
     return { snapshot, rate_id: rate.id };
+  }
+
+  /**
+   * Costo de la tarifa `rate_id` recalculado en el servidor para esta venta
+   * POS (dirección + líneas). `null` si no hay dirección resoluble, no hay
+   * calculador o la tarifa no es una opción aplicable (incluye
+   * `carrier_calculated`, que el calculador no cotiza).
+   */
+  private async recalculatePosRateCost(
+    tx: any,
+    dto: CreatePosPaymentDto,
+    store_id: number,
+    rate_id: number,
+    order_items: ReadonlyArray<any>,
+  ): Promise<number | null> {
+    if (!this.shippingCalculatorService) return null;
+
+    let address: {
+      country_code?: string | null;
+      state_province?: string | null;
+      city?: string | null;
+      postal_code?: string | null;
+    } | null = null;
+    if (dto.shipping_address_id) {
+      address = await tx.addresses.findFirst({
+        where: { id: dto.shipping_address_id },
+        select: { country_code: true, state_province: true, city: true, postal_code: true },
+      });
+    } else if (dto.shipping_address_snapshot) {
+      address = dto.shipping_address_snapshot as any;
+    }
+    if (!address?.country_code) return null;
+
+    const product_ids = [
+      ...new Set(
+        order_items
+          .map((it) => it?.product_id)
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    ];
+    const products = product_ids.length
+      ? await tx.products.findMany({
+          where: { id: { in: product_ids } },
+          select: { id: true, weight: true, product_type: true },
+        })
+      : [];
+    const productById = new Map<number, any>(products.map((p: any) => [p.id, p]));
+
+    const items = order_items
+      .filter((it) => typeof it?.product_id === 'number')
+      .map((it) => {
+        const product = productById.get(it.product_id);
+        const line_tax = (it.order_item_taxes?.create ?? []).reduce(
+          (sum: number, t: any) => sum + Number(t.tax_amount || 0),
+          0,
+        );
+        const quantity = Number(it.quantity || 0);
+        return {
+          product_id: it.product_id,
+          quantity,
+          // Bruto de la línea (base + impuesto), como el checkout.
+          price: Number(it.total_price || 0) + line_tax,
+          weight: it.weight
+            ? Number(it.weight)
+            : product?.weight
+              ? Number(product.weight) * quantity
+              : undefined,
+          product_type: product?.product_type || undefined,
+        };
+      });
+
+    try {
+      const options = await this.shippingCalculatorService.calculateRates(
+        store_id,
+        items,
+        {
+          country_code: address.country_code,
+          state_province: address.state_province || undefined,
+          city: address.city || undefined,
+          postal_code: address.postal_code || undefined,
+        },
+      );
+      const match = options.find((o) => o.rate_id === rate_id);
+      return match ? Number(match.cost) : null;
+    } catch (error) {
+      this.logger.warn(
+        `POS: no se pudo recalcular la tarifa de envío #${rate_id}: ${(error as Error)?.message}`,
+      );
+      return null;
+    }
   }
 
   private async createOrUpdateOrderFromPos(
@@ -4291,6 +4399,7 @@ export class PaymentsService {
           dto,
           dtoStoreId,
           shippingCost,
+          orderItems,
         );
 
         // carril D / lina — D3: cálculo y metadatos de la propina
