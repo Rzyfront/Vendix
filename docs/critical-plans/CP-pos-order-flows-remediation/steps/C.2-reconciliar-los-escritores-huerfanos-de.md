@@ -2,7 +2,7 @@
 id: C.2
 title: "Reconciliar los escritores huérfanos de delivered_at"
 phase: C
-status: pending
+status: in-progress
 owner: none
 updated: 2026-09-20
 contracts: [FB-33, FB-34, DB-08, DB-23]
@@ -29,12 +29,12 @@ skills: [vendix-restaurant-ops, vendix-backend-domain, how-to-test]
   - `psql "$DB" -c "SELECT count(*) FROM order_items WHERE delivered_at > updated_at" > evidence/C.2-invariante-db08.txt` → 0.
   - `grep -rn "delivered_at:" apps/backend/src --include='*.ts' | grep -v '\.spec\.' | grep -v ': true' > evidence/C.2-censo-escritores.txt` — el censo cabe en los tres carriles documentados.
 - **Acceptance checklist:**
-  - [ ] Revertir un ticket entregado deja sus `order_items.delivered_at` en NULL dentro de la misma transacción que revierte el ticket.
+  - [x] Revertir un ticket entregado deja sus `order_items.delivered_at` en NULL dentro de la misma transacción que revierte el ticket.
   - [ ] Tras revertir, la consulta de invariante ticket↔línea devuelve 0 filas.
-  - [ ] La limpieza del revert alcanza solo las líneas de ESE ticket: las de otro ticket de la misma orden conservan su marca.
-  - [ ] `kitchen-fire.markDelivered` documenta en su docblock que su alcance es el ticket completo y cuál es el carril por ítem.
-  - [ ] El listener de despacho documenta su excepción y registra en log las líneas que selló sin ticket asociado.
+  - [x] La limpieza del revert alcanza solo las líneas de ESE ticket: las de otro ticket de la misma orden conservan su marca.
+  - [x] `kitchen-fire.markDelivered` documenta en su docblock que su alcance es el ticket completo y cuál es el carril por ítem.
+  - [x] El listener de despacho documenta su excepción y registra en log las líneas que selló sin ticket asociado.
   - [ ] El censo de escritores de `delivered_at` no crece: sigue siendo seam de orden, cocina y despacho.
-  - [ ] Conteo previo de descuadres históricos guardado como línea base en `evidence/C.2-*` y entregado al dueño.
+  - [ ] Conteo previo de descuadres históricos guardado como línea base en `evidence/C2-*`; entrega al dueño pendiente.
   - [ ] F-002 — AUDIT F-032 - revertTicket nunca limpia delivered_at (major)
-- **Status:** pending
+- **Status:** in-progress — código provisional `1537df4ef`/`79a426485`; 59 tests focalizados. Línea base local previa: 3 ticket/ítem descuadrados y 18 marcas posteriores a `updated_at` (`evidence/C2-before-historical-mismatch.*`), sin backfill. Falta curl+SQL incremental y aceptación de ADR-06.
