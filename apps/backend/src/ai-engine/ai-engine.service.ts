@@ -748,8 +748,8 @@ export class AIEngineService implements OnModuleInit {
       await this.runSubscriptionGate(appKey, app.ai_feature_category);
       await this.checkRateLimit(app);
 
-      resolvedConfigId = app.config_id || this.defaultConfigId;
-      const { provider } = this.resolveProviderForApp(app);
+      const { provider, configId } = this.resolveProviderForApp(app);
+      resolvedConfigId = configId;
 
       if (!provider.generateImage) {
         logResponse = {
@@ -858,8 +858,9 @@ export class AIEngineService implements OnModuleInit {
 
       await this.checkRateLimit(app);
 
-      resolvedConfigId = app.config_id || this.defaultConfigId;
-      const provider = this.resolveProviderForApp(app).provider;
+      const resolved = this.resolveProviderForApp(app);
+      resolvedConfigId = resolved.configId;
+      const provider = resolved.provider;
       if (!provider.generateImage) {
         lastChunk = {
           type: 'error',

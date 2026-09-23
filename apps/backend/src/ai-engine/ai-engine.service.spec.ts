@@ -192,3 +192,137 @@ describe('AIEngineService.runImage (QUI-857 C1 happy path without default)', () 
     expect(generateImage).toHaveBeenCalled();
   });
 });
+
+describe('AIEngineService.runImageStream (QUI-857 C1)', () => {
+  let service: AIEngineService;
+  let prisma: {
+    ai_engine_applications: { findUnique: jest.Mock };
+  };
+
+  const buildService = (): AIEngineService => {
+    prisma = {
+      ai_engine_applications: {
+        findUnique: jest.fn(),
+      },
+    };
+    const serviceInstance = new AIEngineService(
+      prisma as any,
+      { get: jest.fn() } as any,
+      { on: jest.fn() } as any,
+      {
+        calculateCost: jest.fn().mockReturnValue(0),
+        logRequest: jest.fn(),
+      } as any,
+      { emit: jest.fn() } as any,
+      { canUseAIFeature: jest.fn().mockResolvedValue({ allowed: true }) } as any,
+      { isEnforce: jest.fn().mockReturnValue(false) } as any,
+    );
+    return serviceInstance;
+  };
+
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    service = buildService();
+  });
+
+  it('emits an error chunk when no provider is resolvable', async () => {
+    const app = {
+      key: 'product_image_enhancer',
+      model_type: 'image',
+      config_id: null,
+      is_active: true,
+      ai_feature_category: 'image_generation',
+    };
+    prisma.ai_engine_applications.findUnique.mockResolvedValue(app);
+    jest
+      .spyOn(service as any, 'runSubscriptionGate')
+      .mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'checkRateLimit').mockResolvedValue(undefined);
+
+    const chunks: any[] = [];
+    for await (const chunk of service.runImageStream('product_image_enhancer')) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.length).toBe(1);
+    expect(chunks[0].type).toBe('error');
+    expect((chunks[0].error as string).length).toBeGreaterThan(0);
+  });
+
+  it('yields a completed chunk when the provider generates the image', async () => {
+    const app = {
+      key: 'product_image_enhancer',
+      model_type: 'image',
+      config_id: null,
+      is_active: true,
+      ai_feature_category: 'image_generation',
+      system_prompt: 'You are a commercial photographer',
+      prompt_template: null,
+      metadata: { image_generation: { size: '1024x1024' } },
+    };
+    prisma.ai_engine_applications.findUnique.mockResolvedValue(app);
+
+    (service as any).configModelTypes.set(7, 'image');
+    (service as any).providers.set(7, {
+      generateImage: jest.fn().mockResolvedValue({
+        success: true,
+        imageBase64: 'data:image/png;base64,QUJD',
+        model: 'gpt-image-1',
+      }),
+    });
+
+    jest
+      .spyOn(service as any, 'runSubscriptionGate')
+      .mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'checkRateLimit').mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'consumeSubscriptionQuota')
+      .mockResolvedValue(undefined);
+
+    const chunkTypes: string[] = [];
+    for await (const chunk of service.runImageStream('product_image_enhancer')) {
+      chunkTypes.push(chunk.type as string);
+    }
+
+    expect(chunkTypes).toEqual(['progress', 'completed', 'done']);
+  });
+
+  it('logs the resolved config_id when resolved by model_type (no default)', async () => {
+    const app = {
+      key: 'product_image_enhancer',
+      model_type: 'image',
+      config_id: null,
+      is_active: true,
+      ai_feature_category: 'image_generation',
+      system_prompt: 'You are a commercial photographer',
+      prompt_template: null,
+      metadata: { image_generation: { size: '1024x1024' } },
+    };
+    prisma.ai_engine_applications.findUnique.mockResolvedValue(app);
+
+    (service as any).configModelTypes.set(7, 'image');
+    const generateImage = jest.fn().mockResolvedValue({
+      success: true,
+      imageBase64: 'data:image/png;base64,QUJD',
+      model: 'gpt-image-1',
+    });
+    (service as any).providers.set(7, { generateImage });
+
+    jest
+      .spyOn(service as any, 'runSubscriptionGate')
+      .mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'checkRateLimit').mockResolvedValue(undefined);
+    jest
+      .spyOn(service as any, 'consumeSubscriptionQuota')
+      .mockResolvedValue(undefined);
+
+    const logRequest = (service as any).aiLoggingService.logRequest;
+    for await (const _ of service.runImageStream('product_image_enhancer')) {
+      // consume
+    }
+
+    expect(logRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ config_id: 7 }),
+    );
+  });
+});
