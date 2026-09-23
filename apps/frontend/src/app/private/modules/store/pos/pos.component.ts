@@ -511,18 +511,6 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         </div>
       }
 
-      <!-- Modals -->
-      <app-pos-customer-modal
-        [isOpen]="showCustomerModal()"
-        [customer]="editingCustomer()"
-        [queueEnabled]="queueEnabled()"
-        [openInQueueMode]="openInQueueMode()"
-        (closed)="onCustomerModalClosed()"
-        (customerCreated)="onCustomerCreated($event)"
-        (customerUpdated)="onCustomerUpdated($event)"
-        (customerSelected)="onCustomerSelected($event)"
-      ></app-pos-customer-modal>
-
       <!-- Fase 5·B3: SHELL de checkout con stepper — único checkout del POS
            (cobro, cliente, envío y "Guardar borrador" en el footer). El paso
            Cobro autocarga sus métodos, por eso no se bindea [paymentMethods]. -->
@@ -666,6 +654,17 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       (closed)="onChargeModalClosed()"
       (paymentSubmitted)="onPaymentSubmitted($event)"
     ></app-order-payment-modal>
+
+    <app-pos-customer-modal
+      [isOpen]="showCustomerModal()"
+      [customer]="editingCustomer()"
+      [queueEnabled]="queueEnabled()"
+      [openInQueueMode]="openInQueueMode()"
+      (closed)="onCustomerModalClosed()"
+      (customerCreated)="onCustomerCreated($event)"
+      (customerUpdated)="onCustomerUpdated($event)"
+      (customerSelected)="onCustomerSelected($event)"
+    ></app-pos-customer-modal>
   `,
   styles: [
     `
