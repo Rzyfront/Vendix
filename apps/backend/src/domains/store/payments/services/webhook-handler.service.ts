@@ -59,8 +59,7 @@ export class WebhookHandlerService {
     private readonly storeContextRunner: StoreContextRunner,
     @Inject(forwardRef(() => OrderFlowService))
     private orderFlowService: OrderFlowService,
-    // Restaurant Suite (Obj 6): reconcile a deferred table close when a POS
-    // digital payment (wompi/wallet) is confirmed by the gateway webhook.
+    // Restaurant payment projection after gateway confirmation.
     private readonly tableSessionsService: TableSessionsService,
     // A.3 CP-facturacion-fixes: web auto-send on payment confirmation (ADR-03).
     // InvoicingModule exports both; PaymentsModule imports it (no cycle: the
@@ -320,7 +319,7 @@ export class WebhookHandlerService {
       await this.emitPaymentReceivedAccounting(result.paymentId);
     }
     if (result.orderId && result.shouldConfirmOrder) {
-      await this.confirmOrderPaid(result.orderId);
+      await this.confirmOrderPaid(result.orderId, result.paymentId!);
     } else if (result.transitioned && result.orderId && ['failed', 'cancelled'].includes(status)) {
       await this.cancelOrderIfOpen(result.orderId, status, gatewayResponse);
     }
@@ -608,7 +607,7 @@ export class WebhookHandlerService {
    * Invokes OrderFlowService.confirmPayment in store context. Used after
    * the payment-update tx commits so we don't nest transactions.
    */
-  private async confirmOrderPaid(orderId: number): Promise<void> {
+  private async confirmOrderPaid(orderId: number, paymentId?: number): Promise<void> {
     try {
       const client = this.prisma.withoutScope();
       const order = await client.orders.findUnique({ where: { id: orderId } });
@@ -621,6 +620,24 @@ export class WebhookHandlerService {
           const confirmed = await this.orderFlowService.confirmPayment(orderId);
           if (!confirmed || !['processing', 'shipped'].includes(confirmed.state)) return;
 
+          // El pago y la confirmación ya hicieron commit. Una mesa pagada
+          // permanece abierta y ocupada hasta que el mesero la cierre.
+          if (paymentId != null) {
+            try {
+              await this.tableSessionsService.projectOrderPaymentToTableSession(
+                orderId,
+                paymentId,
+              );
+            } catch (projectionError) {
+              // El webhook no debe deshacer ni reintentar un cobro confirmado.
+              // La proyección tipada queda registrada para conciliación.
+              this.logger.error(
+                `POS_TABLE_SESSION_PROJECTION_FAILED_001 order=${orderId} payment=${paymentId}: ${(projectionError as Error)?.message ?? String(projectionError)}`,
+                projectionError instanceof Error ? projectionError.stack : undefined,
+              );
+            }
+          }
+
           // El dinero acaba de ENTRAR: éste es el punto donde el inventario
           // del carril digital diferido puede salir. Ver
           // `commitConfirmedPosStock`. Va inmediatamente después de
@@ -629,23 +646,6 @@ export class WebhookHandlerService {
           // porque el movimiento de stock es el hecho económico y esos dos son
           // consecuencias. Un fallo de entrega no deshace el dinero recibido.
           await this.commitConfirmedPosStock(orderId);
-
-          // Restaurant Suite (Obj 6): if this order backs a still-open table
-          // session, the POS deferred its close for a digital payment
-          // (wompi/wallet). Now that the gateway confirmed the charge, close
-          // the session — `closeSession` flips the table to `cleaning` and
-          // emits `session_closed` to staff + comensal streams. No-op for
-          // non-restaurant / non-table orders (findFirst returns null).
-          const openSession = await this.prisma.table_sessions.findFirst({
-            where: { order_id: orderId, closed_at: null },
-            select: { id: true },
-          });
-          if (openSession) {
-            await this.tableSessionsService.closeSession(openSession.id);
-            this.logger.log(
-              `Table session ${openSession.id} closed after digital payment confirmation of order ${orderId}`,
-            );
-          }
 
           // Venta presencial (POS o mesa QR `dine_in`, ver `isPresentialPosSale`)
           // con confirmación aplicada: `confirmPayment` ya disparó

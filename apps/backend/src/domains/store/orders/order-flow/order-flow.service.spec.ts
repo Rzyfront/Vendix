@@ -34,6 +34,7 @@ import { buildOrder, buildPayment } from 'src/testing/money-fixtures';
 describe('OrderFlowService — compensación de pago POS cuando el finish bloquea', () => {
   let service: OrderFlowService;
   let prismaMock: any;
+  let projectTablePayment: jest.Mock;
 
   const buildOrder = () => ({
     id: 1,
@@ -52,6 +53,7 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
   };
 
   beforeEach(() => {
+    projectTablePayment = jest.fn().mockResolvedValue(null);
     prismaMock = {
       store_payment_methods: {
         findFirst: jest
@@ -108,6 +110,9 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
       {} as any,
       {} as any,
       { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      undefined,
+      undefined,
+      { get: jest.fn(() => ({ projectOrderPaymentToTableSession: projectTablePayment })) } as any,
     );
 
     // Aísla la rama: métodos privados/colaboradores reducidos a stubs.
@@ -158,6 +163,20 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
 
     expect(prismaMock.payments.create).toHaveBeenCalledTimes(1);
     expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(projectTablePayment).toHaveBeenCalledWith(1, 999);
+  });
+
+  it('proyección falla post-commit: conserva el pago y responde ERR-33 tipado (409)', async () => {
+    jest.spyOn(service as any, 'updateOrderState').mockResolvedValue({ id: 1, state: 'finished' });
+    projectTablePayment.mockRejectedValue(new Error('mesa cerrada'));
+
+    const error = await service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe(ErrorCodes.POS_TABLE_SESSION_PROJECTION_FAILED_001.code);
+    expect(error.getStatus()).toBe(409);
+    expect(prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(projectTablePayment).toHaveBeenCalledWith(1, 999);
   });
 });
 

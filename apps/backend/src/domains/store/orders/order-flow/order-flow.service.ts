@@ -15,6 +15,7 @@ import {
   Logger,
   Optional,
 } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { Prisma, order_delivery_type_enum, order_state_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -165,6 +166,7 @@ export class OrderFlowService {
     // `@Optional()` por la misma razón que arriba (specs con construcción
     // manual). Sin servicio ⇒ copia vacía (envío sin impuesto), nunca falla.
     @Optional() private readonly shippingTaxService?: ShippingTaxService,
+    private readonly moduleRef?: ModuleRef,
   ) {}
 
   /**
@@ -1027,7 +1029,7 @@ export class OrderFlowService {
         }
       }
 
-      await this.prisma.payments.create({
+      const payment = await this.prisma.payments.create({
         data: {
           order_id: orderId,
           store_payment_method_id: dto.store_payment_method_id,
@@ -1074,6 +1076,7 @@ export class OrderFlowService {
 
       // Contra entrega de una orden POS: el pago de este cobro la deja saldada.
       await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.shipped');
+      await this.projectPaidOrderToTable(orderId, payment.id);
 
       return {
         order: updatedOrder,
@@ -1157,6 +1160,7 @@ export class OrderFlowService {
           orderId,
           'pay_order.processing',
         );
+        await this.projectPaidOrderToTable(orderId, payment.id);
 
         return {
           order: updatedOrder,
@@ -1265,6 +1269,7 @@ export class OrderFlowService {
       await this.computeAndPersistEta(orderId, new Date());
 
       await this.emitPosSaleCompletedIfFullyPaid(orderId, 'pay_order.finished');
+      await this.projectPaidOrderToTable(orderId, payment.id);
 
       return {
         order: updatedOrder,
@@ -1302,6 +1307,26 @@ export class OrderFlowService {
         order: updatedOrder,
         payment: { transaction_id: transactionId },
       };
+    }
+  }
+
+  /** A projection error is reported after the payment has committed; it must
+   * never enter the charge/finish compensation path. */
+  private async projectPaidOrderToTable(orderId: number, paymentId: number): Promise<void> {
+    // Resolve lazily: TableSessionsService itself injects OrderFlowService, so
+    // constructor injection here would create a provider (and CJS) cycle.
+    // Legacy service-only specs construct this class without Nest's ModuleRef.
+    if (!this.moduleRef) return;
+    try {
+      const { TableSessionsService: TableSessionsToken } = require('../../tables/table-sessions.service') as typeof import('../../tables/table-sessions.service');
+      const tableSessionsService = this.moduleRef.get(TableSessionsToken, { strict: false });
+      await tableSessionsService.projectOrderPaymentToTableSession(orderId, paymentId);
+    } catch (error) {
+      this.logger.error(
+        `[flow/pay table projection failed] order=${orderId} payment=${paymentId}: ${(error as Error)?.message ?? String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new VendixHttpException(ErrorCodes.POS_TABLE_SESSION_PROJECTION_FAILED_001);
     }
   }
 

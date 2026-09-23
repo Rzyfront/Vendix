@@ -14,6 +14,7 @@ describe('WebhookHandlerService', () => {
   let service: WebhookHandlerService;
   let prisma: StorePrismaService;
   let orderFlow: { confirmPayment: jest.Mock; cancelOrder: jest.Mock };
+  let projectTablePayment: jest.Mock;
 
   const mockStripeEvent: WebhookEvent = {
     processor: 'stripe',
@@ -37,6 +38,7 @@ describe('WebhookHandlerService', () => {
   };
 
   beforeEach(async () => {
+    projectTablePayment = jest.fn().mockResolvedValue(null);
     const mockPrismaService: any = {
       payments: {
         findFirst: jest.fn(),
@@ -103,7 +105,7 @@ describe('WebhookHandlerService', () => {
         },
         {
           provide: TableSessionsService,
-          useValue: { closeSession: jest.fn() },
+          useValue: { projectOrderPaymentToTableSession: projectTablePayment, closeSession: jest.fn() },
         },
         // A.3 CP-facturacion-fixes: webhook auto-send deps.
         {
@@ -252,6 +254,32 @@ describe('WebhookHandlerService', () => {
       expect(result.transitioned).toBe(false);
       expect(result.shouldConfirmOrder).toBe(false);
       expect(orderFlow.confirmPayment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('table payment projection (B.2)', () => {
+    it('projects only after confirmation and does not close or clean the table', async () => {
+      (prisma.orders.findUnique as jest.Mock).mockResolvedValue({
+        id: 1, store_id: 7, state: 'pending_payment', channel: 'pos', delivery_type: 'dine_in',
+      });
+      await service['confirmOrderPaid'](1, 31);
+
+      expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
+      expect(projectTablePayment).toHaveBeenCalledWith(1, 31);
+      expect(prisma.table_sessions.findFirst).not.toHaveBeenCalled();
+      expect((service as any).tableSessionsService.closeSession).not.toHaveBeenCalled();
+    });
+
+    it('reports a projection failure without reverting or retrying the confirmed payment', async () => {
+      (prisma.orders.findUnique as jest.Mock).mockResolvedValue({
+        id: 1, store_id: 7, state: 'pending_payment', channel: 'pos', delivery_type: 'dine_in',
+      });
+      projectTablePayment.mockRejectedValue(new Error('missing open session'));
+
+      await expect(service['confirmOrderPaid'](1, 31)).resolves.toBeUndefined();
+      expect(projectTablePayment).toHaveBeenCalledWith(1, 31);
+      expect(prisma.payments.update).not.toHaveBeenCalled();
+      expect(prisma.table_sessions.findFirst).not.toHaveBeenCalled();
     });
   });
 
@@ -596,10 +624,11 @@ describe('WebhookHandlerService', () => {
     it('no-op de confirmación cancelada no cierra mesa ni invoca stock', async () => {
       (prisma.orders.findUnique as jest.Mock).mockResolvedValue({id:1,store_id:7,state:'pending_payment'});
       orderFlow.confirmPayment.mockResolvedValue({state:'cancelled',payment_confirmation_applied:false});
-      await service['confirmOrderPaid'](1);
+      await service['confirmOrderPaid'](1, 31);
       expect(orderFlow.confirmPayment).toHaveBeenCalledWith(1);
       expect((service as any).orderStockCommit.commitOrderDelivery).not.toHaveBeenCalled();
       expect(prisma.table_sessions.findFirst).not.toHaveBeenCalled();
+      expect(projectTablePayment).not.toHaveBeenCalled();
     });
 
     it('dedup de Wompi distingue estados de una misma transacción', () => {
