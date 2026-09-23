@@ -28,9 +28,9 @@ skills: [vendix-backend, vendix-tax-typing, vendix-prisma-scopes, how-to-test]
   - Sad/brute-force en local: doble submit, mesa de otra tienda y línea inválida (`quantity=0`) rechazan tipado y no dejan pago/mesa parcial; no se confunde un error de validación con ERR-01.
 - **Acceptance checklist:**
   - [ ] Los cuatro carriles cobran el mismo producto sin impuesto con igual total, independientemente del área fiscal activa.
-  - [ ] POS con `table_id + items` y con `table_session_id + items` no devuelve ERR-01; Mesas `add-items` → cobro sin `items` sigue funcionando.
+  - [x] POS con `table_id + items` y con `table_session_id + items` no devuelve ERR-01; Mesas `add-items` → cobro sin `items` sigue funcionando.
   - [ ] Una línea antigua gravada conserva importe, `tax_rate_id` y `tax_type` aunque el catálogo actual no tenga asignación.
-  - [ ] Los carritos gravado, 0 % y mixto no pierden impuestos ni duplican orden/pago.
+  - [x] Los carritos gravado, 0 % y mixto no pierden impuestos ni duplican orden/pago.
   - [ ] Happy/sad/brute-force de API y los dos recorridos Playwright quedan documentados en `evidence/`.
-  - [ ] No se produjo ningún reporte que presuma «sin asignación = subdeclaración».
-- **Status:** in-progress — cuatro carriles API locales 201/IVA 0; faltan escenarios gravados, segunda tienda y Playwright.
+  - [x] No se produjo ningún reporte que presuma «sin asignación = subdeclaración».
+- **Status:** in-progress — cuatro carriles API 201/IVA 0 en tienda 10; POS sin mesa y con mesa en tienda 3 fiscal LOCKED también 201/IVA 0. Matriz 0 %/gravado/mixto con snapshots y pagos únicos en `evidence/H3-*`. Playwright real contra `vendix.com` ya cobró producto 302 **sin asignación** en POS «Consumo en mesa»: HTTP 201, orden #1124, pago #820, IVA 0, sesión #107 en mesa #4 (`evidence/H3-ui-pos-table-taxless.*`). Falta recorrido visual módulo Mesas y mutación histórica de catálogo en runtime; la captura detectó además alias incorrecto en el tiquete y falta de aviso de mesa en limpieza, fixes separados en curso.
