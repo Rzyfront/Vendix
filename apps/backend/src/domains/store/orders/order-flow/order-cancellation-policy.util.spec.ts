@@ -68,6 +68,17 @@ describe('Order cancellation policy', () => {
     })).can_cancel).toBe(true);
   });
 
+  it('a legacy draft with a settled digital payment still requires reversal', () => {
+    expect(getOrderCancellationPolicy(snapshot({
+      state: 'draft',
+      payments: [payment('succeeded', 'ONLINE', 'card')],
+    }))).toEqual({
+      can_cancel: false,
+      can_cancel_payment: false,
+      reason_code: PAYMENT_BLOCKER,
+    });
+  });
+
   it.each(['delivered', 'finished', 'refunded'])(
     'blocks forced cancellation from %s even without line snapshots',
     (state) => expect(getCancellationBlocker(snapshot({ state }))).toBe(STOCK_BLOCKER),
