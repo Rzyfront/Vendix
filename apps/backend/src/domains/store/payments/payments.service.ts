@@ -97,6 +97,7 @@ import {
   type ShippingTaxSnapshot,
 } from '../shipping/utils/shipping-tax.util';
 import { buildOrderSaleTaxPayload } from './utils/order-sale-tax-payload.util';
+import { resolvePaymentReceivedSaleFields } from './utils/payment-sale-share.util';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -5406,6 +5407,13 @@ export class PaymentsService {
     //    withholding applied at the payment step — the order's persisted
     //    tax_breakdown is on `order_item_taxes`, but at this layer we only
     //    need the totals for the accounting listener).
+    //    Cuenta dividida: la porción de venta de ESTE pago (el último toma el
+    //    remanente exacto); con los totales de la orden el asiento no cuadra.
+    const sale_fields = await resolvePaymentReceivedSaleFields(tx, {
+      order_id: payment.order_id,
+      payment_id: payment.id,
+      amount: Number(payment.amount),
+    });
     this.eventEmitter.emit('payment.received', {
       payment_id: payment.id,
       store_id: staffUser.store_id,
@@ -5413,12 +5421,9 @@ export class PaymentsService {
       order_id: payment.order_id,
       order_number: payment.orders?.order_number,
       amount: Number(payment.amount),
-      subtotal_amount: Number(payment.orders?.subtotal_amount || 0),
-      tax_amount: Number(payment.orders?.tax_amount || 0),
+      ...sale_fields,
       tax_breakdown: [],
       withholding_breakdown: [],
-      discount_amount: Number(payment.orders?.discount_amount || 0),
-      tip_amount: Number(payment.orders?.tip_amount || 0),
       currency: payment.currency || 'COP',
       payment_method:
         payment.store_payment_method?.system_payment_method?.display_name ||

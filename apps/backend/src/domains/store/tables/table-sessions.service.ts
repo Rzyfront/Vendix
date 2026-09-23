@@ -21,6 +21,7 @@ import {
   TypedTaxRate,
 } from '../taxes/utils/final-price.util';
 import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
+import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale-share.util';
 // QUI-INC — el enum fiscal canónico. Se importa (en vez de tipar `string`)
 // para que la fila de `order_item_taxes` de la cuenta abierta no pueda
 // persistir un valor que el `tax_type_enum` de Postgres no reconozca, ni
@@ -2508,6 +2509,14 @@ export class TableSessionsService {
       // 6. Emit canonical `payment.received`. Shape mirrors the POS fresh-sale
       //    emit (payments.service.ts L1179) so the auto-entry listener + the
       //    notification listener both process it identically.
+      //    Cuenta dividida: cada pago lleva SU porción de subtotal / impuesto /
+      //    flete / propina (el último, el remanente exacto). Con los totales
+      //    de la orden el asiento DR pago / CR orden no cuadraba.
+      const sale_fields = await resolvePaymentReceivedSaleFields(tx, {
+        order_id: order.id,
+        payment_id: payment.id,
+        amount: Number(payment.amount),
+      });
       this.eventEmitter.emit('payment.received', {
         payment_id: payment.id,
         store_id: storeId,
@@ -2515,12 +2524,9 @@ export class TableSessionsService {
         order_id: order?.id,
         order_number: order?.order_number,
         amount: Number(payment.amount),
-        subtotal_amount: Number(order?.subtotal_amount || 0),
-        tax_amount: Number(order?.tax_amount || 0),
+        ...sale_fields,
         tax_breakdown: [],
         withholding_breakdown: [],
-        discount_amount: Number(order?.discount_amount || 0),
-        tip_amount: Number(order?.tip_amount || 0),
         currency: payment.currency || 'COP',
         payment_method:
           payment.store_payment_method?.system_payment_method?.display_name ||

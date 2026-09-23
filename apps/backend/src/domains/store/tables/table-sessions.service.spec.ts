@@ -53,6 +53,8 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       },
       payments: {
         findFirst: jest.fn(),
+        // Otros pagos liquidados de la orden (reparto de cuenta dividida).
+        findMany: jest.fn().mockResolvedValue([]),
         update: jest.fn(),
       },
       order_items: {
@@ -315,6 +317,49 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       }));
       expect(prismaMock.table_sessions.findFirst).not.toHaveBeenCalled();
       expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+    });
+
+    it('cuenta dividida: payment.received lleva la porción del pago (D=C) y el último el remanente', async () => {
+      const fullOrder = {
+        subtotal_amount: 100,
+        discount_amount: 0,
+        tax_amount: 19,
+        shipping_cost: 0,
+        shipping_tax_amount: 0,
+        tip_amount: 0,
+        grand_total: 119,
+      };
+      const emitted = () =>
+        ((service as any).eventEmitter.emit as jest.Mock).mock.calls
+          .filter(([name]: any[]) => name === 'payment.received')
+          .map(([, payload]: any[]) => payload);
+      const balanced = (p: any) =>
+        Math.round(p.amount * 100) + Math.round(p.discount_amount * 100) ===
+        Math.round(p.subtotal_amount * 100) +
+          Math.round(p.tax_amount * 100) +
+          Math.round((p.shipping_amount ?? 0) * 100) +
+          Math.round(p.tip_amount * 100);
+
+      // Primer pago: 40 de 119.
+      prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 0, 40));
+      prismaMock.orders.findUnique.mockResolvedValue({ ...fullOrder, total_paid: 0 });
+      prismaMock.payments.findMany.mockResolvedValue([]);
+      await service.confirmPayment(sessionId, paymentId);
+
+      // Segundo pago: 79, cierra la cuenta.
+      prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 40, 79));
+      prismaMock.orders.findUnique.mockResolvedValue({ ...fullOrder, total_paid: 40 });
+      prismaMock.payments.findMany.mockResolvedValue([{ amount: 40 }]);
+      await service.confirmPayment(sessionId, paymentId);
+
+      const [first, second] = emitted();
+      expect(first).toEqual(
+        expect.objectContaining({ amount: 40, subtotal_amount: 33.61, tax_amount: 6.39 }),
+      );
+      expect(balanced(first)).toBe(true);
+      expect(balanced(second)).toBe(true);
+      expect(Math.round((first.subtotal_amount + second.subtotal_amount) * 100)).toBe(10000);
+      expect(Math.round((first.tax_amount + second.tax_amount) * 100)).toBe(1900);
     });
 
     it('repairs a succeeded retry once, without repeating the payment transition', async () => {
