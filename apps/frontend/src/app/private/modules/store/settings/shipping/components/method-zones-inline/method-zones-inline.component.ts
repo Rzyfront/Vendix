@@ -1,6 +1,7 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  inject,
   input,
   output,
 } from '@angular/core';
@@ -17,6 +18,9 @@ import {
   ShippingRate,
   ZoneWithRates,
 } from '../../interfaces/shipping-zones.interface';
+import { ShippingMethodsService } from '../../services/shipping-methods.service';
+
+const TAX_BADGE_NONE = 'Sin impuesto';
 
 @Component({
   selector: 'app-method-zones-inline',
@@ -84,6 +88,8 @@ import {
   `],
 })
 export class MethodZonesInlineComponent {
+  private readonly shippingService = inject(ShippingMethodsService);
+
   // Inputs
   readonly zones = input.required<ZoneWithRates[]>();
   readonly is_loading = input<boolean>(false);
@@ -103,6 +109,8 @@ export class MethodZonesInlineComponent {
         : item.zone.name,
       rate_type_label: this.getRateTypeLabel(item.rate.type),
       base_cost: this.formatCost(item.rate),
+      tax_label:
+        this.shippingService.getRateTaxLabel(item.rate.tax_category) ?? TAX_BADGE_NONE,
       free_shipping:
         item.rate.free_shipping_threshold == null ||
         isNaN(Number(item.rate.free_shipping_threshold)) ||
@@ -122,6 +130,21 @@ export class MethodZonesInlineComponent {
     { key: 'zone_name', label: 'Zona', priority: 1 },
     { key: 'rate_type_label', label: 'Tipo', priority: 2 },
     { key: 'base_cost', label: 'Costo Base', priority: 3 },
+    {
+      key: 'tax_label',
+      label: 'Impuesto',
+      priority: 4,
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorFn: (value: string) =>
+          value?.startsWith('IVA')
+            ? '#6366F1'
+            : value?.startsWith('INC')
+              ? '#0EA5E9'
+              : '#9CA3AF',
+      },
+    },
     { key: 'free_shipping', label: 'Envío Gratis desde', priority: 4 },
     { key: 'status', label: 'Estado', badge: true, badgeConfig: { type: 'status' }, priority: 5 },
   ];
@@ -138,6 +161,7 @@ export class MethodZonesInlineComponent {
     footerStyle: 'prominent',
     detailKeys: [
       { key: 'free_shipping', label: 'Envío gratis desde', icon: 'tag' },
+      { key: 'tax_label', label: 'Impuesto', icon: 'receipt' },
     ],
   };
 
