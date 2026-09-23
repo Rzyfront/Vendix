@@ -3934,6 +3934,7 @@ export class OrdersService {
         state: true,
         total_paid: true,
         active_financial_split_id: true,
+        order_items: { select: { id: true }, take: 1 },
         payments: { select: { id: true }, take: 1 },
         invoices: { select: { id: true }, take: 1 },
         refunds: { select: { id: true }, take: 1 },
@@ -3970,8 +3971,35 @@ export class OrdersService {
       );
     }
 
+    // A populated draft is an attempted sale, not an empty shell. Its item
+    // FK is RESTRICT; a direct delete would surface P2003 as HTTP 500 and
+    // cascading manually would erase the intended cancellation audit.
+    if (order.order_items.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_VALIDATE_001,
+        'Cannot delete an order with items; cancel it to preserve the history.',
+        { state: order.state, reason: 'order_items_present' },
+      );
+    }
+
     // Use scoped client (implicit via this.prisma).
-    return this.prisma.orders.delete({ where: { id } });
+    try {
+      return await this.prisma.orders.delete({ where: { id } });
+    } catch (error) {
+      // Other nonfinancial FK owners can race the preflight. Never leak a raw
+      // Prisma P2003 as SYS_INTERNAL_001.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2003'
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_VALIDATE_001,
+          'Cannot delete an order with related records; cancel it instead.',
+          { state: order.state, reason: 'dependent_records' },
+        );
+      }
+      throw error;
+    }
   }
 
   private async generateOrderNumber(storeId: number): Promise<string> {

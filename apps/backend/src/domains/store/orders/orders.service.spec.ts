@@ -316,6 +316,7 @@ describe('OrdersService', () => {
       state: 'draft',
       total_paid: new Prisma.Decimal(0),
       active_financial_split_id: null,
+      order_items: [],
       payments: [],
       invoices: [],
       refunds: [],
@@ -359,6 +360,36 @@ describe('OrdersService', () => {
         }),
       });
       expect(mockPrismaService.orders.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejects a populated draft with a typed error before DELETE', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        ...emptyOrder(), order_items: [{ id: 17 }],
+      } as any);
+
+      await expect(service.remove(1)).rejects.toMatchObject({
+        errorCode: 'ORD_VALIDATE_001',
+        response: expect.objectContaining({
+          details: { state: 'draft', reason: 'order_items_present' },
+        }),
+      });
+      expect(mockPrismaService.orders.delete).not.toHaveBeenCalled();
+    });
+
+    it('maps a racing dependent FK to a typed error instead of HTTP 500', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(emptyOrder() as any);
+      mockPrismaService.orders.delete.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('dependent FK', {
+          code: 'P2003', clientVersion: '7.4.1',
+        }),
+      );
+
+      await expect(service.remove(1)).rejects.toMatchObject({
+        errorCode: 'ORD_VALIDATE_001',
+        response: expect.objectContaining({
+          details: { state: 'draft', reason: 'dependent_records' },
+        }),
+      });
     });
 
     it('no revela ni borra orden fuera del scope', async () => {
