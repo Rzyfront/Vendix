@@ -1424,6 +1424,12 @@ export class PosCheckoutShellComponent {
         return { payload: {}, warning: null,
           error: 'Cambiaste el cliente. Selecciona una dirección de este cliente en Envío antes de actualizar.' };
       }
+      // Legacy POS pickup without a shipping method is still an existing order,
+      // not a fresh shipping choice. Preserve it until the cashier edits Envío.
+      if (preserved?.deliveryType === 'pickup' && !hasShipmentContext(preserved) &&
+          !ship?.hasShippingChanges()) {
+        return { payload: {}, warning: null };
+      }
       const error = ship?.editorValidationError();
       if (error) return { payload: {}, warning: null, error };
       const newShipping = !hasShipmentContext(preserved) &&

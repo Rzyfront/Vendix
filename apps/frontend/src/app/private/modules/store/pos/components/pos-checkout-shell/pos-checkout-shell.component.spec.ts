@@ -759,6 +759,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     const { state, ship } = prepareShippingEdit();
     component.entregaChoice.set('enviar');
     ship.shippingContext.set(null);
+    ship.editorValidationError.set('Selecciona un método de envío');
     const result = (component as any).buildEditorShippingPayload({
       ...state,
       shippingContext: {
