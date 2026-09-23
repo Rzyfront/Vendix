@@ -2607,6 +2607,15 @@ export class OrderFlowService {
     //    venta cobrada ni una orden terminal antes de abrir la transacción.
     const order = await this.getOrder(orderId);
 
+    // Una orden reembolsada/cancelada ya es terminal: su estado debe explicar
+    // el rechazo aunque conserve el pago histórico (incluido refunded).
+    if (['cancelled', 'refunded'].includes(order.state)) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_ITEM_CANCEL_STATE_001,
+        `No se puede cancelar un plato de una orden en estado '${order.state}'.`,
+        { state: order.state },
+      );
+    }
     if (order.payments?.some((payment) =>
       SETTLED_PAYMENT_STATES.has(payment.state),
     )) {
@@ -2615,7 +2624,7 @@ export class OrderFlowService {
         'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
       );
     }
-    if (['cancelled', 'refunded', 'finished'].includes(order.state)) {
+    if (order.state === 'finished') {
       throw new VendixHttpException(
         ErrorCodes.ORD_ITEM_CANCEL_STATE_001,
         `No se puede cancelar un plato de una orden en estado '${order.state}'.`,

@@ -2164,6 +2164,20 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
     },
   );
 
+  it('prioriza el estado refunded aunque conserve un pago reembolsado', async () => {
+    const { service, prismaMock, stockLevelManager } = buildService({
+      order: { state: 'refunded', payments: [{ state: 'refunded' }] },
+    });
+    const error = await service.cancelDeliveredOrderItem(
+      ORDER_ID, ITEM_ID, 'reversa sobre reembolso', 'waste',
+    ).catch((caught) => caught);
+
+    expect(error.errorCode).toBe('ORD_ITEM_CANCEL_STATE_001');
+    expect(error.getResponse()).toMatchObject({ details: { state: 'refunded' } });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+  });
+
   it('pago pendiente no impide cancelar un plato de cuenta abierta', async () => {
     const { service, prismaMock } = buildService({
       order: { state: 'processing', payments: [{ state: 'pending' }] },
