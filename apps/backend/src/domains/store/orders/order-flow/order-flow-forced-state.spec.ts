@@ -331,7 +331,10 @@ describe('OrderFlowService — carril forzado (QUI-557)', () => {
 
       await expect(
         service.cancelOrder(ORDER_ID, { reason: 'nope' }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toMatchObject({
+        errorCode: 'ORD_STATUS_001',
+        status: 400,
+      });
       expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
     });
   });

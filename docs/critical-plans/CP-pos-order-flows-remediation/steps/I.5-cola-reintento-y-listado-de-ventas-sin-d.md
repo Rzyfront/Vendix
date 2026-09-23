@@ -2,7 +2,7 @@
 id: I.5
 title: "Cola, reintento y listado de ventas sin documento fiscal"
 phase: I
-status: pending
+status: in-progress
 owner: none
 updated: 2026-09-20
 contracts: [DB-40, DB-41]
@@ -29,11 +29,11 @@ skills: [vendix-fiscal-scope, vendix-backend, vendix-prisma-scopes, vendix-front
   - Playwright MCP contra `vendix.com`: abrir el listado, confirmar que la venta descubierta aparece y enlaza a su orden → `evidence/I5-listado.png`
 - **Acceptance checklist:**
   - [ ] El listado agregado muestra las ventas cobradas sin documento fiscal, con enlace a la orden, sin abrir órdenes una por una
-  - [ ] El listado se alimenta de la consulta de historial fiscal existente: no se crea tabla, columna ni endpoint paralelo
-  - [ ] El filtro respeta la entidad fiscal y el aislamiento entre tiendas: una tienda no ve las ventas de otra
-  - [ ] Cada venta descubierta deja exactamente una fila de constancia, y un segundo fallo no la duplica
-  - [ ] La tabla de reintentos no gana filas ni columnas en este paso
-  - [ ] El listener de venta cobrada registra error con enlace a la orden en vez del warn genérico
-  - [ ] El documento de alcance nombra el cambio de esquema exacto, sus consumidores y qué debe decidir el ADR que lo autorice
+  - [x] El listado se alimenta de la consulta de historial fiscal existente: no se crea tabla, columna ni endpoint paralelo
+  - [x] El filtro respeta la entidad fiscal y el aislamiento entre tiendas: una tienda no ve las ventas de otra
+  - [x] Cada venta descubierta deja exactamente una fila de constancia, y un segundo fallo por este productor no la duplica
+  - [x] La tabla de reintentos no gana filas ni columnas en este paso
+  - [x] El listener de venta cobrada registra error con enlace a la orden en vez del warn genérico
+  - [x] El documento de alcance nombra el cambio de esquema exacto, sus consumidores y qué debe decidir el ADR que lo autorice
   - [ ] El reintento automático queda explícitamente fuera, y el documento dice quién lo asume
-- **Status:** pending
+- **Status:** in-progress — productor idempotente por advisory lock `d539c2533` (20 tests), listado y aislamiento `78a1c8a5e` (32 tests). API local con constancias QA #401/#402: tienda 10 ve solo #401/orden #1119 y tienda 3 solo #402/orden #1110, HTTP 200; fixture borrado exactamente por ID y `invoice_retry_queue` quedó 2→2 (`evidence/I5-*`). Falta UI E2E. Sin índice único no se promete unicidad contra escritores ajenos; cola automática fuera de alcance por decisión explícita del paso.
