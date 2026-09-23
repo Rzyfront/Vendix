@@ -1501,6 +1501,14 @@ export class PaymentsService {
               // `tax_rate × total_price` sigue siendo la comparación correcta
               // con o sin promoción/cupón — no hace falta restar nada acá.
               total_price: true,
+              // Descuento de orden (`buildOrderSaleTaxPayload` →
+              // `projectOrderInvoiceLines`): unidades y cuota escalar de la
+              // línea, para proyectar el impuesto neto del descuento igual
+              // que la factura.
+              quantity: true,
+              tax_amount_item: true,
+              weight: true,
+              price_unit_quantity: true,
               // `is_inclusive` NO se lee acá, a propósito: `total_price` sale
               // de `unitBasePrice`, que es el NETO en las dos ramas
               // (`finalUnitPrice / (1 + total_rate)` en la rama custom,
@@ -1531,6 +1539,7 @@ export class PaymentsService {
               })),
             ),
             order,
+            order_items: orderItemsWithTaxes,
           });
           const tax_breakdown = sale_tax.tax_breakdown;
 
@@ -1609,7 +1618,10 @@ export class PaymentsService {
                 shipping_amount: sale_tax.shipping_amount,
                 tax_breakdown,
                 withholding_breakdown: wh.lines,
-                discount_amount: Number(order.discount_amount || 0),
+                // Con descuento de orden: sólo su parte de BASE (4175); el
+                // impuesto ya viene neto del descuento (misma proyección que
+                // la factura). Sin descuento = `orders.discount_amount`.
+                discount_amount: sale_tax.discount_amount,
                 // GAP-6 — propina (sin IVA). El asiento la reconoce como pasivo
                 // custodio (CR propinas por pagar) para cuadrar el DR caja que ya
                 // incluye la propina dentro de payment.amount (= grand_total).
@@ -1684,7 +1696,8 @@ export class PaymentsService {
               shipping_amount: sale_tax.shipping_amount,
               tax_breakdown,
               withholding_breakdown: wh.lines,
-              discount_amount: Number(order.discount_amount || 0),
+              // Parte de BASE del descuento de orden (ver payment.received).
+              discount_amount: sale_tax.discount_amount,
               total_amount: Number(order.grand_total || 0),
               user_id: user.id,
             });
@@ -5424,7 +5437,8 @@ export class PaymentsService {
       order_number: payment.orders?.order_number,
       amount: Number(payment.amount),
       ...sale_fields,
-      tax_breakdown: [],
+      // Desglose por tipo sólo con descuento de orden proyectado.
+      tax_breakdown: sale_fields.tax_breakdown ?? [],
       withholding_breakdown: [],
       currency: payment.currency || 'COP',
       payment_method:

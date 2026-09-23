@@ -16,6 +16,9 @@
  * no permiten un reparto honesto: componentes que no suman el total de la orden,
  * o pagos que exceden lo que queda por reconocer.
  */
+import type { TaxBreakdownItem } from '@common/interfaces/tax-breakdown.interface';
+import { buildOrderSaleTaxPayload } from './order-sale-tax-payload.util';
+
 export interface PaymentSaleShareInput {
   subtotal_amount: number;
   discount_amount?: number;
@@ -24,6 +27,11 @@ export interface PaymentSaleShareInput {
   /** Flete NETO del impuesto del envío. */
   shipping_amount?: number;
   tip_amount?: number;
+  /**
+   * Desglose del impuesto por tipo (Σ = `tax_amount`). Si viene, cada fila se
+   * reparte como componente propio y la porción devuelve `tax_breakdown`.
+   */
+  tax_rows?: Array<Pick<TaxBreakdownItem, 'tax_type' | 'tax_amount'>>;
   grand_total: number;
   /** Monto de ESTE pago. */
   amount: number;
@@ -37,6 +45,8 @@ export interface PaymentSaleShare {
   tax_amount: number;
   shipping_amount: number;
   tip_amount: number;
+  /** Sólo cuando la entrada trajo `tax_rows`. */
+  tax_breakdown?: TaxBreakdownItem[];
 }
 
 const toCents = (value: number | null | undefined) =>
@@ -65,9 +75,13 @@ export function computePaymentSaleShare(
   input: PaymentSaleShareInput,
 ): PaymentSaleShare | null {
   const discount = toCents(input.discount_amount);
+  const tax_rows = input.tax_rows?.length ? input.tax_rows : null;
+  const tax_components = tax_rows
+    ? tax_rows.map((row) => toCents(row.tax_amount))
+    : [toCents(input.tax_amount)];
   const components = [
     toCents(input.subtotal_amount) - discount, // ingreso neto
-    toCents(input.tax_amount),
+    ...tax_components,
     toCents(input.shipping_amount),
     toCents(input.tip_amount),
   ];
@@ -75,7 +89,9 @@ export function computePaymentSaleShare(
   if (
     discount < 0 ||
     components.some((c) => c < 0) ||
-    components.reduce((a, b) => a + b, 0) !== grand_total
+    components.reduce((a, b) => a + b, 0) !== grand_total ||
+    (tax_rows &&
+      tax_components.reduce((a, b) => a + b, 0) !== toCents(input.tax_amount))
   ) {
     return null;
   }
@@ -103,13 +119,27 @@ export function computePaymentSaleShare(
   const current = take(toCents(input.amount));
   if (!current) return null;
 
-  const [net, tax, shipping, tip] = current.shares;
+  const shares = current.shares;
+  const net = shares[0];
+  const taxes = shares.slice(1, 1 + tax_components.length);
+  const shipping = shares[1 + tax_components.length];
+  const tip = shares[2 + tax_components.length];
   return {
     subtotal_amount: fromCents(net + current.disc),
     discount_amount: fromCents(current.disc),
-    tax_amount: fromCents(tax),
+    tax_amount: fromCents(taxes.reduce((a, b) => a + b, 0)),
     shipping_amount: fromCents(shipping),
     tip_amount: fromCents(tip),
+    ...(tax_rows
+      ? {
+          tax_breakdown: tax_rows
+            .map((row, index) => ({
+              tax_type: row.tax_type,
+              tax_amount: fromCents(taxes[index]),
+            }))
+            .filter((row) => row.tax_amount > 0),
+        }
+      : {}),
   };
 }
 
@@ -120,6 +150,11 @@ export interface PaymentReceivedSaleFields {
   shipping_amount?: number;
   discount_amount: number;
   tip_amount: number;
+  /**
+   * Desglose por tipo de la porción. Sólo con descuento de orden proyectado
+   * (sin descuento el payload es el histórico, sin desglose).
+   */
+  tax_breakdown?: TaxBreakdownItem[];
 }
 
 /**
@@ -144,6 +179,23 @@ export async function resolvePaymentReceivedSaleFields(
       shipping_tax_amount: true,
       tip_amount: true,
       grand_total: true,
+      shipping_tax_type: true,
+      shipping_tax_rate: true,
+      // Descuento de orden: el impuesto de la porción sale de la MISMA
+      // proyección que la factura (`buildOrderSaleTaxPayload`).
+      order_items: {
+        where: { cancelled_at: null },
+        select: {
+          total_price: true,
+          quantity: true,
+          tax_amount_item: true,
+          weight: true,
+          price_unit_quantity: true,
+          order_item_taxes: {
+            select: { tax_type: true, tax_amount: true, tax_rate: true },
+          },
+        },
+      },
     },
   });
   const legacy: PaymentReceivedSaleFields = {
@@ -163,6 +215,35 @@ export async function resolvePaymentReceivedSaleFields(
     select: { amount: true },
     orderBy: { id: 'asc' },
   });
+  // Descuento de orden: impuesto por tipo neto del descuento y 4175 sólo por
+  // la parte de base. Sin descuento (o si no reconcilia) sigue el reparto
+  // histórico, idéntico.
+  const sale_tax = Array.isArray(order.order_items)
+    ? buildOrderSaleTaxPayload({
+        product_tax_rows: [],
+        order,
+        order_items: order.order_items,
+      })
+    : null;
+  if (sale_tax?.discount_projected) {
+    const tax_rows = sale_tax.tax_breakdown.map((row) => ({
+      tax_type: row.tax_type,
+      tax_amount: row.tax_amount,
+    }));
+    const projected_share = computePaymentSaleShare({
+      subtotal_amount: Number(order.subtotal_amount || 0),
+      discount_amount: sale_tax.discount_amount,
+      tax_amount: sale_tax.tax_amount,
+      tax_rows,
+      shipping_amount: sale_tax.shipping_amount,
+      tip_amount: Number(order.tip_amount || 0),
+      grand_total: Number(order.grand_total || 0),
+      amount: args.amount,
+      prior_amounts: prior.map((row) => Number(row.amount || 0)),
+    });
+    if (projected_share) return projected_share;
+  }
+
   const shipping_tax = Number(order.shipping_tax_amount || 0);
   const share = computePaymentSaleShare({
     subtotal_amount: Number(order.subtotal_amount || 0),

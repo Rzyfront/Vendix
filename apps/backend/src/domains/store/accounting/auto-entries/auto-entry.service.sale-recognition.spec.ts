@@ -1,4 +1,5 @@
 import { AutoEntryService } from './auto-entry.service';
+import { buildOrderSaleTaxPayload } from '../../payments/utils/order-sale-tax-payload.util';
 
 /**
  * Doble conteo de la venta POS facturada.
@@ -39,6 +40,10 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
     'credit_note.accepted.sales_returns': '4175',
     'credit_note.accepted.iva_payable': '240802',
     'credit_note.accepted.accounts_receivable': '1305',
+    'payment.received.sales_discount': '4175',
+    'payment.received.inc_payable': '243605',
+    'credit_sale.created.sales_discount': '4175',
+    'credit_sale.created.inc_payable': '243605',
   };
 
   // Venta: subtotal 10.000, IVA 19 % = 1.900, flete neto 5.000 → total 16.900.
@@ -646,6 +651,95 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
         expect.objectContaining({ account_code: '4135', debit_amount: 5000 }),
       );
       expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
+    });
+  });
+
+  describe('descuento de orden sin factura: impuesto = proyección de la factura', () => {
+    // Caso de invoicing.service.order-discount.spec.ts.
+    const order = {
+      subtotal_amount: 220000,
+      tax_amount: 27000,
+      discount_amount: 10000,
+      grand_total: 242000,
+      shipping_cost: 5000,
+      shipping_tax_type: 'iva',
+      shipping_tax_rate: 0.19,
+      shipping_tax_amount: 798.31,
+    };
+    const order_items = [
+      {
+        quantity: 2,
+        total_price: 100000,
+        tax_amount_item: 9500,
+        order_item_taxes: [{ tax_type: 'iva', tax_rate: 0.19, tax_amount: 19000 }],
+      },
+      {
+        quantity: 1,
+        total_price: 100000,
+        tax_amount_item: 8000,
+        order_item_taxes: [{ tax_type: 'inc', tax_rate: 0.08, tax_amount: 8000 }],
+      },
+      { quantity: 1, total_price: 20000, tax_amount_item: 0, order_item_taxes: [] },
+    ];
+    const sale_tax = buildOrderSaleTaxPayload({
+      product_tax_rows: order_items.flatMap((item) =>
+        item.order_item_taxes.map((t) => ({ ...t, taxable_amount: item.total_price })),
+      ),
+      order,
+      order_items,
+    });
+    const debitOn = (lines: any[], code: string) =>
+      sum(
+        lines.filter((l) => l.account_code === code),
+        'debit_amount',
+      );
+
+    const expectInvoiceTaxes = (lines: any[]) => {
+      expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
+      // Factura: IVA 18.230,76 + 798,31 del envío · INC 7.676,11.
+      expect(creditOn(lines, '240802')).toBe(19029.07);
+      expect(creditOn(lines, '243605')).toBe(7676.11);
+      // Ingreso por el subtotal de base; 4175 sólo la parte de base.
+      expect(creditOn(lines, '4135')).toBe(220000);
+      expect(debitOn(lines, '4175')).toBe(8906.87);
+      expect(creditOn(lines, '414505')).toBe(4201.69);
+    };
+
+    it('payment.received POS directo con descuento cuadra y declara el IVA/INC de la factura', async () => {
+      const { service, createAutoEntry } = build();
+      await service.onPaymentReceived({
+        payment_id: 910,
+        organization_id: 1,
+        store_id: 2,
+        order_id: 71,
+        amount: 242000,
+        subtotal_amount: order.subtotal_amount,
+        tax_amount: sale_tax.tax_amount,
+        shipping_amount: sale_tax.shipping_amount,
+        tax_breakdown: sale_tax.tax_breakdown,
+        discount_amount: sale_tax.discount_amount,
+      });
+      const lines = linesOf(createAutoEntry.mock.calls[0]);
+      expect(debitOn(lines, '1105')).toBe(242000);
+      expectInvoiceTaxes(lines);
+    });
+
+    it('credit_sale.created con descuento cuadra y declara el IVA/INC de la factura', async () => {
+      const { service, createAutoEntry } = build();
+      await service.onCreditSaleCreated({
+        order_id: 71,
+        organization_id: 1,
+        store_id: 2,
+        subtotal_amount: order.subtotal_amount,
+        tax_amount: sale_tax.tax_amount,
+        shipping_amount: sale_tax.shipping_amount,
+        tax_breakdown: sale_tax.tax_breakdown,
+        discount_amount: sale_tax.discount_amount,
+        total_amount: order.grand_total,
+      });
+      const lines = linesOf(createAutoEntry.mock.calls[0]);
+      expect(debitOn(lines, '1305')).toBe(242000);
+      expectInvoiceTaxes(lines);
     });
   });
 });

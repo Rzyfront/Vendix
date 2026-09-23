@@ -456,6 +456,11 @@ export class WebhookHandlerService {
         where: { order_id: order.id },
         select: {
           total_price: true,
+          // Descuento de orden: ver `buildOrderSaleTaxPayload`.
+          quantity: true,
+          tax_amount_item: true,
+          weight: true,
+          price_unit_quantity: true,
           // `is_inclusive` no se lee: `total_price` ya es el NETO en
           // ambas ramas del escritor. Ver el comentario extenso en
           // `payments.service.ts`.
@@ -479,6 +484,7 @@ export class WebhookHandlerService {
           })),
         ),
         order,
+        order_items: orderItemsWithTaxes,
       });
 
       const systemPaymentMethod =
@@ -506,7 +512,8 @@ export class WebhookHandlerService {
         // transaction). Leave the breakdown empty; the listener + auto-entry
         // handle `undefined` / `[]` as "no withholding lines".
         withholding_breakdown: [],
-        discount_amount: Number(order.discount_amount || 0),
+        // Parte de BASE del descuento de orden (impuesto neto proyectado).
+        discount_amount: sale_tax.discount_amount,
         tip_amount: Number(order.tip_amount || 0),
         currency: payment.currency || order.currency || 'COP',
         payment_method: paymentMethodLabel,

@@ -7,6 +7,10 @@ import {
   shippingNetBase,
   type ShippingTaxOrderInput,
 } from '../../shipping/utils/shipping-tax.util';
+import {
+  projectOrderInvoiceLines,
+  type OrderInvoiceLineSource,
+} from '../../invoicing/utils/order-invoice-lines.util';
 
 /**
  * Fila de impuesto de producto tal como la leen los emisores de asientos de
@@ -20,9 +24,24 @@ export interface OrderSaleProductTaxRow {
   taxable_amount?: unknown;
 }
 
+/**
+ * Línea de orden para la proyección del descuento. Mismo contrato que
+ * `OrderInvoiceLineSource` salvo `tax_name`, que la proyección no lee y los
+ * emisores de asientos no seleccionan.
+ */
+export type OrderSaleLineSource = Omit<OrderInvoiceLineSource, 'order_item_taxes'> & {
+  order_item_taxes?: Array<
+    Omit<NonNullable<OrderInvoiceLineSource['order_item_taxes']>[number], 'tax_name'>
+  > | null;
+};
+
 export interface OrderSaleTaxPayloadOrder extends ShippingTaxOrderInput {
   /** `orders.tax_amount`: SOLO impuesto de productos (contrato shipping-rate-tax). */
   tax_amount?: unknown;
+  /** `orders.discount_amount`: descuento de ORDEN (después de impuesto). */
+  discount_amount?: unknown;
+  /** `orders.subtotal_amount` = Σ `order_items.total_price` (base). */
+  subtotal_amount?: unknown;
 }
 
 export interface OrderSaleTaxPayload {
@@ -32,6 +51,15 @@ export interface OrderSaleTaxPayload {
   shipping_amount: number;
   /** Desglose tipado: productos + (si hay copia) la fila del envío. */
   tax_breakdown: TaxBreakdownItem[];
+  /**
+   * Descuento a debitar en 4175 (`*.sales_discount`). Sin proyección es
+   * `orders.discount_amount` tal cual. Con descuento de orden proyectado es
+   * SÓLO la parte de BASE del descuento (Σ `total_price − base` de línea): la
+   * parte de impuesto ya no se acredita, porque el impuesto sale neto.
+   */
+  discount_amount: number;
+  /** `true` cuando el impuesto de productos salió de `projectOrderInvoiceLines`. */
+  discount_projected: boolean;
 }
 
 const toCents = (value: unknown): number => {
@@ -67,10 +95,24 @@ const toCents = (value: unknown): number => {
 export function buildOrderSaleTaxPayload(input: {
   product_tax_rows: ReadonlyArray<OrderSaleProductTaxRow>;
   order: OrderSaleTaxPayloadOrder;
+  /**
+   * Líneas de la orden con sus `order_item_taxes` (tarifa en fracción). Sólo
+   * se usan si la orden trae descuento de orden: ver `projectDiscountedSale`.
+   */
+  order_items?: ReadonlyArray<OrderSaleLineSource> | null;
 }): OrderSaleTaxPayload {
   const { order } = input;
-  const product_breakdown = buildTaxBreakdown([...(input.product_tax_rows ?? [])]);
-  const product_tax_cents = toCents(order.tax_amount);
+  const projected = projectDiscountedSale(input.order_items, order);
+  const product_breakdown = projected
+    ? projected.product_breakdown
+    : buildTaxBreakdown([...(input.product_tax_rows ?? [])]);
+  const product_tax_cents = projected
+    ? projected.product_tax_cents
+    : toCents(order.tax_amount);
+  const discount_amount =
+    (projected ? projected.discount_cents : Math.max(0, toCents(order.discount_amount))) /
+    100;
+  const discount_projected = !!projected;
   const shipping_row = buildShippingTaxBreakdownRow(order);
 
   if (!shipping_row) {
@@ -78,6 +120,8 @@ export function buildOrderSaleTaxPayload(input: {
       tax_amount: product_tax_cents / 100,
       shipping_amount: Math.max(0, toCents(order.shipping_cost)) / 100,
       tax_breakdown: product_breakdown,
+      discount_amount,
+      discount_projected,
     };
   }
 
@@ -97,5 +141,98 @@ export function buildOrderSaleTaxPayload(input: {
     tax_amount: (product_tax_cents + toCents(shipping_row.tax_amount)) / 100,
     shipping_amount: shippingNetBase(order),
     tax_breakdown: breakdown,
+    discount_amount,
+    discount_projected,
+  };
+}
+
+/**
+ * Descuento de ORDEN en el asiento sin factura — misma proyección que la
+ * factura (`projectOrderInvoiceLines`, art. 454 ET: el descuento incondicional
+ * reduce la base).
+ *
+ * POS y checkout restan `orders.discount_amount` del `grand_total` DESPUÉS del
+ * impuesto; `orders.tax_amount` y `order_item_taxes` quedan pre-descuento. El
+ * asiento histórico debitaba el descuento BRUTO en 4175 y acreditaba el IVA /
+ * INC pre-descuento: el libro llevaba más impuesto que la factura (27.000 vs
+ * 25.906,87 en el caso IVA 19 % + INC 8 % + exento con 10.000 de descuento).
+ *
+ * Decisión contable: el ingreso se sigue acreditando por el subtotal BRUTO de
+ * base (`orders.subtotal_amount`) y 4175 recibe SÓLO la parte de base del
+ * descuento (Σ `total_price − base proyectada`); cada impuesto se acredita por
+ * su cuota proyectada. Así 4175 sigue mostrando el descuento comercial concedido
+ * (neto de impuesto) y DR caja + DR 4175 = CR ingreso + CR impuestos + CR flete
+ * al centavo, porque la proyección cierra `Σ base + Σ cuota = Σ bruto −
+ * descuento`. El envío no recibe descuento.
+ *
+ * Devuelve `null` (payload histórico intacto) sin descuento, sin líneas, si la
+ * proyección falla, o si la orden no reconcilia con sus líneas (Σ cuotas ≠
+ * `orders.tax_amount`, Σ `total_price` ≠ `orders.subtotal_amount`, o la parte
+ * de base + la parte de impuesto ≠ descuento).
+ */
+function projectDiscountedSale(
+  order_items: ReadonlyArray<OrderSaleLineSource> | null | undefined,
+  order: OrderSaleTaxPayloadOrder,
+): {
+  product_breakdown: TaxBreakdownItem[];
+  product_tax_cents: number;
+  discount_cents: number;
+} | null {
+  const discount_cents = toCents(order.discount_amount);
+  if (discount_cents <= 0 || !order_items || order_items.length === 0) {
+    return null;
+  }
+  const projection = projectOrderInvoiceLines(
+    order_items as ReadonlyArray<OrderInvoiceLineSource>,
+    order.discount_amount,
+  );
+  if (
+    projection.error ||
+    toCents(projection.allocated_discount.toString()) !== discount_cents
+  ) {
+    return null;
+  }
+
+  let original_tax_cents = 0;
+  let projected_tax_cents = 0;
+  let subtotal_cents = 0;
+  let base_discount_cents = 0;
+  const rows: OrderSaleProductTaxRow[] = [];
+  order_items.forEach((item, index) => {
+    const line = projection.lines[index];
+    subtotal_cents += toCents(item.total_price);
+    base_discount_cents += toCents(line.discount.toString());
+    projected_tax_cents += toCents(line.tax_total.toString());
+    const item_rows = item.order_item_taxes ?? [];
+    if (item_rows.length === 0) {
+      original_tax_cents += toCents(line.tax_total.toString());
+      return;
+    }
+    item_rows.forEach((row, row_index) => {
+      original_tax_cents += toCents(row.tax_amount);
+      rows.push({
+        tax_type: (row.tax_type as string | null | undefined) ?? null,
+        tax_amount: line.tax_amounts[row_index]?.toString() ?? 0,
+        tax_rate: row.tax_rate,
+        taxable_amount: line.base.toString(),
+      });
+    });
+  });
+
+  if (
+    original_tax_cents !== toCents(order.tax_amount) ||
+    (order.subtotal_amount != null &&
+      subtotal_cents !== toCents(order.subtotal_amount)) ||
+    base_discount_cents + (original_tax_cents - projected_tax_cents) !==
+      discount_cents ||
+    base_discount_cents < 0
+  ) {
+    return null;
+  }
+
+  return {
+    product_breakdown: buildTaxBreakdown(rows),
+    product_tax_cents: projected_tax_cents,
+    discount_cents: base_discount_cents,
   };
 }

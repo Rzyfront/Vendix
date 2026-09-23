@@ -2525,7 +2525,8 @@ export class TableSessionsService {
         order_number: order?.order_number,
         amount: Number(payment.amount),
         ...sale_fields,
-        tax_breakdown: [],
+        // Desglose por tipo sólo con descuento de orden proyectado.
+        tax_breakdown: sale_fields.tax_breakdown ?? [],
         withholding_breakdown: [],
         currency: payment.currency || 'COP',
         payment_method:

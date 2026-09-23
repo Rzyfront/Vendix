@@ -150,4 +150,78 @@ describe('resolvePaymentReceivedSaleFields', () => {
       tip_amount: 0,
     });
   });
+
+  it('descuento de orden en cuenta dividida: el impuesto de cada porción sale de la proyección de la factura y cada asiento cuadra', async () => {
+    // Caso de invoicing.service.order-discount.spec.ts (IVA 19 % + INC 8 % +
+    // exento + envío con IVA, descuento 10.000 ⇒ 242.000), pagado 142.000 + 100.000.
+    const order = {
+      subtotal_amount: 220000,
+      discount_amount: 10000,
+      tax_amount: 27000,
+      shipping_cost: 5000,
+      shipping_tax_type: 'iva',
+      shipping_tax_rate: 0.19,
+      shipping_tax_amount: 798.31,
+      tip_amount: 0,
+      grand_total: 242000,
+      order_items: [
+        {
+          quantity: 2,
+          total_price: 100000,
+          tax_amount_item: 9500,
+          order_item_taxes: [{ tax_type: 'iva', tax_rate: 0.19, tax_amount: 19000 }],
+        },
+        {
+          quantity: 1,
+          total_price: 100000,
+          tax_amount_item: 8000,
+          order_item_taxes: [{ tax_type: 'inc', tax_rate: 0.08, tax_amount: 8000 }],
+        },
+        { quantity: 1, total_price: 20000, tax_amount_item: 0, order_item_taxes: [] },
+      ],
+    };
+    const c = (n: number) => Math.round(n * 100);
+    const run = async (payment_id: number, amount: number, prior: number[]) =>
+      resolvePaymentReceivedSaleFields(
+        {
+          orders: { findUnique: jest.fn().mockResolvedValue(order) },
+          payments: {
+            findMany: jest
+              .fn()
+              .mockResolvedValue(prior.map((value) => ({ amount: value }))),
+          },
+        },
+        { order_id: 70, payment_id, amount },
+      );
+    const first = await run(1, 142000, []);
+    const last = await run(2, 100000, [142000]);
+
+    for (const [fields, amount] of [
+      [first, 142000],
+      [last, 100000],
+    ] as const) {
+      const taxes = (fields.tax_breakdown ?? []).reduce(
+        (sum, row) => sum + c(row.tax_amount),
+        0,
+      );
+      expect(taxes).toBe(c(fields.tax_amount));
+      // DR caja + DR 4175 = CR ingreso + impuestos + flete + propina.
+      expect(c(amount) + c(fields.discount_amount)).toBe(
+        c(fields.subtotal_amount) +
+          taxes +
+          c(fields.shipping_amount ?? 0) +
+          c(fields.tip_amount),
+      );
+    }
+    const typed = (type: string) =>
+      [first, last]
+        .flatMap((f) => f.tax_breakdown ?? [])
+        .filter((row) => row.tax_type === type)
+        .reduce((sum, row) => sum + c(row.tax_amount), 0);
+    // Σ porciones = factura: IVA 18.230,76 + 798,31 del envío · INC 7.676,11.
+    expect(typed('iva')).toBe(c(18230.76) + c(798.31));
+    expect(typed('inc')).toBe(c(7676.11));
+    expect(c(first.discount_amount) + c(last.discount_amount)).toBe(c(8906.87));
+    expect(c(first.subtotal_amount) + c(last.subtotal_amount)).toBe(c(220000));
+  });
 });
