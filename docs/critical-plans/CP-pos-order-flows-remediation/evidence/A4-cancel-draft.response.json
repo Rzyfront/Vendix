@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "message": "Order cancelled successfully",
+  "data": {
+    "id": 1104,
+    "store_id": 10,
+    "state": "cancelled",
+    "order_number": "ORD2609230001",
+    "customer_alias": "QA A4 borrador cancelable",
+    "internal_notes": "{\"_flow_metadata\":{\"cancelled_at\":\"2026-09-23T04:13:37.027Z\",\"cancellation_reason\":\"QA A4 borrador abandonado\",\"previous_state\":\"draft\"},\"notes\":\"\"}"
+  }
+}

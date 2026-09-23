@@ -2,8 +2,8 @@
 id: D.1
 title: "Test de la reversa de BOM antes de reutilizarla"
 phase: D
-status: pending
-owner: none
+status: in-progress
+owner: Ohm
 updated: 2026-09-20
 contracts: [FB-24, DB-09, DB-11, DB-30]
 adrs: [ADR-08]
@@ -35,4 +35,4 @@ skills: [vendix-restaurant-ops, vendix-inventory-stock, how-to-test, buildcheck-
   - [ ] El caso de ticket pendiente fija que se cancela sin destino y escribe el tipo de merma en duro.
   - [ ] Invertir el signo de la devolución en el servicio pone el test en rojo; la evidencia de la mutación queda guardada.
   - [ ] Ningún doble de prueba se tipa contra la función bajo prueba: la aserción no se recalcula sola.
-- **Status:** pending
+- **Status:** in-progress — 091dab185 cubre reuse/waste/pending/sin consumo; 90+45 tests; faltan mutaciones de control.

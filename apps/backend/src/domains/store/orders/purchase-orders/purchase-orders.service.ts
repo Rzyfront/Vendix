@@ -28,6 +28,10 @@ import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { buildTaxCategoryScopeWhere } from '@common/helpers/tax-category-scope.helper';
 import {
+  assertProductTaxComboValid,
+  type ProductTaxComboCategory,
+} from '../../products/services/product-tax-combination.util';
+import {
   localDateString,
   resolveStoreTimezone,
   DEFAULT_STORE_TIMEZONE,
@@ -1039,7 +1043,14 @@ export class PurchaseOrdersService {
               RequestContextService.getOrganizationId(),
             ),
           },
-          select: { id: true },
+          // `name` / `tax_type` / `tax_rates.store_id` alimentan la regla de
+          // combinación (P1-4) validada abajo por línea.
+          select: {
+            id: true,
+            name: true,
+            tax_type: true,
+            tax_rates: { select: { store_id: true } },
+          },
         });
       for (const taxCategory of taxCategories) {
         allowedTaxCategoryIds.add(taxCategory.id);
@@ -1052,6 +1063,26 @@ export class PurchaseOrdersService {
         // tenía cómo saber qué renglón corregir.
         throw new BadRequestException(
           `Una o más categorías de impuesto no existen para esta tienda (ids: ${missing.join(', ')}).`,
+        );
+      }
+
+      // P1-4 (auditoría impuestos por producto) — la OC crea o REEMPLAZA las
+      // `product_tax_assignments` del producto de cada línea (`deleteMany` +
+      // `create` más abajo). Se aplica la MISMA regla que products create /
+      // update / bulk: una categoría por tax_type, IVA⊕INC, sin retenciones,
+      // una tarifa aplicable por categoría. 400 PROD_TAX_COMBO_001 antes de
+      // abrir la transacción: ningún producto ni orden queda a medias.
+      const taxCategoryById = new Map<number, ProductTaxComboCategory>(
+        (taxCategories as ProductTaxComboCategory[]).map((c) => [c.id, c]),
+      );
+      for (const item of createPurchaseOrderDto.items ?? []) {
+        const ids = normalizeTaxCategoryIds((item as any)?.tax_category_ids);
+        if (!ids) continue;
+        assertProductTaxComboValid(
+          ids
+            .map((id) => taxCategoryById.get(id))
+            .filter((c): c is ProductTaxComboCategory => c != null),
+          { storeId: taxScopeStoreId },
         );
       }
     }

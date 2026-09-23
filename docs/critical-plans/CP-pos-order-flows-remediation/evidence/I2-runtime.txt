@@ -1,0 +1,8 @@
+1117|cancelled|814|cancelled|28|processing|10000.00|cash
+1118|created|815|succeeded||||
+1122|cancelled|819|cancelled|29|completed|10000.00|cash
+434|115|opening_balance|10000.00|
+435|115|cash_out|10000.00|Cancelación orden QA-I2-CASH-OPEN-20260923-01
+436|115|closing_balance|0.00|
+115|closed|0.00|0.00|0.00
+60|f

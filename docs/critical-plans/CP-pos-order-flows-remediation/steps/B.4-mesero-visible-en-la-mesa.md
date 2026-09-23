@@ -2,9 +2,9 @@
 id: B.4
 title: "Mesero visible en la mesa"
 phase: B
-status: pending
-owner: none
-updated: 2026-09-20
+status: done
+owner: Fabio
+updated: 2026-09-23
 contracts: [FB-21, FB-44, FB-45, DB-16, DB-45]
 adrs: [ADR-04]
 skills: [vendix-backend, vendix-prisma-scopes, vendix-restaurant-ops, vendix-frontend, vendix-zoneless-signals, vendix-panel-ui, how-to-test]
@@ -17,7 +17,7 @@ skills: [vendix-backend, vendix-prisma-scopes, vendix-restaurant-ops, vendix-fro
 - **Why:** El dueño pidió ver qué mesero tiene cada mesa y el dato ya está escrito: `opened_by` se graba en toda sesión nueva. Lo que falta es resolverlo a nombre y declararlo. Hay además una trampa concreta: ya existe un objeto `waiter` en la respuesta de sesión, pero se alimenta del pivote `table_waiters` —la asignación estática de meseros a mesas—, no de quien realmente abrió la cuenta. Dejarlo así significa que la pantalla muestra un mesero plausible y equivocado. El mapa de salón expone `opened_by` como número crudo que ninguna vista traduce, y la interfaz del frontend no declara el campo, así que ninguna vista podría pintarlo aunque llegara.
 - **Output:** El `include` de la relación del usuario que abrió, replicado del precedente de orden, en la respuesta de sesión de mesa y en la sesión activa del mapa de salón; el objeto `waiter` cambia de fuente del pivote a quien abrió, conservando la forma del contrato; `paid_at` añadido al mismo constructor de fila del mapa si B.3 no lo dejó; el campo declarado en la interfaz de sesión del frontend; el nombre del mesero pintado en la página de mesa y en el tile del mapa de salón; comentario en el pivote advirtiendo que ya no alimenta esta proyección.
 - **Contracts touched:** FB-21 (precedente que se replica, sin cambio), FB-44 (la respuesta de sesión cambia la fuente de `waiter`), FB-45 (`active_session` resuelve el mesero a nombre en vez de exponer un id crudo), DB-16 (se apoya en que toda sesión nueva lleva quien la abrió), DB-45 (el pivote `table_waiters` queda leído pero deja de ser la fuente del mesero mostrado).
-- **Data impact:** none — solo lectura. El dato ya está escrito en producción para toda sesión existente, así que **no hay backfill**, no hay migración y no hay sesiones sin mesero. Sin DDL: `opened_by` y su relación ya están en el esquema. Si la verificación encontrara sesiones con quien abrió en nulo, el paso **no** inventa una columna ni un relleno: lo registra como hallazgo y la vista muestra el vacío.
+- **Data impact:** none — solo lectura; sin DDL ni backfill. `opened_by` y su relación ya existen. Una sesión QR anónima puede tener `opened_by=NULL` legítimamente: la vista deja el nombre vacío y no inventa un mesero ni exige relleno.
 - **Blast radius:** El riesgo silencioso es el cambio de fuente: cualquier consumidor que hoy lea `waiter` esperando la asignación del pivote pasa a recibir a quien abrió, sin que cambie la forma y por tanto sin que nada falle al compilar. Hay que barrer los consumidores antes de cortar. Riesgo de rendimiento bajo pero real: un `include` mal acotado en el mapa de salón multiplica consultas por mesa. Lo nota el mesero, que ve un nombre distinto al que esperaba, y el encargado en el listado.
 - **Rollback:** Trivial —así lo declara ADR-04 §Reversibility—: revertir el commit devuelve el pivote como fuente y quita el campo de la interfaz. Nada escrito que deshacer. Si más adelante el negocio pide un responsable mutable, la vuelta es aditiva: quien abrió se conserva como historia y el campo nuevo se superpone en la proyección.
 - **Verification:**
@@ -30,17 +30,17 @@ skills: [vendix-backend, vendix-prisma-scopes, vendix-restaurant-ops, vendix-fro
   - `npm --prefix apps/backend run test:path -- src/domains/store/tables/table-sessions.service.spec.ts`
   - Playwright MCP — abrir el mapa de salón y la página de una mesa abierta por un usuario conocido y confirmar que el nombre mostrado es el de quien la abrió; guardar en `evidence/B.4-e2e-mesero.md`
 - **Acceptance checklist:**
-  - [ ] El mesero mostrado se resuelve desde quien abrió la sesión, nunca desde el pivote de asignación
-  - [ ] El `include` replica el precedente ya en uso en el detalle de orden, con el mismo `select` acotado
-  - [ ] El objeto de mesero conserva su forma actual: cambia la fuente, no el contrato
-  - [ ] Los consumidores del pivote quedan barridos y listados antes de cortar la fuente
-  - [ ] El mapa de salón deja de exponer un identificador crudo sin resolver
-  - [ ] La interfaz de sesión del frontend declara el campo del mesero
-  - [ ] La página de mesa muestra el nombre del mesero
-  - [ ] El tile del mapa de salón muestra el nombre del mesero
-  - [ ] Una sesión sin quien la abrió se pinta vacía y no rompe la vista
-  - [ ] No se añade columna, migración ni relleno de datos
-  - [ ] El mapa de salón no aumenta su número de consultas por mesa
-  - [ ] Queda anotado en el pivote que ya no alimenta esta proyección
-  - [ ] Las filas FB-21, FB-44, FB-45, DB-16 y DB-45 quedan marcadas con su evidencia enlazada
-- **Status:** pending
+  - [x] El mesero mostrado se resuelve desde quien abrió la sesión, nunca desde el pivote de asignación
+  - [x] El `include` replica el precedente ya en uso en el detalle de orden, con el mismo `select` acotado
+  - [x] El objeto de mesero conserva su forma actual: cambia la fuente, no el contrato
+  - [x] Los consumidores del pivote quedan barridos y listados antes de cortar la fuente
+  - [x] El mapa de salón deja de exponer un identificador crudo sin resolver
+  - [x] La interfaz de sesión del frontend declara el campo del mesero
+  - [x] La página de mesa muestra el nombre del mesero
+  - [x] El tile del mapa de salón muestra el nombre del mesero
+  - [x] Una sesión sin quien la abrió se pinta vacía y no rompe la vista
+  - [x] No se añade columna, migración ni relleno de datos
+  - [x] El mapa de salón no aumenta su número de consultas por mesa
+  - [x] Queda anotado en el pivote que ya no alimenta esta proyección
+  - [x] Las filas FB-21, FB-44, FB-45, DB-16 y DB-45 quedan marcadas con su evidencia enlazada
+- **Status:** done · Fabio · 2026-09-23 · proyección `70b74852c`, impresión `8c74f9683`, tests UI `67e8d462b`. `evidence/B4-opener-ui.md`: API y Playwright de mesa #24/sesión #116 muestran opener user162 Andrés Roku Owner en tile y página; QR nulo no inventa mesero. Frontend 11/11, backend print 39/39, tables 5/5, sessions 57/57; sin query por tile.

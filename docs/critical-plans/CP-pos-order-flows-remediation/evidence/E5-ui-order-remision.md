@@ -1,0 +1,5 @@
+# E.5 Pedido a domicilio finalizado → remisión visible
+
+Playwright real en `https://vendix.com/admin/orders/1119`: orden QA `home_delivery` en **PROCESANDO**, método «Entrega Rápida Local», dirección «Calle 1 # 2-3, Bogotá» y pago exitoso $10.000. En «Despacho / Remisiones» aparecía `REM2609230001` con acción «Ver remisión»; `GET /store/dispatch-notes/by-order/1119` respondió **200** (`E5-order-shipping-ui.png`). El clic navegó a `/admin/orders/dispatch-notes/226`: borrador con un ítem, total $10.000, dirección de entrega y enlace «Ver orden #1119» (`E5-dispatch-note-ui.png`).
+
+La API de creación y el guard de método están en `E5-*` previos: sin método, error tipado; con método #9, orden #1119 processing y remisión #226 creada. `E5-ui-order-remision.sql/txt` confirma método, snapshot, remisión y el gap pendiente: `orders.shipping_address_id=NULL` mientras snapshot y `dispatch_notes.customer_address` existen. La UI lee el snapshot, pero un consumidor que requiera FK sigue expuesto; F.2/ADR-05 permanece pendiente de decisión.

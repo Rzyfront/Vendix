@@ -2,7 +2,7 @@
 id: I.2
 title: "Artefacto de reembolso y cuadre no-efectivo al cancelar"
 phase: I
-status: pending
+status: in-progress
 owner: none
 updated: 2026-09-20
 contracts: [FB-24, DB-33, DB-34, DB-03, ERR-38]
@@ -29,10 +29,10 @@ skills: [vendix-backend, vendix-accounting-rules, vendix-payment-processors, ven
   - `grep -n "refunds" apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts` → deja de ser 0
 - **Acceptance checklist:**
   - [ ] Cancelar una orden con pago liquidado deja al menos una fila de reembolso trazable, con método y monto
-  - [ ] El carril no-efectivo deja de consumarse en silencio: o crea el artefacto, o rechaza con código tipado
-  - [ ] El egreso de caja del efectivo conserva su conducta actual y no se duplica por el artefacto nuevo
+  - [x] El carril no-efectivo deja de consumarse en silencio: rechaza con código tipado
+  - [x] El egreso de caja del efectivo conserva su conducta actual y no se duplica por el artefacto nuevo
   - [ ] El tope de reembolso sigue anclado a `grand_total` y ninguna devolución lo supera
   - [ ] El test que fijaba el vacío quedó reescrito para afirmar el artefacto, fijando el `errorCode` en el caso de rechazo
   - [ ] La consulta de invariante de reembolso devuelve cero filas sobre el dataset representativo
   - [ ] El servicio de la pasarela de pago no se modificó en este paso
-- **Status:** pending
+- **Status:** in-progress — API local: orden #1122 con efectivo y caja QA abierta → 200, reembolso #29 `completed` 10000 y un solo `cash_out` #435; sesión #115 cerrada con diferencia 0 y caja QA #60 desactivada. Transferencia #1118 → 409 `ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001` sin mutación. Sin caja del operador, #1117 canceló con refund #28 `processing` y log/auditoría `no_open_session`; queda pendiente salida operativa. Además, el reembolso estándar solo permite `delivered/finished`, así que una orden transferida en `processing` no tiene salida por el carril al que remite el 409. Decisión solicitada al dueño; evidencia `evidence/I2-*`.

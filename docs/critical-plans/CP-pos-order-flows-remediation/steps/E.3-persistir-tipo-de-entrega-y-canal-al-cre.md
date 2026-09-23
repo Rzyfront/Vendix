@@ -2,8 +2,8 @@
 id: E.3
 title: "Persistir tipo de entrega y canal al crear la orden"
 phase: E
-status: pending
-owner: none
+status: in-progress
+owner: Rawls
 updated: 2026-09-20
 contracts: [FB-16, DB-04, DB-05]
 adrs: [ADR-01]
@@ -37,4 +37,4 @@ skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-error-han
   - [ ] Una orden creada con `home_delivery` llega al detalle con su etiqueta correcta.
   - [ ] Ninguna orden POS nueva nace con tipo de entrega de recogida diferida.
   - [ ] Ninguna fila histórica de `orders` se reescribe durante el paso.
-- **Status:** pending
+- **Status:** in-progress — persistencia y 75 tests en 91575a2c7; falta curl/DB.

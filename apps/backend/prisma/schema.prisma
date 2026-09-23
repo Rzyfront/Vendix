@@ -1523,6 +1523,23 @@ model orders {
   discount_amount                                 Decimal                   @default(0.00) @db.Decimal(12, 2)
   tax_amount                                      Decimal                   @default(0.00) @db.Decimal(12, 2)
   shipping_cost                                   Decimal                   @default(0.00) @db.Decimal(12, 2)
+  // Copia CONGELADA del impuesto del envío al vender (shipping-tax.service.ts
+  // `snapshotForRate`). Sale de la tarifa (`shipping_rates.tax_category_id`) y
+  // no cambia si luego se edita la tarifa o la categoría. Costo digitado a
+  // mano ⇒ copia vacía. El impuesto va INCLUIDO en `shipping_cost` (bruto):
+  // base del envío = `shipping_cost - shipping_tax_amount` (no se guarda).
+  //
+  // ASIMETRÍA DELIBERADA: `orders.tax_amount` NO incluye `shipping_tax_amount`
+  // (sigue siendo Σ order_item_taxes; el envío ya va bruto en shipping_cost y
+  // sumarlo dos veces rompería grand_total). `invoices.tax_amount` SÍ lo
+  // incluye, porque la DIAN exige cabecera = Σ impuestos de línea (FAU06).
+  shipping_tax_rate_id                            Int?
+  shipping_tax_name                               String?                   @db.VarChar(100)
+  shipping_tax_type                               tax_type_enum?
+  // Fracción (0.08000 = 8 %), misma unidad que `order_item_taxes.tax_rate`.
+  shipping_tax_rate                               Decimal?                  @db.Decimal(6, 5)
+  shipping_tax_amount                             Decimal                   @default(0) @db.Decimal(12, 2)
+  shipping_tax_rate_ref                           tax_rates?                @relation("orders_shipping_tax_rate", fields: [shipping_tax_rate_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   grand_total                                     Decimal                   @default(0.00) @db.Decimal(12, 2)
   // Plan Despacho Economía — FASE 6 paso 19. Estado de cumplimiento del
   // despacho (sin envío parcial del flujo de remisión). Mantenido por
@@ -1628,6 +1645,7 @@ model orders {
   @@index([store_id, channel])
   @@index([store_id, dispatch_pool_at])
   @@index([store_id, created_by_user_id])
+  @@index([shipping_tax_rate_id])
 }
 
 model order_installments {
@@ -2354,6 +2372,9 @@ model tax_categories {
   stores                  stores?                   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   organizations           organizations?            @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   tax_rates               tax_rates[]
+  // Tarifas de envío que cobran este impuesto (FK RESTRICT). `TaxesService
+  // .remove` rechaza el borrado mientras alguna la use.
+  shipping_rates          shipping_rates[]
 
   @@index([organization_id])
 }
@@ -2378,6 +2399,8 @@ model tax_rates {
   tax_categories      tax_categories     @relation(fields: [tax_category_id], references: [id], onUpdate: NoAction)
   invoice_taxes       invoice_taxes[]
   purchase_order_item_taxes purchase_order_item_taxes[]
+  // Copias congeladas del impuesto del envío en órdenes (FK RESTRICT).
+  orders_shipping_tax orders[]           @relation("orders_shipping_tax_rate")
 }
 
 model api_keys {
@@ -3277,6 +3300,15 @@ model shipping_rates {
   copied_from_system_rate_id Int? // ID de tarifa del sistema de donde se copió
   source_type                zone_source_type_enum? // 'system_copy' | 'custom'
 
+  // Impuesto OPCIONAL del envío (null = sin impuesto). Siempre INCLUIDO en
+  // `base_cost`: se ignora `tax_categories.is_inclusive`, lo que paga el
+  // cliente no cambia. Elegible: categoría de la tienda (u org si
+  // fiscal_scope=ORGANIZATION), tax_type iva|inc y exactamente UNA tasa > 0
+  // (`shipping/utils/shipping-tax.util.ts`). RESTRICT: borrar la categoría no
+  // debe quitar el impuesto del envío en silencio.
+  tax_category_id Int?
+  tax_category    tax_categories? @relation(fields: [tax_category_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
   // Relaciones
   shipping_zone   shipping_zones   @relation(fields: [shipping_zone_id], references: [id], onDelete: Cascade)
   shipping_method shipping_methods @relation(fields: [shipping_method_id], references: [id], onDelete: Cascade)
@@ -3285,6 +3317,7 @@ model shipping_rates {
   @@index([shipping_zone_id])
   @@index([shipping_method_id])
   @@index([copied_from_system_rate_id])
+  @@index([tax_category_id])
 }
 
 // Tracking de cambios en zonas del sistema para notificar a tiendas

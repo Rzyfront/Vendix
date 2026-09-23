@@ -2,8 +2,8 @@
 id: B.3
 title: "`session_paid` en el whitelist SSE y suscripción de la página de mesa"
 phase: B
-status: pending
-owner: none
+status: in-progress
+owner: Mencius
 updated: 2026-09-20
 contracts: [FB-42, FB-43, FB-45, DB-17]
 adrs: [ADR-03]
@@ -29,16 +29,16 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-frontend, vendix-zoneless
   - `npx --prefix apps/frontend ng test --include='**/admin-tables-sse.service.spec.ts' --watch=false --browsers=ChromeHeadless`
   - Playwright MCP — abrir la página de una mesa, cobrar la orden desde otra pestaña y confirmar que la cuenta se marca pagada sin recargar; repetir recargando la página para validar el snapshot; guardar en `evidence/B.3-e2e-mesa-pagada.md`
 - **Acceptance checklist:**
-  - [ ] El evento de cuenta pagada está en el whitelist del stream de staff
-  - [ ] El whitelist conserva su salida por defecto en denegar: ningún evento nuevo pasa por accidente
-  - [ ] La carga del evento lleva solo lo necesario para pintar el estado, sin datos ajenos a la sesión
-  - [ ] La unión discriminada del frontend declara la variante con la forma real que emite el servidor
-  - [ ] La página de mesa se suscribe al stream de mesas, no solo al del KDS
-  - [ ] La suscripción se libera al destruir el componente
-  - [ ] La cuenta se marca pagada en vivo, sin recargar
-  - [ ] El snapshot inicial del stream incluye la marca de pago
-  - [ ] La sesión activa del mapa de salón incluye la marca de pago
-  - [ ] Abrir la pantalla después del cobro muestra el mismo estado que verla en vivo
-  - [ ] Hay un test del whitelist que falla si el evento se quita de la lista
-  - [ ] Las filas FB-42, FB-43, FB-45 y DB-17 quedan marcadas con su evidencia enlazada
-- **Status:** pending
+  - [x] El evento de cuenta pagada está en el whitelist del stream de staff
+  - [x] El whitelist conserva su salida por defecto en denegar: ningún evento nuevo pasa por accidente
+  - [x] La carga del evento lleva solo lo necesario para pintar el estado, sin datos ajenos a la sesión
+  - [x] La unión discriminada del frontend declara la variante con la forma real que emite el servidor
+  - [x] La página de mesa se suscribe al stream de mesas, no solo al del KDS
+  - [x] La suscripción se libera al destruir el componente
+  - [x] La cuenta se marca pagada en vivo, sin recargar
+  - [x] El snapshot inicial del stream incluye la marca de pago
+  - [x] La sesión activa del mapa de salón incluye la marca de pago
+  - [x] Abrir la pantalla después del cobro muestra el mismo estado que verla en vivo
+  - [x] Hay un test del whitelist que falla si el evento se quita de la lista
+  - [ ] FB-42/FB-43/FB-45 verificados; DB-17 global sigue abierto por sesiones históricas sin `paid_at`
+- **Status:** in-progress · Fabio · 2026-09-23 · SSE/snapshots/página `1316bfae5`, tile `86138fbd5`. `evidence/B3-live-paid.md`: Playwright página sesión #113 muestra Pagada sin reload tras POST 201/pago #828 y sigue pagada tras reload; stream emitió `session_paid`. Backend whitelist 1/1, frontend SSE 2/2, watcher OK. DB-17 no cierra: 13 sesiones antiguas pagadas tienen `paid_at=NULL` (`evidence/B3-legacy-paid-at.txt`); se pidió decisión sobre backfill idempotente.

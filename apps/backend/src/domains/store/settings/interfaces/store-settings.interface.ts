@@ -710,13 +710,7 @@ export interface PosSettings {
   /** QUI-727 (B.4) — ventas por alias (nombre/mesa) sin cliente formal. */
   allow_alias_sales?: boolean;
   alias_sales_as_default?: boolean;
-  /**
-   * F-127 — severidad de la compuerta fiscal por linea en el carril de cobro
-   * (`POS_TABLE_LINE_TAX_UNRESOLVABLE_001`). `'block'` (default, ausente
-   * incluido) lanza como siempre; `'warn'` deja pasar y registra; `'off'`
-   * deja pasar en silencio. Bajarla es una medida TEMPORAL de emergencia
-   * para que una tienda pueda seguir cobrando mientras corrige el catalogo.
-   */
+  /** @deprecated ADR-10: clave legacy aceptada en JSON, sin efecto en el cobro. */
   tax_line_gate?: 'block' | 'warn' | 'off';
   business_hours: Record<string, BusinessHours>;
   schedule_mode?: 'continuous' | 'custom';

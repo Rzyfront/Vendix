@@ -158,6 +158,15 @@ export class SplitOrderService {
     }
     if (!order.order_items.length)
       throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_EMPTY);
+    // El envío con impuesto (copia `orders.shipping_tax_*`) sólo se proyecta
+    // facturando la orden ENTERA (`createFromOrder`): la proyección de cuentas
+    // divididas trata el envío sin tributo y descuadraría base e impuesto.
+    // Dividir un domicilio es raro — las divisiones son de mesa, sin envío.
+    if (Number(order.shipping_tax_amount ?? 0) > 0) {
+      this.reject(
+        'La orden tiene un envío con impuesto; factúrala sin dividir.',
+      );
+    }
     if (
       (order.invoices ?? []).some(
         (invoice: any) => !VOID_INVOICES.includes(invoice.status),

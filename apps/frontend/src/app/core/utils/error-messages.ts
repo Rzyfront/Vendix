@@ -172,6 +172,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   STORE_VALIDATE_001: 'La validacion de la tienda fallo.',
   STORE_PERM_001: 'No tiene permisos para acceder a esta tienda.',
   STORE_CONTEXT_001: 'Debe seleccionar una tienda.',
+  ADDR_PRIMARY_REQUIRES_CUSTOMER_001:
+    'Selecciona un cliente antes de marcar su dirección como predeterminada.',
+  ADDR_CUSTOMER_NOT_IN_STORE_001:
+    'Este cliente no pertenece a la tienda. Verifica su ficha en Clientes o créala primero aquí.',
 
   // Marketing
   MKT_AD_STORAGE_001:
@@ -266,10 +270,17 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Esta orden tiene inventario consumido o evidencia de entrega. No se puede anular: revisa la entrega y tramita una devolución real; si es un caso anterior sin entrega, requiere conciliación de inventario.',
   ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001:
     'Esta orden tiene un pago confirmado que requiere reversión o conciliación. Usa el flujo de reembolso cuando corresponda; anular la orden no devuelve el dinero de la pasarela.',
+  ORD_CANCEL_OPEN_TABLE_001:
+    'Esta cuenta pertenece a una mesa abierta. Cierra o cobra la cuenta desde Mesas antes de cancelar la orden.',
+  ORD_ITEM_CANCEL_PAID_001:
+    'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
+  ORD_ITEM_CANCEL_STATE_001:
+    'Esta orden está cerrada y no admite cancelar platos. Revisa su estado antes de continuar.',
   ORD_STOCK_COMMIT_STATE_001:
     'No se puede entregar inventario de una orden cancelada o reembolsada.',
   ORD_SHIP_001: 'Metodo de envio no encontrado.',
   ORD_SHIP_REQUIRED_001: 'Debes asignar un método de envío antes de continuar.',
+  ORD_SHIP_CHARGE_001: 'Elige el método de envío antes de cobrar.',
   ORD_SHIP_INVALID_METHOD_001: 'El método de envío no pertenece a esta tienda.',
   ORD_SHIP_RATE_MISMATCH_001:
     'La tarifa seleccionada no corresponde al método de envío.',
@@ -1025,12 +1036,18 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Este enlace ya recibió tus datos y sólo se puede usar una vez. La tienda está emitiendo tu factura.',
 
   // Kitchen tickets (Restaurant Suite Fase K audit jun-2026)
+  KDS_STATION_LOCKED:
+    'Otro operador tiene esta estación. Pídele que cierre su turno o solicita a un administrador que tome la estación.',
+  KITCHEN_TICKET_NOT_TAKEAWAY:
+    'Este ticket incluye platos de mesa. Entrégalos desde la mesa, no desde cocina.',
+  ORDER_ITEM_NOT_DELIVERABLE:
+    'Cocina aún no marca este plato como listo. Espera a que aparezca listo en el KDS antes de entregarlo.',
   KITCHEN_TICKET_NOT_READY:
-    'No se puede marcar como entregado: el plato aun esta pendiente en cocina. Espera a que el KDS lo marque como listo.',
+    'Este plato aún no está listo. Espera a que cocina lo marque como listo en el KDS antes de entregarlo.',
   KITCHEN_TICKET_ALREADY_DELIVERED:
-    'Este plato ya fue marcado como entregado.',
+    'Este plato ya estaba entregado. Actualiza el tablero para ver su estado actual.',
   KITCHEN_TICKET_ALREADY_CANCELLED:
-    'Este plato fue cancelado en cocina y no puede modificarse.',
+    'Este plato fue cancelado en cocina. Revisa el ticket antes de intentar entregarlo.',
   KITCHEN_TICKET_ALREADY_IN_PREPARATION:
     'El ticket ya esta en preparacion.',
   KITCHEN_TICKET_ALREADY_READY:
@@ -1073,8 +1090,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Aún no hay una cuenta abierta para esta mesa. Llama al mesero para que la abra.',
   TABLE_SESSION_ALREADY_OPEN:
     'Esta mesa ya tiene una cuenta abierta.',
+  // B.5 / ERR-39 — aviso de apertura exitosa, no error ni confirmación.
+  TABLE_REOPENED_FROM_CLEANING_001:
+    'Esta mesa estaba en limpieza. Verifica que esté lista para atender.',
   TABLE_SESSION_CLOSED:
     'La cuenta de esta mesa ya fue cerrada.',
+  POS_TABLE_SESSION_PROJECTION_FAILED_001:
+    'El cobro quedó registrado; refresca la mesa.',
   TABLE_SESSION_CUSTOMER_REQUIRED:
     'Necesitamos tus datos para abrir la cuenta de la mesa.',
   TABLE_INVALID_STATUS:
@@ -1145,6 +1167,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La orden se guardó pero no se pudo recargar. Actualiza el detalle.',
   ORD_FLOW_PAYMENT_FAILED_001:
     'No se pudo registrar el cobro. La orden sigue pendiente.',
+  ORD_PAY_ALREADY_PAID_001:
+    'Esta orden ya está pagada por completo. Actualiza el detalle antes de intentar otro cobro.',
 
   // Coupons (QUI-783). El backend rechaza el cupón con estos códigos cuando
   // un cupón aplicado a una venta no puede ser validado server-side (antes

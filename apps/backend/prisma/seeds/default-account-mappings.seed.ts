@@ -117,6 +117,9 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'credit_sale.created.vat_payable': '2408',
   // Phase 1: Refund VAT reversal
   'refund.completed.vat_payable': '2408',
+  // Devolución: la base del envío devuelto reversa el ingreso por fletes
+  // (414505), no 4135. Dual-source con DEFAULT_ACCOUNT_MAPPINGS.
+  'refund.completed.shipping_income_reversal': '414505',
   // Typed fiscal tax routing (per tax_type): IVA→240802, INC→2436, ICA→2412.
   // Mirrors DEFAULT_ACCOUNT_MAPPINGS so AutoEntryService.resolveTaxLines posts
   // each fiscal type to its own PUC account instead of collapsing into 2408.
@@ -139,6 +142,7 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'credit_note.accepted.inc_payable': '2436',
   'credit_note.accepted.ica_payable': '2412',
   'credit_note.accepted.accounts_receivable': '1305',
+  'credit_note.accepted.customer_refund_payable': '2805',
   // Phase 2: Sales discounts (POS coupons, manual discounts)
   'payment.received.sales_discount': '4175',
   'credit_sale.created.sales_discount': '4175',

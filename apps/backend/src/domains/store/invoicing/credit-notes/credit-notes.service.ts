@@ -933,6 +933,12 @@ export function derivePartialNoteLinesViaKernel(
     taxes?: Array<{ is_inclusive?: boolean | null }> | null;
   }>,
   related_items: Array<{
+    /**
+     * Id de la línea de la factura. Sólo lo usa el carril de esquemas
+     * mezclados: las filas de `invoice_taxes` ligadas por `invoice_item_id` a
+     * la gemela dicen qué tributo lleva ESA línea.
+     */
+    id?: number | null;
     product_id: number | null;
     product_variant_id: number | null;
     is_inclusive: boolean | null;
@@ -940,12 +946,18 @@ export function derivePartialNoteLinesViaKernel(
     // estas dos para exención por gemela y divisor de presentación.
     tax_amount?: Prisma.Decimal | number | null;
     price_unit_quantity?: Prisma.Decimal | number | null;
+    // Sólo para reconocer una nota que acredita la línea COMPLETA y heredar
+    // su cuota persistida (ver `fullTwinQuota`).
+    quantity?: Prisma.Decimal | number | null;
+    unit_price?: Prisma.Decimal | number | null;
+    discount_amount?: Prisma.Decimal | number | null;
   }>,
   invoice_taxes: Array<{
     tax_rate_id: number | null;
     tax_name: string;
     tax_rate: Prisma.Decimal | number;
     tax_type: string | null;
+    invoice_item_id?: number | null;
   }>,
   related_invoice_id: number,
   type: 'credit_note' | 'debit_note',
@@ -1002,7 +1014,16 @@ export function derivePartialNoteLinesViaKernel(
   // decimales) antes de decidir si el esquema es único. Una factura de una fila
   // se comporta idéntico: su único grupo ES su fila.
   const schemes = distinctInvoiceTaxSchemes(invoice_taxes);
-  if (schemes.length !== 1) {
+  // FACTURA MIXTA con desglose por línea (p. ej. envío con IVA y platos con
+  // INC, `createFromOrder` con impuesto del envío): el esquema de cada línea
+  // de la nota sale de las filas ligadas por `invoice_item_id` a SU gemela.
+  // `null` = gemela exenta (sin filas y sin impuesto). Si alguna línea no se
+  // resuelve sin ambigüedad, el carril no aplica y se exige `taxes` como hoy.
+  const per_line_schemes =
+    schemes.length > 1
+      ? resolvePerLineNoteSchemes(items, related_items, invoice_taxes)
+      : null;
+  if (schemes.length !== 1 && !per_line_schemes) {
     const label = type === 'credit_note' ? 'nota crédito' : 'nota débito';
     const claimed = items.reduce(
       (acc, i) => acc.plus(new Prisma.Decimal(i.tax_amount || 0)),
@@ -1057,15 +1078,22 @@ export function derivePartialNoteLinesViaKernel(
     );
   }
 
-  const scheme = schemes[0];
-  const scheme_type = (scheme.tax_type ?? '').trim().toLowerCase() || 'iva';
-  // Espejo de `resolveRateBasis` del motor y de `rateFractionPpm` del
-  // preview: sin `rate_basis` explícito el ICA (y su retención) van POR MIL.
-  const rate_basis =
-    scheme_type === 'ica' || scheme_type === 'reteica'
-      ? ('per_mil' as const)
-      : ('percent' as const);
-  const scheme_rate = Number(scheme.tax_rate);
+  type Scheme = (typeof invoice_taxes)[number];
+  const scheme_params = (row: Scheme) => {
+    const type = (row.tax_type ?? '').trim().toLowerCase() || 'iva';
+    return {
+      scheme_type: type,
+      // Espejo de `resolveRateBasis` del motor y de `rateFractionPpm` del
+      // preview: sin `rate_basis` explícito el ICA (y su retención) van POR MIL.
+      rate_basis:
+        type === 'ica' || type === 'reteica'
+          ? ('per_mil' as const)
+          : ('percent' as const),
+      scheme_rate: Number(row.tax_rate),
+    };
+  };
+  const scheme_of = (index: number): Scheme | null =>
+    per_line_schemes ? per_line_schemes[index] : schemes[0];
 
   const lines: DerivedPartialNoteLine[] = items.map((item, index) => {
     const quantity = new Prisma.Decimal(item.quantity);
@@ -1076,6 +1104,18 @@ export function derivePartialNoteLinesViaKernel(
     // también en el carril de notas. Divisor compartido con N2 (`divisor_for`).
     const divisor = divisor_for(item);
     const gross = quantity.times(unit_price).dividedBy(divisor).minus(discount);
+
+    // Carril mixto: la gemela de esta línea es exenta ⇒ sin cuota.
+    const line_scheme = scheme_of(index);
+    if (line_scheme === null) {
+      return {
+        base_amount: gross,
+        tax_amount: new Prisma.Decimal(0),
+        total_amount: gross,
+        is_inclusive: false,
+      };
+    }
+    const { scheme_type, rate_basis, scheme_rate } = scheme_params(line_scheme);
 
     // Herencia de inclusividad del motor: flag de línea ⇒ primer impuesto
     // del DTO ⇒ línea de la factura (misma pareja, o la única) ⇒ adicional.
@@ -1152,7 +1192,19 @@ export function derivePartialNoteLinesViaKernel(
       );
     }
 
-    const quota = kernel.quotas[0]?.quota ?? new Prisma.Decimal(0);
+    const kernel_quota = kernel.quotas[0]?.quota ?? new Prisma.Decimal(0);
+    // La nota que acredita la línea ENTERA devuelve exactamente la cuota que
+    // la factura declaró, no su re-despeje: una cuota truncada al vender
+    // (envío gravado, precio con impuesto incluido) difiere hasta un centavo.
+    const twin_quota = fullTwinQuota(
+      item,
+      related_items,
+      single_related,
+      is_inclusive,
+      kernel_quota,
+    );
+    const quota = twin_quota ?? kernel_quota;
+    const delta = quota.minus(kernel_quota);
     const claimed_tax = new Prisma.Decimal(item.tax_amount || 0);
     if (!claimed_tax.equals(quota)) {
       logger?.warn(
@@ -1161,9 +1213,13 @@ export function derivePartialNoteLinesViaKernel(
       );
     }
     return {
-      base_amount: kernel.base,
+      // Inclusiva: el total queda (es el bruto) y la base absorbe el delta.
+      // Adicional: la base queda y el total lo suma.
+      base_amount: is_inclusive ? kernel.base.minus(delta) : kernel.base,
       tax_amount: quota,
-      total_amount: kernel.closed_total,
+      total_amount: is_inclusive
+        ? kernel.closed_total
+        : kernel.closed_total.plus(delta),
       is_inclusive,
     };
   });
@@ -1186,12 +1242,46 @@ export function derivePartialNoteLinesViaKernel(
   );
 
   if (totals.tax.isZero()) return { taxes: [], lines, totals };
+  if (per_line_schemes) {
+    // Una fila por tributo (tipo + tarifa), con la base y la cuota de SUS
+    // líneas: cada fila cuadra base × tarifa y Σ filas = impuesto de cabecera.
+    const groups = new Map<
+      string,
+      { scheme: Scheme; base: Prisma.Decimal; tax: Prisma.Decimal }
+    >();
+    lines.forEach((line, index) => {
+      const line_scheme = per_line_schemes[index];
+      if (line_scheme === null) return;
+      const key = schemeKey(line_scheme);
+      const group = groups.get(key) ?? {
+        scheme: line_scheme,
+        base: new Prisma.Decimal(0),
+        tax: new Prisma.Decimal(0),
+      };
+      group.base = group.base.plus(line.base_amount);
+      group.tax = group.tax.plus(line.tax_amount);
+      groups.set(key, group);
+    });
+    return {
+      taxes: Array.from(groups.values()).map((group) => ({
+        tax_rate_id: group.scheme.tax_rate_id ?? undefined,
+        tax_name: group.scheme.tax_name,
+        tax_rate: Number(group.scheme.tax_rate),
+        taxable_amount: group.base.toNumber(),
+        tax_amount: group.tax.toNumber(),
+        tax_type: group.scheme.tax_type,
+      })),
+      lines,
+      totals,
+    };
+  }
+  const scheme = schemes[0];
   return {
     taxes: [
       {
         tax_rate_id: scheme.tax_rate_id ?? undefined,
         tax_name: scheme.tax_name,
-        tax_rate: scheme_rate,
+        tax_rate: Number(scheme.tax_rate),
         taxable_amount: totals.subtotal.toNumber(),
         tax_amount: totals.tax.toNumber(),
         tax_type: scheme.tax_type,
@@ -1200,4 +1290,164 @@ export function derivePartialNoteLinesViaKernel(
     lines,
     totals,
   };
+}
+
+const FULL_TWIN_MAX_DELTA = new Prisma.Decimal('0.01');
+
+const decimalOrNull = (value: unknown): Prisma.Decimal | null => {
+  if (value == null) return null;
+  try {
+    return new Prisma.Decimal(value as Prisma.Decimal.Value);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Cuota persistida de la línea gemela cuando la nota la acredita COMPLETA:
+ * misma pareja producto+variante (o la única línea), misma cantidad, mismo
+ * precio unitario, mismo descuento y misma inclusividad. Sólo se hereda si
+ * difiere del re-despeje en un centavo o menos —la holgura de un truncado
+ * hecho al vender—; más que eso no es truncado y el kernel manda. `null` =
+ * no aplica (nota parcial de la línea, o sin gemela exacta).
+ */
+function fullTwinQuota(
+  item: {
+    product_id?: number | null;
+    product_variant_id?: number | null;
+    quantity: number;
+    unit_price: number;
+    discount_amount?: number | null;
+  },
+  related_items: Array<{
+    product_id: number | null;
+    product_variant_id: number | null;
+    is_inclusive: boolean | null;
+    tax_amount?: Prisma.Decimal | number | null;
+    quantity?: Prisma.Decimal | number | null;
+    unit_price?: Prisma.Decimal | number | null;
+    discount_amount?: Prisma.Decimal | number | null;
+  }>,
+  single_related: (typeof related_items)[number] | undefined,
+  is_inclusive: boolean,
+  kernel_quota: Prisma.Decimal,
+): Prisma.Decimal | null {
+  const quantity = new Prisma.Decimal(item.quantity);
+  const unit_price = new Prisma.Decimal(item.unit_price);
+  const discount = new Prisma.Decimal(item.discount_amount || 0);
+  const candidates = single_related
+    ? [single_related]
+    : related_items.filter(
+        (rel) =>
+          (rel.product_id ?? null) === (item.product_id ?? null) &&
+          (rel.product_variant_id ?? null) ===
+            (item.product_variant_id ?? null),
+      );
+  const twin = candidates.find((rel) => {
+    const rel_quantity = decimalOrNull(rel.quantity);
+    const rel_price = decimalOrNull(rel.unit_price);
+    return (
+      rel_quantity !== null &&
+      rel_price !== null &&
+      rel_quantity.equals(quantity) &&
+      rel_price.equals(unit_price) &&
+      (decimalOrNull(rel.discount_amount) ?? new Prisma.Decimal(0)).equals(
+        discount,
+      ) &&
+      (rel.is_inclusive === true) === is_inclusive &&
+      decimalOrNull(rel.tax_amount) !== null
+    );
+  });
+  if (!twin) return null;
+  const persisted = decimalOrNull(twin.tax_amount) as Prisma.Decimal;
+  const delta = persisted.minus(kernel_quota).abs();
+  if (delta.isZero() || delta.greaterThan(FULL_TWIN_MAX_DELTA)) return null;
+  return persisted;
+}
+
+/** Clave de tributo de `distinctInvoiceTaxSchemes` (untyped ⇒ iva, tarifa a 4 decimales). */
+function schemeKey(row: {
+  tax_type: string | null;
+  tax_rate: Prisma.Decimal | number;
+}): string {
+  const type = (row.tax_type ?? '').trim().toLowerCase() || 'iva';
+  return `${type}|${Number(row.tax_rate).toFixed(4)}`;
+}
+
+/**
+ * Esquema de cada línea de una nota PARCIAL sobre una factura que mezcla
+ * tributos, leído del desglose persistido (`invoice_taxes.invoice_item_id`)
+ * de la línea gemela. Devuelve, por línea: la fila representante de su único
+ * tributo, o `null` si la gemela es exenta (sin filas, sin impuesto, y la nota
+ * no reclama cuota). Devuelve `null` para TODO si alguna línea no se resuelve
+ * sin ambigüedad (sin gemela con id, gemelas con esquemas distintos, varias
+ * filas de tributo en la misma línea): el llamador exige `taxes` como hoy.
+ */
+function resolvePerLineNoteSchemes<
+  S extends {
+    tax_type: string | null;
+    tax_rate: Prisma.Decimal | number;
+    invoice_item_id?: number | null;
+  },
+>(
+  items: Array<{
+    product_id?: number | null;
+    product_variant_id?: number | null;
+    tax_amount?: number | null;
+    taxes?: unknown[] | null;
+  }>,
+  related_items: Array<{
+    id?: number | null;
+    product_id: number | null;
+    product_variant_id: number | null;
+    tax_amount?: Prisma.Decimal | number | null;
+  }>,
+  invoice_taxes: S[],
+): Array<S | null> | null {
+  if (!invoice_taxes.some((row) => row.invoice_item_id != null)) return null;
+  const resolved: Array<S | null> = [];
+  for (const item of items) {
+    const twins =
+      related_items.length === 1
+        ? related_items
+        : related_items.filter(
+            (rel) =>
+              (rel.product_id ?? null) === (item.product_id ?? null) &&
+              (rel.product_variant_id ?? null) ===
+                (item.product_variant_id ?? null),
+          );
+    if (twins.length === 0 || twins.some((twin) => twin.id == null)) {
+      return null;
+    }
+    // Todas las gemelas candidatas deben declarar el MISMO tributo (o ser
+    // todas exentas): elegir una sería inventar el esquema de la nota.
+    const verdicts = twins.map((twin) => {
+      const linked = invoice_taxes.filter(
+        (row) =>
+          row.invoice_item_id != null &&
+          Number(row.invoice_item_id) === Number(twin.id),
+      );
+      const line_schemes = distinctInvoiceTaxSchemes(linked);
+      if (line_schemes.length === 1) return line_schemes[0];
+      if (line_schemes.length === 0 && Number(twin.tax_amount ?? NaN) === 0) {
+        return null;
+      }
+      return undefined;
+    });
+    if (verdicts.some((verdict) => verdict === undefined)) return null;
+    const keys = new Set(
+      verdicts.map((verdict) => (verdict ? schemeKey(verdict) : 'exempt')),
+    );
+    if (keys.size !== 1) return null;
+    const verdict = verdicts[0] as S | null;
+    // Gemela exenta pero la nota reclama cuota ⇒ no hay de dónde derivarla.
+    if (
+      verdict === null &&
+      (Number(item.tax_amount || 0) !== 0 || (item.taxes?.length ?? 0) > 0)
+    ) {
+      return null;
+    }
+    resolved.push(verdict);
+  }
+  return resolved;
 }

@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
@@ -331,7 +332,10 @@ describe('PaymentsService', () => {
         { provide: KitchenFireService, useValue: { fireOrder: jest.fn() } },
         {
           provide: TableSessionsService,
-          useValue: { emitSessionClosed: jest.fn() },
+          useValue: {
+            emitSessionClosed: jest.fn(),
+            projectOrderPaymentToTableSession: jest.fn(),
+          },
         },
         {
           provide: SerialNumberEnforcementService,
@@ -370,6 +374,60 @@ describe('PaymentsService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  describe('POS table payment previous status (B.5)', () => {
+    const dto = { store_id: 1, table_id: 4, currency: 'COP' } as any;
+    const user = { id: 7 };
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it.each(['cleaning', 'available', 'occupied'] as const)(
+      'carries %s only from a newly opened session through the single payment path',
+      async (previousStatus) => {
+        const tx = {
+          tables: { findFirst: jest.fn().mockResolvedValue({ id: 4, store_id: 1 }) },
+          table_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
+        };
+        const opened = jest.fn().mockResolvedValue({
+          id: 107,
+          previous_table_status: previousStatus,
+        });
+        (service as any).tableSessionsService.createOpenSessionInTx = opened;
+        const apply = jest
+          .spyOn(service as any, 'applyPosPaymentToTableSession')
+          .mockResolvedValue({ order: { id: 1124 } });
+
+        const result = await (service as any).createOrUpdateOrderFromPos(tx, dto, user);
+
+        expect(opened).toHaveBeenCalledTimes(1);
+        expect(apply).toHaveBeenCalledTimes(1);
+        expect(apply.mock.calls[0][1]).toEqual({ ...dto, table_session_id: 107 });
+        expect(result).toMatchObject({
+          order: { id: 1124 },
+          previousTableStatus: previousStatus,
+        });
+      },
+    );
+
+    it('reuses an existing session without opening another or reporting its table status', async () => {
+      const tx = {
+        tables: { findFirst: jest.fn().mockResolvedValue({ id: 4, store_id: 1 }) },
+        table_sessions: { findFirst: jest.fn().mockResolvedValue({ id: 107 }) },
+      };
+      const opened = jest.fn();
+      (service as any).tableSessionsService.createOpenSessionInTx = opened;
+      const apply = jest
+        .spyOn(service as any, 'applyPosPaymentToTableSession')
+        .mockResolvedValue({ order: { id: 1124 } });
+
+      const result = await (service as any).createOrUpdateOrderFromPos(tx, dto, user);
+
+      expect(opened).not.toHaveBeenCalled();
+      expect(apply).toHaveBeenCalledTimes(1);
+      expect(apply.mock.calls[0][1]).toMatchObject({ table_session_id: 107 });
+      expect(result.previousTableStatus).toBeUndefined();
+    });
   });
 
   describe('processPayment', () => {
@@ -1133,6 +1191,35 @@ describe('PaymentsService', () => {
       contextSpy?.mockRestore();
     });
 
+    it.each([
+      { delivery_type: 'home_delivery' },
+      { shipping_address_snapshot: { city: 'Bogotá' } },
+      { delivery_type: 'direct_delivery', shipping_address_id: 88 },
+    ])('rechaza envío declarado sin método antes de crear orden o pago: %j', async (shippingFields) => {
+      arrange({ checkout: { require_customer_data: false } });
+      const error = await service.processPosPayment(
+        buildDto({ ...shippingFields, is_draft: true }), posUser,
+      ).catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe(ErrorCodes.ORD_SHIP_REQUIRED_FOR_FLOW_001.code);
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      {},
+      { delivery_type: 'direct_delivery' },
+      { delivery_type: 'pickup', shipping_address_id: 88 },
+      { delivery_type: 'dine_in' },
+      { delivery_type: 'home_delivery', shipping_method_id: 12 },
+    ])('conserva el carril válido sin bloquearlo: %j', async (shippingFields) => {
+      arrange({ checkout: { require_customer_data: false } });
+      await expect(service.processPosPayment(
+        buildDto({ ...shippingFields, is_draft: true }), posUser,
+      )).rejects.toThrow(STOP_AFTER_GATES);
+      expect((prisma as any).$transaction).toHaveBeenCalledTimes(1);
+    });
+
     it('acepta la creación con cliente válido: pasa los gates, no cobra y no consume cupón', async () => {
       arrange({ checkout: { require_customer_data: true } });
       (prisma.store_users.findFirst as jest.Mock) = jest
@@ -1263,6 +1350,168 @@ describe('PaymentsService', () => {
     });
   });
 
+  describe('createOrUpdateOrderFromPos — adopted order', () => {
+    const user = { id: 1, roles: ['super_admin'] };
+    const item = {
+      item_type: 'custom', product_name: 'Artículo', quantity: 1,
+      unit_price: 1000, total_price: 1000,
+    };
+    const dto = (overrides: Record<string, unknown> = {}) => ({
+      store_id: 1, order_id: 41, currency: 'COP', items: [item],
+      requires_payment: true, ...overrides,
+    });
+    const order = {
+      id: 41, order_number: 'POS-41', state: 'draft',
+      subtotal_amount: 1000, tax_amount: 0,
+    };
+    const tx = (found: any = order, paid: any = null) => ({
+      orders: {
+        findFirst: jest.fn().mockResolvedValue(found),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        update: jest.fn().mockResolvedValue({
+          ...order, state: 'created', store_id: 1, grand_total: 1000,
+          order_items: [], stores: { id: 1 },
+        }),
+        create: jest.fn(),
+      },
+      payments: { findFirst: jest.fn().mockResolvedValue(paid) },
+      bookings: { updateMany: jest.fn() },
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('rejects another store as not found without probing payments or creating an order', async () => {
+      const client = tx(null);
+      let caught: any;
+      try {
+        await (service as any).createOrUpdateOrderFromPos(client, dto(), user);
+      } catch (error) { caught = error; }
+
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught.errorCode).toBe(ErrorCodes.ORD_FIND_001.code);
+      expect(client.orders.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 41, store_id: 1 },
+      }));
+      expect(client.payments.findFirst).not.toHaveBeenCalled();
+      expect(client.orders.create).not.toHaveBeenCalled();
+    });
+
+    it.each(['succeeded', 'captured'])('rejects an already %s payment with typed 409 and order number', async (state) => {
+      const client = tx(order, { id: 9, state });
+      let caught: any;
+      try {
+        await (service as any).createOrUpdateOrderFromPos(client, dto(), user);
+      } catch (error) { caught = error; }
+
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught.errorCode).toBe(ErrorCodes.POS_DRAFT_DUPLICATE_ORDER_001.code);
+      expect(caught.getStatus()).toBe(409);
+      expect(caught.message).toContain('POS-41');
+      expect(client.payments.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: { order_id: 41, state: { in: ['succeeded', 'captured'] } },
+      }));
+      expect(client.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-chargeable order state before writing a payment', async () => {
+      const client = tx({ ...order, state: 'finished' });
+      let caught: any;
+      try {
+        await (service as any).createOrUpdateOrderFromPos(client, dto(), user);
+      } catch (error) { caught = error; }
+
+      expect(caught.errorCode).toBe(ErrorCodes.POS_DRAFT_DUPLICATE_ORDER_001.code);
+      expect(caught.message).toContain('POS-41');
+      expect(client.orders.updateMany).not.toHaveBeenCalled();
+      expect(client.payments.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('rejects a stale row claim instead of creating a second order', async () => {
+      const client = tx();
+      client.orders.updateMany.mockResolvedValue({ count: 0 });
+      let caught: any;
+      try {
+        await (service as any).createOrUpdateOrderFromPos(client, dto(), user);
+      } catch (error) { caught = error; }
+
+      expect(caught.errorCode).toBe(ErrorCodes.POS_DRAFT_DUPLICATE_ORDER_001.code);
+      expect(client.payments.findFirst).not.toHaveBeenCalled();
+      expect(client.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('updates the adopted order header and never creates another order', async () => {
+      const client = tx();
+      jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+      jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+        // Stale checkout snapshot must not replace persisted adopted items.
+        product_name: 'Artículo', quantity: 1, total_price: 2000,
+        tax_amount_item: 0,
+      });
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: null, coupon_code: null, discount_amount: 0,
+      });
+
+      const result = await (service as any).createOrUpdateOrderFromPos(
+        client, dto({ shipping_cost: 500 }), user,
+      );
+
+      expect(result.order.id).toBe(41);
+      expect(client.orders.create).not.toHaveBeenCalled();
+      expect(client.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 41, store_id: 1 },
+        data: expect.objectContaining({
+          state: 'created', subtotal_amount: 1000,
+          shipping_cost: 500, grand_total: 1500,
+        }),
+      }));
+      expect(client.orders.update.mock.calls[0][0].data.order_items).toBeUndefined();
+    });
+  });
+
+  describe('createOrderInstallments — projected persisted POS credit total', () => {
+    it('records free-credit balance from projected result.order.total_amount', async () => {
+      const update = jest.fn().mockResolvedValue({});
+      (prisma as any).orders = { update };
+
+      await (service as any).createOrderInstallments(
+        { credit_type: 'free', installment_terms: { interest_rate: 0 } },
+        { id: 41, total_amount: new Prisma.Decimal(1500) },
+      );
+
+      expect(update).toHaveBeenCalledWith({
+        where: { id: 41 },
+        data: { credit_type: 'free', remaining_balance: 1500, total_paid: 0 },
+      });
+    });
+
+    it('finances installments from projected result.order.total_amount', async () => {
+      const update = jest.fn().mockResolvedValue({});
+      const create = jest.fn().mockResolvedValue({});
+      (prisma as any).orders = { update };
+      (prisma as any).order_installments = { create };
+
+      await (service as any).createOrderInstallments(
+        { credit_type: 'installments', installment_terms: {
+          num_installments: 2, frequency: 'monthly',
+          first_installment_date: '2026-10-23', interest_rate: 0,
+          initial_payment: 0,
+        } },
+        { id: 42, total_amount: new Prisma.Decimal(1500) },
+      );
+
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 42 },
+        data: expect.objectContaining({
+          credit_type: 'installments', remaining_balance: 1500,
+        }),
+      }));
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Table lifecycle contract: a POS sale (deferred or not) MUST NOT close the
   // table session or flip `tables.status` to 'cleaning'. Only the canonical
@@ -1358,13 +1607,6 @@ describe('PaymentsService', () => {
       (kitchenFire as any).prepareFireContext = jest.fn().mockResolvedValue(null);
       (kitchenFire as any).fireOrderItemsInTx = jest.fn().mockResolvedValue(null);
 
-      // Carril D/D1 marca la sesión como pagada antes del cierre; el mock del
-      // módulo solo declara `emitSessionClosed`. Vive en el arrange (y no en
-      // cada test) porque TODOS los cobros de mesa pasan por aquí.
-      (service as any).tableSessionsService.markSessionPaid = jest
-        .fn()
-        .mockResolvedValue({ id: session.id });
-
       return { tx, session, posUser };
     };
 
@@ -1419,6 +1661,9 @@ describe('PaymentsService', () => {
         }),
       );
       expect(result.closedSessionId).toBeNull();
+      expect(
+        (service as any).tableSessionsService.projectOrderPaymentToTableSession,
+      ).not.toHaveBeenCalled();
     });
 
     it('cancelled items do NOT resurrect into the close-out totals', async () => {
@@ -1429,15 +1674,6 @@ describe('PaymentsService', () => {
       // no `payments` client. Scoped to THIS test only (contract:
       // solo el test nuevo) — no `succeeded` payment, close-out proceeds.
       tx.payments = { findFirst: jest.fn().mockResolvedValue(null) };
-      // Same staleness one step later: carril D/D1 calls
-      // `tableSessionsService.markSessionPaid`, absent from the module
-      // mock (only `emitSessionClosed` exists). Stub it here, scoped to
-      // this test — the top-level `beforeEach` rebuilds the module per
-      // test, so nothing leaks to siblings.
-      (service as any).tableSessionsService.markSessionPaid = jest
-        .fn()
-        .mockResolvedValue({ id: 99 });
-
       // The draft order holds one active line ($10.000) and one line the
       // waiter cancelled earlier. Prisma scoping means `findMany` only
       // resolves what the `where` allows — the cancelled row must never
@@ -1482,6 +1718,37 @@ describe('PaymentsService', () => {
         }),
       );
       expect(result.order).toBeDefined();
+    });
+
+    it('conserva el impuesto persistido de una línea antigua aunque el catálogo actual no tenga asignación', async () => {
+      const { tx, posUser } = arrangeCashSale();
+      const oldTaxSnapshot = {
+        tax_rate_id: 501, tax_type: TaxFiscalType.IVA,
+        tax_rate: 0.19, tax_amount: 1900,
+      };
+      const existingLine = {
+        id: 17, product_id: 425, quantity: 1, total_price: 10000,
+        tax_amount_item: 1900, order_item_taxes: [oldTaxSnapshot],
+      };
+      tx.order_items.findMany.mockResolvedValue([existingLine]);
+      const taxResolver = jest.spyOn(service as any, 'buildPosOrderItem');
+
+      await (service as any).applyPosPaymentToTableSession(
+        tx, buildDto({ items: [] }), posUser, CONTEXT_STORE_ID,
+      );
+
+      expect(taxResolver).not.toHaveBeenCalled();
+      expect(tx.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal_amount: 10000,
+          tax_amount: 1900,
+          grand_total: 11900,
+        }),
+      }));
+      expect(existingLine.order_item_taxes).toEqual([oldTaxSnapshot]);
+      expect(tx.order_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { order_id: 1001, cancelled_at: null },
+      }));
     });
   });
 
@@ -1867,20 +2134,13 @@ describe('PaymentsService', () => {
       expect(mismatchCalls).toHaveLength(0);
     });
 
-    /**
-     * F-065 — `has_tax_assignment` discrimina "producto sin impuesto" de
-     * "producto que perdió su asignación fiscal" (población real: purga de
-     * Roma Motos). Acotado a `isTableSessionLine` a propósito: el carril de
-     * venta fresca/checkout puede depender de productos legítimamente sin
-     * categoría asignada y auditarlo es un cambio aparte (B3-taxes-ejecucion.md).
-     */
-    describe('buildPosOrderItem — F-065: has_tax_assignment gate (sólo cierre de mesa)', () => {
+    /** ADR-10: la asignación fiscal actual no es una compuerta de cobro. */
+    describe('buildPosOrderItem — línea nueva sin impuesto en POS mesa', () => {
       const tx = {
         products: { findFirst: jest.fn().mockResolvedValue(product) },
       };
       const item = { product_id: product.id, quantity: 1, unit_price: 0 };
-
-      const lostAssignment: CalcProductTaxesResult = {
+      const taxless: CalcProductTaxesResult = {
         total_rate: 0,
         total_tax_amount: 0,
         base: 10000,
@@ -1892,175 +2152,45 @@ describe('PaymentsService', () => {
         has_tax_assignment: false,
       };
 
-      afterEach(() => {
-        jest.restoreAllMocks();
-      });
+      it.each([false, true, undefined])(
+        'cobra con impuesto cero cuando has_tax_assignment=%s',
+        async (has_tax_assignment) => {
+          calculateProductTaxesMock.mockResolvedValue({
+            ...taxless,
+            has_tax_assignment,
+          });
+          const result = await (service as any).buildPosOrderItem(
+            tx, item, dtoStoreId, posUser, undefined, 123,
+          );
+          expect(result.tax_amount_item).toBe(0);
+          expect(result.final_unit_price).toBe(10000);
+          expect(result.order_item_taxes).toBeUndefined();
+        },
+      );
 
-      it('cierre de mesa (isTableSessionLine=true) + has_tax_assignment=false lanza POS_TABLE_LINE_TAX_UNRESOLVABLE_001', async () => {
-        calculateProductTaxesMock.mockResolvedValue(lostAssignment);
+      it.each(['block', 'warn', 'off', undefined] as const)(
+        'ignora la configuración legada tax_line_gate=%s para la línea sin impuesto',
+        async (severity) => {
+          const settingsRead = jest.spyOn(
+            (service as any).settingsService,
+            'getSettings',
+          ).mockResolvedValue({ pos: { tax_line_gate: severity } });
+          const falseWarning = jest.spyOn((service as any).logger, 'warn');
+          calculateProductTaxesMock.mockResolvedValue(taxless);
 
-        await expect(
-          (service as any).buildPosOrderItem(
-            tx,
-            item,
-            dtoStoreId,
-            posUser,
-            undefined,
-            123,
-            true,
-          ),
-        ).rejects.toMatchObject({
-          errorCode: ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001.code,
-        });
-      });
+          const result = await (service as any).buildPosOrderItem(
+            tx, item, dtoStoreId, posUser, undefined, 123,
+          );
 
-      it('venta fresca (isTableSessionLine por defecto) + has_tax_assignment=false NO lanza — carril fuera de este cambio', async () => {
-        calculateProductTaxesMock.mockResolvedValue(lostAssignment);
-
-        const result = await (service as any).buildPosOrderItem(
-          tx,
-          item,
-          dtoStoreId,
-          posUser,
-          undefined,
-        );
-
-        expect(result.tax_amount_item).toBe(0);
-      });
-
-      it('cierre de mesa + has_tax_assignment=true (0% legítimo con asignación viva) NO lanza', async () => {
-        calculateProductTaxesMock.mockResolvedValue({
-          ...lostAssignment,
-          has_tax_assignment: true,
-        });
-
-        const result = await (service as any).buildPosOrderItem(
-          tx,
-          item,
-          dtoStoreId,
-          posUser,
-          undefined,
-          123,
-          true,
-        );
-
-        expect(result.tax_amount_item).toBe(0);
-      });
-
-      it('cierre de mesa + has_tax_assignment ausente (contrato viejo, sin el campo) NO lanza — compat con mocks/llamadores que no lo declaran', async () => {
-        const { has_tax_assignment: _omit, ...withoutField } = lostAssignment;
-        calculateProductTaxesMock.mockResolvedValue(withoutField as any);
-
-        const result = await (service as any).buildPosOrderItem(
-          tx,
-          item,
-          dtoStoreId,
-          posUser,
-          undefined,
-          123,
-          true,
-        );
-
-        expect(result.tax_amount_item).toBe(0);
-      });
-    });
-
-    /**
-     * F-127 — hoy, si la compuerta de arriba (`POS_TABLE_LINE_TAX_UNRESOLVABLE_001`)
-     * dispara en una tienda por una combinación de catálogo no contemplada, esa
-     * tienda no puede cobrar hasta un revert + deploy completo con la caja
-     * parada. `taxLineGateSeverity` (resuelto en `processPosPayment` desde
-     * `settings.pos.tax_line_gate`, default `'block'`) permite bajarla por
-     * tienda sin redeploy. Estos tres casos prueban el parámetro aislado, con
-     * el mismo fixture (`lostAssignment`) que ya prueba el 'block' de arriba.
-     */
-    describe('buildPosOrderItem — F-127: severidad configurable de la compuerta fiscal (pos.tax_line_gate)', () => {
-      const tx = {
-        products: { findFirst: jest.fn().mockResolvedValue(product) },
-      };
-      const item = { product_id: product.id, quantity: 1, unit_price: 0 };
-
-      const lostAssignment: CalcProductTaxesResult = {
-        total_rate: 0,
-        total_tax_amount: 0,
-        base: 10000,
-        total: 10000,
-        taxes: [],
-        unclosed_residual_cents: 0,
-        invalid_inputs: [],
-        resolved_from: 'catalog',
-        has_tax_assignment: false,
-      };
-
-      afterEach(() => {
-        jest.restoreAllMocks();
-      });
-
-      it("'block' explícito en cierre de mesa lanza POS_TABLE_LINE_TAX_UNRESOLVABLE_001 — mismo comportamiento que sin configurar la clave", async () => {
-        calculateProductTaxesMock.mockResolvedValue(lostAssignment);
-
-        await expect(
-          (service as any).buildPosOrderItem(
-            tx,
-            item,
-            dtoStoreId,
-            posUser,
-            undefined,
-            123,
-            true,
-            'block',
-          ),
-        ).rejects.toMatchObject({
-          errorCode: ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001.code,
-        });
-      });
-
-      it("'warn' NO lanza — deja pasar la línea normalizando el impuesto a cero y registra el mismo detalle (tienda/orden/producto) por logger.warn", async () => {
-        calculateProductTaxesMock.mockResolvedValue(lostAssignment);
-        const warnSpy = jest.spyOn((service as any).logger, 'warn');
-
-        const result = await (service as any).buildPosOrderItem(
-          tx,
-          item,
-          dtoStoreId,
-          posUser,
-          undefined,
-          123,
-          true,
-          'warn',
-        );
-
-        expect(result.tax_amount_item).toBe(0);
-        expect(warnSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            event: 'payments.pos_table_line_tax_unresolvable',
-            code: ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001.code,
-            severity: 'warn',
-            store_id: dtoStoreId,
-            order_ref: 123,
-            product_id: product.id,
-          }),
-        );
-      });
-
-      it("'off' NO lanza y NO registra — silencio total, deja pasar la línea igual que 'warn' pero sin dejar rastro", async () => {
-        calculateProductTaxesMock.mockResolvedValue(lostAssignment);
-        const warnSpy = jest.spyOn((service as any).logger, 'warn');
-
-        const result = await (service as any).buildPosOrderItem(
-          tx,
-          item,
-          dtoStoreId,
-          posUser,
-          undefined,
-          123,
-          true,
-          'off',
-        );
-
-        expect(result.tax_amount_item).toBe(0);
-        expect(warnSpy).not.toHaveBeenCalled();
-      });
+          expect(result.tax_amount_item).toBe(0);
+          expect(result.final_unit_price).toBe(10000);
+          expect(result.order_item_taxes).toBeUndefined();
+          expect(settingsRead).not.toHaveBeenCalled();
+          expect(falseWarning.mock.calls.some(([message]) =>
+            String(message).includes('pos_table_line_tax_unresolvable'),
+          )).toBe(false);
+        },
+      );
     });
 
     /**
@@ -2129,6 +2259,48 @@ describe('PaymentsService', () => {
      * (invoicing) partía el XML DIAN al revés con los importes cuadrando
      * igual — el modo de falla que ADR-03 llama "el único real" del diseño.
      */
+    /**
+     * P2-3 — la base del ítem personalizado sale del kernel: truncada a
+     * centavos y con base + cuota = bruto persistido. Antes `final / 1.19`
+     * persistía 840.3361344… y el bruto `unit_price × 1.19` sin truncar.
+     */
+    describe('buildPosOrderItem — ítem custom con base del kernel (P2-3)', () => {
+      afterEach(() => jest.restoreAllMocks());
+      const txFor = () => ({
+        stores: { findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }) },
+        tax_categories: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 9, is_inclusive: true,
+            tax_rates: [{ id: 91, name: 'IVA 19%', rate: 0.19 }],
+          }),
+        },
+      });
+
+      it('bruto declarado 1000 IVA 19%: base 840.34, cuota 159.66, bruto 1000', async () => {
+        const result = await (service as any).buildPosOrderItem(
+          txFor(),
+          { item_type: 'custom', product_name: 'Servicio', quantity: 1, unit_price: 0, final_unit_price: 1000, tax_category_id: 9 },
+          dtoStoreId, posUser, undefined,
+        );
+        expect(result.unit_price).toBe(840.34);
+        expect(result.tax_amount_item).toBe(159.66);
+        expect(result.final_unit_price).toBe(1000);
+        expect(Math.round(result.unit_price * 100) + Math.round(result.tax_amount_item * 100))
+          .toBe(Math.round(result.final_unit_price * 100));
+      });
+
+      it('precio base 999.99 IVA 19%: base exacta, cuota truncada, bruto = base + cuota', async () => {
+        const result = await (service as any).buildPosOrderItem(
+          txFor(),
+          { item_type: 'custom', product_name: 'Servicio', quantity: 1, unit_price: 999.99, tax_category_id: 9 },
+          dtoStoreId, posUser, undefined,
+        );
+        expect(result.unit_price).toBe(999.99);
+        expect(result.tax_amount_item).toBe(189.99);
+        expect(result.final_unit_price).toBe(1189.98);
+      });
+    });
+
     describe('buildPosOrderItem — ítem custom persiste is_inclusive de la categoría (F-052)', () => {
       afterEach(() => {
         jest.restoreAllMocks();
@@ -2479,18 +2651,35 @@ describe('PaymentsService', () => {
         expect(mismatchCalls).toHaveLength(0);
       });
 
-      // F-222/F-223 — el umbral de esta compuerta NO cambió con la migración.
-      // El original era `Math.abs(grossMismatchDelta) > 0.02` sobre un delta
-      // que YA venía redondeado a centavos por `roundMoney`, así que 2¢
-      // exactos no disparaban (`0.02 > 0.02` es falso): tolera 2¢ y registra
-      // desde 3¢. En centavos enteros eso es `differsByAtLeastCents(..., 3)`.
-      // Los dos tests de abajo fijan los dos lados del borde.
-      it('F-222: delta exacto de 2¢ (13603.14 vs 13603.12) NO registra — sigue tolerado', () => {
-        const errorSpy = jest.spyOn((service as any).logger, 'error');
-
+      // P2-3 — umbral alineado con la compuerta de dinero (1 ¢, en centavos
+      // enteros). Antes toleraba 2 ¢ (`>= 3`, herencia del `> 0.02` en
+      // floats). El residuo closest-below que el kernel ya reportó no se
+      // duplica como error.
+      it('P2-4: la línea del POS pasa por la compuerta I-1 sin violación (base de la métrica)', () => {
+        const warnSpy = jest.spyOn(Logger.prototype, 'warn');
         (service as any).buildOrderItemSnapshot({
           ...baseParams,
-          unitBasePrice: 13603.14,
+          quantity: 3,
+          lineUnits: 3,
+          unitBasePrice: 925.93,
+          finalUnitPrice: 1000,
+          isPriceOverridden: false,
+          productId: 10,
+          storeId: 3,
+          userId: 42,
+          taxInfo: { total_rate: 0.08, total_tax_amount: 74.07, taxes: [] },
+        });
+        const violations = warnSpy.mock.calls.filter(
+          ([payload]) => (payload as any)?.event === 'orders.line_total_invariant_violation',
+        );
+        expect(violations).toHaveLength(0);
+      });
+
+      it('P2-3: delta de 0¢ no registra', () => {
+        const errorSpy = jest.spyOn((service as any).logger, 'error');
+        (service as any).buildOrderItemSnapshot({
+          ...baseParams,
+          unitBasePrice: 13603.12,
           finalUnitPrice: 13603.12,
           isPriceOverridden: false,
           productId: 10,
@@ -2498,20 +2687,17 @@ describe('PaymentsService', () => {
           userId: 42,
           taxInfo: { total_rate: 0, total_tax_amount: 0, taxes: [] },
         });
-
         const mismatchCalls = errorSpy.mock.calls.filter(
-          ([payload]) =>
-            (payload as any)?.event === 'pos.line_gross_mismatch',
+          ([payload]) => (payload as any)?.event === 'pos.line_gross_mismatch',
         );
         expect(mismatchCalls).toHaveLength(0);
       });
 
-      it('F-222: delta de 3¢ (13603.15 vs 13603.12) SÍ registra — el borde es determinista', () => {
+      it('P2-3: delta de 1¢ (13603.13 vs 13603.12) SÍ registra — antes se toleraba', () => {
         const errorSpy = jest.spyOn((service as any).logger, 'error');
-
         (service as any).buildOrderItemSnapshot({
           ...baseParams,
-          unitBasePrice: 13603.15,
+          unitBasePrice: 13603.13,
           finalUnitPrice: 13603.12,
           isPriceOverridden: false,
           productId: 10,
@@ -2519,13 +2705,31 @@ describe('PaymentsService', () => {
           userId: 42,
           taxInfo: { total_rate: 0, total_tax_amount: 0, taxes: [] },
         });
-
         const mismatchCalls = errorSpy.mock.calls.filter(
-          ([payload]) =>
-            (payload as any)?.event === 'pos.line_gross_mismatch',
+          ([payload]) => (payload as any)?.event === 'pos.line_gross_mismatch',
         );
         expect(mismatchCalls).toHaveLength(1);
-        expect(mismatchCalls[0][0]).toMatchObject({ delta: 0.03 });
+        expect(mismatchCalls[0][0]).toMatchObject({ delta: 0.01 });
+      });
+
+      it('P2-3: 1¢ explicado por el residuo closest-below ya reportado no se duplica', () => {
+        const errorSpy = jest.spyOn((service as any).logger, 'error');
+        (service as any).buildOrderItemSnapshot({
+          ...baseParams,
+          unitBasePrice: 13603.11,
+          finalUnitPrice: 13603.12,
+          isPriceOverridden: false,
+          productId: 10,
+          storeId: 3,
+          userId: 42,
+          taxInfo: {
+            total_rate: 0, total_tax_amount: 0, taxes: [], unclosed_residual_cents: 1,
+          },
+        });
+        const mismatchCalls = errorSpy.mock.calls.filter(
+          ([payload]) => (payload as any)?.event === 'pos.line_gross_mismatch',
+        );
+        expect(mismatchCalls).toHaveLength(0);
       });
     });
   });
@@ -3123,10 +3327,14 @@ describe('PaymentsService', () => {
      *   discriminador. `processing_mode` es el eje bajo prueba; `type` sólo
      *   alimenta las ramas preexistentes (vuelto de efectivo, gateway).
      */
-    const arrangePosSale = (systemMethod: {
-      type: string;
-      processing_mode?: payment_processing_mode_enum | null;
-    }) => {
+    const arrangePosSale = (
+      systemMethod: {
+        type: string;
+        processing_mode?: payment_processing_mode_enum | null;
+      },
+      tableSessionOrderId: number | null = null,
+      deliveryType: 'home_delivery' | 'direct_delivery' = 'home_delivery',
+    ) => {
       mockRequestContext({ store_id: 1, organization_id: 1 });
 
       const order = buildOrder({
@@ -3136,7 +3344,7 @@ describe('PaymentsService', () => {
         // Contra entrega real: la mercancía viaja y el dinero se recauda en
         // destino. `home_delivery` mantiene el consumo de stock diferido a
         // fulfillment, así que el caso aísla el reconocimiento del dinero.
-        delivery_type: 'home_delivery',
+        delivery_type: deliveryType,
         grand_total: new Prisma.Decimal(100),
         total_paid: new Prisma.Decimal(0),
         remaining_balance: new Prisma.Decimal(100),
@@ -3201,6 +3409,7 @@ describe('PaymentsService', () => {
           },
           kitchenFire: null,
           closedSessionId: null,
+          tableSessionOrderId,
         });
 
       (fiscalThreshold.assertInvoiceNotRequired as jest.Mock).mockResolvedValue(
@@ -3279,6 +3488,98 @@ describe('PaymentsService', () => {
       );
     });
 
+    it.each(['home_delivery', 'direct_delivery'] as const)(
+      'ON_DELIVERY %s deja pago y orden pendientes sin consumir stock',
+      async (deliveryType) => {
+        // El nombre NO es el discriminador: cualquier tipo ON_DELIVERY
+        // debe seguir la misma rama de estado y saldo.
+        const { tx } = arrangePosSale(
+          {
+            type: 'card_at_door',
+            processing_mode: payment_processing_mode_enum.ON_DELIVERY,
+          },
+          null,
+          deliveryType,
+        );
+
+        await expect(
+          service.processPosPayment(buildPosDto(), posUser),
+        ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+        expect(tx.payments.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ state: 'pending' }),
+          }),
+        );
+        expect(tx.orders.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ state: 'pending_payment' }),
+          }),
+        );
+        expect(tx.orders.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              total_paid: 0,
+              remaining_balance: 100,
+            }),
+          }),
+        );
+        expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
+        expect(emittedEventNames()).not.toContain('payment.received');
+      },
+    );
+
+    it.each(['cash', 'card'])(
+      '%s DIRECT conserva pago succeeded y estado de orden existente',
+      async (type) => {
+        const { tx } = arrangePosSale(
+          { type, processing_mode: payment_processing_mode_enum.DIRECT },
+          null,
+          'direct_delivery',
+        );
+        jest
+          .spyOn(service as any, 'hasPendingKitchenItemsTx')
+          .mockResolvedValue(false);
+
+        await expect(
+          service.processPosPayment(buildPosDto(), posUser),
+        ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+        expect(tx.payments.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ state: 'succeeded' }),
+          }),
+        );
+        expect(tx.orders.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ state: 'finished' }),
+          }),
+        );
+      },
+    );
+
+    it('Wompi sigue en pending_payment para procesar tras el commit', async () => {
+      const { tx } = arrangePosSale({
+        type: 'wompi',
+        processing_mode: payment_processing_mode_enum.DIRECT,
+      });
+      // La pasarela no escribe saldo dentro de esta transacción; la primera
+      // lectura de orden ya es el refresh posterior a eventos.
+      tx.orders.findUnique.mockReset().mockRejectedValue(new Error(STOP_AFTER_EVENTS));
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+      expect(tx.payments.create).not.toHaveBeenCalled();
+      expect(tx.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ state: 'pending_payment' }),
+        }),
+      );
+      expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
+    });
+
     it('el efectivo normal sigue reconociendo caja y emitiendo su evento (no-regresión)', async () => {
       const { tx } = arrangePosSale({
         type: 'cash',
@@ -3303,6 +3604,93 @@ describe('PaymentsService', () => {
           }),
         }),
       );
+    });
+
+    it('proyecta el cobro de mesa con el pago real en la transacción y emite solo después del commit', async () => {
+      const { tx, order } = arrangePosSale(
+        { type: 'cash', processing_mode: payment_processing_mode_enum.DIRECT },
+        4242,
+      );
+      let insideTransaction = false;
+      (prisma as any).$transaction = jest.fn(async (callback: any) => {
+        insideTransaction = true;
+        try {
+          return await callback(tx);
+        } finally {
+          insideTransaction = false;
+        }
+      });
+      const emitAfterCommit = jest.fn(() => {
+        expect(insideTransaction).toBe(false);
+      });
+      const project = (service as any).tableSessionsService
+        .projectOrderPaymentToTableSession as jest.Mock;
+      project.mockImplementation(
+        async (_orderId: number, _paymentId: number, client: any) => {
+          expect(insideTransaction).toBe(true);
+          expect(client).toBe(tx);
+          return { sessionId: 99, emitAfterCommit };
+        },
+      );
+      tx.orders.findUnique
+        .mockReset()
+        .mockResolvedValueOnce({
+          grand_total: new Prisma.Decimal(100),
+          total_paid: new Prisma.Decimal(0),
+        })
+        .mockResolvedValueOnce({
+          id: order.id,
+          order_number: order.order_number,
+          state: 'finished',
+        });
+      jest
+        .spyOn(service as any, 'recordCashRegisterMovement')
+        .mockResolvedValue(undefined);
+
+      const result = await service.processPosPayment(buildPosDto(), posUser);
+
+      expect(project).toHaveBeenCalledTimes(1);
+      expect(project).toHaveBeenCalledWith(order.id, 7, tx);
+      expect(emitAfterCommit).toHaveBeenCalledTimes(1);
+      expect((result as any).paid_session_id).toBe(99);
+      expect(tx.table_sessions?.update).toBeUndefined();
+      expect(tx.tables?.update).toBeUndefined();
+    });
+
+    it('no emite session_paid si la transacción del cobro revierte', async () => {
+      const { tx, order } = arrangePosSale(
+        { type: 'cash', processing_mode: payment_processing_mode_enum.DIRECT },
+        4242,
+      );
+      const emitAfterCommit = jest.fn();
+      const project = (service as any).tableSessionsService
+        .projectOrderPaymentToTableSession as jest.Mock;
+      project.mockResolvedValue({ sessionId: 99, emitAfterCommit });
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+      expect(project).toHaveBeenCalledWith(order.id, 7, tx);
+      expect(emitAfterCommit).not.toHaveBeenCalled();
+    });
+
+    it('no proyecta una venta de mesa a crédito antes de recibir el dinero', async () => {
+      arrangePosSale(
+        {
+          type: 'cash_on_delivery',
+          processing_mode: payment_processing_mode_enum.ON_DELIVERY,
+        },
+        4242,
+      );
+      const project = (service as any).tableSessionsService
+        .projectOrderPaymentToTableSession as jest.Mock;
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+      expect(project).not.toHaveBeenCalled();
     });
 
     it('fila de método sin processing_mode (tienda antigua): degrada al carril directo y lo deja en el log', async () => {

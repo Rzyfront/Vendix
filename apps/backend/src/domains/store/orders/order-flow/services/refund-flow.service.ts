@@ -13,6 +13,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import {
   buildTaxBreakdown,
   scaleBreakdownToTotal,
+  type TaxBreakdownItem,
 } from 'src/common/interfaces/tax-breakdown.interface';
 import {
   RefundCalculationService,
@@ -65,6 +66,104 @@ export class RefundFlowService {
     @Inject(forwardRef(() => PaymentGatewayService))
     private readonly paymentGatewayService: PaymentGatewayService,
   ) {}
+
+  /** Cash cancellation uses the same refund document and ceiling as returns,
+   * but deliberately does not invoke createRefund's stock or cash-register
+   * side effects: cancelOrder already owns those effects exactly once.
+   */
+  async recordCancellationCashRefund(
+    tx: Prisma.TransactionClient,
+    order: {
+      id: number;
+      grand_total: Prisma.Decimal;
+      tax_amount: Prisma.Decimal;
+      shipping_cost: Prisma.Decimal;
+      shipping_tax_amount: Prisma.Decimal;
+      shipping_tax_type: string | null;
+      currency: string | null;
+      payments: { id: number; state: string }[];
+    },
+    paymentIds: number[],
+    amount: Prisma.Decimal,
+    reason: string,
+  ) {
+    const breakdown = await this.calculationService.calculateCancellationCashRefund(
+      order.id, amount, tx, order,
+    );
+    const refund = await tx.refunds.create({
+      data: {
+        order_id: order.id,
+        payment_id: paymentIds.length === 1 ? paymentIds[0] : null,
+        amount: breakdown.amount,
+        subtotal_refund: breakdown.subtotal,
+        tax_refund: breakdown.tax,
+        shipping_refund: breakdown.shipping,
+        currency: order.currency,
+        reason,
+        notes: `Cancelación; pagos en efectivo: ${paymentIds.join(', ')}`,
+        refund_method: 'cash',
+        state: 'processing',
+        processed_by_user_id: RequestContextService.getUserId(),
+        requested_at: new Date(),
+        processed_at: null,
+      },
+    });
+    return { refund, breakdown };
+  }
+
+  async completeCancellationCashRefund(refundId: number) {
+    return this.prisma.refunds.update({
+      where: { id: refundId },
+      data: { state: 'completed', processed_at: new Date(), updated_at: new Date() },
+    });
+  }
+
+  async emitCancellationCashRefund(
+    order: { id: number; store_id: number; grand_total: Prisma.Decimal },
+    result: Awaited<ReturnType<RefundFlowService['recordCancellationCashRefund']>>,
+  ) {
+    const store = await this.prisma.stores.findUnique({
+      where: { id: order.store_id }, select: { organization_id: true },
+    });
+    if (!store) {
+      this.logger.error(`Refund #${result.refund.id}: store #${order.store_id} missing; accounting event not emitted`);
+      return;
+    }
+    const items = await this.prisma.order_items.findMany({
+      where: { order_id: order.id },
+      select: { order_item_taxes: { select: { tax_type: true, tax_amount: true } } },
+    });
+    const tax_breakdown = scaleBreakdownToTotal(
+      buildTaxBreakdown(items.flatMap((item) => item.order_item_taxes || [])),
+      Number(result.breakdown.tax),
+    );
+    if (result.breakdown.shippingTax.greaterThan(0) && result.breakdown.shippingTaxType) {
+      if (tax_breakdown.length === 0 && result.breakdown.tax.greaterThan(0)) {
+        tax_breakdown.push({ tax_type: 'iva', tax_amount: Number(result.breakdown.tax) });
+      }
+      tax_breakdown.push({
+        tax_type: result.breakdown.shippingTaxType as TaxBreakdownItem['tax_type'],
+        tax_amount: Number(result.breakdown.shippingTax),
+      });
+    }
+    const totalTax = result.breakdown.tax.plus(result.breakdown.shippingTax);
+    this.eventEmitter.emit('refund.completed', {
+      refund_id: result.refund.id,
+      order_id: order.id,
+      organization_id: store.organization_id,
+      store_id: order.store_id,
+      amount: Number(result.breakdown.amount),
+      subtotal: Number(result.breakdown.subtotal),
+      tax: Number(totalTax),
+      tax_amount: Number(totalTax),
+      tax_breakdown,
+      shipping: Number(result.breakdown.shipping),
+      is_full_refund: result.breakdown.amount.equals(order.grand_total),
+      user_id: RequestContextService.getUserId(),
+      refund_method: 'cash',
+      effective_channel: 'cash',
+    });
+  }
 
   async previewRefund(
     orderId: number,
@@ -476,6 +575,25 @@ export class RefundFlowService {
             buildTaxBreakdown(items.flatMap((i) => i.order_item_taxes || [])),
             Number(calculation.tax_refund || 0),
           );
+          // Impuesto del envío devuelto (proporcional a la copia de la orden):
+          // se suma DESPUÉS del prorrateo de productos, con su propio tipo,
+          // para reversar 2408/2436 y no el ingreso de flete. Si los productos
+          // no dejaron desglose tipado pero sí devolvieron impuesto, se
+          // antepone una fila IVA por él (misma cuenta que la línea legada):
+          // un desglose no vacío hace que el asiento ignore el total escalar.
+          const shipping_tax_refund = Number(calculation.shipping_tax_refund || 0);
+          const product_tax_refund = Number(calculation.tax_refund || 0);
+          if (shipping_tax_refund > 0 && calculation.shipping_tax_type) {
+            if (tax_breakdown.length === 0 && product_tax_refund > 0) {
+              tax_breakdown.push({ tax_type: 'iva', tax_amount: product_tax_refund });
+            }
+            tax_breakdown.push({
+              tax_type: calculation.shipping_tax_type as TaxBreakdownItem['tax_type'],
+              tax_amount: shipping_tax_refund,
+            });
+          }
+          const refund_tax_total =
+            Math.round(product_tax_refund * 100 + shipping_tax_refund * 100) / 100;
 
           // Match manual resolution: emit only after successful completion.
           if (refundCompleted) {
@@ -486,8 +604,9 @@ export class RefundFlowService {
               store_id: order.store_id,
               amount: calculation.total_refund,
               subtotal: calculation.subtotal_refund,
-              tax: calculation.tax_refund,
-              tax_amount: calculation.tax_refund,
+              // Productos + impuesto del envío devuelto.
+              tax: refund_tax_total,
+              tax_amount: refund_tax_total,
               tax_breakdown,
               shipping: calculation.shipping_refund,
               is_full_refund: calculation.is_full_refund,

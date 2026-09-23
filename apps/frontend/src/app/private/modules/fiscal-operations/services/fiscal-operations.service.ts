@@ -24,6 +24,7 @@ import {
 } from '../interfaces/fiscal-operations.interface';
 
 export interface FiscalListQuery {
+  event_type?: string;
   type?: string;
   status?: string;
   period_year?: number;

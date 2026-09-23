@@ -104,8 +104,12 @@ interface OrderLineFixture {
   quantity: number;
   /** Unidad NETA ya despejada (2 dec), como persisten POS y checkout. */
   unit_price: number;
-  discount_amount: number;
-  /** `total_price`: base neta de descuento de TODA la línea. */
+  /**
+   * `total_price`: base de TODA la línea. `order_items` NO tiene columna de
+   * descuento: el único descuento de una orden es el de cabecera
+   * (`orders.discount_amount`), que `createFromOrder` reparte con
+   * `projectOrderInvoiceLines` (ver `invoicing.service.order-discount.spec`).
+   */
   total_price: number;
   /** Snapshot de impuesto POR UNIDAD (`tax_amount_item`, `Decimal(12,2)`). */
   tax_amount_item: number;
@@ -152,8 +156,8 @@ const SHAPES: TaxMatrixShape[] = [
       ],
     },
     order_lines: [
-      { description: 'Pan', quantity: 3, unit_price: 10000, discount_amount: 0, total_price: 30000, tax_amount_item: 0, taxes: [] },
-      { description: 'Café', quantity: 2, unit_price: 25000, discount_amount: 0, total_price: 50000, tax_amount_item: 0, taxes: [] },
+      { description: 'Pan', quantity: 3, unit_price: 10000, total_price: 30000, tax_amount_item: 0, taxes: [] },
+      { description: 'Café', quantity: 2, unit_price: 25000, total_price: 50000, tax_amount_item: 0, taxes: [] },
     ],
     expect_split: false,
   },
@@ -168,8 +172,8 @@ const SHAPES: TaxMatrixShape[] = [
       ],
     },
     order_lines: [
-      { description: 'Camisa', quantity: 2, unit_price: 50000, discount_amount: 0, total_price: 100000, tax_amount_item: 9500, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 19000, is_inclusive: false, tax_rate_id: IVA_ID }] },
-      { description: 'Pantalón', quantity: 1, unit_price: 100000, discount_amount: 0, total_price: 100000, tax_amount_item: 19000, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 19000, is_inclusive: false, tax_rate_id: IVA_ID }] },
+      { description: 'Camisa', quantity: 2, unit_price: 50000, total_price: 100000, tax_amount_item: 9500, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 19000, is_inclusive: false, tax_rate_id: IVA_ID }] },
+      { description: 'Pantalón', quantity: 1, unit_price: 100000, total_price: 100000, tax_amount_item: 19000, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 19000, is_inclusive: false, tax_rate_id: IVA_ID }] },
     ],
     expect_split: false,
   },
@@ -192,8 +196,8 @@ const SHAPES: TaxMatrixShape[] = [
       ],
     },
     order_lines: [
-      { description: 'Postre', quantity: 3, unit_price: 925.93, discount_amount: 0, total_price: 2777.79, tax_amount_item: 74.07, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 222.21, is_inclusive: true, tax_rate_id: INC_ID }], channel_gross: { unit_price: 1000, rates: [{ rate: 0.08, is_inclusive: true }] } },
-      { description: 'Jugo', quantity: 2, unit_price: 462.96, discount_amount: 0, total_price: 925.92, tax_amount_item: 37.03, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 74.06, is_inclusive: true, tax_rate_id: INC_ID }], channel_gross: { unit_price: 499.99, rates: [{ rate: 0.08, is_inclusive: true }] } },
+      { description: 'Postre', quantity: 3, unit_price: 925.93, total_price: 2777.79, tax_amount_item: 74.07, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 222.21, is_inclusive: true, tax_rate_id: INC_ID }], channel_gross: { unit_price: 1000, rates: [{ rate: 0.08, is_inclusive: true }] } },
+      { description: 'Jugo', quantity: 2, unit_price: 462.96, total_price: 925.92, tax_amount_item: 37.03, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 74.06, is_inclusive: true, tax_rate_id: INC_ID }], channel_gross: { unit_price: 499.99, rates: [{ rate: 0.08, is_inclusive: true }] } },
     ],
     expect_split: true,
   },
@@ -224,7 +228,6 @@ const SHAPES: TaxMatrixShape[] = [
         description: 'Servicio gravado',
         quantity: 1,
         unit_price: 100000,
-        discount_amount: 0,
         total_price: 100000,
         tax_amount_item: 19700,
         taxes: [
@@ -247,28 +250,31 @@ const SHAPES: TaxMatrixShape[] = [
       ],
     },
     order_lines: [
-      { description: 'Camisa', quantity: 1, unit_price: 50000, discount_amount: 0, total_price: 50000, tax_amount_item: 9500, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 9500, is_inclusive: false, tax_rate_id: IVA_ID }] },
-      { description: 'Licor', quantity: 2, unit_price: 500, discount_amount: 0, total_price: 1000, tax_amount_item: 40, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 80, is_inclusive: true, tax_rate_id: INC_ID }] },
+      { description: 'Camisa', quantity: 1, unit_price: 50000, total_price: 50000, tax_amount_item: 9500, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 9500, is_inclusive: false, tax_rate_id: IVA_ID }] },
+      { description: 'Licor', quantity: 2, unit_price: 500, total_price: 1000, tax_amount_item: 40, taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 80, is_inclusive: true, tax_rate_id: INC_ID }] },
     ],
     expect_split: true,
   },
   {
-    // 6. Multi-tasa AGREGADO (IVA 19 % + INC 8 %, distintos esquemas DIAN)
-    // con descuento POR LÍNEA. Dos grupos → parte; el descuento vive en
-    // la línea, así que el allowance de pie es cero.
-    // (Dos tarifas del MISMO esquema no entran acá a propósito: el emisor
-    // las fusiona en un `TaxSubtotal` y el prevalidador las frena con
-    // `TAX_SCHEME_RATE_COLLISION` por diseño, no por aritmética.)
-    name: 'agregado multi-tasa (IVA 19 % + INC 8 %) + descuento por línea',
+    // 6. Multi-tasa AGREGADO (IVA 19 % + INC 8 %, distintos esquemas DIAN),
+    // qty > 1. Dos grupos → parte. Antes esta forma llevaba un
+    // `discount_amount` POR LÍNEA que `order_items` no tiene: el servicio
+    // leía esa columna inexistente y el descuento real de la orden
+    // desaparecía de la factura (P0-2). El descuento de orden se cubre con el
+    // reparto real en `invoicing.service.order-discount.spec`.
+    // (Dos tarifas del MISMO esquema se cubren en `ubl-shipping-tax-line.spec`:
+    // el emisor abre un `TaxSubtotal` por tarifa y el prevalidador ya no emite
+    // `TAX_SCHEME_RATE_COLLISION`.)
+    name: 'agregado multi-tasa (IVA 19 % + INC 8 %)',
     channel_input: {
       items: [
-        { description: 'Camisa', quantity: 2, unit_price: 50000, discount_amount: 5000, taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }] },
-        { description: 'Licor', quantity: 1, unit_price: 100000, discount_amount: 10000, taxes: [{ tax_name: 'INC', tax_rate: 8, tax_type: 'inc' }] },
+        { description: 'Camisa', quantity: 2, unit_price: 50000, taxes: [{ tax_name: 'IVA', tax_rate: 19, tax_type: 'iva' }] },
+        { description: 'Licor', quantity: 1, unit_price: 100000, taxes: [{ tax_name: 'INC', tax_rate: 8, tax_type: 'inc' }] },
       ],
     },
     order_lines: [
-      { description: 'Camisa', quantity: 2, unit_price: 50000, discount_amount: 5000, total_price: 95000, tax_amount_item: 9025, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 18050, is_inclusive: false, tax_rate_id: IVA_ID }] },
-      { description: 'Licor', quantity: 1, unit_price: 100000, discount_amount: 10000, total_price: 90000, tax_amount_item: 7200, taxes: [{ tax_name: 'INC', tax_rate: 8e-2, tax_type: 'inc', tax_amount: 7200, is_inclusive: false, tax_rate_id: INC_ID }] },
+      { description: 'Camisa', quantity: 2, unit_price: 50000, total_price: 100000, tax_amount_item: 9500, taxes: [{ tax_name: 'IVA', tax_rate: 0.19, tax_type: 'iva', tax_amount: 19000, is_inclusive: false, tax_rate_id: IVA_ID }] },
+      { description: 'Licor', quantity: 1, unit_price: 100000, total_price: 100000, tax_amount_item: 8000, taxes: [{ tax_name: 'INC', tax_rate: 8e-2, tax_type: 'inc', tax_amount: 8000, is_inclusive: false, tax_rate_id: INC_ID }] },
     ],
     expect_split: true,
   },
@@ -309,10 +315,9 @@ function mapOrderToDocument(order_lines: OrderLineFixture[]) {
     (acc, line) => acc + Number(line.quantity) * Number(line.unit_price),
     0,
   );
-  const discount = order_lines.reduce(
-    (acc, line) => acc + Number(line.discount_amount),
-    0,
-  );
+  // Sin columna de descuento en `order_items` (ver `OrderLineFixture`) y sin
+  // descuento de orden en estas formas: ninguna línea se proyecta.
+  const discount = 0;
   const tax = order_lines.reduce(
     (acc, line) => acc + orderLineTaxTotal(line),
     0,
@@ -416,11 +421,10 @@ describe('InvoicingService · matriz fiscal createFromOrder+split+prevalidador',
       description: line.description,
       quantity: new Prisma.Decimal(line.quantity),
       unit_price: new Prisma.Decimal(line.unit_price),
-      discount_amount: new Prisma.Decimal(line.discount_amount),
+      discount_amount: new Prisma.Decimal(0),
       tax_amount: new Prisma.Decimal(orderLineTaxTotal(line)),
       total_amount: new Prisma.Decimal(
-        Number(line.quantity) * Number(line.unit_price) -
-          Number(line.discount_amount),
+        Number(line.quantity) * Number(line.unit_price),
       ),
       is_inclusive: mapped.line_inclusive[index],
     }));
@@ -514,9 +518,9 @@ describe('InvoicingService · matriz fiscal createFromOrder+split+prevalidador',
           expect(channel.taxes.map((t) => t.amount)).toEqual(
             order.taxes.map(() => order.tax_amount_item),
           );
-          // …y es coherente consigo misma: total == qty×unidad − descuento
+          // …y es coherente consigo misma: total == qty×unidad
           // (la incoherencia unidad↔total no la persiste ningún canal).
-          expect(dbRound2(order.quantity * order.unit_price - order.discount_amount)).toBe(
+          expect(dbRound2(order.quantity * order.unit_price)).toBe(
             order.total_price,
           );
           expect(dbRound2(order.tax_amount_item * order.quantity)).toBe(
@@ -653,7 +657,6 @@ describe('InvoicingService · matriz fiscal createFromOrder+split+prevalidador',
             description: 'Plato #81',
             quantity: 1,
             unit_price: 4629.63,
-            discount_amount: 0,
             total_price: 4629.63,
             tax_amount_item: 370.37,
             taxes: [{ tax_name: 'INC', tax_rate: 0.08, tax_type: 'inc', tax_amount: 370.37, is_inclusive: true, tax_rate_id: INC_ID }],

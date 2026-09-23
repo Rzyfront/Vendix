@@ -20,7 +20,7 @@ describe('PosFiscalEmissionService', () => {
       contingency_deadline: null,
     };
 
-    const prisma = {
+    const prisma: any = {
       orders: {
         findFirst: jest.fn().mockResolvedValue({ id: 1 }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -37,6 +37,8 @@ describe('PosFiscalEmissionService', () => {
       },
       ...overrides.prisma,
     };
+    prisma.$executeRawUnsafe = jest.fn().mockResolvedValue(0);
+    prisma.$transaction = jest.fn((callback) => callback(prisma));
 
     const invoicing = {
       getElectronicEmissionEligibility: jest
@@ -203,6 +205,84 @@ describe('PosFiscalEmissionService', () => {
         }),
       }),
     });
+  });
+
+  it('dos fallos de creación del mismo pedido dejan exactamente una constancia', async () => {
+    mockRequestContext({ organization_id: 10, store_id: 20 });
+    const { service, prisma, invoicing } = createService();
+    prisma.invoices.findFirst.mockResolvedValue(null);
+    invoicing.createFromOrder.mockRejectedValue(new Error('Sin resolución vigente'));
+
+    let recorded = false;
+    prisma.fiscal_operation_events.findFirst.mockImplementation(async () =>
+      recorded ? { id: 900 } : null,
+    );
+    prisma.fiscal_operation_events.create.mockImplementation(async () => {
+      recorded = true;
+      return { id: 900 };
+    });
+
+    const first = await service.emitForOrder(1);
+    const second = await service.emitForOrder(1);
+
+    expect(first.state).toBe('failed');
+    expect(second.state).toBe('failed');
+    expect(prisma.fiscal_operation_events.create).toHaveBeenCalledTimes(1);
+    expect(prisma.fiscal_operation_events.findFirst).toHaveBeenCalledWith({
+      where: {
+        organization_id: 10,
+        store_id: 20,
+        accounting_entity_id: 77,
+        event_type: 'pos_sale_without_fiscal_document',
+        resource_type: 'order',
+        resource_id: 1,
+      },
+      select: { id: true },
+    });
+  });
+
+  it('serializa intentos concurrentes del mismo pedido antes de leer y escribir', async () => {
+    mockRequestContext({ organization_id: 10, store_id: 20 });
+    const { service, prisma, invoicing } = createService();
+    prisma.invoices.findFirst.mockResolvedValue(null);
+    invoicing.createFromOrder.mockRejectedValue(new Error('Sin resolución vigente'));
+
+    let recorded = false;
+    let writes = 0;
+    let releasePrevious = Promise.resolve();
+    prisma.$transaction.mockImplementation(async (callback) => {
+      const previous = releasePrevious;
+      let release!: () => void;
+      releasePrevious = new Promise<void>((resolve) => { release = resolve; });
+      const tx = {
+        $executeRawUnsafe: jest.fn(async () => previous),
+        fiscal_operation_events: {
+          findFirst: jest.fn(async () => recorded ? { id: 900 } : null),
+          create: jest.fn(async () => {
+            recorded = true;
+            writes++;
+            return { id: 900 };
+          }),
+        },
+      };
+      try {
+        await callback(tx);
+      } finally {
+        release();
+      }
+      expect(tx.$executeRawUnsafe).toHaveBeenCalledWith(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        'pos_uncovered_sale:10:20:1',
+      );
+    });
+
+    const results = await Promise.all([
+      service.emitForOrder(1),
+      service.emitForOrder(1),
+    ]);
+
+    expect(results.map(({ state }) => state)).toEqual(['failed', 'failed']);
+    expect(writes).toBe(1);
   });
 
   it('(b) getStatusForOrder reporta `failed` leyendo la constancia, en vez de «Emitiendo…» para siempre', async () => {

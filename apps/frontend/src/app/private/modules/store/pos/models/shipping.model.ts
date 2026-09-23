@@ -33,6 +33,25 @@ export interface PosShippingSaleData {
   shippingAddress: PosShippingAddress;
   deliveryNotes?: string;
   shippingAddressId?: number | null;
+  /** Tarifa que cotizó el costo. Viaja al backend solo si el costo no es manual. */
+  shippingRateId?: number | null;
+  /**
+   * El cajero digitó el costo a mano. Con override el envío va SIN tarifa y,
+   * por contrato, sin impuesto (copia vacía en el backend).
+   */
+  manualCostOverride?: boolean;
+}
+
+/**
+ * `shipping_rate_id` que se manda al crear la orden POS (venta o borrador):
+ * solo cuando hay tarifa y el costo sale de ella. Un costo digitado a mano
+ * nunca se ata a la tarifa, para que el backend no le calcule impuesto.
+ */
+export function posShippingRateIdForPayload(
+  data: Pick<PosShippingSaleData, 'shippingRateId' | 'manualCostOverride'> | null | undefined,
+): number | undefined {
+  if (!data || data.manualCostOverride) return undefined;
+  return data.shippingRateId != null ? data.shippingRateId : undefined;
 }
 
 export interface PosShippingOption {

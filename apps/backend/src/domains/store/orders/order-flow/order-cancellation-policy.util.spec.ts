@@ -2,6 +2,7 @@ import {
   getCancellationBlocker,
   getOrderCancellationPolicy,
   OrderCancellationSnapshot,
+  SETTLED_PAYMENT_STATES,
 } from './order-cancellation-policy.util';
 
 const STOCK_BLOCKER = 'ORD_CANCEL_STOCK_COMMITTED_001';
@@ -27,18 +28,24 @@ function payment(
 }
 
 describe('Order cancellation policy', () => {
-  it.each(['created', 'pending_payment', 'processing'])(
+  it('expone el mismo conjunto de pagos liquidados al guard de cancelación de ítem', () => {
+    expect([...SETTLED_PAYMENT_STATES].sort()).toEqual([
+      'captured', 'partially_refunded', 'refunded', 'succeeded',
+    ]);
+    expect(SETTLED_PAYMENT_STATES.has('pending')).toBe(false);
+  });
+  it.each(['draft', 'created', 'pending_payment', 'processing'])(
     'permits cancellation of %s with reservations only',
     (state) => {
       expect(getOrderCancellationPolicy(snapshot({ state }))).toEqual({
         can_cancel: true,
-        can_cancel_payment: state !== 'created',
+        can_cancel_payment: state !== 'created' && state !== 'draft',
         reason_code: null,
       });
     },
   );
 
-  it.each(['draft', 'shipped', 'cancelled'])(
+  it.each(['shipped', 'cancelled'])(
     'keeps state eligibility separate from the force-safe blocker: %s',
     (state) => {
       const order = snapshot({ state });
@@ -48,6 +55,29 @@ describe('Order cancellation policy', () => {
       });
     },
   );
+
+  it('blocks a draft attached to an open table but not a closed one', () => {
+    expect(getOrderCancellationPolicy(snapshot({
+      state: 'draft', table_sessions: [{ id: 17, closed_at: null }],
+    }))).toEqual({
+      can_cancel: false, can_cancel_payment: false,
+      reason_code: 'ORD_CANCEL_OPEN_TABLE_001',
+    });
+    expect(getOrderCancellationPolicy(snapshot({
+      state: 'draft', table_sessions: [{ id: 17, closed_at: new Date() }],
+    })).can_cancel).toBe(true);
+  });
+
+  it('a legacy draft with a settled digital payment still requires reversal', () => {
+    expect(getOrderCancellationPolicy(snapshot({
+      state: 'draft',
+      payments: [payment('succeeded', 'ONLINE', 'card')],
+    }))).toEqual({
+      can_cancel: false,
+      can_cancel_payment: false,
+      reason_code: PAYMENT_BLOCKER,
+    });
+  });
 
   it.each(['delivered', 'finished', 'refunded'])(
     'blocks forced cancellation from %s even without line snapshots',

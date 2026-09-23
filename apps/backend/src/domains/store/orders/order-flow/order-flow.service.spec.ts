@@ -17,6 +17,362 @@ import {
 } from 'src/testing/prisma-mock';
 import { buildOrder, buildPayment } from 'src/testing/money-fixtures';
 
+describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2)', () => {
+  const DTO: any = { store_payment_method_id: 1, payment_type: PaymentType.DIRECT };
+
+  const harness = (
+    consumedAtFire = false,
+    initialState = 'draft',
+    existingPayments: Array<{ state: string; amount: number }> = [],
+  ) => {
+    let state = initialState;
+    const reservations: Array<{ product_id: number; status: string }> = [];
+    const events: Array<string> = [];
+    const stateUpdates: Array<{ state: string; metadata: Record<string, unknown> }> = [];
+    const tx: any = {
+      $queryRaw: jest.fn(async () => [{ id: 1, state }]),
+      orders: {
+        findFirst: jest.fn(async () => ({
+          id: 1,
+          store_id: 4,
+          order_items: [{
+            product_id: 701,
+            product_variant_id: null,
+            quantity: 2,
+            inventory_consumed_at_fire: consumedAtFire,
+            products: { id: 701, track_inventory: true, product_type: 'product' },
+          }],
+        })),
+        update: jest.fn(async ({ data }: any) => { state = data.state; return { id: 1, state }; }),
+        updateMany: jest.fn(async ({ where, data }: any) => {
+          if (where.state !== state || where.store_id !== 4) return { count: 0 };
+          state = data.state;
+          return { count: 1 };
+        }),
+      },
+      stock_reservations: {
+        findFirst: jest.fn(async () => reservations.find((row) => row.status === 'active') ?? null),
+      },
+    };
+    const prismaMock: any = {
+      $transaction: jest.fn(async (callback: any) => callback(tx)),
+      orders: {
+        findFirst: jest.fn(async ({ select }: any) => select?.state
+          ? { state }
+          : { active_financial_split_id: null, delivery_type: 'direct_delivery', shipping_method_id: null, order_items: [{ products: { product_type: 'product' } }] }),
+        updateMany: jest.fn(async ({ where, data }: any) => {
+          if (where.state?.in && !where.state.in.includes(state)) return { count: 0 };
+          if (where.state && typeof where.state === 'string' && where.state !== state) return { count: 0 };
+          state = data.state;
+          return { count: 1 };
+        }),
+      },
+      stock_reservations: {
+        count: jest.fn(async () => reservations.filter((row) => row.status === 'active').length),
+      },
+      store_payment_methods: { findFirst: jest.fn(async () => ({ id: 1, system_payment_method: { type: 'card' } })) },
+      payments: {
+        create: jest.fn(async () => { events.push('payment'); return { id: 99, gateway_response: {} }; }),
+        update: jest.fn(async () => ({ id: 99, state: 'cancelled' })),
+      },
+    };
+    const stock: any = {
+      getDefaultLocationForProduct: jest.fn(async () => 11),
+      reserveStock: jest.fn(async (...args: any[]) => {
+        events.push('reserve');
+        reservations.push({ product_id: args[0], status: 'active' });
+      }),
+      releaseReservation: jest.fn(async (productId: number) => {
+        const row = reservations.find((reservation) =>
+          reservation.product_id === productId && reservation.status === 'active');
+        if (row) row.status = 'consumed';
+        events.push('release');
+      }),
+    };
+    const audit: any = { logCustom: jest.fn(async () => undefined) };
+    const service = new OrderFlowService(
+      prismaMock, {} as any, {} as any, {} as any, {} as any, stock,
+      {} as any, {} as any, audit,
+    );
+    jest.spyOn(service as any, 'getOrder').mockImplementation(async () => ({
+      id: 1, state, store_id: 4, customer_id: 44, delivery_type: 'direct_delivery',
+      grand_total: 100, currency: 'COP', payments: existingPayments,
+    }));
+    jest.spyOn(service as any, 'appendFlowMetadata').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'updateOrderState').mockImplementation(async (_id: number, nextState: string, metadata: Record<string, unknown> = {}) => {
+      stateUpdates.push({ state: nextState, metadata });
+      state = nextState;
+      return { id: 1, state, ...metadata };
+    });
+    jest.spyOn(service as any, 'commitCouponUseForOrder').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'generateTransactionId').mockResolvedValue('TXN-1');
+    jest.spyOn(service as any, 'hasPendingKitchenItems').mockResolvedValue(false);
+    jest.spyOn(service as any, 'recordPayOrderCashMovement').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'computeAndPersistEta').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'emitPosSaleCompletedIfFullyPaid').mockResolvedValue(undefined);
+    return { service, prismaMock, tx, stock, audit, reservations, events, stateUpdates, getState: () => state };
+  };
+
+  it('reserva antes del pago, mantiene processing durante el cobro y audita el conteo', async () => {
+    const h = harness();
+    await h.service.payOrder(1, DTO);
+    expect(h.reservations).toHaveLength(1);
+    expect(h.events).toEqual(['reserve', 'payment']);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    const args = h.stock.reserveStock.mock.calls[0];
+    expect(args.slice(0, 6)).toEqual([701, undefined, 11, 2, 'order', 1]);
+    expect([args[7], args[8], args[10], args[12]]).toEqual([
+      false, h.tx, false, true,
+    ]);
+    expect(h.audit.logCustom).toHaveBeenCalledWith(
+      expect.any(Number), 'order.promoted_to_created', expect.anything(),
+      expect.objectContaining({ order_id: 1, reservation_count: 1 }), 1,
+    );
+    expect(h.getState()).toBe('finished');
+    expect(h.stock.releaseReservation).not.toHaveBeenCalled();
+  });
+
+  it('segundo submit no reserva ni cobra y conserva el 409 tipado', async () => {
+    const h = harness();
+    await h.service.payOrder(1, DTO);
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(error.getStatus()).toBe(409);
+    expect(h.stock.reserveStock).toHaveBeenCalledTimes(1);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechaza draft ya pagado después del claim sin reservar ni crear otro pago', async () => {
+    const h = harness(false, 'draft', [{ state: 'succeeded', amount: 60 }, { state: 'captured', amount: 40 }]);
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_PAY_ALREADY_PAID_001');
+    expect(error.getStatus()).toBe(409);
+    expect(h.prismaMock.orders.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ state: 'processing' }),
+    }));
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.stock.reserveStock).not.toHaveBeenCalled();
+    expect(h.stock.releaseReservation).not.toHaveBeenCalled();
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('rechaza orden created ya pagada y revierte el claim sin crear otro pago', async () => {
+    const h = harness(false, 'created', [{ state: 'succeeded', amount: 100 }]);
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error.errorCode).toBe('ORD_PAY_ALREADY_PAID_001');
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.getState()).toBe('created');
+  });
+
+  it('permite un abono parcial y cobra solo el saldo pendiente', async () => {
+    const h = harness(false, 'created', [{ state: 'succeeded', amount: 40 }]);
+    const result = await h.service.payOrder(1, DTO);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ amount: 60, state: 'succeeded' }),
+    }));
+    expect(h.stateUpdates).toContainEqual({
+      state: 'finished',
+      metadata: expect.objectContaining({ total_paid: 100, remaining_balance: 0 }),
+    });
+    expect(result.order).toEqual(expect.objectContaining({ total_paid: 100, remaining_balance: 0 }));
+    expect(h.getState()).toBe('finished');
+  });
+
+  it('restaura shipped y proyecta el saldo al cobrar el remanente', async () => {
+    const h = harness(false, 'shipped', [{ state: 'captured', amount: 40 }]);
+    h.prismaMock.orders.findFirst.mockImplementation(async () => ({
+      id: 1, state: h.getState(), total_paid: 100, remaining_balance: 0,
+    }));
+    const result = await h.service.payOrder(1, DTO);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ amount: 60, state: 'succeeded' }),
+    }));
+    expect(h.stateUpdates).toContainEqual({
+      state: 'shipped',
+      metadata: { total_paid: 100, remaining_balance: 0 },
+    });
+    expect(result.order).toEqual(expect.objectContaining({ total_paid: 100, remaining_balance: 0 }));
+    expect(h.getState()).toBe('shipped');
+  });
+
+  it('stock agotado no bloquea el cobro; consumo en cocina evita descontar otra vez', async () => {
+    const h = harness(true);
+    await h.service.payOrder(1, DTO);
+    const args = h.stock.reserveStock.mock.calls[0];
+    expect([args[7], args[8], args[10], args[12]]).toEqual([
+      false, h.tx, true, true,
+    ]);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('si falla la infraestructura de reserva, no cobra y restaura el draft', async () => {
+    const h = harness();
+    h.stock.reserveStock.mockRejectedValueOnce(new Error('db unavailable'));
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.reservations).toHaveLength(0);
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('método de pago inexistente libera solo la reserva del draft y restaura claim', async () => {
+    const h = harness();
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValueOnce(null);
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.stock.releaseReservation).toHaveBeenCalledWith(701, undefined, 11, 'order', 1, h.tx);
+    expect(h.reservations[0].status).toBe('consumed');
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('efectivo corto libera y restaura sin crear pago', async () => {
+    const h = harness();
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValueOnce({
+      id: 1, system_payment_method: { type: 'cash' },
+    });
+    const error = await h.service.payOrder(1, { ...DTO, amount_received: 50 }).catch((failure) => failure);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.stock.releaseReservation).toHaveBeenCalledTimes(1);
+    expect(h.reservations[0].status).toBe('consumed');
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('fallo al crear el pago libera la reserva y mantiene el draft cobrable', async () => {
+    const h = harness();
+    h.prismaMock.payments.create.mockRejectedValueOnce(new Error('payment db unavailable'));
+    await expect(h.service.payOrder(1, DTO)).rejects.toThrow('payment db unavailable');
+    expect(h.stock.releaseReservation).toHaveBeenCalledTimes(1);
+    expect(h.reservations[0].status).toBe('consumed');
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('finish bloqueado compensa el pago y libera la reserva nueva', async () => {
+    const h = harness();
+    jest.spyOn(h.service as any, 'updateOrderState').mockRejectedValueOnce(
+      new VendixHttpException(ErrorCodes.INV_STOCK_002),
+    );
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(h.prismaMock.payments.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 99 }, data: expect.objectContaining({ state: 'cancelled' }),
+    }));
+    expect(h.stock.releaseReservation).toHaveBeenCalledTimes(1);
+    expect(h.reservations[0].status).toBe('consumed');
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('cocina pendiente cancela el pago y libera la reserva nueva', async () => {
+    const h = harness();
+    jest.spyOn(h.service as any, 'hasPendingKitchenItems').mockResolvedValueOnce(true);
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(h.prismaMock.payments.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 99 }, data: expect.objectContaining({ state: 'cancelled' }),
+    }));
+    expect(h.stock.releaseReservation).toHaveBeenCalledTimes(1);
+    expect(h.reservations[0].status).toBe('consumed');
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('no libera una reserva activa que ya existía antes de promover el draft', async () => {
+    const h = harness();
+    h.reservations.push({ product_id: 701, status: 'active' });
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValueOnce(null);
+    await h.service.payOrder(1, DTO).catch(() => undefined);
+    expect(h.stock.reserveStock).not.toHaveBeenCalled();
+    expect(h.stock.releaseReservation).not.toHaveBeenCalled();
+    expect(h.reservations[0].status).toBe('active');
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('ERR-33 postcommit conserva el pago succeeded y la reserva activa', async () => {
+    const h = harness();
+    jest.spyOn(h.service as any, 'projectPaidOrderToTable').mockRejectedValueOnce(
+      new VendixHttpException(ErrorCodes.POS_TABLE_SESSION_PROJECTION_FAILED_001),
+    );
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error.errorCode).toBe('POS_TABLE_SESSION_PROJECTION_FAILED_001');
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    expect(h.prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(h.stock.releaseReservation).not.toHaveBeenCalled();
+    expect(h.reservations[0].status).toBe('active');
+    expect(h.getState()).toBe('finished');
+  });
+
+  it('la promoción independiente de mesa/split sigue dejando created', async () => {
+    const h = harness();
+    const promoted = await (h.service as any).promoteDraftToCreated(1, 4);
+    expect(promoted).toBe(true);
+    expect(h.getState()).toBe('created');
+    expect(h.reservations).toHaveLength(1);
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
+  const pendingItems = [
+    { order_item_id: 11, status: 'ready', quantity: 2, variant_label: 'Grande', order_item: { product_name: 'Hamburguesa' } },
+    { order_item_id: 12, status: 'in_preparation', quantity: 1, variant_label: null, order_item: { product_name: 'Papas' } },
+  ];
+
+  const harness = (state: string, items: typeof pendingItems) => {
+    const prisma: any = {
+      kitchen_ticket_items: { findMany: jest.fn().mockResolvedValue(items) },
+    };
+    const service = new OrderFlowService(
+      prisma, {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, {} as any,
+    );
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({ id: 1, state });
+    const updateState = jest.spyOn(service as any, 'updateOrderState')
+      .mockResolvedValue({ id: 1, state: 'finished' });
+    return { service, prisma, updateState };
+  };
+
+  it.each(['processing', 'delivered'])(
+    'rechaza finalizar desde %s con lista de platos accionable',
+    async (state) => {
+      const { service, prisma, updateState } = harness(state, pendingItems);
+      await expect(service.confirmDelivery(1)).rejects.toMatchObject({
+        errorCode: 'ORDER_HAS_PENDING_KITCHEN_ITEMS',
+        response: expect.objectContaining({
+          details: {
+            pending_items: [
+              { order_item_id: 11, product_name: 'Hamburguesa', variant_label: 'Grande', quantity: 2, status: 'ready' },
+              { order_item_id: 12, product_name: 'Papas', variant_label: null, quantity: 1, status: 'in_preparation' },
+            ],
+          },
+        }),
+      });
+      expect(prisma.kitchen_ticket_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { kitchen_ticket: { order_id: 1 }, status: { notIn: ['delivered', 'cancelled'] } },
+      }));
+      expect(updateState).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['processing', 'delivered'])(
+    'finaliza desde %s cuando no quedan platos pendientes',
+    async (state) => {
+      const { service, updateState } = harness(state, []);
+      await expect(service.confirmDelivery(1)).resolves.toMatchObject({ state: 'finished' });
+      expect(updateState).toHaveBeenCalledWith(1, 'finished', expect.objectContaining({ finished_at: expect.any(Date) }));
+    },
+  );
+
+  it('no consulta cocina ni muta un estado no finalizable', async () => {
+    const { service, prisma, updateState } = harness('refunded', pendingItems);
+    await expect(service.confirmDelivery(1)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.kitchen_ticket_items.findMany).not.toHaveBeenCalled();
+    expect(updateState).not.toHaveBeenCalled();
+  });
+});
+
 /**
  * Regresión de la compensación de pago en {@link OrderFlowService.payOrder}
  * rama `direct → finished` (POS).
@@ -34,6 +390,7 @@ import { buildOrder, buildPayment } from 'src/testing/money-fixtures';
 describe('OrderFlowService — compensación de pago POS cuando el finish bloquea', () => {
   let service: OrderFlowService;
   let prismaMock: any;
+  let projectTablePayment: jest.Mock;
 
   const buildOrder = () => ({
     id: 1,
@@ -52,6 +409,7 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
   };
 
   beforeEach(() => {
+    projectTablePayment = jest.fn().mockResolvedValue(null);
     prismaMock = {
       store_payment_methods: {
         findFirst: jest
@@ -108,6 +466,9 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
       {} as any,
       {} as any,
       { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      undefined,
+      undefined,
+      { get: jest.fn(() => ({ projectOrderPaymentToTableSession: projectTablePayment })) } as any,
     );
 
     // Aísla la rama: métodos privados/colaboradores reducidos a stubs.
@@ -158,6 +519,231 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
 
     expect(prismaMock.payments.create).toHaveBeenCalledTimes(1);
     expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(projectTablePayment).toHaveBeenCalledWith(1, 999);
+  });
+
+  it('proyección falla post-commit: conserva el pago y responde ERR-33 tipado (409)', async () => {
+    jest.spyOn(service as any, 'updateOrderState').mockResolvedValue({ id: 1, state: 'finished' });
+    projectTablePayment.mockRejectedValue(new Error('mesa cerrada'));
+
+    const error = await service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe(ErrorCodes.POS_TABLE_SESSION_PROJECTION_FAILED_001.code);
+    expect(error.getStatus()).toBe(409);
+    expect(prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(projectTablePayment).toHaveBeenCalledWith(1, 999);
+  });
+});
+
+/** D.1 — la reversa de cocina devuelve consumos reales del ítem, no el plato vendido. */
+describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas BOM', () => {
+  const ORDER_ID = 8101;
+  const ITEM_ID = 8102;
+  const TICKET_ID = 8103;
+  const reason = '  cliente canceló el plato  ';
+
+  const firedItem = (status: 'pending' | 'in_preparation' | 'ready') => ({
+    id: ITEM_ID,
+    inventory_consumed_at_fire: true,
+    cancelled_at: null,
+    products: { product_type: 'prepared' },
+    kitchen_ticket_items: [{
+      kitchen_ticket_id: TICKET_ID,
+      kitchen_ticket: { id: TICKET_ID, status },
+    }],
+  });
+
+  const buildKitchenHarness = (
+    status: 'pending' | 'in_preparation' | 'ready',
+    consumptions: Array<{
+      product_id: number;
+      product_variant_id: number | null;
+      quantity_change: number;
+    }> = [],
+  ) => {
+    const prismaMock = createPrismaMock({
+      orders: ['updateMany', 'update'],
+      order_items: ['findMany', 'update'],
+      inventory_transactions: ['findMany'],
+      kitchen_tickets: ['findFirst'],
+    });
+    prismaMock.$queryRaw = jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'processing' }]);
+    prismaMock.orders.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID, store_id: 100, state: 'cancelled' });
+    prismaMock.order_items.findMany.mockResolvedValue([firedItem(status)]);
+    prismaMock.order_items.update.mockResolvedValue({});
+    prismaMock.inventory_transactions.findMany.mockResolvedValue(consumptions);
+    prismaMock.kitchen_tickets.findFirst.mockResolvedValue({ status });
+
+    const stock = {
+      getDefaultLocationForProduct: jest.fn().mockImplementation(
+        async (productId: number, variantId?: number) => {
+          if (productId === 701 && variantId === undefined) return 11;
+          if (productId === 702 && variantId === 91) return 22;
+          if (productId === 703 && variantId === undefined) return 33;
+          throw new Error(`Unexpected leaf/location lookup ${productId}/${variantId}`);
+        },
+      ),
+      updateStock: jest.fn().mockResolvedValue({}),
+      releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
+    };
+    const kds = {
+      cancelTicketInTx: jest.fn().mockResolvedValue(undefined),
+      emitTicketCancelledEvent: jest.fn().mockResolvedValue(undefined),
+    };
+    const emitter = { emit: jest.fn() };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      emitter as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      stock as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      kds as any,
+    );
+    jest.spyOn(service, 'getOrder').mockResolvedValue(buildOrder({
+      id: ORDER_ID,
+      state: 'processing',
+      internal_notes: null,
+      payments: [],
+      order_items: [{ id: ITEM_ID, inventory_consumed_at_fire: true }],
+    }) as any);
+    return { service, prismaMock, stock, kds, emitter };
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
+  });
+
+  it('kitchenDisposition reuse: devuelve exactamente las tres hojas consumidas, con signo absoluto y ubicación por variante', async () => {
+    // Tres transacciones del ítem (una hoja variante) deliberadamente distintas
+    // del producto preparado vendido; los valores esperados NO salen del mock.
+    const { service, prismaMock, stock, kds, emitter } = buildKitchenHarness('in_preparation', [
+      { product_id: 701, product_variant_id: null, quantity_change: -2.5 },
+      { product_id: 702, product_variant_id: 91, quantity_change: -1.25 },
+      { product_id: 703, product_variant_id: null, quantity_change: -4 },
+    ]);
+
+    await expect(service.cancelOrder(ORDER_ID, { reason, kitchenDisposition: 'reuse' }))
+      .resolves.toMatchObject({ state: 'cancelled' });
+
+    expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledWith({
+      where: { order_item_id: ITEM_ID, quantity_change: { lt: 0 } },
+      select: { product_id: true, product_variant_id: true, quantity_change: true },
+    });
+    expect(stock.getDefaultLocationForProduct.mock.calls).toEqual([
+      [701, undefined], [702, 91], [703, undefined],
+    ]);
+    expect(stock.updateStock).toHaveBeenCalledTimes(3);
+    const expectedReturns = [
+      { product_id: 701, variant_id: undefined, location_id: 11, quantity_change: 2.5 },
+      { product_id: 702, variant_id: 91, location_id: 22, quantity_change: 1.25 },
+      { product_id: 703, variant_id: undefined, location_id: 33, quantity_change: 4 },
+    ];
+    expectedReturns.forEach((leaf, index) => {
+      const [movement, tx] = stock.updateStock.mock.calls[index];
+      expect(movement).toEqual({
+        ...leaf,
+        movement_type: 'return',
+        reason: expect.stringContaining(`orden #${ORDER_ID} ítem #${ITEM_ID}`),
+        source_module: 'order_item_cancellation',
+        create_movement: true,
+        validate_availability: false,
+      });
+      expect(movement).not.toHaveProperty('order_item_id');
+      expect(tx).toBe(prismaMock);
+    });
+    expect(prismaMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({
+        cancellation_type: 'after_fire_reused',
+        cancellation_reason: 'cliente canceló el plato',
+      }),
+    });
+    expect(prismaMock.order_items.update.mock.calls[0][0].data)
+      .not.toHaveProperty('inventory_consumed_at_fire');
+    expect(kds.cancelTicketInTx).not.toHaveBeenCalled();
+    expect(emitter.emit).toHaveBeenCalledWith('order.status_changed', expect.objectContaining({
+      order_id: ORDER_ID, new_state: 'cancelled',
+    }));
+  });
+
+  it('kitchenDisposition waste: registra merma sin consultar consumos ni devolver stock', async () => {
+    const { service, prismaMock, stock, kds } = buildKitchenHarness('ready', [
+      { product_id: 701, product_variant_id: null, quantity_change: -2.5 },
+      { product_id: 702, product_variant_id: 91, quantity_change: -1.25 },
+    ]);
+
+    await expect(service.cancelOrder(ORDER_ID, { reason, kitchenDisposition: 'waste' }))
+      .resolves.toMatchObject({ state: 'cancelled' });
+
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({ cancellation_type: 'after_fire_waste' }),
+    });
+    expect(prismaMock.order_items.update.mock.calls[0][0].data)
+      .not.toHaveProperty('inventory_consumed_at_fire');
+    expect(prismaMock.inventory_transactions.findMany).not.toHaveBeenCalled();
+    expect(stock.getDefaultLocationForProduct).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(kds.cancelTicketInTx).not.toHaveBeenCalled();
+  });
+
+  it('sin kitchenDisposition y ticket avanzado: error tipado antes del claim, sin efectos', async () => {
+    const { service, prismaMock, stock } = buildKitchenHarness('in_preparation');
+
+    await expect(service.cancelOrder(ORDER_ID, { reason })).rejects.toMatchObject({
+      errorCode: 'TABLE_SESSION_ADD_ITEMS_INVALID',
+    });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.order_items.update).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('ticket pending: cancela sin kitchenDisposition y conserva after_fire_waste', async () => {
+    const { service, prismaMock, stock, kds, emitter } = buildKitchenHarness('pending');
+
+    await expect(service.cancelOrder(ORDER_ID, { reason }))
+      .resolves.toMatchObject({ state: 'cancelled' });
+
+    expect(prismaMock.kitchen_tickets.findFirst).toHaveBeenCalledWith({
+      where: { id: TICKET_ID }, select: { status: true },
+    });
+    expect(kds.cancelTicketInTx).toHaveBeenCalledWith(prismaMock, TICKET_ID);
+    expect(kds.emitTicketCancelledEvent).toHaveBeenCalledWith(TICKET_ID);
+    expect(prismaMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({ cancellation_type: 'after_fire_waste' }),
+    });
+    expect(prismaMock.inventory_transactions.findMany).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(emitter.emit).toHaveBeenCalledWith('order.status_changed', expect.anything());
+  });
+
+  it('kitchenDisposition reuse sin consumo registrado: cancela la línea sin devoluciones ni excepción', async () => {
+    const { service, prismaMock, stock } = buildKitchenHarness('ready', []);
+
+    await expect(service.cancelOrder(ORDER_ID, { reason, kitchenDisposition: 'reuse' }))
+      .resolves.toMatchObject({ state: 'cancelled' });
+
+    expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledWith({
+      where: { order_item_id: ITEM_ID, quantity_change: { lt: 0 } },
+      select: { product_id: true, product_variant_id: true, quantity_change: true },
+    });
+    expect(prismaMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({ cancellation_type: 'after_fire_reused' }),
+    });
+    expect(stock.getDefaultLocationForProduct).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
   });
 });
 
@@ -622,6 +1208,7 @@ describe('OrderFlowService.revertKitchenOrderDelivery — kitchen bridge reverse
       ORDER_ID,
       'processing',
       expect.objectContaining({ kitchen_delivery_reverted: true }),
+      { source: 'kitchen_bridge' },
     );
     expect(result.transitioned).toBe(true);
     expect(result.previousState).toBe('delivered');
@@ -1036,15 +1623,20 @@ describe('OrderFlowService — charge-time shipping gate (A.2 CP-facturacion-fix
     ...over,
   });
 
-  it('blocks charging a shippyless whatsapp-like order BEFORE the state claim', async () => {
-    const { service, prismaMock } = buildService(physicalProbe());
+  it.each(['home_delivery', 'other'])(
+    'blocks charging a %s order without shipping BEFORE the state claim',
+    async (delivery_type) => {
+      const { service, prismaMock } = buildService(
+        physicalProbe({ delivery_type }),
+      );
 
-    await expect(service.payOrder(1, DTO)).rejects.toMatchObject({
-      errorCode: ErrorCodes.ORD_SHIP_CHARGE_001.code,
-    });
-    // Read-only gate: the race claim was never taken.
-    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
-  });
+      await expect(service.payOrder(1, DTO)).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_SHIP_CHARGE_001.code,
+      });
+      // Read-only gate: the race claim was never taken.
+      expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    },
+  );
 
   it('lets the charge through once a method is assigned', async () => {
     const { service, prismaMock } = buildService(
@@ -1060,17 +1652,23 @@ describe('OrderFlowService — charge-time shipping gate (A.2 CP-facturacion-fix
     expect(prismaMock.orders.updateMany).toHaveBeenCalled();
   });
 
-  it('exempts direct_delivery and services-only carts', async () => {
-    const direct = buildService(
-      physicalProbe({ delivery_type: 'direct_delivery' }),
-    );
-    try {
-      await direct.service.payOrder(1, DTO);
-    } catch (e: any) {
-      expect(e?.errorCode).not.toBe(ErrorCodes.ORD_SHIP_CHARGE_001.code);
-    }
-    expect(direct.prismaMock.orders.updateMany).toHaveBeenCalled();
+  it.each(['pickup', 'direct_delivery', 'dine_in'])(
+    'does not block a %s order without shipping',
+    async (delivery_type) => {
+      const { service, prismaMock } = buildService(
+        physicalProbe({ delivery_type }),
+      );
+      try {
+        await service.payOrder(1, DTO);
+      } catch (e: any) {
+        // A later, unmocked payment step may reject; the shipping gate may not.
+        expect(e?.errorCode).not.toBe(ErrorCodes.ORD_SHIP_CHARGE_001.code);
+      }
+      expect(prismaMock.orders.updateMany).toHaveBeenCalled();
+    },
+  );
 
+  it('exempts services-only carts', async () => {
     const servicesOnly = buildService(
       physicalProbe({
         order_items: [{ products: { product_type: 'service' } }],
@@ -1470,6 +2068,46 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
     return { service, prismaMock, txMock, stockLevelManager, auditService };
   };
 
+  it.each(['succeeded', 'captured', 'partially_refunded', 'refunded'])(
+    '409 tipado si hay pago %s, sin tocar totales, stock ni auditoría',
+    async (state) => {
+      const { service, prismaMock, stockLevelManager, auditService } = buildService({
+        order: { state: 'finished', payments: [{ state }] },
+      });
+
+      await expect(service.cancelDeliveredOrderItem(
+        ORDER_ID, ITEM_ID, 'mosca en el plato', 'waste',
+      )).rejects.toMatchObject({ errorCode: 'ORD_ITEM_CANCEL_PAID_001' });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+      expect(auditService.logCustom).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['cancelled', 'refunded', 'finished'])(
+    '409 tipado para estado terminal %s sin pago',
+    async (state) => {
+      const { service, prismaMock } = buildService({ order: { state, payments: [] } });
+      const error = await service.cancelDeliveredOrderItem(
+        ORDER_ID, ITEM_ID, 'mosca en el plato', 'waste',
+      ).catch((caught) => caught);
+
+      expect(error.errorCode).toBe('ORD_ITEM_CANCEL_STATE_001');
+      expect(error.getResponse()).toMatchObject({ details: { state } });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it('pago pendiente no impide cancelar un plato de cuenta abierta', async () => {
+    const { service, prismaMock } = buildService({
+      order: { state: 'processing', payments: [{ state: 'pending' }] },
+    });
+    await service.cancelDeliveredOrderItem(
+      ORDER_ID, ITEM_ID, 'mosca en el plato', 'waste',
+    );
+    expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+  });
+
   it('restock: devuelve stock, cancela suave y audita con destino', async () => {
     const { service, txMock, stockLevelManager, auditService } = buildService(
       {},
@@ -1807,6 +2445,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
   let audit: { log: jest.Mock; logCustom: jest.Mock };
   let stock: { releaseReservationsByReference: jest.Mock };
   let emitter: { emit: jest.Mock };
+  let refundFlow: { recordCancellationCashRefund: jest.Mock; completeCancellationCashRefund: jest.Mock; emitCancellationCashRefund: jest.Mock };
 
   /** Orden cancelable (estado `processing`) con los pagos que se le pasen. */
   const cancelableOrder = (payments: any[]) =>
@@ -1832,6 +2471,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       orders: ['updateMany', 'update'],
       order_items: ['findMany'],
       payments: ['findMany', 'update'],
+      table_sessions: ['findFirst'],
     });
     prismaMock.$queryRaw = jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'processing' }]);
     // Sin ítems de cocina: la rama KDS de `cancelOrder` no participa aquí.
@@ -1847,6 +2487,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     // Por defecto: ningún pago del lote es en efectivo. Cada test que necesita
     // efectivo lo declara explícitamente.
     prismaMock.payments.findMany.mockResolvedValue([]);
+    prismaMock.table_sessions.findFirst.mockResolvedValue(null);
 
     settings = {
       getSettings: jest
@@ -1867,6 +2508,14 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
     };
     emitter = { emit: jest.fn() };
+    refundFlow = {
+      recordCancellationCashRefund: jest.fn().mockResolvedValue({
+        refund: { id: 81, state: 'processing', amount: new Prisma.Decimal('59.50') },
+        breakdown: { amount: new Prisma.Decimal('59.50') },
+      }),
+      completeCancellationCashRefund: jest.fn().mockResolvedValue({ id: 81, state: 'completed' }),
+      emitCancellationCashRefund: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
@@ -1878,7 +2527,56 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       {} as any,
       {} as any,
       audit as any,
+      undefined,
+      undefined,
+      undefined,
+      refundFlow as any,
     );
+  });
+
+  it('cancela un draft sin mesa mediante el claim condicional', async () => {
+    const draft = { ...cancelableOrder([]), state: 'draft', order_items: [] };
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(draft);
+
+    await expect(service.cancelOrder(ORDER_ID, DTO)).resolves.toMatchObject({ state: 'cancelled' });
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: ORDER_ID, state: { in: expect.arrayContaining(['draft']) },
+      }),
+    }));
+    expect(prismaMock.table_sessions.findFirst).toHaveBeenCalledWith({
+      where: { order_id: ORDER_ID, store_id: 100, closed_at: null },
+      select: { id: true },
+    });
+  });
+
+  it.each(['finished', 'refunded', 'cancelled'] as const)(
+    'rechaza cancelación de %s con código y estado, sin claim',
+    async (state) => {
+      jest.spyOn(service as any, 'getOrder').mockResolvedValue({
+        ...cancelableOrder([]), state,
+      });
+
+      await expect(service.cancelOrder(ORDER_ID, DTO)).rejects.toMatchObject({
+        errorCode: 'ORD_STATUS_001',
+        response: expect.objectContaining({ details: { state } }),
+      });
+      expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rechaza draft con mesa abierta antes de escribir, con código y sesión', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({
+      ...cancelableOrder([]), state: 'draft', order_items: [],
+    });
+    prismaMock.table_sessions.findFirst.mockResolvedValue({ id: 55 });
+
+    await expect(service.cancelOrder(ORDER_ID, DTO)).rejects.toMatchObject({
+      errorCode: 'ORD_CANCEL_OPEN_TABLE_001',
+      response: expect.objectContaining({ details: { table_session_id: 55 } }),
+    });
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(stock.releaseReservationsByReference).not.toHaveBeenCalled();
   });
 
   it('pago succeeded en efectivo: registra el egreso por el monto exacto', async () => {
@@ -1909,9 +2607,16 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     expect(
       new Prisma.Decimal(payload.amount).equals(new Prisma.Decimal('59.50')),
     ).toBe(true);
+    expect(refundFlow.recordCancellationCashRefund).toHaveBeenCalledTimes(1);
+    expect(refundFlow.recordCancellationCashRefund).toHaveBeenCalledWith(
+      prismaMock, expect.objectContaining({ id: ORDER_ID }),
+      [CASH_PAYMENT_ID], new Prisma.Decimal('59.50'), DTO.reason,
+    );
+    expect(refundFlow.completeCancellationCashRefund).toHaveBeenCalledWith(81);
+    expect(refundFlow.emitCancellationCashRefund).toHaveBeenCalledTimes(1);
   });
 
-  it('suma los pagos en efectivo del lote (cobro mixto: sólo el efectivo sale)', async () => {
+  it('rechaza cobro mixto liquidado sin reversa de tarjeta; no sale efectivo', async () => {
     jest.spyOn(service as any, 'getOrder').mockResolvedValue(
       cancelableOrder([
         buildPayment({
@@ -1933,15 +2638,15 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('40.00') },
     ]);
 
-    await service.cancelOrder(ORDER_ID, DTO);
-
-    const [, payload] = movements.createManualMovement.mock.calls[0];
-    expect(
-      new Prisma.Decimal(payload.amount).equals(new Prisma.Decimal('40.00')),
-    ).toBe(true);
+    await expect(service.cancelOrder(ORDER_ID, DTO)).rejects.toMatchObject({
+      errorCode: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001',
+    });
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(movements.createManualMovement).not.toHaveBeenCalled();
+    expect(refundFlow.recordCancellationCashRefund).not.toHaveBeenCalled();
   });
 
-  it('NO-REGRESIÓN — venta con tarjeta: cancela igual y no toca la caja', async () => {
+  it('venta con tarjeta liquidada: 409 tipado sin cancelar pago ni orden', async () => {
     jest.spyOn(service as any, 'getOrder').mockResolvedValue(
       cancelableOrder([
         buildPayment({
@@ -1953,32 +2658,14 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     );
     prismaMock.payments.findMany.mockResolvedValue([]);
 
-    const result = await service.cancelOrder(ORDER_ID, DTO);
-
-    // El arnés alcanza el call site REAL: el claim atómico corrió con su WHERE
-    // condicional, el pago quedó anulado y el evento post-commit salió. Sin
-    // estas tres, el `not.toHaveBeenCalled` de abajo pasaría por no haber
-    // ejecutado nada — un mock muerto también "no llama" a la caja.
-    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: ORDER_ID,
-        state: { in: ['created', 'pending_payment', 'processing'] },
-      },
-      data: expect.objectContaining({ state: 'cancelled' }),
+    await expect(service.cancelOrder(ORDER_ID, DTO)).rejects.toMatchObject({
+      errorCode: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001',
     });
-    expect(prismaMock.payments.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: CARD_PAYMENT_ID } }),
-    );
-    expect(emitter.emit).toHaveBeenCalledWith(
-      'order.status_changed',
-      expect.objectContaining({
-        old_state: 'processing',
-        new_state: 'cancelled',
-      }),
-    );
-    expect(result).toMatchObject({ state: 'cancelled' });
-
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(emitter.emit).not.toHaveBeenCalled();
     expect(movements.createManualMovement).not.toHaveBeenCalled();
+    expect(refundFlow.recordCancellationCashRefund).not.toHaveBeenCalled();
   });
 
   it('pago en efectivo `pending`: nunca entró al cajón, no hay egreso', async () => {
@@ -2001,6 +2688,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     await service.cancelOrder(ORDER_ID, DTO);
 
     expect(movements.createManualMovement).not.toHaveBeenCalled();
+    expect(refundFlow.recordCancellationCashRefund).not.toHaveBeenCalled();
   });
 
   it('el egreso que falla deja constancia auditable (no es un catch mudo)', async () => {
@@ -2035,6 +2723,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
         metadata: expect.objectContaining({ cause: 'movement_write_failed' }),
       }),
     );
+    expect(refundFlow.completeCancellationCashRefund).not.toHaveBeenCalled();
   });
 
   it('sin sesión de caja abierta: no inventa el movimiento y escala la falla', async () => {

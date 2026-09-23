@@ -11,6 +11,7 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
 import { ResponseService } from '@common/responses/response.service';
 import { CreateOrderDto, UpdateOrderDto, OrderQueryDto } from './dto';
 import { order_state_enum } from '@prisma/client';
+import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 
 describe('OrdersController', () => {
   let controller: OrdersController;
@@ -402,6 +403,16 @@ describe('OrdersController', () => {
         400,
       );
     });
+
+    it('propaga el error tipado de motivo para que el filtro responda HTTP 400', async () => {
+      const error = new VendixHttpException(
+        ErrorCodes.ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001,
+      );
+      mockOrdersService.update.mockRejectedValue(error);
+      await expect(controller.update(1, { state: order_state_enum.processing } as UpdateOrderDto))
+        .rejects.toBe(error);
+      expect(mockResponseService.error).not.toHaveBeenCalled();
+    });
   });
 
   describe('remove', () => {
@@ -426,30 +437,19 @@ describe('OrdersController', () => {
       );
     });
 
-    it('should handle errors when deleting order', async () => {
+    it('propagates typed delete rejection so the exception filter preserves HTTP status/details', async () => {
       const orderId = 999;
-      const error = new Error('Order not found');
-
-      const errorResponse = {
-        success: false as const,
-        message: 'Error al eliminar la orden',
-        error: 'Order not found',
-        statusCode: 400,
-        timestamp: '2024-01-01T00:00:00.000Z',
-      };
+      const error = new VendixHttpException(
+        ErrorCodes.ORD_VALIDATE_001,
+        'Cannot delete an order with financial records',
+        { state: 'finished', reason: 'financial_evidence' },
+      );
 
       mockOrdersService.remove.mockRejectedValue(error);
-      mockResponseService.error.mockReturnValue(errorResponse);
-
-      const result = await controller.remove(orderId);
-
-      expect(result).toEqual(errorResponse);
+      await expect(controller.remove(orderId)).rejects.toBe(error);
       expect(mockOrdersService.remove).toHaveBeenCalledWith(orderId);
-      expect(mockResponseService.error).toHaveBeenCalledWith(
-        'Order not found',
-        'Order not found',
-        400,
-      );
+      expect(mockResponseService.error).not.toHaveBeenCalled();
+      expect(mockResponseService.deleted).not.toHaveBeenCalled();
     });
   });
 });

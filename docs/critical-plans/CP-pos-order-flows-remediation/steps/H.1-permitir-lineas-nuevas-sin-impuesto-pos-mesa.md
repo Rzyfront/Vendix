@@ -2,9 +2,9 @@
 id: H.1
 title: "Permitir líneas nuevas sin impuesto al cobrar desde POS mesa"
 phase: H
-status: pending
-owner: none
-updated: 2026-09-22
+status: done
+owner: Fabio
+updated: 2026-09-23
 contracts: [FB-03, FB-66, FB-67, DB-13, DB-43, ERR-01, ERR-02]
 adrs: [ADR-10]
 skills: [vendix-backend, vendix-tax-typing, vendix-error-handling, how-to-test]
@@ -26,11 +26,11 @@ skills: [vendix-backend, vendix-tax-typing, vendix-error-handling, how-to-test]
   - `curl` con payloads guardados `evidence/H1-pos-mesa-nueva.request.json` y `evidence/H1-pos-mesa-existente.request.json` a `$API/store/payments/pos`: ambos 2xx, orden y pago únicos, ninguna respuesta contiene el código de ERR-01. Guardar cuerpos y headers en `evidence/`.
   - `docker logs --tail 120 vendix_backend` después de los dos cobros: sin excepción ni error de transacción; comparar contra la hora de recompilación, no un `dist` viejo.
 - **Acceptance checklist:**
-  - [ ] POS → «Consumir en mesa» cobra una línea nueva sin impuesto con `table_id`, aun si abre la sesión en esa petición.
-  - [ ] POS cobra esa misma línea nueva sin impuesto con `table_session_id` de una mesa preexistente; no depende de `opened_at`.
-  - [ ] POS sin mesa y módulo Mesas mantienen su conducta; no se exige categoría explícita de 0 %.
-  - [ ] Tasas positivas, categoría 0 % y carrito mixto conservan precios y snapshots fiscales correctos.
-  - [ ] Líneas antiguas gravadas no se recalculan a cero aunque cambie el catálogo.
-  - [ ] `POS_TABLE_LINE_TAX_UNRESOLVABLE_001` no se lanza por ausencia de asignación actual en una línea nueva.
-  - [ ] Evidencia de Jest, curl, SQL de orden/pago y logs vinculada bajo `evidence/`.
-- **Status:** pending
+  - [x] POS → «Consumir en mesa» cobra una línea nueva sin impuesto con `table_id`, aun si abre la sesión en esa petición.
+  - [x] POS cobra esa misma línea nueva sin impuesto con `table_session_id` de una mesa preexistente; no depende de `opened_at`.
+  - [x] POS sin mesa y módulo Mesas mantienen su conducta; no se exige categoría explícita de 0 %.
+  - [x] Tasas positivas, categoría 0 % y carrito mixto conservan precios y snapshots fiscales correctos.
+  - [x] Líneas antiguas gravadas no se recalculan a cero aunque cambie el catálogo.
+  - [x] `POS_TABLE_LINE_TAX_UNRESOLVABLE_001` no se lanza por ausencia de asignación actual en una línea nueva.
+  - [x] Evidencia de Jest, curl, SQL de orden/pago y logs vinculada bajo `evidence/`.
+- **Status:** done · Fabio · 2026-09-23 · `evidence/H3-ui-pos-table-taxless.md`, `evidence/H3-ui-mesas-taxless.md`, `evidence/H3-historic-snapshot.md`, `evidence/H3-store3-full-matrix.md`. Ambos carriles POS mesa, Mesas y sin mesa dieron 201 sin asignación en dos tiendas de estado fiscal distinto; 0 %/IVA19/mixto y snapshots antiguos conservaron tasa/tipo/monto; un pago por orden. Jest PaymentsService 104/104.

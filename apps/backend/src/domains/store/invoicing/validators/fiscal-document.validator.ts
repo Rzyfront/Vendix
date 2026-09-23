@@ -1127,23 +1127,24 @@ export class FiscalDocumentValidator {
   // ---------------------------------------------------------------------------
 
   /**
-   * La regla se comprueba DOS veces y por buenas razones distintas.
+   * La regla se comprueba fila por fila, que es donde el operador puede
+   * corregirla y la misma granularidad con la que el emisor publica.
    *
-   * Fila por fila, porque es donde el operador puede corregirla. Y por GRUPO,
-   * porque el emisor agrupa las filas por esquema DIAN (01 IVA, 04 INC, 03 ICA…)
-   * y emite UN `cac:TaxSubtotal` por grupo, con `cbc:Percent` tomado de la
-   * PRIMERA fila del grupo. Dos filas de IVA con tarifas distintas (19 % y 5 %)
-   * producen un subtotal cuya tarifa declarada no explica su importe: cuadra fila
-   * a fila y no cuadra en el documento, que es lo que la DIAN valida.
+   * Ya NO se comprueba por grupo de esquema. El emisor agrupaba las filas sólo
+   * por esquema DIAN y declaraba la tarifa de la primera, y por eso existía
+   * `TAX_SCHEME_RATE_COLLISION`; hoy `UblCommonBuilder.buildTaxTotals` (y
+   * `buildLineTaxTotal`) abren UN `cac:TaxSubtotal` por (esquema, tarifa)
+   * —FAS01a/FAS04/FAX04 del Anexo 1.9— con `TaxTotal/TaxAmount` = Σ de sus
+   * subtotales (FAS02), y el CUFE suma los subtotales de cada esquema en su
+   * `ValImp`. IVA 19 % + IVA 5 % sale como dos subtotales que cuadran cada uno
+   * `base × tarifa`, así que bloquearlo frenaba un documento válido. El código
+   * sigue en el catálogo para lectores de reportes viejos; nadie lo emite.
    */
   private checkTaxSubtotals(
     taxes: FiscalDocumentTaxInput[],
   ): FiscalDocumentFinding[] {
     const findings: FiscalDocumentFinding[] = [];
     if (taxes.length === 0) return findings;
-
-    /** `código de esquema` → filas que el emisor va a fusionar en un subtotal. */
-    const groups = new Map<string, FiscalDocumentTaxInput[]>();
 
     taxes.forEach((tax, index) => {
       const scheme = this.schemeCodeOf(tax);
@@ -1178,10 +1179,6 @@ export class FiscalDocumentValidator {
         });
         return;
       }
-
-      const bucket = groups.get(scheme);
-      if (bucket) bucket.push(tax);
-      else groups.set(scheme, [tax]);
 
       const taxable = toDecimal(tax.taxable_amount);
       const declared = toDecimal(tax.tax_amount);
@@ -1239,26 +1236,6 @@ export class FiscalDocumentValidator {
         },
       });
     });
-
-    for (const [scheme, rows] of groups) {
-      if (rows.length < 2) continue;
-      const rates = new Set(rows.map((row) => dianRate(row.tax_rate)));
-      if (rates.size < 2) continue;
-
-      findings.push({
-        code: 'TAX_SCHEME_RATE_COLLISION',
-        severity: 'blocker',
-        category: 'arithmetic',
-        field: 'taxes',
-        problem: `El documento lleva ${rates.size} tarifas distintas (${[
-          ...rates,
-        ].join(
-          ', ',
-        )}) para el mismo tributo ${scheme}. El emisor las fusiona en un solo \`cac:TaxSubtotal\` y declara la tarifa de la primera, así que el subtotal resultante declara un importe que su propia tarifa no explica y la DIAN lo rechaza por descuadre.`,
-        fix: `Separa el documento por tarifa —un documento por tarifa de ${scheme}— o corrige las líneas para que todas usen la misma, en ${SCREEN_DOCUMENT_LINES}.`,
-        details: { dian_tax_code: scheme, tax_rates: [...rates] },
-      });
-    }
 
     return findings;
   }

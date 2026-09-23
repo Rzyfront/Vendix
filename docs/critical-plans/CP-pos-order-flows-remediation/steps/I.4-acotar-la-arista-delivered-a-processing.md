@@ -2,7 +2,7 @@
 id: I.4
 title: "Acotar la arista `delivered→processing`"
 phase: I
-status: pending
+status: in-progress
 owner: none
 updated: 2026-09-20
 contracts: [FB-17, DB-01, DB-08, DB-23]
@@ -28,10 +28,10 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-error-handling, how-to-te
   - SQL de solo lectura de control: `SELECT k.id FROM kitchen_ticket_items k JOIN order_items i ON i.id = k.order_item_id WHERE i.delivered_at IS NOT NULL AND k.status <> 'delivered';` = 0 filas → `evidence/I4-sincronia-cocina.txt`
 - **Acceptance checklist:**
   - [ ] El puente de reversa del KDS sigue pudiendo devolver una orden entregada a preparación, sin fricción nueva
-  - [ ] El PATCH genérico que recorre la arista queda auditado como forzado, con motivo obligatorio y usuario
-  - [ ] Un forzado sin motivo se rechaza con código tipado
+  - [x] El PATCH genérico que recorre la arista queda auditado como forzado, con motivo obligatorio y usuario
+  - [x] Un forzado sin motivo se rechaza con código tipado
   - [ ] El carril de transición masiva conserva su cierre actual y no recupera el destino de preparación
   - [ ] La sincronía entre entrega de ítem y estado del ítem de ticket no cambia en ningún caso
-  - [ ] El comentario de la máquina de estados nombra al dueño de la arista
+  - [x] El comentario de la máquina de estados nombra al dueño de la arista
   - [ ] Ninguna auditoría histórica se reescribe; la consulta solo cuenta las que ya existen
-- **Status:** pending
+- **Status:** in-progress — código provisional `eea29dbdf`. API local orden QA #1123: PATCH sin motivo 400 `ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001` y estado intacto; con motivo 200, `processing` y `forced_transition.forced=true` con usuario 162 y motivo (`evidence/I4-*`). Falta KDS runtime, regresión total de spec y aceptación de ADR-09.

@@ -2,8 +2,8 @@
 id: C.3
 title: "Registrar y dar mensaje accionable a los códigos de cocina"
 phase: C
-status: pending
-owner: none
+status: in-progress
+owner: Leibniz
 updated: 2026-09-20
 contracts: [ERR-07, ERR-08, ERR-09, ERR-10, ERR-11, ERR-12, ERR-13, FB-35, FB-41]
 adrs: [ADR-06]
@@ -38,4 +38,4 @@ skills: [vendix-error-handling, vendix-restaurant-ops, vendix-frontend, how-to-t
   - [ ] El docblock del servicio de mesa del frontend cita el código realmente lanzado, no la entrada muerta.
   - [ ] La entrada sin lanzadores queda marcada como deprecada con puntero al código vigente; sigue en 0 lanzadores.
   - [ ] Los tres rechazos se provocan por curl y ninguno devuelve 500 ni cae al texto genérico.
-- **Status:** pending
+- **Status:** in-progress — catálogo/mensajes en 83f5e67f2; falta Jest estable, curl y E2E.

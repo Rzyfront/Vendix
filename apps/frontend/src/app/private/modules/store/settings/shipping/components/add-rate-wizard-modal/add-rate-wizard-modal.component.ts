@@ -1,5 +1,6 @@
 import {Component, ChangeDetectionStrategy, OnInit, inject, input, output, signal, computed, DestroyRef} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { startWith } from 'rxjs';
 
 import {
   FormBuilder,
@@ -12,6 +13,7 @@ import {
   ShippingRateType,
   CreateRateDto,
   UpdateRateDto,
+  ShippingRateTaxOptions,
 } from '../../interfaces/shipping-zones.interface';
 import { ShippingMethodsService } from '../../services/shipping-methods.service';
 import { ZoneModalComponent } from '../zone-modal/zone-modal.component';
@@ -23,8 +25,43 @@ import {
   ToastService,
   StepsLineComponent,
   SettingToggleComponent,
+  SelectorComponent,
 } from '../../../../../../../shared/components/index';
+import { SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import { StepsLineItem } from '../../../../../../../shared/components/steps-line/steps-line.component';
+import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
+
+/**
+ * Vista previa informativa del impuesto incluido en el precio de la tarifa.
+ * El precio configurado es lo que paga el cliente; la base se despeja como
+ * `cost / (1 + r)` redondeada a 2 decimales. Solo orienta: el cálculo que se
+ * factura lo hace el backend al vender.
+ */
+export interface ShippingTaxPreview {
+  cost: number;
+  tax: number;
+  label: string;
+}
+
+const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
+
+export function computeShippingTaxPreview(
+  cost: number,
+  rate_percent: number | null | undefined,
+  label: string | null,
+): ShippingTaxPreview | null {
+  if (!label || rate_percent == null || !(Number(rate_percent) > 0)) return null;
+  if (!Number.isFinite(cost) || cost <= 0) return null;
+  const base = round2(cost / (1 + Number(rate_percent) / 100));
+  return { cost, tax: round2(cost - base), label };
+}
+
+/** El selector trabaja con `number`; `null` es «Sin impuesto». */
+export function toTaxCategoryId(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
 
 @Component({
   selector: 'app-add-rate-wizard-modal',
@@ -37,6 +74,8 @@ import { StepsLineItem } from '../../../../../../../shared/components/steps-line
     IconComponent,
     InputComponent,
     SettingToggleComponent,
+    SelectorComponent,
+    CurrencyPipe,
     ZoneModalComponent
 ],
   templateUrl: './add-rate-wizard-modal.component.html',
@@ -59,6 +98,8 @@ export class AddRateWizardModalComponent implements OnInit {
 
   close = output<void>();
   saved = output<void>();
+  /** Se emite al editar una zona desde el wizard para que el padre recargue. */
+  zones_changed = output<void>();
 
   // ─── State ───
 
@@ -68,6 +109,14 @@ export class AddRateWizardModalComponent implements OnInit {
   is_saving = signal<boolean>(false);
   is_loading_zones = signal<boolean>(false);
   zones_list = signal<ShippingZone[]>([]);
+  /** Zona abierta en `<app-zone-modal mode="edit">` (fuera del modal principal). */
+  editing_zone = signal<ShippingZone | null>(null);
+
+  // ─── Impuesto del envío ───
+
+  tax_options = signal<ShippingRateTaxOptions | null>(null);
+  is_loading_tax_options = signal<boolean>(false);
+  tax_options_error = signal<string | null>(null);
 
   // ─── Steps config ───
 
@@ -96,12 +145,97 @@ export class AddRateWizardModalComponent implements OnInit {
     free_shipping_threshold: [null as number | null],
     is_active: [true],
     name: [''],
+    tax_category_id: [null as number | null],
   });
+
+  /** Puente zoneless del valor del formulario (los `computed` lo leen). */
+  private readonly form_value = toSignal(
+    this.rate_form.valueChanges.pipe(startWith(this.rate_form.getRawValue())),
+    { initialValue: this.rate_form.getRawValue() },
+  );
 
   // ─── Computed ───
 
   can_proceed_step1 = computed(() => this.selected_zone_id() !== null);
   is_edit_mode = computed(() => this.edit_rate() !== null);
+
+  /** En edición la zona de la tarifa no se cambia; solo se puede editar. */
+  fixed_zone = computed<ShippingZone | null>(() => {
+    if (!this.is_edit_mode()) return null;
+    const id = this.selected_zone_id();
+    return this.zones_list().find((z) => z.id === id) ?? null;
+  });
+
+  visible_zones = computed<ShippingZone[]>(() => {
+    const fixed = this.fixed_zone();
+    if (this.is_edit_mode()) return fixed ? [fixed] : [];
+    return this.zones_list();
+  });
+
+  is_free_type = computed(() => this.form_value().type === 'free');
+
+  tax_selector_options = computed<SelectorOption[]>(() => {
+    const options: SelectorOption[] = [
+      // `SelectorOption.value` no admite null en su tipo, pero el <select>
+      // nativo usa [ngValue] y compara por identidad: null es «Sin impuesto».
+      { value: null as unknown as number, label: 'Sin impuesto' },
+    ];
+    const categories = this.tax_options()?.categories ?? [];
+    for (const c of categories) {
+      const tax_label = this.shippingService.getRateTaxLabel(c);
+      const base = tax_label ? `${c.name} (${tax_label})` : c.name;
+      options.push({
+        value: c.id,
+        label: c.eligible ? base : `${base} — ${c.reason || 'No disponible'}`,
+        disabled: !c.eligible,
+        description: c.eligible ? undefined : c.reason,
+      });
+    }
+    // La tarifa en edición puede traer una categoría que ya no aparece en el
+    // catálogo: se conserva visible para no perder la selección en silencio.
+    const current = this.edit_rate()?.tax_category;
+    if (current && !categories.some((c) => c.id === current.id)) {
+      const tax_label = this.shippingService.getRateTaxLabel(current);
+      options.push({
+        value: current.id,
+        label: tax_label ? `${current.name} (${tax_label})` : current.name,
+      });
+    }
+    return options;
+  });
+
+  selected_tax = computed<{ rate_percent: number | null; label: string | null } | null>(() => {
+    const id = toTaxCategoryId(this.form_value().tax_category_id);
+    if (id === null) return null;
+    const option = this.tax_options()?.categories.find((c) => c.id === id);
+    if (option) {
+      return {
+        rate_percent: option.rate_percent,
+        label: this.shippingService.getRateTaxLabel(option),
+      };
+    }
+    const current = this.edit_rate()?.tax_category;
+    if (current && current.id === id) {
+      return {
+        rate_percent: current.rate_percent,
+        label: this.shippingService.getRateTaxLabel(current),
+      };
+    }
+    return null;
+  });
+
+  tax_preview = computed<ShippingTaxPreview | null>(() => {
+    const tax = this.selected_tax();
+    if (!tax || this.is_free_type()) return null;
+    return computeShippingTaxPreview(
+      Number(this.form_value().base_cost),
+      tax.rate_percent,
+      tax.label,
+    );
+  });
+
+  tax_suggestion = computed(() => this.tax_options()?.suggestion?.message ?? null);
+  tax_warnings = computed(() => this.tax_options()?.warnings ?? []);
 
   // ─── Dynamic labels (extracted from rates-modal) ───
 
@@ -173,6 +307,7 @@ export class AddRateWizardModalComponent implements OnInit {
 
   ngOnInit(): void {
     this.zones_list.set(this.existing_zones());
+    this.loadTaxOptions();
 
     const rate = this.edit_rate();
     if (rate) {
@@ -189,9 +324,34 @@ export class AddRateWizardModalComponent implements OnInit {
             : null,
         is_active: rate.is_active,
         name: rate.name || '',
+        tax_category_id: rate.tax_category?.id ?? rate.tax_category_id ?? null,
       });
       this.current_step.set(1);
+      // La lista del padre puede no traer la zona de la tarifa en edición.
+      if (!this.zones_list().some((z) => z.id === rate.shipping_zone_id)) {
+        this.reloadZones();
+      }
     }
+  }
+
+  loadTaxOptions(): void {
+    this.is_loading_tax_options.set(true);
+    this.tax_options_error.set(null);
+    this.shippingService
+      .getRateTaxOptions()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (options) => {
+          this.tax_options.set(options);
+          this.is_loading_tax_options.set(false);
+        },
+        error: () => {
+          this.tax_options_error.set(
+            'No se pudieron cargar los impuestos. Puedes guardar la tarifa sin impuesto.',
+          );
+          this.is_loading_tax_options.set(false);
+        },
+      });
   }
 
   // ─── Actions ───
@@ -235,6 +395,50 @@ export class AddRateWizardModalComponent implements OnInit {
     const mapped = countries.map((c) => countryNames[c] || c);
     if (mapped.length <= 3) return mapped.join(', ');
     return `${mapped.slice(0, 3).join(', ')} +${mapped.length - 3}`;
+  }
+
+  // ─── Editar zona desde el wizard ───
+
+  openZoneEdit(zone: ShippingZone, event: Event): void {
+    event.stopPropagation();
+    for (const notice of this.zoneEditNotices(zone)) {
+      this.toastService.show({ variant: 'warning', description: notice, duration: 6000 });
+    }
+    this.editing_zone.set(zone);
+  }
+
+  /** Avisos antes de editar una zona compartida o copiada del sistema. */
+  zoneEditNotices(zone: ShippingZone): string[] {
+    const notices: string[] = [];
+    const usage = zone._count?.shipping_rates ?? 0;
+    if (usage > 1) {
+      notices.push(`Esta zona la usan ${usage} tarifas: los cambios aplican a todas.`);
+    }
+    if (zone.source_type === 'system_copy') {
+      notices.push(
+        'Esta zona es copia de una zona del sistema: si la sincronizas con el sistema, se sobrescribirán tus cambios.',
+      );
+    }
+    return notices;
+  }
+
+  onZoneEdited(): void {
+    this.reloadZones();
+    this.zones_changed.emit();
+  }
+
+  /** Recarga las zonas conservando la zona elegida. */
+  reloadZones(): void {
+    this.is_loading_zones.set(true);
+    this.shippingService.getStoreZones().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (zones) => {
+        this.zones_list.set(zones);
+        this.is_loading_zones.set(false);
+      },
+      error: () => {
+        this.is_loading_zones.set(false);
+      },
+    });
   }
 
   onZoneCreated(): void {
@@ -317,6 +521,9 @@ export class AddRateWizardModalComponent implements OnInit {
       max_val: maxVal,
       free_shipping_threshold: freeThreshold,
       is_active: values.is_active ?? true,
+      // Gratis no cobra envío: no hay impuesto que llevar.
+      tax_category_id:
+        values.type === 'free' ? null : toTaxCategoryId(values.tax_category_id),
     };
 
     const obs = this.is_edit_mode()
@@ -333,8 +540,15 @@ export class AddRateWizardModalComponent implements OnInit {
         this.saved.emit();
         this.close.emit();
       },
-      error: () => {
-        this.toastService.show({ variant: 'error', description: 'Error al guardar la tarifa' });
+      error: (err: unknown) => {
+        const message = err instanceof Error ? err.message : '';
+        this.toastService.show({
+          variant: 'error',
+          description:
+            message && message !== 'An unknown error occurred'
+              ? `Error al guardar la tarifa: ${message}`
+              : 'Error al guardar la tarifa',
+        });
         this.is_saving.set(false);
       },
     });

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { CartService } from '../cart/cart.service';
@@ -58,6 +58,11 @@ import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availabil
 import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 import { FiscalInvoiceThresholdService } from '@common/services/fiscal-invoice-threshold.service';
 import { CheckoutIdempotencyService } from './checkout-idempotency.service';
+import { ShippingTaxService } from '../../store/shipping/services/shipping-tax.service';
+import {
+  EMPTY_SHIPPING_TAX,
+  type ShippingTaxSnapshot,
+} from '../../store/shipping/utils/shipping-tax.util';
 
 /**
  * QUI-INC — la fila de catálogo que `TaxesService.calculateProductTaxes`
@@ -198,7 +203,46 @@ export class CheckoutService {
     private readonly fiscalInvoiceThreshold: FiscalInvoiceThresholdService,
     // A.4 CP-facturacion-fixes: Idempotency-Key store (same module, no cycle).
     private readonly checkoutIdempotency: CheckoutIdempotencyService,
+    // Impuesto opcional por tarifa de envío: copia congelada en la orden.
+    // `@Optional()` para no romper los TestingModule existentes; sin él (sólo
+    // en specs) el envío sale sin impuesto.
+    @Optional() private readonly shippingTaxService?: ShippingTaxService,
   ) {}
+
+  /**
+   * Copia del impuesto del envío para una orden cuyo costo salió de la tarifa
+   * `rate_id` (checkout y WhatsApp). Sin tarifa o sin servicio ⇒ vacía. Nunca
+   * lanza (ver `ShippingTaxService.snapshotForRate`).
+   */
+  private async resolveCheckoutShippingTax(
+    rate_id: number | null,
+    shipping_cost: number,
+    store_id: number | null | undefined,
+  ): Promise<ShippingTaxSnapshot> {
+    if (!rate_id || !store_id || !this.shippingTaxService) {
+      return { ...EMPTY_SHIPPING_TAX };
+    }
+    return this.shippingTaxService.snapshotForRate(null, rate_id, shipping_cost, {
+      store_id,
+    });
+  }
+
+  /**
+   * Proyección de la copia del envío como «línea» para la compuerta F4 de
+   * IVA: el IVA del envío también es IVA cobrado en la venta.
+   */
+  private static shippingTaxGuardLine(snapshot: ShippingTaxSnapshot): {
+    item_taxes: Array<{ tax_type: string | null; amount: number }>;
+  } {
+    return {
+      item_taxes: [
+        {
+          tax_type: snapshot.shipping_tax_type,
+          amount: Number(snapshot.shipping_tax_amount || 0),
+        },
+      ],
+    };
+  }
 
   /**
    * MIME types accepted as payment receipts attached to checkout. Aligned with
@@ -1603,8 +1647,20 @@ export class CheckoutService {
       itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0),
     );
 
+    // Copia del impuesto del envío (tarifa elegida). Va incluido en
+    // `shipping_cost`: no cambia `grand_total`.
+    const shipping_tax = await this.resolveCheckoutShippingTax(
+      shipping_rate_id,
+      shipping_cost,
+      store_id,
+    );
+
     // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
-    await this.assertCheckoutVatAllowed(itemsWithTaxes);
+    // El IVA del envío cuenta igual que el de los productos.
+    await this.assertCheckoutVatAllowed([
+      ...itemsWithTaxes,
+      CheckoutService.shippingTaxGuardLine(shipping_tax),
+    ]);
 
     // Restaurant fire-to-kitchen deferral: prepared items with an active
     // recipe are excluded from reservation (computed once for the whole cart).
@@ -1679,6 +1735,8 @@ export class CheckoutService {
         shipping_cost: shipping_cost,
         shipping_method_id: shipping_method_id,
         shipping_rate_id: shipping_rate_id,
+        // Copia congelada del impuesto del envío (vacía sin tarifa gravada).
+        ...shipping_tax,
         delivery_type: delivery_type,
         grand_total: grand_total,
         shipping_address_id,
@@ -2452,6 +2510,17 @@ export class CheckoutService {
       wa_delivery_type = deriveDeliveryType(method.type);
     }
 
+    // Copia del impuesto del envío (endpoint WhatsApp antiguo). La compuerta
+    // F4 de productos ya corrió arriba; aquí se evalúa el IVA del envío.
+    const wa_shipping_tax = await this.resolveCheckoutShippingTax(
+      wa_shipping_rate_id,
+      wa_shipping_cost,
+      wa_store_id,
+    );
+    await this.assertCheckoutVatAllowed([
+      CheckoutService.shippingTaxGuardLine(wa_shipping_tax),
+    ]);
+
     const grand_total = this.roundMoney(
       Math.max(
         0,
@@ -2485,6 +2554,8 @@ export class CheckoutService {
         shipping_cost: wa_shipping_cost,
         shipping_method_id: wa_shipping_method_id,
         shipping_rate_id: wa_shipping_rate_id,
+        // Copia congelada del impuesto del envío (vacía sin tarifa gravada).
+        ...wa_shipping_tax,
         delivery_type: wa_delivery_type,
         grand_total: grand_total,
         shipping_address_id,

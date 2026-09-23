@@ -581,9 +581,12 @@ describe('ProductsService', () => {
       // it found against the requested ids and names the missing ones, so an
       // unmocked findMany makes it fail on `.length` of undefined before ever
       // reaching product_tax_assignments.createMany.
+      // P1-4: tipos distintos y compatibles (INC + ICA). Dos categorías sin
+      // tipo contarían ambas como IVA y el create las rechazaría. (INC y no
+      // IVA: el doble no configura fiscal_data y el gate F4 bloquearía IVA.)
       mockPrismaService.tax_categories.findMany.mockResolvedValue([
-        { id: 3 },
-        { id: 4 },
+        { id: 3, tax_type: 'inc', tax_rates: [{ store_id: 1 }] },
+        { id: 4, tax_type: 'ica', tax_rates: [{ store_id: null }] },
       ]);
       mockPrismaService.$transaction.mockImplementation((callback) => {
         return callback(mockPrismaService);
@@ -608,6 +611,77 @@ describe('ProductsService', () => {
           { tax_category_id: 4, product_id: 1 },
         ],
       });
+    });
+  });
+
+  describe('P1-4 — combinación de impuestos del producto', () => {
+    const txPassthrough = () =>
+      mockPrismaService.$transaction.mockImplementation((callback) =>
+        callback(mockPrismaService),
+      );
+
+    it('create rechaza IVA + INC con 400 PROD_TAX_COMBO_001 sin escribir asignaciones', async () => {
+      mockPrismaService.products.create.mockResolvedValue({ id: 1 });
+      mockPrismaService.tax_categories.findMany.mockResolvedValue([
+        { id: 3, name: 'IVA 19%', tax_type: 'iva', tax_rates: [] },
+        { id: 4, name: 'INC 8%', tax_type: 'inc', tax_rates: [] },
+      ]);
+      txPassthrough();
+
+      const err: any = await service
+        .create({
+          name: 'Test Product',
+          base_price: 99.99,
+          sku: 'TEST-001',
+          store_id: 1,
+          tax_category_ids: [3, 4],
+        })
+        .catch((e) => e);
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('PROD_TAX_COMBO_001');
+      expect(err.getStatus()).toBe(400);
+      expect(err.getResponse().message).toContain('IVA e INC son excluyentes');
+      expect(
+        mockPrismaService.product_tax_assignments.createMany,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('update rechaza dos categorías del mismo tipo antes de tocar asignaciones', async () => {
+      const existingProduct = {
+        id: 1,
+        store_id: 1,
+        name: 'Original Product',
+        base_price: 99.99,
+        state: ProductState.ACTIVE,
+        stock_levels: [],
+        product_variants: [],
+        product_images: [],
+        _count: { product_variants: 0, product_images: 0, reviews: 0 },
+      };
+      mockPrismaService.products.findFirst.mockResolvedValue(existingProduct);
+      mockPrismaService.products.update.mockResolvedValue(existingProduct);
+      mockPrismaService.tax_categories.findMany.mockResolvedValue([
+        { id: 3, name: 'IVA 19%', tax_type: 'iva', tax_rates: [] },
+        { id: 5, name: 'IVA 5%', tax_type: null, tax_rates: [] },
+      ]);
+      txPassthrough();
+
+      const err: any = await service
+        .update(1, { tax_category_ids: [3, 5] })
+        .catch((e) => e);
+
+      expect(err).toBeInstanceOf(VendixHttpException);
+      expect(err.errorCode).toBe('PROD_TAX_COMBO_001');
+      expect(err.getResponse().details).toEqual(
+        expect.objectContaining({
+          reason: 'duplicate_tax_type',
+          tax_category_ids: [3, 5],
+        }),
+      );
+      expect(
+        mockPrismaService.product_tax_assignments.deleteMany,
+      ).not.toHaveBeenCalled();
     });
   });
 

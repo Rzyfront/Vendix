@@ -62,6 +62,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
+      [dialog]="true"
       [showCloseButton]="false"
       class="cm-aa-scope"
       >

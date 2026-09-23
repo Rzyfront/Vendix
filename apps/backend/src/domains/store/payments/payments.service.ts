@@ -3,10 +3,11 @@ import {
   BadRequestException,
   ConflictException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { Prisma, payment_processing_mode_enum } from '@prisma/client';
+import { Prisma, payment_processing_mode_enum, table_status_enum } from '@prisma/client';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import {
@@ -35,7 +36,6 @@ import {
 import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
 import { assertVariantRequiredForPrepared } from '../orders/utils/variant-required.validator';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { buildTaxBreakdown } from 'src/common/interfaces/tax-breakdown.interface';
 import {
   resolveTierSnapshotsForItems,
   type TierSnapshot,
@@ -89,6 +89,15 @@ import {
 } from '@common/audit/audit.service';
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
+import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
+import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
+import { assertOrderLineTotalInvariant } from '../orders/shared/order-arithmetic.guard';
+import {
+  EMPTY_SHIPPING_TAX,
+  type ShippingTaxSnapshot,
+} from '../shipping/utils/shipping-tax.util';
+import { buildOrderSaleTaxPayload } from './utils/order-sale-tax-payload.util';
+import { resolvePaymentReceivedSaleFields } from './utils/payment-sale-share.util';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -167,6 +176,15 @@ export class PaymentsService {
     // here because `@Global()` AuditModule already exports it, so DI resolves
     // without touching the module wiring.
     private readonly auditService: AuditService,
+    // Impuesto opcional por tarifa de envío: copia congelada en la orden POS
+    // a domicilio. `@Optional()` para no romper los TestingModule existentes;
+    // sin él (sólo en specs) el envío sale sin impuesto.
+    @Optional() private readonly shippingTaxService?: ShippingTaxService,
+    // Recalcula en el servidor el costo de una tarifa calculada (peso/precio)
+    // para decidir si el costo cobrado es el de la tarifa o uno manual.
+    // `@Optional()` por la misma razón; sin él una tarifa calculada sale sin
+    // impuesto (fallo seguro: nunca se inventa un impuesto).
+    @Optional() private readonly shippingCalculatorService?: ShippingCalculatorService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -741,6 +759,24 @@ export class PaymentsService {
 
       await this.validateUserAccess(user, createPosPaymentDto.store_id);
 
+      // E.5: a delivery intent must never fall through to the POS default
+      // `direct_delivery`. Reject before the payment transaction so no order,
+      // stock movement or charge can be born without a dispatch method.
+      const hasShippingAddress =
+        createPosPaymentDto.shipping_address_id != null ||
+        createPosPaymentDto.shipping_address_snapshot != null;
+      const deliveryIntent =
+        createPosPaymentDto.delivery_type === 'home_delivery' ||
+        (hasShippingAddress &&
+          (createPosPaymentDto.delivery_type == null ||
+            createPosPaymentDto.delivery_type === 'direct_delivery'));
+      if (deliveryIntent && createPosPaymentDto.shipping_method_id == null) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_SHIP_REQUIRED_FOR_FLOW_001,
+          'Selecciona un método de envío antes de guardar o cobrar esta venta.',
+        );
+      }
+
       // Resolve store currency once if not provided in DTO
       if (!createPosPaymentDto.currency) {
         createPosPaymentDto.currency =
@@ -815,7 +851,6 @@ export class PaymentsService {
         | {
             allow_anonymous_sales?: boolean;
             allow_alias_sales?: boolean;
-            tax_line_gate?: 'block' | 'warn' | 'off';
           }
         | undefined;
       const allowAnonymousSales = posSettings?.allow_anonymous_sales === true;
@@ -823,35 +858,6 @@ export class PaymentsService {
       // requiere el flag POS y un alias no vacío.
       const allowAliasSales = posSettings?.allow_alias_sales === true;
       const hasAlias = !!createPosPaymentDto.customer_alias;
-
-      // ----------------------------------------------------------------
-      // F-127 — severidad de la compuerta fiscal bloqueante del carril POS.
-      //
-      // Hoy, si `POS_TABLE_LINE_TAX_UNRESOLVABLE_001` dispara en una tienda
-      // por una combinación de catálogo no contemplada, esa tienda NO PUEDE
-      // COBRAR hasta que se abra un revert, se mergee y corra la tubería de
-      // despliegue completa (`deploy-backend-ec2.yml`: docker stop, sleep
-      // 40, espera de worker hasta 90s, seeds) con la caja parada.
-      // `settings.pos.tax_line_gate` es la válvula de escape: baja la
-      // severidad de esa compuerta SIN redeploy, por tienda, con un simple
-      // cambio de settings.
-      //
-      // Se resuelve UNA sola vez acá (settings ya está en memoria por
-      // `require_session_for_sales`, línea ~727) y se encadena por
-      // parámetro hasta `buildPosOrderItem` — releerla ahí adentro
-      // multiplicaría `SettingsService.getSettings()` (dos `findUnique` sin
-      // caché) por cada línea del carrito, dentro del `Promise.all` que ya
-      // sostiene locks de la transacción (mismo patrón de N+1 que P2028).
-      //
-      // Default `'block'` = comportamiento de HOY sin configurar: ninguna
-      // tienda cambia de comportamiento por default. Bajar a 'warn'/'off'
-      // es una MEDIDA TEMPORAL DE EMERGENCIA, no un ajuste permanente — ver
-      // el comentario junto al throw en `buildPosOrderItem`.
-      const taxLineGateSeverity: 'block' | 'warn' | 'off' =
-        posSettings?.tax_line_gate === 'warn' ||
-        posSettings?.tax_line_gate === 'off'
-          ? posSettings.tax_line_gate
-          : 'block';
 
       if (
         requireCustomerData &&
@@ -893,6 +899,7 @@ export class PaymentsService {
         }
       }
 
+      let emitSessionPaidAfterCommit: (() => void) | undefined;
       const result = await this.prisma.$transaction(async (tx) => {
         // 1. Create or update order. Backend recalculates promotions/coupon
         // server-side and returns the persistence-ready snapshots so this
@@ -901,7 +908,6 @@ export class PaymentsService {
           tx,
           createPosPaymentDto,
           user,
-          taxLineGateSeverity,
         ))!;
         const order = orderCreation.order;
         // QUI-431 — ¿la venta tiene productos serializados? Calculado UNA vez
@@ -1348,10 +1354,9 @@ export class PaymentsService {
 
         // 2. Process payment if required
         let payment: any = null;
-        const isDigitalPayment = await this.isDeferredDigitalMethod(
-          tx,
-          createPosPaymentDto,
-        );
+        let paidSessionId: number | null = null;
+        const { isDigitalPayment, isOnDelivery } =
+          await this.resolvePosPaymentRoute(tx, createPosPaymentDto);
 
         if (createPosPaymentDto.requires_payment && !isDigitalPayment) {
           // Direct methods (cash, card, bank_transfer) — process inside transaction
@@ -1359,11 +1364,25 @@ export class PaymentsService {
             tx,
             order,
             createPosPaymentDto,
+            isOnDelivery,
           );
+          if (
+            orderCreation.tableSessionOrderId != null &&
+            payment?.state === 'succeeded'
+          ) {
+            const projection =
+              await this.tableSessionsService.projectOrderPaymentToTableSession(
+                order.id,
+                payment.id,
+                tx,
+              );
+            paidSessionId = projection?.sessionId ?? null;
+            emitSessionPaidAfterCommit = projection?.emitAfterCommit;
+          }
           await this.updateOrderPaymentStatus(
             tx,
             order.id,
-            'succeeded',
+            isOnDelivery ? 'pending_payment' : 'succeeded',
             // QUI-431 — difiere a fulfillment para domicilio O serializado.
             // OJO: tras forzar el delivery_type, order.delivery_type ya es
             // 'pickup' para serializado, por eso se incluye `hasSerialized`.
@@ -1431,6 +1450,7 @@ export class PaymentsService {
         const isDirectDeliveryFinished =
           createPosPaymentDto.requires_payment &&
           !isDigitalPayment &&
+          !isOnDelivery &&
           order.delivery_type !== 'home_delivery' &&
           !hasSerialized;
 
@@ -1499,6 +1519,14 @@ export class PaymentsService {
               // `tax_rate × total_price` sigue siendo la comparación correcta
               // con o sin promoción/cupón — no hace falta restar nada acá.
               total_price: true,
+              // Descuento de orden (`buildOrderSaleTaxPayload` →
+              // `projectOrderInvoiceLines`): unidades y cuota escalar de la
+              // línea, para proyectar el impuesto neto del descuento igual
+              // que la factura.
+              quantity: true,
+              tax_amount_item: true,
+              weight: true,
+              price_unit_quantity: true,
               // `is_inclusive` NO se lee acá, a propósito: `total_price` sale
               // de `unitBasePrice`, que es el NETO en las dos ramas
               // (`finalUnitPrice / (1 + total_rate)` en la rama custom,
@@ -1511,8 +1539,13 @@ export class PaymentsService {
               },
             },
           });
-          const tax_breakdown = buildTaxBreakdown(
-            orderItemsWithTaxes.flatMap((item) =>
+          // Impuesto del envío (copia congelada en la orden): `orders.tax_amount`
+          // NO lo incluye y `shipping_cost` es el bruto. El helper compartido
+          // (también lo usa el webhook) devuelve el flete NETO para 414505, el
+          // impuesto total (productos + envío) y el desglose con la fila del
+          // envío. Sin copia la salida es la histórica.
+          const sale_tax = buildOrderSaleTaxPayload({
+            product_tax_rows: orderItemsWithTaxes.flatMap((item) =>
               (item.order_item_taxes || []).map((tax) => ({
                 ...tax,
                 // F-111 — la base de CADA impuesto de la línea es el
@@ -1523,7 +1556,10 @@ export class PaymentsService {
                 taxable_amount: Number(item.total_price || 0),
               })),
             ),
-          );
+            order,
+            order_items: orderItemsWithTaxes,
+          });
+          const tax_breakdown = sale_tax.tax_breakdown;
 
           // CASO 2 (suffered): a customer who is a withholding agent retains
           // us on this sale, turning the withheld amount into an advance asset
@@ -1592,13 +1628,18 @@ export class PaymentsService {
                 order_number: order.order_number,
                 amount: payment.amount,
                 subtotal_amount: Number(order.subtotal_amount || 0),
-                tax_amount: Number(order.tax_amount || 0),
+                // Productos + impuesto del envío (si la orden tiene copia).
+                tax_amount: sale_tax.tax_amount,
                 // Plan Despacho Economía — FASE 4 paso 15. Ingreso de flete
                 // separado en cuenta 414505 al pagar un POS directo con flete.
-                shipping_amount: Number(order.shipping_cost || 0),
+                // NETO del impuesto del envío (= shipping_cost − shipping_tax_amount).
+                shipping_amount: sale_tax.shipping_amount,
                 tax_breakdown,
                 withholding_breakdown: wh.lines,
-                discount_amount: Number(order.discount_amount || 0),
+                // Con descuento de orden: sólo su parte de BASE (4175); el
+                // impuesto ya viene neto del descuento (misma proyección que
+                // la factura). Sin descuento = `orders.discount_amount`.
+                discount_amount: sale_tax.discount_amount,
                 // GAP-6 — propina (sin IVA). El asiento la reconoce como pasivo
                 // custodio (CR propinas por pagar) para cuadrar el DR caja que ya
                 // incluye la propina dentro de payment.amount (= grand_total).
@@ -1665,14 +1706,20 @@ export class PaymentsService {
               customer_id: order.customer_id ? Number(order.customer_id) : null,
               document_number: order.order_number,
               subtotal_amount: Number(order.subtotal_amount || 0),
-              tax_amount: Number(order.tax_amount || 0),
+              // Productos + impuesto del envío (si la orden tiene copia).
+              tax_amount: sale_tax.tax_amount,
               // Plan Despacho Economía — FASE 4 paso 15. Crédito con flete →
-              // se reconoce también ingreso de flete en cuenta 414505.
-              shipping_amount: Number(order.shipping_cost || 0),
+              // se reconoce también ingreso de flete en cuenta 414505, NETO
+              // del impuesto del envío.
+              shipping_amount: sale_tax.shipping_amount,
               tax_breakdown,
               withholding_breakdown: wh.lines,
-              discount_amount: Number(order.discount_amount || 0),
+              // Parte de BASE del descuento de orden (ver payment.received).
+              discount_amount: sale_tax.discount_amount,
               total_amount: Number(order.grand_total || 0),
+              // Propina incluida en grand_total: el asiento la acredita a su
+              // pasivo custodio (sin ella el DR 1305 no cuadra).
+              tip_amount: Number(order.tip_amount || 0),
               user_id: user.id,
             });
 
@@ -1820,6 +1867,10 @@ export class PaymentsService {
 
         return {
           success: true,
+          ...('previousTableStatus' in orderCreation &&
+          orderCreation.previousTableStatus != null
+            ? { previous_table_status: orderCreation.previousTableStatus }
+            : {}),
           message: isDigitalPayment
             ? 'Order created, processing payment...'
             : createPosPaymentDto.requires_payment
@@ -1828,6 +1879,9 @@ export class PaymentsService {
           order: {
             id: order.id,
             order_number: order.order_number,
+            // The POS confirmation prints this persisted identity. Omitting it
+            // made an alias sale render as "Consumidor Final" after payment.
+            customer_alias: order.customer_alias ?? null,
             status: order.state,
             payment_status: payment
               ? payment.state
@@ -1859,11 +1913,9 @@ export class PaymentsService {
           // close-out (null when a digital payment deferred the close). Used
           // AFTER commit to emit `session_closed` to staff + comensal streams.
           closed_session_id: orderCreation.closedSessionId ?? null,
-          // carril D / lina — D1: id de la sesión de mesa PAGADA (≠ cerrada)
-          // por este cobro. Null cuando el pago no aplica a mesa o cuando
-          // la mesa ya estaba pagada (idempotencia). Consumido por el caller
-          // (`processPosPayment` post-commit) para emitir `session_paid` SSE.
-          paid_session_id: orderCreation.paidSessionId ?? null,
+          // La proyección canónica devuelve la sesión pagada; la emisión
+          // correspondiente ocurre exclusivamente después del commit.
+          paid_session_id: paidSessionId,
           applied_promotions: appliedPromotionsResponse,
           applied_coupons: appliedCouponsResponse,
           payment: payment
@@ -1943,16 +1995,12 @@ export class PaymentsService {
         );
       }
 
-      // carril D / lina — D1: emitir `order.paid` (carril keilis lo consume)
-      // y `session_paid` SSE (consumido por mesa y POS) DESPUÉS del commit.
-      // El EventEmitter2 transporta `order.paid` al `OrderSseService` que
-      // keilis mantiene; el `notificationsSseService.push` directo cubre
-      // el staff floor-map y el POS cobro, que filtran por `order_id`.
+      // Emitir `order.paid` después del commit. La proyección B.1 posee
+      // la emisión `session_paid`, también después del commit.
+      // El EventEmitter2 transporta `order.paid` al `OrderSseService`;
+      // la proyección canónica notifica al floor-map y al POS.
       //
-      // Idempotencia: si un pago ya había marcado `paid_at`, `paidSessionId`
-      // sería null en este call (guard de `applyPosPaymentToTableSession`),
-      // por lo que `session_paid` se omite y `order.paid` se sigue emitiendo
-      // una sola vez por orden pagada.
+      // Idempotencia: la proyección B.1 no re-emite cuando `paid_at` ya existía.
       //
       // P0 fix (auditoría nancy): `payment` vive dentro del closure del
       // `$transaction` y NO está disponible aquí. La fuente post-commit
@@ -1983,19 +2031,8 @@ export class PaymentsService {
             }`,
           );
         }
-        if (paidSessionIdResolved) {
-          this.tableSessionsService.emitSessionPaid(
-            ctxStoreId,
-            paidSessionIdResolved,
-            orderPaidId,
-            // `emitSessionPaid` declara `paymentId?: number` (opcional =
-            // undefined). `paymentIdResolved` es `number | null` por la
-            // union mesa/retail; coalescemos null a undefined para no
-            // cambiar la firma y no romper a los otros callers.
-            paymentIdResolved ?? undefined,
-          );
-        }
       }
+      emitSessionPaidAfterCommit?.();
 
       // Process digital payments AFTER transaction commit (order is now visible)
       if (result.success && result._digitalPaymentPending) {
@@ -2200,15 +2237,18 @@ export class PaymentsService {
    */
   private async createOrderInstallments(
     dto: CreatePosPaymentDto,
-    order: { id: number | bigint; total_amount?: any },
+    order: { id: number | bigint; total_amount: Prisma.Decimal | number | string },
   ) {
     const creditType = dto.credit_type || 'installments';
     const orderId =
       typeof order.id === 'object' ? Number(order.id) : Number(order.id);
+    // processPosPayment projects persisted orders.grand_total as
+    // result.order.total_amount; this is not the client's DTO estimate.
+    const orderTotal = Number(order.total_amount);
 
     const updateData: Record<string, any> = {
       credit_type: creditType,
-      remaining_balance: order.total_amount || 0,
+      remaining_balance: orderTotal,
       total_paid: 0,
     };
 
@@ -2228,7 +2268,7 @@ export class PaymentsService {
         const initialPayment = terms.initial_payment || 0;
         // Subtract initial payment from total BEFORE calculating installments
         const amountToFinance =
-          Math.round((Number(order.total_amount) - initialPayment) * 100) / 100;
+          Math.round((orderTotal - initialPayment) * 100) / 100;
 
         const schedule = calculateSchedule({
           total_amount: amountToFinance,
@@ -2291,9 +2331,9 @@ export class PaymentsService {
       } else {
         // Free credit - just set interest fields if applicable
         if (interestRate > 0) {
-          const totalInterest = Number(order.total_amount) * interestRate;
+          const totalInterest = orderTotal * interestRate;
           updateData.total_with_interest =
-            Math.round((Number(order.total_amount) + totalInterest) * 100) /
+            Math.round((orderTotal + totalInterest) * 100) /
             100;
           updateData.remaining_balance = updateData.total_with_interest;
         }
@@ -2747,24 +2787,6 @@ export class PaymentsService {
     // `session.order_id` (cierre de mesa, orden ya existe) u `orderNumber`
     // (venta nueva, recién generado antes de mapear los ítems).
     orderRef?: string | number | null,
-    // F-065 (B.3→B.4): distingue el cierre de cuenta de mesa —líneas que
-    // pueden llevar tiempo abiertas y perder su asignación fiscal entre la
-    // apertura y el cierre (población real: purga de Roma Motos)— de la
-    // venta fresca (POS directo/checkout), que F-065 deja fuera a propósito:
-    // ese carril puede depender de productos legítimamente sin categoría
-    // asignada y auditarlo es un cambio aparte (evidence/B3-taxes-ejecucion.md).
-    isTableSessionLine = false,
-    // F-127: severidad de la compuerta `POS_TABLE_LINE_TAX_UNRESOLVABLE_001`,
-    // resuelta UNA sola vez en `processPosPayment` (settings ya está en
-    // memoria ahí, `payments.service.ts:726`) y encadenada por los dos
-    // llamadores (`createOrUpdateOrderFromPos` / `applyPosPaymentToTableSession`)
-    // en vez de releerse por ítem: `SettingsService.getSettings()` hace dos
-    // `findUnique` sin caché y este método corre dentro de un
-    // `Promise.all` por línea — releerla aquí multiplicaría consultas
-    // exactamente en el punto que P2028 (memoria del equipo) ya señaló
-    // como el cuello de botella del carril de cobro. Default `'block'`
-    // para que un llamador nuevo que no la pase se comporte como hoy.
-    taxLineGateSeverity: 'block' | 'warn' | 'off' = 'block',
   ): Promise<any> {
     const isCustomItem = item.item_type === 'custom' || !item.product_id;
     const lineUnits = this.getPosLineUnits(item);
@@ -2790,19 +2812,65 @@ export class PaymentsService {
         dtoStoreId,
       );
       const declaredGross = this.resolveDeclaredGrossUnitPrice(item);
-      const finalUnitPrice =
-        declaredGross ??
-        Number(item.unit_price || 0) * (1 + rateProbe.total_rate);
-      const unitBasePrice =
-        rateProbe.total_rate > 0
-          ? finalUnitPrice / (1 + rateProbe.total_rate)
-          : finalUnitPrice;
-      const taxInfo = await this.calculateTaxCategoryTaxes(
-        tx,
-        item.tax_category_id,
-        unitBasePrice,
-        dtoStoreId,
-      );
+      // P2-3 — la base del ítem personalizado sale del KERNEL, no de una
+      // división en float. Antes `final / (1 + tasa)` dejaba una base con
+      // decimales arbitrarios (p. ej. 840.3361344…) que el snapshot
+      // persistía sin truncar, y el bruto `unit_price × (1 + tasa)` tampoco
+      // se truncaba: base + cuota truncada ≠ bruto guardado.
+      //  - Bruto declarado con impuesto ⇒ `resolveLineTotals` con TODAS las
+      //    tasas inclusivas (ADR-01, mismo despeje que `invertDeclaredGross`):
+      //    base y cuotas truncadas DIAN; el bruto persistido es el que el
+      //    kernel cierra (closest-below si no hay base exacta) y el residuo se
+      //    registra igual que en el carril de catálogo.
+      //  - Precio base (sin bruto declarado) ⇒ la base ES ese precio, a
+      //    centavos; la cuota se trunca en `calculateTaxCategoryTaxes` y el
+      //    bruto es base + cuota.
+      let unitBasePrice: number;
+      let finalUnitPrice: number;
+      let taxInfo: Awaited<ReturnType<PaymentsService['calculateTaxCategoryTaxes']>>;
+      if (declaredGross != null && rateProbe.total_rate > 0) {
+        const resolved = this.taxes_service.resolveLineTotals(
+          declaredGross,
+          rateProbe.taxes.map((tax) => ({ rate: tax.rate, is_inclusive: true })),
+        );
+        if ((resolved.unclosed_residual_cents ?? 0) !== 0) {
+          this.logger.warn({
+            event: 'payments.unclosed_residual_cents',
+            store_id: dtoStoreId ?? null,
+            user_id: user?.id ?? null,
+            order_ref: orderRef ?? null,
+            product_id: null,
+            quantity: item.quantity ?? null,
+            final_price: declaredGross,
+            rates: rateProbe.taxes.map((tax) => ({ rate: tax.rate, is_inclusive: true })),
+            residual_cents: resolved.unclosed_residual_cents,
+            invalid_inputs: resolved.invalid_inputs,
+          });
+        }
+        unitBasePrice = resolved.base;
+        finalUnitPrice = resolved.total;
+        taxInfo = {
+          total_rate: rateProbe.total_rate,
+          total_tax_amount: resolved.total_tax_amount,
+          taxes: rateProbe.taxes.map((tax, index) => ({
+            ...tax,
+            amount: resolved.taxes[index].amount,
+          })),
+        };
+      } else {
+        unitBasePrice = this.roundMoney(
+          declaredGross ?? Number(item.unit_price || 0),
+        );
+        taxInfo = await this.calculateTaxCategoryTaxes(
+          tx,
+          item.tax_category_id,
+          unitBasePrice,
+          dtoStoreId,
+        );
+        finalUnitPrice = this.roundMoney(
+          unitBasePrice + taxInfo.total_tax_amount,
+        );
+      }
 
       return this.buildOrderItemSnapshot({
         item,
@@ -2968,59 +3036,9 @@ export class PaymentsService {
       )),
       resolved_from: 'catalog',
     };
-    // F-065 (B.3→B.4): al cerrar una cuenta de mesa, un producto que perdió
-    // su `product_tax_assignments` entre la apertura y el cierre resolvía en
-    // silencio a IVA cero sobre base inflada — sub-declaración a la DIAN sin
-    // ninguna señal. `has_tax_assignment` (TaxesService, F-065) discrimina:
-    // `false` es "nunca tuvo asignación o la perdió", nunca "tasa 0%
-    // explícita" (una asignación viva a categoría 0% sigue siendo `true`).
-    // Acotado a `isTableSessionLine` a propósito: el carril de venta
-    // fresca/checkout puede depender de productos legítimamente sin
-    // categoría asignada y auditarlo es un cambio aparte, no éste.
-    //
-    // F-127 — válvula de escape por tienda para esta compuerta.
-    //
-    // Sin esta rama, una tienda que dispara esta excepción por una
-    // combinación de catálogo no contemplada queda SIN PODER COBRAR hasta
-    // abrir un revert, mergearlo y esperar `deploy-backend-ec2.yml`
-    // completo (docker stop, sleep 40, espera de worker hasta 90s, seeds)
-    // con la caja parada. `settings.pos.tax_line_gate` (`'block' | 'warn' |
-    // 'off'`, default `'block'`) permite bajarla en caliente, por tienda,
-    // sin tocar código ni desplegar:
-    //   - 'block' (default = comportamiento de HOY): lanza y revierte la
-    //     transacción, exactamente como antes de F-127.
-    //   - 'warn': NO lanza — registra el mismo detalle (tienda, orden,
-    //     usuario, producto) que hoy sólo viaja en el mensaje de la
-    //     excepción, vía `this.logger.warn` con el mismo shape de evento
-    //     estructurado que usa `invertDeclaredGross` más abajo
-    //     (`payments.unclosed_residual_cents`), y deja pasar la línea
-    //     normalizando el impuesto a cero.
-    //   - 'off': ni lanza ni registra — silencio total.
-    // Bajar a 'warn'/'off' es una MEDIDA TEMPORAL DE EMERGENCIA para poder
-    // seguir cobrando mientras se corrige el catálogo, no un ajuste
-    // permanente: toda venta que pasa por 'warn'/'off' sigue siendo una
-    // venta con IVA potencialmente sub-declarado a la DIAN (F-065).
-    if (isTableSessionLine && catalogTaxInfo.has_tax_assignment === false) {
-      if (taxLineGateSeverity === 'block') {
-        throw new VendixHttpException(
-          ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001,
-          `El producto "${product.name}" perdió su asignación fiscal; no se puede cerrar la cuenta normalizando el impuesto a cero.`,
-        );
-      }
-      if (taxLineGateSeverity === 'warn') {
-        this.logger.warn({
-          event: 'payments.pos_table_line_tax_unresolvable',
-          code: ErrorCodes.POS_TABLE_LINE_TAX_UNRESOLVABLE_001.code,
-          severity: 'warn',
-          store_id: dtoStoreId,
-          user_id: user?.id ?? null,
-          order_ref: orderRef ?? null,
-          product_id: product.id,
-          product_name: product.name,
-        });
-      }
-      // 'off': ni lanza ni registra, a propósito.
-    }
+    // ADR-10: una línea NUEVA de POS puede venderse sin impuesto, también
+    // desde mesa. La ausencia de asignación actual no demuestra que antes
+    // tuviera una. Las líneas anteriores conservan su snapshot persistido.
     // F-001: el precio publicado YA contiene lo inclusivo — el total NO crece.
     // Con todo inclusivo, `total === catalogUnitPrice` (119000, no 141610); lo
     // agregado sí suma encima vía el resolver.
@@ -3204,10 +3222,8 @@ export class PaymentsService {
     // a la DIAN saldría mal, EN SILENCIO y sin compuerta que lo note — el
     // eje (a) del hallazgo. Hoy ninguna tasa AIU alcanza el carril de línea
     // POS, así que el radio de explosión es cero; el día que alguna llegue,
-    // esto corta en vez de sub-declarar. NO va bajo `settings.pos.
-    // tax_line_gate` (F-127) a propósito: aquella válvula existe para no
-    // dejar la caja parada por un dato de catálogo, y nunca debe poder
-    // apagar una compuerta de aritmética fiscal.
+    // esto corta en vez de sub-declarar. ADR-10 retira la antigua válvula
+    // `tax_line_gate`; esta compuerta de aritmética fiscal permanece intacta.
     const fixedBaseTax = source.taxes.find(
       (tax) =>
         (tax as { fixed_base?: unknown }).fixed_base !== undefined &&
@@ -3469,17 +3485,24 @@ export class PaymentsService {
     const grossMismatchDelta = this.roundMoney(
       computedGrossUnitPrice - orderItem.final_unit_price,
     );
-    // F-222: MISMO umbral que el `> 0.02` original (tolera 2 centavos), pero
-    // medido en centavos enteros: `>= 3` ¢. El `> 0.02` en floats fallaba en el
-    // borde exacto según la magnitud (13603.14 − 13603.12 = 0.0199999999986, no
-    // disparaba; 551.07 − 551.05 = 0.0200000000001, sí). Solo registra, no
-    // lanza (ADR-11/B.4).
+    // P2-3 — umbral alineado con la compuerta de dinero del cobro: 1 ¢ en
+    // centavos enteros (antes `>= 3` ¢ heredado del `> 0.02` en floats, que
+    // dejaba pasar sin rastro los descuadres de 1-2 ¢ que la compuerta sí
+    // mide). El único descuadre legítimo es el residuo closest-below que el
+    // kernel ya reportó (`unclosed_residual_cents`, warn propio): ese delta
+    // exacto no se vuelve a registrar como error. Solo registra, no lanza
+    // (ADR-11/B.4).
+    const knownResidualCents = Math.abs(
+      Number((params.taxInfo as any).unclosed_residual_cents ?? 0),
+    );
+    const grossMismatchCents = Math.abs(Math.round(grossMismatchDelta * 100));
     if (
       differsByAtLeastCents(
         computedGrossUnitPrice,
         orderItem.final_unit_price,
-        3,
-      )
+        1,
+      ) &&
+      !(knownResidualCents > 0 && grossMismatchCents === knownResidualCents)
     ) {
       this.logger.error({
         event: 'pos.line_gross_mismatch',
@@ -3496,32 +3519,56 @@ export class PaymentsService {
       });
     }
 
+    // P2-4 — invariante I-1 (`total_price = unit_price × line_units`) en
+    // centavos. Aquí se cumple por construcción (`lineBaseTotal`), así que es
+    // la línea base de la métrica `orders.line_total_invariant_violation`:
+    // con la bandera OFF (default) sólo registra; nunca bloquea el cobro.
+    assertOrderLineTotalInvariant(
+      {
+        unit_price: orderItem.unit_price,
+        total_price: orderItem.total_price,
+        quantity: params.quantity,
+        // Peso tal como lo guarda `numeric(10,3)` (F-085, `getPosLineUnits`).
+        weight: weightValue > 0 ? Math.round(weightValue * 1000) / 1000 : null,
+        price_unit_quantity: orderItem.price_unit_quantity ?? null,
+      },
+      {
+        context: {
+          writer: 'payments.pos',
+          store_id: params.storeId ?? null,
+          product_id: params.productId ?? null,
+        },
+      },
+    );
+
     return orderItem;
   }
 
   /**
-   * True when a POS payment must be DEFERRED past the payment transaction
-   * commit: the method requires a real charge (`requires_payment`) AND is a
-   * digital gateway (`wompi` | `wallet`) that only settles asynchronously via
-   * webhook. Cash / card / bank_transfer settle in-band and return `false`.
-   *
-   * Single source of truth (mirror of the historical inline `isDigitalPayment`
-   * check in `processPosPayment`). Also gates the table-session close in
-   * `applyPosPaymentToTableSession`: a deferred digital payment must NOT close
-   * the table until its webhook confirms the charge (otherwise the mesa would
-   * flip to `cleaning` while the diner could still abandon the Wompi widget).
+   * Resolve POS routing once from the selected method. Digital gateways are
+   * processed after commit; ON_DELIVERY is recorded now but settled later.
+   * The latter flag drives both the payment row and the order state.
    */
-  private async isDeferredDigitalMethod(
+  private async resolvePosPaymentRoute(
     tx: any,
     dto: CreatePosPaymentDto,
-  ): Promise<boolean> {
-    if (!dto.requires_payment) return false;
+  ): Promise<{ isDigitalPayment: boolean; isOnDelivery: boolean }> {
+    if (!dto.requires_payment) {
+      return { isDigitalPayment: false, isOnDelivery: false };
+    }
     const method = await tx.store_payment_methods.findUnique({
       where: { id: dto.store_payment_method_id },
       include: { system_payment_method: true },
     });
     const type = method?.system_payment_method?.type || '';
-    return ['wompi', 'wallet'].includes(type);
+    const isOnDelivery = this.isOnDeliveryMethod(
+      dto.store_payment_method_id,
+      method,
+    );
+    return {
+      isDigitalPayment: !isOnDelivery && ['wompi', 'wallet'].includes(type),
+      isOnDelivery,
+    };
   }
 
   /**
@@ -3589,9 +3636,6 @@ export class PaymentsService {
     dto: CreatePosPaymentDto,
     user: any,
     dtoStoreId: number,
-    // F-127: encadenada desde `processPosPayment` hasta `buildPosOrderItem`
-    // — ver comentario de la firma de ese método.
-    taxLineGateSeverity: 'block' | 'warn' | 'off' = 'block',
   ): Promise<{
     order: any;
     // QUI-431 — alineado con la rama de venta fresca (`createOrUpdateOrderFromPos`)
@@ -3623,13 +3667,9 @@ export class PaymentsService {
     // awaiting webhook) or nothing was closed. The caller emits `session_closed`
     // post-commit only when this is non-null.
     closedSessionId: number | null;
-    // carril D / lina — D1: id de la sesión de mesa PAGADA por este pago,
-    // o null cuando no hay sesión (venta fresca sin mesa) o la mesa ya
-    // estaba pagada (idempotencia). El caller emite `session_paid` SSE
-    // post-commit solo cuando es no-null. El mark paid ocurre dentro del
-    // propio tx para que la marca sea atómica con el pago; un rollback
-    // del pago nunca deja un paid_at fantasma.
-    paidSessionId: number | null;
+    // Orden vinculada a la sesión abierta. El caller proyecta solo cuando
+    // existe una fila de pago `succeeded`, dentro de la misma transacción.
+    tableSessionOrderId: number | null;
   }> {
     const tableSessionId = dto.table_session_id!;
 
@@ -3717,9 +3757,6 @@ export class PaymentsService {
                 user,
                 tierSnapshots[index],
                 session.order_id,
-                // F-065: esta rama SÍ es cierre de cuenta de mesa.
-                true,
-                taxLineGateSeverity,
               ),
             ),
           )
@@ -3864,27 +3901,6 @@ export class PaymentsService {
     });
 
     // ----------------------------------------------------------------
-    // carril D / lina — D1: marca la sesión de mesa como PAGADA dentro
-    // del mismo `$transaction` del pago. La marca es atómica con el
-    // update del order: un rollback del pago NUNCA deja un `paid_at`
-    // fantasma. `markSessionPaid` es idempotente sobre `paid_at` (no
-    // reescribe el primer timestamp), así que un retry del POS no corre
-    // el riesgo de "pagar dos veces" contablemente.
-    //
-    // Se hace aquí, antes del auto-fire, para que la cocina ya sepa que
-    // la mesa está pagada cuando vea el ticket (el KDS usa
-    // `session_paid` SSE post-commit para refrescar el header).
-    let paidSessionId: number | null = null;
-    if (!session.closed_at) {
-      const marked = await this.tableSessionsService.markSessionPaid(
-        tableSessionId,
-        null, // payment.id aún no existe; el flag paid_at no lo requiere.
-        tx,
-      );
-      paidSessionId = marked.id;
-    }
-
-    // ----------------------------------------------------------------
     // Plan KDS fire-flows (B6): auto-fire the pending `prepared` items
     // of the table's draft order to the kitchen BEFORE the session is
     // closed. Same core as B5 (`processPosPayment`) and B7
@@ -4009,7 +4025,7 @@ export class PaymentsService {
       couponInfo,
       kitchenFire,
       closedSessionId,
-      paidSessionId,
+      tableSessionOrderId: session.order_id,
     };
   }
 
@@ -4057,7 +4073,7 @@ export class PaymentsService {
     dtoStoreId: number,
     dto: CreatePosPaymentDto,
     user: any,
-  ): Promise<number> {
+  ): Promise<{ id: number; previousTableStatus?: table_status_enum }> {
     const table = await tx.tables.findFirst({ where: { id: tableId } });
     if (!table) {
       throw new VendixHttpException(
@@ -4082,7 +4098,7 @@ export class PaymentsService {
       select: { id: true },
     });
     if (activeSession) {
-      return activeSession.id;
+      return { id: activeSession.id };
     }
 
     const opened = await this.tableSessionsService.createOpenSessionInTx(tx, {
@@ -4102,16 +4118,177 @@ export class PaymentsService {
       currency: dto.currency,
     });
 
-    return opened.id;
+    return { id: opened.id, previousTableStatus: opened.previous_table_status };
+  }
+
+  /**
+   * Impuesto opcional por tarifa de envío en la venta POS (contrato
+   * shipping-rate-tax). El frontend manda `shipping_rate_id` SOLO si el costo
+   * salió de la tarifa (sin override manual).
+   * - Sin `shipping_rate_id` ⇒ copia vacía y `rate_id` null.
+   * - Con él: la tarifa debe existir, pertenecer al `shipping_method_id` del
+   *   DTO y a una zona de la tienda (o del sistema). Si no ⇒ 400
+   *   `ORD_SHIP_RATE_MISMATCH_001` (validación de entrada, no del impuesto).
+   * - Validada ⇒ `ShippingTaxService.snapshotForRate` (nunca lanza: tarifa
+   *   sin categoría, costo 0, emisor sin O-48 con IVA… ⇒ copia vacía).
+   */
+  private async resolvePosShippingTax(
+    tx: any,
+    dto: CreatePosPaymentDto,
+    store_id: number,
+    shipping_cost: number,
+    order_items: ReadonlyArray<any> = [],
+  ): Promise<{ snapshot: ShippingTaxSnapshot; rate_id: number | null }> {
+    const rate_id = dto.shipping_rate_id ?? null;
+    if (!rate_id) return { snapshot: { ...EMPTY_SHIPPING_TAX }, rate_id: null };
+
+    const rate = await tx.shipping_rates.findFirst({
+      where: {
+        id: rate_id,
+        ...(dto.shipping_method_id
+          ? { shipping_method_id: dto.shipping_method_id }
+          : {}),
+        shipping_zone: {
+          OR: [{ store_id }, { is_system: true, store_id: null }],
+        },
+      },
+      select: { id: true, shipping_method_id: true, type: true, base_cost: true },
+    });
+    if (!rate || !dto.shipping_method_id) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_SHIP_RATE_MISMATCH_001,
+        'La tarifa de envío no pertenece al método de envío o a la tienda',
+        {
+          shipping_rate_id: rate_id,
+          shipping_method_id: dto.shipping_method_id ?? null,
+        },
+      );
+    }
+
+    // Costo manual: si el costo cobrado no es el de la tarifa, el envío NO
+    // sale de ella ⇒ copia vacía (contrato: un costo manual no lleva
+    // impuesto). Misma regla que `costComesFromRate` de
+    // `OrdersService.assignShipping`:
+    //  - `flat`: el costo esperado es `base_cost`.
+    //  - calculadas (`weight_based`, `price_based`, `free`): se RECALCULA en
+    //    el servidor con `ShippingCalculatorService.calculateRates` (la misma
+    //    lógica del checkout y de `assignShipping`) sobre la dirección y las
+    //    líneas de esta venta; se toma la opción de ESTA tarifa.
+    //  - `carrier_calculated`: el calculador no la soporta (no hay cotización
+    //    determinista), así que nunca aparece entre las opciones ⇒ copia
+    //    vacía. Igual para cualquier tarifa sin dirección resoluble o que el
+    //    calculador no devuelva.
+    const expected_cost =
+      rate.type === 'flat'
+        ? Number(rate.base_cost ?? 0)
+        : await this.recalculatePosRateCost(tx, dto, store_id, rate.id, order_items);
+    const isManualCost =
+      expected_cost == null ||
+      differsByAtLeastCents(shipping_cost, expected_cost, 1);
+
+    const snapshot =
+      this.shippingTaxService && !isManualCost
+        ? await this.shippingTaxService.snapshotForRate(tx, rate.id, shipping_cost, {
+            store_id,
+          })
+        : { ...EMPTY_SHIPPING_TAX };
+    return { snapshot, rate_id: rate.id };
+  }
+
+  /**
+   * Costo de la tarifa `rate_id` recalculado en el servidor para esta venta
+   * POS (dirección + líneas). `null` si no hay dirección resoluble, no hay
+   * calculador o la tarifa no es una opción aplicable (incluye
+   * `carrier_calculated`, que el calculador no cotiza).
+   */
+  private async recalculatePosRateCost(
+    tx: any,
+    dto: CreatePosPaymentDto,
+    store_id: number,
+    rate_id: number,
+    order_items: ReadonlyArray<any>,
+  ): Promise<number | null> {
+    if (!this.shippingCalculatorService) return null;
+
+    let address: {
+      country_code?: string | null;
+      state_province?: string | null;
+      city?: string | null;
+      postal_code?: string | null;
+    } | null = null;
+    if (dto.shipping_address_id) {
+      address = await tx.addresses.findFirst({
+        where: { id: dto.shipping_address_id },
+        select: { country_code: true, state_province: true, city: true, postal_code: true },
+      });
+    } else if (dto.shipping_address_snapshot) {
+      address = dto.shipping_address_snapshot as any;
+    }
+    if (!address?.country_code) return null;
+
+    const product_ids = [
+      ...new Set(
+        order_items
+          .map((it) => it?.product_id)
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    ];
+    const products = product_ids.length
+      ? await tx.products.findMany({
+          where: { id: { in: product_ids } },
+          select: { id: true, weight: true, product_type: true },
+        })
+      : [];
+    const productById = new Map<number, any>(products.map((p: any) => [p.id, p]));
+
+    const items = order_items
+      .filter((it) => typeof it?.product_id === 'number')
+      .map((it) => {
+        const product = productById.get(it.product_id);
+        const line_tax = (it.order_item_taxes?.create ?? []).reduce(
+          (sum: number, t: any) => sum + Number(t.tax_amount || 0),
+          0,
+        );
+        const quantity = Number(it.quantity || 0);
+        return {
+          product_id: it.product_id,
+          quantity,
+          // Bruto de la línea (base + impuesto), como el checkout.
+          price: Number(it.total_price || 0) + line_tax,
+          weight: it.weight
+            ? Number(it.weight)
+            : product?.weight
+              ? Number(product.weight) * quantity
+              : undefined,
+          product_type: product?.product_type || undefined,
+        };
+      });
+
+    try {
+      const options = await this.shippingCalculatorService.calculateRates(
+        store_id,
+        items,
+        {
+          country_code: address.country_code,
+          state_province: address.state_province || undefined,
+          city: address.city || undefined,
+          postal_code: address.postal_code || undefined,
+        },
+      );
+      const match = options.find((o) => o.rate_id === rate_id);
+      return match ? Number(match.cost) : null;
+    } catch (error) {
+      this.logger.warn(
+        `POS: no se pudo recalcular la tarifa de envío #${rate_id}: ${(error as Error)?.message}`,
+      );
+      return null;
+    }
   }
 
   private async createOrUpdateOrderFromPos(
     tx: any,
     dto: CreatePosPaymentDto,
     user: any,
-    // F-127: encadenada desde `processPosPayment` hasta `buildPosOrderItem`
-    // — ver comentario de la firma de ese método.
-    taxLineGateSeverity: 'block' | 'warn' | 'off' = 'block',
   ) {
     // store_id is guaranteed by processPosPayment (line ~612) which copies it
     // from RequestContext. Re-assert here so downstream typing is non-null and
@@ -4133,7 +4310,6 @@ export class PaymentsService {
         dto,
         user,
         dtoStoreId,
-        taxLineGateSeverity,
       );
     }
 
@@ -4151,7 +4327,7 @@ export class PaymentsService {
     // more specific reference), which is why this branch is guarded on
     // its absence and sits after it.
     if (dto.table_id != null) {
-      const resolvedSessionId = await this.resolvePosTableSessionId(
+      const resolvedSession = await this.resolvePosTableSessionId(
         tx,
         dto.table_id,
         dtoStoreId,
@@ -4161,13 +4337,66 @@ export class PaymentsService {
       // Shallow clone instead of mutating the caller's DTO: the rest of
       // `processPosPayment` must keep seeing the request exactly as it
       // arrived, while the close-out helper reads a resolved session id.
-      return await this.applyPosPaymentToTableSession(
+      const paid = await this.applyPosPaymentToTableSession(
         tx,
-        { ...dto, table_session_id: resolvedSessionId },
+        { ...dto, table_session_id: resolvedSession.id },
         user,
         dtoStoreId,
-        taxLineGateSeverity,
       );
+      return { ...paid, previousTableStatus: resolvedSession.previousTableStatus };
+    }
+
+    // An adopted POS cart already has an order. Claim that row inside the
+    // payment transaction before checking payments, so concurrent POS retries
+    // cannot both pass the state gate and create a second charge/order.
+    const existingOrder = dto.order_id != null
+      ? await tx.orders.findFirst({
+          where: { id: dto.order_id, store_id: dtoStoreId },
+          select: {
+            id: true, order_number: true, state: true,
+            subtotal_amount: true, tax_amount: true,
+          },
+        })
+      : null;
+    if (dto.order_id != null && !existingOrder) {
+      // Identical response for missing and cross-store ids: no tenant leak.
+      throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+    }
+    if (existingOrder) {
+      const orderLabel = existingOrder.order_number || `#${existingOrder.id}`;
+      if (dto.is_draft || !['draft', 'created'].includes(existingOrder.state)) {
+        throw new VendixHttpException(
+          ErrorCodes.POS_DRAFT_DUPLICATE_ORDER_001,
+          `La orden ${orderLabel} no está pendiente de cobro. Actualiza la lista de órdenes antes de intentarlo de nuevo.`,
+        );
+      }
+      const claimed = await tx.orders.updateMany({
+        where: {
+          id: existingOrder.id,
+          store_id: dtoStoreId,
+          state: existingOrder.state,
+        },
+        data: { state: 'created', updated_at: new Date() },
+      });
+      if (claimed.count !== 1) {
+        throw new VendixHttpException(
+          ErrorCodes.POS_DRAFT_DUPLICATE_ORDER_001,
+          `La orden ${orderLabel} cambió mientras se cobraba. Actualiza la lista de órdenes antes de intentarlo de nuevo.`,
+        );
+      }
+      const paid = await tx.payments.findFirst({
+        where: {
+          order_id: existingOrder.id,
+          state: { in: ['succeeded', 'captured'] },
+        },
+        select: { id: true },
+      });
+      if (paid) {
+        throw new VendixHttpException(
+          ErrorCodes.POS_DRAFT_DUPLICATE_ORDER_001,
+          `La orden ${orderLabel} ya tiene un pago registrado. Actualiza la lista de órdenes antes de intentarlo de nuevo.`,
+        );
+      }
     }
 
     // Venta normal (sin sesión de mesa): los ítems son obligatorios para
@@ -4205,7 +4434,8 @@ export class PaymentsService {
     while (retries > 0) {
       try {
         // Generate order number for this store
-        orderNumber = await this.generateOrderNumber(tx, dtoStoreId);
+        orderNumber = existingOrder?.order_number ??
+          await this.generateOrderNumber(tx, dtoStoreId);
 
         // Create order items from backend-normalized financial snapshots.
         const orderItems = await Promise.all(
@@ -4217,22 +4447,21 @@ export class PaymentsService {
               user,
               tierSnapshots[index],
               orderNumber,
-              // F-065: venta fresca, no es cierre de cuenta de mesa — la
-              // compuerta de abajo no aplica en este carril a propósito.
-              false,
-              taxLineGateSeverity,
             ),
           ),
         );
 
-        const calculatedSubtotal = this.roundMoney(
-          orderItems.reduce(
-            (sum, item) => sum + Number(item.total_price || 0),
-            0,
-          ),
-        );
-        const calculatedTaxAmount = this.roundMoney(
-          orderItems.reduce((sum, item) => {
+        // The adopted cart has already persisted item edits via the orders
+        // endpoint. Its stored item totals, not a potentially stale checkout
+        // payload, are authoritative for this existing order's header.
+        const calculatedSubtotal = existingOrder
+          ? this.roundMoney(Number(existingOrder.subtotal_amount))
+          : this.roundMoney(orderItems.reduce(
+              (sum, item) => sum + Number(item.total_price || 0), 0,
+            ));
+        const calculatedTaxAmount = existingOrder
+          ? this.roundMoney(Number(existingOrder.tax_amount))
+          : this.roundMoney(orderItems.reduce((sum, item) => {
             const nestedTaxes = item.order_item_taxes?.create || [];
             if (nestedTaxes.length > 0) {
               return (
@@ -4257,8 +4486,7 @@ export class PaymentsService {
                     item.price_unit_quantity,
                   );
             return sum + Number(item.tax_amount_item || 0) * multiplier;
-          }, 0),
-        );
+          }, 0));
 
         // Backend is the source of truth for promotion and coupon discounts.
         // Any `dto.discount_amount` sent by the frontend is intentionally
@@ -4286,6 +4514,17 @@ export class PaymentsService {
           promotionQuote.total_discount + couponInfo.discount_amount,
         );
         const shippingCost = this.roundMoney(dto.shipping_cost || 0);
+        // Impuesto opcional por tarifa de envío: copia congelada SOLO si el
+        // costo viene de una tarifa (`shipping_rate_id`) validada contra el
+        // método y la tienda. Sin tarifa (costo digitado a mano) ⇒ copia
+        // vacía. No cambia `grandTotal`: el impuesto va incluido en el costo.
+        const shippingTax = await this.resolvePosShippingTax(
+          tx,
+          dto,
+          dtoStoreId,
+          shippingCost,
+          orderItems,
+        );
 
         // carril D / lina — D3: cálculo y metadatos de la propina
         // (rama retail / POS caja). Misma regla que mesa: el % se
@@ -4372,6 +4611,11 @@ export class PaymentsService {
             ? null
             : dto.payment_form || (dto.requires_payment ? '1' : '2'),
           shipping_cost: shippingCost,
+          // Copia del impuesto del envío (vacía sin tarifa). Siempre se
+          // escribe, así una orden adoptada no conserva una copia rancia.
+          ...shippingTax.snapshot,
+          // La tarifa validada queda ligada a la orden (null sin tarifa).
+          shipping_rate_id: shippingTax.rate_id,
           // GAP-6 — propina persistida aparte (no entra a subtotal/tax).
           // carril D / D3: tip_amount + metadatos (tip_type, tip_value,
           // tip_waiter_id). Los metadatos quedan en NULL si no llegaron.
@@ -4406,14 +4650,25 @@ export class PaymentsService {
           orderData.customer_id = null;
         }
 
-        // Create the order
-        const order = await tx.orders.create({
-          data: orderData,
-          include: {
-            order_items: true,
-            stores: true,
-          },
-        });
+        // Adopted carts persist their item edits through the orders endpoint.
+        // Keep those item ids (and their dependent tax/inventory rows); only
+        // refresh the header from this checkout and reuse the existing id.
+        const adoptedOrderData = { ...orderData };
+        delete adoptedOrderData.order_items;
+        delete adoptedOrderData.order_number;
+        delete adoptedOrderData.created_by_user_id;
+        delete adoptedOrderData.store_id;
+        delete adoptedOrderData.channel;
+        const order = existingOrder
+          ? await tx.orders.update({
+              where: { id: existingOrder.id, store_id: dtoStoreId },
+              data: adoptedOrderData,
+              include: { order_items: true, stores: true },
+            })
+          : await tx.orders.create({
+              data: orderData,
+              include: { order_items: true, stores: true },
+            });
 
         // Link pending bookings to this order
         if (dto.booking_ids?.length) {
@@ -4457,14 +4712,8 @@ export class PaymentsService {
           // Fresh sales never close a table session — only the table close-out
           // branch (`applyPosPaymentToTableSession`) can. Keep the shape aligned.
           closedSessionId: null as number | null,
-          // carril D / lina — D1: rama retail nunca marca `paid_at` en una
-          // session de mesa (no hay session asociada). Devolvemos null
-          // explícito para ESTRECHAR la unión con la rama mesa (que sí
-          // devuelve `paidSessionId: number | null`) y que el typecheck
-          // vea el campo en ambas ramas. Sin esto, el caller cae en
-          // union-typed y `orderCreation.paidSessionId` queda fuera de
-          // tipo — bug detectado por typecheck consolidado.
-          paidSessionId: null as number | null,
+          // La venta retail no tiene orden vinculada a sesión de mesa.
+          tableSessionOrderId: null as number | null,
         };
       } catch (error) {
         if (
@@ -4495,6 +4744,7 @@ export class PaymentsService {
     tx: any,
     order: any,
     dto: CreatePosPaymentDto,
+    resolvedIsOnDelivery?: boolean,
   ) {
     // store_id is guaranteed by processPosPayment (resolved from RequestContext).
     // Re-assert here so PaymentGateway gets a non-null storeId.
@@ -4524,16 +4774,15 @@ export class PaymentsService {
 
     // Contra entrega — resuelto ANTES de leer `system_payment_method.type`
     // para que una fila incompleta deje rastro en el log en vez de morir muda.
-    const isOnDelivery = this.isOnDeliveryMethod(
-      dto.store_payment_method_id,
-      paymentMethod,
-    );
+    const isOnDelivery =
+      resolvedIsOnDelivery ??
+      this.isOnDeliveryMethod(dto.store_payment_method_id, paymentMethod);
 
     // Check if method requires gateway processing (digital/async methods)
     const methodType = paymentMethod.system_payment_method.type;
     const digitalMethods = ['wompi', 'wallet'];
 
-    if (digitalMethods.includes(methodType)) {
+    if (!isOnDelivery && digitalMethods.includes(methodType)) {
       // Decrypt credentials before passing to gateway processor
       const decryptedConfig = this.paymentEncryption.decryptConfig(
         (paymentMethod.custom_config || {}) as Record<string, any>,
@@ -5205,6 +5454,13 @@ export class PaymentsService {
     //    withholding applied at the payment step — the order's persisted
     //    tax_breakdown is on `order_item_taxes`, but at this layer we only
     //    need the totals for the accounting listener).
+    //    Cuenta dividida: la porción de venta de ESTE pago (el último toma el
+    //    remanente exacto); con los totales de la orden el asiento no cuadra.
+    const sale_fields = await resolvePaymentReceivedSaleFields(tx, {
+      order_id: payment.order_id,
+      payment_id: payment.id,
+      amount: Number(payment.amount),
+    });
     this.eventEmitter.emit('payment.received', {
       payment_id: payment.id,
       store_id: staffUser.store_id,
@@ -5212,12 +5468,10 @@ export class PaymentsService {
       order_id: payment.order_id,
       order_number: payment.orders?.order_number,
       amount: Number(payment.amount),
-      subtotal_amount: Number(payment.orders?.subtotal_amount || 0),
-      tax_amount: Number(payment.orders?.tax_amount || 0),
-      tax_breakdown: [],
+      ...sale_fields,
+      // Desglose por tipo sólo con descuento de orden proyectado.
+      tax_breakdown: sale_fields.tax_breakdown ?? [],
       withholding_breakdown: [],
-      discount_amount: Number(payment.orders?.discount_amount || 0),
-      tip_amount: Number(payment.orders?.tip_amount || 0),
       currency: payment.currency || 'COP',
       payment_method:
         payment.store_payment_method?.system_payment_method?.display_name ||

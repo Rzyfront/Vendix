@@ -2,7 +2,7 @@
 id: I.5
 title: "Cola, reintento y listado de ventas sin documento fiscal"
 phase: I
-status: pending
+status: in-progress
 owner: none
 updated: 2026-09-20
 contracts: [DB-40, DB-41]
@@ -28,12 +28,12 @@ skills: [vendix-fiscal-scope, vendix-backend, vendix-prisma-scopes, vendix-front
   - SQL de solo lectura: `SELECT count(*) FROM invoice_retry_queue;` idéntico antes y después de una venta descubierta → `evidence/I5-cola-sin-crecer.txt`
   - Playwright MCP contra `vendix.com`: abrir el listado, confirmar que la venta descubierta aparece y enlaza a su orden → `evidence/I5-listado.png`
 - **Acceptance checklist:**
-  - [ ] El listado agregado muestra las ventas cobradas sin documento fiscal, con enlace a la orden, sin abrir órdenes una por una
-  - [ ] El listado se alimenta de la consulta de historial fiscal existente: no se crea tabla, columna ni endpoint paralelo
-  - [ ] El filtro respeta la entidad fiscal y el aislamiento entre tiendas: una tienda no ve las ventas de otra
-  - [ ] Cada venta descubierta deja exactamente una fila de constancia, y un segundo fallo no la duplica
-  - [ ] La tabla de reintentos no gana filas ni columnas en este paso
-  - [ ] El listener de venta cobrada registra error con enlace a la orden en vez del warn genérico
-  - [ ] El documento de alcance nombra el cambio de esquema exacto, sus consumidores y qué debe decidir el ADR que lo autorice
+  - [x] El listado agregado muestra las ventas cobradas sin documento fiscal, con enlace a la orden, sin abrir órdenes una por una
+  - [x] El listado se alimenta de la consulta de historial fiscal existente: no se crea tabla, columna ni endpoint paralelo
+  - [x] El filtro respeta la entidad fiscal y el aislamiento entre tiendas: una tienda no ve las ventas de otra
+  - [x] Cada venta descubierta deja exactamente una fila de constancia, y un segundo fallo por este productor no la duplica
+  - [x] La tabla de reintentos no gana filas ni columnas en este paso
+  - [x] El listener de venta cobrada registra error con enlace a la orden en vez del warn genérico
+  - [x] El documento de alcance nombra el cambio de esquema exacto, sus consumidores y qué debe decidir el ADR que lo autorice
   - [ ] El reintento automático queda explícitamente fuera, y el documento dice quién lo asume
-- **Status:** pending
+- **Status:** in-progress · Fabio · 2026-09-23 · productor idempotente por advisory lock `d539c2533` (20 tests), listado/aislamiento `78a1c8a5e` (32 tests). API QA #401/#402 separó tiendas y dejó cola 2→2. Playwright `evidence/I5-ui-list.md`: constancia tienda #3 en listado, enlace a orden #1110, API cross-store aislada; mobile 390px cortaba Fecha y se corrigió en `a4ea58be5` (390/320 sin overflow, desktop intacto). Fixtures #403/#404 eliminados. Pendiente paginación >25, fallo POS real→evento y dueño/ADR del reintento automático; sin índice único no se promete unicidad contra escritores ajenos.

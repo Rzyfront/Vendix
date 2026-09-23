@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PaymentValidatorService } from './services/payment-validator.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { OrderValidationResult } from './interfaces';
+import { ErrorCodes } from '../../../common/errors/error-codes';
 
 describe('PaymentValidatorService', () => {
   let service: PaymentValidatorService;
@@ -119,7 +120,7 @@ describe('PaymentValidatorService', () => {
       expect(result.errors).toContain('Order does not belong to this store');
     });
 
-    it('should warn about fully paid order', async () => {
+    it('should reject a fully paid order with the typed conflict code', async () => {
       const mockOrder = {
         id: 1,
         state: 'created',
@@ -146,9 +147,32 @@ describe('PaymentValidatorService', () => {
 
       const result = await service.validateOrder(1, 1);
 
-      expect(result.valid).toBe(true);
-      expect(result.warnings).toContain('Order is already fully paid');
+      expect(result.valid).toBe(false);
+      expect(result.errorCode).toBe('ORD_PAY_ALREADY_PAID_001');
+      expect(ErrorCodes.ORD_PAY_ALREADY_PAID_001.httpStatus).toBe(409);
+      expect(result.errors).toContain('Order is already fully paid');
+      expect(result.warnings).toBeUndefined();
     });
+
+    it.each(['succeeded', 'captured'])(
+      'should still allow a partial %s payment with a remaining balance',
+      async (state) => {
+        jest.spyOn(prisma.orders, 'findUnique').mockResolvedValue({
+          id: 1,
+          state: 'processing',
+          store_id: 1,
+          grand_total: 100,
+          order_items: [{ product_name: 'Test Product', quantity: 1 }],
+          payments: [{ state, amount: 40 }],
+        });
+
+        const result = await service.validateOrder(1, 1);
+
+        expect(result.valid).toBe(true);
+        expect(result.errorCode).toBeUndefined();
+        expect(result.errors).toBeUndefined();
+      },
+    );
 
     it('should reject order with no items', async () => {
       const mockOrder = {

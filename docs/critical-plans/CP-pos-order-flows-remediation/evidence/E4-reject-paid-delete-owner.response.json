@@ -1,0 +1,9 @@
+{
+  "statusCode": 400,
+  "error_code": "ORD_VALIDATE_001",
+  "message": "Cannot delete an order with financial records; use the cancellation or return flow.",
+  "details": {
+    "state": "created",
+    "reason": "financial_evidence"
+  }
+}

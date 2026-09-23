@@ -240,21 +240,21 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
     expect(data.custom_variables?.kds_name).toBe('Cocina Caliente');
     expect(data.custom_variables?.order_number).toBe('ORD-2026-0012');
 
-    // A.5 / CP-POLLO-ARABE-727 A.7 — la sesión ABIERTA (closed_at IS NULL) y la
-    // más reciente se resuelve con un `findFirst` top-level sobre `table_sessions`
+    // ADR-04 — la sesión más reciente, abierta o cerrada, se resuelve con un
+    // `findFirst` top-level sobre `table_sessions`
     // (que sí pasa por el scoping), no con un include anidado.
     expect(findFirstSession).toHaveBeenCalledTimes(1);
     expect(findFirstSession.mock.calls[0][0].where).toEqual({
       order_id: 100,
-      closed_at: null,
     });
     expect(findFirstSession.mock.calls[0][0].orderBy).toEqual({
       opened_at: 'desc',
     });
     expect(findFirstSession.mock.calls[0][0].take).toBe(1);
+    expect(findFirstSession.mock.calls[0][0].include.table.select).not.toHaveProperty('table_waiters');
   });
 
-  it('kitchen_ticket: el mesero asignado (table_waiters) manda sobre el opener', async () => {
+  it('kitchen_ticket: el opener manda sobre table_waiters estáticos', async () => {
     const findFirstTicket = jest.fn().mockResolvedValue({
       id: 43,
       fired_at: new Date('2026-08-22T15:00:00.000Z'),
@@ -293,9 +293,46 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
 
     const data = await p.fetchDocumentData(10, 43);
 
-    // C.3 — el mesero asignado (table_waiters) gana al opener.
-    expect(data.document.waiter_name).toBe('Lucía Ramírez');
+    // ADR-04 — la asignación estática no cambia al mesero de la sesión.
+    expect(data.document.waiter_name).toBe('Mateo Sánchez');
     expect(data.document.table_number).toBe('Mesa 05');
+  });
+
+  it('kitchen_ticket: reimpresión de sesión cerrada conserva mesa y opener', async () => {
+    const findFirstSession = jest.fn().mockResolvedValue({
+      closed_at: new Date('2026-08-22T16:00:00.000Z'),
+      table: { name: '09' },
+      opener: { first_name: 'Ana', last_name: 'Gómez' },
+    });
+    const p = new KitchenTicketDataProvider({
+      kitchen_tickets: { findFirst: jest.fn().mockResolvedValue({
+        id: 45, status: 'ready', items: [], order: { id: 103 },
+      }) },
+      table_sessions: { findFirst: findFirstSession },
+    } as any);
+
+    const data = await p.fetchDocumentData(10, 45);
+
+    expect(findFirstSession.mock.calls[0][0].where).toEqual({ order_id: 103 });
+    expect(data.document.table_number).toBe('Mesa 09');
+    expect(data.document.waiter_name).toBe('Ana Gómez');
+  });
+
+  it('kitchen_ticket: sesión QR sin opener no inventa mesero', async () => {
+    const p = new KitchenTicketDataProvider({
+      kitchen_tickets: { findFirst: jest.fn().mockResolvedValue({
+        id: 46, status: 'fired', items: [], order: { id: 104 },
+      }) },
+      table_sessions: { findFirst: jest.fn().mockResolvedValue({
+        table: { name: '10', table_waiters: [{ user: { first_name: 'Lucía' } }] },
+        opener: null,
+      }) },
+    } as any);
+
+    const data = await p.fetchDocumentData(10, 46);
+
+    expect(data.document.table_number).toBe('Mesa 10');
+    expect(data.document.waiter_name).toBe('');
   });
 
   it('kitchen_ticket: orden sin mesa (sin sesión abierta) → sin mesa ni mesero, no rompe', async () => {
@@ -423,7 +460,7 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
     expect(html).toContain('Ana Mesera');
   });
 
-  it('pos_sale_ticket: venta en mesa — incluye la sesión ABIERTA y mapea mesa + mesero', async () => {
+  it('pos_sale_ticket: venta en mesa — mapea el opener, no table_waiters', async () => {
     const findFirst = jest.fn().mockResolvedValue({
       id: 7,
       order_number: 'POS-0007',
@@ -469,13 +506,45 @@ describe('carril real de impresión: leer o fallar, nunca fabricar', () => {
 
     const data = await p.fetchDocumentData(10, 7);
 
-    // C.3 — la consulta pide la sesión ABIERTA (closed_at IS NULL) y la más
-    // reciente; el recibo mapea mesa + mesero (asignado, prioridad sobre opener).
+    // ADR-04 — la consulta pide la sesión más reciente sin excluir las cerradas.
     const tableSessions = findFirst.mock.calls[0][0].include.table_sessions;
-    expect(tableSessions.where).toEqual({ closed_at: null });
+    expect(tableSessions.where).toBeUndefined();
     expect(tableSessions.orderBy).toEqual({ opened_at: 'desc' });
+    expect(tableSessions.take).toBe(1);
+    expect(tableSessions.include.table.select).not.toHaveProperty('table_waiters');
     expect(data.document.table_number).toBe('Mesa 07');
-    expect(data.document.waiter_name).toBe('Lucía Ramírez');
+    expect(data.document.waiter_name).toBe('Mateo Sánchez');
+  });
+
+  it.each([
+    ['cerrada', [{
+      closed_at: new Date('2026-08-27T10:00:00.000Z'),
+      table: { name: '08' },
+      opener: { first_name: 'Ana', last_name: 'Gómez' },
+    }], 'Mesa 08', 'Ana Gómez'],
+    ['sin sesión', [], '', ''],
+    ['QR sin opener', [{
+      closed_at: null,
+      table: { name: '09', table_waiters: [{ user: { first_name: 'Lucía' } }] },
+      opener: null,
+    }], 'Mesa 09', ''],
+  ])('pos_sale_ticket: %s → mesa y mesero seguros', async (_case, sessions, tableName, waiterName) => {
+    const p = new PosSaleTicketDataProvider({
+      orders: { findFirst: jest.fn().mockResolvedValue({
+        id: 8,
+        order_number: 'POS-0008',
+        created_at: new Date('2026-08-27T09:15:00.000Z'),
+        order_items: [],
+        stores: { name: 'Tienda Test', addresses: [], organizations: {} },
+        table_sessions: sessions,
+      }) },
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+    } as any);
+
+    const data = await p.fetchDocumentData(10, 8);
+
+    expect(data.document.table_number).toBe(tableName);
+    expect(data.document.waiter_name).toBe(waiterName);
   });
 
   /**

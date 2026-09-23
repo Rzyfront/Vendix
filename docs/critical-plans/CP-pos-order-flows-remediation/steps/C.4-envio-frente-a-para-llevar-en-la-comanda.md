@@ -2,8 +2,8 @@
 id: C.4
 title: "ENVÍO frente a PARA LLEVAR en la comanda del KDS"
 phase: C
-status: pending
-owner: none
+status: in-progress
+owner: Bohr
 updated: 2026-09-20
 contracts: [FB-36, FB-37, FB-38, FB-16, FB-19, DB-04, DB-10]
 adrs: [ADR-01, ADR-06]
@@ -37,4 +37,4 @@ skills: [vendix-restaurant-ops, vendix-backend-api, vendix-zoneless-signals, how
   - [ ] `is_takeaway` conserva valor y reglas: conteo agrupado idéntico y compuerta takeaway-only sin cambio de comportamiento.
   - [ ] El botón «Entregar» del KDS sigue habilitándose exactamente con el mismo criterio que antes del paso.
   - [ ] El paso se despliega después de que `delivery_type` se persista de verdad; si no, el badge queda leyendo el default del esquema.
-- **Status:** pending
+- **Status:** in-progress — contrato/badges en 37005e554; 30 tests y watch OK; falta E2E.

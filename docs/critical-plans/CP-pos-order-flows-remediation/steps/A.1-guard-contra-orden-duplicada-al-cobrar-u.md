@@ -2,9 +2,9 @@
 id: A.1
 title: "Guard contra orden duplicada al cobrar un borrador reabierto"
 phase: A
-status: pending
-owner: none
-updated: 2026-09-20
+status: in-progress
+owner: A1-pos-draft
+updated: 2026-09-22
 contracts: [FB-01, FB-02, ERR-34, ERR-35, DB-02, DB-14]
 adrs: []
 skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-error-handling, vendix-prisma-scopes, vendix-zoneless-signals, how-to-test]
@@ -46,4 +46,4 @@ skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-error-han
   - [ ] `error-messages.ts` mapea `POS_DRAFT_DUPLICATE_ORDER_001` y `POS_DRAFT_REQUIRES_PAYMENT_001` a texto accionable en español
   - [ ] Ningún carril de este paso termina en 500: las evidencias no contienen `SYS_INTERNAL_001`
   - [ ] Las filas FB-01, FB-02, ERR-34, ERR-35, DB-02 y DB-14 quedan marcadas con su evidencia enlazada
-- **Status:** pending
+- **Status:** in-progress

@@ -47,6 +47,7 @@ import { PosOrderCreateResult } from '../../models/order.model';
 // división que `pos-payment.service.ts`/`pos-order.service.ts` ya usan.
 import { resolveLineUnits } from '../../utils/line-units.util';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { ERROR_MESSAGES } from '../../../../../../core/utils/error-messages';
 import { focusFirstInvalid } from '../../../../../../core/utils/focus-first-invalid';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import { StoreOrdersService } from '../../../orders/services/store-orders.service';
@@ -648,6 +649,11 @@ export class PosCheckoutShellComponent {
       this.submittingDraft() ||
       (this.paymentStep()?.isProcessing() ?? false) ||
       (this.shippingStep()?.isProcessing() ?? false),
+  );
+  readonly draftDeliveryBlocked = computed<boolean>(() =>
+    this.effectiveIntent() === 'delivery' &&
+    this.currentStepKey() === 'envio' &&
+    !this.shippingStep()?.buildShippingContext(),
   );
   readonly confirmDisabled = computed<boolean>(() => {
     if (this.footerProcessing()) return true;
@@ -1412,7 +1418,7 @@ export class PosCheckoutShellComponent {
     if (this.entregaTouched() && choice !== 'enviar') {
       return {
         payload: {
-          delivery_type: choice === 'mesa' ? 'dine_in' : 'pickup',
+          delivery_type: choice === 'mesa' ? 'dine_in' : 'direct_delivery',
           shipping_cost: 0,
         },
         warning: null,
@@ -1424,10 +1430,17 @@ export class PosCheckoutShellComponent {
         return { payload: {}, warning: null,
           error: 'Cambiaste el cliente. Selecciona una dirección de este cliente en Envío antes de actualizar.' };
       }
+      // Legacy POS pickup without a shipping method is still an existing order,
+      // not a fresh shipping choice. Preserve it until the cashier edits Envío.
+      if (preserved?.deliveryType === 'pickup' && !hasShipmentContext(preserved) &&
+          !ship?.hasShippingChanges()) {
+        return { payload: {}, warning: null };
+      }
       const error = ship?.editorValidationError();
       if (error) return { payload: {}, warning: null, error };
       const newShipping = !hasShipmentContext(preserved) &&
-        preserved?.deliveryType !== 'home_delivery' && !preserved?.shippingAddressId;
+        preserved?.deliveryType !== 'home_delivery' &&
+        preserved?.deliveryType !== 'pickup' && !preserved?.shippingAddressId;
       if (ship?.hasShippingChanges() || newShipping) {
         const context = ship?.buildShippingContext();
         if (!context) return { payload: {}, warning: null, error: 'Completa la configuración de envío antes de actualizar.' };
@@ -1906,6 +1919,18 @@ export class PosCheckoutShellComponent {
     const state = this.cartState();
     if (!state || !(state.items?.length ?? 0)) return;
 
+    // A delivery draft must not silently become a counter/direct-delivery
+    // order when the shipping step has no selected method. Navigate back to
+    // the step if the cashier pressed Guardar from elsewhere in the wizard.
+    const deliveryShipping = this.effectiveIntent() === 'delivery'
+      ? this.shippingStep()?.buildShippingContext() ?? null
+      : null;
+    if (this.effectiveIntent() === 'delivery' && !deliveryShipping) {
+      this.toastService.warning('Selecciona un método de envío antes de guardar esta entrega a domicilio.');
+      this.goToStepKey('envio');
+      return;
+    }
+
     this.submittingDraft.set(true);
 
     // Envío: el borrador es un pedido a domicilio, no una cuenta de mesa ni
@@ -1914,7 +1939,7 @@ export class PosCheckoutShellComponent {
     // y notas del envío. Se guarda como borrador con su contexto de envío; la
     // cocina se dispara al cobrarlo, igual que en la venta directa.
     if (this.effectiveIntent() === 'delivery') {
-      this.createRetailDraft(state, this.shippingStep()?.buildShippingContext() ?? null);
+      this.createRetailDraft(state, deliveryShipping);
       return;
     }
 
@@ -1947,21 +1972,41 @@ export class PosCheckoutShellComponent {
   }
 
   private createCounterAndFire(state: CartState): void {
-    const lines = this.toCounterLines(state.items);
-    if (lines.length === 0) {
+    const hasProductLines = state.items.some((it) => it.itemType !== 'custom');
+    if (!hasProductLines) {
       this.submittingDraft.set(false);
       this.toastService.warning('Agrega productos al carrito antes de crear la orden');
       return;
     }
-    const customerId = this.resolveCustomerId(state.customer);
+    // P0-3 — el borrador de mostrador va por el mismo carril que «Guardar
+    // borrador» (`/store/payments/pos` con `is_draft`), que resuelve en
+    // servidor el impuesto de catálogo por línea. Se aplica la misma política
+    // de cliente que `createRetailDraft`: el backend exige cliente
+    // (`POS_CUSTOMER_REQUIRED_001`) salvo venta anónima o alias permitidos.
+    if (
+      !this.isAnonymousSale() &&
+      this.saleMode() !== 'alias' &&
+      (!state.customer || state.customer.id == null)
+    ) {
+      this.submittingDraft.set(false);
+      this.toastService.error(
+        'Selecciona o crea un cliente antes de guardar la orden.',
+      );
+      return;
+    }
+    const customerPicked = state.customer?.id != null;
+    const draftState =
+      (this.isAnonymousSale() || this.saleMode() === 'alias') && !customerPicked
+        ? { ...state, customer: null }
+        : state;
     this.integration
-      .createCounterDraftOrder(customerId, lines, undefined, this.customerAliasForPayload())
+      .createCounterDraftOrder(draftState, this.customerAliasForPayload())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (order) => {
           const orderId = order?.id;
           const preparedIds = this.preparedItemIdsFromOrder(order);
-          this.maybeFireAndFinish(orderId, preparedIds, state);
+          this.maybeFireAndFinish(orderId, preparedIds, state, order);
         },
         error: (err) => {
           this.submittingDraft.set(false);
@@ -1998,6 +2043,15 @@ export class PosCheckoutShellComponent {
           }
           // Mantiene al POS al día con la sesión recién abierta.
           this.onTableSessionOpened(result);
+          // El picker del checkout solo selecciona la mesa: la apertura real
+          // ocurre aquí al guardar el borrador, no en el modal de selección.
+          if (result.previous_table_status === 'cleaning') {
+            this.toastService.warning(
+              ERROR_MESSAGES['TABLE_REOPENED_FROM_CLEANING_001'],
+              undefined,
+              5000,
+            );
+          }
           this.appendToTableAndFire(state, session);
         },
         error: (err) => {
@@ -2056,7 +2110,7 @@ export class PosCheckoutShellComponent {
           const orderItemIds = this.preparedItemIdsFromOrder(
             updated?.order,
           ).filter((id) => justAdded.has(id));
-          this.maybeFireAndFinish(orderId, orderItemIds, state);
+          this.maybeFireAndFinish(orderId, orderItemIds, state, updated?.order);
         },
         error: (err) => {
           this.submittingDraft.set(false);
@@ -2139,6 +2193,7 @@ export class PosCheckoutShellComponent {
     orderId: number | undefined,
     orderItemIds: number[],
     state: CartState,
+    fallbackOrder?: any,
   ): void {
     if (!orderId) {
       this.finishDraft(null, orderItemIds, false);
@@ -2155,8 +2210,7 @@ export class PosCheckoutShellComponent {
           } else {
             this.toastService.success('Orden creada');
           }
-          this.finishDraft({ id: orderId } as any, orderItemIds, fired);
-          void state; // keep for future extensions (notes / customer)
+          this.finishPersistedDraft(orderId, orderItemIds, fired, fallbackOrder);
         },
         error: (err) => {
           // Order already persisted — surface the error but do not roll back.
@@ -2164,7 +2218,34 @@ export class PosCheckoutShellComponent {
             'La orden se creó pero no se pudo enviar a cocina. Reintenta desde el panel.',
           );
           console.error('maybeFireKitchen failed', err);
-          this.finishDraft({ id: orderId } as any, orderItemIds, false);
+          this.finishPersistedDraft(orderId, orderItemIds, false, fallbackOrder);
+        },
+      });
+    void state; // keep for future extensions (notes / customer)
+  }
+
+  private finishPersistedDraft(
+    orderId: number,
+    orderItemIds: number[],
+    firedToKitchen: boolean,
+    fallbackOrder?: any,
+  ): void {
+    // El resultado de fire contiene solo ids. La confirmación/tiquete debe
+    // mostrar el número, alias y totales PERSISTIDOS, no un {id} parcial que
+    // pinta Borrador #N/A y $0 tras guardar correctamente la mesa.
+    this.ordersService.getOrderById(String(orderId))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (order) => this.finishDraft(order, orderItemIds, firedToKitchen),
+        error: () => {
+          this.toastService.warning(
+            'La orden se guardó, pero no se pudo cargar su resumen. Revisa el detalle antes de cobrar.',
+          );
+          this.finishDraft(
+            { ...fallbackOrder, id: orderId, order_number: fallbackOrder?.order_number || String(orderId) },
+            orderItemIds,
+            firedToKitchen,
+          );
         },
       });
   }
@@ -2200,32 +2281,6 @@ export class PosCheckoutShellComponent {
   }
 
   // ─── Draft helpers (copied from the legacy modal) ────────────────────────
-  private toCounterLines(items: CartItem[]): Array<{
-    product_id: number;
-    product_variant_id?: number;
-    product_name: string;
-    quantity: number;
-    unit_price: number;
-    total_price: number;
-    tax_rate?: number;
-  }> {
-    // NOTA takeaway: NO se envía `is_takeaway` aunque la orden sea 'Para
-    // llevar' — POST /store/orders (`CreateOrderItemDto`) no declara el campo
-    // y el ValidationPipe global (`forbidNonWhitelisted`) lo rechazaría con
-    // 400. El cobro por /store/payments/pos es el carril que persiste la marca.
-    return items
-      .filter((it) => it.itemType !== 'custom')
-      .map((it) => ({
-        product_id: Number((it.product as any).id),
-        product_variant_id: it.variant_id ?? undefined,
-        product_name: it.product.name,
-        quantity: it.quantity,
-        unit_price: Number(it.unitPrice || 0),
-        total_price: Number(it.totalPrice || 0),
-        tax_rate: (it.product as any)?.tax_rate ?? undefined,
-      }));
-  }
-
   private preparedItemIdsFromOrder(order: any): number[] {
     const items: any[] = order?.order_items ?? [];
     const cart = this.cartState()?.items ?? [];

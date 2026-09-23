@@ -23,6 +23,11 @@
           <p class="font-semibold text-[var(--color-text-primary)]">
             {{ t.order?.order_number ?? ('#' + t.order_id) }}
           </p>
+          @if (deliveryBadgeLabel(); as label) {
+            <app-badge variant="info" size="xs" [title]="label === 'ENVÍO' ? 'Pedido para envío a domicilio' : 'Pedido para llevar'">
+              <app-icon name="shopping-bag" [size]="10" /> {{ label }}
+            </app-badge>
+          }
         </div>
         @if (t.table_id) {
           <div>

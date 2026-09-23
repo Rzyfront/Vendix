@@ -1,5 +1,6 @@
 import { PosSaleCompletedListener } from './pos-sale-completed.listener';
 import { PosSaleCompletedEvent } from './pos-sale-completed.event';
+import { Logger } from '@nestjs/common';
 
 /**
  * El listener es el ÚNICO lector de `auto_emit` en el camino del evento: el
@@ -68,6 +69,24 @@ describe('PosSaleCompletedListener', () => {
     await makeListener(emitForOrder).handlePosSaleCompleted(event());
     expect(emitForOrder).toHaveBeenCalledTimes(1);
     expect(emitForOrder).toHaveBeenCalledWith(100);
+  });
+
+  it('logs a paid sale without a document as an error with the order link', async () => {
+    const log = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    try {
+      const emitForOrder = jest.fn().mockResolvedValue({
+        state: 'failed', message: 'Sin resolución vigente', invoice_id: null,
+      });
+      await makeListener(emitForOrder).handlePosSaleCompleted(event({ order_id: 321 }));
+      expect(log).toHaveBeenCalledWith(
+        expect.stringContaining('/admin/orders/321'),
+      );
+      expect(log).toHaveBeenCalledWith(
+        expect.stringContaining('Sin resolución vigente'),
+      );
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it('dos eventos concurrentes del mismo pedido emiten UNA sola vez', async () => {

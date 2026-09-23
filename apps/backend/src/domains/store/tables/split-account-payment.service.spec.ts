@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { SplitAccountPaymentService } from './split-account-payment.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { VendixHttpException } from 'src/common/errors';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 /** Orchestration tests: real service, mocked infrastructure, no external charge. */
 describe('SplitAccountPaymentService', () => {
@@ -13,6 +13,7 @@ describe('SplitAccountPaymentService', () => {
   let settings: any;
   let sessions: any;
   let tableSessions: any;
+  let emitAfterCommit: jest.Mock;
   let redis: any;
   let source: any;
   let accounts: any[];
@@ -212,9 +213,21 @@ describe('SplitAccountPaymentService', () => {
       })),
     };
     sessions = { getActiveSession: jest.fn(async () => null) };
+    emitAfterCommit = jest.fn(() => {
+      expect(transactionOpen).toBe(false);
+    });
     tableSessions = {
-      markSessionPaid: jest.fn(async () => ({ id: 3, order_id: 100 })),
-      emitSessionPaid: jest.fn(),
+      projectOrderPaymentToTableSession: jest.fn(
+        async (orderId, _paymentId, tx) => {
+          expect(transactionOpen).toBe(true);
+          expect(tx).toBe(db);
+          expect(orderId).toBe(100);
+          const session = await tx.table_sessions.findFirst({
+            where: { order_id: orderId, store_id: 10, closed_at: null },
+          });
+          return session ? { sessionId: session.id, emitAfterCommit } : null;
+        },
+      ),
     };
     orderFlow = {
       settleFinancialSplitSource: jest.fn(async () => {
@@ -265,7 +278,9 @@ describe('SplitAccountPaymentService', () => {
           customer: { id: 8, name: 'QA Payer', tax_id: 'QA' },
         }),
       );
-      expect(tableSessions.markSessionPaid).not.toHaveBeenCalled();
+      expect(
+        tableSessions.projectOrderPaymentToTableSession,
+      ).not.toHaveBeenCalled();
     },
   );
 
@@ -515,12 +530,62 @@ describe('SplitAccountPaymentService', () => {
       12,
       makeRequest({ idempotency_key: 'payment-key-002' }),
     );
-    expect(tableSessions.markSessionPaid).toHaveBeenCalledTimes(1);
-    expect(tableSessions.markSessionPaid).toHaveBeenCalledWith(3, 3, db);
-    expect(tableSessions.emitSessionPaid).toHaveBeenCalledWith(10, 3, 100, 3);
+    expect(tableSessions.projectOrderPaymentToTableSession).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(tableSessions.projectOrderPaymentToTableSession).toHaveBeenCalledWith(
+      100,
+      3,
+      db,
+    );
+    expect(emitAfterCommit).toHaveBeenCalledTimes(1);
     expect(orderFlow.settleFinancialSplitSource).toHaveBeenCalledWith(100, 15);
     expect(String(source.remaining_balance)).toBe('0');
     expect(source.state).toBe('processing');
+  });
+
+  it('staff confirm delegates a fully paid split account to the same projection', async () => {
+    await service.pay(100, 11, makeRequest());
+    db.table_sessions.findFirst.mockResolvedValue({ id: 3 });
+    payments.push({
+      id: 3,
+      order_id: 100,
+      financial_account_id: 12,
+      store_payment_method_id: 1,
+      amount: '100.00',
+      currency: 'COP',
+      state: 'pending',
+      gateway_response: {
+        financial_request: { created_by_user_id: 15, authorized_store_id: 10 },
+      },
+      financial_effects_recorded_at: null,
+    });
+
+    await service.confirm(100, 12, 3, {});
+
+    expect(payments[2].state).toBe('succeeded');
+    expect(tableSessions.projectOrderPaymentToTableSession).toHaveBeenCalledWith(
+      100,
+      3,
+      db,
+    );
+    expect(emitAfterCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it('no emite una sesión pagada si la proyección revierte', async () => {
+    await service.pay(100, 11, makeRequest());
+    tableSessions.projectOrderPaymentToTableSession.mockRejectedValueOnce(
+      new VendixHttpException(
+        ErrorCodes.POS_TABLE_SESSION_PROJECTION_FAILED_001,
+      ),
+    );
+    await expect(
+      service.pay(100, 12, makeRequest({ idempotency_key: 'payment-key-002' })),
+    ).rejects.toMatchObject({
+      errorCode: 'POS_TABLE_SESSION_PROJECTION_FAILED_001',
+    });
+    expect(emitAfterCommit).not.toHaveBeenCalled();
+    expect(payments[2].state).toBe('succeeded');
   });
 
   it('retries physical settlement failure without charging or duplicating the payment', async () => {

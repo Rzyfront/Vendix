@@ -165,8 +165,21 @@ export interface OperatingRevenueParts {
   subtotal: number;
   /** SUM(orders.discount_amount) — order-level discount. */
   discounts: number;
-  /** SUM(orders.shipping_cost) — freight CHARGED to the customer (revenue). */
+  /**
+   * SUM(orders.shipping_cost) — freight CHARGED to the customer, GROSS: when the
+   * shipping rate carries a tax, that tax is included inside this amount.
+   */
   shipping: number;
+  /**
+   * SUM(orders.shipping_tax_amount) — the tax embedded in `shipping` (IVA/INC
+   * of the shipping rate, always tax-inclusive). NOT in `orders.tax_amount`;
+   * it is money held for the DIAN, so it is subtracted from revenue and
+   * reported under the collected taxes instead. 0 for untaxed freight.
+   *
+   * Optional only so legacy callers outside analytics keep compiling; a caller
+   * that omits it overstates revenue by the freight tax. Always pass it.
+   */
+  shipping_tax?: number;
   /** SUM(orders.tax_amount) — VAT/consumption tax COLLECTED, never revenue. */
   tax: number;
 }
@@ -174,20 +187,32 @@ export interface OperatingRevenueParts {
 /**
  * OPERATING REVENUE — the one number every "Ingresos" card must show.
  *
- *   subtotal − discounts + shipping charged
+ *   subtotal − discounts + (shipping charged − shipping tax)
  *
  * VAT is excluded on purpose: it is money held for the DIAN, not earned income
  * (it is reported separately as `tax_collected`). Freight charged IS included,
  * per the product decision, so revenue matches what the store actually invoiced
- * the customer minus tax.
+ * the customer minus tax. The freight enters on its BASE: the tax of a taxed
+ * shipping rate (`shipping_tax_amount`) is excluded like any other VAT/INC.
  *
  * Using `grand_total` instead — the previous behaviour of `sales/summary` — makes
  * the card overstate revenue by exactly the VAT, and puts the margin numerator
  * and denominator on different bases.
  */
 export function computeOperatingRevenue(parts: OperatingRevenueParts): number {
-  return parts.subtotal - parts.discounts + parts.shipping;
+  return (
+    parts.subtotal - parts.discounts + (parts.shipping - (parts.shipping_tax ?? 0))
+  );
 }
+
+/**
+ * SQL expression for the tax embedded in the freight of an order (`o.` alias).
+ * Add it to any "impuestos recaudados" figure built from `orders.tax_amount`,
+ * which does NOT carry it.
+ */
+export const SHIPPING_TAX_SQL = Prisma.raw(
+  'COALESCE(o.shipping_tax_amount, 0)',
+) as unknown as Prisma.Sql;
 
 /**
  * SQL expression for operating revenue (ex-VAT), ready to interpolate into
@@ -202,7 +227,7 @@ export function computeOperatingRevenue(parts: OperatingRevenueParts): number {
  * shared SQL fragment enforces one definition across all granularities.
  */
 export const OPERATING_REVENUE_SQL = Prisma.raw(
-  '(o.subtotal_amount - o.discount_amount + o.shipping_cost)',
+  '(o.subtotal_amount - o.discount_amount + (o.shipping_cost - COALESCE(o.shipping_tax_amount, 0)))',
 ) as unknown as Prisma.Sql;
 
 /**
