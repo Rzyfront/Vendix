@@ -68,6 +68,22 @@ import { AlertBannerComponent, DialogService, ModalComponent, ToastService, Time
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
+
+/** The finish guard returns its current KDS snapshot, which may be newer than this page's order. */
+export function pendingKitchenLabelsFromError(error: unknown): string[] {
+  const details = (error as { details?: { pending_items?: unknown } } | null)?.details;
+  if (!Array.isArray(details?.pending_items)) return [];
+  return details.pending_items.flatMap((item: unknown) => {
+    if (!item || typeof item !== 'object') return [];
+    const row = item as { product_name?: unknown; variant_label?: unknown; quantity?: unknown };
+    if (typeof row.product_name !== 'string' || !row.product_name.trim()) return [];
+    const variant = typeof row.variant_label === 'string' && row.variant_label.trim()
+      ? ` (${row.variant_label.trim()})` : '';
+    const quantity = typeof row.quantity === 'number' && row.quantity > 1
+      ? ` ×${row.quantity}` : '';
+    return [`${row.product_name}${variant}${quantity}`];
+  });
+}
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
   StickyHeaderComponent,
@@ -2557,7 +2573,7 @@ export class OrderDetailsPageComponent {
               const pendingKitchen = (err as { errorCode?: string | null })?.errorCode ===
                 'ORDER_HAS_PENDING_KITCHEN_ITEMS';
               const dishes = pendingKitchen
-                ? this.undeliveredKitchenItems().map((item) => item.product_name)
+                ? pendingKitchenLabelsFromError(err)
                 : [];
               this.toastService.error(
                 dishes.length > 0
