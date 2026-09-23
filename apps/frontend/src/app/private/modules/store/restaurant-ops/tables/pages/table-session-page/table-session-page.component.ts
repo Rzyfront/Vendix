@@ -11,7 +11,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { interval } from 'rxjs';
+import { forkJoin, interval } from 'rxjs';
 import {
   CardComponent,
   StickyHeaderComponent,
@@ -43,6 +43,7 @@ import {
   PaymentPendingView,
   TransferResult,
   SplitResult,
+  TableOrderReassignmentEvidence,
 } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
 import { AdminTablesSseService } from '../../services/admin-tables-sse.service';
@@ -78,7 +79,7 @@ import { TransferTableModalComponent } from '../../components/transfer-table-mod
 
 /** One entry of the `Opciones` overflow menu (desktop dropdown + mobile action sheet). */
 interface SecondaryAction {
-  id: 'pay' | 'split' | 'transfer' | 'customer' | 'table-status' | 'history' | 'close';
+  id: 'pay' | 'split' | 'transfer' | 'reassign' | 'customer' | 'table-status' | 'history' | 'close';
   label: string;
   icon: string;
   disabled?: boolean;
@@ -156,6 +157,9 @@ export class TableSessionPageComponent implements OnInit {
   readonly isAddItemsOpen = signal(false);
   readonly isSplitOpen = signal(false);
   readonly hasFinancialSplit = signal(false);
+  /** Null until the order detail proves the closed check has no financial blockers. */
+  readonly reassignmentEvidence = signal<TableOrderReassignmentEvidence | null>(null);
+  readonly reassignmentFloorLoaded = signal(false);
   readonly splitRefreshKey = signal(0);
   readonly isPayOpen = signal(false);
   readonly isAssignCustomerOpen = signal(false);
@@ -199,6 +203,7 @@ export class TableSessionPageComponent implements OnInit {
   readonly statusModalShowsHistory = signal(false);
   /** Transfer modal (cambiar de mesa / swap de cuentas). */
   readonly isTransferOpen = signal(false);
+  readonly tableMoveMode = signal<'transfer' | 'reassign'>('transfer');
   /** Mobile-only: collapses the account detail below the totals row. */
   readonly summaryExpanded = signal(false);
 
@@ -360,6 +365,26 @@ export class TableSessionPageComponent implements OnInit {
   readonly isPaid = computed(() => {
     const session = this.session();
     return !!session?.paid_at || (session != null && this.paidFromSseSessionId() === session.id);
+  });
+
+  /** Conservative UI gate; the backend re-reads all evidence under lock. */
+  readonly canReassignClosedOrder = computed(() => {
+    const session = this.session();
+    const evidence = this.reassignmentEvidence();
+    if (!session?.closed_at || !session.order || !session.table || this.isPaid() || this.hasFinancialSplit()) return false;
+    if (!evidence || evidence.id !== session.order_id || !this.reassignmentFloorLoaded()) return false;
+    if (this.tablesService.floorTables().some((table) =>
+      table.active_session?.order_id === session.order_id)) return false;
+    // add-items on a table session accepts only draft orders. Other backend-
+    // eligible states are intentionally hidden until that flow supports them.
+    if (session.order.state !== 'draft' || evidence.state !== 'draft') return false;
+    if (evidence.active_financial_split_id != null || Number(evidence.total_paid) !== 0) return false;
+    if (!Array.isArray(evidence.payments) || !Array.isArray(evidence.invoices)) return false;
+    // The orders detail returns only its latest invoice. Any invoice row is
+    // treated as uncertain and hidden here; the backend remains authoritative.
+    if (evidence.invoices.length > 0) return false;
+    return !evidence.payments.some((payment) =>
+      ['succeeded', 'captured', 'partially_refunded', 'refunded'].includes(payment.state));
   });
 
   /** Reads `restaurant.enable_table_checkout` (loose JSON slice). */
@@ -537,10 +562,14 @@ export class TableSessionPageComponent implements OnInit {
    * Advanced actions grouped in the `Opciones` dropdown menu — a single source
    * of truth consumed by BOTH the desktop `app-dropdown` (projected into
    * the sticky header's `[actions-extra]` slot) and the mobile action
-   * sheet (`app-modal`). Empty once the session is closed.
+   * sheet (`app-modal`). A closed, eligible check keeps only reassignment.
    */
   readonly secondaryActions = computed<SecondaryAction[]>(() => {
-    if (this.isClosed()) return [];
+    if (this.isClosed()) {
+      return this.canReassignClosedOrder()
+        ? [{ id: 'reassign', label: 'Volver a asignar mesa', icon: 'arrow-right-left' }]
+        : [];
+    }
     const actions: SecondaryAction[] = [];
 
     if (this.checkoutEnabled()) {
@@ -644,6 +673,11 @@ export class TableSessionPageComponent implements OnInit {
         next: (s) => {
           this.session.set(s);
           this.seedKitchenStateFromOrder(s);
+          if (s.closed_at) this.loadReassignmentEvidence(s.order_id);
+          else {
+            this.reassignmentEvidence.set(null);
+            this.reassignmentFloorLoaded.set(false);
+          }
           if (!opts.silent) this.isLoading.set(false);
         },
         error: (err: unknown) => {
@@ -651,6 +685,29 @@ export class TableSessionPageComponent implements OnInit {
           this.toastService.error(
             typeof err === 'string' ? err : 'Error al cargar la sesión',
           );
+        },
+      });
+  }
+
+  private loadReassignmentEvidence(orderId: number): void {
+    this.reassignmentEvidence.set(null);
+    this.reassignmentFloorLoaded.set(false);
+    forkJoin({
+      evidence: this.tablesService.getOrderReassignmentEvidence(orderId),
+      floor: this.tablesService.getFloorMap(),
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: ({ evidence }) => {
+          if (this.session()?.order_id === orderId) {
+            this.reassignmentEvidence.set(evidence);
+            this.reassignmentFloorLoaded.set(true);
+          }
+        },
+        error: () => {
+          if (this.session()?.order_id === orderId) {
+            this.toastService.error('No se pudo verificar esta orden para reasignarla. Recarga la página.');
+          }
         },
       });
   }
@@ -1326,7 +1383,15 @@ export class TableSessionPageComponent implements OnInit {
         this.openSplit();
         return;
       case 'transfer':
+        if (this.isClosed()) return;
+        this.tableMoveMode.set('transfer');
         this.isTransferOpen.set(true);
+        return;
+      case 'reassign':
+        if (this.canReassignClosedOrder()) {
+          this.tableMoveMode.set('reassign');
+          this.isTransferOpen.set(true);
+        }
         return;
       case 'customer':
         this.openAssignCustomer();
@@ -1377,6 +1442,20 @@ export class TableSessionPageComponent implements OnInit {
     const id = this.session()?.id;
     if (id) this.loadSession(id, { silent: true });
     this.isTransferOpen.set(false);
+  }
+
+  onReassignmentConfirmed(newSession: TableSession): void {
+    this.isTransferOpen.set(false);
+    this.reassignmentEvidence.set(null);
+    this.reassignmentFloorLoaded.set(false);
+    this.session.set(newSession);
+    this.seedKitchenStateFromOrder(newSession);
+    this.toastService.success('Orden devuelta a una mesa con una sesión nueva');
+    this.loadSession(newSession.id, { silent: true });
+    void this.kdsSse.refreshSnapshot().catch(() => {
+      this.toastService.error('La mesa se reasignó, pero no se pudo refrescar cocina. Actualiza el tablero KDS.');
+    });
+    void this.router.navigate(['/admin/restaurant-ops/tables/session', newSession.id]);
   }
 
   // ── Assign / change customer ───────────────────────────────────────────
@@ -1581,6 +1660,7 @@ export class TableSessionPageComponent implements OnInit {
               this.isClosing.set(false);
               this.session.set(s);
               this.seedKitchenStateFromOrder(s);
+              this.loadReassignmentEvidence(s.order_id);
               this.toastService.success('Mesa cerrada correctamente');
             },
             error: (err: unknown) => {

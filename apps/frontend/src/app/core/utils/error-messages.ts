@@ -1090,6 +1090,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Aún no hay una cuenta abierta para esta mesa. Llama al mesero para que la abra.',
   TABLE_SESSION_ALREADY_OPEN:
     'Esta mesa ya tiene una cuenta abierta.',
+  ORD_TABLE_REASSIGN_ORDER_STATE_001:
+    'Esta orden está cancelada o reembolsada. No se puede devolver a una mesa.',
+  ORD_TABLE_REASSIGN_NOT_ELIGIBLE_001:
+    'Esta orden ya fue cobrada, dividida o facturada. Revisa su historial antes de reasignarla.',
   // B.5 / ERR-39 — aviso de apertura exitosa, no error ni confirmación.
   TABLE_REOPENED_FROM_CLEANING_001:
     'Esta mesa estaba en limpieza. Verifica que esté lista para atender.',

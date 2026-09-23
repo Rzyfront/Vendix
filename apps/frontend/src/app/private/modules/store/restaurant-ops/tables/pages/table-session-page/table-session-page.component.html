@@ -104,10 +104,15 @@
                       → el mesero aún no la liberó).
                     - Pendiente (aún sin pagar).
                 -->
-                @if (isClosed()) {
+                @if (isClosed() && isPaid()) {
                   <app-badge variant="success" size="sm">
                     <app-icon name="circle-check" [size]="12"></app-icon>
                     Pagada / Cerrada
+                  </app-badge>
+                } @else if (isClosed()) {
+                  <app-badge variant="warning" size="sm">
+                    <app-icon name="clock" [size]="12"></app-icon>
+                    Cerrada · pago pendiente
                   </app-badge>
                 } @else if (isPaid()) {
                   <app-badge variant="info" size="sm">
@@ -618,7 +623,7 @@
     }
   </div>
 
-  <!-- Mobile sticky-cta: [···] [Agregar items] [Cobrar] -->
+  <!-- Mobile sticky-cta: open check actions or closed-check reassignment. -->
   @if (session() && !isClosed()) {
     <div class="session-cta">
       <app-button
@@ -660,6 +665,19 @@
           Cobrar
         </app-button>
       }
+    </div>
+  } @else if (canReassignClosedOrder()) {
+    <div class="session-cta">
+      <app-button
+        variant="primary"
+        size="md"
+        customClasses="!h-11"
+        [fullWidth]="true"
+        (clicked)="onSecondaryAction('reassign')"
+      >
+        <app-icon slot="icon" name="arrow-right-left" [size]="15"></app-icon>
+        Volver a asignar mesa
+      </app-button>
     </div>
   }
 
@@ -705,8 +723,11 @@
     [isOpen]="isTransferOpen()"
     [table]="transferSourceTable()"
     [tables]="[]"
+    [mode]="tableMoveMode()"
+    [orderId]="session()?.order_id ?? null"
     (isOpenChange)="isTransferOpen.set($event)"
     (confirmed)="onTransferConfirmed($event)"
+    (reassigned)="onReassignmentConfirmed($event)"
   />
 
   @if (checkoutEnabled()) {

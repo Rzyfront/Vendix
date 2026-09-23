@@ -585,6 +585,23 @@ export interface TransferTableSessionDto {
   target_table_id: number;
 }
 
+/** G.2: reuses the existing order and creates a new table session. */
+export interface ReassignTableSessionDto {
+  order_id: number;
+  target_table_id: number;
+}
+
+/** Read-side evidence for hiding reassignment when financial history exists. */
+export interface TableOrderReassignmentEvidence {
+  id: number;
+  state: string;
+  total_paid: number | string;
+  active_financial_split_id: number | null;
+  payments: Array<{ state: string }>;
+  // The orders detail endpoint currently projects only its latest invoice.
+  invoices: Array<{ status: string }>;
+}
+
 export type TransferMode = 'transfer' | 'swap';
 
 /**

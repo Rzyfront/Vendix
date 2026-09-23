@@ -35,6 +35,8 @@ import {
   ConfirmTablePaymentResult,
   TransferResult,
   TransferTableSessionDto,
+  ReassignTableSessionDto,
+  TableOrderReassignmentEvidence,
 } from '../interfaces';
 import type { IconName } from '../../../../../../shared/components/icon/icons.registry';
 
@@ -395,6 +397,64 @@ export class TablesService {
         catchError(this.handleError),
       );
   }
+
+  /** The session projection omits payments/invoices; fail closed without this read. */
+  getOrderReassignmentEvidence(orderId: number): Observable<TableOrderReassignmentEvidence> {
+    return this.http
+      .get<ApiResponse<TableOrderReassignmentEvidence>>(`${this.apiUrl}/store/orders/${orderId}`)
+      .pipe(map((res) => res.data), catchError(this.handleError));
+  }
+
+  /** Reassign an existing order, then refresh the local floor-map projection. */
+  reassignOrderToTable(orderId: number, targetTableId: number): Observable<TableSession> {
+    const dto: ReassignTableSessionDto = {
+      order_id: orderId,
+      target_table_id: targetTableId,
+    };
+    return this.http
+      .post<ApiResponse<TableSession>>(`${this.apiUrl}/store/table-sessions/reassign`, dto)
+      .pipe(
+        map((res) => res.data),
+        switchMap((session) => this.getFloorMap().pipe(
+          map(() => session),
+          // Reassignment is already committed; a refresh outage is not a
+          // failed write. Backend SSE also updates other floor-map clients.
+          catchError(() => of(session)),
+        )),
+        catchError(this.handleReassignmentError),
+      );
+  }
+
+  private handleReassignmentError = (error: unknown): Observable<never> => {
+    const parsed = parseApiError(error);
+    let message: string;
+    switch (parsed.errorCode) {
+      case 'ORD_TABLE_REASSIGN_NOT_ELIGIBLE_001':
+        message = parsed.details?.reason === 'settled_payment'
+          ? 'La orden ya tiene un pago registrado. Revisa o revierte el cobro antes de reasignarla.'
+          : parsed.details?.reason === 'active_financial_split'
+            ? 'La orden tiene cuentas divididas. Cancela el reparto antes de reasignarla.'
+            : parsed.details?.reason === 'issued_invoice'
+              ? 'La orden ya tiene una factura numerada. Revísala antes de reasignar la mesa.'
+              : ERROR_MESSAGES['ORD_TABLE_REASSIGN_NOT_ELIGIBLE_001'];
+        break;
+      case 'TABLE_SESSION_NOT_FOUND':
+        message = 'Esta orden no venía de una mesa. Comprueba el número de orden.';
+        break;
+      case 'TABLE_INVALID_STATUS':
+        message = 'La mesa de destino está reservada o en limpieza. Elige una mesa disponible.';
+        break;
+      case 'TABLE_SESSION_ALREADY_OPEN':
+        message = 'Esa mesa ya tiene una cuenta abierta. Elige otra mesa disponible.';
+        break;
+      case 'SYS_CONFLICT_001':
+        message = 'La mesa cambió de estado. Refresca el plano y vuelve a intentarlo.';
+        break;
+      default:
+        return this.handleError(error);
+    }
+    return throwError(() => withApiErrorReference(message, parsed.request_id));
+  };
 
   /**
    * Assign (or clear) the customer of the table session's draft order.
