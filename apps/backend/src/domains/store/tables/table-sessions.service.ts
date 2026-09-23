@@ -159,8 +159,8 @@ export interface TableSessionView {
     name: string;
     zone: string | null;
     status: string;
-    // C.3 QUI-733 — mesero asignado vía `table_waiters`, proyectado como
-    // `table.waiter` para la UI de mesa. Null cuando no hay asignación.
+    // ADR-04 — `table.waiter` conserva su forma, pero es quien abrió la sesión.
+    // El pivote `table_waiters` sólo representa asignaciones estáticas.
     waiter?: {
       id: number;
       first_name: string;
@@ -1931,6 +1931,9 @@ export class TableSessionsService {
     const session = await this.prisma.table_sessions.findFirst({
       where: { id },
       include: {
+        opener: {
+          select: { id: true, first_name: true, last_name: true },
+        },
         order: {
           select: {
             id: true,
@@ -2035,15 +2038,6 @@ export class TableSessionsService {
             name: true,
             zone: true,
             status: true,
-            // C.3 QUI-733 — mesero asignado a la mesa (table_waiters), para que
-            // la UI de mesa proyecte `table.waiter` sin re-consultar.
-            table_waiters: {
-              select: {
-                user: {
-                  select: { id: true, first_name: true, last_name: true },
-                },
-              },
-            },
           },
         },
       },
@@ -2054,10 +2048,9 @@ export class TableSessionsService {
 
     // Remap the Prisma `users` relation to `customer` so the consumer
     // reads a stable field name (orders' customer relation is `users`).
-    // C.3 QUI-733 — remap del mesero asignado (table_waiters.user) a un campo
-    // `table.waiter` estable para la UI de mesa.
-    const { order, ...rest } = session;
-    const assignedWaiter = session.table?.table_waiters?.[0]?.user ?? null;
+    // El pivote table_waiters sigue sirviendo para asignación, pero ya no
+    // alimenta esta proyección. Una sesión QR puede no tener opener.
+    const { order, opener, ...rest } = session;
     // Final con impuesto por línea (display-only): UN batch de asignaciones,
     // no N+1. Cocina NO recibe finales (ADR-10): `finalsByItemId` queda vacío
     // y su payload sale byte-por-byte como hoy.
@@ -2099,11 +2092,11 @@ export class TableSessionsService {
             name: session.table.name,
             zone: session.table.zone,
             status: session.table.status,
-            waiter: assignedWaiter
+            waiter: opener
               ? {
-                  id: assignedWaiter.id,
-                  first_name: assignedWaiter.first_name,
-                  last_name: assignedWaiter.last_name,
+                  id: opener.id,
+                  first_name: opener.first_name,
+                  last_name: opener.last_name,
                 }
               : null,
           }

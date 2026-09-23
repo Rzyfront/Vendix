@@ -146,6 +146,10 @@ export class TableSessionPageComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly session = signal<TableSession | null>(null);
+  readonly waiterName = computed(() => {
+    const waiter = this.session()?.table?.waiter;
+    return waiter ? `${waiter.first_name} ${waiter.last_name}`.trim() : null;
+  });
   private readonly paidFromSseSessionId = signal<number | null>(null);
   readonly isLoading = signal(false);
   readonly selectedItemIds = signal<Set<number>>(new Set());

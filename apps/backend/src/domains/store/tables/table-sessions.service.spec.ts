@@ -1616,6 +1616,41 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       },
     });
 
+    it('findOne proyecta table.waiter desde opener, no desde table_waiters', async () => {
+      const row = findOneRow();
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue({
+        ...row,
+        opener: { id: USER_ID, first_name: 'Ana', last_name: 'Rojas' },
+        table: {
+          ...row.table,
+          table_waiters: [{ user: { id: 99, first_name: 'Otro', last_name: 'Mesero' } }],
+        },
+      });
+
+      const view = await service.findOne(83);
+
+      expect(view.table?.waiter).toEqual({ id: USER_ID, first_name: 'Ana', last_name: 'Rojas' });
+      expect(prismaMock.table_sessions.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            opener: { select: { id: true, first_name: true, last_name: true } },
+            table: { select: { id: true, name: true, zone: true, status: true } },
+          }),
+        }),
+      );
+      expect(prismaMock.table_sessions.findFirst).toHaveBeenCalledTimes(1);
+    });
+
+    it('findOne deja waiter en null cuando la sesión no tiene opener', async () => {
+      (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue({
+        ...findOneRow(),
+        opened_by: null,
+        opener: null,
+      });
+
+      expect((await service.findOne(83)).table?.waiter).toBeNull();
+    });
+
     it('findOne expone cancelled_at / cancellation_reason / cancellation_type', async () => {
       (prismaMock.table_sessions.findFirst as jest.Mock).mockResolvedValue(
         findOneRow({

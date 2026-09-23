@@ -96,7 +96,9 @@ export interface PendingBookingSummary {
 export interface TableSessionSummary {
   id: number;
   order_id: number;
-  opened_by: number;
+  opened_by: number | null;
+  /** ADR-04: quien abrió la sesión, no la asignación estática de la mesa. */
+  waiter: TableWaiter | null;
   opened_at: string | Date;
   /** Marca de cuenta saldada; la mesa permanece ocupada hasta su cierre. */
   paid_at?: string | Date | null;
@@ -109,7 +111,7 @@ export interface TableSession {
   store_id: number;
   table_id: number;
   order_id: number;
-  opened_by: number;
+  opened_by: number | null;
   opened_at: string | Date;
   closed_at: string | Date | null;
   /**
@@ -127,7 +129,14 @@ export interface TableSession {
     name: string;
     zone: string | null;
     status: string;
+    waiter?: TableWaiter | null;
   };
+}
+
+export interface TableWaiter {
+  id: number;
+  first_name: string;
+  last_name: string;
 }
 
 export interface TableSessionOrder {

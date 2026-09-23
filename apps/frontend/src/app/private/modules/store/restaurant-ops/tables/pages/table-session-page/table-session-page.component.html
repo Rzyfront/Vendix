@@ -5,7 +5,8 @@
       'Sesión #' +
       (session()?.id ?? '') +
       ' — ' +
-      (isClosed() ? 'Cerrada' : 'Cuenta abierta')
+      (isClosed() ? 'Cerrada' : 'Cuenta abierta') +
+      (waiterName() ? ' — Mesero: ' + waiterName() : '')
     "
     icon="receipt"
     variant="glass"

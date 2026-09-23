@@ -34,7 +34,12 @@ export interface FloorMapTable {
   active_session: {
     id: number;
     order_id: number;
-    opened_by: number;
+    opened_by: number | null;
+    waiter: {
+      id: number;
+      first_name: string;
+      last_name: string;
+    } | null;
     opened_at: Date;
     paid_at: Date | null;
     closed_at: Date | null;
@@ -729,6 +734,9 @@ export class TablesService {
         closed_at: null,
       },
       orderBy: { opened_at: 'desc' },
+      include: {
+        opener: { select: { id: true, first_name: true, last_name: true } },
+      },
     });
 
     // Latest open session per table (if more than one — should never
@@ -771,6 +779,13 @@ export class TablesService {
               id: active.id,
               order_id: active.order_id,
               opened_by: active.opened_by,
+              waiter: active.opener
+                ? {
+                    id: active.opener.id,
+                    first_name: active.opener.first_name,
+                    last_name: active.opener.last_name,
+                  }
+                : null,
               opened_at: active.opened_at,
               paid_at: active.paid_at,
               closed_at: active.closed_at,
