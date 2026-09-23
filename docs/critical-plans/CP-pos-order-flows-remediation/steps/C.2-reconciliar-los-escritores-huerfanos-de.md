@@ -25,16 +25,16 @@ skills: [vendix-restaurant-ops, vendix-backend-domain, how-to-test]
   - `npx jest --runInBand apps/backend/src/domains/store/orders/order-flow/order-flow.service.spec.ts` — `deliverOrderItem` sigue siendo idempotente tras un revert.
   - `curl -s -X POST "$API/store/kitchen-fire/tickets/$TID/delivered" -H "Authorization: Bearer $TOKEN_COCINA" -o evidence/C.2-ticket-delivered.json -w '%{http_code}\n'`
   - `curl -s -X POST "$API/store/kitchen-fire/tickets/$TID/revert" -H "Authorization: Bearer $TOKEN_COCINA" -o evidence/C.2-ticket-revert.json -w '%{http_code}\n'`
-  - `psql "$DB" -c "SELECT k.id FROM kitchen_ticket_items k JOIN order_items i ON i.id=k.order_item_id WHERE i.delivered_at IS NOT NULL AND k.status<>'delivered'" > evidence/C.2-invariante-db23.txt` → 0 filas.
+  - Ejecutar `evidence/C2-latest-ticket-audit-20260923.sql`: comparar solo la última fila `kitchen_ticket_items` por `order_item_id` (`id DESC`). Anotar legado y exigir 0 descuadres del corte en adelante; la consulta contra TODAS las filas produce falsos positivos con re-fire.
   - `psql "$DB" -c "SELECT count(*) FROM order_items WHERE delivered_at > updated_at" > evidence/C.2-invariante-db08.txt` → 0.
   - `grep -rn "delivered_at:" apps/backend/src --include='*.ts' | grep -v '\.spec\.' | grep -v ': true' > evidence/C.2-censo-escritores.txt` — el censo cabe en los tres carriles documentados.
 - **Acceptance checklist:**
   - [x] Revertir un ticket entregado deja sus `order_items.delivered_at` en NULL dentro de la misma transacción que revierte el ticket.
-  - [ ] Tras revertir, la consulta de invariante ticket↔línea devuelve 0 filas.
+  - [ ] Tras revertir, la consulta del ticket VIGENTE↔línea no añade ninguna fila nueva (legado #1692 separado, sin backfill).
   - [x] La limpieza del revert alcanza solo las líneas de ESE ticket: las de otro ticket de la misma orden conservan su marca.
   - [x] `kitchen-fire.markDelivered` documenta en su docblock que su alcance es el ticket completo y cuál es el carril por ítem.
   - [x] El listener de despacho documenta su excepción y registra en log las líneas que selló sin ticket asociado.
   - [ ] El censo de escritores de `delivered_at` no crece: sigue siendo seam de orden, cocina y despacho.
   - [ ] Conteo previo de descuadres históricos guardado como línea base en `evidence/C2-*`; entrega al dueño pendiente.
   - [ ] F-002 — AUDIT F-032 - revertTicket nunca limpia delivered_at (major)
-- **Status:** in-progress — código provisional `1537df4ef`/`79a426485`; 59 tests focalizados. Línea base local previa: 3 ticket/ítem descuadrados y 18 marcas posteriores a `updated_at` (`evidence/C2-before-historical-mismatch.*`), sin backfill. Falta curl+SQL incremental y aceptación de ADR-06.
+- **Status:** in-progress — código provisional `1537df4ef`/`79a426485`; 59 tests focalizados. `evidence/C2-latest-ticket-audit-20260923.md`: la consulta vieja daba 3 falsos/mixtos; última fila vigente reduce a **1 legado real** (#1692), 0 postcut. DB-08 tiene 18 marcas antiguas posteriores a `updated_at`. Sin backfill; falta curl de revert + SQL incremental y aceptación ADR-06.
