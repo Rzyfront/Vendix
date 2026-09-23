@@ -2004,6 +2004,7 @@ export class AutoEntryService {
       invoice_id: data.invoice_id,
       organization_id: data.organization_id,
       invoice_total: data.total,
+      store_id: data.store_id,
     });
     if (prior?.covered) {
       this.logger.log(
@@ -2135,14 +2136,48 @@ export class AutoEntryService {
     );
 
     // Caso 2: asset debit per withholding type (135510/135515/135517).
-    lines.push(
-      ...(await this.resolveWithholdingLines({
-        organization_id: data.organization_id,
-        store_id: data.store_id,
-        breakdown: data.withholding_breakdown,
-        side: 'debit',
-      })),
-    );
+    const withholding_lines = await this.resolveWithholdingLines({
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      breakdown: data.withholding_breakdown,
+      side: 'debit',
+    });
+    lines.push(...withholding_lines);
+
+    let posted_lines = lines;
+    if (uncovered_cents != null) {
+      const scaled = this.scaleEntryLines(
+        lines,
+        uncovered_cents,
+        new Set(withholding_lines.filter((l): l is AutoEntryLine => !!l)),
+      );
+      if (!scaled) {
+        // Sin escalar no hay forma honesta de postear: la factura completa
+        // duplicaría lo ya reconocido por los pagos. Se registra la omisión
+        // para reproceso cuando se corrija el mapeo.
+        const detail =
+          `Cobertura parcial de la factura #${data.invoice_id} (orden ` +
+          `#${prior!.order_id}): el asiento no se puede escalar al saldo ` +
+          `${formatCents(uncovered_cents)} (línea sin cuenta, asiento descuadrado ` +
+          `o retención mayor que el saldo). Asiento omitido.`;
+        this.logger.error(`invoice.validated #${data.invoice_id}: ${detail}`);
+        await this.entry_failure_service.recordSkip({
+          organization_id: data.organization_id,
+          store_id: data.store_id,
+          source_type: 'invoice.validated',
+          source_id: data.invoice_id,
+          cause: 'SKIPPED_MISSING_MAPPING',
+          detail,
+          event_payload: data,
+        });
+        return {
+          id: null,
+          skipped: true,
+          reason: 'partial_coverage_unscalable',
+        };
+      }
+      posted_lines = scaled;
+    }
 
     return this.createAutoEntry({
       source_type: 'invoice.validated',
@@ -2154,35 +2189,51 @@ export class AutoEntryService {
         uncovered_cents != null
           ? `Invoice validated #${data.invoice_id} (saldo no reconocido por pagos)`
           : `Invoice validated #${data.invoice_id}`,
-      lines:
-        uncovered_cents != null
-          ? this.scaleEntryLines(lines, uncovered_cents)
-          : lines,
+      lines: posted_lines,
       user_id: data.user_id,
     });
   }
 
   /**
-   * Escala un asiento cuadrado a `target_cents` por lado: cada lado se reparte
-   * en proporción a sus líneas por mayor residuo, así DR = CR = target al
-   * centavo y cada cuenta conserva su peso. Si el asiento de entrada no
-   * cuadra, se devuelve intacto (la validación de createAutoEntry decide).
+   * Escala un asiento cuadrado al saldo no cubierto `target_cents`.
+   *
+   * - Líneas `fixed` (retenciones DR 1355 de la factura): quedan COMPLETAS —
+   *   los pagos previos no llevaron retención, así que toda la retención es
+   *   del saldo.
+   * - Resto del DR (la contrapartida 1305): `target − Σ fixed`.
+   * - CR (ingreso, impuestos, flete): `target`, por mayor residuo.
+   *
+   * Así DR = CR = target al centavo y el cobro posterior (total − retención −
+   * lo ya pagado) deja la 1305 en cero. `null` si alguna línea no resolvió su
+   * cuenta, si el asiento de entrada no cuadra, o si la retención no cabe en
+   * el saldo.
    */
   private scaleEntryLines(
     lines: (AutoEntryLine | null)[],
     target_cents: bigint,
-  ): (AutoEntryLine | null)[] {
-    const present = lines.filter((l): l is AutoEntryLine => !!l);
+    fixed: ReadonlySet<AutoEntryLine> = new Set(),
+  ): AutoEntryLine[] | null {
+    if (lines.some((l) => !l)) return null;
+    const present = lines as AutoEntryLine[];
+    const sumOf = (values: bigint[]) => values.reduce((a, b) => a + b, 0n);
     const debits = present.map((l) => getCents(l.debit_amount ?? 0));
     const credits = present.map((l) => getCents(l.credit_amount ?? 0));
-    const sumOf = (values: bigint[]) => values.reduce((a, b) => a + b, 0n);
-    if (sumOf(debits) !== sumOf(credits) || sumOf(debits) <= 0n) return lines;
-    const scaled_debits = proportional(target_cents, debits);
+    if (sumOf(debits) !== sumOf(credits) || sumOf(debits) <= 0n) return null;
+    const fixed_debit = sumOf(
+      present.map((l, i) => (fixed.has(l) ? debits[i] : 0n)),
+    );
+    const variable_debits = present.map((l, i) => (fixed.has(l) ? 0n : debits[i]));
+    const variable_target = target_cents - fixed_debit;
+    if (variable_target < 0n) return null;
+    if (variable_target > 0n && sumOf(variable_debits) <= 0n) return null;
+    const scaled_variable = proportional(variable_target, variable_debits);
     const scaled_credits = proportional(target_cents, credits);
     return present
       .map((line, index) => ({
         ...line,
-        debit_amount: Number(formatCents(scaled_debits[index])),
+        debit_amount: Number(
+          formatCents(fixed.has(line) ? debits[index] : scaled_variable[index]),
+        ),
         credit_amount: Number(formatCents(scaled_credits[index])),
       }))
       .filter((line) => line.debit_amount > 0 || line.credit_amount > 0);
@@ -2233,11 +2284,15 @@ export class AutoEntryService {
     invoice_id: number;
     organization_id: number;
     invoice_total: number;
+    store_id?: number;
   }): Promise<{
     order_id: number;
     entry_ids: number[];
     recognized_cents: bigint;
-    /** Dinero (o CxC de venta a crédito) ya reconocido como venta. */
+    /**
+     * Porción de VENTA ya reconocida (comparable con el total de la factura):
+     * Σ CR del asiento − CR propina por pagar − DR descuento 4175.
+     */
     recognized_payment_cents: bigint;
     covered: boolean;
   } | null> {
@@ -2261,12 +2316,9 @@ export class AutoEntryService {
 
     const payments = await db.payments.findMany({
       where: { order_id },
-      select: { id: true, amount: true },
+      select: { id: true },
     });
     const payment_ids = payments.map((row: any) => row.id);
-    const payment_amount = new Map<number, bigint>(
-      payments.map((row: any) => [row.id, getCents(row.amount ?? 0)]),
-    );
 
     const candidates = await db.accounting_entries.findMany({
       where: {
@@ -2291,6 +2343,7 @@ export class AutoEntryService {
         total_credit: true,
         accounting_entry_lines: {
           select: {
+            debit_amount: true,
             credit_amount: true,
             account: { select: { code: true } },
           },
@@ -2315,16 +2368,35 @@ export class AutoEntryService {
       invoice.total_amount ?? params.invoice_total ?? 0,
     );
 
-    // Para la cobertura parcial: lo que los pagos ya reconocieron es su MONTO
-    // (DR caja), no el total_credit (que suma el descuento de 4175). Sin
-    // monto conocido se usa total_credit.
+    // Porción de VENTA reconocida, comparable con el total de la factura: el
+    // total acreditado incluye la propina (pasivo, fuera de la factura) y se
+    // infla con el DR 4175 del descuento (la factura va neta). Ni el monto del
+    // pago (trae propina) ni total_credit sirven solos.
+    const codeOf = async (key: string) =>
+      (
+        await this.account_mapping_service.getMapping(
+          params.organization_id,
+          key,
+          params.store_id,
+        )
+      )?.account_code ?? null;
+    const [tip_code, ...discount_codes] = await Promise.all([
+      codeOf('payment.received.tip_payable'),
+      codeOf('payment.received.sales_discount'),
+      codeOf('credit_sale.created.sales_discount'),
+    ]);
+    const discounts = new Set(discount_codes.filter(Boolean) as string[]);
     const recognized_payment_cents = sale_entries.reduce(
-      (sum: bigint, entry: any) =>
-        sum +
-        (entry.source_type === 'payment.received' &&
-        payment_amount.has(entry.source_id)
-          ? payment_amount.get(entry.source_id)!
-          : getCents(entry.total_credit ?? 0)),
+      (sum: bigint, entry: any) => {
+        const lines = entry.accounting_entry_lines ?? [];
+        const tip = lines
+          .filter((l: any) => !!tip_code && l.account?.code === tip_code)
+          .reduce((a: bigint, l: any) => a + getCents(l.credit_amount ?? 0), 0n);
+        const discount = lines
+          .filter((l: any) => discounts.has(String(l.account?.code ?? '')))
+          .reduce((a: bigint, l: any) => a + getCents(l.debit_amount ?? 0), 0n);
+        return sum + getCents(entry.total_credit ?? 0) - tip - discount;
+      },
       0n,
     );
 
@@ -2333,7 +2405,9 @@ export class AutoEntryService {
       entry_ids: sale_entries.map((entry: any) => entry.id),
       recognized_cents,
       recognized_payment_cents,
-      covered: sale_entries.length > 0 && recognized_cents + 1n >= invoice_cents,
+      covered:
+        sale_entries.length > 0 &&
+        recognized_payment_cents + 1n >= invoice_cents,
     };
   }
 
@@ -3213,6 +3287,7 @@ export class AutoEntryService {
 
     // Check if this payment's order has an associated invoice
     let has_invoice = false;
+    let has_real_invoice = false;
     if (data.order_id) {
       const invoice = await this.prisma.invoices.findFirst({
         where: {
@@ -3222,6 +3297,7 @@ export class AutoEntryService {
         select: { id: true },
       });
       has_invoice = !!invoice;
+      has_real_invoice = !!invoice;
       // Venta a crédito sin factura: `credit_sale.created` ya reconoció el
       // ingreso + impuestos contra 1305. El cobro posterior sólo cruza cartera
       // (DR caja / CR 1305); por la rama «sin factura» reconocería la venta
@@ -3252,6 +3328,15 @@ export class AutoEntryService {
 
     if (has_invoice) {
       // Invoice exists: Debit Cash/Bank, Credit AR (invoice.validated already recognized revenue+IVA)
+      // La propina NO está en la factura (ni en su 1305): con factura, la
+      // porción de propina del cobro va a su pasivo y la 1305 sólo cruza la
+      // venta. Sin esto la 1305 queda negativa por la propina.
+      const collection_tip = has_real_invoice
+        ? Math.min(
+            Math.max(0, Number(data.tip_amount || 0)),
+            Number(data.amount || 0),
+          )
+        : 0;
       lines = await Promise.all([
         this.resolveAccountLine(
           data.organization_id,
@@ -3266,10 +3351,22 @@ export class AutoEntryService {
           'payment.received.accounts_receivable',
           `Recaudo CxC${order_ref}`,
           0,
-          data.amount,
+          Math.round((Number(data.amount) - collection_tip) * 100) / 100,
           data.store_id,
           customer_third_party,
         ),
+        ...(collection_tip > 0
+          ? [
+              this.resolveAccountLine(
+                data.organization_id,
+                'payment.received.tip_payable',
+                `Propina por pagar${order_ref}`,
+                0,
+                collection_tip,
+                data.store_id,
+              ),
+            ]
+          : []),
       ]);
     } else {
       // No invoice (POS direct sale): Debit Cash/Bank + Discount, Credit Revenue + VAT + Shipping Income.

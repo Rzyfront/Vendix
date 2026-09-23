@@ -45,6 +45,8 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
     'payment.received.inc_payable': '243605',
     'credit_sale.created.sales_discount': '4175',
     'credit_sale.created.inc_payable': '243605',
+    'payment.received.tip_payable': '238005',
+    'invoice.validated.retefuente_receivable': '135515',
   };
 
   // Venta: subtotal 10.000, IVA 19 % = 1.900, flete neto 5.000 → total 16.900.
@@ -428,28 +430,162 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
       expect(sum(all, 'debit_amount')).toBe(sum(all, 'credit_amount'));
     });
 
-    it('pagos que ya igualan la factura por monto ⇒ la factura no postea', async () => {
-      const { service, createAutoEntry, unscoped } = build({
-        payments: [{ id: SALE.payment_id, amount: SALE.total }],
+    const netOf = (lines: any[], code: string) =>
+      sum(
+        lines.filter((l) => l.account_code === code),
+        'debit_amount',
+      ) - creditOn(lines, code);
+
+    it('con propina: lo reconocido es la porción de VENTA del pago (sin propina); 1305 en 0 al cierre', async () => {
+      // Venta 16.900 + propina 1.690 = 18.590, pagada en dos mitades de 9.295.
+      const TIP_HALF = 845;
+      const first = build();
+      await first.service.onPaymentReceived({
+        payment_id: SALE.payment_id,
+        organization_id: 1,
+        store_id: 2,
+        order_id: SALE.order_id,
+        amount: HALF + TIP_HALF,
+        subtotal_amount: SALE.subtotal / 2,
+        tax_amount: SALE.tax / 2,
+        shipping_amount: SALE.shipping / 2,
+        tip_amount: TIP_HALF,
+      });
+      const payment_lines = linesOf(first.createAutoEntry.mock.calls[0]);
+      expect(creditOn(payment_lines, '238005')).toBe(TIP_HALF);
+
+      const second = build({
+        entries: [
+          {
+            ...asPostedEntry(700, 'payment.received', payment_lines),
+            source_id: SALE.payment_id,
+          },
+        ],
+      });
+      await second.service.onInvoiceValidated(invoiceEvent);
+      const invoice_lines = linesOf(second.createAutoEntry.mock.calls[0]);
+      // No cubierto = 16.900 − 8.450 (no 16.900 − 9.295).
+      expect(sum(invoice_lines, 'debit_amount')).toBe(HALF);
+      expect(sum(invoice_lines, 'credit_amount')).toBe(HALF);
+
+      const third = build();
+      third.service['prisma'].invoices.findFirst = jest
+        .fn()
+        .mockResolvedValue({ id: SALE.invoice_id });
+      await third.service.onPaymentReceived({
+        payment_id: 901,
+        organization_id: 1,
+        store_id: 2,
+        order_id: SALE.order_id,
+        amount: HALF + TIP_HALF,
+        tip_amount: TIP_HALF,
+      });
+      const collection_lines = linesOf(third.createAutoEntry.mock.calls[0]);
+
+      const all = [...payment_lines, ...invoice_lines, ...collection_lines];
+      expect(creditOn(all, '4135')).toBe(SALE.subtotal);
+      expect(creditOn(all, '238005')).toBe(2 * TIP_HALF);
+      expect(netOf(all, '1305')).toBe(0);
+      expect(sum(all, 'debit_amount')).toBe(sum(all, 'credit_amount'));
+    });
+
+    it('con retención: DR 1355 completo en la factura, el resto escala; el cobro final deja 1305 en 0', async () => {
+      const W = 250; // retefuente 2,5 % sobre 10.000
+      const withholdingInvoice = {
+        ...invoiceEvent,
+        withholding_breakdown: [
+          {
+            withholding_type: 'retefuente',
+            concept_code: 'RF-SERV',
+            rate: 0.025,
+            base: SALE.subtotal,
+            amount: W,
+            account_role: 'invoice.validated.retefuente_receivable',
+          } as any,
+        ],
+      };
+      const first = build();
+      await first.service.onPaymentReceived({
+        payment_id: SALE.payment_id,
+        organization_id: 1,
+        store_id: 2,
+        order_id: SALE.order_id,
+        amount: HALF,
+        subtotal_amount: SALE.subtotal / 2,
+        tax_amount: SALE.tax / 2,
+        shipping_amount: SALE.shipping / 2,
+      });
+      const payment_lines = linesOf(first.createAutoEntry.mock.calls[0]);
+
+      const second = build({
+        entries: [
+          {
+            ...asPostedEntry(700, 'payment.received', payment_lines),
+            source_id: SALE.payment_id,
+          },
+        ],
+      });
+      await second.service.onInvoiceValidated(withholdingInvoice);
+      const invoice_lines = linesOf(second.createAutoEntry.mock.calls[0]);
+      expect(invoice_lines).toContainEqual(
+        expect.objectContaining({ account_code: '135515', debit_amount: W }),
+      );
+      expect(invoice_lines).toContainEqual(
+        expect.objectContaining({ account_code: '1305', debit_amount: HALF - W }),
+      );
+      expect(sum(invoice_lines, 'credit_amount')).toBe(HALF);
+      expect(sum(invoice_lines, 'debit_amount')).toBe(HALF);
+
+      // El cliente paga el saldo menos lo retenido.
+      const third = build();
+      third.service['prisma'].invoices.findFirst = jest
+        .fn()
+        .mockResolvedValue({ id: SALE.invoice_id });
+      await third.service.onPaymentReceived({
+        payment_id: 901,
+        organization_id: 1,
+        store_id: 2,
+        order_id: SALE.order_id,
+        amount: HALF - W,
+      });
+      const all = [
+        ...payment_lines,
+        ...invoice_lines,
+        ...linesOf(third.createAutoEntry.mock.calls[0]),
+      ];
+      expect(creditOn(all, '4135')).toBe(SALE.subtotal);
+      expect(netOf(all, '1305')).toBe(0);
+      expect(netOf(all, '135515')).toBe(W);
+      expect(sum(all, 'debit_amount')).toBe(sum(all, 'credit_amount'));
+    });
+
+    it('cuenta sin resolver en cobertura parcial ⇒ se omite con registro, nunca la factura completa', async () => {
+      const codes: Record<string, string> = { ...CODES };
+      delete codes['invoice.validated.shipping_income'];
+      const { service, createAutoEntry } = build({
+        codes,
         entries: [
           {
             id: 800,
             source_type: 'payment.received',
             source_id: SALE.payment_id,
-            // total_credit bajo (p. ej. asiento histórico sin envío) pero el
-            // dinero cubre la factura completa.
-            total_credit: 5000,
+            total_credit: HALF,
             accounting_entry_lines: [
-              { credit_amount: 5000, account: { code: '4135' } },
+              { debit_amount: 0, credit_amount: HALF, account: { code: '4135' } },
             ],
           },
         ],
       });
 
-      await service.onInvoiceValidated(invoiceEvent);
+      const result: any = await service.onInvoiceValidated(invoiceEvent);
 
+      expect(result).toEqual(
+        expect.objectContaining({
+          skipped: true,
+          reason: 'partial_coverage_unscalable',
+        }),
+      );
       expect(createAutoEntry).not.toHaveBeenCalled();
-      expect(unscoped.invoices.updateMany).toHaveBeenCalled();
     });
   });
 
