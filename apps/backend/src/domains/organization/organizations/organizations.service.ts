@@ -18,6 +18,7 @@ import {
   OrganizationOperatingScope,
 } from './dto';
 import { Prisma } from '@prisma/client';
+import { OPERATING_REVENUE_SQL } from '../../store/analytics/analytics-metrics.contract';
 import {
   resolveOrganizationTimezone,
   localBucketSql,
@@ -567,7 +568,10 @@ export class OrganizationsService {
           SELECT
             EXTRACT(MONTH FROM ${createdAtLocal})::int as month,
             EXTRACT(YEAR FROM ${createdAtLocal})::int as year,
-            COALESCE(SUM(o.grand_total - o.shipping_cost), 0) as revenue
+            -- Ingreso operativo del contrato: subtotal − descuentos + base del
+            -- envío (sin IVA/INC de líneas ni el impuesto del envío). Antes era
+            -- grand_total − shipping_cost, que contaba el IVA como ingreso.
+            COALESCE(SUM(${OPERATING_REVENUE_SQL}), 0) as revenue
           FROM orders o
           INNER JOIN stores s ON s.id = o.store_id
           WHERE s.organization_id = ${org_id}
@@ -706,13 +710,16 @@ export class OrganizationsService {
       ? Prisma.sql`AND o.store_id = ${storeId}`
       : Prisma.empty;
 
+    // `revenue` es el ingreso operativo del contrato (subtotal − descuentos +
+    // base del envío): excluye el IVA/INC de las líneas y el impuesto de una
+    // tarifa de envío gravada, que son pasivo con la DIAN. Antes se usaba
+    // `grand_total`, que los contaba como ganancia.
     const rows = await (this.prisma.withoutScope() as any).$queryRaw<
-      Array<{ revenue: unknown; shipping_cost: unknown; cogs: unknown }>
+      Array<{ revenue: unknown; cogs: unknown }>
     >`
       WITH order_totals AS (
         SELECT
-          COALESCE(SUM(o.grand_total), 0) AS revenue,
-          COALESCE(SUM(o.shipping_cost), 0) AS shipping_cost
+          COALESCE(SUM(${OPERATING_REVENUE_SQL}), 0) AS revenue
         FROM orders o
         INNER JOIN stores s ON s.id = o.store_id
         WHERE s.organization_id = ${organizationId}
@@ -731,13 +738,12 @@ export class OrganizationsService {
           ${endFilter}
           ${storeFilter}
       )
-      SELECT order_totals.revenue, order_totals.shipping_cost, item_costs.cogs
+      SELECT order_totals.revenue, item_costs.cogs
       FROM order_totals, item_costs
     `;
 
     const row = rows[0];
     const revenue = Number(row?.revenue ?? 0);
-    const shippingCost = Number(row?.shipping_cost ?? 0);
     const cogs = Number(row?.cogs ?? 0);
 
     // Plan Despacho Economía — FASE 8 paso 24. Resta el flete cobrado porque
@@ -756,14 +762,11 @@ export class OrganizationsService {
     `;
     const transportCost = Number(transportCostRows[0]?.transport_cost ?? 0);
 
-    // Fórmula corregida:
+    // Fórmula:
     //   profit = (producto − COGS) + (ingreso flete − costo flete)
-    // donde:
-    //   producto   = revenue − shippingCost (lo ya cobrado)
-    //   ingreso flete = shippingCost (lo que ya estaba restando arriba)
-    // ⇒ producto − COGS + shippingCost − transportCost
-    //    = revenue − shippingCost − cogs + shippingCost − transportCost
-    //    = revenue − cogs − transportCost
+    // donde `revenue` (ingreso operativo) ya es producto neto de descuentos +
+    // base del flete, sin impuestos
+    // ⇒ profit = revenue − cogs − transportCost
     return { _sum: { profit: revenue - cogs - transportCost } };
   }
 
