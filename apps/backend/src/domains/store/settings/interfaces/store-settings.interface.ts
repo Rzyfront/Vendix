@@ -1236,4 +1236,13 @@ export interface DispatchSettings {
   default_cost_settlement_timing?: 'immediate_on_close';
   default_origin_location_id?: number;
   requires_dispatch_address?: boolean;
+
+  /**
+   * Which dispatch methods the store offers in the order dispatch chooser
+   * (QUI-844). All default to `true`; the logistics settings form requires
+   * at least one to stay enabled. Missing keys merge to `true`.
+   */
+  enable_dispatch_with_remision?: boolean;
+  enable_dispatch_direct_delivery?: boolean;
+  enable_dispatch_to_pool?: boolean;
 }

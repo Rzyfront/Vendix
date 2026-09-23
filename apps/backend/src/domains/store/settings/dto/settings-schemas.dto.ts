@@ -1103,6 +1103,33 @@ export class DispatchSettingsDto {
   @IsOptional()
   @IsBoolean()
   requires_dispatch_address?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Permite "Crear remisión con ruta de despacho" en el selector de despacho (QUI-844). Default: true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_dispatch_with_remision?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Permite "Entrega completa" en el selector de despacho (QUI-844). Default: true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_dispatch_direct_delivery?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Permite "Enviar a despacho" (pool de repartidores) en el selector de despacho (QUI-844). Default: true.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_dispatch_to_pool?: boolean;
 }
 
 export class RestaurantSettingsDto {

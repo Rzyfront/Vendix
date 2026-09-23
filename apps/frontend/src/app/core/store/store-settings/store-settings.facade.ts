@@ -7,6 +7,7 @@ import {
   StoreSettings,
   PosSettings,
   CheckoutSettings,
+  DispatchSettings,
   NotificationsSettings,
   ReceiptsSettings,
   VexiSettings,
@@ -77,6 +78,11 @@ export class StoreSettingsFacade {
   /** Print/delivery preferences for receipts, POS tickets and invoices. */
   readonly receipts = computed<ReceiptsSettings | null>(
     () => this.settings()?.receipts ?? null,
+  );
+
+  /** Dispatch behavior: state-update mode plus QUI-844 method toggles. */
+  readonly dispatch = computed<DispatchSettings | null>(
+    () => this.settings()?.dispatch ?? null,
   );
 
   readonly modules = computed<Record<string, any> | null>(

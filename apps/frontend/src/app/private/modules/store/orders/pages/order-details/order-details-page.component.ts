@@ -277,6 +277,19 @@ export class OrderDetailsPageComponent {
   showDispatchModal = signal(false);
   /** Chooser modal: "con remisión" vs "sin remisión" (single dispatch entry). */
   showDispatchSelector = signal(false);
+  /**
+   * QUI-844 — dispatch methods the store offers, read with `?? true` so
+   * stores persisted before these flags behave as before (all enabled).
+   */
+  readonly enabledDispatchMethods = computed<DispatchMethod[]>(() => {
+    const dispatch = this.settingsFacade.dispatch();
+    const methods: Array<{ method: DispatchMethod; flag: boolean }> = [
+      { method: 'with-note', flag: dispatch?.enable_dispatch_with_remision ?? true },
+      { method: 'direct', flag: dispatch?.enable_dispatch_direct_delivery ?? true },
+      { method: 'to-dispatch', flag: dispatch?.enable_dispatch_to_pool ?? true },
+    ];
+    return methods.filter((m) => m.flag).map((m) => m.method);
+  });
   /** Courier-name modal: asked on "Entrega completa" before directFullDelivery. */
   showCourierNameModal = signal(false);
   /**
@@ -1998,6 +2011,19 @@ export class OrderDetailsPageComponent {
     }
     if (!this.canGenerateRemision()) {
       this.startShipWithoutNote();
+      return;
+    }
+    // QUI-844 — single enabled method skips the chooser and runs directly;
+    // with none enabled (stale data) there is nothing to run.
+    const enabled = this.enabledDispatchMethods();
+    if (enabled.length === 1) {
+      this.onDispatchMethodSelected(enabled[0]);
+      return;
+    }
+    if (enabled.length === 0) {
+      this.toastService.warning(
+        'Esta tienda no tiene ningún método de despacho habilitado. Actívalo en Ajustes > Logística.',
+      );
       return;
     }
     this.showDispatchSelector.set(true);

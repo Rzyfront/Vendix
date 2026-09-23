@@ -263,4 +263,21 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     fixture.detectChanges();
     expect(component.shippingCost()).toBe(7000);
   });
+
+  it('QUI-844 — solo los métodos activos se muestran al elegir envío a domicilio', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    fixture.componentRef.setInput('cartState', state);
+    fixture.detectChanges();
+    methods.next([
+      firstMethod,
+      { ...originalMethod, id: 9, name: 'Apagado', is_active: false },
+    ]);
+    fixture.detectChanges();
+    expect(component.activeShippingMethods().map((m) => m.id)).toEqual([1]);
+    const cards = fixture.debugElement.queryAll(By.css('.method-card'));
+    expect(cards.length).toBe(1);
+    expect(cards[0].nativeElement.textContent).toContain('Mensajero');
+  });
 });

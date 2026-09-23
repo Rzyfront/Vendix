@@ -334,6 +334,14 @@ export type OrderStateUpdateMode = 'live' | 'on_close';
 
 export interface DispatchSettings {
   order_state_update_mode: OrderStateUpdateMode;
+  /**
+   * Dispatch methods offered in the order dispatch chooser (QUI-844).
+   * All default to `true`; read with `?? true` so stores persisted before
+   * these keys behave as before.
+   */
+  enable_dispatch_with_remision?: boolean;
+  enable_dispatch_direct_delivery?: boolean;
+  enable_dispatch_to_pool?: boolean;
 }
 
 /**

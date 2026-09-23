@@ -22,6 +22,46 @@
     ></app-setting-toggle>
   </div>
 
+  <div>
+    <div class="flex items-center gap-2 flex-wrap mb-2">
+      <app-icon name="send" size="16" class="text-text-secondary"></app-icon>
+      <h4 class="text-xs font-bold text-text-secondary uppercase tracking-wider">
+        M&eacute;todos de despacho
+      </h4>
+    </div>
+    <p class="text-xs text-text-secondary mb-2">
+      Elige qu&eacute; opciones ve el operador al despachar una orden. Al menos una
+      debe quedar activa.
+    </p>
+
+    @if (methodsError()) {
+      <app-alert-banner variant="danger" icon="alert-triangle">
+        {{ methodsError() }}
+      </app-alert-banner>
+    }
+
+    <app-setting-toggle
+      [formControl]="withRemisionControl"
+      label="Crear remisión con ruta de despacho"
+      description="Genera una remisión y permite asignarla a una ruta."
+      (changed)="onMethodToggle('enable_dispatch_with_remision', $event)"
+    ></app-setting-toggle>
+
+    <app-setting-toggle
+      [formControl]="directDeliveryControl"
+      label="Entrega completa"
+      description="Crea una remisión, la marca como entregada y finaliza la orden."
+      (changed)="onMethodToggle('enable_dispatch_direct_delivery', $event)"
+    ></app-setting-toggle>
+
+    <app-setting-toggle
+      [formControl]="toPoolControl"
+      label="Enviar a despacho"
+      description="Publica la orden al pool de reparto para que un repartidor la tome."
+      (changed)="onMethodToggle('enable_dispatch_to_pool', $event)"
+    ></app-setting-toggle>
+  </div>
+
   <!-- Comparación de los dos modos; el activo queda resaltado -->
   <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
     <div
