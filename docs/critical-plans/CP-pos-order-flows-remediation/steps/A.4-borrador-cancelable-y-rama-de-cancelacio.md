@@ -2,8 +2,8 @@
 id: A.4
 title: "Borrador cancelable y rama de cancelación inalcanzable"
 phase: A
-status: pending
-owner: none
+status: in-progress
+owner: Fabio
 updated: 2026-09-20
 contracts: [FB-22, FB-24, DB-01, DB-16, DB-27, ERR-38, ERR-43]
 adrs: []
@@ -47,4 +47,4 @@ skills: [vendix-backend, vendix-error-handling, vendix-inventory-stock, vendix-r
   - [ ] Queda registrado como deuda que el rechazo por estado no cancelable sigue siendo una excepción sin código tipado
   - [ ] Las filas FB-22, FB-24, DB-01, DB-27 y ERR-38 quedan marcadas con su evidencia enlazada
   - [ ] F-005 — Falta contrato de error para cancelar draft con mesa abierta (major)
-- **Status:** pending
+- **Status:** in-progress — código en d13ce5b79; 129 tests backend pasan; falta verificación de API/Playwright y marcar aceptación.

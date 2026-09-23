@@ -2,8 +2,8 @@
 id: H.3
 title: "Verificar POS mesa contra Mesas y conservar snapshots fiscales"
 phase: H
-status: pending
-owner: none
+status: in-progress
+owner: Fabio
 updated: 2026-09-22
 contracts: [FB-03, FB-66, FB-67, DB-02, DB-13, DB-43, ERR-01, ERR-02]
 adrs: [ADR-10]
@@ -33,4 +33,4 @@ skills: [vendix-backend, vendix-tax-typing, vendix-prisma-scopes, how-to-test]
   - [ ] Los carritos gravado, 0 % y mixto no pierden impuestos ni duplican orden/pago.
   - [ ] Happy/sad/brute-force de API y los dos recorridos Playwright quedan documentados en `evidence/`.
   - [ ] No se produjo ningún reporte que presuma «sin asignación = subdeclaración».
-- **Status:** pending
+- **Status:** in-progress — cuatro carriles API locales 201/IVA 0; faltan escenarios gravados, segunda tienda y Playwright.

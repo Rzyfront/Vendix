@@ -7,3 +7,5 @@
 | 2026-09-22 | A2-dinein-gate | A.2 | Backend y UI parcial en b917b5d18 y 290067e7b; se corrigió expansión accidental de tipo en d3a63db50. Falta E2E real. | order-flow.service.spec.ts: 74/74; watch FE OK |
 | 2026-09-22 | Orquestador | A.3 | Guardas backend reparadas en 1a60d333a; frontend y E2E pendientes. No cerrar el paso. | 2 suites/126 tests; error codes 409 tipados |
 | 2026-09-22 | Orquestador | H.1/H.2 | Falso gate retirado en ed49e8472; settings legacy inerte y default nuevo ausente. Falta E2E POS/Mesas antes de cerrar. | payments.service.spec.ts: 75/75; backend compiló |
+| 2026-09-22 | Orquestador | H.3 | Cuatro carriles API dieron 201: POS sin mesa, mesa nueva, sesión previa y Mesas. Total 10000, impuesto 0, un pago por orden. Negativos/E2E pendientes por login 429 y MCP ausente. | evidence/H3-local-api-verification.md; H3-snapshots.txt |
+| 2026-09-22 | Orquestador | A.4 | Draft cancelable con estado compartido y guard de mesa abierta 409 tipado en d13ce5b79; lectura de política usa sesiones existentes. API/E2E pendientes. | 2 suites/129 tests; watch frontend OK; backend health 200 |
