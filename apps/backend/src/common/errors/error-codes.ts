@@ -1367,6 +1367,17 @@ export const ErrorCodes = {
     devMessage:
       'This order is no longer in an editable state (created/draft required)',
   },
+  // ADR-07 / G.1 — future table-reassignment route uses these policy outcomes.
+  ORD_TABLE_REASSIGN_ORDER_STATE_001: {
+    code: 'ORD_TABLE_REASSIGN_ORDER_STATE_001',
+    httpStatus: 409,
+    devMessage: 'Cancelled or refunded orders cannot be returned to a table',
+  },
+  ORD_TABLE_REASSIGN_NOT_ELIGIBLE_001: {
+    code: 'ORD_TABLE_REASSIGN_NOT_ELIGIBLE_001',
+    httpStatus: 409,
+    devMessage: 'This order has financial activity that prevents table reassignment',
+  },
   // CP-POS-CREAR-EDITAR-COBRAR-001 — el customer_id que manda el frontend no
   // pertenece a la tienda del contexto. 403 (no es problema de autenticación, es
   // de scope/tenant).
