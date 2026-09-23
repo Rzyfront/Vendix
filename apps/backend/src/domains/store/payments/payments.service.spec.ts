@@ -1471,14 +1471,14 @@ describe('PaymentsService', () => {
     });
   });
 
-  describe('createOrderInstallments — persisted POS credit total', () => {
-    it('records free-credit balance from grand_total rather than absent order.total_amount', async () => {
+  describe('createOrderInstallments — projected persisted POS credit total', () => {
+    it('records free-credit balance from projected result.order.total_amount', async () => {
       const update = jest.fn().mockResolvedValue({});
       (prisma as any).orders = { update };
 
       await (service as any).createOrderInstallments(
         { credit_type: 'free', installment_terms: { interest_rate: 0 } },
-        { id: 41, grand_total: new Prisma.Decimal(1500) },
+        { id: 41, total_amount: new Prisma.Decimal(1500) },
       );
 
       expect(update).toHaveBeenCalledWith({
@@ -1487,7 +1487,7 @@ describe('PaymentsService', () => {
       });
     });
 
-    it('finances installments from grand_total after an initial payment', async () => {
+    it('finances installments from projected result.order.total_amount', async () => {
       const update = jest.fn().mockResolvedValue({});
       const create = jest.fn().mockResolvedValue({});
       (prisma as any).orders = { update };
@@ -1499,7 +1499,7 @@ describe('PaymentsService', () => {
           first_installment_date: '2026-10-23', interest_rate: 0,
           initial_payment: 0,
         } },
-        { id: 42, grand_total: new Prisma.Decimal(1500) },
+        { id: 42, total_amount: new Prisma.Decimal(1500) },
       );
 
       expect(create).toHaveBeenCalledTimes(2);

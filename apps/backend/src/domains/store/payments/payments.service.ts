@@ -2237,14 +2237,14 @@ export class PaymentsService {
    */
   private async createOrderInstallments(
     dto: CreatePosPaymentDto,
-    order: { id: number | bigint; grand_total: any },
+    order: { id: number | bigint; total_amount: Prisma.Decimal | number | string },
   ) {
     const creditType = dto.credit_type || 'installments';
     const orderId =
       typeof order.id === 'object' ? Number(order.id) : Number(order.id);
-    // The persisted orders row has grand_total, not total_amount (which is
-    // only a POS request estimate). Credit balances must use the final sale.
-    const orderTotal = Number(order.grand_total);
+    // processPosPayment projects persisted orders.grand_total as
+    // result.order.total_amount; this is not the client's DTO estimate.
+    const orderTotal = Number(order.total_amount);
 
     const updateData: Record<string, any> = {
       credit_type: creditType,
