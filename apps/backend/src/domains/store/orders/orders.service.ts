@@ -1,5 +1,5 @@
 import { assertNoActiveFinancialSplit } from './shared/financial-split-policy';
-import { Injectable, ConflictException, Logger } from '@nestjs/common';
+import { Injectable, ConflictException, Logger, Optional } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import {
   CreateOrderDto,
@@ -51,6 +51,11 @@ import { CouponsService } from '../coupons/coupons.service';
 import { AuditService, AuditAction, AuditResource } from '@common/audit/audit.service';
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
+import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
+import {
+  EMPTY_SHIPPING_TAX,
+  type ShippingTaxSnapshot,
+} from '../shipping/utils/shipping-tax.util';
 
 /**
  * Tasas de un producto con impuesto, resueltas en batch desde
@@ -194,7 +199,27 @@ export class OrdersService {
     // compartido. Se invoca desde @OnEvent handlers abajo y desde el post-commit
     // de updateOrderFromEditor.
     private orderSse: OrderSseService,
+    // Impuesto opcional por tarifa de envío: copia congelada en la orden al
+    // asignar/editar el envío. `@Optional()` para no romper los TestingModule
+    // existentes; sin él (sólo en specs) el envío sale sin impuesto.
+    @Optional() private readonly shippingTaxService?: ShippingTaxService,
   ) {}
+
+  /** Copia del impuesto de la tarifa `rate_id` (vacía sin tarifa/servicio). */
+  private async snapshotShippingTax(
+    rate_id: number | null | undefined,
+    shipping_cost: number,
+    store_id: number,
+    client?: any,
+  ): Promise<ShippingTaxSnapshot> {
+    if (!rate_id || !this.shippingTaxService) return { ...EMPTY_SHIPPING_TAX };
+    return this.shippingTaxService.snapshotForRate(
+      client ?? null,
+      rate_id,
+      shipping_cost,
+      { store_id },
+    );
+  }
 
   // === Carril B - B3: listeners de EventEmitter que empujan al SSE =========
   // El hub es por store_id; el cliente del detalle de orden discrimina por
@@ -2165,6 +2190,26 @@ export class OrdersService {
       );
     }
 
+    // 8b) Copia del impuesto del envío (contrato shipping-rate-tax):
+    //  - DTO sin nada de envío ⇒ `undefined`: se conservan costo y copia.
+    //  - `dtoDropsShipment` ⇒ copia vacía (y `shipping_rate_id` null abajo).
+    //  - Método + tarifa (explícita o calculada) ⇒ copia NUEVA con la
+    //    configuración vigente de la tarifa. El guard de tolerancia de arriba
+    //    asegura que el costo es el de la tarifa (no hay costo manual aquí).
+    //  - Método sin tarifa, o solo `shipping_cost` ⇒ copia vacía.
+    let shippingTaxUpdate: ShippingTaxSnapshot | undefined;
+    if (dtoDropsShipment) {
+      shippingTaxUpdate = { ...EMPTY_SHIPPING_TAX };
+    } else if (dto.shipping_method_id) {
+      shippingTaxUpdate = await this.snapshotShippingTax(
+        resolvedShippingRateId,
+        shippingCost,
+        storeId,
+      );
+    } else if (dto.shipping_cost !== undefined) {
+      shippingTaxUpdate = { ...EMPTY_SHIPPING_TAX };
+    }
+
     // 9) Promotion quote: recotizamos server-side, NUNCA confiamos en
     //    `promotion_ids` como verdad. El motor decide qué aplica.
     let promotionDiscount = 0;
@@ -3164,8 +3209,16 @@ export class OrdersService {
           billing_address_id: dto.billing_address_id ?? existingOrder.billing_address_id,
           shipping_address_id: dto.shipping_address_id ?? existingOrder.shipping_address_id,
           shipping_method_id: dto.shipping_method_id ?? existingOrder.shipping_method_id,
-          shipping_rate_id: resolvedShippingRateId ?? existingOrder.shipping_rate_id,
+          // Quitar el envío también suelta la tarifa (antes la conservaba);
+          // un método nuevo liga su tarifa resuelta (o ninguna).
+          shipping_rate_id: dtoDropsShipment
+            ? null
+            : dto.shipping_method_id
+              ? resolvedShippingRateId
+              : (resolvedShippingRateId ?? existingOrder.shipping_rate_id),
           shipping_cost: dto.shipping_cost ?? shippingCost,
+          // Copia del impuesto del envío; `undefined` ⇒ se conserva la actual.
+          ...(shippingTaxUpdate ?? {}),
           subtotal_amount: recalculatedSubtotal,
           tax_amount: recalculatedTax,
           discount_amount: discountAmount,
@@ -3480,6 +3533,9 @@ export class OrdersService {
 
     let shippingCost = dto.shipping_cost ?? 0;
     let resolvedRateId: number | null = dto.shipping_rate_id ?? null;
+    // Costo que dicta la tarifa (o el cálculo). Si el operador digitó otro
+    // ⇒ costo manual ⇒ el envío va SIN impuesto (copia vacía).
+    let rateCost: number | null = null;
 
     // Auto-calculate: resolve rate + cost from customer's shipping address
     if (dto.auto_calculate && !dto.shipping_rate_id) {
@@ -3536,6 +3592,7 @@ export class OrdersService {
       }
 
       resolvedRateId = match.rate_id;
+      rateCost = Number(match.cost);
       if (dto.shipping_cost === undefined) {
         shippingCost = Number(match.cost);
       }
@@ -3548,10 +3605,19 @@ export class OrdersService {
         throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
       }
 
+      rateCost = Number(rate.base_cost);
       if (dto.shipping_cost === undefined) {
         shippingCost = Number(rate.base_cost);
       }
     }
+
+    const costComesFromRate =
+      resolvedRateId != null &&
+      rateCost != null &&
+      !differsByAtLeastCents(shippingCost, rateCost, 1);
+    const shippingTax = costComesFromRate
+      ? await this.snapshotShippingTax(resolvedRateId, shippingCost, storeId)
+      : { ...EMPTY_SHIPPING_TAX };
 
     const { deriveDeliveryType } =
       await import('../shipping/shipping-derivation.util');
@@ -3570,6 +3636,9 @@ export class OrdersService {
         shipping_rate_id: resolvedRateId,
         delivery_type: deliveryType,
         shipping_cost: shippingCost,
+        // Copia del impuesto del envío: de la tarifa si el costo es el suyo;
+        // vacía si el costo se digitó a mano. No mueve `grand_total`.
+        ...shippingTax,
         grand_total: newGrandTotal,
         updated_at: new Date(),
       },

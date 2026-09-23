@@ -1415,6 +1415,109 @@ describe('OrdersService', () => {
     });
 
     // ----------------------------------------------------------------
+    // Impuesto opcional por tarifa de envío — copia en el editor.
+    // ----------------------------------------------------------------
+    describe('impuesto del envío en el editor', () => {
+      const INC_SNAPSHOT = {
+        shipping_tax_rate_id: 77,
+        shipping_tax_name: 'INC 8%',
+        shipping_tax_type: 'inc',
+        shipping_tax_rate: 0.08,
+        shipping_tax_amount: 0.74,
+      };
+      let snapshotForRate: jest.Mock;
+      const arrangeProduct = () =>
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1, name: 'Test product', product_type: 'simple', product_variants: [],
+        } as any);
+      const headerUpdate = () =>
+        mockPrismaService.orders.update.mock.calls
+          .map((c: any[]) => c[0])
+          .find((a: any) => a?.where?.id === 500 && 'grand_total' in (a.data ?? {}))?.data;
+
+      beforeEach(() => {
+        snapshotForRate = jest.fn().mockResolvedValue({ ...INC_SNAPSHOT });
+        (service as any).shippingTaxService = { snapshotForRate };
+      });
+
+      it('método + tarifa: copia nueva de la tarifa vigente', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          await service.updateOrderFromEditor(500, fullDto);
+          expect(snapshotForRate).toHaveBeenCalledWith(null, 7, 10, { store_id: 1 });
+          expect(headerUpdate()).toMatchObject({
+            ...INC_SNAPSHOT,
+            shipping_rate_id: 7,
+            shipping_cost: 10,
+            grand_total: 129,
+          });
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it('DTO sin envío: conserva costo y copia (no escribe shipping_tax_*)', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          const withShipping = {
+            ...draftOrder, shipping_cost: '10.00', shipping_method_id: 5, shipping_rate_id: 7,
+          };
+          mockPrismaService.orders.findFirst.mockReset();
+          mockPrismaService.orders.findFirst
+            .mockResolvedValueOnce(withShipping as any)
+            .mockResolvedValue(persistedOrder as any);
+          const { delivery_type, shipping_method_id, shipping_rate_id, shipping_address_id, shipping_cost, ...noShip } = fullDto;
+          await service.updateOrderFromEditor(500, noShip);
+          expect(snapshotForRate).not.toHaveBeenCalled();
+          const data = headerUpdate();
+          expect(data.shipping_cost).toBe(10);
+          expect(data.shipping_rate_id).toBe(7);
+          expect('shipping_tax_amount' in data).toBe(false);
+          expect('shipping_tax_rate_id' in data).toBe(false);
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
+      it('dtoDropsShipment (pickup): limpia la copia y suelta shipping_rate_id', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          const withShipping = {
+            ...draftOrder, shipping_cost: '10.00', shipping_method_id: 5, shipping_rate_id: 7,
+          };
+          mockPrismaService.orders.findFirst.mockReset();
+          mockPrismaService.orders.findFirst
+            .mockResolvedValueOnce(withShipping as any)
+            .mockResolvedValue({ ...persistedOrder, shipping_cost: 0, grand_total: 119 } as any);
+          const { shipping_method_id, shipping_rate_id, shipping_address_id, shipping_cost, ...rest } = fullDto;
+          await service.updateOrderFromEditor(500, { ...rest, delivery_type: 'pickup' });
+          expect(snapshotForRate).not.toHaveBeenCalled();
+          expect(headerUpdate()).toMatchObject({
+            shipping_rate_id: null,
+            shipping_cost: 0,
+            shipping_tax_rate_id: null,
+            shipping_tax_name: null,
+            shipping_tax_type: null,
+            shipping_tax_rate: null,
+            shipping_tax_amount: 0,
+            grand_total: 119,
+          });
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+    });
+
+    // ----------------------------------------------------------------
     // C.8 — F-012/F-037 (blocker/major): el subtotal usaba `priceUnitsQty`
     // (la ESCALA `price_unit_quantity` del producto) pero el impuesto
     // multiplicaba por `quantity` (el multiplicador de línea que manda el
