@@ -32,19 +32,19 @@ skills: [vendix-backend, vendix-error-handling, vendix-inventory-stock, vendix-r
   - `npm --prefix apps/backend run test:path -- src/domains/store/orders/order-flow/order-cancellation-race.integration.spec.ts`
   - Playwright MCP — abrir el detalle de un borrador POS abandonado, cancelarlo y confirmar que desaparece de la lista de pendientes; guardar en `evidence/A.4-e2e-borrador.md`
 - **Acceptance checklist:**
-  - [ ] `draft` está en `CANCELABLE_STATES` del servicio y en el `Set` homónimo del util de política
-  - [ ] Las dos listas quedan sincronizadas y el paso deja constancia de cuál es la fuente
-  - [ ] El claim atómico conserva su `WHERE` condicional: dos cancelaciones concurrentes siguen teniendo un solo ganador
-  - [ ] Cancelar un `draft` sin mesa devuelve 200 y deja `orders.state='cancelled'`
-  - [ ] Cancelar un `draft` con sesión de mesa abierta se rechaza con código tipado y mensaje accionable
-  - [ ] ERR-43 `ORD_CANCEL_OPEN_TABLE_001` devuelve 409 antes del claim, con `details.table_session_id` y cero escrituras
-  - [ ] No queda ninguna fila con sesión abierta apuntando a una orden `cancelled`
-  - [ ] `cancellation_policy.can_cancel` llega en `true` para un borrador elegible en las dos respuestas de orden
-  - [ ] El botón Cancelar Orden es visible en el detalle de un borrador y su handler completa el flujo
-  - [ ] La cadena de efectos no falla sobre un borrador sin reservas, sin pagos y sin tickets de cocina
-  - [ ] El blocker de reversa de pago sigue disparando si el borrador tuviera un pago confirmado
-  - [ ] Hay un test que falla antes del fix probando la arista `draft → cancelled`
-  - [ ] Queda registrado como deuda que el rechazo por estado no cancelable sigue siendo una excepción sin código tipado
+  - [x] `draft` está en `CANCELABLE_STATES` del servicio y en el `Set` homónimo del util de política
+  - [x] Las dos listas quedan sincronizadas y el paso deja constancia de cuál es la fuente
+  - [x] El claim atómico conserva su `WHERE` condicional: dos cancelaciones concurrentes siguen teniendo un solo ganador
+  - [x] Cancelar un `draft` sin mesa devuelve 200 y deja `orders.state='cancelled'`
+  - [x] Cancelar un `draft` con sesión de mesa abierta se rechaza con código tipado y mensaje accionable
+  - [x] ERR-43 `ORD_CANCEL_OPEN_TABLE_001` devuelve 409 antes del claim, con `details.table_session_id` y cero escrituras
+  - [x] No queda ninguna fila con sesión abierta apuntando a una orden `cancelled`
+  - [x] `cancellation_policy.can_cancel` llega en `true` para un borrador elegible en las dos respuestas de orden
+  - [x] El botón Cancelar Orden es visible en el detalle de un borrador y su handler completa el flujo
+  - [x] La cadena de efectos no falla sobre un borrador sin reservas, sin pagos y sin tickets de cocina
+  - [x] El blocker de reversa de pago sigue disparando si el borrador tuviera un pago confirmado
+  - [x] Hay un test que falla antes del fix probando la arista `draft → cancelled`
+  - [x] Queda registrado como deuda que el rechazo por estado no cancelable sigue siendo una excepción sin código tipado
   - [ ] Las filas FB-22, FB-24, DB-01, DB-27 y ERR-38 quedan marcadas con su evidencia enlazada
-  - [ ] F-005 — Falta contrato de error para cancelar draft con mesa abierta (major)
-- **Status:** in-progress — código en d13ce5b79; 129 tests backend pasan; falta verificación de API/Playwright y marcar aceptación.
+  - [x] F-005 — Falta contrato de error para cancelar draft con mesa abierta (major)
+- **Status:** in-progress · Fabio · 2026-09-23 · código en `d13ce5b79`; 129 tests backend iniciales + policy 46/46 (`036dca473`, paid draft exige reversa). API/SQL `evidence/A4-local-api-verification.md`: draft #1104 cancela 200; mesa abierta #1105 rechaza 409 tipado/cero escrituras. Playwright real `evidence/A4-ui-draft-cancel.md`: borrador POS #1135→detalle con Cancelar Orden→razón→POST 200, CANCELADA e historial; cero pagos/reservas. `CANCELABLE_ORDER_STATES` exportado desde policy util es fuente única. Falta barrido contrato FB-22 y cierre de filas compartidas DB-01/DB-27/ERR-38 con fases I/E antes de marcar done.
