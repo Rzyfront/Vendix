@@ -37,5 +37,6 @@ skills: [vendix-error-handling, vendix-restaurant-ops, vendix-frontend, how-to-t
   - [x] El mensaje de plato no listo lleva al KDS, no describe el estado interno del ticket.
   - [x] El docblock del servicio de mesa del frontend cita el código realmente lanzado, no la entrada muerta.
   - [x] La entrada sin lanzadores queda marcada como deprecada con puntero al código vigente; sigue en 0 lanzadores.
-  - [ ] Los tres rechazos se provocan por curl y ninguno devuelve 500 ni cae al texto genérico.
-- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/C3-http-rejection.md`: catálogo/mensajes 83f5e67f2/69f4a4caa; controller `de529b29f` corrigió ticket mixto de HTTP201/body422 a HTTP422 real, sin mutación; plato pendiente HTTP409 con CTA KDS. Jest cocina 33/33, controller 1/1, OrderFlow 118/118; Angular error-messages 20/20. `evidence/C3-station-lock-safety-20260923.md` documenta por qué NO se abrió Cocina #1 para fabricar el 403 (backfill de inventario); Barra #7 no tiene tickets. Falta fixture seguro y Playwright de toasts; ADR-06 sigue proposed.
+  - [x] Los tres rechazos se provocan por curl y ninguno devuelve 500 ni cae al texto genérico.
+  - [ ] Playwright muestra toasts accionables de lock, ticket no-takeaway y plato no listo en sus superficies reales.
+- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/C3-http-rejection.md` y `C3-station-lock-and-codes-20260923.md`: fixture aislado en Barra #7 probó HTTP403 `KDS_STATION_LOCKED` sin atribuir consumos huérfanos; not-takeaway 422, not-ready/already-delivered/already-cancelled e ítem no listo 409, sin mutación. Jest cocina 33/33, controller 1/1, Angular error-messages 20/20. Falta Playwright de toasts en superficies reales; ADR-06 sigue proposed.
