@@ -542,19 +542,13 @@ export class SplitAccountPaymentService {
               },
             });
         }
-        let paidSession: any = null;
+        let paidSession: Awaited<
+          ReturnType<TableSessionsService['projectOrderPaymentToTableSession']>
+        > = null;
         if (paid.gte(money(order.grand_total))) {
-          const session = await tx.table_sessions.findFirst({
-            where: {
-              order_id: order.id,
-              store_id,
-              closed_at: null,
-              paid_at: null,
-            },
-          });
-          if (session)
-            paidSession = await this.tableSessions.markSessionPaid(
-              session.id,
+          paidSession =
+            await this.tableSessions.projectOrderPaymentToTableSession(
+              order.id,
               paymentId,
               tx,
             );
@@ -568,14 +562,7 @@ export class SplitAccountPaymentService {
           recorded: !!fresh.financial_effects_recorded_at,
         };
       });
-      if (result.paidSession) {
-        this.tableSessions.emitSessionPaid(
-          store_id,
-          result.paidSession.id,
-          payment.order_id,
-          paymentId,
-        );
-      }
+      result.paidSession?.emitAfterCommit();
       if (result.recorded) return;
       if (result.fullyPaid)
         await this.orderFlow.settleFinancialSplitSource(

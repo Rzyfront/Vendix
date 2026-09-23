@@ -331,7 +331,10 @@ describe('PaymentsService', () => {
         { provide: KitchenFireService, useValue: { fireOrder: jest.fn() } },
         {
           provide: TableSessionsService,
-          useValue: { emitSessionClosed: jest.fn() },
+          useValue: {
+            emitSessionClosed: jest.fn(),
+            projectOrderPaymentToTableSession: jest.fn(),
+          },
         },
         {
           provide: SerialNumberEnforcementService,
@@ -1479,13 +1482,6 @@ describe('PaymentsService', () => {
       (kitchenFire as any).prepareFireContext = jest.fn().mockResolvedValue(null);
       (kitchenFire as any).fireOrderItemsInTx = jest.fn().mockResolvedValue(null);
 
-      // Carril D/D1 marca la sesión como pagada antes del cierre; el mock del
-      // módulo solo declara `emitSessionClosed`. Vive en el arrange (y no en
-      // cada test) porque TODOS los cobros de mesa pasan por aquí.
-      (service as any).tableSessionsService.markSessionPaid = jest
-        .fn()
-        .mockResolvedValue({ id: session.id });
-
       return { tx, session, posUser };
     };
 
@@ -1540,6 +1536,9 @@ describe('PaymentsService', () => {
         }),
       );
       expect(result.closedSessionId).toBeNull();
+      expect(
+        (service as any).tableSessionsService.projectOrderPaymentToTableSession,
+      ).not.toHaveBeenCalled();
     });
 
     it('cancelled items do NOT resurrect into the close-out totals', async () => {
@@ -1550,15 +1549,6 @@ describe('PaymentsService', () => {
       // no `payments` client. Scoped to THIS test only (contract:
       // solo el test nuevo) — no `succeeded` payment, close-out proceeds.
       tx.payments = { findFirst: jest.fn().mockResolvedValue(null) };
-      // Same staleness one step later: carril D/D1 calls
-      // `tableSessionsService.markSessionPaid`, absent from the module
-      // mock (only `emitSessionClosed` exists). Stub it here, scoped to
-      // this test — the top-level `beforeEach` rebuilds the module per
-      // test, so nothing leaks to siblings.
-      (service as any).tableSessionsService.markSessionPaid = jest
-        .fn()
-        .mockResolvedValue({ id: 99 });
-
       // The draft order holds one active line ($10.000) and one line the
       // waiter cancelled earlier. Prisma scoping means `findMany` only
       // resolves what the `where` allows — the cancelled row must never
@@ -3114,10 +3104,13 @@ describe('PaymentsService', () => {
      *   discriminador. `processing_mode` es el eje bajo prueba; `type` sólo
      *   alimenta las ramas preexistentes (vuelto de efectivo, gateway).
      */
-    const arrangePosSale = (systemMethod: {
-      type: string;
-      processing_mode?: payment_processing_mode_enum | null;
-    }) => {
+    const arrangePosSale = (
+      systemMethod: {
+        type: string;
+        processing_mode?: payment_processing_mode_enum | null;
+      },
+      tableSessionOrderId: number | null = null,
+    ) => {
       mockRequestContext({ store_id: 1, organization_id: 1 });
 
       const order = buildOrder({
@@ -3192,6 +3185,7 @@ describe('PaymentsService', () => {
           },
           kitchenFire: null,
           closedSessionId: null,
+          tableSessionOrderId,
         });
 
       (fiscalThreshold.assertInvoiceNotRequired as jest.Mock).mockResolvedValue(
@@ -3294,6 +3288,93 @@ describe('PaymentsService', () => {
           }),
         }),
       );
+    });
+
+    it('proyecta el cobro de mesa con el pago real en la transacción y emite solo después del commit', async () => {
+      const { tx, order } = arrangePosSale(
+        { type: 'cash', processing_mode: payment_processing_mode_enum.DIRECT },
+        4242,
+      );
+      let insideTransaction = false;
+      (prisma as any).$transaction = jest.fn(async (callback: any) => {
+        insideTransaction = true;
+        try {
+          return await callback(tx);
+        } finally {
+          insideTransaction = false;
+        }
+      });
+      const emitAfterCommit = jest.fn(() => {
+        expect(insideTransaction).toBe(false);
+      });
+      const project = (service as any).tableSessionsService
+        .projectOrderPaymentToTableSession as jest.Mock;
+      project.mockImplementation(
+        async (_orderId: number, _paymentId: number, client: any) => {
+          expect(insideTransaction).toBe(true);
+          expect(client).toBe(tx);
+          return { sessionId: 99, emitAfterCommit };
+        },
+      );
+      tx.orders.findUnique
+        .mockReset()
+        .mockResolvedValueOnce({
+          grand_total: new Prisma.Decimal(100),
+          total_paid: new Prisma.Decimal(0),
+        })
+        .mockResolvedValueOnce({
+          id: order.id,
+          order_number: order.order_number,
+          state: 'finished',
+        });
+      jest
+        .spyOn(service as any, 'recordCashRegisterMovement')
+        .mockResolvedValue(undefined);
+
+      const result = await service.processPosPayment(buildPosDto(), posUser);
+
+      expect(project).toHaveBeenCalledTimes(1);
+      expect(project).toHaveBeenCalledWith(order.id, 7, tx);
+      expect(emitAfterCommit).toHaveBeenCalledTimes(1);
+      expect((result as any).paid_session_id).toBe(99);
+      expect(tx.table_sessions?.update).toBeUndefined();
+      expect(tx.tables?.update).toBeUndefined();
+    });
+
+    it('no emite session_paid si la transacción del cobro revierte', async () => {
+      const { tx, order } = arrangePosSale(
+        { type: 'cash', processing_mode: payment_processing_mode_enum.DIRECT },
+        4242,
+      );
+      const emitAfterCommit = jest.fn();
+      const project = (service as any).tableSessionsService
+        .projectOrderPaymentToTableSession as jest.Mock;
+      project.mockResolvedValue({ sessionId: 99, emitAfterCommit });
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+      expect(project).toHaveBeenCalledWith(order.id, 7, tx);
+      expect(emitAfterCommit).not.toHaveBeenCalled();
+    });
+
+    it('no proyecta una venta de mesa a crédito antes de recibir el dinero', async () => {
+      arrangePosSale(
+        {
+          type: 'cash_on_delivery',
+          processing_mode: payment_processing_mode_enum.ON_DELIVERY,
+        },
+        4242,
+      );
+      const project = (service as any).tableSessionsService
+        .projectOrderPaymentToTableSession as jest.Mock;
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+      expect(project).not.toHaveBeenCalled();
     });
 
     it('fila de método sin processing_mode (tienda antigua): degrada al carril directo y lo deja en el log', async () => {
