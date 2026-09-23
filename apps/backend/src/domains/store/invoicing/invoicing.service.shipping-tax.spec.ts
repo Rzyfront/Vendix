@@ -333,19 +333,33 @@ describe('InvoicingService.createFromOrder — impuesto del envío (copia de la 
     expect(fallback.line_tax_rows[0].tax_amount.toString()).toBe('11894.96');
   });
 
-  it('copia incoherente (impuesto sin tarifa) ⇒ Envío legacy y warn, sin inventar tarifa', async () => {
-    const { data } = await createDraft({
-      shipping_cost: money(15000),
-      ...ivaShippingCopy,
-      shipping_tax_rate: null,
-      order_items: [ivaProducto()],
-    });
-    expect(data.invoice_items.create[1]).toEqual(legacyShippingLine('15000'));
-    expect(data.shipping_amount.toString()).toBe('15000');
-    expect((service as any).logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('missing_rate'),
-    );
-  });
+  it.each([
+    ['missing_rate', { shipping_tax_rate: null }],
+    ['unsupported_tax_type', { shipping_tax_type: 'ica' }],
+    ['amount_not_below_cost', { shipping_tax_amount: money('15000') }],
+  ])(
+    'copia incoherente (%s) ⇒ INVOICING_CALC_006 antes de crear el borrador, sin inventar tarifa',
+    async (reason, override) => {
+      prisma.orders.findFirst.mockResolvedValue(
+        buildOrder({
+          shipping_cost: money(15000),
+          ...ivaShippingCopy,
+          ...override,
+          order_items: [ivaProducto()],
+        }),
+      );
+      const error: any = await service
+        .createFromOrder(ORDER_ID)
+        .then(() => null, (e) => e);
+      expect(error?.errorCode).toBe('INVOICING_CALC_006');
+      expect(error.getResponse().details).toEqual({
+        order_id: 9001,
+        detail: `shipping_tax:${reason}`,
+      });
+      expect(prisma.invoices.create).not.toHaveBeenCalled();
+      expect(prisma.invoice_taxes.createMany).not.toHaveBeenCalled();
+    },
+  );
 
   it('update() del borrador que reenvía la línea Envío con su fila conserva el impuesto', async () => {
     const { data, line_tax_rows } = await createDraft({

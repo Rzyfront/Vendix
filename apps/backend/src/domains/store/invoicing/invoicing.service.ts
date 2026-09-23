@@ -599,6 +599,23 @@ export type InvoiceShippingTaxProjection =
  * NO se «arregla» inventando una tarifa: se informa y el llamador deja el
  * envío como hoy.
  */
+/** Motivo legible de una copia de impuesto del envío incoherente. */
+export function describeShippingTaxIncoherence(
+  reason: Exclude<
+    Extract<InvoiceShippingTaxProjection, { applies: false }>['reason'],
+    'none'
+  >,
+): string {
+  switch (reason) {
+    case 'unsupported_tax_type':
+      return 'el tipo de impuesto no es IVA ni INC';
+    case 'missing_rate':
+      return 'el impuesto no tiene tarifa';
+    case 'amount_not_below_cost':
+      return 'el impuesto es igual o mayor que el costo del envío';
+  }
+}
+
 export function resolveInvoiceShippingTax(
   order: InvoiceShippingTaxSource,
 ): InvoiceShippingTaxProjection {
@@ -2512,14 +2529,19 @@ export class InvoicingService {
       shippingCost > 0
         ? resolveInvoiceShippingTax(order)
         : ({ applies: false, reason: 'none' } as const);
+    // Copia incoherente (sin tarifa, tipo fuera de iva/inc, impuesto ≥ costo):
+    // se RECHAZA. Facturar el envío sin tributo dejaría la factura
+    // declarando menos impuesto del que la orden y la contabilidad registran,
+    // e inventar la tarifa es peor. El borrador nace sin numerar, así que no
+    // se consume consecutivo.
     if (!shippingTax.applies && shippingTax.reason !== 'none') {
-      this.logger.warn(
-        `[invoice:create-from-order]${formatGateCorrelation({
-          store_id: context.store_id ?? null,
-          organization_id: context.organization_id ?? null,
-          order_id: order.id,
-        })} copia de impuesto del envío incoherente (${shippingTax.reason}): ` +
-          'la línea Envío sale sin tributo — no se inventa la tarifa',
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_CALC_006,
+        `La orden #${order.id} tiene una copia del impuesto del envío incoherente ` +
+          `(${describeShippingTaxIncoherence(shippingTax.reason)}): no se puede ` +
+          'facturar sin inventar la tarifa ni omitir un impuesto que la orden ya cobró. ' +
+          'Revisa el envío de la orden (vuelve a asignar la tarifa o quita el impuesto) y factura de nuevo.',
+        { order_id: order.id, detail: `shipping_tax:${shippingTax.reason}` },
       );
     }
     const shippingBase = shippingTax.applies
