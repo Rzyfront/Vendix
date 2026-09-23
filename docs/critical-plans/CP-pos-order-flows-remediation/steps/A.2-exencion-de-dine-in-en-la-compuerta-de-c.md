@@ -30,16 +30,16 @@ skills: [vendix-backend, vendix-error-handling, vendix-restaurant-ops, vendix-fr
   - `grep -rn "delivery_type !== 'pickup'" apps/backend/src apps/frontend/src` → una sola definición de la lista de exentos por capa, documentada y cruzada
   - Playwright MCP — abrir mesa, pedir, y cobrar desde el detalle de la orden: la acción Registrar Pago debe estar visible y el cobro terminar en 200; guardar el recorrido en `evidence/A.2-e2e-detalle-mesa.md`
 - **Acceptance checklist:**
-  - [ ] `needsDispatch` exime `dine_in` además de `pickup` y `direct_delivery`, con comentario que cita el objetivo del hub
-  - [ ] La compuerta sigue lanzando 422 sobre `home_delivery` sin `shipping_method_id`
-  - [ ] La compuerta sigue siendo previa al claim atómico y de solo lectura: un rechazo no escribe nada
-  - [ ] `assertNoActiveFinancialSplit` sigue ejecutándose en el mismo bloque y antes del claim
-  - [ ] `blockedByMissingShipping` usa la misma lista de exentos que el backend e incluye `dine_in` y `pickup`
-  - [ ] Con una orden `dine_in` el menú de acciones del detalle muestra Registrar Pago y no el alert de método de envío
-  - [ ] `error-messages.ts` mapea `ORD_SHIP_CHARGE_001` a un mensaje accionable en español
-  - [ ] Hay un test que falla antes del fix y que fija `errorCode` sobre `home_delivery` sin método de envío
-  - [ ] Hay un test que afirma la AUSENCIA de `ORD_SHIP_CHARGE_001` al cobrar una orden `dine_in`
-  - [ ] `registerCreditPayment` no adquiere la compuerta: el fiado sobre mesa responde sin 422 de envío
+  - [x] `needsDispatch` exime `dine_in` además de `pickup` y `direct_delivery`, con comentario que cita el objetivo del hub
+  - [x] La compuerta sigue lanzando 422 sobre `home_delivery` sin `shipping_method_id`
+  - [x] La compuerta sigue siendo previa al claim atómico y de solo lectura: un rechazo no escribe nada
+  - [x] `assertNoActiveFinancialSplit` sigue ejecutándose en el mismo bloque y antes del claim
+  - [x] `blockedByMissingShipping` usa la misma lista de exentos que el backend e incluye `dine_in` y `pickup`
+  - [x] Con una orden `dine_in` el menú de acciones del detalle muestra Registrar Pago y no el alert de método de envío
+  - [x] `error-messages.ts` mapea `ORD_SHIP_CHARGE_001` a un mensaje accionable en español
+  - [x] Hay un test que falla antes del fix y que fija `errorCode` sobre `home_delivery` sin método de envío
+  - [x] Hay un test que afirma la AUSENCIA de `ORD_SHIP_CHARGE_001` al cobrar una orden `dine_in`
+  - [x] `registerCreditPayment` no adquiere la compuerta: el fiado sobre mesa responde sin 422 de envío
   - [ ] Los cuatro carriles de cobro quedan verificados con su evidencia en `evidence/`
-  - [ ] Las filas FB-04, FB-05, FB-20 y ERR-03 quedan marcadas con su evidencia enlazada
-- **Status:** in-progress
+  - [x] Las filas FB-04, FB-05, FB-20 y ERR-03 quedan marcadas con su evidencia enlazada
+- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/A2-flowpay-matrix.md`: Playwright mesa #25/orden #1141 `dine_in` sin método mostró Registrar Pago, POST 200/pago único y sesión #117 pagada; home_delivery #1144 sin método 422/cero writes, con PATCH método #9 pagó 200; crédito parcial #1146 pagó 200 y sobrepago 400 sin mutar. OrderFlowService 114/114, health/watch OK. Falta consolidar evidencia cruzada de los cuatro carriles POS/adoptado/detalle para el último checkbox.
