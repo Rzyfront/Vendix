@@ -13,6 +13,7 @@ import {
   DianSoftwareSecurity,
 } from '../interfaces/dian-config.interface';
 import { DianDirectProvider } from '../dian-direct.provider';
+import { FiscalDocumentValidator } from '../../../validators/fiscal-document.validator';
 
 /**
  * Impuesto opcional del envío (copia de la orden): la línea Envío declara su
@@ -288,6 +289,147 @@ describe('UBL — la línea Envío con impuesto de la copia', () => {
       const totals = monetaryTotals(xml);
       expect(totals.TaxExclusiveAmount).toBe(s.base_total);
       expect(totals.PayableAmount).toBe('69000.00');
+      expectClean(xml);
+    });
+  });
+
+  describe('IVA 19 % en el envío + productos IVA 5 % (mismo esquema, dos tarifas)', () => {
+    const iva5 = tax({
+      tax_name: 'IVA 5%',
+      tax_type: 'iva',
+      tax_rate: '5.00',
+      taxable_amount: '50000.00',
+      tax_amount: '2500.00',
+    });
+    const iva19Envio = tax({
+      tax_name: 'IVA 19%',
+      tax_type: 'iva',
+      tax_rate: '19.00',
+      taxable_amount: '12605.04',
+      tax_amount: '2394.96',
+    });
+    const header = [iva5, iva19Envio];
+    const items: UblDocumentLine[] = [
+      {
+        description: 'Producto',
+        quantity: '1',
+        unit_price: '50000.00',
+        discount_amount: '0.00',
+        tax_amount: '2500.00',
+        total_amount: '52500.00',
+        taxes: [{ ...iva5 }],
+      } as UblDocumentLine,
+      {
+        description: 'Envio',
+        quantity: '1',
+        unit_price: '12605.04',
+        discount_amount: '0.00',
+        tax_amount: '2394.96',
+        total_amount: '15000.00',
+        taxes: [{ ...iva19Envio }],
+      } as UblDocumentLine,
+    ];
+
+    const headerTaxTotal = (xml: string) => {
+      const body = xml.replace(
+        /<cac:InvoiceLine>[\s\S]*?<\/cac:InvoiceLine>/g,
+        '',
+      );
+      const blocks = [
+        ...body.matchAll(/<cac:TaxTotal>([\s\S]*?)<\/cac:TaxTotal>/g),
+      ].map((m) => m[1]);
+      expect(blocks).toHaveLength(1);
+      return blocks[0];
+    };
+
+    it('cabecera: UN TaxTotal 01 con un TaxSubtotal por tarifa y TaxAmount = Σ (FAS01a/FAS02/FAS04)', () => {
+      const xml = buildInvoiceXml(items, header, '4894.96');
+      const block = headerTaxTotal(xml);
+      expect(block).toMatch(
+        /^<cbc:TaxAmount currencyID="COP">4894.96<\/cbc:TaxAmount>/,
+      );
+      const subtotals = [
+        ...block.matchAll(/<cac:TaxSubtotal>([\s\S]*?)<\/cac:TaxSubtotal>/g),
+      ].map((m) => m[1]);
+      expect(subtotals).toHaveLength(2);
+      expect(subtotals[0]).toContain('<cbc:Percent>5.00</cbc:Percent>');
+      expect(subtotals[0]).toContain(
+        '<cbc:TaxableAmount currencyID="COP">50000.00</cbc:TaxableAmount>',
+      );
+      expect(subtotals[0]).toContain(
+        '<cbc:TaxAmount currencyID="COP">2500.00</cbc:TaxAmount>',
+      );
+      expect(subtotals[1]).toContain('<cbc:Percent>19.00</cbc:Percent>');
+      expect(subtotals[1]).toContain(
+        '<cbc:TaxAmount currencyID="COP">2394.96</cbc:TaxAmount>',
+      );
+      for (const sub of subtotals) expect(sub).toContain('<cbc:ID>01</cbc:ID>');
+
+      const [producto, envio] = invoiceLines(xml);
+      expect(producto).toContain('<cbc:Percent>5.00</cbc:Percent>');
+      expect(envio).toContain('<cbc:Percent>19.00</cbc:Percent>');
+
+      const totals = monetaryTotals(xml);
+      expect(totals.TaxExclusiveAmount).toBe('62605.04');
+      expect(totals.PayableAmount).toBe('67500.00');
+      expectClean(xml);
+    });
+
+    it('CUFE: ValImp1 = Σ de los dos subtotales IVA', () => {
+      const calculateTaxAmounts = (DianDirectProvider.prototype as any)
+        .calculateTaxAmounts as (data: Partial<ProviderInvoiceData>) => {
+        iva: string;
+        inc: string;
+        ica: string;
+      };
+      expect(calculateTaxAmounts.call({}, { taxes: header })).toEqual({
+        iva: '4894.96',
+        inc: '0.00',
+        ica: '0.00',
+      });
+    });
+
+    it('prevalidador: cada tarifa cuadra su subtotal y ya no hay colisión de esquema', () => {
+      const findings = (new FiscalDocumentValidator() as any).checkTaxSubtotals(
+        header,
+      ) as Array<{ code: string }>;
+      expect(findings).toEqual([]);
+    });
+
+    it('productos IVA 19 % + IVA 5 % sin envío: mismo tratamiento', () => {
+      const iva19 = tax({
+        tax_name: 'IVA 19%',
+        tax_type: 'iva',
+        tax_rate: '19.00',
+        taxable_amount: '1000.00',
+        tax_amount: '190.00',
+      });
+      const iva5b = tax({
+        tax_name: 'IVA 5%',
+        tax_type: 'iva',
+        tax_rate: '5.00',
+        taxable_amount: '1000.00',
+        tax_amount: '50.00',
+      });
+      const lines = [iva19, iva5b].map(
+        (t, i) =>
+          ({
+            description: `P${i}`,
+            quantity: '1',
+            unit_price: '1000.00',
+            discount_amount: '0.00',
+            tax_amount: t.tax_amount,
+            total_amount: String(1000 + Number(t.tax_amount)),
+            taxes: [{ ...t }],
+          }) as UblDocumentLine,
+      );
+      const xml = buildInvoiceXml(lines, [iva19, iva5b], '240.00');
+      const block = headerTaxTotal(xml);
+      expect(block.match(/<cac:TaxSubtotal>/g)).toHaveLength(2);
+      expect(block).toMatch(
+        /^<cbc:TaxAmount currencyID="COP">240.00<\/cbc:TaxAmount>/,
+      );
+      expect(monetaryTotals(xml).PayableAmount).toBe('2240.00');
       expectClean(xml);
     });
   });

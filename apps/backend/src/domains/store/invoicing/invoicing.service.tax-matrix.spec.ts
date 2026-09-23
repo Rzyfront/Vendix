@@ -256,9 +256,9 @@ const SHAPES: TaxMatrixShape[] = [
     // 6. Multi-tasa AGREGADO (IVA 19 % + INC 8 %, distintos esquemas DIAN)
     // con descuento POR LÍNEA. Dos grupos → parte; el descuento vive en
     // la línea, así que el allowance de pie es cero.
-    // (Dos tarifas del MISMO esquema no entran acá a propósito: el emisor
-    // las fusiona en un `TaxSubtotal` y el prevalidador las frena con
-    // `TAX_SCHEME_RATE_COLLISION` por diseño, no por aritmética.)
+    // (Dos tarifas del MISMO esquema se cubren en `ubl-shipping-tax-line.spec`:
+    // el emisor abre un `TaxSubtotal` por tarifa y el prevalidador ya no emite
+    // `TAX_SCHEME_RATE_COLLISION`.)
     name: 'agregado multi-tasa (IVA 19 % + INC 8 %) + descuento por línea',
     channel_input: {
       items: [
