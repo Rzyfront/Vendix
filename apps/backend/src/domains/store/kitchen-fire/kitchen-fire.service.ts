@@ -2574,6 +2574,9 @@ export class KitchenFireService {
    * kitchen handoff is complete. Items are NOT marked
    * `inventory_consumed_at_fire` here (that flag is flipped in
    * fireOrderItems).
+   * KDS delivery is ticket-wide: every order item linked to this ticket is
+   * stamped. For a single line (including table service), use
+   * `OrderFlowService.deliverOrderItem` instead of this ticket action.
    *
    * Restaurant Suite — Fase K audit jun-2026: emits SPECIFIC error codes
    * for the common UX bug "Marcar entregado cuando el plato está
@@ -2955,7 +2958,8 @@ export class KitchenFireService {
    *
    * Inventario: NO se toca. Los insumos se consumen en el fire (no en las
    * transiciones del ticket), así que reactivar un ticket NUNCA re-consume ni
-   * devuelve stock. La reversa es puramente de estado (ticket + sus items).
+   * devuelve stock. Al revertir delivered → ready también se limpian las
+   * marcas de entrega de las líneas de ESTE ticket, en la misma transacción.
    *
    * Bloqueo SÍNCRONO antes de mutar: cuando el ticket es terminal
    * (delivered/cancelled) y tiene orden asociada, revertirlo implica reabrir
@@ -3020,6 +3024,19 @@ export class KitchenFireService {
         where: { kitchen_ticket_id: ticketId },
         data: { status: target as any, updated_at: new Date() },
       });
+      if (ticket.status === 'delivered') {
+        await tx.order_items.updateMany({
+          where: {
+            kitchen_ticket_items: { some: { kitchen_ticket_id: ticketId } },
+            delivered_at: { not: null },
+          },
+          data: {
+            delivered_at: null,
+            delivered_by_user_id: null,
+            updated_at: new Date(),
+          },
+        });
+      }
     });
 
     const full = await this.getTicketForStore(ticketId);

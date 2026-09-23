@@ -884,9 +884,14 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
         update: jest.fn().mockResolvedValue({}),
       },
       order_items: {
-        findMany: jest.fn().mockResolvedValue(pending),
+        findMany: jest.fn().mockImplementation(async ({ where }: any) =>
+          where.delivered_at instanceof Date
+            ? pending.filter((item) => where.id.in.includes(item.id))
+            : pending,
+        ),
         updateMany: jest.fn().mockResolvedValue({ count: pending.length }),
       },
+      kitchen_ticket_items: { findMany: jest.fn().mockResolvedValue([]) },
     };
     orderFlowMock = { reconcileOrderFromDispatch: jest.fn().mockResolvedValue(undefined) };
 
@@ -953,6 +958,44 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
 
     const arg = prismaMock.order_items.updateMany.mock.calls[0][0];
     expect(arg.where.id.in).toEqual([11]);
+  });
+
+  it('(C.2) logs only stamped lines without a kitchen ticket, not linked lines', async () => {
+    arrange(
+      [
+        { id: 11, product_id: 1, product_variant_id: null },
+        { id: 12, product_id: 99, product_variant_id: null },
+      ],
+      [{ status: 'delivered' }],
+    );
+    prismaMock.kitchen_ticket_items.findMany.mockResolvedValue([
+      { order_item_id: 12 },
+    ]);
+    const warn = jest.spyOn((listener as any).logger, 'warn').mockImplementation(() => undefined);
+
+    await fire();
+
+    expect(prismaMock.order_items.findMany).toHaveBeenCalledWith({
+      where: { id: { in: [11, 12] }, delivered_at: expect.any(Date) },
+      select: { id: true },
+    });
+    expect(prismaMock.kitchen_ticket_items.findMany).toHaveBeenCalledWith({
+      where: { order_item_id: { in: [11, 12] } },
+      select: { order_item_id: true },
+    });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('line(s) without kitchen ticket: 11'));
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('without kitchen ticket: 11, 12'));
+  });
+
+  it('(C.2) does not log a no-ticket exception when no line won the stamp race', async () => {
+    arrange([{ id: 11, product_id: 1, product_variant_id: null }], [{ status: 'delivered' }]);
+    prismaMock.order_items.updateMany.mockResolvedValue({ count: 0 });
+    const warn = jest.spyOn((listener as any).logger, 'warn').mockImplementation(() => undefined);
+
+    await fire();
+
+    expect(prismaMock.kitchen_ticket_items.findMany).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('(s) nada pendiente: no escribe (idempotente ante re-disparo del evento)', async () => {

@@ -431,6 +431,8 @@ export class DispatchNoteEventsListener {
    * del mesero —no sirvas un plato que cocina no terminó—, no el hecho del
    * despacho. Acá la mercancía YA salió físicamente con el domiciliario; negar
    * el sello dejaría la contradicción que este puente corrige.
+   * Excepción de despacho: este carril puede sellar una línea sin ticket de
+   * cocina asociado; se registra su ID para auditar la invariante cocina↔orden.
    *
    * Idempotente por `delivered_at: null` en la `where`: la primera entrega es
    * la que ocurrió, un re-disparo del evento nunca mueve la fecha adelante.
@@ -511,6 +513,26 @@ export class DispatchNoteEventsListener {
           allFulfilled ? 'orden completa' : 'despacho parcial'
         })`,
       );
+      // Confirmar qué líneas estampó ESTA escritura (no solo las candidatas,
+      // que pueden perder la carrera contra otro escritor) antes de reportar
+      // la excepción sin ticket.
+      const stamped = await db.order_items.findMany({
+        where: { id: { in: targetIds }, delivered_at: now },
+        select: { id: true },
+      });
+      const ticketLinks = await db.kitchen_ticket_items.findMany({
+        where: { order_item_id: { in: stamped.map((item) => item.id) } },
+        select: { order_item_id: true },
+      });
+      const linkedIds = new Set(ticketLinks.map((link) => link.order_item_id));
+      const withoutTicket = stamped
+        .map((item) => item.id)
+        .filter((id) => !linkedIds.has(id));
+      if (withoutTicket.length > 0) {
+        this.logger.warn(
+          `[delivered] Dispatch note #${dispatch_note.id} stamped order #${order_id} line(s) without kitchen ticket: ${withoutTicket.join(', ')}`,
+        );
+      }
     }
   }
 
