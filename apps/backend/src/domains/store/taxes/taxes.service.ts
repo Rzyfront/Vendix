@@ -421,6 +421,21 @@ export class TaxesService {
       );
     }
     await this.findOne(id, user);
+
+    // `shipping_rates.tax_category_id` es FK RESTRICT: sin este chequeo el
+    // borrado revienta con un error de FK opaco. Se cuenta sin scoping de
+    // tienda a propósito: la FK bloquea igual si la usa cualquier tarifa.
+    const shipping_rates_in_use = await this.prisma
+      .withoutScope()
+      .shipping_rates.count({ where: { tax_category_id: id } });
+    if (shipping_rates_in_use > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_CONFLICT_001,
+        `No se puede eliminar la categoría: la usan ${shipping_rates_in_use} tarifa(s) de envío. Quita el impuesto de esas tarifas primero.`,
+        { tax_category_id: id, shipping_rates_in_use },
+      );
+    }
+
     return this.prisma.tax_categories.delete({ where: { id } });
   }
 }

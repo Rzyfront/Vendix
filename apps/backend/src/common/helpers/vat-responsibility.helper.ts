@@ -111,7 +111,7 @@ export const INC_RESPONSIBLE_CODE = 'O-33';
 export const INC_NOT_RESPONSIBLE_CODE = 'O-50';
 
 /** Contexto de la operación bloqueada, viaja en `details.context` del error. */
-export type VatChargeContext = 'product' | 'sale';
+export type VatChargeContext = 'product' | 'sale' | 'shipping';
 
 /** Forma mínima de `fiscal_data` que consume la resolución de responsabilidad. */
 export interface VatFiscalDataInput {
@@ -619,7 +619,8 @@ export function isExplicitlyNotVatResponsible(
  * cuando el comercio NO es responsable de IVA, incluyendo el estado
  * indeterminado (fail-closed desde 2026-08-21). No-op sólo cuando hay
  * una declaración de responsabilidad POSITIVA (O-48 o régimen que la
- * implica). El `context` indica el origen ('product' | 'sale') y el CTA
+ * implica). El `context` indica el origen ('product' | 'sale' | 'shipping')
+ * y el CTA
  * apunta al wizard de activación fiscal.
  */
 export function assertCanChargeVat(

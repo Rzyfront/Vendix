@@ -189,6 +189,26 @@ export class StoreShippingZonesController {
     }
   }
 
+  // ========== IMPUESTO DEL ENVÍO ==========
+
+  // Declarada antes de las rutas con params (`:zoneId/rates`, `:id/updates`)
+  // para que `rates/tax-options` nunca caiga en ellas.
+  @Get('rates/tax-options')
+  @ApiOperation({
+    summary: 'Tax categories that can be assigned to a shipping rate',
+    description:
+      'Returns every store tax category with eligibility (IVA/INC, exactly one rate > 0) and reason, the issuer fiscal flags, a non-binding INC suggestion for O-33 restaurants and warnings.',
+  })
+  @ApiResponse({ status: 200, description: 'Tax options retrieved successfully' })
+  async getRateTaxOptions() {
+    // Sin try/catch: el filtro global emite el status real (vendix-error-handling).
+    const data = await this.service.getRateTaxOptions();
+    return this.responseService.success(
+      data,
+      'Opciones de impuesto del envío obtenidas correctamente',
+    );
+  }
+
   // ========== ZONAS DE TIENDA (CRUD) ==========
 
   @Get()
@@ -379,18 +399,14 @@ export class StoreShippingZonesController {
     status: 201,
     description: 'Rate created successfully',
   })
-  @ApiResponse({ status: 400, description: 'Invalid data' })
-  @ApiResponse({ status: 404, description: 'Zone or method not found' })
+  @ApiResponse({ status: 400, description: 'Invalid data or tax category not eligible' })
+  @ApiResponse({ status: 404, description: 'Zone, method or tax category not found' })
+  @ApiResponse({ status: 412, description: 'IVA on shipping without O-48 (FISCAL_VAT_NOT_RESPONSIBLE_001)' })
   async createRate(@Body() dto: CreateRateDto) {
-    try {
-      const data = await this.service.createStoreRate(dto);
-      return this.responseService.created(data, 'Tarifa creada correctamente');
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al crear tarifa',
-        error,
-      );
-    }
+    // Sin try/catch: el servicio lanza VendixHttpException y el filtro global
+    // emite 400/404/412 con su error_code en vez de un 200 con success:false.
+    const data = await this.service.createStoreRate(dto);
+    return this.responseService.created(data, 'Tarifa creada correctamente');
   }
 
   @Patch('rates/:id')
@@ -400,24 +416,20 @@ export class StoreShippingZonesController {
     status: 200,
     description: 'Rate updated successfully',
   })
+  @ApiResponse({ status: 400, description: 'Zone change requested or tax category not eligible' })
   @ApiResponse({ status: 403, description: 'Cannot edit system rates' })
-  @ApiResponse({ status: 404, description: 'Rate not found' })
+  @ApiResponse({ status: 404, description: 'Rate or tax category not found' })
+  @ApiResponse({ status: 412, description: 'IVA on shipping without O-48 (FISCAL_VAT_NOT_RESPONSIBLE_001)' })
   async updateRate(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateRateDto,
   ) {
-    try {
-      const data = await this.service.updateStoreRate(id, dto);
-      return this.responseService.updated(
-        data,
-        'Tarifa actualizada correctamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al actualizar tarifa',
-        error,
-      );
-    }
+    // Sin try/catch: ver createRate.
+    const data = await this.service.updateStoreRate(id, dto);
+    return this.responseService.updated(
+      data,
+      'Tarifa actualizada correctamente',
+    );
   }
 
   @Delete('rates/:id')
