@@ -48,7 +48,7 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
  *   - `table_payment_pending` |
  *     `table_payment_confirmed`               (C5: payment per-table state)
  */
-const STAFF_EVENT_WHITELIST = (type: string): boolean => {
+export const STAFF_EVENT_WHITELIST = (type: string): boolean => {
   if (type === 'comensal_joined') return true;
   if (type === 'comensal_left') return true;
   if (type === 'item_added') return true;
@@ -59,6 +59,8 @@ const STAFF_EVENT_WHITELIST = (type: string): boolean => {
   if (type === 'payment.confirmed') return true;
   if (type === 'table_payment_pending') return true;
   if (type === 'table_payment_confirmed') return true;
+  // La cuenta fue pagada, pero la mesa permanece ocupada hasta su cierre.
+  if (type === 'session_paid') return true;
   // Mesa cerrada (POS close-out o cierre canónico / reconciliación Wompi) —
   // el dashboard refresca la mesa a `cleaning` / libre.
   if (type === 'session_closed') return true;

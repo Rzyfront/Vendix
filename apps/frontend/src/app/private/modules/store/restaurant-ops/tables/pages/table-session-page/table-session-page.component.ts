@@ -45,6 +45,7 @@ import {
   SplitResult,
 } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
+import { AdminTablesSseService } from '../../services/admin-tables-sse.service';
 import {
   KitchenTicketsService,
   KdsSseService,
@@ -134,6 +135,7 @@ export class TableSessionPageComponent implements OnInit {
   private readonly tablesService = inject(TablesService);
   private readonly kitchenService = inject(KitchenTicketsService);
   private readonly kdsSse = inject(KdsSseService);
+  private readonly adminTablesSse = inject(AdminTablesSseService);
   private readonly settingsFacade = inject(StoreSettingsFacade);
   // C.7 (§5.3) — par del .html: la nota informativa necesita el gate fiscal.
   private readonly authFacade = inject(AuthFacade);
@@ -144,6 +146,7 @@ export class TableSessionPageComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly session = signal<TableSession | null>(null);
+  private readonly paidFromSseSessionId = signal<number | null>(null);
   readonly isLoading = signal(false);
   readonly selectedItemIds = signal<Set<number>>(new Set());
   readonly isAddItemsOpen = signal(false);
@@ -353,7 +356,10 @@ export class TableSessionPageComponent implements OnInit {
    * (canónico), pero el frontend de mesa y el floor-map pintan el badge
    * "Pagada" sin esperar al cierre explícito.
    */
-  readonly isPaid = computed(() => !!this.session()?.paid_at);
+  readonly isPaid = computed(() => {
+    const session = this.session();
+    return !!session?.paid_at || (session != null && this.paidFromSseSessionId() === session.id);
+  });
 
   /** Reads `restaurant.enable_table_checkout` (loose JSON slice). */
   readonly checkoutEnabled = computed(
@@ -586,6 +592,19 @@ export class TableSessionPageComponent implements OnInit {
       if (!orderId) return;
       untracked(() => this.mergeTicketsForOrder(orderId, tickets));
     });
+
+    // The staff event carries the session identity, not its persisted paid_at.
+    // Keep an optimistic flag while a silent detail read fetches the exact value.
+    effect(() => {
+      const event = this.adminTablesSse.lastEvent();
+      if (event?.type !== 'session_paid') return;
+      const sessionId = Number(this.route.snapshot.paramMap.get('id'));
+      if (event.data.table_session_id !== sessionId) return;
+      untracked(() => {
+        this.paidFromSseSessionId.set(sessionId);
+        this.loadSession(sessionId, { silent: true });
+      });
+    });
   }
 
   ngOnInit(): void {
@@ -597,6 +616,8 @@ export class TableSessionPageComponent implements OnInit {
     }
     // Warm up the KDS SSE stream so badges update live. Idempotent.
     this.kdsSse.connect();
+    this.adminTablesSse.connect();
+    this.destroyRef.onDestroy(() => this.adminTablesSse.disconnect());
     this.loadSession(id);
     this.loadPendingPayments(id);
   }

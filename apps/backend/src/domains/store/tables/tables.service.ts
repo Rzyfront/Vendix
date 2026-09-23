@@ -36,6 +36,7 @@ export interface FloorMapTable {
     order_id: number;
     opened_by: number;
     opened_at: Date;
+    paid_at: Date | null;
     closed_at: Date | null;
     guest_count: number | null;
   } | null;
@@ -771,6 +772,7 @@ export class TablesService {
               order_id: active.order_id,
               opened_by: active.opened_by,
               opened_at: active.opened_at,
+              paid_at: active.paid_at,
               closed_at: active.closed_at,
               guest_count: active.guest_count,
             }

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -12,7 +12,7 @@ import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
-import { OrderFlowService } from '../orders/order-flow/order-flow.service';
+import type { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import {
   groupRatesByProductId,
   resolveOrderLineFinals,
@@ -275,7 +275,13 @@ export class TableSessionsService {
     // idempotencia vivan en un solo sitio. La firma del endpoint de mesa
     // (`PATCH /store/tables/sessions/:id/items/:orderItemId/deliver`) NO
     // cambia — sigue siendo un seam de UI → servicio → seam de flujo.
-    private readonly orderFlowService: OrderFlowService,
+    // Use a lazy DI token and a structural type: reflected constructor
+    // metadata must not read OrderFlowService during the module cycle.
+    @Inject(forwardRef(() => require('../orders/order-flow/order-flow.service').OrderFlowService))
+    private readonly orderFlowService: Pick<
+      OrderFlowService,
+      'cancelOrderItem' | 'deliverOrderItem'
+    >,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -1813,6 +1819,7 @@ export class TableSessionsService {
       table_id: number;
       order_id: number;
       opened_at: Date;
+      paid_at: Date | null;
       guest_count: number | null;
       table: {
         id: number;
@@ -1842,6 +1849,7 @@ export class TableSessionsService {
         table_id: true,
         order_id: true,
         opened_at: true,
+        paid_at: true,
         guest_count: true,
         table: {
           select: {
@@ -1876,6 +1884,7 @@ export class TableSessionsService {
         table_id: r.table_id,
         order_id: r.order_id,
         opened_at: r.opened_at,
+        paid_at: r.paid_at,
         guest_count: r.guest_count,
         table: r.table
           ? {
