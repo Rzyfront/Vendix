@@ -101,7 +101,6 @@ describe('TableSessionPageComponent waiter delivery', () => {
     expect(api.markItemDelivered).toHaveBeenCalledOnceWith(7, 101);
     expect(kitchen.markDelivered).not.toHaveBeenCalled();
     expect(component.deliveringItemId()).toBe(101);
-    expect(component.deliveringTicketId()).toBeNull();
     response.next(delivered);
     response.complete();
     expect(component.deliveringItemId()).toBeNull();
@@ -118,5 +117,27 @@ describe('TableSessionPageComponent waiter delivery', () => {
 
     expect(api.markItemDelivered).toHaveBeenCalledOnceWith(7, 102);
     expect(kitchen.markDelivered).not.toHaveBeenCalled();
+  });
+
+  it('offers prepared delivery only after kitchen marks the item ready, regardless of takeaway', () => {
+    for (const isTakeaway of [true, false]) {
+      for (const status of ['pending', 'in_preparation', 'ready', 'delivered', 'cancelled'] as const) {
+        const prepared = item(101, isTakeaway);
+        prepared.kitchen_ticket_items![0].status = status;
+        expect(component.canDeliver(prepared))
+          .withContext(`${isTakeaway ? 'takeaway' : 'dine-in'} ${status}`)
+          .toBe(status === 'ready');
+      }
+      expect(component.canDeliver({ ...item(101, isTakeaway), kitchen_ticket_items: [] }))
+        .withContext('prepared without a ticket')
+        .toBeFalse();
+    }
+  });
+
+  it('keeps non-kitchen items deliverable but hides delivered or cancelled lines', () => {
+    const direct = { ...item(103, true), item_type: 'physical', kitchen_ticket_items: [] };
+    expect(component.canDeliver(direct)).toBeTrue();
+    expect(component.canDeliver({ ...direct, delivered_at: '2026-09-23T12:05:00Z' })).toBeFalse();
+    expect(component.canDeliver({ ...direct, cancelled_at: '2026-09-23T12:05:00Z' })).toBeFalse();
   });
 });

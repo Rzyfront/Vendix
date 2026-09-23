@@ -162,12 +162,9 @@ export class TableSessionPageComponent implements OnInit {
   readonly isAddingItems = signal(false);
   readonly isFiring = signal(false);
   readonly firingItemId = signal<number | null>(null);
-  readonly deliveringTicketId = signal<number | null>(null);
   /**
-   * QUI-652 — spinner del item que se está entregando por el seam de mesa
-   * (sin pasar por cocina, o preparado dine-in). Separado de
-   * `deliveringTicketId` porque la entrega se dirige a la línea de pedido:
-   * reutilizar esa señal dejaría el botón sin spinner o marcaría otra fila.
+   * QUI-652 — spinner de la línea que se está entregando por el seam de mesa.
+   * La entrega se dirige al item, no al ticket compartido con otros platos.
    */
   readonly deliveringItemId = signal<number | null>(null);
   /**
@@ -799,27 +796,13 @@ export class TableSessionPageComponent implements OnInit {
   }
 
   /**
-   * Can the item be marked delivered? (fired, ready — or the takeaway
-   * in_preparation shortcut —, not yet terminal).
-   *
-   * Restaurant Suite — Fase K audit jun-2026: the previous `canDeliver`
-   * returned `true` for ANY non-terminal state, including `pending`. That
-   * let the operator click "Marcar entregado" on a dish the kitchen had
-   * never even acknowledged as cooked; the backend rejected with
-   * `KITCHEN_TICKET_INVALID_STATE` but the UX was confusing (generic
-   * devMessage, no live state pill explaining why the button was shown).
-   *
-   * The new rules:
-   *   - `ready`            → true  (primary path: kitchen said "listo")
-   *   - `in_preparation`   → true ONLY for takeaway (atajo vigente del
-   *     endpoint de cocina; el dine-in espera a `ready`)
-   *   - `pending`          → false (must go through KDS board first)
-   *   - `delivered`/`cancelled` → false (terminal)
-   *   - `null`             → false (never fired)
+   * El seam de orden admite preparados solo en `ready`, sean para llevar o
+   * para mesa. Los items sin cocina se pueden entregar directamente; los ya
+   * entregados o cancelados no ofrecen de nuevo la acción.
    */
   canDeliver(item: TableSessionOrderItem): boolean {
     // QUI-652 — la entrega es un hecho de SERVICIO y ya está registrada.
-    if (this.isDelivered(item)) return false;
+    if (this.isDelivered(item) || item.cancelled_at != null) return false;
 
     // Lo que no se cocina se entrega directo desde la fila: no pasa por cocina,
     // así que no hay estado de cocina que esperar. Antes esto devolvía false
@@ -827,14 +810,7 @@ export class TableSessionPageComponent implements OnInit {
     // cerveza en botella se quedaba sin ningún estado de entrega alcanzable.
     if (!this.needsKitchen(item)) return true;
 
-    const status = this.kitchenStatusFor(item);
-    if (status == null) return false;
-    if (status === 'cancelled') return false;
-    if (status === 'ready') return true;
-    // Atajo vigente del endpoint de cocina: un takeaway en `in_preparation`
-    // se puede entregar directo; el dine-in espera a `ready` porque el seam
-    // de mesa lo exige para preparados.
-    return item.is_takeaway === true && status === 'in_preparation';
+    return this.kitchenStatusFor(item) === 'ready';
   }
 
   /**
@@ -893,19 +869,6 @@ export class TableSessionPageComponent implements OnInit {
       default:
         return 'Aún no se ha enviado a cocina.';
     }
-  }
-
-  /** The kitchen_ticket_id to act on for an item (most recent non-terminal). */
-  private ticketIdFor(item: TableSessionOrderItem): number | null {
-    const rows = item.kitchen_ticket_items ?? [];
-    if (rows.length === 0) return null;
-    const active = rows.find(
-      (r) =>
-        r.status === 'in_preparation' ||
-        r.status === 'ready' ||
-        r.status === 'pending',
-    );
-    return (active ?? rows[0]).kitchen_ticket_id;
   }
 
   // ── Selection helpers (batch fire mode) ────────────────────────────────
@@ -1274,9 +1237,8 @@ export class TableSessionPageComponent implements OnInit {
    * takeaway. El endpoint de cocina es takeaway-only y actúa por ticket;
    * el mesero siempre entrega una sola línea por clic.
    *
-   * Usa `deliveringItemId` en vez de `deliveringTicketId` porque la entrega
-   * se dirige a la línea de pedido, y reutilizar la señal del ticket dejaría
-   * el botón sin spinner o marcaría el equivocado.
+   * Usa `deliveringItemId` porque el spinner debe seguir la línea seleccionada,
+   * no el ticket compartido.
    */
   private deliverTableSessionItem(item: TableSessionOrderItem): void {
     const sessionId = this.session()?.id;
