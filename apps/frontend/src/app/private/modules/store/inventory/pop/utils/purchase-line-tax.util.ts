@@ -36,6 +36,30 @@ export interface PurchaseLineTaxInput {
   discount_percentage?: number | null;
   /** Descuento propio de la línea en DINERO. Gana sobre el porcentaje. */
   discount_amount?: number | null;
+  /**
+   * QUI-855 — N impuestos de la línea. Cuando tiene elementos REEMPLAZA al
+   * par legacy `tax_rate` en `deriveLineTaxes` (espejo del backend).
+   */
+  taxes?: Array<{
+    tax_rate?: number | null;
+    tax_type?: string | null;
+    is_inclusive?: boolean | null;
+    add_to_cost?: boolean | null;
+    tax_rate_id?: number | null;
+    tax_name?: string | null;
+  }> | null;
+}
+
+/** QUI-855 — un impuesto derivado por línea (espejo del backend). */
+export interface PurchaseDerivedTax {
+  tax_rate: number;
+  tax_type: string;
+  is_inclusive: boolean;
+  add_to_cost: boolean;
+  tax_rate_id: number | null;
+  tax_name: string | null;
+  taxable_amount: number;
+  tax_amount: number;
 }
 
 export interface PurchaseLineTaxResult {
@@ -134,9 +158,10 @@ export function deriveLineTax(
  * `purchase_orders.discount_amount` no tiene forma física de llegar al costo del
  * producto.
  *
- * El residuo de redondeo cae en la ÚLTIMA línea para que
+ * El residuo de redondeo cae en la ÚLTIMA línea CON BRUTO > 0 para que
  * `Σ prorrateado === headerDiscount` exacto y el total de la orden no derive un
- * centavo contra lo que facturó el proveedor.
+ * centavo contra lo que facturó el proveedor (QUI-855: una bonificación de
+ * precio 0 nunca absorbe residuo).
  */
 export function prorateHeaderDiscount(
   items: Array<Pick<PurchaseLineTaxInput, 'unit_price' | 'unit_cost' | 'quantity'>>,
@@ -157,13 +182,112 @@ export function prorateHeaderDiscount(
   // Nunca descontar más de lo que vale la orden.
   const effective = Math.min(discount, grossTotal);
 
+  // QUI-855 (regalo): el residuo va a la última línea con bruto > 0, nunca
+  // a una bonificación (precio 0). Espejo del backend.
+  let lastPaying = items.length - 1;
+  while (lastPaying > 0 && !(grossPerLine[lastPaying] > 0)) lastPaying--;
   let assigned = 0;
-  for (let i = 0; i < items.length - 1; i++) {
+  for (let i = 0; i < items.length; i++) {
+    if (i === lastPaying) continue;
     shares[i] = round2((grossPerLine[i] / grossTotal) * effective);
     assigned += shares[i];
   }
-  shares[items.length - 1] = round2(effective - assigned);
+  shares[lastPaying] = round2(effective - assigned);
   return shares;
+}
+
+/**
+ * QUI-855 — espejo de `PurchaseOrdersService.deriveLineTaxes`.
+ *
+ * Mismo contrato de descuento/base que `deriveLineTax`, pero itera sobre
+ * `item.taxes` cuando tiene elementos; si no, normaliza el par legacy
+ * `tax_rate` a una sola entrada (números BYTE-IDÉNTICOS al legacy).
+ *
+ * `add_to_cost` capitaliza al costo (IBUA/ICUI) sin importar el modo include.
+ */
+export function deriveLineTaxes(
+  item: PurchaseLineTaxInput,
+  header: { prices_include_tax?: boolean | null },
+  proratedHeaderDiscount = 0,
+): PurchaseLineTaxResult & {
+  taxes: PurchaseDerivedTax[];
+  capitalized_per_unit: number;
+  deductible_per_unit: number;
+} {
+  const gross = Number(item.unit_price ?? item.unit_cost ?? 0) || 0;
+  const quantity = Number(item.quantity ?? 0) || 0;
+  const effective_include =
+    item.prices_include_tax ?? header.prices_include_tax ?? false;
+
+  const ownDiscount =
+    item.discount_amount != null && Number(item.discount_amount) > 0
+      ? Number(item.discount_amount)
+      : gross * quantity * ((Number(item.discount_percentage ?? 0) || 0) / 100);
+  const discount_total = Math.max(
+    0,
+    ownDiscount + (Number(proratedHeaderDiscount) || 0),
+  );
+  const discountPerUnit =
+    quantity > 0 ? Math.min(discount_total / quantity, gross) : 0;
+  const grossAfterDiscount = gross - discountPerUnit;
+
+  const entries =
+    item.taxes && item.taxes.length > 0
+      ? item.taxes
+      : [
+          {
+            tax_rate: (item as PurchaseLineTaxInput).tax_rate ?? 0,
+            tax_type: undefined,
+            is_inclusive: undefined,
+            add_to_cost: false,
+          },
+        ];
+
+  let inclusivePortions = 0;
+  let taxTotal = 0;
+  let capitalizedPerUnit = 0;
+  let deductiblePerUnit = 0;
+  const taxes: PurchaseDerivedTax[] = entries.map((t) => {
+    const r = (Number(t.tax_rate ?? 0) || 0) / 100;
+    const include = t.is_inclusive ?? effective_include;
+    const portion =
+      r > 0
+        ? include
+          ? grossAfterDiscount - grossAfterDiscount / (1 + r)
+          : grossAfterDiscount * r
+        : 0;
+    if (include) inclusivePortions += portion;
+    const amount = portion * quantity;
+    taxTotal += amount;
+    if (t.add_to_cost) capitalizedPerUnit += portion;
+    else deductiblePerUnit += portion;
+    return {
+      tax_rate: Number(t.tax_rate ?? 0) || 0,
+      tax_type: t.tax_type ?? 'iva',
+      is_inclusive: include,
+      add_to_cost: !!t.add_to_cost,
+      tax_rate_id: t.tax_rate_id ?? null,
+      tax_name: t.tax_name ?? null,
+      taxable_amount: grossAfterDiscount * quantity,
+      tax_amount: amount,
+    };
+  });
+
+  const unit_price_net = grossAfterDiscount - inclusivePortions;
+  const net_line = unit_price_net * quantity;
+  return {
+    unit_price_net,
+    tax_amount_per_unit: quantity > 0 ? taxTotal / quantity : 0,
+    tax_amount: taxTotal,
+    effective_include,
+    discount_total: discountPerUnit * quantity,
+    gross_line: gross * quantity,
+    net_line,
+    total_line: net_line + taxTotal,
+    taxes,
+    capitalized_per_unit: capitalizedPerUnit,
+    deductible_per_unit: deductiblePerUnit,
+  };
 }
 
 export interface PurchaseTotals {
@@ -204,7 +328,12 @@ export function derivePurchaseTotals(
   let discount_amount = 0;
 
   items.forEach((item, i) => {
-    const d = deriveLineTax(item, header, shares[i]);
+    // QUI-855: con `taxes` no vacío deriva multi-impuesto; si no, el legacy
+    // (números idénticos a `deriveLineTax`).
+    const d =
+      item.taxes && item.taxes.length > 0
+        ? deriveLineTaxes(item, header, shares[i])
+        : deriveLineTax(item, header, shares[i]);
     gross_subtotal += d.gross_line;
     subtotal += d.net_line;
     tax_amount += d.tax_amount;

@@ -21,12 +21,16 @@ import {
   PopCartItem,
   PopCartSummary,
   PopCartState,
+  PopLineTax,
+  PopTaxGroup,
   AddToPopCartRequest,
   UpdatePopCartItemRequest,
 } from '../interfaces/pop-cart.interface';
 import {
   deriveLineTax,
+  deriveLineTaxes,
   derivePurchaseTotals,
+  prorateHeaderDiscount,
 } from '../utils/purchase-line-tax.util';
 import { PurchaseOrder } from '../../interfaces';
 import { WithholdingTaxService } from '../../../withholding-tax/services/withholding-tax.service';
@@ -745,6 +749,7 @@ export class PopCartService {
         tax_rate: request.tax_rate ?? DEFAULT_PURCHASE_TAX_RATE,
         tax_type: request.tax_type ?? 'iva',
         prices_include_tax: request.prices_include_tax,
+        taxes: request.taxes,
         subtotal: 0,
         tax_amount: 0,
         total: 0,
@@ -825,6 +830,8 @@ export class PopCartService {
           request.prices_include_tax !== undefined
             ? request.prices_include_tax
             : existingItem.prices_include_tax,
+        // QUI-855: último escaneo gana también para multi-impuesto.
+        taxes: request.taxes !== undefined ? request.taxes : existingItem.taxes,
         lot_info: request.lot_info || existingItem.lot_info,
         notes: request.notes || existingItem.notes,
         contentPerPackage:
@@ -853,6 +860,7 @@ export class PopCartService {
         tax_rate: request.tax_rate ?? DEFAULT_PURCHASE_TAX_RATE,
         tax_type: request.tax_type ?? 'iva',
         prices_include_tax: request.prices_include_tax,
+        taxes: request.taxes,
         subtotal: 0,
         tax_amount: 0,
         total: 0,
@@ -972,22 +980,34 @@ export class PopCartService {
     hasVat: boolean,
   ): void {
     const safeTaxRate = hasVat ? Number(item.tax_rate) || 0 : 0;
-    const result = deriveLineTax(
-      {
-        unit_cost: item.unit_cost,
-        quantity: item.quantity,
-        // Se entregan LOS DOS y el util resuelve la precedencia (monto > 0
-        // gana), exactamente como lo hace `deriveLineTax` en el backend. Pasar
-        // sólo el porcentaje era lo que degradaba el descuento del escáner: la
-        // cifra en pesos de la factura no tenía por dónde entrar al preview.
-        discount_percentage: item.discount,
-        discount_amount: item.discount_amount,
-        tax_rate: safeTaxRate,
-        prices_include_tax: item.prices_include_tax ?? undefined,
-      },
-      { prices_include_tax: headerPricesIncludeTax },
-      0, // prorrateo del descuento de cabecera: vive en calculateSummary
-    );
+    // QUI-855: con multi-impuesto deriva por filas; el maestro `has_vat`
+    // apagado las ignora igual que la tasa (línea sin impuesto).
+    const multiTaxes = hasVat ? item.taxes : undefined;
+    const input = {
+      unit_cost: item.unit_cost,
+      quantity: item.quantity,
+      // Se entregan LOS DOS y el util resuelve la precedencia (monto > 0
+      // gana), exactamente como lo hace `deriveLineTax` en el backend. Pasar
+      // sólo el porcentaje era lo que degradaba el descuento del escáner: la
+      // cifra en pesos de la factura no tenía por dónde entrar al preview.
+      discount_percentage: item.discount,
+      discount_amount: item.discount_amount,
+      tax_rate: safeTaxRate,
+      prices_include_tax: item.prices_include_tax ?? undefined,
+      taxes: multiTaxes,
+    };
+    const result =
+      multiTaxes && multiTaxes.length > 0
+        ? deriveLineTaxes(
+            input,
+            { prices_include_tax: headerPricesIncludeTax },
+            0, // prorrateo del descuento de cabecera: vive en calculateSummary
+          )
+        : deriveLineTax(
+            input,
+            { prices_include_tax: headerPricesIncludeTax },
+            0,
+          );
 
     item.subtotal = result.net_line; // NET line subtotal
     item.tax_amount = result.tax_amount; // IVA for the line
@@ -1040,6 +1060,28 @@ export class PopCartService {
   setItemTaxType(itemId: string, taxType: string): void {
     this.mutateItem(itemId, (item) => {
       item.tax_type = taxType || 'iva';
+    });
+  }
+
+  /**
+   * QUI-855: reemplaza el multi-impuesto de la línea (máx. 4 filas, como el
+   * backend). Vacío/undefined ⇒ la línea vuelve al par legacy
+   * `tax_rate`/`tax_type`.
+   */
+  setItemTaxes(itemId: string, taxes: PopLineTax[] | undefined): void {
+    const safe = (taxes ?? [])
+      .filter((t) => t && Number(t.tax_rate) >= 0)
+      .slice(0, 4)
+      .map((t) => ({
+        tax_rate_id: t.tax_rate_id,
+        tax_name: t.tax_name,
+        tax_rate: Number(t.tax_rate) || 0,
+        tax_type: t.tax_type || 'iva',
+        is_inclusive: t.is_inclusive,
+        add_to_cost: !!t.add_to_cost,
+      }));
+    this.mutateItem(itemId, (item) => {
+      item.taxes = safe.length > 0 ? safe : undefined;
     });
   }
 
@@ -1110,25 +1152,30 @@ export class PopCartService {
       0,
     );
 
+    // Entradas del util espejo (una sola construcción: totales y desglose
+    // usan EXACTAMENTE la misma base para no contradecirse).
+    const taxInputs = items.map((item) => ({
+      unit_cost: item.unit_cost,
+      quantity: item.quantity,
+      // `discount` es porcentaje en el carrito; el util lo lee como
+      // `discount_percentage` (10 = 10%). `discount_amount` (pesos) viaja al
+      // lado y GANA cuando es > 0 — misma precedencia que el backend, para
+      // que el pie del carrito no contradiga a sus propias filas.
+      discount_percentage: item.discount,
+      discount_amount: item.discount_amount,
+      // IVA efectivo por línea. El maestro `has_vat` se aplica AQUÍ, no en la
+      // línea: `recalculateItemTotals` calcula su tasa efectiva en una
+      // variable local y nunca la escribe en `item.tax_rate`, así que la línea
+      // sigue guardando su 19 aunque el maestro esté apagado. Leerla cruda
+      // hacía que el pie cobrara IVA mientras cada fila mostraba cero — y el
+      // total del carrito dejaba de ser el que el operador estaba aprobando.
+      tax_rate: state.has_vat ? item.tax_rate : 0,
+      prices_include_tax: item.prices_include_tax ?? undefined,
+      // QUI-855: multi-impuesto gateado por el maestro igual que la tasa.
+      taxes: state.has_vat ? item.taxes : undefined,
+    }));
     const totals = derivePurchaseTotals(
-      items.map((item) => ({
-        unit_cost: item.unit_cost,
-        quantity: item.quantity,
-        // `discount` es porcentaje en el carrito; el util lo lee como
-        // `discount_percentage` (10 = 10%). `discount_amount` (pesos) viaja al
-        // lado y GANA cuando es > 0 — misma precedencia que el backend, para
-        // que el pie del carrito no contradiga a sus propias filas.
-        discount_percentage: item.discount,
-        discount_amount: item.discount_amount,
-        // IVA efectivo por línea. El maestro `has_vat` se aplica AQUÍ, no en la
-        // línea: `recalculateItemTotals` calcula su tasa efectiva en una
-        // variable local y nunca la escribe en `item.tax_rate`, así que la línea
-        // sigue guardando su 19 aunque el maestro esté apagado. Leerla cruda
-        // hacía que el pie cobrara IVA mientras cada fila mostraba cero — y el
-        // total del carrito dejaba de ser el que el operador estaba aprobando.
-        tax_rate: state.has_vat ? item.tax_rate : 0,
-        prices_include_tax: item.prices_include_tax ?? undefined,
-      })),
+      taxInputs,
       { prices_include_tax: state.prices_include_tax },
       Number(state.discountAmount) || 0,
       Number(state.shippingCost) || 0,
@@ -1144,7 +1191,65 @@ export class PopCartService {
       totalItems: 0,
       withholding_amount: previousSummary?.withholding_amount ?? 0,
       withholding_lines: previousSummary?.withholding_lines,
+      tax_groups: this.buildTaxGroups(
+        taxInputs,
+        state.prices_include_tax,
+        Number(state.discountAmount) || 0,
+      ),
     };
+  }
+
+  /**
+   * QUI-855 — desglose por impuesto para el resumen. Deriva cada línea con
+   * `deriveLineTaxes` (normaliza el legacy a una fila: números idénticos) y
+   * agrupa por tipo + tasa + al-costo. El prorrateo de cabecera es el mismo
+   * que usa `derivePurchaseTotals`, así que la suma por grupo cuadra con el
+   * `tax_amount` del pie.
+   */
+  private buildTaxGroups(
+    taxInputs: Array<{
+      unit_cost: number;
+      quantity: number;
+      discount_percentage: number;
+      discount_amount?: number;
+      tax_rate: number;
+      prices_include_tax?: boolean;
+      taxes?: PopLineTax[];
+    }>,
+    headerPricesIncludeTax: boolean,
+    headerDiscount: number,
+  ): PopTaxGroup[] {
+    const round2 = (n: number): number => Math.round(n * 100) / 100;
+    const shares = prorateHeaderDiscount(taxInputs, headerDiscount);
+    const groups = new Map<string, PopTaxGroup>();
+    taxInputs.forEach((input, i) => {
+      const derived = deriveLineTaxes(
+        input,
+        { prices_include_tax: headerPricesIncludeTax },
+        shares[i] ?? 0,
+      );
+      for (const t of derived.taxes) {
+        // Tasa 0 sin monto no dice nada: una línea exenta no es un grupo.
+        if (!(t.tax_rate > 0) && !(t.tax_amount > 0)) continue;
+        const key = `${t.tax_type}|${t.tax_rate}|${t.add_to_cost}`;
+        const existing = groups.get(key);
+        if (existing) {
+          existing.taxable_amount = round2(
+            existing.taxable_amount + t.taxable_amount,
+          );
+          existing.tax_amount = round2(existing.tax_amount + t.tax_amount);
+        } else {
+          groups.set(key, {
+            tax_type: t.tax_type,
+            tax_rate: t.tax_rate,
+            taxable_amount: round2(t.taxable_amount),
+            tax_amount: round2(t.tax_amount),
+            add_to_cost: t.add_to_cost,
+          });
+        }
+      }
+    });
+    return [...groups.values()];
   }
 
   /**
@@ -1223,6 +1328,22 @@ export class PopCartService {
         };
       }
 
+      // QUI-855: filas multi-impuesto persistidas. Vacío ⇒ undefined para
+      // que el carrito derive del par legacy tasa/tipo (misma rama que nuevo).
+      const restoredTaxes: PopLineTax[] = (
+        (item as any).purchase_order_item_taxes ?? []
+      )
+        .map((t: any) => ({
+          tax_rate_id: t.tax_rate_id ?? undefined,
+          tax_name: t.tax_name ?? undefined,
+          tax_rate: Number(t.tax_rate) || 0,
+          tax_type: t.tax_type ?? 'iva',
+          is_inclusive: t.is_inclusive ?? undefined,
+          add_to_cost: !!t.add_to_cost,
+        }))
+        .filter((t: PopLineTax) => t.tax_rate >= 0)
+        .slice(0, 4);
+
       const cartItem: PopCartItem = {
         id: this.generateItemId(),
         product: popProduct,
@@ -1256,6 +1377,9 @@ export class PopCartService {
         // IVA cycle (F1): restore tax classification and per-line override.
         tax_type: (item as any).tax_type ?? 'iva',
         prices_include_tax: (item as any).prices_include_tax ?? undefined,
+        // QUI-855: restaura las filas multi-impuesto persistidas para que
+        // reabrir la orden reproduzca las mismas cifras.
+        taxes: restoredTaxes.length > 0 ? restoredTaxes : undefined,
         subtotal: ((item.quantity_ordered || item.quantity) * (item.unit_cost || item.unit_price)),
         tax_amount: 0,
         total: 0,

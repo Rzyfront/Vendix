@@ -169,6 +169,22 @@ export interface PreBulkData {
 /**
  * Cart item for purchase order
  */
+/**
+ * QUI-855 — un impuesto dentro de una línea multi-impuesto del carrito.
+ * Espejo del `PurchaseOrderItemTaxDto` del backend. `is_inclusive: undefined`
+ * hereda el modo efectivo de la línea; `add_to_cost: true` capitaliza ese
+ * impuesto al costo del inventario (estilo IBUA/ICUI).
+ */
+export interface PopLineTax {
+  tax_rate_id?: number;
+  tax_name?: string;
+  /** PORCENTAJE (19 = 19%), nunca fracción. */
+  tax_rate: number;
+  tax_type?: string;
+  is_inclusive?: boolean;
+  add_to_cost?: boolean;
+}
+
 export interface PopCartItem {
   id: string;
   product: PopProduct;
@@ -208,6 +224,13 @@ export interface PopCartItem {
    * Passed through to the backend as-is (backend is the source of truth).
    */
   tax_type?: string;
+  /**
+   * QUI-855 — N impuestos de esta línea. Cuando tiene elementos REEMPLAZA al
+   * par legacy `tax_rate`/`tax_type` en el backend (`deriveLineTaxes`); la
+   * fila legacy sigue espejando el PRIMER impuesto para lectores viejos.
+   * `add_to_cost: true` capitaliza ese impuesto al costo (estilo IBUA/ICUI).
+   */
+  taxes?: PopLineTax[];
   /**
    * IVA cycle (F1): per-line override of the header `prices_include_tax`
    * mode (mixed invoices). When set, it inverts/overrides the header mode
@@ -278,6 +301,23 @@ export interface PopCartSummary {
   withholding_amount?: number;
   /** Resolved withholding lines for display/breakdown (preview, informative). */
   withholding_lines?: WithholdingLine[];
+  /**
+   * QUI-855 — desglose por impuesto (tipo + tasa + al-costo) para el resumen.
+   * Suma de `tax_amount` por grupo = `tax_amount`. Vacío ⇒ sin impuesto.
+   */
+  tax_groups?: PopTaxGroup[];
+}
+
+/**
+ * QUI-855 — un grupo del desglose de impuestos del resumen del carrito.
+ */
+export interface PopTaxGroup {
+  tax_type: string;
+  tax_rate: number;
+  taxable_amount: number;
+  tax_amount: number;
+  /** Ese impuesto capitaliza al costo (IBUA/ICUI) en vez de ser descontable. */
+  add_to_cost: boolean;
 }
 
 /**
@@ -394,6 +434,11 @@ export interface AddToPopCartRequest {
   tax_rate?: number;
   tax_type?: string;
   prices_include_tax?: boolean;
+  /**
+   * QUI-855 — N impuestos de la línea (el escáner los emite cuando la factura
+   * trae más de un impuesto). Último escaneo gana, igual que `tax_rate`.
+   */
+  taxes?: PopLineTax[];
 }
 
 /**

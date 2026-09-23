@@ -94,6 +94,20 @@ const PAYMENT_TERM_LABELS = {
             <span>Impuestos</span>
             <span>{{ formatCurrency(summary().tax_amount) }}</span>
           </div>
+          <!-- QUI-855: desglose por impuesto (tipo + tasa + base). La fila
+               "al costo" avisa que ese impuesto capitaliza al inventario. -->
+          @for (group of summary().tax_groups ?? []; track group.tax_type + '-' + group.tax_rate + '-' + group.add_to_cost) {
+            <div class="flex justify-between text-xs text-[var(--color-text-secondary)] pl-3">
+              <span>
+                {{ group.tax_type.toUpperCase() }} {{ group.tax_rate }}%
+                @if (group.add_to_cost) {
+                  <span class="font-medium text-amber-700">(al costo)</span>
+                }
+                <span class="opacity-70">— base {{ formatCurrency(group.taxable_amount) }}</span>
+              </span>
+              <span>{{ formatCurrency(group.tax_amount) }}</span>
+            </div>
+          }
 
           <!--
             Retención (preview). role='practiced': nosotros retenemos al

@@ -3,7 +3,20 @@
  * Models for creating and submitting purchase orders
  */
 
-import { PopCartState, PopCartItem, LotInfo, PreBulkData } from './pop-cart.interface';
+import { PopCartState, PopCartItem, PopLineTax, LotInfo, PreBulkData } from './pop-cart.interface';
+
+/**
+ * QUI-855 — un impuesto de una línea multi-impuesto para el payload.
+ * Espejo del `PurchaseOrderItemTaxDto` del backend.
+ */
+export interface PopLineTaxRequest {
+  tax_rate_id?: number;
+  tax_name?: string;
+  tax_rate: number;
+  tax_type?: string;
+  is_inclusive?: boolean;
+  add_to_cost?: boolean;
+}
 import { ApiResponse } from '../../interfaces';
 
 
@@ -33,6 +46,13 @@ export interface PurchaseOrderItemRequest {
   tax_rate?: number;
   /** IVA cycle (F1): tax classification for this line. Defaults to 'iva'. */
   tax_type?: string;
+  /**
+   * QUI-855 — N impuestos para esta línea. Cuando viaja no vacío REEMPLAZA
+   * al par legacy `tax_rate`/`tax_type` en el backend; `add_to_cost: true`
+   * capitaliza ese impuesto al costo del inventario (estilo IBUA/ICUI) en vez
+   * de tratarlo como descontable.
+   */
+  taxes?: PopLineTaxRequest[];
   /**
    * IVA cycle (F1): per-line override of the header `prices_include_tax`
    * mode (mixed invoices). When present it inverts/overrides the header for
@@ -160,6 +180,20 @@ export function cartToPurchaseOrderRequest(
         // meaningful when VAT is on (mixed invoices).
         tax_rate: cartState.has_vat ? item.tax_rate : 0,
         tax_type: item.tax_type ?? 'iva',
+        // QUI-855: multi-impuesto gateado por el maestro igual que la tasa.
+        // No vacío ⇒ el backend lo usa y el par legacy queda como espejo.
+        ...(cartState.has_vat && item.taxes && item.taxes.length > 0
+          ? {
+              taxes: item.taxes.map((t) => ({
+                tax_rate_id: t.tax_rate_id,
+                tax_name: t.tax_name,
+                tax_rate: Number(t.tax_rate) || 0,
+                tax_type: t.tax_type ?? 'iva',
+                is_inclusive: t.is_inclusive,
+                add_to_cost: !!t.add_to_cost,
+              })),
+            }
+          : {}),
         // QUI-661: descuento comercial de la línea. No se manda un precio ya
         // rebajado: el descuento tiene que ser visible como tal para que llegue
         // a la capa de costo y no se confunda con un precio negociado.

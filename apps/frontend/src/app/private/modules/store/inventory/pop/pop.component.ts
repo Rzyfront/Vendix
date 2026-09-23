@@ -1146,6 +1146,15 @@ export class PopComponent implements OnInit, OnDestroy {
             tax_rate: scannedRate,
             tax_type: 'iva',
             prices_include_tax: scannedIncludeMode,
+            // QUI-855: si el escáner declara varios impuestos por línea viajan
+            // tal cual (tasa a PORCENTAJE, modo adicional porque el precio ya
+            // viene en neto). Hoy emite uno solo; el carrito lo deriva igual.
+            taxes: (item as any).taxes?.map((t: any) => ({
+              tax_rate: Number(t.tax_rate) * 100,
+              tax_type: t.tax_type ?? 'iva',
+              is_inclusive: false,
+              add_to_cost: !!t.add_to_cost,
+            })),
             // Solo el porcentaje. `discount_amount` se deja fuera a propósito:
             // si viajara con valor ganaría por precedencia en `deriveLineTax` y
             // el % que muestra el carrito dejaría de ser el que se aplica.
@@ -1172,6 +1181,13 @@ export class PopComponent implements OnInit, OnDestroy {
             tax_rate: scannedRate,
             tax_type: 'iva',
             prices_include_tax: scannedIncludeMode,
+            // QUI-855: multi-impuesto del escáner (ver rama de arriba).
+            taxes: (item as any).taxes?.map((t: any) => ({
+              tax_rate: Number(t.tax_rate) * 100,
+              tax_type: t.tax_type ?? 'iva',
+              is_inclusive: false,
+              add_to_cost: !!t.add_to_cost,
+            })),
             // También en el producto NUEVO: el descuento no depende de que el
             // producto exista en el catálogo, depende de lo que imprimió la
             // factura. Mismo porcentaje, misma vía.
@@ -2094,6 +2110,20 @@ export class PopComponent implements OnInit, OnDestroy {
         // que la orden no iba a tener.
         tax_rate: state.has_vat ? Number(item.tax_rate) || 0 : 0,
         tax_type: item.tax_type ?? 'iva',
+        // QUI-855: la vista previa simula EXACTO lo que la creación va a
+        // persistir, multi-impuesto incluido (ver `cartToPurchaseOrderRequest`).
+        ...(state.has_vat && item.taxes && item.taxes.length > 0
+          ? {
+              taxes: item.taxes.map((t) => ({
+                tax_rate_id: t.tax_rate_id,
+                tax_name: t.tax_name,
+                tax_rate: Number(t.tax_rate) || 0,
+                tax_type: t.tax_type ?? 'iva',
+                is_inclusive: t.is_inclusive,
+                add_to_cost: !!t.add_to_cost,
+              })),
+            }
+          : {}),
         ...(Number(item.discount) > 0
           ? { discount_percentage: Number(item.discount) }
           : {}),

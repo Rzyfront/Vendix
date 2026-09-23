@@ -1,5 +1,6 @@
 import {
   deriveLineTax,
+  deriveLineTaxes,
   derivePurchaseTotals,
   prorateHeaderDiscount,
 } from './purchase-line-tax.util';
@@ -259,6 +260,89 @@ describe('purchase-line-tax.util — paridad con el backend', () => {
       expect(t.line_discount).toBe(600);
       expect(t.subtotal).toBe(3400);
       expect(t.total).toBe(t.subtotal + t.tax_amount);
+    });
+  });
+
+  describe('QUI-855: deriveLineTaxes — multi-impuesto por línea', () => {
+    it('IVA 19% + INC 8% con add_to_cost: neto 1000, IVA total 1350, capitalizado 400', () => {
+      // 1000 × 5 por fuera, sin descuento:
+      //   IVA 19% ⇒ 190/u × 5 = 950 (descontable)
+      //   INC 8% add_to_cost ⇒ 80/u × 5 = 400 (al costo)
+      //   neto/u = 1000, total línea = 5000 + 1350 = 6350.
+      const d = deriveLineTaxes(
+        {
+          unit_cost: 1000,
+          quantity: 5,
+          taxes: [
+            { tax_rate: 19, tax_type: 'iva' },
+            { tax_rate: 8, tax_type: 'inc', add_to_cost: true },
+          ],
+        },
+        ADDED,
+      );
+
+      expect(d.unit_price_net).toBe(1000);
+      expect(d.tax_amount).toBe(1350);
+      expect(d.net_line).toBe(5000);
+      expect(d.total_line).toBe(6350);
+      expect(d.capitalized_per_unit).toBe(80);
+      expect(d.deductible_per_unit).toBe(190);
+      expect(d.taxes).toHaveSize(2);
+      expect(d.taxes[1].add_to_cost).toBe(true);
+      expect(d.taxes[1].taxable_amount).toBe(5000);
+    });
+
+    it('sin taxes deriva idéntico al legacy de una sola tasa', () => {
+      const item = { unit_cost: 1000, quantity: 2, tax_rate: 19 };
+      const legacy = deriveLineTax(item, ADDED, 0);
+      const multi = deriveLineTaxes(item, ADDED, 0);
+
+      expect(multi.unit_price_net).toBe(legacy.unit_price_net);
+      expect(multi.tax_amount).toBe(legacy.tax_amount);
+      expect(multi.tax_amount_per_unit).toBe(
+        legacy.tax_amount_per_unit,
+      );
+      expect(multi.discount_total).toBe(legacy.discount_total);
+    });
+
+    it('el regalo (precio 0) no absorbe residuo del descuento de cabecera', () => {
+      // Brutos 100 / 100 / 100 / 0 con 100 de descuento: el residuo va a la
+      // tercera (33,34) y el regalo queda en 0 — antes se quedaba con 0,01.
+      const shares = prorateHeaderDiscount(
+        [
+          { unit_price: 100, quantity: 1 },
+          { unit_price: 100, quantity: 1 },
+          { unit_price: 100, quantity: 1 },
+          { unit_price: 0, quantity: 2 },
+        ],
+        100,
+      );
+
+      expect(shares).toEqual([33.33, 33.33, 33.34, 0]);
+      expect(shares.reduce((s, v) => s + v, 0)).toBe(100);
+    });
+
+    it('derivePurchaseTotals suma multi-impuesto y deja el regalo en 0', () => {
+      const t = derivePurchaseTotals(
+        [
+          {
+            unit_cost: 1000,
+            quantity: 5,
+            taxes: [
+              { tax_rate: 19, tax_type: 'iva' },
+              { tax_rate: 8, tax_type: 'inc', add_to_cost: true },
+            ],
+          },
+          { unit_cost: 0, quantity: 2 },
+        ],
+        ADDED,
+        0,
+        0,
+      );
+
+      expect(t.subtotal).toBe(5000);
+      expect(t.tax_amount).toBe(1350);
+      expect(t.total).toBe(6350);
     });
   });
 });

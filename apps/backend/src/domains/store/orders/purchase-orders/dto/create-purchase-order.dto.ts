@@ -111,6 +111,59 @@ export const toOptionalBoolean = (params: TransformFnParams): unknown => {
   return raw;
 };
 
+/**
+ * QUI-855 — one tax of a multi-tax purchase-order line. Mirrors the persisted
+ * `purchase_order_item_taxes` row. `add_to_cost=true` capitalizes that tax
+ * into inventory cost (IBUA/ICUI style) instead of treating it as deductible.
+ */
+export class PurchaseOrderItemTaxDto {
+  @ApiProperty({ description: 'Tax rate catalog id (optional)', required: false })
+  @Transform(toOptionalNumber)
+  @IsInt()
+  @IsOptional()
+  tax_rate_id?: number;
+
+  @ApiProperty({ description: 'Tax display name (optional)', required: false })
+  @IsString()
+  @MaxLength(100)
+  @IsOptional()
+  tax_name?: string;
+
+  @ApiProperty({ description: 'Tax rate as percentage 0-100' })
+  @Transform(toOptionalNumber)
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  tax_rate!: number;
+
+  @ApiProperty({
+    description: 'Fiscal classification (iva | inc | ica | ...). Defaults to iva.',
+    enum: tax_type_enum,
+    required: false,
+  })
+  @IsIn(TAX_TYPE_VALUES)
+  @IsOptional()
+  tax_type?: string;
+
+  @ApiProperty({
+    description: 'Rate already included in the price. Defaults to false.',
+    required: false,
+  })
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
+  @IsOptional()
+  is_inclusive?: boolean;
+
+  @ApiProperty({
+    description: 'Capitalize this tax into inventory cost. Defaults to false.',
+    required: false,
+  })
+  @Transform(toOptionalBoolean)
+  @IsBoolean()
+  @IsOptional()
+  add_to_cost?: boolean;
+}
+
 export class PurchaseOrderItemDto {
   @ApiProperty({ description: 'Product ID' })
   @IsNumber()
@@ -283,6 +336,18 @@ export class PurchaseOrderItemDto {
   @IsBoolean()
   @IsOptional()
   prices_include_tax?: boolean;
+
+  /**
+   * QUI-855 — N taxes for this line. When non-empty it REPLACES the legacy
+   * single-tax `tax_rate`/`tax_type` pair; when absent/empty the legacy path
+   * applies unchanged (backward compatible with existing orders).
+   */
+  @ApiProperty({ type: [PurchaseOrderItemTaxDto], required: false })
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PurchaseOrderItemTaxDto)
+  @IsOptional()
+  taxes?: PurchaseOrderItemTaxDto[];
 
   @ApiProperty({ description: 'Expected delivery date (optional)' })
   @IsDateString()
