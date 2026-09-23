@@ -1954,15 +1954,35 @@ export class PosCheckoutShellComponent {
   }
 
   private createCounterAndFire(state: CartState): void {
-    const lines = this.toCounterLines(state.items);
-    if (lines.length === 0) {
+    const hasProductLines = state.items.some((it) => it.itemType !== 'custom');
+    if (!hasProductLines) {
       this.submittingDraft.set(false);
       this.toastService.warning('Agrega productos al carrito antes de crear la orden');
       return;
     }
-    const customerId = this.resolveCustomerId(state.customer);
+    // P0-3 — el borrador de mostrador va por el mismo carril que «Guardar
+    // borrador» (`/store/payments/pos` con `is_draft`), que resuelve en
+    // servidor el impuesto de catálogo por línea. Se aplica la misma política
+    // de cliente que `createRetailDraft`: el backend exige cliente
+    // (`POS_CUSTOMER_REQUIRED_001`) salvo venta anónima o alias permitidos.
+    if (
+      !this.isAnonymousSale() &&
+      this.saleMode() !== 'alias' &&
+      (!state.customer || state.customer.id == null)
+    ) {
+      this.submittingDraft.set(false);
+      this.toastService.error(
+        'Selecciona o crea un cliente antes de guardar la orden.',
+      );
+      return;
+    }
+    const customerPicked = state.customer?.id != null;
+    const draftState =
+      (this.isAnonymousSale() || this.saleMode() === 'alias') && !customerPicked
+        ? { ...state, customer: null }
+        : state;
     this.integration
-      .createCounterDraftOrder(customerId, lines, undefined, this.customerAliasForPayload())
+      .createCounterDraftOrder(draftState, this.customerAliasForPayload())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (order) => {
@@ -2207,32 +2227,6 @@ export class PosCheckoutShellComponent {
   }
 
   // ─── Draft helpers (copied from the legacy modal) ────────────────────────
-  private toCounterLines(items: CartItem[]): Array<{
-    product_id: number;
-    product_variant_id?: number;
-    product_name: string;
-    quantity: number;
-    unit_price: number;
-    total_price: number;
-    tax_rate?: number;
-  }> {
-    // NOTA takeaway: NO se envía `is_takeaway` aunque la orden sea 'Para
-    // llevar' — POST /store/orders (`CreateOrderItemDto`) no declara el campo
-    // y el ValidationPipe global (`forbidNonWhitelisted`) lo rechazaría con
-    // 400. El cobro por /store/payments/pos es el carril que persiste la marca.
-    return items
-      .filter((it) => it.itemType !== 'custom')
-      .map((it) => ({
-        product_id: Number((it.product as any).id),
-        product_variant_id: it.variant_id ?? undefined,
-        product_name: it.product.name,
-        quantity: it.quantity,
-        unit_price: Number(it.unitPrice || 0),
-        total_price: Number(it.totalPrice || 0),
-        tax_rate: (it.product as any)?.tax_rate ?? undefined,
-      }));
-  }
-
   private preparedItemIdsFromOrder(order: any): number[] {
     const items: any[] = order?.order_items ?? [];
     const cart = this.cartState()?.items ?? [];

@@ -129,7 +129,6 @@ import { BookingSchedulerModalComponent } from '../../../../shared/components/bo
 import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.component';
 import {
   PosRestaurantIntegrationService,
-  CounterOrderLine,
   PosFireItemNote,
 } from './services/pos-restaurant-integration.service';
 import { TaxesService } from '../products/services/taxes.service';
@@ -2194,55 +2193,50 @@ export class PosComponent {
    */
   private fireCounterOrder(): void {
     const cart = this.cartState();
-    const preparedLines: CounterOrderLine[] = [];
-    for (const it of cart?.items ?? []) {
-      if (it.itemType === 'custom') continue;
-      if (it.product?.product_type !== 'prepared') continue;
-      const productId = parseInt(
-        typeof it.product.id === 'string'
-          ? it.product.id
-          : String(it.product.id),
-        10,
-      );
-      if (!Number.isFinite(productId)) continue;
-      const line: CounterOrderLine = {
-        product_id: productId,
-        product_name: it.product.name,
-        quantity: it.quantity,
-        unit_price: Number(it.unitPrice ?? 0),
-        total_price: Number(it.totalPrice ?? 0),
-        tax_rate: it.taxRate,
-      };
-      if (it.variant_id != null) {
-        line.product_variant_id = it.variant_id;
-      }
-      // Restaurant Suite — Fase K Gap 1: items flagged skipKds
-      // (cashier chose "Usar stock") are excluded from the kitchen
-      // dispatch list. Their product stock is consumed at payment.
-      if (it.skipKds) continue;
-      preparedLines.push(line);
-    }
+    // Solo los `prepared` que van a cocina: los que el cajero marcó "usar
+    // stock" (skipKds, Fase K Gap 1) se consumen al cobrar, no aquí.
+    const preparedItems = (cart?.items ?? []).filter(
+      (it) =>
+        it.itemType !== 'custom' &&
+        it.product?.product_type === 'prepared' &&
+        !it.skipKds &&
+        Number.isFinite(Number(it.product?.id)),
+    );
 
-    if (preparedLines.length === 0) {
+    if (!cart || preparedItems.length === 0) {
       this.toastService.warning(
         'No hay platos preparados en el carrito para enviar a cocina',
       );
       return;
     }
 
-    // Bug 4 (Fase K): orders.customer_id is optional. Only forward the
-    // id when the operator actually picked a customer; otherwise the
-    // integration service omits the field and the backend stores an
-    // anonymous Consumidor Final order.
-    const customer = this.selectedCustomer();
-    const customerId =
-      customer && Number.isFinite(Number(customer.id)) && Number(customer.id) > 0
-        ? Number(customer.id)
-        : 0;
+    // P0-3 — el borrador de mostrador viaja por `/store/payments/pos` con
+    // `is_draft` (ver `createCounterDraftOrder`), que resuelve en servidor el
+    // impuesto de catálogo y el precio de cada línea. La cabecera se recalcula
+    // en servidor; la que se manda aquí solo describe el subconjunto enviado.
+    // Sin promociones ni cupón: aplicarían sobre líneas que no viajan.
+    const taxAmount = preparedItems.reduce((sum, it) => sum + (it.taxAmount || 0), 0);
+    const total = preparedItems.reduce((sum, it) => sum + (it.totalPrice || 0), 0);
+    const counterState: CartState = {
+      ...cart,
+      items: preparedItems,
+      customer: this.selectedCustomer(),
+      appliedDiscounts: [],
+      appliedCoupon: undefined,
+      summary: {
+        ...cart.summary,
+        subtotal: total - taxAmount,
+        taxAmount,
+        discountAmount: 0,
+        total,
+        itemCount: preparedItems.length,
+        totalItems: preparedItems.reduce((sum, it) => sum + it.quantity, 0),
+      },
+    };
 
     this.loading.set(true);
     this.restaurantIntegration
-      .createCounterDraftOrder(customerId, preparedLines, cart?.notes)
+      .createCounterDraftOrder(counterState)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (order) => {
