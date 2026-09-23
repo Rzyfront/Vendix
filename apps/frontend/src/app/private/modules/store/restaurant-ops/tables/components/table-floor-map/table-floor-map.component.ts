@@ -268,6 +268,15 @@ export class TableFloorMapComponent {
     const callingId = this.callingVisibleId();
     const paidSessionIds = this.paidSessionIds();
     let autoIndex = 0;
+    // Reserve all fixed positions before assigning grid slots, regardless of
+    // their order in the input list. Drag overrides take precedence here too.
+    const occupied = list.flatMap((table) => {
+      const override = overrides.get(table.id);
+      if (override) return [override];
+      return table.pos_x != null && table.pos_y != null
+        ? [{ x: table.pos_x, y: table.pos_y }]
+        : [];
+    });
     return list.map((t) => {
       const status = t.effective_status ?? t.status;
       const override = overrides.get(t.id);
@@ -280,12 +289,22 @@ export class TableFloorMapComponent {
         x = t.pos_x;
         y = t.pos_y;
       } else {
-        // Auto-distribución en grilla para mesas sin coordenadas.
-        const col = autoIndex % AUTO_COLS;
-        const row = Math.floor(autoIndex / AUTO_COLS);
-        x = col * (TABLE_W + GRID_GAP);
-        y = row * (TABLE_H + GRID_GAP);
-        autoIndex++;
+        // Find the first grid slot clear of both positioned and previously
+        // auto-placed tables, leaving GRID_GAP around each cell.
+        while (true) {
+          const col = autoIndex % AUTO_COLS;
+          const row = Math.floor(autoIndex / AUTO_COLS);
+          x = col * (TABLE_W + GRID_GAP);
+          y = row * (TABLE_H + GRID_GAP);
+          autoIndex++;
+          if (occupied.every((pos) =>
+            x + TABLE_W + GRID_GAP <= pos.x ||
+            pos.x + TABLE_W + GRID_GAP <= x ||
+            y + TABLE_H + GRID_GAP <= pos.y ||
+            pos.y + TABLE_H + GRID_GAP <= y
+          )) break;
+        }
+        occupied.push({ x, y });
       }
       // Hidratar `live` resolviendo `table_id → session_id` por la sesión
       // activa de la mesa. Sin liveMap o sin sesión abierta → null.
