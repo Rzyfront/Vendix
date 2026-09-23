@@ -2799,11 +2799,11 @@
       [isOpen]="showDeliverModal()"
       (closed)="showDeliverModal.set(false); isManualDeliverMode.set(false)"
       [title]="
-        isManualDeliverMode()
-          ? orderData.delivery_type === 'pickup'
-            ? 'Entregar directamente al cliente'
-            : 'Entregar sin confirmar pago'
-          : 'Marcar como Entregado'
+        orderData.delivery_type === 'pickup'
+          ? 'Confirmar recogida en tienda'
+          : isManualDeliverMode()
+            ? 'Entregar sin confirmar pago'
+            : 'Marcar como Entregado'
       "
       size="md"
     >
@@ -2820,12 +2820,12 @@
             <div>
               @if (orderData.delivery_type === "pickup") {
                 <p class="text-sm font-bold text-orange-800">
-                  Entrega directa al cliente
+                  Recogida en tienda
                 </p>
                 <p class="text-xs text-orange-600 mt-0.5">
-                  Se omitira el paso "Lista para recoger" y la orden se marcara
-                  como entregada directamente. Si el pago esta confirmado, la
-                  orden se finalizara automaticamente.
+                  Se omitirá el estado "Lista para recogida" y la orden se
+                  marcará como recogida. Si el pago está confirmado, la orden
+                  se finalizará automáticamente.
                 </p>
               } @else {
                 <p class="text-sm font-bold text-orange-800">
