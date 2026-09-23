@@ -15,6 +15,8 @@ import { StoreSettingsFacade } from '../../../../../../core/store/store-settings
 import { PaymentCollectorComponent } from '../../../../../../shared/components/payment-collector/payment-collector.component';
 import { PaymentMethodsCatalogService } from '../../../../../../shared/services/payment-methods-catalog.service';
 import type { PaymentMethod } from '../../../../../../shared/models/payment-method.model';
+import { deliveryTypeToEntregaChoice } from '../../models/cart.model';
+import { shouldAutoPrintDispatchTicket } from '../../../../../../shared/services/print/dispatch-ticket-autoprint';
 
 /**
  * CP-POS-CHECKOUT-KEYBOARD — matriz teclado × paso del modal de pago.
@@ -728,6 +730,51 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       shipping_address_id: 1, shipping_rate_id: 2, shipping_cost: 100,
     }));
     expect(component.totalToPay()).toBe(1100);
+  });
+
+  for (const [choice, deliveryType] of [
+    ['llevar', 'direct_delivery'],
+    ['mesa', 'dine_in'],
+  ] as const) {
+    it(`edición explícita de ${choice} estampa ${deliveryType} sin flete`, () => {
+      const { update } = prepareShippingEdit();
+      component.entregaChoice.set(choice);
+      fixture.detectChanges();
+      component.onPrimaryConfirm();
+      expect(update.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+        delivery_type: deliveryType, shipping_cost: 0,
+      }));
+    });
+  }
+
+  it('reabre direct_delivery sin flete como Para llevar y pickup real como Enviar', () => {
+    const context = {
+      deliveryType: 'direct_delivery', shippingMethodId: null, shippingCost: 0,
+    };
+    expect(deliveryTypeToEntregaChoice(context as any)).toBe('llevar');
+    expect(deliveryTypeToEntregaChoice({ ...context, deliveryType: 'pickup', shippingMethodId: 7 } as any)).toBe('enviar');
+  });
+
+  it('preserva pickup histórico sin método al editar sin tocar Envío', () => {
+    const { state, ship } = prepareShippingEdit();
+    component.entregaChoice.set('enviar');
+    ship.shippingContext.set(null);
+    const result = (component as any).buildEditorShippingPayload({
+      ...state,
+      shippingContext: {
+        ...state.shippingContext, deliveryType: 'pickup',
+        shippingAddressId: null, shippingMethodId: null, shippingRateId: null, shippingCost: null,
+      },
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.payload).toEqual({});
+  });
+
+  it('autoimprime Para llevar con opt-in de mostrador sin cambiar pickup real', () => {
+    const context = { printDispatchTicketEnabled: true, printDispatchTicketAuto: true, counterEnabled: true };
+    expect(shouldAutoPrintDispatchTicket('automatic', { ...context, deliveryType: 'direct_delivery' })).toBeTrue();
+    expect(shouldAutoPrintDispatchTicket('automatic', { ...context, deliveryType: 'pickup' })).toBeTrue();
+    expect(shouldAutoPrintDispatchTicket('automatic', { ...context, deliveryType: 'dine_in' })).toBeFalse();
   });
 
   for (const message of ['Espera a que termine el cálculo del envío', 'Selecciona una dirección del nuevo cliente', 'Guarda la dirección en la ficha del cliente']) {

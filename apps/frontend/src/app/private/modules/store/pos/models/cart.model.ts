@@ -182,7 +182,7 @@ export interface PendingBooking {
  * (`UpdateOrderEditorDto` accepts `delivery_type`, `shipping_address_id`,
  * `billing_address_id`, `shipping_method_id`, `shipping_rate_id`,
  * `shipping_cost`). Nulls are intentional: an order with no shipping
- * (pickup) keeps every key null and the editor endpoint treats them as
+ * (direct_delivery) keeps every key null and the editor endpoint treats them as
  * "no change".
  *
  * F-FLETE — quién lo escribe y quién lo lee (antes esta nota MENTÍA: decía
@@ -255,7 +255,9 @@ export function hasShipmentContext(
  * era `direct_delivery` — cambiarle la naturaleza a la orden por el solo
  * hecho de reabrirla.
  *
- * `direct_delivery` / `other` son ambiguos por sí mismos (ver
+ * `pickup` es una recogida diferida elegida como método de envío: vuelve al
+ * carril Enviar, nunca al botón Para llevar. `direct_delivery` / `other` son
+ * ambiguos por sí mismos (ver
  * {@link hasShipmentContext}): se resuelven por la EVIDENCIA de flete, no por
  * la etiqueta.
  */
@@ -268,7 +270,7 @@ export function deliveryTypeToEntregaChoice(
     case 'dine_in':
       return 'mesa';
     case 'pickup':
-      return 'llevar';
+      return 'enviar';
     case 'direct_delivery':
     case 'other':
     default:

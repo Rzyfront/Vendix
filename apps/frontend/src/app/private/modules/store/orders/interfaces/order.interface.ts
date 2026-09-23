@@ -2,7 +2,7 @@
 export type OrderChannel = 'pos' | 'ecommerce' | 'agent' | 'whatsapp' | 'marketplace';
 
 // Delivery type - aligned with Prisma enum
-export type DeliveryType = 'pickup' | 'home_delivery' | 'direct_delivery' | 'other';
+export type DeliveryType = 'pickup' | 'home_delivery' | 'direct_delivery' | 'dine_in' | 'other';
 
 // Shipping entities - Aligned with backend shipping models
 export interface ShippingMethod {

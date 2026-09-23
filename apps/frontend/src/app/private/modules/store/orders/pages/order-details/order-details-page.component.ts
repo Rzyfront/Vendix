@@ -141,6 +141,37 @@ export interface LifecycleStep {
   status: 'completed' | 'current' | 'upcoming' | 'terminal';
 }
 
+export const ORDER_DELIVERY_STEP_LABELS: Record<DeliveryType, Record<string, string>> = {
+  home_delivery: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Procesando',
+    shipped: 'Enviada', delivered: 'Entregada', finished: 'Finalizada',
+  },
+  pickup: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Preparando',
+    shipped: 'Lista para recogida', delivered: 'Recogida en tienda', finished: 'Finalizada',
+  },
+  direct_delivery: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Procesando',
+    shipped: 'Entregada en mostrador', delivered: 'Entregada en mostrador', finished: 'Finalizada',
+  },
+  dine_in: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Preparando',
+    shipped: 'Servida en mesa', delivered: 'Servida en mesa', finished: 'Finalizada',
+  },
+  other: {
+    created: 'Creada', pending_payment: 'Pago Pendiente', processing: 'Procesando',
+    shipped: 'Despachada', delivered: 'Entregada', finished: 'Finalizada',
+  },
+};
+
+export const ORDER_DELIVERY_CONFIG: Record<DeliveryType, { label: string; icon: string }> = {
+  home_delivery: { label: 'Envío a domicilio', icon: 'truck' },
+  pickup: { label: 'Recogida en tienda', icon: 'map-pin' },
+  direct_delivery: { label: 'Entrega directa en mostrador', icon: 'package' },
+  dine_in: { label: 'Consumo en mesa', icon: 'store' },
+  other: { label: 'Otro', icon: 'box' },
+};
+
 type PaymentReceiptPreviewKind = 'image' | 'pdf';
 
 interface PaymentReceiptPreview {
@@ -557,43 +588,7 @@ export class OrderDetailsPageComponent {
 
   readonly stepLabels = computed<Record<string, string>>(() => {
     const delivery = this.order()?.delivery_type || 'direct_delivery';
-
-    const labels: Record<DeliveryType, Record<string, string>> = {
-      home_delivery: {
-        created: 'Creada',
-        pending_payment: 'Pago Pendiente',
-        processing: 'Procesando',
-        shipped: 'Enviada',
-        delivered: 'Entregada',
-        finished: 'Finalizada',
-      },
-      pickup: {
-        created: 'Creada',
-        pending_payment: 'Pago Pendiente',
-        processing: 'Preparando',
-        shipped: 'Lista para Recoger',
-        delivered: 'Recogida',
-        finished: 'Finalizada',
-      },
-      direct_delivery: {
-        created: 'Creada',
-        pending_payment: 'Pago Pendiente',
-        processing: 'Procesando',
-        shipped: 'Despachada',
-        delivered: 'Entregada',
-        finished: 'Finalizada',
-      },
-      other: {
-        created: 'Creada',
-        pending_payment: 'Pago Pendiente',
-        processing: 'Procesando',
-        shipped: 'Despachada',
-        delivered: 'Entregada',
-        finished: 'Finalizada',
-      },
-    };
-
-    return labels[delivery] || labels.direct_delivery;
+    return ORDER_DELIVERY_STEP_LABELS[delivery] || ORDER_DELIVERY_STEP_LABELS.direct_delivery;
   });
 
   readonly lifecycleSteps = computed<LifecycleStep[]>(() => {
@@ -647,13 +642,7 @@ export class OrderDetailsPageComponent {
 
   readonly deliveryConfig = computed(() => {
     const delivery = this.order()?.delivery_type || 'direct_delivery';
-    const configs: Record<string, { label: string; icon: string }> = {
-      home_delivery: { label: 'Envio a domicilio', icon: 'truck' },
-      pickup: { label: 'Retiro en tienda', icon: 'map-pin' },
-      direct_delivery: { label: 'Entrega directa', icon: 'package' },
-      other: { label: 'Otro', icon: 'box' },
-    };
-    return configs[delivery] || configs['direct_delivery'];
+    return ORDER_DELIVERY_CONFIG[delivery] || ORDER_DELIVERY_CONFIG.direct_delivery;
   });
 
   readonly showShippingAssignment = computed(() => {
@@ -981,7 +970,7 @@ export class OrderDetailsPageComponent {
           // Pickup: can mark "ready to pick up" without payment (confirm dialog)
           actions.push({
             id: 'manual-ready-pickup',
-            label: 'Listo para Recoger',
+            label: 'Lista para recogida',
             icon: 'package',
             variant: 'primary',
           });
@@ -1069,7 +1058,7 @@ export class OrderDetailsPageComponent {
           if (delivery === 'home_delivery') {
             actions.push({ id: 'deliver', label: 'Marcar como Entregado', icon: 'package-check', variant: 'primary' });
           } else if (isPickup) {
-            actions.push({ id: 'deliver', label: 'Confirmar Recogida', icon: 'user-check', variant: 'primary' });
+            actions.push({ id: 'deliver', label: 'Confirmar recogida', icon: 'user-check', variant: 'primary' });
           } else {
             actions.push({ id: 'deliver', label: 'Confirmar Entrega', icon: 'check-circle', variant: 'primary' });
           }
@@ -1159,7 +1148,7 @@ export class OrderDetailsPageComponent {
         };
       case 'pickup':
         return {
-          title: 'Marcar Listo para Recoger',
+          title: 'Marcar lista para recogida',
           showTracking: false,
           showCarrier: false,
           showNotes: true,
@@ -2571,8 +2560,8 @@ export class OrderDetailsPageComponent {
 
     this.dialogService
       .confirm({
-        title: 'Listo para recoger sin pago',
-        message: '¿Marcar esta orden como lista para recoger sin confirmar el pago? El pago deberá confirmarse antes de entregar al cliente.',
+        title: 'Lista para recogida sin pago',
+        message: '¿Marcar esta orden como lista para recogida sin confirmar el pago? El pago deberá confirmarse antes de entregar al cliente.',
         confirmText: 'Marcar como lista',
         cancelText: 'Cancelar',
         confirmVariant: 'primary',
@@ -2587,7 +2576,7 @@ export class OrderDetailsPageComponent {
           .subscribe({
             next: () => {
               this.isProcessingAction.set(false);
-              this.toastService.success('Orden marcada como lista para recoger');
+              this.toastService.success('Orden marcada como lista para recogida');
               this.loadData();
             },
             error: (err) => {

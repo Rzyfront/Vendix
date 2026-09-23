@@ -1412,7 +1412,7 @@ export class PosCheckoutShellComponent {
     if (this.entregaTouched() && choice !== 'enviar') {
       return {
         payload: {
-          delivery_type: choice === 'mesa' ? 'dine_in' : 'pickup',
+          delivery_type: choice === 'mesa' ? 'dine_in' : 'direct_delivery',
           shipping_cost: 0,
         },
         warning: null,
@@ -1427,7 +1427,8 @@ export class PosCheckoutShellComponent {
       const error = ship?.editorValidationError();
       if (error) return { payload: {}, warning: null, error };
       const newShipping = !hasShipmentContext(preserved) &&
-        preserved?.deliveryType !== 'home_delivery' && !preserved?.shippingAddressId;
+        preserved?.deliveryType !== 'home_delivery' &&
+        preserved?.deliveryType !== 'pickup' && !preserved?.shippingAddressId;
       if (ship?.hasShippingChanges() || newShipping) {
         const context = ship?.buildShippingContext();
         if (!context) return { payload: {}, warning: null, error: 'Completa la configuración de envío antes de actualizar.' };
