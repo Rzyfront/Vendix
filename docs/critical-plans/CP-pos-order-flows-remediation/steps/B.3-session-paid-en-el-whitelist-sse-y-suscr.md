@@ -2,8 +2,8 @@
 id: B.3
 title: "`session_paid` en el whitelist SSE y suscripción de la página de mesa"
 phase: B
-status: pending
-owner: none
+status: in-progress
+owner: Mencius
 updated: 2026-09-20
 contracts: [FB-42, FB-43, FB-45, DB-17]
 adrs: [ADR-03]
@@ -41,4 +41,4 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-frontend, vendix-zoneless
   - [ ] Abrir la pantalla después del cobro muestra el mismo estado que verla en vivo
   - [ ] Hay un test del whitelist que falla si el evento se quita de la lista
   - [ ] Las filas FB-42, FB-43, FB-45 y DB-17 quedan marcadas con su evidencia enlazada
-- **Status:** pending
+- **Status:** in-progress — SSE/snapshots/página en 1316bfae5; falta tile y E2E.

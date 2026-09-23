@@ -14,3 +14,8 @@
 | 2026-09-22 | Orquestador | H.3 | API local: categoría 0 %, IVA 19 % y mixto en POS sin mesa; mixto en mesa 12. Todos 201, tasas persistidas correctas, un pago por orden. | evidence/H3-tax-matrix.sql/txt; H3-local-api-verification.md |
 | 2026-09-22 | Bernoulli | B.1 | Proyección canónica añadida sin llamadores nuevos; ERR-33 y mensaje. Emisión diferida si tx externa. | 226c25ee6; table-sessions.service.spec.ts 44/44 |
 | 2026-09-22 | Tesla | J.1 | Modal de cliente movido después de los diálogos de pago, sin cambiar z-index. Playwright pendiente. | 08d53167d; watcher FE OK |
+| 2026-09-22 | Heisenberg | B.2 | POS y split delegan proyección canónica en tx; emisión post-commit. Webhook/flow-pay siguen en ejecución. | 5848a2a24; 106 tests |
+| 2026-09-22 | Mencius | B.3 | SSE de staff, snapshots y página muestran mesa pagada; tile pendiente. | 1316bfae5; 47 tests |
+| 2026-09-22 | Rawls | E.3 | Creación persiste delivery_type/channel con defaults explícitos. | 91575a2c7; 75 tests |
+| 2026-09-22 | Bohr | C.4 | KDS distingue ENVÍO/PARA LLEVAR por delivery_type sin tocar is_takeaway. | 37005e554; 30 tests |
+| 2026-09-22 | Kepler | F.1 | Dirección primaria exige cliente y unset se limita a su user_id. Datos históricos no reparados. | 5a97f2399; 5 tests |
