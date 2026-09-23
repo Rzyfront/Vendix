@@ -39,6 +39,11 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
           }],
         })),
         update: jest.fn(async ({ data }: any) => { state = data.state; return { id: 1, state }; }),
+        updateMany: jest.fn(async ({ where, data }: any) => {
+          if (where.state !== state || where.store_id !== 4) return { count: 0 };
+          state = data.state;
+          return { count: 1 };
+        }),
       },
       stock_reservations: {
         findFirst: jest.fn(async () => reservations.find((row) => row.status === 'active') ?? null),
@@ -61,13 +66,22 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
         count: jest.fn(async () => reservations.filter((row) => row.status === 'active').length),
       },
       store_payment_methods: { findFirst: jest.fn(async () => ({ id: 1, system_payment_method: { type: 'card' } })) },
-      payments: { create: jest.fn(async () => { events.push('payment'); return { id: 99, gateway_response: {} }; }) },
+      payments: {
+        create: jest.fn(async () => { events.push('payment'); return { id: 99, gateway_response: {} }; }),
+        update: jest.fn(async () => ({ id: 99, state: 'cancelled' })),
+      },
     };
     const stock: any = {
       getDefaultLocationForProduct: jest.fn(async () => 11),
       reserveStock: jest.fn(async (...args: any[]) => {
         events.push('reserve');
         reservations.push({ product_id: args[0], status: 'active' });
+      }),
+      releaseReservation: jest.fn(async (productId: number) => {
+        const row = reservations.find((reservation) =>
+          reservation.product_id === productId && reservation.status === 'active');
+        if (row) row.status = 'consumed';
+        events.push('release');
       }),
     };
     const audit: any = { logCustom: jest.fn(async () => undefined) };
@@ -109,6 +123,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
       expect.objectContaining({ order_id: 1, reservation_count: 1 }), 1,
     );
     expect(h.getState()).toBe('finished');
+    expect(h.stock.releaseReservation).not.toHaveBeenCalled();
   });
 
   it('segundo submit no reserva ni cobra y conserva el 409 tipado', async () => {
@@ -141,6 +156,92 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
     expect(h.reservations).toHaveLength(0);
     expect(h.getState()).toBe('draft');
+  });
+
+  it('método de pago inexistente libera solo la reserva del draft y restaura claim', async () => {
+    const h = harness();
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValueOnce(null);
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.stock.releaseReservation).toHaveBeenCalledWith(701, undefined, 11, 'order', 1, h.tx);
+    expect(h.reservations[0].status).toBe('consumed');
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('efectivo corto libera y restaura sin crear pago', async () => {
+    const h = harness();
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValueOnce({
+      id: 1, system_payment_method: { type: 'cash' },
+    });
+    const error = await h.service.payOrder(1, { ...DTO, amount_received: 50 }).catch((failure) => failure);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.stock.releaseReservation).toHaveBeenCalledTimes(1);
+    expect(h.reservations[0].status).toBe('consumed');
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('fallo al crear el pago libera la reserva y mantiene el draft cobrable', async () => {
+    const h = harness();
+    h.prismaMock.payments.create.mockRejectedValueOnce(new Error('payment db unavailable'));
+    await expect(h.service.payOrder(1, DTO)).rejects.toThrow('payment db unavailable');
+    expect(h.stock.releaseReservation).toHaveBeenCalledTimes(1);
+    expect(h.reservations[0].status).toBe('consumed');
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('finish bloqueado compensa el pago y libera la reserva nueva', async () => {
+    const h = harness();
+    jest.spyOn(h.service as any, 'updateOrderState').mockRejectedValueOnce(
+      new VendixHttpException(ErrorCodes.INV_STOCK_002),
+    );
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(h.prismaMock.payments.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 99 }, data: expect.objectContaining({ state: 'cancelled' }),
+    }));
+    expect(h.stock.releaseReservation).toHaveBeenCalledTimes(1);
+    expect(h.reservations[0].status).toBe('consumed');
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('cocina pendiente cancela el pago y libera la reserva nueva', async () => {
+    const h = harness();
+    jest.spyOn(h.service as any, 'hasPendingKitchenItems').mockResolvedValueOnce(true);
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(h.prismaMock.payments.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 99 }, data: expect.objectContaining({ state: 'cancelled' }),
+    }));
+    expect(h.stock.releaseReservation).toHaveBeenCalledTimes(1);
+    expect(h.reservations[0].status).toBe('consumed');
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('no libera una reserva activa que ya existía antes de promover el draft', async () => {
+    const h = harness();
+    h.reservations.push({ product_id: 701, status: 'active' });
+    h.prismaMock.store_payment_methods.findFirst.mockResolvedValueOnce(null);
+    await h.service.payOrder(1, DTO).catch(() => undefined);
+    expect(h.stock.reserveStock).not.toHaveBeenCalled();
+    expect(h.stock.releaseReservation).not.toHaveBeenCalled();
+    expect(h.reservations[0].status).toBe('active');
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('ERR-33 postcommit conserva el pago succeeded y la reserva activa', async () => {
+    const h = harness();
+    jest.spyOn(h.service as any, 'projectPaidOrderToTable').mockRejectedValueOnce(
+      new VendixHttpException(ErrorCodes.POS_TABLE_SESSION_PROJECTION_FAILED_001),
+    );
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error.errorCode).toBe('POS_TABLE_SESSION_PROJECTION_FAILED_001');
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    expect(h.prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(h.stock.releaseReservation).not.toHaveBeenCalled();
+    expect(h.reservations[0].status).toBe('active');
+    expect(h.getState()).toBe('finished');
   });
 
   it('la promoción independiente de mesa/split sigue dejando created', async () => {
