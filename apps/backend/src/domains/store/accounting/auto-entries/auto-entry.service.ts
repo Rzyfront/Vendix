@@ -8,6 +8,7 @@ import { TaxBreakdownItem } from '@common/interfaces/tax-breakdown.interface';
 import { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
 import { AccountingEntryFailureService } from './accounting-entry-failure.service';
 import { projectOrderDiscountedTaxes } from '../../payments/utils/order-sale-tax-payload.util';
+import { buildShippingTaxBreakdownRow } from '../../shipping/utils/shipping-tax.util';
 import { VendixHttpException } from '../../../../common/errors/vendix-http.exception';
 import { ErrorCodes } from '../../../../common/errors/error-codes';
 import {
@@ -1469,7 +1470,24 @@ export class AutoEntryService {
       },
       include: {
         split: {
-          select: { source_order_id: true, original_payment_ids: true },
+          select: {
+            source_order_id: true,
+            original_payment_ids: true,
+            // Copia congelada del impuesto del envío (contrato
+            // shipping-rate-tax): la cuenta sólo guarda su parte BRUTA.
+            source_order: {
+              select: {
+                shipping_cost: true,
+                shipping_tax_type: true,
+                shipping_tax_rate: true,
+                shipping_tax_amount: true,
+              },
+            },
+            accounts: {
+              orderBy: { ordinal: 'asc' },
+              select: { id: true, shipping_cost: true },
+            },
+          },
         },
         lines: {
           orderBy: { id: 'asc' },
@@ -1660,6 +1678,7 @@ export class AutoEntryService {
     const expectedTax = discountedTaxes
       ? BigInt(discountedTaxes.product_tax_cents)
       : getCents(account.tax_amount);
+    const shippingTax = this.financialAccountShippingTax(account);
     const components: Array<{
       kind: 'revenue' | 'tax' | 'shipping' | 'tip';
       amount: bigint;
@@ -1671,7 +1690,22 @@ export class AutoEntryService {
         amount: getCents(row.tax_amount),
         tax_type: row.tax_type ?? 'iva',
       })),
-      { kind: 'shipping', amount: getCents(account.shipping_cost) },
+      // Envío con impuesto incluido: 414505 por la base y el impuesto como
+      // componente tipado propio, igual que el carril POS. Sin copia ⇒ la
+      // línea de flete es la bruta de siempre.
+      ...(shippingTax
+        ? [
+            {
+              kind: 'tax' as const,
+              amount: shippingTax.amount,
+              tax_type: shippingTax.tax_type,
+            },
+          ]
+        : []),
+      {
+        kind: 'shipping',
+        amount: getCents(account.shipping_cost) - (shippingTax?.amount ?? 0n),
+      },
       { kind: 'tip', amount: getCents(account.tip_amount) },
     ];
     const sumCents = (values: bigint[]) => values.reduce((a, b) => a + b, 0n);
@@ -1681,7 +1715,7 @@ export class AutoEntryService {
       sumCents(components.map((row) => row.amount)) !== total ||
       sumCents(
         components.filter((row) => row.kind === 'tax').map((row) => row.amount),
-      ) !== expectedTax
+      ) !== expectedTax + (shippingTax?.amount ?? 0n)
     ) {
       throw new Error('Financial account components do not reconcile');
     }
@@ -1875,6 +1909,43 @@ export class AutoEntryService {
     );
     if (!entry) throw new Error('Financial account journal was not posted');
     return entry;
+  }
+
+  /**
+   * Impuesto del envío que corresponde a UNA cuenta financiera. La cuenta
+   * guarda sólo su parte BRUTA del flete (`shipping_cost`); la copia congelada
+   * (`orders.shipping_tax_*`) vive en la orden. Se reparte el impuesto de la
+   * orden entre las cuentas de la división por su flete (mayor residuo): Σ
+   * cuentas = impuesto de la orden al centavo. Si las cuentas no suman el
+   * flete de la orden, proporción directa contra el flete de la orden.
+   *
+   * `null` sin copia (o copia ilegible): el asiento es el histórico.
+   */
+  private financialAccountShippingTax(
+    account: any,
+  ): { amount: bigint; tax_type: TaxBreakdownItem['tax_type'] } | null {
+    const order = account?.split?.source_order;
+    const row = buildShippingTaxBreakdownRow(order);
+    const accountShipping = getCents(account?.shipping_cost ?? 0);
+    if (!row || accountShipping <= 0n) return null;
+    const orderShipping = getCents(order.shipping_cost ?? 0);
+    const orderTax = getCents(order.shipping_tax_amount ?? 0);
+    if (orderShipping <= 0n || orderTax <= 0n || orderTax >= orderShipping)
+      return null;
+    const siblings: any[] = account.split.accounts ?? [];
+    const weights = siblings.map((row: any) => getCents(row.shipping_cost ?? 0));
+    const index = siblings.findIndex((row: any) => row.id === account.id);
+    const amount =
+      index >= 0 &&
+      weights.every((weight) => weight >= 0n) &&
+      weights.reduce((a, b) => a + b, 0n) === orderShipping
+        ? proportional(orderTax, weights)[index]
+        : proportional(orderTax, [
+            accountShipping,
+            orderShipping > accountShipping ? orderShipping - accountShipping : 0n,
+          ])[0];
+    if (amount <= 0n || amount >= accountShipping) return null;
+    return { amount, tax_type: row.tax_type };
   }
 
   /**
