@@ -114,6 +114,7 @@ import { normalizeInvoiceTaxRate } from './utils/invoice-tax-rate.util';
 // compartida con mesas, pagos y remisiones: ver `createFromOrder`.
 import { resolveOrderLineTaxTotal } from '../taxes/utils/final-price.util';
 import { resolveCategoryTaxType } from '../shipping/utils/shipping-tax.util';
+import { projectOrderInvoiceLines } from './utils/order-invoice-lines.util';
 
 /**
  * Listing rows whose send/transmission state is an error or a pending send get
@@ -2605,7 +2606,48 @@ export class InvoicingService {
     // dos veces. La inclusividad de origen sigue auditable en
     // `order_item_taxes`, y SÍ decide el split por línea más abajo (incidente
     // #81), que se conserva para no mover un byte del XML.
-    const productItems = (order.order_items || []).map((item: any) => {
+    // DESCUENTO DE ORDEN e IMPUESTO DE LÍNEA POR UNIDAD (P0-2 / P2-1): ver
+    // `projectOrderInvoiceLines`. Sin descuento y sin deriva de más de un
+    // centavo, toda línea sale `unchanged` y la factura es la de siempre.
+    const lineProjection = projectOrderInvoiceLines(
+      order.order_items || [],
+      order.discount_amount,
+    );
+    if (lineProjection.error) {
+      const failure = lineProjection.error;
+      throw new VendixHttpException(
+        failure.code === 'unclosed'
+          ? ErrorCodes.INVOICING_CALC_005
+          : ErrorCodes.INVOICING_CALC_006,
+        failure.code === 'discount_exceeds_lines'
+          ? `El descuento de la orden #${order.id} (${failure.discount}) supera el valor de las líneas que pueden absorberlo (${failure.eligible_gross}): no se puede facturar sin declarar una base negativa. Revisa el descuento de la orden.`
+          : failure.code === 'unclosed'
+            ? `El descuento de la orden #${order.id} deja una línea en un valor que, con su tarifa, no cierra al centavo con lo cobrado. Ajusta el descuento en 1 centavo y factura de nuevo.`
+            : `Una línea de la orden #${order.id} trae una tarifa de impuesto inválida (${failure.detail}); no se puede repartir el descuento sin inventarla.`,
+        { order_id: order.id, detail: `order_discount:${failure.code}` },
+      );
+    }
+    // Filas de la orden con la base y las cuotas ya proyectadas: es lo que
+    // agregan `aggregateOrderTaxes` y `computeOrderInvoiceSubtotal`, para que
+    // cabecera, filas y líneas lean el MISMO número.
+    const projectedOrderItems = (order.order_items || []).map(
+      (item: any, index: number) => {
+        const line = lineProjection.lines[index];
+        if (line.reason === 'unchanged') return item;
+        return {
+          ...item,
+          total_price: line.base,
+          order_item_taxes: (item.order_item_taxes || []).map(
+            (row: any, row_index: number) => ({
+              ...row,
+              tax_amount: line.tax_amounts[row_index],
+            }),
+          ),
+        };
+      },
+    );
+    const productItems = (order.order_items || []).map((item: any, index: number) => {
+      const projectedLine = lineProjection.lines[index];
       const description =
         item.description ||
         item.product_name ||
@@ -2613,7 +2655,9 @@ export class InvoicingService {
         'Product';
       const quantity = Number(item.quantity || 1);
       const unit_price = Number(item.unit_price || 0);
-      const discount = Number(item.discount_amount || 0);
+      // `order_items` no tiene columna de descuento: el de la línea es el que
+      // proyecta el reparto del descuento de orden (o el ajuste de P2-1).
+      const discount = projectedLine.discount.toNumber();
       // El impuesto de la línea COMPLETA, leído del snapshot persistido.
       //
       // `order_items.tax_amount_item` es el impuesto POR UNIDAD DE PRECIO
@@ -2640,9 +2684,14 @@ export class InvoicingService {
       // cabecera —desglose que YA era correcto—, y `checkTaxInclusiveTotal`
       // (FAU06) deja de abortar la firma por esta causa DESPUÉS de que
       // `validate()` consumió el consecutivo DIAN.
-      const tax = resolveOrderLineTaxTotal(item);
+      const tax =
+        projectedLine.reason === 'unchanged'
+          ? resolveOrderLineTaxTotal(item)
+          : projectedLine.tax_total.toNumber();
       const total_amount =
-        Number(item.total_price || quantity * unit_price - discount) + tax;
+        projectedLine.reason === 'unchanged'
+          ? Number(item.total_price || quantity * unit_price - discount) + tax
+          : projectedLine.base.plus(projectedLine.tax_total).toNumber();
       return {
         product_id: item.product_id,
         product_variant_id: item.product_variant_id,
@@ -2736,19 +2785,30 @@ export class InvoicingService {
     // lecturas descartadas de ADR-04.
     // Con impuesto en el envío el subtotal suma la BASE del envío, no el
     // bruto: el impuesto viaja en `tax` y `subtotal + tax` sigue dando el total.
-    const subtotal = computeOrderInvoiceSubtotal(
-      order.order_items || [],
-      shippingBase,
+    // Base NETA del descuento proyectado: FAU02 compara `subtotal_amount`
+    // contra Σ `LineExtensionAmount`, que ya resta el descuento de línea.
+    // Sumas en coma flotante: se cierran al centavo para que la cabecera no
+    // persista ruido (`8906.869999…`) ahora que las líneas llevan descuento.
+    const toCents = (n: number) => Math.round(n * 100) / 100;
+    const subtotal = toCents(
+      computeOrderInvoiceSubtotal(projectedOrderItems, shippingBase),
     );
-    const discount = items.reduce(
-      (acc: number, item: any) => acc + Number(item.discount_amount),
-      0,
+    const discount = toCents(
+      items.reduce(
+        (acc: number, item: any) => acc + Number(item.discount_amount),
+        0,
+      ),
     );
-    const tax = items.reduce(
-      (acc: number, item: any) => acc + Number(item.tax_amount),
-      0,
+    const tax = toCents(
+      items.reduce(
+        (acc: number, item: any) => acc + Number(item.tax_amount),
+        0,
+      ),
     );
-    const total = subtotal - discount + tax;
+    // `subtotal` ya es neto del descuento de línea (ver arriba): restarlo otra
+    // vez lo contaría dos veces. Sin descuento `discount` es 0 y el total es el
+    // de siempre.
+    const total = toCents(subtotal + tax);
 
     // Aggregate the order's per-line typed taxes (order_item_taxes) into invoice
     // header-level invoice_taxes, one row per (name, rate, fiscal type,
@@ -2762,7 +2822,7 @@ export class InvoicingService {
       header_rows: invoiceTaxRows,
       distinct_group_count: distinctGroupCount,
       tax_scalar_without_breakdown: taxScalarWithoutBreakdown,
-    } = aggregateOrderTaxes(order.order_items || []);
+    } = aggregateOrderTaxes(projectedOrderItems);
     // F-090 (eje de código de F-053) — población 3 de `aggregateOrderTaxes`
     // (ver su docblock): líneas con `tax_amount_item` > 0 pero SIN filas
     // `order_item_taxes` no aportan nada a `invoiceTaxRows` y hoy se ven
@@ -2835,9 +2895,14 @@ export class InvoicingService {
     // El impuesto del envío FUERZA el split: su fila tiene que quedar ligada a
     // la línea Envío (`invoice_item_id`) para que el «todo o nada» de
     // `invoice-flow`, FAU04 y la NC parcial lean bases persistidas por línea.
+    // Una línea proyectada (descuento de orden o P2-1) también lo fuerza: su
+    // cuota puede llevar el centavo de un bruto inalcanzable
+    // (`absorbOneCent`), que el prevalidador tolera por fila pero no sumado
+    // con los truncados de otras líneas en una fila de cabecera.
     const split_order_line_taxes =
       needsOrderLineTaxSplit(taxGroups.size, orderLineTaxes) ||
-      shippingTax.applies;
+      shippingTax.applies ||
+      lineProjection.lines.some((line) => line.reason !== 'unchanged');
     // Forma base (ver arriba): el split ya se decidió con la inclusividad de
     // ORIGEN; lo que se persiste es base + cuota, así que toda fila de
     // tributo nace `is_inclusive = false` — el gate lee `tax.is_inclusive`

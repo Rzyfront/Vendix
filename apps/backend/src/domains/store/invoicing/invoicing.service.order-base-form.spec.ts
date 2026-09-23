@@ -94,8 +94,13 @@ describe('InvoicingService.createFromOrder — forma base con impuesto incluido'
 
   afterEach(() => jest.restoreAllMocks());
 
-  const createDraft = async (order_items: unknown[]) => {
-    prisma.orders.findFirst.mockResolvedValue(buildOrder({ order_items }));
+  const createDraft = async (
+    order_items: unknown[],
+    order: Record<string, unknown> = {},
+  ) => {
+    prisma.orders.findFirst.mockResolvedValue(
+      buildOrder({ ...order, order_items }),
+    );
     prisma.invoice_items.findMany.mockResolvedValue(
       order_items.map((_, index) => ({ id: 501 + index })),
     );
@@ -150,20 +155,28 @@ describe('InvoicingService.createFromOrder — forma base con impuesto incluido'
   });
 
   it('el XML no cambia: importe y precio emitidos iguales a la forma anterior (qty 3 + descuento)', async () => {
-    // 3 × 17129.63 = 51388.89; descuento 1000 en base ⇒ 50388.89 + 4031.11.
-    const { data, line_tax_rows } = await createDraft([
-      buildOrderItem({
-        quantity: 3,
-        unit_price: money('17129.63'),
-        total_price: money('50388.89'),
-        discount_amount: money(1000),
-        tax_rate: money('0.08'),
-        tax_amount_item: money('1343.70'),
-        order_item_taxes: [incRow(4031.11)],
-      }),
-    ]);
+    // 3 × 18.500 = 55.500 bruto (3 × 17129.63 + 3 × 1370.37). `order_items`
+    // no tiene columna de descuento: el descuento es el de la ORDEN (1.080
+    // sobre el bruto), que `projectOrderInvoiceLines` baja a la línea ⇒
+    // bruto 54.420 = base 50388.89 + INC 4031.11, descuento de línea 1000.
+    const { data, line_tax_rows } = await createDraft(
+      [
+        buildOrderItem({
+          quantity: 3,
+          unit_price: money('17129.63'),
+          total_price: money('51388.89'),
+          tax_rate: money('0.08'),
+          tax_amount_item: money('1370.37'),
+          order_item_taxes: [incRow(4111.11)],
+        }),
+      ],
+      { discount_amount: money(1080) },
+    );
     const [line] = data.invoice_items.create;
+    expect(line.discount_amount.toString()).toBe('1000');
+    expect(line.tax_amount.toString()).toBe('4031.11');
     expect(line.total_amount.toString()).toBe('54420');
+    expect(data.total_amount.toString()).toBe('54420');
 
     const flow = new InvoiceFlowService(
       ...(Array.from({ length: 11 }, () => ({})) as [any, any, any, any, any, any, any, any, any, any, any]),
