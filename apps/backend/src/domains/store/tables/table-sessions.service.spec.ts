@@ -383,6 +383,39 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       expect((service as any).notificationsSseService.push).toHaveBeenCalledTimes(1);
     });
 
+    it('expone ERR-33 tipado al final sin perder SSE/caja cuando la proyección falla', async () => {
+      prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 40));
+      prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100, total_paid: 40 });
+      prismaMock.table_sessions.findFirst.mockResolvedValue({ id: sessionId, paid_at: null });
+      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: null, order_id: orderId });
+      prismaMock.table_sessions.update.mockRejectedValue(new Error('projection failed'));
+      const cashSpy = jest
+        .spyOn(service as any, 'recordStaffCashMovement')
+        .mockResolvedValue(undefined);
+
+      const error = await service.confirmPayment(sessionId, paymentId).catch((failure) => failure);
+
+      // Typed at the end — never the raw projection error, never a 500.
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe('POS_TABLE_SESSION_PROJECTION_FAILED_001');
+      // Payment kept succeeded; balances committed.
+      expect(prismaMock.payments.update).toHaveBeenCalledTimes(1);
+      expect(prismaMock.orders.update).toHaveBeenCalledTimes(1);
+      // Side effects NOT skipped: comensal SSE, staff notification, cash.
+      expect((service as any).notificationsSseService.push).toHaveBeenCalledWith(
+        STORE_ID,
+        expect.objectContaining({ type: 'payment.confirmed' }),
+      );
+      expect((service as any).notificationsService.createAndBroadcast).toHaveBeenCalledWith(
+        STORE_ID,
+        'table_payment_confirmed',
+        expect.any(String),
+        expect.any(String),
+        expect.objectContaining({ table_session_id: sessionId, payment_id: paymentId }),
+      );
+      expect(cashSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('can retry a projection failure after the payment already committed', async () => {
       prismaMock.payments.findFirst
         .mockResolvedValueOnce(payment('pending', 40))
@@ -394,7 +427,11 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         .mockRejectedValueOnce(new Error('projection failed'))
         .mockResolvedValueOnce({ id: sessionId, paid_at: new Date(), order_id: orderId });
 
-      await expect(service.confirmPayment(sessionId, paymentId)).rejects.toThrow('projection failed');
+      // T5/G2: the first attempt fails typed AFTER the payment committed —
+      // never with the raw projection error — and the retry repairs it.
+      const first = await service.confirmPayment(sessionId, paymentId).catch((failure) => failure);
+      expect(first).toBeInstanceOf(VendixHttpException);
+      expect(first.errorCode).toBe('POS_TABLE_SESSION_PROJECTION_FAILED_001');
       await expect(service.confirmPayment(sessionId, paymentId)).resolves.toEqual({
         state: 'succeeded', payment_id: paymentId,
       });
@@ -402,7 +439,9 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       expect(prismaMock.payments.update).toHaveBeenCalledTimes(1);
       expect(prismaMock.orders.update).toHaveBeenCalledTimes(1);
       expect(prismaMock.table_sessions.update).toHaveBeenCalledTimes(2);
-      expect((service as any).notificationsSseService.push).toHaveBeenCalledTimes(1);
+      // First call still pushed `payment.confirmed`; the retry emits `session_paid`.
+      expect((service as any).notificationsSseService.push).toHaveBeenCalledTimes(2);
+      expect((service as any).notificationsService.createAndBroadcast).toHaveBeenCalledTimes(1);
     });
 
     it('does not project a failed payment or a succeeded partial retry', async () => {

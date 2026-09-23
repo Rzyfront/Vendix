@@ -3081,3 +3081,123 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
   });
 
 });
+
+describe('OrderFlowService.registerCreditPayment — table projection (B.2/T5)', () => {
+  const CREDIT_DTO: any = { store_payment_method_id: 5, amount: 60 };
+
+  const harness = (remainingBalance = 60, totalPaid = 40) => {
+    mockRequestContext({ store_id: 4, organization_id: 1, user_id: 42 });
+    const orderRow: any = {
+      id: 1,
+      order_number: 'CR-1',
+      state: 'processing',
+      store_id: 4,
+      organization_id: 1,
+      customer_id: 44,
+      currency: 'COP',
+      payment_form: '2',
+      credit_type: 'libre',
+      grand_total: 100,
+      total_paid: totalPaid,
+      remaining_balance: remainingBalance,
+      payments: [],
+      order_installments: [],
+    };
+    const prismaMock: any = {
+      orders: {
+        findFirst: jest.fn(async () => orderRow),
+        update: jest.fn(async () => ({ id: 1 })),
+      },
+      store_payment_methods: {
+        findFirst: jest.fn(async () => ({
+          id: 5,
+          system_payment_method: { type: 'cash' },
+        })),
+      },
+      payments: {
+        create: jest.fn(async () => ({ id: 501 })),
+      },
+      order_installments: {
+        findFirst: jest.fn(async () => null),
+        findMany: jest.fn(async () => []),
+        update: jest.fn(async () => ({})),
+      },
+    };
+    const eventEmitter: any = { emit: jest.fn() };
+    const service = new OrderFlowService(
+      prismaMock, eventEmitter, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, {} as any,
+    );
+    jest.spyOn(service as any, 'hasPendingKitchenItems').mockResolvedValue(false);
+    const updateOrderState = jest
+      .spyOn(service as any, 'updateOrderState')
+      .mockResolvedValue({ id: 1, state: 'finished' });
+    const cashMovement = jest
+      .spyOn(service as any, 'recordPayOrderCashMovement')
+      .mockResolvedValue(undefined);
+    const project = jest
+      .spyOn(service as any, 'projectPaidOrderToTable')
+      .mockResolvedValue(undefined);
+    return { service, prismaMock, eventEmitter, updateOrderState, cashMovement, project };
+  };
+
+  it('projects the table session only when the credit is fully settled', async () => {
+    const h = harness(60, 40);
+
+    const result = await h.service.registerCreditPayment(1, CREDIT_DTO);
+
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    expect(h.project).toHaveBeenCalledTimes(1);
+    expect(h.project).toHaveBeenCalledWith(1, 501);
+    expect(h.updateOrderState).toHaveBeenCalledWith(
+      1, 'finished', expect.objectContaining({ finished_at: expect.any(Date) }),
+    );
+    expect(result.finished).toBe(true);
+    expect(result.payment_recorded).toBe(true);
+  });
+
+  it('does not project a partial abono', async () => {
+    const h = harness(100, 0);
+
+    const result = await h.service.registerCreditPayment(1, CREDIT_DTO);
+
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    expect(h.project).not.toHaveBeenCalled();
+    expect(h.updateOrderState).not.toHaveBeenCalled();
+    expect(result.finished).toBe(false);
+    expect(result.payment_recorded).toBe(true);
+  });
+
+  it('projection failure throws typed ERR-33, keeps payment/cash, skips finish', async () => {
+    const h = harness(60, 40);
+    h.project.mockRejectedValueOnce(
+      new VendixHttpException(ErrorCodes.POS_TABLE_SESSION_PROJECTION_FAILED_001),
+    );
+
+    const error = await h.service.registerCreditPayment(1, CREDIT_DTO).catch((failure) => failure);
+
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('POS_TABLE_SESSION_PROJECTION_FAILED_001');
+    // Payment + balances + installments kept; cash + events already ran.
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    expect(h.prismaMock.orders.update).toHaveBeenCalledTimes(1);
+    expect(h.cashMovement).toHaveBeenCalledTimes(1);
+    expect(h.eventEmitter.emit).toHaveBeenCalledWith(
+      'installment_payment.received', expect.objectContaining({ payment_id: 501 }),
+    );
+    // No false `finished`: the finish transition never ran.
+    expect(h.updateOrderState).not.toHaveBeenCalled();
+  });
+
+  it('projects even when the kitchen keeps a settled order open', async () => {
+    const h = harness(60, 40);
+    (h.service as any).hasPendingKitchenItems.mockResolvedValue(true);
+
+    const result = await h.service.registerCreditPayment(1, CREDIT_DTO);
+
+    expect(h.project).toHaveBeenCalledTimes(1);
+    expect(h.updateOrderState).not.toHaveBeenCalled();
+    expect(result.finished).toBe(false);
+    expect(result.payment_recorded).toBe(true);
+  });
+});

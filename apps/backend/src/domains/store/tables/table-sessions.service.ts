@@ -2414,7 +2414,9 @@ export class TableSessionsService {
    *   - Updates `orders.total_paid` / `remaining_balance` so the order
    *     reflects the new paid amount.
    *   - Once the paid sum covers `grand_total`, projects `table_sessions.paid_at`
-   *     after commit; partial payments leave the session unpaid.
+   *     after commit; partial payments leave the session unpaid. A projection
+   *     failure is captured: SSE/cash side effects still run and ERR-33 is
+   *     thrown typed at the end, with the payment kept succeeded.
    *   - Emits `payment.received` with the canonical shape so the auto-entry
    *     listener + notification listener both fire identically to the POS
    *     fresh-sale path.
@@ -2576,12 +2578,23 @@ export class TableSessionsService {
 
     // The payment and order balance are committed before B.1 opens its own
     // transaction. A succeeded retry repairs a missed projection; B.1 keeps
-    // both paid_at and session_paid idempotent.
+    // both paid_at and session_paid idempotent. A projection failure must
+    // never lose the SSE/cash side effects below nor surface a raw 500: it
+    // is captured here and rethrown typed (ERR-33) at the end.
+    let projectionError: unknown = null;
     if (result.shouldProject) {
-      await this.projectOrderPaymentToTableSession(
-        result.orderId,
-        result.payment_id,
-      );
+      try {
+        await this.projectOrderPaymentToTableSession(
+          result.orderId,
+          result.payment_id,
+        );
+      } catch (error) {
+        projectionError = error;
+        this.logger.error(
+          `[confirmPayment] table projection failed for order ${result.orderId} payment ${result.payment_id}: ${(error as Error)?.message ?? String(error)}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
     }
 
     // 7. Post-commit side effects — fire-and-await because the SSE push
@@ -2640,6 +2653,14 @@ export class TableSessionsService {
 
       this.logger.log(
         `[confirmPayment] payment ${result.payment_id} confirmed by staff ${userId} on session ${sessionId}`,
+      );
+    }
+
+    // The payment stays succeeded no matter what: a captured projection
+    // failure surfaces here, typed, after every side effect already ran.
+    if (projectionError) {
+      throw new VendixHttpException(
+        ErrorCodes.POS_TABLE_SESSION_PROJECTION_FAILED_001,
       );
     }
 

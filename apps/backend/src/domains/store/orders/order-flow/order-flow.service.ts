@@ -4322,46 +4322,11 @@ export class OrderFlowService {
       },
     });
 
-    // If fully paid, finish through updateOrderState — which now deducts stock
-    // via the canonical OrderStockCommitService and blocks on INV_STOCK_002 /
-    // SERIAL_REQUIRED_001. The balance write above already committed, so a
-    // blocked finish NEVER loses the payment.
+    // The finish transition runs after the table projection below: a
+    // projection failure must skip it (no false `finished`) while keeping
+    // the committed payment, balances, installments and cash movement.
     let finished = false;
     let finishBlockedReason: string | undefined;
-    if (newRemainingBalance <= 0.01) {
-      // F2-guard (AUTOMATIC path): do NOT finish a fully-paid order while the
-      // kitchen still has undelivered items. We must NOT throw here — the
-      // payment is legitimate and has to be recorded — so we just skip the
-      // finish transition and leave the order in its current state. It will
-      // finish later (manual `confirmDelivery` or the auto-finish job) once
-      // the kitchen delivers.
-      if (await this.hasPendingKitchenItems(orderId)) {
-        this.logger.log(
-          `Order #${orderId} fully paid but kept open: kitchen items still pending (not finishing).`,
-        );
-      } else {
-        this.validateTransition(order.state as OrderState, 'finished');
-        try {
-          await this.updateOrderState(orderId, 'finished', {
-            paid_at: new Date(),
-            finished_at: new Date(),
-          });
-          finished = true;
-        } catch (error) {
-          // A stock/serial business rule blocked the finish. The payment is
-          // already recorded above, so leave the order UNFINISHED and surface
-          // the reason WITHOUT failing the whole call (never lose the payment).
-          if (error instanceof VendixHttpException) {
-            finishBlockedReason = error.message;
-            this.logger.warn(
-              `Order #${orderId} fully paid but NOT finished (stock/serial rule): ${error.message}`,
-            );
-          } else {
-            throw error;
-          }
-        }
-      }
-    }
 
     // Update installment if specified (for installment-based credit)
     if (order.credit_type === 'installments') {
@@ -4465,6 +4430,56 @@ export class OrderFlowService {
       order_id: orderId,
       user_id: RequestContextService.getUserId(),
     });
+
+    // B.2/T5 — project a FULLY settled credit sale onto its table session.
+    // Partial abonos never project. Payment, balances, installments, cash
+    // and events above are already committed, so this runs post-commit: a
+    // projection failure throws typed ERR-33 (via `projectPaidOrderToTable`)
+    // and skips the finish below — no false `finished`, payment kept. The
+    // canonical projection is idempotent, so a later staff confirmPayment
+    // retry repairs a missed projection without duplicating effects.
+    if (newRemainingBalance <= 0.01) {
+      await this.projectPaidOrderToTable(orderId, payment.id);
+    }
+
+    // If fully paid, finish through updateOrderState — which now deducts stock
+    // via the canonical OrderStockCommitService and blocks on INV_STOCK_002 /
+    // SERIAL_REQUIRED_001. The balance write above already committed, so a
+    // blocked finish NEVER loses the payment.
+    if (newRemainingBalance <= 0.01) {
+      // F2-guard (AUTOMATIC path): do NOT finish a fully-paid order while the
+      // kitchen still has undelivered items. We must NOT throw here — the
+      // payment is legitimate and has to be recorded — so we just skip the
+      // finish transition and leave the order in its current state. It will
+      // finish later (manual `confirmDelivery` or the auto-finish job) once
+      // the kitchen delivers.
+      if (await this.hasPendingKitchenItems(orderId)) {
+        this.logger.log(
+          `Order #${orderId} fully paid but kept open: kitchen items still pending (not finishing).`,
+        );
+      } else {
+        this.validateTransition(order.state as OrderState, 'finished');
+        try {
+          await this.updateOrderState(orderId, 'finished', {
+            paid_at: new Date(),
+            finished_at: new Date(),
+          });
+          finished = true;
+        } catch (error) {
+          // A stock/serial business rule blocked the finish. The payment is
+          // already recorded above, so leave the order UNFINISHED and surface
+          // the reason WITHOUT failing the whole call (never lose the payment).
+          if (error instanceof VendixHttpException) {
+            finishBlockedReason = error.message;
+            this.logger.warn(
+              `Order #${orderId} fully paid but NOT finished (stock/serial rule): ${error.message}`,
+            );
+          } else {
+            throw error;
+          }
+        }
+      }
+    }
 
     // Return updated order
     const updatedOrder = await this.prisma.orders.findFirst({
