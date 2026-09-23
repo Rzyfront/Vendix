@@ -29,4 +29,4 @@ skills: [vendix-frontend, vendix-frontend-modal, how-to-test]
   - [x] El shell conserva su estado al cerrar el modal de cliente (no se pierde el cobro en curso).
   - [x] Los pares layaway y order-payment quedan verificados: ambos usan el mismo `app-modal` y anteceden al cliente en el DOM.
   - [x] F-004 — AUDIT F-025 - modal de cliente bajo el shell por orden del DOM (major)
-- **Status:** done · Fabio · 2026-09-23 · orden DOM `08d53167d`; teclado/foco/scroll anidados `b19aa295f`. `evidence/J1-credit-nested-modal.md`: Playwright real con crédito $38.000 muestra cliente encima y Escape cierra solo cliente, shell/foco/scroll conservados. Modal+POS focalizados 42/42; barrido 7 specs de modales 47/52 por cinco tests ajenos obsoletos descritos en evidencia.
+- **Status:** done · Fabio · 2026-09-23 · orden DOM `08d53167d`; teclado/foco/scroll anidados `b19aa295f`. `evidence/J1-credit-nested-modal.md`: Playwright real con crédito $38.000 muestra cliente encima y Escape cierra solo cliente, shell/foco/scroll conservados. Modal+POS focalizados 42/42; siete specs de modales 52/52 tras alinear cinco fixtures obsoletas en `9d514d78f`.
