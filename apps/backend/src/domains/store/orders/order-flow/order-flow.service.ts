@@ -44,6 +44,11 @@ import { OrderStockCommitService } from '../../inventory/shared/services/order-s
 import { OrderEtaService } from '../services/order-eta.service';
 import { KitchenFireService } from '../../kitchen-fire/kitchen-fire.service';
 import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
+import { ShippingTaxService } from '../../shipping/services/shipping-tax.service';
+import {
+  EMPTY_SHIPPING_TAX,
+  type ShippingTaxSnapshot,
+} from '../../shipping/utils/shipping-tax.util';
 import {
   AuditService,
   AuditResource,
@@ -159,6 +164,10 @@ export class OrderFlowService {
     // llega `undefined`, `cancelOrderItem` falla fuerte (500 explícito),
     // nunca salta el KDS en silencio.
     @Optional() private readonly kitchenFireService?: KitchenFireService,
+    // Copia del impuesto del envío al asignar método + tarifa en `shipOrder`.
+    // `@Optional()` por la misma razón que arriba (specs con construcción
+    // manual). Sin servicio ⇒ copia vacía (envío sin impuesto), nunca falla.
+    @Optional() private readonly shippingTaxService?: ShippingTaxService,
   ) {}
 
   /**
@@ -1495,6 +1504,27 @@ export class OrderFlowService {
         shippingCost = Number(rate.base_cost);
       }
 
+      // Impuesto del envío: copia congelada de la tarifa (incluido en su
+      // precio). Sin tarifa ⇒ copia vacía. El `grand_total` se recalcula
+      // cambiando el costo anterior por el nuevo: el impuesto va DENTRO del
+      // costo, así que no se suma aparte (orders.tax_amount no lo incluye).
+      const shippingTax: ShippingTaxSnapshot =
+        dto.shipping_rate_id && this.shippingTaxService
+          ? await this.shippingTaxService.snapshotForRate(
+              null,
+              dto.shipping_rate_id,
+              shippingCost,
+              { store_id: order.store_id },
+            )
+          : { ...EMPTY_SHIPPING_TAX };
+      const previousShippingCents = Math.round(
+        Number(order.shipping_cost ?? 0) * 100,
+      );
+      const grandTotalCents =
+        Math.round(Number(order.grand_total ?? 0) * 100) -
+        previousShippingCents +
+        Math.round(shippingCost * 100);
+
       await this.prisma.orders.update({
         where: { id: orderId },
         data: {
@@ -1502,6 +1532,8 @@ export class OrderFlowService {
           shipping_rate_id: dto.shipping_rate_id ?? null,
           delivery_type: deliveryType,
           shipping_cost: shippingCost,
+          ...shippingTax,
+          grand_total: new Prisma.Decimal(grandTotalCents).div(100),
           updated_at: new Date(),
         },
       });
