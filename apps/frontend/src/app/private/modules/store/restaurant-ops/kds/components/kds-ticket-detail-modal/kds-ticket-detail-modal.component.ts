@@ -64,11 +64,19 @@ export class KdsTicketDetailModalComponent {
   readonly isOpen = input<boolean>(false);
   readonly ticket = input<KitchenTicket | null>(null);
   readonly isMutating = input<boolean>(false);
+  /**
+   * Determina si el ticket pertenece a una mesa de salón (table_id != null, table != null o dine_in).
+   */
+  readonly isTableTicket = computed<boolean>(() => {
+    const t = this.ticketDisplay();
+    return t?.table_id != null || t?.table != null || t?.order?.delivery_type === 'dine_in';
+  });
+
   /** Ver `KdsTicketCardComponent.allTakeaway`: "Entregar" se habilita solo
    *  para tickets todo-para-llevar; el resto lo registra mesero/cajero. */
   readonly allTakeaway = computed(() => {
     const ticket = this.ticketDisplay();
-    if (ticket?.order?.delivery_type === 'direct_delivery') {
+    if (!this.isTableTicket() && ticket?.order?.delivery_type === 'direct_delivery') {
       return true;
     }
     const items = ticket?.items ?? [];
@@ -153,6 +161,9 @@ export class KdsTicketDetailModalComponent {
   readonly ticketDisplay = computed(() => this.ticket());
 
   readonly deliveryBadgeLabel = computed(() => {
+    if (this.isTableTicket()) {
+      return null;
+    }
     switch (this.ticketDisplay()?.order?.delivery_type) {
       case 'home_delivery':
         return 'ENVÍO';
@@ -166,6 +177,9 @@ export class KdsTicketDetailModalComponent {
   itemDeliveryBadge(item: KitchenTicketItem): string | null {
     if (this.ticketDisplay()?.order?.delivery_type === 'home_delivery') {
       return 'ENVÍO';
+    }
+    if (this.isTableTicket()) {
+      return item.order_item?.is_takeaway === true ? 'PARA LLEVAR' : null;
     }
     if (
       this.ticketDisplay()?.order?.delivery_type === 'direct_delivery' ||
