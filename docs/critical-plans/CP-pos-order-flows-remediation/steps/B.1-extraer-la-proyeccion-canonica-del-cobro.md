@@ -2,8 +2,8 @@
 id: B.1
 title: "Extraer la proyección canónica del cobro sobre la sesión"
 phase: B
-status: pending
-owner: none
+status: in-progress
+owner: Bernoulli
 updated: 2026-09-20
 contracts: [DB-17, DB-18, DB-19, DB-20, DB-21, ERR-33]
 adrs: [ADR-03]
@@ -41,4 +41,4 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-error-handling, vendix-pr
   - [ ] El spec de rechazo fija el código de error, no solo el tipo de la excepción
   - [ ] Ningún archivo de producción llama todavía a la función nueva
   - [ ] Las filas DB-17, DB-18, DB-19, DB-20, DB-21 y ERR-33 quedan marcadas con su evidencia enlazada
-- **Status:** pending
+- **Status:** in-progress — función/código ERR-33 en 226c25ee6; 44 tests pasan; faltan baseline y cierre de aceptación.

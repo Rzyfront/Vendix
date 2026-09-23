@@ -12,3 +12,5 @@
 | 2026-09-22 | Orquestador | H.3/A.4 | Negativos H.3: 400 cantidad, 404 mesa ajena, 409 doble cobro. A.4: draft QA cancelado 200; draft con mesa abierta bloqueado 409. E2E pendiente. | evidence/H3-local-api-verification.md; A4-local-api-verification.md |
 | 2026-09-22 | Orquestador | H.3 | Regresión de línea histórica gravada: el cierre de mesa conserva snapshot persistido y total 11900 aunque el catálogo nuevo carezca de impuesto. | c5a4e09c1; payments.service.spec.ts 76/76 |
 | 2026-09-22 | Orquestador | H.3 | API local: categoría 0 %, IVA 19 % y mixto en POS sin mesa; mixto en mesa 12. Todos 201, tasas persistidas correctas, un pago por orden. | evidence/H3-tax-matrix.sql/txt; H3-local-api-verification.md |
+| 2026-09-22 | Bernoulli | B.1 | Proyección canónica añadida sin llamadores nuevos; ERR-33 y mensaje. Emisión diferida si tx externa. | 226c25ee6; table-sessions.service.spec.ts 44/44 |
+| 2026-09-22 | Tesla | J.1 | Modal de cliente movido después de los diálogos de pago, sin cambiar z-index. Playwright pendiente. | 08d53167d; watcher FE OK |

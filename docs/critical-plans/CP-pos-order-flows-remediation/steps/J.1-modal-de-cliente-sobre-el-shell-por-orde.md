@@ -2,8 +2,8 @@
 id: J.1
 title: "Modal de cliente sobre el shell por orden del DOM"
 phase: J
-status: pending
-owner: none
+status: in-progress
+owner: Tesla
 updated: 2026-09-22
 contracts: []
 adrs: []
@@ -29,4 +29,4 @@ skills: [vendix-frontend, vendix-frontend-modal, how-to-test]
   - [ ] El shell conserva su estado al cerrar el modal de cliente (no se pierde el cobro en curso).
   - [ ] Los pares layaway y order-payment quedan verificados: el modal de cliente los cubre a ambos.
   - [ ] F-004 — AUDIT F-025 - modal de cliente bajo el shell por orden del DOM (major)
-- **Status:** pending
+- **Status:** in-progress — orden DOM reparado en 08d53167d; watcher OK; falta Playwright foco/capas.
