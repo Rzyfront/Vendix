@@ -35,6 +35,20 @@ import { resolveInclusiveClearing } from './dian-money.util';
  * base nueva nunca puede superar `total_price`: si lo hiciera, la proyección no
  * aplica (drift) o falla cerrada (descuento).
  *
+ * ### El ajuste de P2-1 también sale como «descuento»
+ *
+ * En el caso 2 el cliente NO recibió descuento: los 4,44 de la línea de 500
+ * unidades son la diferencia entre la base por unidad × cantidad y la base de
+ * la línea. Se expresa igual porque es la única forma que cabe sin migración:
+ * `unit_price` es `Decimal(12,2)` (1.122.680,56 / 500 no tiene 2 decimales) y
+ * `invoice_items` no tiene columna para marcar el motivo del ajuste. En el XML
+ * no se lee como descuento comercial: el `cac:AllowanceCharge` de línea no
+ * lleva `cbc:AllowanceChargeReason` (sólo `ChargeIndicator=false`, importe y
+ * base), y así cuadran FAU04/FAX07. Donde SÍ se lee como descuento es en la
+ * representación gráfica (PDF/tirilla imprimen `discount_amount`). Para
+ * distinguirlo haría falta una columna aditiva (motivo del ajuste) que lean
+ * el emisor y la impresión.
+ *
  * Una línea con impuesto escalar y SIN filas (`order_item_taxes`, F-090) no
  * tiene tarifa de la que despejar: no recibe descuento ni se re-despeja.
  */
@@ -47,6 +61,13 @@ export interface OrderInvoiceLineTaxRow {
   tax_amount?: unknown;
   tax_type?: unknown;
   is_inclusive?: unknown;
+  /**
+   * Tarifa COMPUESTA (sobre base + otros tributos). El despeje de acá es
+   * aditivo (`resolveInclusiveClearing`): una fila compuesta no se proyecta,
+   * se rechaza (`invalid_rate`). Hoy ninguna tarifa sembrada ni creada por los
+   * canales la marca `true`.
+   */
+  is_compound?: unknown;
 }
 
 export interface OrderInvoiceLineSource {
@@ -110,11 +131,40 @@ interface Clearing {
   invalid: string | null;
 }
 
+/**
+ * Filas de las que NO se puede despejar sin inventar o perder impuesto:
+ * - tarifa 0 (o ilegible) con cuota distinta de cero — tratarla como exenta
+ *   haría desaparecer el impuesto de la factura sin aviso; la exenta legítima
+ *   (tarifa 0 y cuota 0) sí se despeja;
+ * - tarifa compuesta (`is_compound`), que el despeje aditivo no modela.
+ */
+function unclearableRows(rows: OrderInvoiceLineTaxRow[]): string | null {
+  const bad = rows
+    .map((row) =>
+      row.is_compound === true
+        ? `${row.tax_name}: tarifa compuesta`
+        : fractionOf(row) === 0 && !dec(row.tax_amount).isZero()
+          ? `${row.tax_name}: tarifa ${String(row.tax_rate ?? 0)} con impuesto ${dec(row.tax_amount).toFixed(2)}`
+          : null,
+    )
+    .filter((reason): reason is string => reason !== null);
+  return bad.length ? bad.join('; ') : null;
+}
+
 /** Despeje único del bruto de la línea contra TODAS sus tarifas. */
 function clearLine(
   gross: Prisma.Decimal,
   rows: OrderInvoiceLineTaxRow[],
 ): Clearing {
+  const unclearable = unclearableRows(rows);
+  if (unclearable) {
+    return {
+      base: gross,
+      amounts: rows.map(() => ZERO),
+      residual_cents: 0,
+      invalid: unclearable,
+    };
+  }
   const taxed = rows.map(fractionOf);
   if (taxed.every((f) => f === 0)) {
     return {
@@ -143,31 +193,81 @@ function clearLine(
 }
 
 /**
- * Un bruto que la tarifa no alcanza (con IVA 19 % ~1 de cada 5 valores en
- * centavos: `b + trunc(0,19·b)` salta de a 2 ¢) deja el despeje UN centavo por
- * debajo. Ese centavo se declara en la cuota de la fila de mayor tarifa
- * (`trunc(base × r) + 0,01`): el prevalidador tolera 1 ¢ por fila
- * (`checkTaxSubtotals`) y FAX07 ±2,00, y así la línea factura EXACTO lo
- * cobrado. Con más de un centavo (varias tarifas en la línea) no se inventa
- * nada: el residuo sigue y el llamador decide.
+ * ¿La cuota de la fila la acepta el prevalidador? `checkTaxSubtotals` compara
+ * contra `round2(base × tarifa)` con 1 ¢ de tolerancia (FAX07 da ±2,00).
  */
-function absorbOneCent(cleared: Clearing, rows: OrderInvoiceLineTaxRow[]): Clearing {
-  if (cleared.invalid || cleared.residual_cents !== 1) return cleared;
-  let target = -1;
-  rows.forEach((row, index) => {
-    const fraction = fractionOf(row);
-    if (fraction > 0 && (target < 0 || fraction > fractionOf(rows[target]))) {
-      target = index;
+function withinTolerance(
+  base: Prisma.Decimal,
+  row: OrderInvoiceLineTaxRow,
+  amount: Prisma.Decimal,
+): boolean {
+  const fraction = fractionOf(row);
+  if (fraction === 0) return amount.isZero();
+  if (amount.isNegative()) return false;
+  return amount
+    .minus(base.times(fraction).toDecimalPlaces(2))
+    .abs()
+    .lessThanOrEqualTo(CENT);
+}
+
+/**
+ * Cierra la línea EXACTO al bruto objetivo. Un bruto que la tarifa no alcanza
+ * (con IVA 19 % ~1 de cada 5 valores en centavos: `b + trunc(0,19·b)` salta de
+ * a 2 ¢) deja el despeje unos centavos por debajo; y en una orden ya cobrada
+ * la factura TIENE que sumar lo cobrado. En este orden:
+ *
+ * 1. ±1 ¢ por fila de tributo, la de mayor tarifa primero, mientras la cuota
+ *    siga dentro de la tolerancia del prevalidador (`withinTolerance`).
+ * 2. Lo que falte, a la base (con `max_base` como tope: la base no puede
+ *    superar `total_price` o el descuento de línea quedaría negativo),
+ *    siempre que TODAS las cuotas sigan dentro de la tolerancia.
+ *
+ * Sólo si ninguna de las dos cabe queda residuo (y el llamador decide). Nunca
+ * mueve una cuota más de 1 ¢: eso ya no sería truncado sino inventar impuesto.
+ */
+function settleToTarget(
+  cleared: Clearing,
+  rows: OrderInvoiceLineTaxRow[],
+  target: Prisma.Decimal,
+  max_base?: Prisma.Decimal,
+): Clearing {
+  if (cleared.invalid) return cleared;
+  let base =
+    max_base && cleared.base.greaterThan(max_base) ? max_base : cleared.base;
+  const amounts = [...cleared.amounts];
+  const gap = () =>
+    target
+      .minus(base)
+      .minus(amounts.reduce((a, b) => a.plus(b), ZERO))
+      .times(100)
+      .toNumber();
+  let cents = gap();
+  if (cents !== 0) {
+    const step = cents > 0 ? CENT : CENT.negated();
+    const by_rate = rows
+      .map((row, index) => ({ index, fraction: fractionOf(row) }))
+      .filter((r) => r.fraction > 0)
+      .sort((a, b) => b.fraction - a.fraction);
+    for (const { index } of by_rate) {
+      if (cents === 0) break;
+      const next = amounts[index].plus(step);
+      if (!withinTolerance(base, rows[index], next)) continue;
+      amounts[index] = next;
+      cents -= Math.sign(cents);
     }
-  });
-  if (target < 0) return cleared;
-  return {
-    ...cleared,
-    amounts: cleared.amounts.map((amount, index) =>
-      index === target ? amount.plus(CENT) : amount,
-    ),
-    residual_cents: 0,
-  };
+  }
+  if (cents !== 0) {
+    const candidate = base.plus(new Prisma.Decimal(cents).dividedBy(100));
+    if (
+      !candidate.isNegative() &&
+      (!max_base || candidate.lessThanOrEqualTo(max_base)) &&
+      rows.every((row, index) => withinTolerance(candidate, row, amounts[index]))
+    ) {
+      base = candidate;
+      cents = 0;
+    }
+  }
+  return { ...cleared, base, amounts, residual_cents: cents };
 }
 
 /** ¿Alguna fila se separa más de un centavo de `trunc(base × tarifa)`? */
@@ -272,10 +372,10 @@ export function projectOrderInvoiceLines(
     if (share.isZero() || applied.isNegative()) {
       // P2-1 — sin descuento: sólo si la cuota por unidad × cantidad deriva.
       if (!drifts(total_price, rows)) continue;
-      const cleared = absorbOneCent(clearLine(gross, rows), rows);
+      const cleared = settleToTarget(clearLine(gross, rows), rows, gross);
       if (
         cleared.invalid ||
-        cleared.residual_cents > 0 ||
+        cleared.residual_cents !== 0 ||
         cleared.base.greaterThan(total_price)
       ) {
         continue; // no cierra al bruto cobrado: se queda como hoy
@@ -292,7 +392,12 @@ export function projectOrderInvoiceLines(
     }
 
     const target = gross.minus(applied);
-    const cleared = absorbOneCent(clearLine(target, rows), rows);
+    const cleared = settleToTarget(
+      clearLine(target, rows),
+      rows,
+      target,
+      total_price,
+    );
     if (cleared.invalid) {
       return {
         lines,
@@ -300,6 +405,8 @@ export function projectOrderInvoiceLines(
         error: { code: 'invalid_rate', line_index: index, detail: cleared.invalid },
       };
     }
+    // Residuo ≠ 0 sólo si `settleToTarget` no pudo cerrar: pasa a la línea
+    // siguiente (la de mayor bruto va al final y lo absorbe).
     const residual = new Prisma.Decimal(cleared.residual_cents).dividedBy(100);
     const base = cleared.base;
     if (base.greaterThan(total_price) || base.isNegative()) {
@@ -320,6 +427,41 @@ export function projectOrderInvoiceLines(
     };
     allocated_discount = allocated_discount.plus(line_share);
     carry = residual;
+  }
+
+  // Último recurso antes de rechazar: el arrastre que ninguna línea pudo
+  // tomar va a la línea descontada de mayor bruto, con el mismo cierre
+  // tolerado (cuota ±1 ¢ o base). Una orden cobrada debe facturar lo cobrado.
+  if (!carry.isZero()) {
+    const largest = [...ordered]
+      .reverse()
+      .find(({ index }) => lines[index].reason === 'order_discount');
+    if (largest) {
+      const line = lines[largest.index];
+      const settled = settleToTarget(
+        {
+          base: line.base,
+          amounts: line.tax_amounts,
+          residual_cents: 0,
+          invalid: null,
+        },
+        items[largest.index].order_item_taxes ?? [],
+        line.base.plus(line.tax_total).plus(carry),
+        dec(items[largest.index].total_price),
+      );
+      if (settled.residual_cents === 0) {
+        lines[largest.index] = {
+          ...line,
+          base: settled.base,
+          discount: dec(items[largest.index].total_price).minus(settled.base),
+          tax_total: settled.amounts.reduce((a, b) => a.plus(b), ZERO),
+          tax_amounts: settled.amounts,
+          order_discount_share: line.order_discount_share.minus(carry),
+        };
+        allocated_discount = allocated_discount.minus(carry);
+        carry = ZERO;
+      }
+    }
   }
 
   if (!carry.isZero()) {

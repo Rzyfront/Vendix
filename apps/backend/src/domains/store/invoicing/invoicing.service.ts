@@ -2620,10 +2620,10 @@ export class InvoicingService {
           ? ErrorCodes.INVOICING_CALC_005
           : ErrorCodes.INVOICING_CALC_006,
         failure.code === 'discount_exceeds_lines'
-          ? `El descuento de la orden #${order.id} (${failure.discount}) supera el valor de las líneas que pueden absorberlo (${failure.eligible_gross}): no se puede facturar sin declarar una base negativa. Revisa el descuento de la orden.`
+          ? `El descuento de la orden #${order.id} (${failure.discount}) es mayor que el valor de los productos que pueden recibirlo (${failure.eligible_gross}). No se creó la factura ni se usó ningún número. Corrige el descuento de la orden y factura de nuevo.`
           : failure.code === 'unclosed'
-            ? `El descuento de la orden #${order.id} deja una línea en un valor que, con su tarifa, no cierra al centavo con lo cobrado. Ajusta el descuento en 1 centavo y factura de nuevo.`
-            : `Una línea de la orden #${order.id} trae una tarifa de impuesto inválida (${failure.detail}); no se puede repartir el descuento sin inventarla.`,
+            ? `No pudimos repartir el descuento de la orden #${order.id} entre sus productos de forma que la factura sume exactamente lo que pagó el cliente. No se creó la factura ni se usó ningún número. Escríbenos a soporte con el número de la orden para facturarla.`
+            : `Un producto de la orden #${order.id} tiene un impuesto mal configurado (${failure.detail}), así que no se puede repartir el descuento de la orden sin cambiar lo que se declara. No se creó la factura ni se usó ningún número. Revisa el impuesto de ese producto en la orden o escríbenos a soporte.`,
         { order_id: order.id, detail: `order_discount:${failure.code}` },
       );
     }
@@ -2897,7 +2897,7 @@ export class InvoicingService {
     // `invoice-flow`, FAU04 y la NC parcial lean bases persistidas por línea.
     // Una línea proyectada (descuento de orden o P2-1) también lo fuerza: su
     // cuota puede llevar el centavo de un bruto inalcanzable
-    // (`absorbOneCent`), que el prevalidador tolera por fila pero no sumado
+    // (`settleToTarget`), que el prevalidador tolera por fila pero no sumado
     // con los truncados de otras líneas en una fila de cabecera.
     const split_order_line_taxes =
       needsOrderLineTaxSplit(taxGroups.size, orderLineTaxes) ||

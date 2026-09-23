@@ -4,6 +4,7 @@ import { InvoicingService } from './invoicing.service';
 import { InvoiceCalculatorService } from './services/invoice-calculator.service';
 import { FiscalDocumentValidator } from './validators/fiscal-document.validator';
 import { projectOrderInvoiceLines } from './utils/order-invoice-lines.util';
+import { derivePartialNoteLinesViaKernel } from './credit-notes/credit-notes.service';
 import {
   UblCommonBuilder,
   UblDocumentLine,
@@ -401,6 +402,236 @@ describe('InvoicingService.createFromOrder — descuento de orden e impuesto de 
         errorCode: ErrorCodes.INVOICING_CALC_006.code,
       });
       expect(prisma.invoices.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('filas que no se pueden despejar (M3)', () => {
+    it('tarifa 0 con impuesto > 0 y descuento de orden: rechaza antes del borrador, sin perder el impuesto', async () => {
+      const roto = buildOrderItem({
+        id: 5,
+        product_id: 15,
+        product_name: 'Roto',
+        quantity: 1,
+        unit_price: money('10000'),
+        total_price: money('10000'),
+        tax_rate: money('0'),
+        tax_amount_item: money('1900'),
+        order_item_taxes: [row(1, 'IVA 19%', '0', '1900', 'iva', false)],
+      });
+      prisma.orders.findFirst.mockResolvedValue(
+        buildOrder({
+          discount_amount: money('1000'),
+          order_items: [camisa(), roto],
+        }),
+      );
+      await expect(service.createFromOrder(9001)).rejects.toMatchObject({
+        errorCode: ErrorCodes.INVOICING_CALC_006.code,
+      });
+      expect(prisma.invoices.create).not.toHaveBeenCalled();
+    });
+
+    it('exenta legítima (tarifa 0, impuesto 0) sí recibe su parte del descuento', async () => {
+      const exenta = buildOrderItem({
+        id: 6,
+        product_id: 16,
+        product_name: 'Exenta',
+        quantity: 1,
+        unit_price: money('10000'),
+        total_price: money('10000'),
+        tax_rate: money('0'),
+        tax_amount_item: money('0'),
+        order_item_taxes: [row(9, 'Exento', '0', '0', 'iva', false)],
+      });
+      const { data } = await createDraft({
+        discount_amount: money('1290'),
+        order_items: [camisa(), exenta],
+      });
+      // 1.290 × 10.000 / 129.000 = 100 a la exenta; 1.190 a la Camisa.
+      const [, e] = data.invoice_items.create;
+      expect(e.discount_amount.toString()).toBe('100');
+      expect(e.total_amount.toString()).toBe('9900');
+      expect(data.total_amount.toString()).toBe('127710');
+    });
+
+    it('tarifa compuesta: invalid_rate (el despeje es aditivo)', () => {
+      const result = projectOrderInvoiceLines(
+        [
+          {
+            quantity: 1,
+            total_price: '1000',
+            tax_amount_item: '190',
+            order_item_taxes: [
+              {
+                tax_name: 'IVA',
+                tax_rate: '0.19',
+                tax_amount: '190',
+                tax_type: 'iva',
+                is_compound: true,
+              },
+            ],
+          },
+        ],
+        '10',
+      );
+      expect(result.error).toMatchObject({ code: 'invalid_rate' });
+    });
+  });
+
+  describe('bruto que la tarifa no alcanza (M4): la factura siempre cierra', () => {
+    const dosTarifas = () => ({
+      quantity: 1,
+      total_price: '720',
+      tax_amount_item: '280.8',
+      order_item_taxes: [
+        { tax_name: 'IVA', tax_rate: '0.19', tax_amount: '136.8', tax_type: 'iva' },
+        { tax_name: 'ICUI', tax_rate: '0.2', tax_amount: '144', tax_type: 'icui' },
+      ],
+    });
+
+    it('IVA 19 % + 20 %: el despeje deja 2 ¢ abajo y se reparten 1 ¢ por fila', () => {
+      // 1.000,80 − 0,22 = 1.000,58: el kernel llega a 1.000,56 (base 719,84).
+      const result = projectOrderInvoiceLines([dosTarifas()], '0.22');
+      expect(result.error).toBeUndefined();
+      const [line] = result.lines;
+      expect(line.base.toString()).toBe('719.84');
+      expect(line.tax_amounts.map(String)).toEqual(['136.77', '143.97']);
+      expect(line.base.plus(line.tax_total).toString()).toBe('1000.58');
+      expect(
+        taxSubtotalFindings([
+          { tax_name: 'IVA', tax_type: 'iva', tax_rate: 19, taxable_amount: '719.84', tax_amount: '136.77' },
+          { tax_name: 'ICUI', tax_type: 'icui', tax_rate: 20, taxable_amount: '719.84', tax_amount: '143.97' },
+        ]),
+      ).toEqual([]);
+    });
+
+    it('mensaje del rechazo: sin jerga y sin pedir tocar una orden ya cobrada', async () => {
+      prisma.orders.findFirst.mockResolvedValue(
+        buildOrder({
+          discount_amount: money('247000.01'),
+          order_items: [camisa(), licor(), libro()],
+        }),
+      );
+      const error = await service.createFromOrder(9001).catch((e) => e);
+      expect(String(error.message)).toContain('No se creó la factura');
+      expect(String(error.message)).not.toMatch(/base negativa|centavo/);
+    });
+  });
+
+  describe('NC sobre una línea proyectada con el centavo cerrado en la cuota', () => {
+    // 2 × 500 + IVA 19 % = 1.190; descuento de orden 0,01 ⇒ 1.189,99 no se
+    // alcanza: base 999,99 + IVA 190,00 (trunc 189,99 + 1 ¢).
+    const projected = projectOrderInvoiceLines(
+      [
+        {
+          quantity: 2,
+          total_price: '1000',
+          tax_amount_item: '95',
+          order_item_taxes: [
+            { tax_name: 'IVA 19%', tax_rate: '0.19', tax_amount: '190', tax_type: 'iva' },
+          ],
+        },
+      ],
+      '0.01',
+    ).lines[0];
+    const related = [
+      {
+        id: 501,
+        product_id: 11,
+        product_variant_id: null,
+        is_inclusive: false,
+        tax_amount: Number(projected.tax_total),
+        quantity: 2,
+        unit_price: 500,
+        discount_amount: Number(projected.discount),
+      },
+    ];
+    const iva19 = [
+      { tax_rate_id: 1, tax_name: 'IVA 19%', tax_rate: 19, tax_type: 'iva', invoice_item_id: 501 },
+    ];
+
+    const creditNoteXml = (note: ReturnType<typeof derivePartialNoteLinesViaKernel>, discount: number, quantity: number) => {
+      const header = note.taxes.map(
+        (t) =>
+          ({
+            tax_name: t.tax_name,
+            tax_type: t.tax_type,
+            tax_rate: t.tax_rate.toFixed(2),
+            taxable_amount: t.taxable_amount.toFixed(2),
+            tax_amount: t.tax_amount.toFixed(2),
+          }) as ProviderInvoiceTax,
+      );
+      const items = [
+        {
+          description: 'Producto',
+          quantity: String(quantity),
+          unit_price: '500.00',
+          discount_amount: discount.toFixed(2),
+          tax_amount: Number(note.lines[0].tax_amount).toFixed(2),
+          total_amount: Number(note.lines[0].total_amount).toFixed(2),
+          taxes: header.map((t) => ({ ...t })),
+        } as UblDocumentLine,
+      ];
+      const doc = create({ version: '1.0', encoding: 'UTF-8' }).ele(
+        UBL_NAMESPACES.CREDIT_NOTE,
+        'CreditNote',
+        {
+          'xmlns:cac': UBL_NAMESPACES.CAC,
+          'xmlns:cbc': UBL_NAMESPACES.CBC,
+          'xmlns:ext': UBL_NAMESPACES.EXT,
+        },
+      );
+      UblCommonBuilder.buildTaxTotals(doc, header, 'COP');
+      UblCommonBuilder.buildLegalMonetaryTotal(
+        doc,
+        {
+          tax_amount: Number(note.totals.tax).toFixed(2),
+          items,
+          taxes: header,
+          discount_amount: discount.toFixed(2),
+        },
+        'COP',
+      );
+      UblCommonBuilder.buildDocumentLines(doc, items, header, 'COP', {
+        line_element: 'CreditNoteLine',
+        quantity_element: 'CreditedQuantity',
+      });
+      return { xml: doc.end({ prettyPrint: false }), header };
+    };
+
+    it('fixture: la línea proyectada lleva el centavo en la cuota', () => {
+      expect(projected.base.toString()).toBe('999.99');
+      expect(projected.tax_total.toString()).toBe('190');
+    });
+
+    it('NC de la línea completa: hereda 190,00 y prevalidador + FAU04/FAU06/FAX07 limpios', () => {
+      const note = derivePartialNoteLinesViaKernel(
+        [{ product_id: 11, quantity: 2, unit_price: 500, discount_amount: 0.01 }],
+        related,
+        iva19,
+        920,
+        'credit_note',
+      );
+      expect(note.lines[0].base_amount.toString()).toBe('999.99');
+      expect(note.lines[0].tax_amount.toString()).toBe('190');
+      expect(note.lines[0].total_amount.toString()).toBe('1189.99');
+      expect(taxSubtotalFindings(note.taxes)).toEqual([]);
+      const { xml } = creditNoteXml(note, 0.01, 2);
+      expectDianClean(xml);
+      expect(monetaryTotals(xml).PayableAmount).toBe('1189.99');
+    });
+
+    it('NC parcial (1 de 2): el kernel re-deriva sin el centavo y también cuadra', () => {
+      const note = derivePartialNoteLinesViaKernel(
+        [{ product_id: 11, quantity: 1, unit_price: 500, discount_amount: 0 }],
+        related,
+        iva19,
+        921,
+        'credit_note',
+      );
+      expect(note.lines[0].base_amount.toString()).toBe('500');
+      expect(note.lines[0].tax_amount.toString()).toBe('95');
+      expect(taxSubtotalFindings(note.taxes)).toEqual([]);
+      expectDianClean(creditNoteXml(note, 0, 1).xml);
     });
   });
 
