@@ -1549,6 +1549,43 @@ export class OrderFlowService {
       }
       return { order: await this.getOrder(orderId, tx), applied: true, previousState: order.state };
     });
+
+    // A gateway callback and the staff confirm endpoint both land here. The
+    // payment is already committed; only a fully settled order may mark its
+    // open table session paid. On replay, a processing order can repair a
+    // missed projection, but a legitimately closed table must stay closed.
+    let projectionError: unknown;
+    const settledPayments = result.order.payments.filter((payment) =>
+      ['succeeded', 'captured'].includes(payment.state),
+    );
+    const settledTotal = settledPayments.reduce(
+      (sum, payment) => sum.plus(payment.amount),
+      new Prisma.Decimal(0),
+    );
+    if (
+      settledPayments.length > 0 &&
+      settledTotal.greaterThanOrEqualTo(result.order.grand_total) &&
+      (result.applied || ['processing', 'shipped'].includes(result.order.state))
+    ) {
+      try {
+        const openSession = result.applied || await this.prisma.table_sessions.findFirst({
+          where: { order_id: orderId, store_id: result.order.store_id, closed_at: null },
+          select: { id: true },
+        });
+        if (openSession) {
+          const paymentId = settledPayments.reduce((latest, payment) =>
+            payment.id > latest.id ? payment : latest,
+          ).id;
+          await this.projectPaidOrderToTable(orderId, paymentId);
+        }
+      } catch (error) {
+        // Do not hide a committed payment or skip its remaining post-commit
+        // notifications. Surface ERR-33 after those effects have run.
+        projectionError = error instanceof VendixHttpException
+          ? error
+          : new VendixHttpException(ErrorCodes.POS_TABLE_SESSION_PROJECTION_FAILED_001);
+      }
+    }
     for (const effect of afterCommit) await effect();
     // Después del commit: el pago online quedó `succeeded`. Sólo si la
     // confirmación se aplicó — un no-op (orden ya confirmada o cancelada) no es
@@ -1563,6 +1600,7 @@ export class OrderFlowService {
         old_state: 'pending_payment', new_state: 'processing',
       });
     }
+    if (projectionError) throw projectionError;
     // Explicit result for callbacks: a no-op on a cancelled order is NOT a
     // successful confirmation. Existing HTTP callers still receive an order.
     return { ...result.order, payment_confirmation_applied: result.applied };

@@ -327,7 +327,7 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
     );
     // claim (created → processing) + restauración (→ created)
     expect(prismaMock.orders.updateMany).toHaveBeenLastCalledWith({
-      where: { id: ORDER_ID },
+      where: { id: ORDER_ID, state: 'processing' },
       data: expect.objectContaining({ state: 'created' }),
     });
     expect(posEmits()).toHaveLength(0);
@@ -335,6 +335,7 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
 
   describe('confirmPayment', () => {
     let txMock: any;
+    let projectTablePayment: jest.Mock;
 
     beforeEach(() => {
       txMock = {
@@ -346,6 +347,12 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
         },
       };
       prismaMock.$transaction = jest.fn((fn: any) => fn(txMock));
+      projectTablePayment = jest.fn().mockResolvedValue(null);
+      (service as any).moduleRef = {
+        get: jest.fn().mockReturnValue({
+          projectOrderPaymentToTableSession: projectTablePayment,
+        }),
+      };
       (service as any).getOrder.mockResolvedValue(
         baseOrder({
           state: 'pending_payment',
@@ -404,6 +411,91 @@ describe('OrderFlowService — emisión de factura POS al completar el pago', ()
       await service.confirmPayment(ORDER_ID);
 
       expect(posEmits()).toHaveLength(0);
+    });
+
+    it('proyecta la mesa tras confirmar el pago completo, sin cerrar la sesión', async () => {
+      const pending = baseOrder({
+        state: 'pending_payment',
+        payments: [{ id: 5, state: 'pending', amount: 4000 }],
+      });
+      const settled = baseOrder({
+        state: 'processing',
+        payments: [{ id: 5, state: 'succeeded', amount: 4000 }],
+      });
+      (service as any).getOrder.mockResolvedValueOnce(pending)
+        .mockResolvedValueOnce(pending).mockResolvedValueOnce(settled);
+
+      await service.confirmPayment(ORDER_ID);
+
+      expect(projectTablePayment).toHaveBeenCalledTimes(1);
+      expect(projectTablePayment).toHaveBeenCalledWith(ORDER_ID, 5);
+    });
+
+    it('no marca la mesa pagada por una confirmación parcial', async () => {
+      const partial = baseOrder({
+        state: 'processing',
+        payments: [{ id: 5, state: 'succeeded', amount: 1000 }],
+      });
+      (service as any).getOrder.mockResolvedValue(partial);
+      prismaMock.table_sessions = { findFirst: jest.fn().mockResolvedValue({ id: 17 }) };
+
+      await service.confirmPayment(ORDER_ID);
+
+      expect(projectTablePayment).not.toHaveBeenCalled();
+    });
+
+    it('replay de orden procesando repara la mesa abierta sin segundo cobro', async () => {
+      const settled = baseOrder({
+        state: 'processing',
+        payments: [{ id: 5, state: 'succeeded', amount: 4000 }],
+      });
+      (service as any).getOrder.mockResolvedValue(settled);
+      prismaMock.table_sessions = { findFirst: jest.fn().mockResolvedValue({ id: 17 }) };
+
+      const result = await service.confirmPayment(ORDER_ID);
+
+      expect(result.payment_confirmation_applied).toBe(false);
+      expect(txMock.payments.updateMany).not.toHaveBeenCalled();
+      expect(projectTablePayment).toHaveBeenCalledWith(ORDER_ID, 5);
+      expect(posEmits()).toHaveLength(0);
+    });
+
+    it('replay tras cierre legítimo de mesa no intenta reproyectar una sesión cerrada', async () => {
+      const settled = baseOrder({
+        state: 'processing',
+        payments: [{ id: 5, state: 'succeeded', amount: 4000 }],
+      });
+      (service as any).getOrder.mockResolvedValue(settled);
+      prismaMock.table_sessions = { findFirst: jest.fn().mockResolvedValue(null) };
+
+      await service.confirmPayment(ORDER_ID);
+
+      expect(projectTablePayment).not.toHaveBeenCalled();
+    });
+
+    it('si falla la proyección post-commit conserva el cobro y emite el estado antes de ERR-33', async () => {
+      const pending = baseOrder({
+        state: 'pending_payment',
+        payments: [{ id: 5, state: 'pending', amount: 4000 }],
+      });
+      const settled = baseOrder({
+        state: 'processing',
+        payments: [{ id: 5, state: 'succeeded', amount: 4000 }],
+      });
+      (service as any).getOrder.mockResolvedValueOnce(pending)
+        .mockResolvedValueOnce(pending).mockResolvedValueOnce(settled);
+      projectTablePayment.mockRejectedValue(new Error('projection unavailable'));
+
+      await expect(service.confirmPayment(ORDER_ID)).rejects.toMatchObject({
+        errorCode: 'POS_TABLE_SESSION_PROJECTION_FAILED_001',
+      });
+
+      expect(txMock.payments.updateMany).toHaveBeenCalledTimes(1);
+      expect(posEmits()).toHaveLength(1);
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        'order.status_changed',
+        expect.objectContaining({ order_id: ORDER_ID, new_state: 'processing' }),
+      );
     });
   });
 });

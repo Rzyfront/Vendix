@@ -19,7 +19,6 @@ import { StoreContextRunner } from '@common/context/store-context-runner.service
 import { WebhookEvent } from '../interfaces';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 import { PaymentLinksService } from '../../payment-links/payment-links.service';
-import { TableSessionsService } from '../../tables/table-sessions.service';
 import { InvoicingService } from '../../invoicing/invoicing.service';
 import { InvoiceFlowService } from '../../invoicing/invoice-flow/invoice-flow.service';
 import {
@@ -59,8 +58,6 @@ export class WebhookHandlerService {
     private readonly storeContextRunner: StoreContextRunner,
     @Inject(forwardRef(() => OrderFlowService))
     private orderFlowService: OrderFlowService,
-    // Restaurant payment projection after gateway confirmation.
-    private readonly tableSessionsService: TableSessionsService,
     // A.3 CP-facturacion-fixes: web auto-send on payment confirmation (ADR-03).
     // InvoicingModule exports both; PaymentsModule imports it (no cycle: the
     // invoicing graph never imports payments/orders/tables).
@@ -319,7 +316,7 @@ export class WebhookHandlerService {
       await this.emitPaymentReceivedAccounting(result.paymentId);
     }
     if (result.orderId && result.shouldConfirmOrder) {
-      await this.confirmOrderPaid(result.orderId, result.paymentId!);
+      await this.confirmOrderPaid(result.orderId);
     } else if (result.transitioned && result.orderId && ['failed', 'cancelled'].includes(status)) {
       await this.cancelOrderIfOpen(result.orderId, status, gatewayResponse);
     }
@@ -614,7 +611,7 @@ export class WebhookHandlerService {
    * Invokes OrderFlowService.confirmPayment in store context. Used after
    * the payment-update tx commits so we don't nest transactions.
    */
-  private async confirmOrderPaid(orderId: number, paymentId?: number): Promise<void> {
+  private async confirmOrderPaid(orderId: number): Promise<void> {
     try {
       const client = this.prisma.withoutScope();
       const order = await client.orders.findUnique({ where: { id: orderId } });
@@ -624,26 +621,12 @@ export class WebhookHandlerService {
       await this.storeContextRunner.runInStoreContext(
         order.store_id,
         async () => {
+          // OrderFlow owns the post-commit table projection, including repair
+          // on a processing-state replay. Let its failure reach handleWebhook
+          // so dedup is released; the terminal payment CAS prevents a second
+          // monetary receipt when the gateway retries.
           const confirmed = await this.orderFlowService.confirmPayment(orderId);
           if (!confirmed || !['processing', 'shipped'].includes(confirmed.state)) return;
-
-          // El pago y la confirmación ya hicieron commit. Una mesa pagada
-          // permanece abierta y ocupada hasta que el mesero la cierre.
-          if (paymentId != null) {
-            try {
-              await this.tableSessionsService.projectOrderPaymentToTableSession(
-                orderId,
-                paymentId,
-              );
-            } catch (projectionError) {
-              // El webhook no debe deshacer ni reintentar un cobro confirmado.
-              // La proyección tipada queda registrada para conciliación.
-              this.logger.error(
-                `POS_TABLE_SESSION_PROJECTION_FAILED_001 order=${orderId} payment=${paymentId}: ${(projectionError as Error)?.message ?? String(projectionError)}`,
-                projectionError instanceof Error ? projectionError.stack : undefined,
-              );
-            }
-          }
 
           // El dinero acaba de ENTRAR: éste es el punto donde el inventario
           // del carril digital diferido puede salir. Ver
