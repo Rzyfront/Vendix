@@ -166,7 +166,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(h.getState()).toBe('created');
   });
 
-  it.each(['created', 'shipped'] as const)(
+  it.each(['created', 'shipped', 'pending_payment'] as const)(
     'método de pago inválido restaura %s tras el claim, sin pago ni finish',
     async (state) => {
       const h = harness(false, state);
