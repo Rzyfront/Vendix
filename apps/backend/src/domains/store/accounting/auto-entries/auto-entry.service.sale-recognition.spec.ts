@@ -200,6 +200,7 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
     source_type,
     total_credit: sum(lines, 'credit_amount'),
     accounting_entry_lines: lines.map((l) => ({
+      debit_amount: l.debit_amount,
       credit_amount: l.credit_amount,
       account: { code: l.account_code },
     })),
@@ -276,6 +277,59 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
             },
           ]),
         }),
+      }),
+    );
+  });
+
+  it('venta POS pagada entera con propina + descuento ⇒ la factura se omite y el asiento cuadra', async () => {
+    // Venta 16.900 − descuento 1.000 = 15.900 facturado; cobro 15.900 + propina 1.690.
+    const DISCOUNT = 1000;
+    const TIP = 1690;
+    const INVOICE_TOTAL = SALE.total - DISCOUNT;
+    const { service, createAutoEntry, unscoped } = build({
+      invoice: {
+        order_id: SALE.order_id,
+        invoice_type: 'sales_invoice',
+        total_amount: INVOICE_TOTAL,
+      },
+    });
+
+    await service.onPaymentReceived({
+      payment_id: SALE.payment_id,
+      organization_id: 1,
+      store_id: 2,
+      order_id: SALE.order_id,
+      amount: INVOICE_TOTAL + TIP,
+      subtotal_amount: SALE.subtotal,
+      discount_amount: DISCOUNT,
+      tax_amount: SALE.tax,
+      shipping_amount: SALE.shipping,
+      tax_breakdown: [{ tax_type: 'iva', tax_amount: SALE.tax }],
+      tip_amount: TIP,
+    });
+    const paymentLines = linesOf(createAutoEntry.mock.calls[0]);
+    expect(sum(paymentLines, 'debit_amount')).toBe(
+      sum(paymentLines, 'credit_amount'),
+    );
+    expect(creditOn(paymentLines, '238005')).toBe(TIP);
+    // total_credit (18.590) ≠ factura (15.900): lo comparable es lo reconocido
+    // de venta = total_credit − propina − DR descuento.
+    expect(sum(paymentLines, 'credit_amount')).toBe(SALE.total + TIP);
+
+    unscoped.accounting_entries.findMany.mockResolvedValue([
+      asPostedEntry(502, 'payment.received', paymentLines),
+    ]);
+    const result: any = await service.onInvoiceValidated({
+      ...invoiceEvent,
+      total: INVOICE_TOTAL,
+    });
+
+    expect(createAutoEntry).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(
+      expect.objectContaining({
+        skipped: true,
+        reason: 'sale_already_recognized',
+        covering_entry_ids: [502],
       }),
     );
   });
