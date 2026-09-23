@@ -209,6 +209,117 @@ describe('credit-notes · parcial por kernel (B.1/F-020)', () => {
     );
   });
 
+  describe('factura mixta con envío gravado (desglose por invoice_item_id)', () => {
+    // Factura de `createFromOrder`: plato 50.000 + INC 4.000 (línea 1) y
+    // Envío 12.605,04 + IVA 2.394,96 (línea 2), cada fila ligada a su línea.
+    const mixedRelated = () => [
+      { id: 1, product_id: 11, product_variant_id: null, is_inclusive: false, tax_amount: 4000 },
+      { id: 2, product_id: null, product_variant_id: null, is_inclusive: false, tax_amount: 2394.96 },
+    ];
+    const mixedTaxes = () => [
+      { ...scheme({ tax_rate_id: 68, tax_name: 'INC' }), invoice_item_id: 1 },
+      {
+        ...scheme({ tax_rate_id: 1, tax_name: 'IVA 19%', tax_rate: 19, tax_type: 'iva' }),
+        invoice_item_id: 2,
+      },
+    ];
+
+    it('NC parcial sólo del Envío ⇒ IVA 19 % desde la fila ligada, sin exigir taxes', () => {
+      const result = derivePartialNoteLinesViaKernel(
+        [{ product_id: null, description: 'Envio', quantity: 1, unit_price: 12605.04 }],
+        mixedRelated(),
+        mixedTaxes(),
+        910,
+        'credit_note',
+      );
+      expect(result.lines[0].base_amount.toString()).toBe('12605.04');
+      // trunc(12.605,04 × 19 %) = 2.394,95: 1 ¢ bajo la cuota facturada
+      // (2.394,96, truncado del despeje al vender) — la nota acredita de menos.
+      expect(result.lines[0].tax_amount.toString()).toBe('2394.95');
+      expect(result.taxes).toEqual([
+        {
+          tax_rate_id: 1,
+          tax_name: 'IVA 19%',
+          tax_rate: 19,
+          taxable_amount: 12605.04,
+          tax_amount: 2394.95,
+          tax_type: 'iva',
+        },
+      ]);
+    });
+
+    it('NC parcial de plato + Envío ⇒ una fila por tributo, cada una con sus bases', () => {
+      const result = derivePartialNoteLinesViaKernel(
+        [
+          { product_id: 11, description: 'Plato', quantity: 1, unit_price: 25000 },
+          { product_id: null, description: 'Envio', quantity: 1, unit_price: 12605.04 },
+        ],
+        mixedRelated(),
+        mixedTaxes(),
+        911,
+        'credit_note',
+      );
+      expect(result.lines[0].tax_amount.toString()).toBe('2000');
+      expect(result.taxes).toHaveLength(2);
+      expect(result.taxes.find((t) => t.tax_type === 'inc')).toMatchObject({
+        tax_rate: 8,
+        taxable_amount: 25000,
+        tax_amount: 2000,
+      });
+      expect(result.taxes.find((t) => t.tax_type === 'iva')).toMatchObject({
+        tax_rate: 19,
+        taxable_amount: 12605.04,
+        tax_amount: 2394.95,
+      });
+      // Σ filas = impuesto de cabecera; Σ bases = subtotal.
+      expect(result.totals.tax.toString()).toBe('4394.95');
+      expect(result.totals.subtotal.toString()).toBe('37605.04');
+    });
+
+    it('gemela sin id o sin filas ligadas ⇒ sigue exigiendo taxes (CALC_001)', () => {
+      const noIds = mixedRelated().map(({ id: _id, ...rest }) => rest);
+      expect(() =>
+        derivePartialNoteLinesViaKernel(
+          [{ product_id: null, quantity: 1, unit_price: 12605.04 }],
+          noIds,
+          mixedTaxes(),
+          912,
+          'credit_note',
+        ),
+      ).toThrow(expect.objectContaining({ errorCode: 'INVOICING_CALC_001' }));
+
+      const unlinked = mixedTaxes().map(({ invoice_item_id: _i, ...rest }) => rest);
+      expect(() =>
+        derivePartialNoteLinesViaKernel(
+          [{ product_id: null, quantity: 1, unit_price: 12605.04 }],
+          mixedRelated(),
+          unlinked,
+          913,
+          'credit_note',
+        ),
+      ).toThrow(expect.objectContaining({ errorCode: 'INVOICING_CALC_001' }));
+    });
+
+    it('línea con dos tributos ligados (IVA + ICA) ⇒ CALC_001, no se elige uno', () => {
+      const taxes = [
+        ...mixedTaxes(),
+        {
+          ...scheme({ tax_rate_id: 9, tax_name: 'ICA', tax_rate: 7, tax_type: 'ica' }),
+          invoice_item_id: 2,
+        },
+      ];
+      expect(() =>
+        derivePartialNoteLinesViaKernel(
+          [{ product_id: null, quantity: 1, unit_price: 12605.04 }],
+          mixedRelated(),
+          taxes,
+          914,
+          'credit_note',
+        ),
+      ).toThrow(expect.objectContaining({ errorCode: 'INVOICING_CALC_001' }));
+    });
+  });
+
   it('bruto inalcanzable ($17/INC 8%) ⇒ CALC_005 antes de numerar', () => {
     // Mismo caso que el gate del motor (A.2): f(15.74) = 16.99 y f(15.75)
     // salta a 17.01 — el kernel persiste closest-below y la nota bloquea.
