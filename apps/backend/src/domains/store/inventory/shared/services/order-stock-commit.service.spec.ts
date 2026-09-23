@@ -140,6 +140,37 @@ describe('OrderStockCommitService — claim atómico anti doble-descuento', () =
     );
     expect(result.committedItemCount).toBe(1);
   });
+
+  it('no vuelve a consumir un plato cuyo BOM ya se descontó al disparar a cocina', async () => {
+    const firedOrder: any = buildOrder();
+    firedOrder.stores.industries = ['restaurant'];
+    firedOrder.order_items[0].products.product_type = 'prepared';
+    firedOrder.order_items[0].inventory_consumed_at_fire = true;
+    txMock.orders.findFirst.mockResolvedValue(firedOrder);
+    txMock.orders.findUnique.mockResolvedValue(firedOrder);
+
+    const result = await service.commitOrderDelivery(1, OPTS, txMock);
+
+    expect(txMock.order_items.updateMany).not.toHaveBeenCalled();
+    expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
+    expect(stockLevelManagerMock.releaseReservation).not.toHaveBeenCalled();
+    expect(result.committedItemCount).toBe(0);
+  });
+
+  it('no descuenta el plato preparado pendiente de fire al cobrar la orden restaurante', async () => {
+    const pendingOrder: any = buildOrder();
+    pendingOrder.stores.industries = ['restaurant'];
+    pendingOrder.order_items[0].products.product_type = 'prepared';
+    txMock.orders.findFirst.mockResolvedValue(pendingOrder);
+    txMock.orders.findUnique.mockResolvedValue(pendingOrder);
+
+    const result = await service.commitOrderDelivery(1, OPTS, txMock);
+
+    expect(txMock.order_items.updateMany).not.toHaveBeenCalled();
+    expect(stockLevelManagerMock.updateStock).not.toHaveBeenCalled();
+    expect(result.committedItemCount).toBe(0);
+  });
+
   it('no consume una orden cancelada aunque el callback llegue tarde', async () => {
     txMock.$queryRaw.mockResolvedValue([{ id: 1, state: 'cancelled' }]);
     await expect(service.commitOrderDelivery(1, OPTS, txMock)).rejects
