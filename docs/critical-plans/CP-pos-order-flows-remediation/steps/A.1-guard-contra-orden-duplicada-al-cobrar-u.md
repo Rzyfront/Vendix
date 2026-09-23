@@ -1,0 +1,49 @@
+---
+id: A.1
+title: "Guard contra orden duplicada al cobrar un borrador reabierto"
+phase: A
+status: pending
+owner: none
+updated: 2026-09-20
+contracts: [FB-01, FB-02, ERR-34, ERR-35, DB-02, DB-14]
+adrs: []
+skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-error-handling, vendix-prisma-scopes, vendix-zoneless-signals, how-to-test]
+---
+# A.1 — Guard contra orden duplicada al cobrar un borrador reabierto
+
+- **Skills:** `vendix-backend` y `vendix-backend-api` (rama nueva dentro de `createOrUpdateOrderFromPos` y superficie HTTP del cobro POS) · `vendix-validation` (campo nuevo en un DTO bajo `forbidNonWhitelisted`) · `vendix-error-handling` (registrar el código tipado en `error-codes.ts`, nunca un enum local) · `vendix-prisma-scopes` (la orden referida se resuelve dentro del scope de tienda, no por id crudo) · `vendix-zoneless-signals` (el paso de envío recibe el id por `input()`) · `how-to-test` (los tres esquemas de flujo sobre los cuatro carriles de cobro).
+- **Resources:** `apps/backend/src/domains/store/payments/dto/create-pos-payment.dto.ts:264-702` (`CreatePosPaymentDto` NO declara `order_id`; el único `order_id` del archivo es `:709`, de la clase distinta `UpdateOrderWithPaymentDto:705`) · `apps/backend/src/domains/store/payments/payments.service.ts:4057-4130` (`createOrUpdateOrderFromPos`: sin `table_session_id` ni `table_id` cae a la rama de venta fresca y crea una orden nueva) · `apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.ts:927-947` (`processOrder` llama `processShippingSale` sin ninguna referencia a la orden reabierta) y `:98` (el componente solo declara el input `cartState`) · `apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/pos-checkout-shell.component.html:384-387` (al paso de envío solo se le pasa `[cartState]`) · `apps/frontend/src/app/private/modules/store/pos/services/pos-payment.service.ts:535-690` (`processShippingSale`, sin `order_id`), `:717` y `:801` (fiado y fiado-con-plazos SÍ lo envían) · `apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-payment-step.component.ts:701-720` (precedente ya resuelto: con `editingOrderId` el carril de mostrador va a `flow/pay`) · `apps/frontend/src/app/private/modules/store/pos/services/pos-cart.service.ts:1197,1243,1351` (`linkedOrderId` sí se restaura al reabrir) · `apps/backend/src/main.ts:246` (`forbidNonWhitelisted`) · hub §Context, P0 de N9 · sin ADR: ver **Business decision**.
+- **Business decision:** Cobrar un borrador reabierto **liquida la orden que ya existe**; el carril POS nunca materializa una segunda orden para un carrito adoptado. No hay ADR porque no hubo alternativas de negocio que decidir: el dueño lo reportó como P0 dentro de N9 y el hub lo fija como Objetivo Específico 1 ("reabrir un borrador de envío y cobrar liquida **la misma** orden, verificado por conteo de filas"). La regla se apoya en invariantes ya declaradas (DB-02, DB-14), no en una política nueva.
+- **Why:** Al reabrir un borrador con envío el carrito recupera `linkedOrderId`, pero el paso de envío ni lo recibe ni lo reenvía: `processShippingSale` arma el payload sin `order_id` y `POST /store/payments/pos` entra por la rama de venta fresca de `createOrUpdateOrderFromPos`. Resultado: **dos** filas en `orders` con los mismos ítems, el pago contra la nueva, el borrador vivo con su reserva sin liberar y una caja que cuadra contra una orden que el cajero no ve. El mismo hueco de contrato rompe el fiado por el lado contrario: el frontend ya manda `order_id` (`:717`, `:801`) y `forbidNonWhitelisted` lo convierte en 400, así que la cuenta por cobrar no se registra nunca. El carril de mostrador ya está resuelto (`pos-payment-step:701-720`) — la deuda es la del carril de envío y la del contrato.
+- **Output:** `order_id?: number` declarado y validado en `CreatePosPaymentDto`; rama de vinculación en `createOrUpdateOrderFromPos` que resuelve esa orden dentro del scope de tienda y la liquida en vez de crear otra; `POS_DRAFT_DUPLICATE_ORDER_001` registrado en `error-codes.ts` y lanzado con `VendixHttpException` cuando la orden referida ya tiene pago liquidado o no es cobrable; el paso de envío recibe `editingOrderId` por `input()` y lo propaga a `processShippingSale`; mapeo de `POS_DRAFT_DUPLICATE_ORDER_001` y `POS_DRAFT_REQUIRES_PAYMENT_001` en `error-messages.ts`; specs de rechazo que fijan `errorCode`.
+- **Contracts touched:** FB-01 (el `order_id?` nuevo), FB-02 (el fiado deja de dar 400), ERR-34 (código nuevo), ERR-35 (mensaje accionable), DB-02 y DB-14 (el pago queda contra la orden correcta y no se duplica).
+- **Data impact:** Sin DDL, sin backfill y sin script de datos. En runtime el efecto sobre filas es **negativo**: `orders` deja de ganar una fila por cada cobro de borrador reabierto y `payments.order_id` pasa a apuntar a la orden preexistente. Las órdenes ya duplicadas en producción no se reparan aquí — el hub lo declara Non-Goal y el inventario correspondiente se entrega aparte.
+- **Blast radius:** Si la vinculación resuelve mal, el pago entra contra **otra** orden, que es peor que el defecto actual: lo nota el cajero al cierre de caja y contabilidad en el cruce `Σ payments` vs `grand_total`. Si el guard queda demasiado estricto, un cobro legítimo se rechaza con 409 y la venta se traba en el mostrador. Superficies tocadas: los cuatro carriles de cobro (P1 POS directo, P2 borrador reabierto, P3 detalle de orden, P4 orden adoptada) y el fiado.
+- **Rollback:** Revertir el commit del paso. El DTO vuelve a rechazar `order_id`, el frontend vuelve a no enviarlo y el comportamiento regresa exactamente al de hoy; no hay filas escritas por el paso que haya que deshacer. Los cuatro carriles quedan independientes entre sí, como fija la tabla de Rollback del hub para la fase A.
+- **Verification:**
+  - `TOKEN=$(curl -sk -X POST https://api.vendix.com/api/auth/login -H 'Content-Type: application/json' -d '{"email":"admin@vendix.online","password":"<pwd>","organization_slug":"vendix"}' | jq -r '.data.access_token')`
+  - `curl -sk -H "Authorization: Bearer $TOKEN" 'https://api.vendix.com/api/store/orders?state=draft&limit=1' | tee ../evidence/A.1-draft-before.json | jq '.data[0].id'`
+  - `curl -sk -o ../evidence/A.1-pos-order-id.json -w '%{http_code}\n' -X POST https://api.vendix.com/api/store/payments/pos -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d @../evidence/A.1-payload-reopened-draft.json` (hoy 400 por `forbidNonWhitelisted`; tras el paso, 200 sin fila nueva)
+  - `curl -sk -o ../evidence/A.1-pos-duplicate.json -w '%{http_code}\n' -X POST https://api.vendix.com/api/store/payments/pos -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d @../evidence/A.1-payload-already-paid.json` (espera 409 `POS_DRAFT_DUPLICATE_ORDER_001`)
+  - `psql "$DATABASE_URL" -c "SELECT count(*) FROM orders WHERE store_id=:store AND created_at > :t0;"` antes y después del cobro: debe ser idéntico
+  - `psql "$DATABASE_URL" -c "SELECT order_id, state, amount FROM payments WHERE created_at > :t0 ORDER BY id DESC LIMIT 5;"`
+  - `npm --prefix apps/backend run test:path -- src/domains/store/payments/payments.service.spec.ts`
+  - `npm --prefix apps/backend run test:path -- src/domains/store/payments/payments.controller.spec.ts`
+  - `npx ng test --include='**/pos-shipping-step.component.spec.ts' --watch=false --browsers=ChromeHeadless` desde `apps/frontend`
+  - Playwright MCP — recorrido 1 del hub: guardar borrador de envío → reabrir → editar → cobrar; capturar el conteo de `orders` antes y después en `evidence/A.1-e2e-recorrido1.md`
+- **Acceptance checklist:**
+  - [ ] `CreatePosPaymentDto` declara `order_id?: number` con `@IsOptional() @IsInt() @Min(1) @Type(() => Number)`
+  - [ ] La orden referida por `order_id` se resuelve dentro del scope de tienda; una orden ajena devuelve 404 sin filtrar datos
+  - [ ] Con `order_id` presente, `createOrUpdateOrderFromPos` liquida esa orden y NO llama a la rama de venta fresca
+  - [ ] `POS_DRAFT_DUPLICATE_ORDER_001` está registrado en `error-codes.ts` con HTTP 409 y se lanza con `VendixHttpException`
+  - [ ] El guard rechaza cuando la orden referida ya tiene un pago `succeeded` o `captured`, y el mensaje nombra el número de orden
+  - [ ] `pos-shipping-step.component.ts` declara `editingOrderId` como `input<number | null>(null)` y el shell se lo pasa
+  - [ ] `processShippingSale` envía `order_id` cuando el carrito está adoptado y lo omite cuando no lo está
+  - [ ] El fiado (`:717`) y el fiado con plazos (`:801`) dejan de responder 400 y registran la cuenta por cobrar
+  - [ ] Cobrar un borrador reabierto no incrementa el conteo de filas de `orders`, verificado por SQL antes/después
+  - [ ] `payments.order_id` del cobro apunta a la orden preexistente, no a una nueva
+  - [ ] Hay un test que falla antes del fix y que fija `errorCode` (no solo `toBeInstanceOf(VendixHttpException)`)
+  - [ ] `error-messages.ts` mapea `POS_DRAFT_DUPLICATE_ORDER_001` y `POS_DRAFT_REQUIRES_PAYMENT_001` a texto accionable en español
+  - [ ] Ningún carril de este paso termina en 500: las evidencias no contienen `SYS_INTERNAL_001`
+  - [ ] Las filas FB-01, FB-02, ERR-34, ERR-35, DB-02 y DB-14 quedan marcadas con su evidencia enlazada
+- **Status:** pending

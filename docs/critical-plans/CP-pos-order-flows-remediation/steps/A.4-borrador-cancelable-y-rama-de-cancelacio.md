@@ -1,0 +1,48 @@
+---
+id: A.4
+title: "Borrador cancelable y rama de cancelación inalcanzable"
+phase: A
+status: pending
+owner: none
+updated: 2026-09-20
+contracts: [FB-22, FB-24, DB-01, DB-27, ERR-38]
+adrs: []
+skills: [vendix-backend, vendix-error-handling, vendix-inventory-stock, vendix-restaurant-ops, vendix-frontend, vendix-zoneless-signals, how-to-test]
+---
+# A.4 — Borrador cancelable y rama de cancelación inalcanzable
+
+- **Skills:** `vendix-backend` (dos constantes en dos archivos y un claim atómico que no se puede aflojar) · `vendix-error-handling` (el rechazo actual es una `BadRequestException` cruda sin código) · `vendix-inventory-stock` (la cadena de efectos de `cancelOrder` libera reservas: sobre un borrador puede no haber ninguna) · `vendix-restaurant-ops` (abrir una mesa crea la orden en `draft`: el borrador cancelable toca el carril de mesa) · `vendix-frontend` y `vendix-zoneless-signals` (el botón existe en el menú de acciones y lo borra un filtro) · `how-to-test`.
+- **Resources:** `apps/backend/src/domains/store/orders/order-flow/order-flow.service.ts:56-72` (`VALID_TRANSITIONS`, con `draft: ['created','cancelled']` en `:57`), `:75-79` (`CANCELABLE_STATES` sin `draft`), `:2980` (`cancelOrder`), `:2985-2990` (`notCancelableError`, `BadRequestException` sin código tipado), `:3000-3002` (fast-path), `:3110` y `:3144` (claim atómico y su rechazo) · `apps/backend/src/domains/store/orders/order-flow/order-cancellation-policy.util.ts:32` (la SEGUNDA `CANCELABLE_STATES`, un `Set` con los mismos tres estados) y `:92-101` (`getOrderCancellationPolicy`) · `apps/backend/src/domains/store/orders/orders.service.ts:826` y `:1159` (los dos puntos donde la política viaja al frontend) · `apps/frontend/src/app/private/modules/store/orders/pages/order-details/order-details-page.component.ts:908-921` (el `case 'draft'` que empuja el botón Cancelar con un comentario que promete el comportamiento) y `:1090-1098` (`applyCancellationPolicy`, que lo borra) · `apps/backend/src/domains/store/tables/table-sessions.service.ts:363-386` (abrir mesa crea la orden con `state: 'draft'`) · registry `registry/fb.md` fila FB-22 · hub §Context (N9) y Objetivo Específico 2 · sin ADR: ver **Business decision**.
+- **Business decision:** Una orden `draft` abandonada **se puede cancelar desde la UI**; hoy la única salida es el borrado duro y eso no deja rastro. Lo fija el hub como Objetivo Específico 2 a partir de lo reportado por el dueño en N9; no hubo alternativas de negocio en disputa, por eso no tiene ADR propio. Carve-out de implementación que este paso adopta y que el dueño debe confirmar: un `draft` **atado a una sesión de mesa abierta** no se cancela por esta vía —se cierra desde la mesa—, porque abrir una mesa crea precisamente una orden `draft` y cancelarla dejaría la sesión abierta apuntando a una orden cancelada.
+- **Why:** La arista `draft → cancelled` existe en la máquina de estados (`:57`) y nadie puede recorrerla. `CANCELABLE_STATES` (`:75-79`) no incluye `draft`, así que el fast-path de `cancelOrder` lanza una `BadRequestException` cruda antes de llegar al claim: la rama es inalcanzable por construcción, no por permiso. El mismo conjunto está duplicado como `Set` en `order-cancellation-policy.util.ts:32`, que alimenta `cancellation_policy` en las dos respuestas de orden; por eso el frontend hace un movimiento contradictorio consigo mismo: el `case 'draft'` empuja el botón Cancelar con un comentario que dice *"`draft` behaves exactly like `created`: register payment, modify (privileged), cancel"*, y catorce líneas después `applyCancellationPolicy` lo filtra porque `can_cancel` llega en `false`. El cajero se queda con un borrador que no puede cerrar ni cancelar, y el único camino existente es `DELETE /store/orders/:id`, un borrado duro que destruye la evidencia de que la venta se intentó.
+- **Output:** `draft` incorporado a las dos listas `CANCELABLE_STATES` (servicio y util), con una sola fuente si el ejecutor encuentra cómo compartirla sin ciclo de imports; guard nuevo que rechaza cancelar un `draft` con sesión de mesa abierta, con código tipado y mensaje que manda a cerrar la cuenta desde la mesa; el botón Cancelar deja de ser filtrado para un borrador sin mesa; la cadena de efectos de `cancelOrder` verificada sobre un borrador (sin reservas, sin pagos, sin tickets) para confirmar que no intenta liberar ni reversar lo que nunca existió; specs de ambos lados.
+- **Contracts touched:** FB-22 (`DELETE` deja de ser el único camino para un borrador abandonado y su verificación de rechazo sobre orden con pagos se conserva), FB-24 (`flow/cancel` gana un estado de origen), DB-01 (`orders.state` y su `_flow_metadata` ganan la transición `draft→cancelled`), DB-27 (se confirma que un borrador sin reservas no rompe la liberación), ERR-38 (el blocker de reversa de pago debe seguir disparando si el borrador llegara a tener un pago confirmado).
+- **Data impact:** Escribe `orders.state = 'cancelled'` y su `internal_notes._flow_metadata` en las órdenes que un operador cancele deliberadamente, por la misma cadena de efectos que ya usan `created`, `pending_payment` y `processing`. Sin DDL, sin backfill y sin script masivo: ninguna orden cambia de estado por el solo hecho de desplegar el paso. Los borradores ya borrados en duro no se recuperan.
+- **Blast radius:** El riesgo alto es el carril de mesa: si el guard de sesión abierta falta o se escribe mal, cancelar el borrador de una mesa deja la sesión abierta contra una orden `cancelled` y la mesa queda ocupada y sin salida; lo nota el mesero y el encargado al cierre. Riesgo medio: si la cadena de efectos asume reservas o pagos que un borrador no tiene, la cancelación revienta a medio camino y deja la orden en un estado intermedio. Riesgo bajo, pero real: exponer Cancelar donde antes no estaba invita a cancelar en vez de cobrar.
+- **Rollback:** Revertir el commit: `draft` sale de las dos listas, la política vuelve a devolver `can_cancel:false` y el frontend vuelve a filtrar el botón. Las órdenes ya canceladas por esta vía **quedan canceladas** — `cancelled` sí tiene aristas de salida en `VALID_TRANSITIONS` (`pending_payment`, `created`, `processing`), de modo que se recuperan por el flujo de reactivación existente, una por una y con auditoría. No es una reversión silenciosa de datos.
+- **Verification:**
+  - `curl -sk -o ../evidence/A.4-cancel-draft.json -w '%{http_code}\n' -X POST "https://api.vendix.com/api/store/orders/$DRAFT_ORDER/flow/cancel" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"reason":"borrador abandonado"}'` (espera 200)
+  - `curl -sk -o ../evidence/A.4-cancel-draft-con-mesa.json -w '%{http_code}\n' -X POST "https://api.vendix.com/api/store/orders/$TABLE_DRAFT/flow/cancel" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"reason":"prueba mesa abierta"}'` (espera rechazo tipado, no 200 y no 500)
+  - `curl -sk -H "Authorization: Bearer $TOKEN" "https://api.vendix.com/api/store/orders/$DRAFT_ORDER" | tee ../evidence/A.4-policy.json | jq '.data.cancellation_policy'` (espera `can_cancel: true` para el borrador sin mesa)
+  - `psql "$DATABASE_URL" -c "SELECT id, state, internal_notes FROM orders WHERE id=$DRAFT_ORDER;"`
+  - `psql "$DATABASE_URL" -c "SELECT count(*) FROM stock_reservations WHERE reserved_for_type='order' AND reserved_for_id=$DRAFT_ORDER AND status='active';"` (0 antes y después: el borrador no reservaba)
+  - `psql "$DATABASE_URL" -c "SELECT s.id, s.closed_at, o.state FROM table_sessions s JOIN orders o ON o.id=s.order_id WHERE s.closed_at IS NULL AND o.state='cancelled';"` (debe devolver 0 filas)
+  - `npm --prefix apps/backend run test:path -- src/domains/store/orders/order-flow/order-flow.service.spec.ts`
+  - `npm --prefix apps/backend run test:path -- src/domains/store/orders/order-flow/order-cancellation-policy.util.spec.ts`
+  - `npm --prefix apps/backend run test:path -- src/domains/store/orders/order-flow/order-cancellation-race.integration.spec.ts`
+  - Playwright MCP — abrir el detalle de un borrador POS abandonado, cancelarlo y confirmar que desaparece de la lista de pendientes; guardar en `evidence/A.4-e2e-borrador.md`
+- **Acceptance checklist:**
+  - [ ] `draft` está en `CANCELABLE_STATES` del servicio y en el `Set` homónimo del util de política
+  - [ ] Las dos listas quedan sincronizadas y el paso deja constancia de cuál es la fuente
+  - [ ] El claim atómico conserva su `WHERE` condicional: dos cancelaciones concurrentes siguen teniendo un solo ganador
+  - [ ] Cancelar un `draft` sin mesa devuelve 200 y deja `orders.state='cancelled'`
+  - [ ] Cancelar un `draft` con sesión de mesa abierta se rechaza con código tipado y mensaje accionable
+  - [ ] No queda ninguna fila con sesión abierta apuntando a una orden `cancelled`
+  - [ ] `cancellation_policy.can_cancel` llega en `true` para un borrador elegible en las dos respuestas de orden
+  - [ ] El botón Cancelar Orden es visible en el detalle de un borrador y su handler completa el flujo
+  - [ ] La cadena de efectos no falla sobre un borrador sin reservas, sin pagos y sin tickets de cocina
+  - [ ] El blocker de reversa de pago sigue disparando si el borrador tuviera un pago confirmado
+  - [ ] Hay un test que falla antes del fix probando la arista `draft → cancelled`
+  - [ ] Queda registrado como deuda que el rechazo por estado no cancelable sigue siendo una excepción sin código tipado
+  - [ ] Las filas FB-22, FB-24, DB-01, DB-27 y ERR-38 quedan marcadas con su evidencia enlazada
+- **Status:** pending
