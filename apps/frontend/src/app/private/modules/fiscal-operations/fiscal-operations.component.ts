@@ -7,7 +7,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { map, switchMap } from 'rxjs/operators';
@@ -18,6 +18,7 @@ import {
   CardComponent,
   IconComponent,
   ItemListCardConfig,
+  PaginationComponent,
   ResponsiveDataViewComponent,
   SaveRequirementsModalComponent,
   SelectorComponent,
@@ -38,6 +39,7 @@ import {
   FiscalObligation,
   FiscalOperationEvent,
   FiscalOverview,
+  POS_UNCOVERED_SALE_EVENT_TYPE,
   TaxDeclarationDraft,
   TaxDeclarationLine,
 } from './interfaces/fiscal-operations.interface';
@@ -59,7 +61,7 @@ type FiscalTab =
   | 'history'
   | 'rules';
 
-type AuditView = 'evidence' | 'history';
+type AuditView = 'evidence' | 'history' | 'uncovered-sales';
 
 @Component({
   selector: 'app-fiscal-operations',
@@ -73,6 +75,7 @@ type AuditView = 'evidence' | 'history';
     FiscalRulesTabComponent,
     FormsModule,
     IconComponent,
+    PaginationComponent,
     ResponsiveDataViewComponent,
     SaveRequirementsModalComponent,
     SelectorComponent,
@@ -462,6 +465,21 @@ type AuditView = 'evidence' | 'history';
               <app-icon name="clipboard-list" [size]="14" />
               Historial
             </button>
+            @if (fiscalScope === 'store') {
+              <button
+                type="button"
+                role="tab"
+                [attr.aria-selected]="auditView() === 'uncovered-sales'"
+                class="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors md:text-sm"
+                [class]="auditView() === 'uncovered-sales'
+                  ? 'bg-primary text-[var(--color-text-on-primary)]'
+                  : 'text-text-secondary hover:text-text-primary'"
+                (click)="auditView.set('uncovered-sales')"
+              >
+                <app-icon name="alert-triangle" [size]="14" />
+                Ventas sin documento ({{ uncoveredTotal() }})
+              </button>
+            }
           </div>
         </div>
       }
@@ -520,6 +538,39 @@ type AuditView = 'evidence' | 'history';
           </div>
         </app-card>
       }
+      @if (activeTab() === 'audit' && auditView() === 'uncovered-sales' && fiscalScope === 'store') {
+        <app-card [responsive]="true" [padding]="false">
+          <div class="px-4 py-3 md:px-6 md:py-4 md:border-b md:border-border">
+            <h2 class="text-sm font-semibold text-text-primary md:text-base">
+              Ventas POS cobradas sin documento fiscal ({{ uncoveredTotal() }})
+            </h2>
+            <p class="text-xs text-text-secondary mt-1">
+              Constancias históricas. Abre la orden para consultar su estado fiscal actual y emitir el documento si corresponde.
+            </p>
+          </div>
+          <div class="px-2 pb-2 pt-3 md:p-4">
+            <app-responsive-data-view
+              [data]="uncoveredSales()"
+              [columns]="uncoveredColumns"
+              [cardConfig]="uncoveredCardConfig"
+              [actions]="uncoveredActions"
+              [loading]="uncoveredLoading()"
+              emptyTitle="Sin ventas descubiertas"
+              emptyMessage="Sin ventas descubiertas"
+              emptyDescription="No hay constancias de ventas POS cobradas sin documento fiscal."
+              emptyIcon="file-check"
+              [showEmptyAction]="false"
+            />
+            <app-pagination
+              [currentPage]="uncoveredPage()"
+              [totalPages]="uncoveredTotalPages()"
+              [total]="uncoveredTotal()"
+              [limit]="uncoveredLimit"
+              (pageChange)="onUncoveredPageChange($event)"
+            />
+          </div>
+        </app-card>
+      }
     </section>
 
     <!-- Prevalidacion operativa: cualquier 4xx fiscal de una operacion del
@@ -535,6 +586,7 @@ type AuditView = 'evidence' | 'history';
 })
 export class FiscalOperationsComponent {
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly service = inject(FiscalOperationsService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly toast = inject(ToastService);
@@ -625,6 +677,14 @@ export class FiscalOperationsComponent {
   }
   readonly evidence = signal<FiscalEvidence[]>([]);
   readonly history = signal<FiscalOperationEvent[]>([]);
+  readonly uncoveredSales = signal<FiscalOperationEvent[]>([]);
+  readonly uncoveredTotal = signal(0);
+  readonly uncoveredPage = signal(1);
+  readonly uncoveredLimit = 25;
+  readonly uncoveredTotalPages = computed(() =>
+    Math.ceil(this.uncoveredTotal() / this.uncoveredLimit) || 1,
+  );
+  readonly uncoveredLoading = signal(false);
   readonly loading = signal(false);
   readonly working = signal(false);
   readonly errorMessage = signal<string | null>(null);
@@ -773,6 +833,37 @@ export class FiscalOperationsComponent {
       { key: 'created_at', label: 'Fecha', icon: 'calendar-clock', transform: (v) => this.formatDate(v) },
     ],
   };
+
+  readonly uncoveredColumns: TableColumn[] = [
+    { key: 'resource_id', label: 'Pedido', priority: 1, transform: (v) => `#${v ?? '-'}` },
+    { key: 'store', label: 'Tienda', priority: 2, transform: (_v, r) => r.store?.name || '-' },
+    { key: 'accounting_entity', label: 'Entidad fiscal', priority: 2, transform: (_v, r) => this.historyEntityLabel(r) },
+    { key: 'metadata', label: 'Motivo', priority: 2, transform: (_v, r) => this.uncoveredReason(r) },
+    { key: 'created_at', label: 'Fecha', priority: 2, transform: (v) => this.formatDate(v) },
+  ];
+
+  readonly uncoveredCardConfig: ItemListCardConfig = {
+    titleKey: 'resource_id',
+    titleTransform: (i) => `Pedido #${i.resource_id ?? '-'}`,
+    subtitleTransform: (i) => i.store?.name || 'Tienda',
+    avatarFallbackIcon: 'alert-triangle',
+    avatarShape: 'square',
+    detailKeys: [
+      { key: 'accounting_entity', label: 'Entidad fiscal', icon: 'building-2', transform: (_v, i) => this.historyEntityLabel(i) },
+      { key: 'metadata', label: 'Motivo', transform: (_v, i) => this.uncoveredReason(i) },
+      { key: 'created_at', label: 'Fecha', icon: 'calendar-clock', transform: (v) => this.formatDate(v) },
+    ],
+  };
+
+  readonly uncoveredActions: TableAction[] = [
+    {
+      label: 'Abrir orden',
+      icon: 'external-link',
+      variant: 'primary',
+      show: (item: FiscalOperationEvent) => item.resource_type === 'order' && !!item.resource_id,
+      action: (item: FiscalOperationEvent) => void this.router.navigate(['/admin/orders', item.resource_id]),
+    },
+  ];
 
   constructor() {
     this.currency.loadCurrency();
@@ -1278,6 +1369,18 @@ export class FiscalOperationsComponent {
     return name || item.store?.name || 'Entidad fiscal';
   }
 
+  uncoveredReason(item: FiscalOperationEvent): string {
+    const reason = item.metadata?.['error'];
+    return typeof reason === 'string' && reason.trim()
+      ? reason
+      : 'No se pudo crear el documento fiscal';
+  }
+
+  onUncoveredPageChange(page: number): void {
+    this.uncoveredPage.set(page);
+    this.loadUncoveredSales();
+  }
+
   statusTransitionLabel(item: FiscalOperationEvent): string {
     const prev = item.previous_status
       ? this.statusLabel(item.previous_status)
@@ -1356,6 +1459,7 @@ export class FiscalOperationsComponent {
       // Evidencias ↔ Historial toggle is instant.
       this.loadEvidence();
       this.loadHistory();
+      if (this.fiscalScope === 'store') this.loadUncoveredSales();
     }
     if (tab === 'evidence') this.loadEvidence();
     if (tab === 'history') this.loadHistory();
@@ -1423,6 +1527,31 @@ export class FiscalOperationsComponent {
       .subscribe({
         next: (response) => this.history.set(response.data || []),
         error: () => this.handleError('No se pudo cargar el historial fiscal'),
+      });
+  }
+
+  private loadUncoveredSales(): void {
+    const page = this.uncoveredPage();
+    this.uncoveredLoading.set(true);
+    this.service
+      .listHistory('store', {
+        event_type: POS_UNCOVERED_SALE_EVENT_TYPE,
+        page,
+        limit: this.uncoveredLimit,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (this.uncoveredPage() !== page) return;
+          this.uncoveredSales.set(response.data || []);
+          this.uncoveredTotal.set(response.meta.total);
+          this.uncoveredLoading.set(false);
+        },
+        error: () => {
+          if (this.uncoveredPage() !== page) return;
+          this.uncoveredLoading.set(false);
+          this.handleError('No se pudieron cargar las ventas sin documento fiscal');
+        },
       });
   }
 
