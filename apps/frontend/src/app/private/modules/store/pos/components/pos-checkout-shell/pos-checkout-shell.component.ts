@@ -649,6 +649,11 @@ export class PosCheckoutShellComponent {
       (this.paymentStep()?.isProcessing() ?? false) ||
       (this.shippingStep()?.isProcessing() ?? false),
   );
+  readonly draftDeliveryBlocked = computed<boolean>(() =>
+    this.effectiveIntent() === 'delivery' &&
+    this.currentStepKey() === 'envio' &&
+    !this.shippingStep()?.buildShippingContext(),
+  );
   readonly confirmDisabled = computed<boolean>(() => {
     if (this.footerProcessing()) return true;
 
@@ -1913,6 +1918,18 @@ export class PosCheckoutShellComponent {
     const state = this.cartState();
     if (!state || !(state.items?.length ?? 0)) return;
 
+    // A delivery draft must not silently become a counter/direct-delivery
+    // order when the shipping step has no selected method. Navigate back to
+    // the step if the cashier pressed Guardar from elsewhere in the wizard.
+    const deliveryShipping = this.effectiveIntent() === 'delivery'
+      ? this.shippingStep()?.buildShippingContext() ?? null
+      : null;
+    if (this.effectiveIntent() === 'delivery' && !deliveryShipping) {
+      this.toastService.warning('Selecciona un método de envío antes de guardar esta entrega a domicilio.');
+      this.goToStepKey('envio');
+      return;
+    }
+
     this.submittingDraft.set(true);
 
     // Envío: el borrador es un pedido a domicilio, no una cuenta de mesa ni
@@ -1921,7 +1938,7 @@ export class PosCheckoutShellComponent {
     // y notas del envío. Se guarda como borrador con su contexto de envío; la
     // cocina se dispara al cobrarlo, igual que en la venta directa.
     if (this.effectiveIntent() === 'delivery') {
-      this.createRetailDraft(state, this.shippingStep()?.buildShippingContext() ?? null);
+      this.createRetailDraft(state, deliveryShipping);
       return;
     }
 

@@ -707,6 +707,33 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     return { state, update, error, ship };
   };
 
+  it('no guarda un borrador de envío como venta de mostrador cuando falta el método', () => {
+    const saveDraft = jasmine.createSpy('saveDraft');
+    const warning = jasmine.createSpy('warning');
+    Object.assign(TestBed.inject(PosPaymentService), { saveDraft });
+    Object.assign(TestBed.inject(ToastService), { warning });
+    fixture.componentRef.setInput('cartState', {
+      items: [{ product: { id: '7', name: 'Producto' }, quantity: 1,
+        unitPrice: 1000, finalPrice: 1000, totalPrice: 1000, taxAmount: 0 }],
+      customer: { id: 99, first_name: 'Cliente' }, summary: { total: 1000 },
+      appliedDiscounts: [],
+    });
+    component.entregaChoice.set('enviar');
+    fixture.detectChanges();
+    wireStubs();
+    const ship = (component as any).shippingStep() as ShippingStub;
+    ship.shippingContext.set(null);
+    component.currentStep.set(component.stepKeys().indexOf('envio'));
+    fixture.detectChanges();
+
+    expect(component.draftDeliveryBlocked()).toBeTrue();
+    component.onSaveDraft();
+    expect(saveDraft).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(jasmine.stringMatching(/método de envío/));
+    expect(component.currentStepKey()).toBe('envio');
+    expect(component.submittingDraft()).toBeFalse();
+  });
+
   it('visitar Envío y Actualizar omite todas las claves y conserva el total original', () => {
     const { update } = prepareShippingEdit();
     expect(component.totalToPay()).toBe(13500.5);

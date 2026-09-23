@@ -1137,6 +1137,35 @@ describe('PaymentsService', () => {
       contextSpy?.mockRestore();
     });
 
+    it.each([
+      { delivery_type: 'home_delivery' },
+      { shipping_address_snapshot: { city: 'Bogotá' } },
+      { delivery_type: 'direct_delivery', shipping_address_id: 88 },
+    ])('rechaza envío declarado sin método antes de crear orden o pago: %j', async (shippingFields) => {
+      arrange({ checkout: { require_customer_data: false } });
+      const error = await service.processPosPayment(
+        buildDto({ ...shippingFields, is_draft: true }), posUser,
+      ).catch((failure) => failure);
+
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe(ErrorCodes.ORD_SHIP_REQUIRED_FOR_FLOW_001.code);
+      expect((prisma as any).$transaction).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      {},
+      { delivery_type: 'direct_delivery' },
+      { delivery_type: 'pickup', shipping_address_id: 88 },
+      { delivery_type: 'dine_in' },
+      { delivery_type: 'home_delivery', shipping_method_id: 12 },
+    ])('conserva el carril válido sin bloquearlo: %j', async (shippingFields) => {
+      arrange({ checkout: { require_customer_data: false } });
+      await expect(service.processPosPayment(
+        buildDto({ ...shippingFields, is_draft: true }), posUser,
+      )).rejects.toThrow(STOP_AFTER_GATES);
+      expect((prisma as any).$transaction).toHaveBeenCalledTimes(1);
+    });
+
     it('acepta la creación con cliente válido: pasa los gates, no cobra y no consume cupón', async () => {
       arrange({ checkout: { require_customer_data: true } });
       (prisma.store_users.findFirst as jest.Mock) = jest

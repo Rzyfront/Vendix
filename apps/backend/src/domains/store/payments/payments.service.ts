@@ -759,6 +759,24 @@ export class PaymentsService {
 
       await this.validateUserAccess(user, createPosPaymentDto.store_id);
 
+      // E.5: a delivery intent must never fall through to the POS default
+      // `direct_delivery`. Reject before the payment transaction so no order,
+      // stock movement or charge can be born without a dispatch method.
+      const hasShippingAddress =
+        createPosPaymentDto.shipping_address_id != null ||
+        createPosPaymentDto.shipping_address_snapshot != null;
+      const deliveryIntent =
+        createPosPaymentDto.delivery_type === 'home_delivery' ||
+        (hasShippingAddress &&
+          (createPosPaymentDto.delivery_type == null ||
+            createPosPaymentDto.delivery_type === 'direct_delivery'));
+      if (deliveryIntent && createPosPaymentDto.shipping_method_id == null) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_SHIP_REQUIRED_FOR_FLOW_001,
+          'Selecciona un método de envío antes de guardar o cobrar esta venta.',
+        );
+      }
+
       // Resolve store currency once if not provided in DTO
       if (!createPosPaymentDto.currency) {
         createPosPaymentDto.currency =

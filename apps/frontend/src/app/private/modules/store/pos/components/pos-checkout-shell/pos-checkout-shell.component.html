@@ -529,7 +529,7 @@
     <button
       type="button"
       class="header-draft-btn"
-      [disabled]="footerProcessing()"
+      [disabled]="footerProcessing() || draftDeliveryBlocked()"
       (click)="onSaveDraft()"
       aria-label="Guardar borrador"
     >
@@ -572,7 +572,7 @@
         <button
           type="button"
           class="btn-draft"
-          [disabled]="footerProcessing()"
+          [disabled]="footerProcessing() || draftDeliveryBlocked()"
           (click)="onSaveDraft()"
         >
           <app-icon name="save" [size]="16"></app-icon>
