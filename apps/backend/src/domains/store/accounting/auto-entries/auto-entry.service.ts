@@ -2447,10 +2447,19 @@ export class AutoEntryService {
 
   /**
    * ¿La NC es el espejo de una re-emisión nominativa
-   * (`invoice-data-requests` → `credit_note_reissue`)? Lo es si reversa TODA
-   * su factura de origen y la orden tiene otra factura de venta vigente
-   * posterior a esa, o una solicitud de datos en curso (`processing`: la
-   * factura nueva todavía no se crea cuando la DIAN acepta la NC).
+   * (`invoice-data-requests` → `credit_note_reissue`)? Sólo aplica cuando la
+   * factura de origen NO contabilizó (`not_applicable`: su venta la reconoció
+   * `payment.received` o `credit_sale.created`); si la factura de origen sí
+   * posteó, NC + factura nueva contabilizan normal y el neto ya es una venta.
+   *
+   * Exige además que la NC reverse TODA su factura de origen y que la orden
+   * tenga la SOLICITUD de datos que la originó, apuntando a esa factura (o sin
+   * factura fijada):
+   *   · `processing` — la conversión está en curso (la NC se emite y puede
+   *     aceptarse antes de crear la factura nueva);
+   *   · `completed` con `new_invoice_id` = una factura de venta vigente
+   *     posterior a la de origen (la factura nominativa de ESA solicitud).
+   * Una factura posterior cualquiera de la orden no basta.
    */
   private async isReissueMirrorCreditNote(
     credit_note_id: number,
@@ -2462,19 +2471,43 @@ export class AutoEntryService {
       where: { id: credit_note_id, organization_id },
       select: {
         related_invoice: {
-          select: { id: true, order_id: true, total_amount: true },
+          select: {
+            id: true,
+            order_id: true,
+            total_amount: true,
+            accounting_status: true,
+          },
         },
       },
     });
     const original = (note as any)?.related_invoice;
-    if (!original?.order_id) return false;
+    if (!original?.order_id || original.accounting_status !== 'not_applicable')
+      return false;
     if (getCents(credit_note_total) + 1n < getCents(original.total_amount ?? 0))
       return false;
-    const sibling = await db.invoices.findFirst({
+    const requests = await db.invoice_data_requests.findMany({
+      where: {
+        order_id: original.order_id,
+        status: { in: ['processing', 'completed'] },
+        OR: [{ invoice_id: null }, { invoice_id: original.id }],
+      },
+      select: { status: true, new_invoice_id: true },
+    });
+    if (requests.some((row: any) => row.status === 'processing')) return true;
+    const reissued_ids = requests
+      .filter(
+        (row: any) =>
+          row.status === 'completed' &&
+          typeof row.new_invoice_id === 'number' &&
+          row.new_invoice_id > original.id,
+      )
+      .map((row: any) => row.new_invoice_id as number);
+    if (!reissued_ids.length) return false;
+    const reissued = await db.invoices.findFirst({
       where: {
         organization_id,
         order_id: original.order_id,
-        id: { gt: original.id },
+        id: { in: reissued_ids },
         invoice_type: {
           in: AutoEntryService.SALE_RECOGNITION_INVOICE_TYPES as any,
         },
@@ -2482,12 +2515,7 @@ export class AutoEntryService {
       },
       select: { id: true },
     });
-    if (sibling) return true;
-    const in_progress = await db.invoice_data_requests.findFirst({
-      where: { order_id: original.order_id, status: 'processing' },
-      select: { id: true },
-    });
-    return !!in_progress;
+    return !!reissued;
   }
 
   /**
@@ -2632,6 +2660,32 @@ export class AutoEntryService {
       data.invoice_id,
       data.organization_id,
     );
+    // Venta a crédito (factura de origen omitida por credit_sale.created)
+    // re-emitida a nombre del cliente: la NC espejo no reversa nada. Postearla
+    // (DR 4175 / CR 1305) dejaría ingreso y cartera en cero con la factura
+    // nueva también omitida, y el cobro posterior llevaría la 1305 a negativo.
+    if (
+      !pos_sale &&
+      (await this.isReissueMirrorCreditNote(
+        data.invoice_id,
+        data.organization_id,
+        data.total,
+      ))
+    ) {
+      this.logger.log(
+        `credit_note.accepted #${data.invoice_id}: NC espejo de re-emisión sobre ` +
+          `una factura sin asiento propio; la venta sigue reconocida, sin asiento.`,
+      );
+      await this.markInvoiceRecognizedElsewhere(
+        data.invoice_id,
+        data.organization_id,
+      );
+      return {
+        id: null,
+        skipped: true,
+        reason: 'reissue_mirror_credit_note',
+      };
+    }
     if (pos_sale) {
       const refunded = await this.sumPostedRefundEntries(
         pos_sale.order_id,

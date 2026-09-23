@@ -72,10 +72,10 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
     creditNotes?: any[];
     refunds?: any[];
     returnOrders?: any[];
-    /** Otra factura de venta posterior de la orden (re-emisión). */
-    sibling?: any;
-    /** invoice_data_requests en curso de la orden. */
-    dataRequest?: any;
+    /** Factura de venta vigente de la orden (re-emisión); sólo si su id está en where.id.in. */
+    reissued?: any;
+    /** invoice_data_requests de la orden (status + new_invoice_id). */
+    dataRequests?: any[];
   } = {}) => {
     const codes = opts.codes ?? CODES;
     const unscoped = {
@@ -83,8 +83,10 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
         findFirst: jest.fn(async (args: any) =>
           args?.select?.related_invoice
             ? (opts.creditNote ?? null)
-            : args?.where?.id?.gt !== undefined
-              ? (opts.sibling ?? null)
+            : Array.isArray(args?.where?.id?.in)
+              ? opts.reissued && args.where.id.in.includes(opts.reissued.id)
+                ? opts.reissued
+                : null
             : opts.invoice === undefined
               ? {
                   order_id: SALE.order_id,
@@ -103,7 +105,11 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
         findMany: jest.fn().mockResolvedValue(opts.returnOrders ?? []),
       },
       invoice_data_requests: {
-        findFirst: jest.fn().mockResolvedValue(opts.dataRequest ?? null),
+        findMany: jest.fn(async (args: any) =>
+          (opts.dataRequests ?? []).filter((row) =>
+            (args?.where?.status?.in ?? [row.status]).includes(row.status),
+          ),
+        ),
       },
       fiscal_transmissions: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -783,7 +789,7 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
         credit_amount: l.credit_amount,
       }));
 
-      const runReissue = async (opts: { sibling?: any; dataRequest?: any }) => {
+      const runReissue = async (opts: { reissued?: any; dataRequests?: any[] }) => {
         const { service, createAutoEntry, unscoped } = build({
           creditNote: skippedOriginal,
           bySource: { 'payment.received': [posPaymentEntry] },
@@ -800,7 +806,8 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
 
       it('NC espejo + factura nueva: ninguna postea; Σ ingreso = venta y caja intacta', async () => {
         const { nc, invoiceB, createAutoEntry, unscoped } = await runReissue({
-          sibling: { id: 56 },
+          reissued: { id: 56 },
+          dataRequests: [{ status: 'completed', new_invoice_id: 56 }],
         });
         expect(nc).toEqual(
           expect.objectContaining({ skipped: true, reason: 'reissue_mirror_credit_note' }),
@@ -822,10 +829,76 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
 
       it('NC espejo aceptada antes de crear la factura B (solicitud en curso): tampoco postea', async () => {
         const { nc, createAutoEntry } = await runReissue({
-          dataRequest: { id: 9 },
+          dataRequests: [{ status: 'processing', new_invoice_id: null }],
         });
         expect(nc.reason).toBe('reissue_mirror_credit_note');
         expect(createAutoEntry).not.toHaveBeenCalled();
+      });
+
+      it('factura posterior SIN la solicitud que la originó: no es espejo, la NC postea contra 2805', async () => {
+        for (const dataRequests of [
+          [],
+          [{ status: 'completed', new_invoice_id: 57 }],
+          [{ status: 'pending', new_invoice_id: null }],
+        ]) {
+          const { nc, createAutoEntry } = await runReissue({
+            reissued: { id: 56 },
+            dataRequests,
+          });
+          expect(nc?.reason).not.toBe('reissue_mirror_credit_note');
+          const lines = linesOf(createAutoEntry.mock.calls[0]);
+          expect(lines).toContainEqual(
+            expect.objectContaining({ account_code: '2805', credit_amount: SALE.total }),
+          );
+        }
+      });
+
+      it('crédito + re-emisión: NC espejo y factura B omitidas; el cobro deja la 1305 en 0', async () => {
+        const creditSaleLines = [
+          { account_code: '1305', debit_amount: SALE.total, credit_amount: 0 },
+          { account_code: '4135', debit_amount: 0, credit_amount: SALE.subtotal },
+          { account_code: '414505', debit_amount: 0, credit_amount: SALE.shipping },
+          { account_code: '240802', debit_amount: 0, credit_amount: SALE.tax },
+        ];
+        const { service, createAutoEntry } = build({
+          creditNote: skippedOriginal,
+          payments: [],
+          firstBySource: { 'credit_sale.created': { id: 601 } },
+          entries: [asPostedEntry(601, 'credit_sale.created', creditSaleLines)],
+          reissued: { id: 56 },
+          dataRequests: [{ status: 'completed', new_invoice_id: 56 }],
+        });
+
+        const nc: any = await service.onCreditNoteAccepted(mirrorNc);
+        const invoiceB: any = await service.onInvoiceValidated({
+          ...invoiceEvent,
+          invoice_id: 56,
+        });
+        expect(nc).toEqual(
+          expect.objectContaining({ skipped: true, reason: 'reissue_mirror_credit_note' }),
+        );
+        expect(invoiceB).toEqual(
+          expect.objectContaining({ skipped: true, reason: 'sale_already_recognized' }),
+        );
+        expect(createAutoEntry).not.toHaveBeenCalled();
+
+        await service.onPaymentReceived({
+          payment_id: 905,
+          organization_id: 1,
+          store_id: 2,
+          order_id: SALE.order_id,
+          amount: SALE.total,
+          subtotal_amount: SALE.subtotal,
+          tax_amount: SALE.tax,
+          shipping_amount: SALE.shipping,
+        });
+        const all = [...creditSaleLines, ...linesOf(createAutoEntry.mock.calls[0])];
+        expect(creditOn(all, '4135')).toBe(SALE.subtotal);
+        const net1305 =
+          sum(all.filter((l) => l.account_code === '1305'), 'debit_amount') -
+          creditOn(all, '1305');
+        expect(net1305).toBe(0);
+        expect(sum(all, 'debit_amount')).toBe(sum(all, 'credit_amount'));
       });
 
       it('NC parcial sin re-emisión: saldo a favor 2805 y el refund posterior lo cruza', async () => {
