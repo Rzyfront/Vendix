@@ -1,0 +1,3 @@
+# H.3 Snapshot de impuesto histórico preservado
+
+Mesa QA #16/sesión #109/orden #1126: `add-items` incorporó el producto QA 2471 con asignación IVA 19 %, dejando `order_item_taxes.tax_rate_id=72`, `tax_type=iva`, monto 1900. Se eliminó **temporalmente y solo en BD local** su asignación `(product_id=2471,tax_category_id=89)`, se confirmó ausencia, y se cobró la sesión sin `items` por 11900: POST POS HTTP 201/pago #822. La línea y la cabecera conservaron IVA 1900 y tasa 72; un único pago succeeded. Un `trap EXIT` restauró la fila `(2471,89,false)` y se comprobó que existe de nuevo una vez. Evidencia SQL y request/response resumida adjunta; ninguna producción ni migración afectada.
