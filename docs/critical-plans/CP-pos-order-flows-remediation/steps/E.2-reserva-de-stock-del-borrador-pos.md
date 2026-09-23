@@ -28,14 +28,14 @@ skills: [vendix-inventory-stock, vendix-backend, vendix-prisma-scopes, vendix-er
   - Doble clic real: dos `curl` de `flow/pay` en paralelo sobre el mismo borrador; se espera 200 + 409 `ORD_FLOW_PAYMENT_FAILED_001` y **un** `payments` → `evidence/E.2-doble-clic/`.
   - `curl -s -X POST "$API/store/dispatch-notes/from-order/$ORDER_ID" -H "Authorization: Bearer $TOKEN" | tee evidence/E.2-remision-sin-insufficient-stock.json` — sin `DISPATCH_NOTE_INSUFFICIENT_STOCK`.
 - **Acceptance checklist:**
-  - [ ] Existe un test que falla antes del arreglo: cobrar un borrador POS con línea física deja cero reservas.
-  - [ ] La decisión «venía en draft» se toma del estado previo al claim, no del objeto recargado.
-  - [ ] Cobrar un borrador deja al menos una fila activa en `stock_reservations` para esa orden.
-  - [ ] El segundo clic sigue rechazando con el mismo código tipado y un solo pago persistido.
+  - [x] Existe un test que falla antes del arreglo: cobrar un borrador POS con línea física deja cero reservas.
+  - [x] La decisión «venía en draft» se toma del estado previo al claim, no del objeto recargado.
+  - [x] Cobrar un borrador deja al menos una fila activa en `stock_reservations` para esa orden.
+  - [x] El segundo clic sigue rechazando con el mismo código tipado y un solo pago persistido.
   - [ ] Ningún ítem descuenta stock dos veces: cero filas en la consulta de doble transacción.
-  - [ ] Los ítems ya consumidos al disparar a cocina no vuelven a descontar disponible.
-  - [ ] La reserva sigue siendo no bloqueante: falta de stock no rechaza el cobro.
-  - [ ] Se emite la auditoría de promoción con su conteo de reservas.
+  - [x] Los ítems ya consumidos al disparar a cocina no vuelven a descontar disponible.
+  - [x] La reserva sigue siendo no bloqueante: falta de stock no rechaza el cobro.
+  - [x] Se emite la auditoría de promoción con su conteo de reservas.
   - [ ] Una orden cobrada desde borrador genera remisión sin rechazo por stock insuficiente.
   - [ ] El carril de mesa y el de split conservan su comportamiento actual de promoción.
-- **Status:** in-progress — reserva bajo claim en 1ca4c0083; compensación en ejecución; falta Jest/runtime.
+- **Status:** in-progress · Fabio · 2026-09-23 · reserva bajo claim `1ca4c0083` y compensación `a9371ab55`; Jest focalizado E.2 16/16. `evidence/E2-flowpay-reservation.md`: POS draft físico #1140 nace sin reserva, flow/pay 200 crea una reserva activa antes del pago y auditoría count1; #1142 doble submit concurrente 200+409 con un pago/una reserva. Falta remisión desde borrador cobrado, consumo final sin doble descuento y barrido mesa/split; DB-27 permanece abierto.
