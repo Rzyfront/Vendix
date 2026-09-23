@@ -55,6 +55,7 @@ import {
   AuditService,
   AuditResource,
 } from '@common/audit/audit.service';
+import { RefundFlowService } from './services/refund-flow.service';
 
 type OrderState = order_state_enum;
 type DraftReservationKey = {
@@ -172,6 +173,7 @@ export class OrderFlowService {
     // manual). Sin servicio ⇒ copia vacía (envío sin impuesto), nunca falla.
     @Optional() private readonly shippingTaxService?: ShippingTaxService,
     private readonly moduleRef?: ModuleRef,
+    @Optional() private readonly refundFlowService?: RefundFlowService,
   ) {}
 
   /**
@@ -3368,6 +3370,7 @@ export class OrderFlowService {
     // DESPUÉS del commit: un egreso escrito dentro de la tx quedaría huérfano
     // si el claim perdiera la carrera o la rama KDS abortara con 422.
     let cashReversal: Awaited<ReturnType<OrderFlowService['resolveCancelCashReversal']>> = null;
+    let cancellationRefund: Awaited<ReturnType<RefundFlowService['recordCancellationCashRefund']>> | null = null;
 
     // Build cancel metadata exactly as updateOrderState would: `orders` has no
     // cancelled_at/cancellation_reason columns, so these + previous_state live
@@ -3382,6 +3385,19 @@ export class OrderFlowService {
       const freshOrder = await this.getOrder(orderId, tx);
       await this.assertNoOpenTableForDraft(freshOrder, tx);
       this.assertCancellationAllowed(freshOrder);
+      // A direct card or transfer payment is settled money too: marking its
+      // local row cancelled would falsely claim an external reversal.
+      if (freshOrder.payments.some((payment) =>
+        SETTLED_PAYMENT_STATES.has(payment.state) && (
+          payment.state !== 'succeeded' ||
+          payment.store_payment_method?.system_payment_method?.type !== 'cash'
+        ),
+      )) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
+          'El pago liquidado no es efectivo: realiza la reversa manual o por pasarela mediante el flujo de reembolso antes de cancelar.',
+        );
+      }
       previousState = freshOrder.state as OrderState;
       claimableStates = force ? [previousState] : CANCELABLE_STATES;
       let existingMetadata: Record<string, any> = {};
@@ -3406,6 +3422,20 @@ export class OrderFlowService {
         notes: existingMetadata.original_notes || '',
       });
       cashReversal = await this.resolveCancelCashReversal(freshOrder, tx);
+      if (freshOrder.payments.some((payment) => payment.state === 'succeeded') && !cashReversal) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
+          'No se pudo verificar el monto del pago en efectivo; concilia el cobro antes de cancelar.',
+        );
+      }
+      if (cashReversal) {
+        if (!this.refundFlowService) {
+          throw new InternalServerErrorException('RefundFlowService no disponible para documentar la devolución en efectivo');
+        }
+        cancellationRefund = await this.refundFlowService.recordCancellationCashRefund(
+          tx, freshOrder, cashReversal.paymentIds, cashReversal.amount, dto.reason,
+        );
+      }
       // ATOMIC CLAIM — the conditional UPDATE is the source of truth that
       // serializes concurrent cancellations (double-click / retry). Only ONE
       // request flips the state out of CANCELABLE_STATES (count=1); a
@@ -3595,12 +3625,21 @@ export class OrderFlowService {
     // Compensación post-commit: la orden ya está `cancelled`, así que el egreso
     // nunca queda colgado de una cancelación que hizo rollback.
     if (cashReversal) {
-      await this.registerCancelCashOut(
+      const cashOutRecorded = await this.registerCancelCashOut(
         orderId,
         order.order_number,
         dto.reason,
         cashReversal,
       );
+      const committedRefund = cancellationRefund as Awaited<ReturnType<RefundFlowService['recordCancellationCashRefund']>> | null;
+      if (committedRefund && cashOutRecorded) {
+        try {
+          await this.refundFlowService!.completeCancellationCashRefund(committedRefund.refund.id);
+          await this.refundFlowService!.emitCancellationCashRefund(order, committedRefund);
+        } catch (error) {
+          this.logger.error(`Order #${orderId}: refund accounting event failed`, (error as Error).stack);
+        }
+      }
     }
 
     this.logger.log(
@@ -3685,7 +3724,7 @@ export class OrderFlowService {
     orderNumber: string | null,
     reason: string,
     reversal: { amount: Prisma.Decimal; paymentIds: number[] },
-  ): Promise<void> {
+  ): Promise<boolean> {
     const userId = RequestContextService.getUserId();
 
     try {
@@ -3696,7 +3735,7 @@ export class OrderFlowService {
       // corta en este mismo gate). Escribir sólo el egreso descuadraría una
       // sesión que no existe. No es una falla: no se escala.
       if (!cashRegister?.enabled) {
-        return;
+        return true;
       }
 
       if (!userId) {
@@ -3706,7 +3745,7 @@ export class OrderFlowService {
           'no_user_context',
           userId,
         );
-        return;
+        return false;
       }
 
       const session = await this.sessionsService.getActiveSession(userId);
@@ -3717,7 +3756,7 @@ export class OrderFlowService {
           'no_open_session',
           userId,
         );
-        return;
+        return false;
       }
 
       const movement = await this.movementsService.createManualMovement(
@@ -3736,6 +3775,7 @@ export class OrderFlowService {
         `Order #${orderId} cancelled: cash_out #${movement.id} for ${reversal.amount.toString()} ` +
           `registered on session #${session.id} (payments ${reversal.paymentIds.join(', ')})`,
       );
+      return true;
     } catch (error) {
       await this.escalateCancelCashOutFailure(
         orderId,
@@ -3744,6 +3784,7 @@ export class OrderFlowService {
         userId,
         error,
       );
+      return false;
     }
   }
 

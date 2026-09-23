@@ -4,6 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
+import { Prisma } from '@prisma/client';
 import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 
 export interface RefundItemRequest {
@@ -65,11 +66,12 @@ export class RefundCalculationService {
 
   async calculate(
     params: CalculateRefundParams,
+    client: Prisma.TransactionClient | StorePrismaService = this.prisma,
   ): Promise<RefundCalculationResult> {
     const { order_id, items, include_shipping } = params;
 
     // Load order with items, taxes, and previous refunds
-    const order = await this.prisma.orders.findFirst({
+    const order = await client.orders.findFirst({
       where: { id: order_id },
       include: {
         order_items: {
@@ -300,6 +302,46 @@ export class RefundCalculationService {
       is_full_refund,
       already_refunded,
       max_refundable: Math.round(max_refundable * 100) / 100,
+    };
+  }
+
+  /** Cancellation refunds are payment-scoped, not item-return requests. Keep
+   * the grand_total ceiling and prior completed refunds in the same calculator
+   * used by the ordinary refund flow, under the caller's order lock/transaction.
+   */
+  async calculateCancellationCashRefund(
+    orderId: number,
+    paidAmount: Prisma.Decimal,
+    client: Prisma.TransactionClient,
+    totals: {
+      grand_total: Prisma.Decimal;
+      tax_amount: Prisma.Decimal;
+      shipping_cost: Prisma.Decimal;
+      shipping_tax_amount: Prisma.Decimal;
+      shipping_tax_type: string | null;
+    },
+  ) {
+    const ceiling = await this.calculate(
+      { order_id: orderId, items: [], include_shipping: false }, client,
+    );
+    const amount = new Prisma.Decimal(paidAmount);
+    if (amount.lessThanOrEqualTo(0) || amount.greaterThan(ceiling.max_refundable)) {
+      throw new VendixHttpException(
+        ErrorCodes.REF_VALIDATE_001,
+        `Cash refund ${amount.toString()} exceeds the remaining refundable total ${ceiling.max_refundable.toFixed(2)}`,
+      );
+    }
+    const ratio = amount.div(totals.grand_total);
+    const tax = new Prisma.Decimal(totals.tax_amount).mul(ratio).toDecimalPlaces(2);
+    const shipping = new Prisma.Decimal(totals.shipping_cost).mul(ratio).toDecimalPlaces(2);
+    const shippingTax = new Prisma.Decimal(totals.shipping_tax_amount).mul(ratio).toDecimalPlaces(2);
+    return {
+      amount,
+      subtotal: amount.minus(tax).minus(shipping),
+      tax,
+      shipping,
+      shippingTax,
+      shippingTaxType: totals.shipping_tax_type,
     };
   }
 }

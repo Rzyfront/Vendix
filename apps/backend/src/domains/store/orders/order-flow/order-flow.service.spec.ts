@@ -2420,6 +2420,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
   let audit: { log: jest.Mock; logCustom: jest.Mock };
   let stock: { releaseReservationsByReference: jest.Mock };
   let emitter: { emit: jest.Mock };
+  let refundFlow: { recordCancellationCashRefund: jest.Mock; completeCancellationCashRefund: jest.Mock; emitCancellationCashRefund: jest.Mock };
 
   /** Orden cancelable (estado `processing`) con los pagos que se le pasen. */
   const cancelableOrder = (payments: any[]) =>
@@ -2482,6 +2483,14 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
     };
     emitter = { emit: jest.fn() };
+    refundFlow = {
+      recordCancellationCashRefund: jest.fn().mockResolvedValue({
+        refund: { id: 81, state: 'processing', amount: new Prisma.Decimal('59.50') },
+        breakdown: { amount: new Prisma.Decimal('59.50') },
+      }),
+      completeCancellationCashRefund: jest.fn().mockResolvedValue({ id: 81, state: 'completed' }),
+      emitCancellationCashRefund: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new OrderFlowService(
       prismaMock as unknown as StorePrismaService,
@@ -2493,6 +2502,10 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       {} as any,
       {} as any,
       audit as any,
+      undefined,
+      undefined,
+      undefined,
+      refundFlow as any,
     );
   });
 
@@ -2569,9 +2582,16 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     expect(
       new Prisma.Decimal(payload.amount).equals(new Prisma.Decimal('59.50')),
     ).toBe(true);
+    expect(refundFlow.recordCancellationCashRefund).toHaveBeenCalledTimes(1);
+    expect(refundFlow.recordCancellationCashRefund).toHaveBeenCalledWith(
+      prismaMock, expect.objectContaining({ id: ORDER_ID }),
+      [CASH_PAYMENT_ID], new Prisma.Decimal('59.50'), DTO.reason,
+    );
+    expect(refundFlow.completeCancellationCashRefund).toHaveBeenCalledWith(81);
+    expect(refundFlow.emitCancellationCashRefund).toHaveBeenCalledTimes(1);
   });
 
-  it('suma los pagos en efectivo del lote (cobro mixto: sólo el efectivo sale)', async () => {
+  it('rechaza cobro mixto liquidado sin reversa de tarjeta; no sale efectivo', async () => {
     jest.spyOn(service as any, 'getOrder').mockResolvedValue(
       cancelableOrder([
         buildPayment({
@@ -2593,15 +2613,15 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       { id: CASH_PAYMENT_ID, amount: new Prisma.Decimal('40.00') },
     ]);
 
-    await service.cancelOrder(ORDER_ID, DTO);
-
-    const [, payload] = movements.createManualMovement.mock.calls[0];
-    expect(
-      new Prisma.Decimal(payload.amount).equals(new Prisma.Decimal('40.00')),
-    ).toBe(true);
+    await expect(service.cancelOrder(ORDER_ID, DTO)).rejects.toMatchObject({
+      errorCode: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001',
+    });
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(movements.createManualMovement).not.toHaveBeenCalled();
+    expect(refundFlow.recordCancellationCashRefund).not.toHaveBeenCalled();
   });
 
-  it('NO-REGRESIÓN — venta con tarjeta: cancela igual y no toca la caja', async () => {
+  it('venta con tarjeta liquidada: 409 tipado sin cancelar pago ni orden', async () => {
     jest.spyOn(service as any, 'getOrder').mockResolvedValue(
       cancelableOrder([
         buildPayment({
@@ -2613,32 +2633,14 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     );
     prismaMock.payments.findMany.mockResolvedValue([]);
 
-    const result = await service.cancelOrder(ORDER_ID, DTO);
-
-    // El arnés alcanza el call site REAL: el claim atómico corrió con su WHERE
-    // condicional, el pago quedó anulado y el evento post-commit salió. Sin
-    // estas tres, el `not.toHaveBeenCalled` de abajo pasaría por no haber
-    // ejecutado nada — un mock muerto también "no llama" a la caja.
-    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: ORDER_ID,
-        state: { in: ['draft', 'created', 'pending_payment', 'processing'] },
-      },
-      data: expect.objectContaining({ state: 'cancelled' }),
+    await expect(service.cancelOrder(ORDER_ID, DTO)).rejects.toMatchObject({
+      errorCode: 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001',
     });
-    expect(prismaMock.payments.update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: CARD_PAYMENT_ID } }),
-    );
-    expect(emitter.emit).toHaveBeenCalledWith(
-      'order.status_changed',
-      expect.objectContaining({
-        old_state: 'processing',
-        new_state: 'cancelled',
-      }),
-    );
-    expect(result).toMatchObject({ state: 'cancelled' });
-
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.payments.update).not.toHaveBeenCalled();
+    expect(emitter.emit).not.toHaveBeenCalled();
     expect(movements.createManualMovement).not.toHaveBeenCalled();
+    expect(refundFlow.recordCancellationCashRefund).not.toHaveBeenCalled();
   });
 
   it('pago en efectivo `pending`: nunca entró al cajón, no hay egreso', async () => {
@@ -2661,6 +2663,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     await service.cancelOrder(ORDER_ID, DTO);
 
     expect(movements.createManualMovement).not.toHaveBeenCalled();
+    expect(refundFlow.recordCancellationCashRefund).not.toHaveBeenCalled();
   });
 
   it('el egreso que falla deja constancia auditable (no es un catch mudo)', async () => {
@@ -2695,6 +2698,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
         metadata: expect.objectContaining({ cause: 'movement_write_failed' }),
       }),
     );
+    expect(refundFlow.completeCancellationCashRefund).not.toHaveBeenCalled();
   });
 
   it('sin sesión de caja abierta: no inventa el movimiento y escala la falla', async () => {

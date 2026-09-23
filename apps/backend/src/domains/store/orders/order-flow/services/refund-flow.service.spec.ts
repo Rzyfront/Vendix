@@ -13,6 +13,7 @@ import { InventorySerialNumbersService } from '../../../inventory/serial-numbers
 import { WalletService } from '../../../wallet/wallet.service';
 import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
 import { PaymentGatewayService } from '../../../payments/services/payment-gateway.service';
+import { Prisma } from '@prisma/client';
 
 /**
  * REFUND OVERHAUL — focused regression tests for the invariants this
@@ -53,6 +54,7 @@ describe('RefundFlowService — refund overhaul invariants', () => {
   const mockCalculationService = {
     calculate: jest.fn(),
     preview: jest.fn(),
+    calculateCancellationCashRefund: jest.fn(),
   };
 
   const mockMovementsService = {
@@ -107,6 +109,42 @@ describe('RefundFlowService — refund overhaul invariants', () => {
     }).compile();
 
     service = module.get(RefundFlowService);
+  });
+
+  describe('cash cancellation document', () => {
+    it('creates one processing refund linked to the settled payment without writing a second cash movement', async () => {
+      const breakdown = {
+        amount: new Prisma.Decimal('59.50'),
+        subtotal: new Prisma.Decimal('50.00'),
+        tax: new Prisma.Decimal('9.50'),
+        shipping: new Prisma.Decimal(0),
+        shippingTax: new Prisma.Decimal(0),
+        shippingTaxType: null,
+      };
+      mockCalculationService.calculateCancellationCashRefund = jest.fn().mockResolvedValue(breakdown);
+      mockPrisma.refunds.create.mockResolvedValue({ id: 81, state: 'processing' });
+      const order = {
+        id: 9001, store_id: 10, currency: 'COP',
+        grand_total: new Prisma.Decimal('59.50'),
+        tax_amount: new Prisma.Decimal('9.50'),
+        shipping_cost: new Prisma.Decimal(0),
+        shipping_tax_amount: new Prisma.Decimal(0),
+        shipping_tax_type: null,
+        payments: [{ id: 5001, state: 'succeeded' }],
+      };
+      const result = await service.recordCancellationCashRefund(
+        mockPrisma as any, order, [5001], breakdown.amount, 'Cliente desistió',
+      );
+      expect(result.refund.id).toBe(81);
+      expect(mockPrisma.refunds.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          order_id: 9001, payment_id: 5001, amount: breakdown.amount,
+          refund_method: 'cash', state: 'processing',
+        }),
+      });
+      expect(movementsService.recordRefundMovement).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalled();
+    });
   });
 
   describe('refund_method in event payload', () => {
