@@ -113,6 +113,7 @@ import { normalizeInvoiceTaxRate } from './utils/invoice-tax-rate.util';
 // (Σ `order_item_taxes` → escalar × `resolveLineUnits`). Definición ÚNICA
 // compartida con mesas, pagos y remisiones: ver `createFromOrder`.
 import { resolveOrderLineTaxTotal } from '../taxes/utils/final-price.util';
+import { resolveCategoryTaxType } from '../shipping/utils/shipping-tax.util';
 
 /**
  * Listing rows whose send/transmission state is an error or a pending send get
@@ -547,6 +548,96 @@ export function computeOrderInvoiceSubtotal(
     0,
   );
   return items_subtotal + Number(shipping_cost || 0);
+}
+
+/**
+ * Lo que `createFromOrder` lee de la orden para proyectar el impuesto del
+ * envío. Es la COPIA congelada al vender (`orders.shipping_tax_*`), nunca la
+ * tarifa ni su categoría actual: editar la tarifa después no mueve la factura
+ * de una orden vieja.
+ */
+export interface InvoiceShippingTaxSource {
+  shipping_cost?: unknown;
+  shipping_tax_rate_id?: number | null;
+  shipping_tax_name?: string | null;
+  shipping_tax_type?: string | null;
+  shipping_tax_rate?: unknown;
+  shipping_tax_amount?: unknown;
+}
+
+export type InvoiceShippingTaxProjection =
+  | {
+      /** La orden trae copia: la línea Envío sale en forma base. */
+      applies: true;
+      gross: Prisma.Decimal;
+      /** `shipping_cost − shipping_tax_amount`, EXACTO (no se re-despeja). */
+      base: Prisma.Decimal;
+      tax_amount: Prisma.Decimal;
+      tax_row: InvoiceTaxRowInput;
+    }
+  | {
+      applies: false;
+      /** `none` = sin copia (el caso de siempre); el resto es copia incoherente. */
+      reason: 'none' | 'unsupported_tax_type' | 'missing_rate' | 'amount_not_below_cost';
+    };
+
+/**
+ * Impuesto del envío en la factura nacida de una orden, a partir de la copia.
+ *
+ * Sin copia (`shipping_tax_amount = 0`) ⇒ `applies: false` y la línea Envío
+ * sale EXACTAMENTE como antes. Con copia:
+ * · base = `shipping_cost − shipping_tax_amount`, al centavo exacto. El
+ *   impuesto ya se truncó al vender (`resolveInclusiveClearing`); volver a
+ *   despejar produciría una segunda verdad. `base × tarifa` puede diferir del
+ *   impuesto ≤ 0,01 — FAX07 (±2,00), FAU04/FAU06 (a peso) y
+ *   `checkTaxSubtotals` (≤ 1 ¢) lo aceptan.
+ * · la fila lleva `tax_type` de la copia (sin tipo ⇒ iva, misma lectura que
+ *   `buildShippingTaxBreakdownRow` usa para contabilidad) y la tarifa en
+ *   PORCENTAJE (`orderTaxFractionToInvoiceRate`), `is_inclusive = false`.
+ *
+ * Una copia incoherente (tipo fuera de iva/inc, sin tarifa, impuesto ≥ costo)
+ * NO se «arregla» inventando una tarifa: se informa y el llamador deja el
+ * envío como hoy.
+ */
+export function resolveInvoiceShippingTax(
+  order: InvoiceShippingTaxSource,
+): InvoiceShippingTaxProjection {
+  const tax_amount = new Prisma.Decimal(
+    Number(order.shipping_tax_amount ?? 0) || 0,
+  ).toDecimalPlaces(2);
+  if (!tax_amount.greaterThan(0)) return { applies: false, reason: 'none' };
+
+  const tax_type = resolveCategoryTaxType(order.shipping_tax_type);
+  if (tax_type !== 'iva' && tax_type !== 'inc') {
+    return { applies: false, reason: 'unsupported_tax_type' };
+  }
+  const fraction = Number(order.shipping_tax_rate ?? 0);
+  if (!Number.isFinite(fraction) || fraction <= 0) {
+    return { applies: false, reason: 'missing_rate' };
+  }
+  const gross = new Prisma.Decimal(
+    Number(order.shipping_cost ?? 0) || 0,
+  ).toDecimalPlaces(2);
+  const base = gross.minus(tax_amount);
+  if (!base.greaterThan(0)) {
+    return { applies: false, reason: 'amount_not_below_cost' };
+  }
+
+  return {
+    applies: true,
+    gross,
+    base,
+    tax_amount,
+    tax_row: {
+      tax_rate_id: order.shipping_tax_rate_id ?? null,
+      tax_name: order.shipping_tax_name || tax_type.toUpperCase(),
+      tax_rate: orderTaxFractionToInvoiceRate(fraction, tax_type),
+      taxable_amount: base.toNumber(),
+      tax_amount: tax_amount.toNumber(),
+      tax_type,
+      is_inclusive: false,
+    },
+  };
 }
 
 /**
@@ -2411,25 +2502,59 @@ export class InvoicingService {
       };
     });
     const shippingCost = Number(order.shipping_cost || 0);
-    const items =
+    // IMPUESTO DEL ENVÍO desde la COPIA de la orden (`orders.shipping_tax_*`,
+    // ver `resolveInvoiceShippingTax`). Con copia, la línea Envío se expresa
+    // en forma base —`unit_price` = base, `tax_amount` = impuesto,
+    // `is_inclusive = false`, como las líneas de producto— y su total sigue
+    // siendo el bruto que pagó el cliente: `total_amount` no se mueve. Sin
+    // copia la línea sale EXACTAMENTE como antes (sin `is_inclusive`).
+    const shippingTax =
       shippingCost > 0
-        ? [
-            ...productItems,
-            {
-              product_id: null,
-              product_variant_id: null,
-              description: 'Envio',
-              quantity: new Prisma.Decimal(1),
-              unit_price: new Prisma.Decimal(shippingCost),
-              discount_amount: new Prisma.Decimal(0),
-              tax_amount: new Prisma.Decimal(0),
-              total_amount: new Prisma.Decimal(shippingCost),
-              applied_price_tier_name: null,
-              stock_units_consumed: null,
-              serial_numbers_snapshot: null,
-            },
-          ]
-        : productItems;
+        ? resolveInvoiceShippingTax(order)
+        : ({ applies: false, reason: 'none' } as const);
+    if (!shippingTax.applies && shippingTax.reason !== 'none') {
+      this.logger.warn(
+        `[invoice:create-from-order]${formatGateCorrelation({
+          store_id: context.store_id ?? null,
+          organization_id: context.organization_id ?? null,
+          order_id: order.id,
+        })} copia de impuesto del envío incoherente (${shippingTax.reason}): ` +
+          'la línea Envío sale sin tributo — no se inventa la tarifa',
+      );
+    }
+    const shippingBase = shippingTax.applies
+      ? shippingTax.base.toNumber()
+      : shippingCost;
+    const shippingLine = shippingTax.applies
+      ? {
+          product_id: null,
+          product_variant_id: null,
+          description: 'Envio',
+          quantity: new Prisma.Decimal(1),
+          unit_price: shippingTax.base,
+          discount_amount: new Prisma.Decimal(0),
+          tax_amount: shippingTax.tax_amount,
+          total_amount: shippingTax.gross,
+          is_inclusive: false,
+          applied_price_tier_name: null,
+          stock_units_consumed: null,
+          serial_numbers_snapshot: null,
+        }
+      : {
+          product_id: null,
+          product_variant_id: null,
+          description: 'Envio',
+          quantity: new Prisma.Decimal(1),
+          unit_price: new Prisma.Decimal(shippingCost),
+          discount_amount: new Prisma.Decimal(0),
+          tax_amount: new Prisma.Decimal(0),
+          total_amount: new Prisma.Decimal(shippingCost),
+          applied_price_tier_name: null,
+          stock_units_consumed: null,
+          serial_numbers_snapshot: null,
+        };
+    const items =
+      shippingCost > 0 ? [...productItems, shippingLine] : productItems;
 
     // A.4: el subtotal es Σ de BASES gravables y ya llega despejado desde
     // los canales (POS y checkout persisten la base en `unit_price`): no se
@@ -2439,9 +2564,11 @@ export class InvoicingService {
     // F-056: fórmula fijada y documentada en `computeOrderInvoiceSubtotal`
     // (arriba del todo en este archivo) — ahí está el porqué de las tres
     // lecturas descartadas de ADR-04.
+    // Con impuesto en el envío el subtotal suma la BASE del envío, no el
+    // bruto: el impuesto viaja en `tax` y `subtotal + tax` sigue dando el total.
     const subtotal = computeOrderInvoiceSubtotal(
       order.order_items || [],
-      shippingCost,
+      shippingBase,
     );
     const discount = items.reduce(
       (acc: number, item: any) => acc + Number(item.discount_amount),
@@ -2493,7 +2620,39 @@ export class InvoicingService {
     // La línea de ENVÍO, cuando existe, se añade al final de `items` y no
     // lleva tributos: se representa como un arreglo vacío para que el
     // alineamiento por posición contra `invoice_items` siga siendo cierto.
-    if (shippingCost > 0) orderLineTaxes.push([]);
+    //
+    // Con impuesto en el envío la línea lleva SU fila (base del envío +
+    // impuesto) y esa misma fila se funde en el agregado de cabecera —misma
+    // clave que `aggregateOrderTaxes`: (nombre|tarifa|tipo|id|inclusivo)— para
+    // que el respaldo de `persistLineTaxes` (cabecera sin vínculo) también la
+    // lleve y `invoices.tax_amount` = Σ filas (FAU06).
+    if (shippingCost > 0) {
+      if (shippingTax.applies) {
+        const row = shippingTax.tax_row;
+        orderLineTaxes.push([{ ...row }]);
+        const round2 = (n: number) => Math.round(n * 100) / 100;
+        const group = invoiceTaxRows.find(
+          (existing) =>
+            existing.tax_name === row.tax_name &&
+            Number(existing.tax_rate) === Number(row.tax_rate) &&
+            existing.tax_type === row.tax_type &&
+            (existing.tax_rate_id ?? null) === (row.tax_rate_id ?? null) &&
+            (existing.is_inclusive === true) === (row.is_inclusive === true),
+        );
+        if (group) {
+          group.taxable_amount = round2(
+            Number(group.taxable_amount || 0) + Number(row.taxable_amount || 0),
+          );
+          group.tax_amount = round2(
+            Number(group.tax_amount || 0) + Number(row.tax_amount || 0),
+          );
+        } else {
+          invoiceTaxRows.push({ ...row });
+        }
+      } else {
+        orderLineTaxes.push([]);
+      }
+    }
     const taxGroups = { size: distinctGroupCount };
 
     // `needsOrderLineTaxSplit`: multi-tributo O cualquier línea inclusiva.
@@ -2502,10 +2661,13 @@ export class InvoicingService {
     // cabecera no lleva `invoice_item_id`, el prevalidador no usa la base
     // persistida y recomputa `bruto − impuesto` sobre unidades que ya son
     // netas (doble despeje). Ver `needsPersistedLineTaxes` para create/update.
-    const split_order_line_taxes = needsOrderLineTaxSplit(
-      taxGroups.size,
-      orderLineTaxes,
-    );
+    //
+    // El impuesto del envío FUERZA el split: su fila tiene que quedar ligada a
+    // la línea Envío (`invoice_item_id`) para que el «todo o nada» de
+    // `invoice-flow`, FAU04 y la NC parcial lean bases persistidas por línea.
+    const split_order_line_taxes =
+      needsOrderLineTaxSplit(taxGroups.size, orderLineTaxes) ||
+      shippingTax.applies;
     // Forma base (ver arriba): el split ya se decidió con la inclusividad de
     // ORIGEN; lo que se persiste es base + cuota, así que toda fila de
     // tributo nace `is_inclusive = false` — el gate lee `tax.is_inclusive`
@@ -2600,7 +2762,12 @@ export class InvoicingService {
         // Plan Despacho Economía — FASE 4 paso 13. Persistir el monto del flete
         // separado del subtotal de productos. El asiento diferenciará producto
         // (4135) vs flete (414505) al validar la factura.
-        shipping_amount: new Prisma.Decimal(shippingCost),
+        //
+        // Es la BASE NETA del envío: con impuesto en el envío,
+        // `onInvoiceValidated` separa producto (subtotal − shipping → 4135) de
+        // flete (shipping → 414505) y el impuesto va a 2408/2436 por
+        // `tax_breakdown`. Sin copia es el bruto, como siempre.
+        shipping_amount: new Prisma.Decimal(shippingBase),
         total_amount: new Prisma.Decimal(total),
         currency: 'COP',
         issue_date: new Date(),
