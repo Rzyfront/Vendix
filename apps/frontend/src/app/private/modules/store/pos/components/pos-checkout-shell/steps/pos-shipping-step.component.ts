@@ -96,6 +96,7 @@ export class PosShippingStepComponent {
 
   // ── Inputs / two-way ──────────────────────────────────────────────────────
   readonly cartState = input<CartState | null>(null);
+  readonly customerAlias = input<string>('');
   readonly editingOrderId = input<number | null>(null);
   // ── Address capture (owned by shipping step according to method type) ───
   readonly address = signal<AddressPayload | null>(null);
@@ -246,6 +247,8 @@ export class PosShippingStepComponent {
   }
 
   get customerDisplayName(): string {
+    const alias = this.customerAlias().trim();
+    if (alias) return alias;
     const customer = this.cartState()?.customer;
     if (!customer) return 'Seleccionar cliente';
     const firstName = customer.first_name || '';
@@ -653,8 +656,8 @@ export class PosShippingStepComponent {
         return { section: 'address', message: 'Completa la dirección de envío' };
       }
     }
-    if (!this.cartState()?.customer) {
-      return { section: 'customer', message: 'Selecciona un cliente' };
+    if (!this.cartState()?.customer && !this.customerAlias().trim()) {
+      return { section: 'customer', message: 'Indica un cliente o un nombre de referencia' };
     }
     return null;
   }
@@ -768,13 +771,30 @@ export class PosShippingStepComponent {
       };
     }
     const a = this.address();
+    const coordinates = a && typeof a.latitude === 'number' && typeof a.longitude === 'number' &&
+      Number.isFinite(a.latitude) && Number.isFinite(a.longitude) &&
+      a.latitude >= -90 && a.latitude <= 90 && a.longitude >= -180 && a.longitude <= 180
+      ? { latitude: a.latitude, longitude: a.longitude }
+      : {};
     return {
       address_line1: a?.address_line1 || '',
+      ...(this.customerAlias().trim() && a?.address_line2
+        ? { address_line2: a.address_line2 }
+        : {}),
       city: a?.city || '',
       state_province: a?.state_province || '',
+      ...(this.customerAlias().trim() && a?.postal_code
+        ? { postal_code: a.postal_code }
+        : {}),
       country_code: a?.country_code || 'CO',
+      ...coordinates,
+      ...(a?.municipality_code?.trim()
+        ? { municipality_code: a.municipality_code.trim() }
+        : {}),
       recipient_name: this.customerDisplayName,
-      recipient_phone: this.cartState()?.customer?.phone || '',
+      recipient_phone: this.customerAlias().trim()
+        ? a?.phone_number || ''
+        : this.cartState()?.customer?.phone || '',
     };
   }
 
@@ -795,8 +815,10 @@ export class PosShippingStepComponent {
         ? this.originalShipping()!.deliveryType ?? this.resolveDeliveryType(method)
         : this.resolveDeliveryType(method),
       shippingAddress: this.buildShippingAddress(),
+      customerAlias: this.customerAlias().trim() || undefined,
       deliveryNotes: this.notesControl.value || undefined,
-      shippingAddressId: this.isPickupMethod() ? undefined : (this.addressId() ?? undefined),
+      shippingAddressId: this.isPickupMethod() || this.customerAlias().trim()
+        ? undefined : (this.addressId() ?? undefined),
       // El borrador aplica `posShippingRateIdForPayload`; el editor lee
       // `shippingRateId` crudo (su backend ya rechaza costo manual vs tarifa).
       manualCostOverride: this.manualCostOverride(),
@@ -804,16 +826,16 @@ export class PosShippingStepComponent {
   }
 
   /**
-   * Persiste la dirección del checkout en el address book del cliente (Paso 8)
-   * y luego procesa la orden. NO bloqueante: un fallo de persistencia muestra un
-   * toast pero la orden continúa (su `shipping_address_snapshot` se guarda igual).
+   * Para venta con alias, envía solo snapshot: el backend crea la fila huérfana
+   * y la enlaza dentro de la transacción POS. Para cliente registrado se conserva
+   * el antiguo best-effort del address book.
    *
    *  - Sin id guardado + dirección utilizable → CREATE via
    *    `CustomersService.createCustomerAddress` (incluye customer_id, lat/lng,
    *    postal_code) y usa el nuevo id.
    *  - Id guardado + payload distinto al guardado → UPDATE via
    *    `updateCustomerAddress`.
-   *  - Id guardado sin cambios / sin cliente / dirección incompleta → procesa
+   *  - Id guardado sin cambios / dirección incompleta → procesa
    *    sin persistir.
    */
   private persistAddressThenProcess(
@@ -825,9 +847,13 @@ export class PosShippingStepComponent {
   ): void {
     const customer = this.cartState()?.customer;
     const customerId = Number(customer?.id);
+    const alias = this.customerAlias().trim();
+    if (alias) {
+      this.processOrder(shippingAddress, deliveryType, paymentRequest, null, creditConfig);
+      return;
+    }
     const existingId = this.addressId();
 
-    // Sin un cliente válido no se persiste ni se envía is_primary.
     if (
       this.isPickupMethod() || !Number.isInteger(customerId) || customerId <= 0 ||
       !a?.address_line1 || !a?.city
@@ -846,10 +872,7 @@ export class PosShippingStepComponent {
 
     // Caso 1: sin dirección guardada → CREAR y usar el nuevo id.
     if (!existingId) {
-      const createDto: CustomerAddressPayload = {
-        ...dto,
-        is_primary: !customer?.addresses?.length,
-      };
+      const createDto: CustomerAddressPayload = { ...dto, is_primary: !customer?.addresses?.length };
       this.customersService
         .createCustomerAddress(createDto)
         .pipe(takeUntilDestroyed(this.destroyRef))
@@ -888,7 +911,7 @@ export class PosShippingStepComponent {
     this.processOrder(shippingAddress, deliveryType, paymentRequest, existingId, creditConfig);
   }
 
-  /** Toast no-bloqueante cuando la persistencia de dirección falla (ej. 403). */
+  /** Registered-customer address book persistence remains best-effort. */
   private notifyAddressPersistFailed(title: string): void {
     this.toastService.show({
       variant: 'warning',
@@ -956,6 +979,7 @@ export class PosShippingStepComponent {
           shippingCost: this.shippingCost(),
           deliveryType,
           shippingAddress,
+          customerAlias: this.customerAlias().trim() || undefined,
           deliveryNotes: this.notesControl.value || undefined,
           shippingAddressId: addressId,
           shippingRateId: this.shippingRateId(),

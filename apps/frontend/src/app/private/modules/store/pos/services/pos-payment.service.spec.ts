@@ -54,6 +54,37 @@ describe('PosPaymentService.processShippingSale — adopted order reference', ()
     ));
     expect(post.calls.mostRecent().args[1].order_id).toBe(57);
   });
+
+  it('sends alias without customer or address FK, but with snapshot for home delivery', async () => {
+    const aliasCart = { ...cart(null), customer: null };
+    await firstValueFrom(service.processShippingSale(aliasCart, {
+      ...shipping, customerAlias: 'Portería torre B', shippingAddressId: 123,
+    }, null, 'current_user'));
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.customer_alias).toBe('Portería torre B');
+    expect(payload.customer_id).toBeUndefined();
+    expect(payload.shipping_address_id).toBeUndefined();
+    expect(payload.shipping_address_snapshot).toEqual(shipping.shippingAddress);
+  });
+
+  it('keeps registered-customer shipping identity unchanged', async () => {
+    await firstValueFrom(service.processShippingSale(cart(null), shipping, null, 'current_user'));
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.customer_id).toBe(9);
+    expect(payload.customer_alias).toBeUndefined();
+  });
+
+  it('omits a stale address id for an adopted alias draft while keeping its snapshot', async () => {
+    await firstValueFrom(service.saveDraft(
+      { ...cart(41), customer: null }, 'current_user', 'Portería torre B',
+      { ...shipping, shippingAddressId: 123 },
+    ));
+    const payload = post.calls.mostRecent().args[1];
+    expect(payload.customer_alias).toBe('Portería torre B');
+    expect(payload.customer_id).toBeUndefined();
+    expect(payload.shipping_address_id).toBeUndefined();
+    expect(payload.shipping_address_snapshot).toEqual(shipping.shippingAddress);
+  });
 });
 
 describe('PosPaymentService.processSaleWithPayment — prior table status', () => {
