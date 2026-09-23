@@ -1200,6 +1200,8 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
 
       expect(err).toMatchObject({ errorCode: 'KITCHEN_TICKET_NOT_TAKEAWAY' });
       const body = (err as any).getResponse?.() ?? {};
+      expect((err as VendixHttpException).getStatus()).toBe(422);
+      expect(body.message).toContain('Entrégalos desde la mesa');
       expect(body.details).toMatchObject({
         hint: 'Solo los platos para llevar se entregan en cocina',
       });

@@ -14,6 +14,36 @@ import { parseApiError } from './parse-api-error';
  */
 const DEBT_WORDS = ['pago', 'deuda', 'mora', 'pendiente'];
 
+describe('ERROR_MESSAGES — rechazos de cocina C.3', () => {
+  for (const [code, status, action] of [
+    ['KDS_STATION_LOCKED', 403, 'tome la estación'],
+    ['KITCHEN_TICKET_NOT_TAKEAWAY', 422, 'desde la mesa'],
+    ['ORDER_ITEM_NOT_DELIVERABLE', 409, 'KDS'],
+  ] as const) {
+    it(`${code} tiene una acción concreta y no usa el genérico`, () => {
+      const copy = ERROR_MESSAGES[code];
+      expect(copy).toContain(action);
+      expect(copy).not.toBe(DEFAULT_ERROR_MESSAGE);
+      expect(
+        parseApiError({ error: { statusCode: status, error_code: code } }).userMessage,
+      ).toBe(copy);
+    });
+  }
+
+  it('el detalle español de cocina coincide con la acción visible para el ticket de mesa', () => {
+    const parsed = parseApiError({
+      error: {
+        statusCode: 422,
+        error_code: 'KITCHEN_TICKET_NOT_TAKEAWAY',
+        message: 'Este ticket incluye platos de mesa. Entrégalos desde la mesa, no desde cocina.',
+      },
+    });
+    expect(parsed.userMessage).toBe(
+      ERROR_MESSAGES['KITCHEN_TICKET_NOT_TAKEAWAY'],
+    );
+  });
+});
+
 describe('ERROR_MESSAGES — POS draft payment guards', () => {
   for (const errorCode of ['POS_DRAFT_DUPLICATE_ORDER_001', 'POS_DRAFT_REQUIRES_PAYMENT_001'] as const) {
     it(`maps ${errorCode} to an actionable Spanish message`, () => {

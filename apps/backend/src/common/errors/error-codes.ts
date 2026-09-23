@@ -5562,7 +5562,7 @@ export const ErrorCodes = {
     code: 'KDS_STATION_LOCKED',
     httpStatus: 403,
     devMessage:
-      'La estación está siendo gestionada por otro operador. Solo el dueño del turno o un administrador pueden actuar sobre sus tickets.',
+      'Otro operador tiene esta estación. Pídele que cierre su turno o solicita a un administrador que tome la estación.',
   },
   /** @deprecated Sin lanzadores; usar ORDER_ITEM_NOT_DELIVERABLE para la entrega por ítem. */
   TABLE_SESSION_ITEM_NOT_DELIVERABLE: {
@@ -5750,7 +5750,7 @@ export const ErrorCodes = {
     code: 'KITCHEN_TICKET_NOT_TAKEAWAY',
     httpStatus: 422,
     devMessage:
-      'El ticket contiene platos que no son para llevar; en cocina solo se entregan pedidos takeaway',
+      'Este ticket incluye platos de mesa. Entrégalos desde la mesa, no desde cocina.',
   },
   // Restaurant Suite — Fase K audit jun-2026: explicit operator-friendly
   // codes for the common invalid transitions surfaced by the table-session

@@ -7,7 +7,10 @@ import {
   parseApiError,
   withApiErrorReference,
 } from '../../../../../../../app/core/utils/parse-api-error';
-import { DEFAULT_ERROR_MESSAGE } from '../../../../../../../app/core/utils/error-messages';
+import {
+  DEFAULT_ERROR_MESSAGE,
+  ERROR_MESSAGES,
+} from '../../../../../../../app/core/utils/error-messages';
 import {
   Table,
   CreateTableDto,
@@ -664,7 +667,13 @@ export class TablesService {
     console.error('TablesService Error:', error);
 
     const parsed = parseApiError(error);
-    let message = parsed.userMessage;
+    // El seam de orden incluye un diagnóstico de estado en español. El parser
+    // lo prioriza sobre ERROR_MESSAGES, pero aquí el mesero necesita el paso
+    // siguiente (esperar a que cocina marque listo en el KDS).
+    let message =
+      parsed.errorCode === 'ORDER_ITEM_NOT_DELIVERABLE'
+        ? ERROR_MESSAGES['ORDER_ITEM_NOT_DELIVERABLE']
+        : parsed.userMessage;
 
     if (message === DEFAULT_ERROR_MESSAGE) {
       message = tablesStatusErrorCopy(error);
