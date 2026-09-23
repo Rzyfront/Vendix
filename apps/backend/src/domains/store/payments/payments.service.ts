@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
@@ -35,7 +36,6 @@ import {
 import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
 import { assertVariantRequiredForPrepared } from '../orders/utils/variant-required.validator';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { buildTaxBreakdown } from 'src/common/interfaces/tax-breakdown.interface';
 import {
   resolveTierSnapshotsForItems,
   type TierSnapshot,
@@ -89,6 +89,12 @@ import {
 } from '@common/audit/audit.service';
 // F-222 — comparación de dinero en centavos enteros (no `Math.abs` en floats).
 import { differsByAtLeastCents } from '@common/money-kernel';
+import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
+import {
+  EMPTY_SHIPPING_TAX,
+  type ShippingTaxSnapshot,
+} from '../shipping/utils/shipping-tax.util';
+import { buildOrderSaleTaxPayload } from './utils/order-sale-tax-payload.util';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -167,6 +173,10 @@ export class PaymentsService {
     // here because `@Global()` AuditModule already exports it, so DI resolves
     // without touching the module wiring.
     private readonly auditService: AuditService,
+    // Impuesto opcional por tarifa de envío: copia congelada en la orden POS
+    // a domicilio. `@Optional()` para no romper los TestingModule existentes;
+    // sin él (sólo en specs) el envío sale sin impuesto.
+    @Optional() private readonly shippingTaxService?: ShippingTaxService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -1511,8 +1521,13 @@ export class PaymentsService {
               },
             },
           });
-          const tax_breakdown = buildTaxBreakdown(
-            orderItemsWithTaxes.flatMap((item) =>
+          // Impuesto del envío (copia congelada en la orden): `orders.tax_amount`
+          // NO lo incluye y `shipping_cost` es el bruto. El helper compartido
+          // (también lo usa el webhook) devuelve el flete NETO para 414505, el
+          // impuesto total (productos + envío) y el desglose con la fila del
+          // envío. Sin copia la salida es la histórica.
+          const sale_tax = buildOrderSaleTaxPayload({
+            product_tax_rows: orderItemsWithTaxes.flatMap((item) =>
               (item.order_item_taxes || []).map((tax) => ({
                 ...tax,
                 // F-111 — la base de CADA impuesto de la línea es el
@@ -1523,7 +1538,9 @@ export class PaymentsService {
                 taxable_amount: Number(item.total_price || 0),
               })),
             ),
-          );
+            order,
+          });
+          const tax_breakdown = sale_tax.tax_breakdown;
 
           // CASO 2 (suffered): a customer who is a withholding agent retains
           // us on this sale, turning the withheld amount into an advance asset
@@ -1592,10 +1609,12 @@ export class PaymentsService {
                 order_number: order.order_number,
                 amount: payment.amount,
                 subtotal_amount: Number(order.subtotal_amount || 0),
-                tax_amount: Number(order.tax_amount || 0),
+                // Productos + impuesto del envío (si la orden tiene copia).
+                tax_amount: sale_tax.tax_amount,
                 // Plan Despacho Economía — FASE 4 paso 15. Ingreso de flete
                 // separado en cuenta 414505 al pagar un POS directo con flete.
-                shipping_amount: Number(order.shipping_cost || 0),
+                // NETO del impuesto del envío (= shipping_cost − shipping_tax_amount).
+                shipping_amount: sale_tax.shipping_amount,
                 tax_breakdown,
                 withholding_breakdown: wh.lines,
                 discount_amount: Number(order.discount_amount || 0),
@@ -1665,10 +1684,12 @@ export class PaymentsService {
               customer_id: order.customer_id ? Number(order.customer_id) : null,
               document_number: order.order_number,
               subtotal_amount: Number(order.subtotal_amount || 0),
-              tax_amount: Number(order.tax_amount || 0),
+              // Productos + impuesto del envío (si la orden tiene copia).
+              tax_amount: sale_tax.tax_amount,
               // Plan Despacho Economía — FASE 4 paso 15. Crédito con flete →
-              // se reconoce también ingreso de flete en cuenta 414505.
-              shipping_amount: Number(order.shipping_cost || 0),
+              // se reconoce también ingreso de flete en cuenta 414505, NETO
+              // del impuesto del envío.
+              shipping_amount: sale_tax.shipping_amount,
               tax_breakdown,
               withholding_breakdown: wh.lines,
               discount_amount: Number(order.discount_amount || 0),
@@ -4105,6 +4126,57 @@ export class PaymentsService {
     return opened.id;
   }
 
+  /**
+   * Impuesto opcional por tarifa de envío en la venta POS (contrato
+   * shipping-rate-tax). El frontend manda `shipping_rate_id` SOLO si el costo
+   * salió de la tarifa (sin override manual).
+   * - Sin `shipping_rate_id` ⇒ copia vacía y `rate_id` null.
+   * - Con él: la tarifa debe existir, pertenecer al `shipping_method_id` del
+   *   DTO y a una zona de la tienda (o del sistema). Si no ⇒ 400
+   *   `ORD_SHIP_RATE_MISMATCH_001` (validación de entrada, no del impuesto).
+   * - Validada ⇒ `ShippingTaxService.snapshotForRate` (nunca lanza: tarifa
+   *   sin categoría, costo 0, emisor sin O-48 con IVA… ⇒ copia vacía).
+   */
+  private async resolvePosShippingTax(
+    tx: any,
+    dto: CreatePosPaymentDto,
+    store_id: number,
+    shipping_cost: number,
+  ): Promise<{ snapshot: ShippingTaxSnapshot; rate_id: number | null }> {
+    const rate_id = dto.shipping_rate_id ?? null;
+    if (!rate_id) return { snapshot: { ...EMPTY_SHIPPING_TAX }, rate_id: null };
+
+    const rate = await tx.shipping_rates.findFirst({
+      where: {
+        id: rate_id,
+        ...(dto.shipping_method_id
+          ? { shipping_method_id: dto.shipping_method_id }
+          : {}),
+        shipping_zone: {
+          OR: [{ store_id }, { is_system: true, store_id: null }],
+        },
+      },
+      select: { id: true, shipping_method_id: true },
+    });
+    if (!rate || !dto.shipping_method_id) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_SHIP_RATE_MISMATCH_001,
+        'La tarifa de envío no pertenece al método de envío o a la tienda',
+        {
+          shipping_rate_id: rate_id,
+          shipping_method_id: dto.shipping_method_id ?? null,
+        },
+      );
+    }
+
+    const snapshot = this.shippingTaxService
+      ? await this.shippingTaxService.snapshotForRate(tx, rate.id, shipping_cost, {
+          store_id,
+        })
+      : { ...EMPTY_SHIPPING_TAX };
+    return { snapshot, rate_id: rate.id };
+  }
+
   private async createOrUpdateOrderFromPos(
     tx: any,
     dto: CreatePosPaymentDto,
@@ -4342,6 +4414,16 @@ export class PaymentsService {
           promotionQuote.total_discount + couponInfo.discount_amount,
         );
         const shippingCost = this.roundMoney(dto.shipping_cost || 0);
+        // Impuesto opcional por tarifa de envío: copia congelada SOLO si el
+        // costo viene de una tarifa (`shipping_rate_id`) validada contra el
+        // método y la tienda. Sin tarifa (costo digitado a mano) ⇒ copia
+        // vacía. No cambia `grandTotal`: el impuesto va incluido en el costo.
+        const shippingTax = await this.resolvePosShippingTax(
+          tx,
+          dto,
+          dtoStoreId,
+          shippingCost,
+        );
 
         // carril D / lina — D3: cálculo y metadatos de la propina
         // (rama retail / POS caja). Misma regla que mesa: el % se
@@ -4428,6 +4510,11 @@ export class PaymentsService {
             ? null
             : dto.payment_form || (dto.requires_payment ? '1' : '2'),
           shipping_cost: shippingCost,
+          // Copia del impuesto del envío (vacía sin tarifa). Siempre se
+          // escribe, así una orden adoptada no conserva una copia rancia.
+          ...shippingTax.snapshot,
+          // La tarifa validada queda ligada a la orden (null sin tarifa).
+          shipping_rate_id: shippingTax.rate_id,
           // GAP-6 — propina persistida aparte (no entra a subtotal/tax).
           // carril D / D3: tip_amount + metadatos (tip_type, tip_value,
           // tip_waiter_id). Los metadatos quedan en NULL si no llegaron.
