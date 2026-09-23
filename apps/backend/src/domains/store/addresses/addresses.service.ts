@@ -102,7 +102,6 @@ export class AddressesService {
           'Selecciona un cliente antes de marcar esta dirección como predeterminada.',
         );
       }
-      await this.unsetOtherDefaults(store_id, resolvedUserId);
     }
 
     const address_data: Prisma.addressesUncheckedCreateInput = {
@@ -128,16 +127,26 @@ export class AddressesService {
       user_id: resolvedUserId,
     };
 
-    try {
-      return await this.prisma.addresses.create({
+    const createAddress = (tx: Prisma.TransactionClient) =>
+      tx.addresses.create({
         data: address_data,
         include: {
           stores: { select: { id: true, name: true } },
         },
       });
-    } catch (error) {
-      throw error;
+
+    if (createAddressDto.is_primary && resolvedUserId) {
+      // Clearing the old default and inserting its replacement are one write.
+      // If the insert fails, rollback must preserve the previous default.
+      return this.prisma.$transaction(async (tx) => {
+        await this.unsetOtherDefaults(tx, store_id, resolvedUserId);
+        return createAddress(tx);
+      });
     }
+    return this.prisma.addresses.create({
+      data: address_data,
+      include: { stores: { select: { id: true, name: true } } },
+    });
   }
 
   async findAll(query: AddressQueryDto, user: any) {
@@ -234,7 +243,6 @@ export class AddressesService {
           'Selecciona un cliente antes de marcar esta dirección como predeterminada.',
         );
       }
-      await this.unsetOtherDefaults(address.store_id!, address.user_id, id);
     }
 
     const update_data: Prisma.addressesUpdateInput = {};
@@ -260,17 +268,24 @@ export class AddressesService {
         updateAddressDto.municipality_code,
       );
 
-    try {
-      return await this.prisma.addresses.update({
-        where: { id },
-        data: update_data,
-        include: {
-          stores: { select: { id: true, name: true } },
-        },
+    if (updateAddressDto.is_primary && address.user_id) {
+      // The scoped findOne above proves ownership; keep an explicit store
+      // predicate inside the raw transaction client and rollback both writes
+      // together if updating the target address fails.
+      return this.prisma.$transaction(async (tx) => {
+        await this.unsetOtherDefaults(tx, address.store_id!, address.user_id, id);
+        return tx.addresses.update({
+          where: { id, store_id: address.store_id! },
+          data: update_data,
+          include: { stores: { select: { id: true, name: true } } },
+        });
       });
-    } catch (error) {
-      throw error;
     }
+    return this.prisma.addresses.update({
+      where: { id },
+      data: update_data,
+      include: { stores: { select: { id: true, name: true } } },
+    });
   }
 
   async remove(id: number, user: any) {
@@ -304,6 +319,7 @@ export class AddressesService {
   }
 
   private async unsetOtherDefaults(
+    tx: Prisma.TransactionClient,
     storeId: number,
     userId: number,
     excludeId?: number,
@@ -314,6 +330,14 @@ export class AddressesService {
         'Selecciona un cliente antes de marcar esta dirección como predeterminada.',
       );
     }
+    // Serialize competing primary replacements for THIS customer's address
+    // book. A transaction alone cannot prevent two concurrent INSERTs from
+    // both leaving is_primary=true when no unique partial index exists.
+    // The lock is transaction-scoped and never touches another customer.
+    await tx.$executeRawUnsafe(
+      'SELECT pg_advisory_xact_lock(hashtext($1))',
+      `address_primary:${storeId}:${userId}`,
+    );
     const where: Prisma.addressesWhereInput = {
       is_primary: true,
       store_id: storeId,
@@ -322,7 +346,7 @@ export class AddressesService {
 
     if (excludeId) where.id = { not: excludeId };
 
-    await this.prisma.addresses.updateMany({
+    await tx.addresses.updateMany({
       where,
       data: { is_primary: false },
     });

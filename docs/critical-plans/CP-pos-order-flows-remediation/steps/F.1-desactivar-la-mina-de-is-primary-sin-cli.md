@@ -32,13 +32,15 @@ skills: [vendix-backend, vendix-address-geocoding, vendix-error-handling, vendix
 - **Acceptance checklist:**
   - [ ] Existe un test que falla antes del arreglo: un alta con predeterminada y sin cliente apagaba toda la tienda.
   - [x] El apagado masivo no se ejecuta nunca sin criterio de cliente.
+  - [x] El unset y el create/update de la nueva predeterminada son atómicos: si la segunda escritura falla, la anterior sobrevive (`evidence/F1-atomic-primary-20260923.md`).
+  - [x] Dos altas simultáneas del mismo cliente dejan una sola predeterminada; lock transaccional por tienda+cliente, QA #536/#537 sin residuo.
   - [x] La vía de actualización arma el criterio con el cliente de la dirección, no solo con la tienda.
   - [x] Marcar predeterminada sin cliente se rechaza con código tipado y texto en español.
-  - [ ] Un cliente de otra tienda se rechaza con código tipado, con el mismo texto de hoy.
+  - [x] Un cliente de otra tienda se rechaza con código tipado, con el mismo texto de hoy.
   - [x] El frontend no envía la marca de predeterminada cuando no hay cliente seleccionado.
   - [x] El conteo de direcciones predeterminadas de la tienda es idéntico antes y después del alta.
   - [x] Ningún cliente queda con dos direcciones predeterminadas tras el cambio.
   - [ ] Ninguna dirección sin cliente queda marcada como predeterminada.
   - [ ] El paso está terminado y verificado antes de empezar el que levanta los gates de alias.
   - [x] El conteo de clientes que perdieron su predeterminada queda registrado como evidencia.
-- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/F1-primary-isolation.md`: POST huérfana/cliente ajeno y PATCH huérfana 400 tipados, sin escrituras; PATCH de cliente #151 aisló y restauró default, conteo 11→12→11, cero doble default. Specs 5/5. Legado: 8 huérfanas primary de tienda (45 de organización excluidas). Pendientes red-before-green, reparación histórica/ADR-05 y confirmar adopción de huérfana: `UpdateAddressDto.customer_id` es hoy inerte.
+- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/F1-primary-isolation.md` y `F1-atomic-primary-20260923.md`: aislamiento por cliente y transacción rollback red→green 7/7; API real PATCH/POST/DELETE 200/201/204, defaults tienda 11→11 al final. Legado: 8 huérfanas primary de tienda (45 de organización excluidas), sin backfill. Pendientes ADR-05 y contrato de adopción: `UpdateAddressDto.customer_id` sigue inerte.
