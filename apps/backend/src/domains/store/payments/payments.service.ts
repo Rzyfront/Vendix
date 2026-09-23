@@ -91,6 +91,7 @@ import {
 import { differsByAtLeastCents } from '@common/money-kernel';
 import { ShippingTaxService } from '../shipping/services/shipping-tax.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
+import { assertOrderLineTotalInvariant } from '../orders/shared/order-arithmetic.guard';
 import {
   EMPTY_SHIPPING_TAX,
   type ShippingTaxSnapshot,
@@ -3472,6 +3473,28 @@ export class PaymentsService {
         delta: grossMismatchDelta,
       });
     }
+
+    // P2-4 — invariante I-1 (`total_price = unit_price × line_units`) en
+    // centavos. Aquí se cumple por construcción (`lineBaseTotal`), así que es
+    // la línea base de la métrica `orders.line_total_invariant_violation`:
+    // con la bandera OFF (default) sólo registra; nunca bloquea el cobro.
+    assertOrderLineTotalInvariant(
+      {
+        unit_price: orderItem.unit_price,
+        total_price: orderItem.total_price,
+        quantity: params.quantity,
+        // Peso tal como lo guarda `numeric(10,3)` (F-085, `getPosLineUnits`).
+        weight: weightValue > 0 ? Math.round(weightValue * 1000) / 1000 : null,
+        price_unit_quantity: orderItem.price_unit_quantity ?? null,
+      },
+      {
+        context: {
+          writer: 'payments.pos',
+          store_id: params.storeId ?? null,
+          product_id: params.productId ?? null,
+        },
+      },
+    );
 
     return orderItem;
   }

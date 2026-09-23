@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
@@ -2506,6 +2507,26 @@ describe('PaymentsService', () => {
       // enteros). Antes toleraba 2 ¢ (`>= 3`, herencia del `> 0.02` en
       // floats). El residuo closest-below que el kernel ya reportó no se
       // duplica como error.
+      it('P2-4: la línea del POS pasa por la compuerta I-1 sin violación (base de la métrica)', () => {
+        const warnSpy = jest.spyOn(Logger.prototype, 'warn');
+        (service as any).buildOrderItemSnapshot({
+          ...baseParams,
+          quantity: 3,
+          lineUnits: 3,
+          unitBasePrice: 925.93,
+          finalUnitPrice: 1000,
+          isPriceOverridden: false,
+          productId: 10,
+          storeId: 3,
+          userId: 42,
+          taxInfo: { total_rate: 0.08, total_tax_amount: 74.07, taxes: [] },
+        });
+        const violations = warnSpy.mock.calls.filter(
+          ([payload]) => (payload as any)?.event === 'orders.line_total_invariant_violation',
+        );
+        expect(violations).toHaveLength(0);
+      });
+
       it('P2-3: delta de 0¢ no registra', () => {
         const errorSpy = jest.spyOn((service as any).logger, 'error');
         (service as any).buildOrderItemSnapshot({
