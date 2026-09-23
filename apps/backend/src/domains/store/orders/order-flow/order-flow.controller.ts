@@ -41,7 +41,7 @@ import { VendixHttpException } from '@common/errors';
 import { ErrorCodes } from '@common/errors/error-codes';
 import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { Prisma } from '@prisma/client';
+import { isOrderFullyPaid } from '../../payments/services/payment-validator.service';
 import {
   CancelOrderItemDto,
   CancelDeliveredOrderItemDto,
@@ -149,15 +149,7 @@ export class OrderFlowController {
       // behind the generic unavailable-action error. The service still owns
       // the atomic check for concurrent requests that pass this preflight.
       if (['created', 'shipped', 'processing'].includes(orderRow.state)) {
-        const settledAmount = (orderRow.payments ?? [])
-          .filter((payment) =>
-            payment.state === 'succeeded' || payment.state === 'captured',
-          )
-          .reduce(
-            (sum, payment) => sum.plus(payment.amount),
-            new Prisma.Decimal(0),
-          );
-        if (settledAmount.gte(orderRow.grand_total)) {
+        if (isOrderFullyPaid(orderRow)) {
           throw new VendixHttpException(ErrorCodes.ORD_PAY_ALREADY_PAID_001);
         }
       }

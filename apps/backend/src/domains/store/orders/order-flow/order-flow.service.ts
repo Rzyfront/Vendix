@@ -56,6 +56,10 @@ import {
   AuditResource,
 } from '@common/audit/audit.service';
 import { RefundFlowService } from './services/refund-flow.service';
+import {
+  getSettledOrderAmount,
+  isOrderFullyPaid,
+} from '../../payments/services/payment-validator.service';
 
 type OrderState = order_state_enum;
 type DraftReservationKey = {
@@ -830,10 +834,8 @@ export class OrderFlowService {
 
     // The winning state claim serializes flow/pay attempts. Re-read settled
     // payments AFTER it, before draft reservation or any new payment row.
-    const settledAmount = (order.payments ?? [])
-      .filter((payment) => payment.state === 'succeeded' || payment.state === 'captured')
-      .reduce((sum, payment) => sum.plus(payment.amount), new Prisma.Decimal(0));
-    if (settledAmount.gte(order.grand_total)) {
+    const settledAmount = getSettledOrderAmount(order);
+    if (isOrderFullyPaid(order, settledAmount)) {
       if (preClaimState && preClaimState !== 'draft') {
         await this.prisma.orders.updateMany({
           where: { id: orderId, state: 'processing' },
