@@ -79,9 +79,9 @@ export const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
   pending_payment: ['processing', 'finished', 'cancelled'],
   processing: ['shipped', 'delivered', 'finished', 'cancelled'],
   shipped: ['delivered'],
-  // 'processing' habilita la reversa de entrega del ticket de cocina
-  // (KDS "un paso atrás"): cuando el ticket terminal vuelve a 'ready',
-  // la orden retrocede delivered -> processing (ver revertKitchenOrderDelivery).
+  // 'processing' pertenece SOLO a revertKitchenOrderDelivery (puente KDS).
+  // El PATCH genérico no puede usarla como transición legal: necesita forzado
+  // explícito con motivo del operador y auditoría forced:true.
   delivered: ['finished', 'refunded', 'processing'],
   finished: ['refunded'],
   cancelled: ['pending_payment', 'created', 'processing'],
@@ -261,6 +261,7 @@ export class OrderFlowService {
   private validateTransition(
     currentState: OrderState,
     targetState: OrderState,
+    owner?: 'kitchen_bridge',
   ): void {
     // QUI-POS-E2E-R8-LIVE: idempotent no-op when the caller already
     // pre-claimed the order into the target state (the FB-10 race-claim
@@ -269,6 +270,9 @@ export class OrderFlowService {
     // is a no-op transition, not an error).
     if (currentState === targetState) {
       return;
+    }
+    if (currentState === 'delivered' && targetState === 'processing' && owner !== 'kitchen_bridge') {
+      throw new VendixHttpException(ErrorCodes.ORD_DELIVERED_REVERSAL_OWNER_001);
     }
     const validTargets = VALID_TRANSITIONS[currentState];
     if (!validTargets.includes(targetState)) {
@@ -330,7 +334,7 @@ export class OrderFlowService {
     orderId: number,
     newState: OrderState,
     metadata: Record<string, any> = {},
-    opts?: { source?: 'kitchen_bridge' | string },
+    opts?: { source?: string; deliveredReversalOwner?: 'forced' },
   ) {
     // Filter out non-schema fields and store them in internal_notes as JSON metadata
     const schemaFields: Record<string, any> = {
@@ -396,6 +400,15 @@ export class OrderFlowService {
       where: { id: orderId },
       select: { state: true, store_id: true, order_number: true },
     });
+
+    if (
+      previous_order?.state === 'delivered' &&
+      newState === 'processing' &&
+      opts?.source !== 'kitchen_bridge' &&
+      opts?.deliveredReversalOwner !== 'forced'
+    ) {
+      throw new VendixHttpException(ErrorCodes.ORD_DELIVERED_REVERSAL_OWNER_001);
+    }
 
     // `finished` is the only state that mutates inventory. Route the stock
     // deduction through the canonical OrderStockCommitService and make the
@@ -2027,8 +2040,8 @@ export class OrderFlowService {
    * `delivered` (p.ej. ya fue finalizada, reembolsada, o nunca llegó a
    * delivered porque tenía otros tickets aún abiertos), es un no-op. Así, una
    * reversa que no corresponde a un retroceso real de la orden nunca lanza ni
-   * fuerza una transición inválida. La transición delivered -> processing está
-   * habilitada en VALID_TRANSITIONS.
+   * fuerza una transición inválida. La arista delivered -> processing está
+   * habilitada en VALID_TRANSITIONS exclusivamente para este puente.
    */
 
   /**
@@ -2797,10 +2810,10 @@ export class OrderFlowService {
       };
     }
 
-    this.validateTransition(order.state as OrderState, 'processing');
+    this.validateTransition(order.state as OrderState, 'processing', 'kitchen_bridge');
     const updatedOrder = await this.updateOrderState(orderId, 'processing', {
       kitchen_delivery_reverted: true,
-    });
+    }, { source: 'kitchen_bridge' });
 
     this.logger.log(
       `Order #${orderId} reverted to 'processing' (kitchen ticket delivery reverted)`,
@@ -4463,7 +4476,10 @@ export class OrderFlowService {
    */
   async getValidTransitions(orderId: number): Promise<OrderState[]> {
     const order = await this.getOrder(orderId);
-    return VALID_TRANSITIONS[order.state as OrderState] || [];
+    const targets = VALID_TRANSITIONS[order.state as OrderState] || [];
+    return order.state === 'delivered'
+      ? targets.filter((state) => state !== 'processing')
+      : targets;
   }
 
   /**
@@ -4498,8 +4514,9 @@ export class OrderFlowService {
    *
    * Toda forzada queda auditada en `internal_notes._flow_metadata.forced_transition`
    * con estado origen, destino, motivo y usuario. `forced` distingue una
-   * transición que la máquina de estados no permitía de una que sí, porque el
-   * PATCH genérico también recibe transiciones legales.
+   * transición no disponible al carril genérico de una legal. La excepción
+   * es delivered -> processing: figura en el mapa sólo para el puente KDS,
+   * y desde el PATCH siempre es forzada.
    */
   async forceOrderState(
     orderId: number,
@@ -4516,7 +4533,14 @@ export class OrderFlowService {
       return order;
     }
 
-    const forced = !(VALID_TRANSITIONS[from] ?? []).includes(target);
+    const kitchenReversal = from === 'delivered' && target === 'processing';
+    const reason = opts.reason?.trim();
+    if (kitchenReversal && !reason) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001,
+      );
+    }
+    const forced = kitchenReversal || !(VALID_TRANSITIONS[from] ?? []).includes(target);
 
     let updatedOrder: any;
     switch (target) {
@@ -4539,7 +4563,9 @@ export class OrderFlowService {
         });
         break;
       default:
-        updatedOrder = await this.updateOrderState(orderId, target);
+        updatedOrder = kitchenReversal
+          ? await this.updateOrderState(orderId, target, {}, { deliveredReversalOwner: 'forced' })
+          : await this.updateOrderState(orderId, target);
     }
 
     // Se escribe DESPUÉS del método canónico para no pisar la metadata que él
@@ -4549,7 +4575,7 @@ export class OrderFlowService {
         from,
         to: target,
         forced,
-        reason: opts.reason,
+        reason: reason || opts.reason,
         user_id: RequestContextService.getUserId() ?? null,
         at: new Date(),
       },

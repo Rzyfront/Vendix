@@ -1208,6 +1208,7 @@ describe('OrderFlowService.revertKitchenOrderDelivery — kitchen bridge reverse
       ORDER_ID,
       'processing',
       expect.objectContaining({ kitchen_delivery_reverted: true }),
+      { source: 'kitchen_bridge' },
     );
     expect(result.transitioned).toBe(true);
     expect(result.previousState).toBe('delivered');

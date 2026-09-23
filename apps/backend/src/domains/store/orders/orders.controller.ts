@@ -406,6 +406,8 @@ export class OrdersController {
         'Orden actualizada exitosamente',
       );
     } catch (error) {
+      // Dejar pasar el código tipado (y el HTTP 400 real) al filtro global.
+      if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al actualizar la orden',
         error.response?.message || error.message,

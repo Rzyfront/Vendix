@@ -1080,6 +1080,16 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Invalid order status',
   },
+  ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001: {
+    code: 'ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'A user-provided reason is required to return a delivered order to processing',
+  },
+  ORD_DELIVERED_REVERSAL_OWNER_001: {
+    code: 'ORD_DELIVERED_REVERSAL_OWNER_001',
+    httpStatus: 400,
+    devMessage: 'Only the kitchen reversal bridge may use delivered to processing as a legal transition',
+  },
   ORD_CANCEL_STOCK_COMMITTED_001: {
     code: 'ORD_CANCEL_STOCK_COMMITTED_001',
     httpStatus: 409,

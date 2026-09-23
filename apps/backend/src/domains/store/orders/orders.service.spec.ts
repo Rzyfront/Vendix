@@ -19,6 +19,7 @@ import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { Prisma, order_channel_enum, order_delivery_type_enum, order_state_enum } from '@prisma/client';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { UpdateOrderDto } from './dto/update-order.dto';
 
 /**
  * Fila de `products.findMany` con la forma que lee
@@ -1045,6 +1046,48 @@ describe('OrdersService', () => {
 
     /** Todos los estados que la UI manda hoy por el PATCH genérico. */
     const UI_STATES = ['cancelled', 'shipped', 'delivered'] as const;
+
+    it('el DTO admite motivo string pero rechaza uno no textual', () => {
+      expect(validateSync(plainToInstance(UpdateOrderDto, {
+        state: 'processing', reason: 'Entrega equivocada',
+      }), { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
+      expect(validateSync(plainToInstance(UpdateOrderDto, {
+        state: 'processing', reason: 123,
+      }), { whitelist: true, forbidNonWhitelisted: true }).length).toBeGreaterThan(0);
+    });
+
+    it.each([undefined, '', '   '])(
+      'rechaza delivered -> processing sin motivo del usuario (%s) antes de cualquier write',
+      async (reason) => {
+        mockPrismaService.orders.findFirst.mockResolvedValue({ ...processingOrder, state: 'delivered' });
+        await expect(service.update(590, {
+          state: 'processing', reason, internal_notes: 'nota',
+        } as any)).rejects.toMatchObject({
+          errorCode: 'ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001',
+        });
+        expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+        expect(mockOrderFlowService.forceOrderState).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([false, true])(
+      'delega motivo del usuario para delivered -> processing (con metadata=%s)',
+      async (withMetadata) => {
+        mockPrismaService.orders.findFirst.mockResolvedValue({ ...processingOrder, state: 'delivered' });
+        mockPrismaService.orders.update.mockResolvedValue(processingOrder);
+        await service.update(590, {
+          state: 'processing', reason: '  Entrega equivocada  ',
+          ...(withMetadata ? { internal_notes: 'nota' } : {}),
+        } as any);
+        expect(mockOrderFlowService.forceOrderState).toHaveBeenCalledWith(590, 'processing', {
+          reason: 'Entrega equivocada',
+        });
+        for (const [call] of mockPrismaService.orders.update.mock.calls) {
+          expect(call.data.reason).toBeUndefined();
+          expect(call.data.state).toBeUndefined();
+        }
+      },
+    );
 
     it.each(UI_STATES)(
       'delega state=%s en forceOrderState y no escribe el estado en crudo',

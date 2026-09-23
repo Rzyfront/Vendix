@@ -1415,6 +1415,16 @@ export class OrdersService {
      */
     const targetState = updateOrderDto.state;
 
+    // El motivo no es columna de orders. En esta arista NO se puede usar el
+    // motivo sintético histórico del PATCH: debe venir del operador.
+    const userReason = updateOrderDto.reason?.trim();
+    delete updateOrderDto.reason;
+    if (order.state === 'delivered' && targetState === 'processing' && !userReason) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001,
+      );
+    }
+
     // Se quita siempre, incluso cuando coincide con el estado actual: el
     // `prisma.orders.update` de abajo no debe recibir `state` bajo ninguna
     // circunstancia, o el seam deja de ser el único escritor.
@@ -1424,7 +1434,7 @@ export class OrdersService {
     if (Object.keys(updateOrderDto).length === 0) {
       if (mustForceState) {
         await this.orderFlowService.forceOrderState(id, targetState!, {
-          reason: 'Transición manual desde la gestión de órdenes',
+          reason: userReason || 'Transición manual desde la gestión de órdenes',
         });
       }
       return this.findOne(id);
@@ -1548,7 +1558,7 @@ export class OrdersService {
      */
     if (mustForceState) {
       await this.orderFlowService.forceOrderState(id, targetState!, {
-        reason: 'Transición manual desde la gestión de órdenes',
+        reason: userReason || 'Transición manual desde la gestión de órdenes',
       });
       // El row devuelto arriba quedó obsoleto: se leyó antes de la transición.
       return this.findOne(id);

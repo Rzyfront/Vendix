@@ -403,6 +403,16 @@ describe('OrdersController', () => {
         400,
       );
     });
+
+    it('propaga el error tipado de motivo para que el filtro responda HTTP 400', async () => {
+      const error = new VendixHttpException(
+        ErrorCodes.ORD_DELIVERED_REVERSAL_REASON_REQUIRED_001,
+      );
+      mockOrdersService.update.mockRejectedValue(error);
+      await expect(controller.update(1, { state: order_state_enum.processing } as UpdateOrderDto))
+        .rejects.toBe(error);
+      expect(mockResponseService.error).not.toHaveBeenCalled();
+    });
   });
 
   describe('remove', () => {
