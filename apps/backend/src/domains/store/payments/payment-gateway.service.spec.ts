@@ -13,6 +13,7 @@ import {
 } from './interfaces';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PaymentError, PaymentErrorCodes } from './utils';
+import { VendixHttpException } from 'src/common/errors';
 import { Prisma, payments_state_enum } from '@prisma/client';
 import { createPrismaMock, PrismaMock } from '../../../testing/prisma-mock';
 import { buildOrder, buildPayment } from '../../../testing/money-fixtures';
@@ -164,6 +165,39 @@ describe('PaymentGatewayService', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(PaymentError);
       }
+    });
+
+    it('propagates the typed already-paid order error before creating a payment', async () => {
+      jest.spyOn(validator, 'validateOrder').mockResolvedValue({
+        valid: false,
+        errors: ['Order is already fully paid'],
+        errorCode: 'ORD_PAY_ALREADY_PAID_001',
+      });
+
+      const error = await service.processPayment(mockPaymentData).catch((failure) => failure);
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe('ORD_PAY_ALREADY_PAID_001');
+      expect(error.getStatus()).toBe(409);
+      expect(prisma.payments.create).not.toHaveBeenCalled();
+    });
+
+    it('preserves the typed order error through processPaymentWithNewOrder', async () => {
+      jest.spyOn(service as any, 'createOrderFromPaymentData').mockResolvedValue({ id: 1 });
+      jest.spyOn(validator, 'validateOrder').mockResolvedValue({
+        valid: false,
+        errorCode: 'ORD_PAY_ALREADY_PAID_001',
+        errors: ['Order is already fully paid'],
+      });
+
+      const error = await service.processPaymentWithNewOrder({
+        ...mockPaymentData,
+        customerEmail: 'customer@example.com',
+        customerName: 'Customer',
+        items: [],
+      }).catch((failure) => failure);
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe('ORD_PAY_ALREADY_PAID_001');
+      expect(prisma.payments.create).not.toHaveBeenCalled();
     });
 
     it('should throw error for disabled payment method', async () => {
@@ -451,7 +485,7 @@ describe('PaymentGatewayService', () => {
 
     it('rechaza el segundo cobro de una orden ya pagada aunque el body traiga metadata.is_pos_payment', async () => {
       // grand_total 59.50 ya cubierto por un pago `succeeded` de 59.50:
-      // saldo pendiente = 0, así que un segundo cobro de 59.50 es sobrepago.
+      // saldo pendiente = 0, así que el validador devuelve el 409 tipado.
       prismaMock.orders.findUnique.mockResolvedValue(
         buildOrder({
           id: ORDER_ID,
@@ -472,7 +506,7 @@ describe('PaymentGatewayService', () => {
           posCharge({ metadata: { is_pos_payment: true } }),
         ),
       ).rejects.toMatchObject({
-        code: PaymentErrorCodes.INVALID_AMOUNT,
+        errorCode: 'ORD_PAY_ALREADY_PAID_001',
       });
 
       // Ninguna plata se mueve ni se persiste cuando la compuerta rechaza.

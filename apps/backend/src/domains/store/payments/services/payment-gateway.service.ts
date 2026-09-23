@@ -18,6 +18,7 @@ import {
 import { PaymentValidatorService } from './payment-validator.service';
 import { PaymentError, PaymentErrorCodes } from '../utils';
 import { BasePaymentProcessor } from '../interfaces/base-processor.interface';
+import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 
 @Injectable()
 export class PaymentGatewayService {
@@ -130,7 +131,7 @@ export class PaymentGatewayService {
         transactionId: result.transactionId || payment.transaction_id,
       };
     } catch (error) {
-      if (error instanceof PaymentError) {
+      if (error instanceof PaymentError || error instanceof VendixHttpException) {
         throw error;
       }
       throw new PaymentError(PaymentErrorCodes.PROCESSOR_ERROR, error.message);
@@ -241,7 +242,7 @@ export class PaymentGatewayService {
         orderId: order.id,
       });
     } catch (error) {
-      if (error instanceof PaymentError) {
+      if (error instanceof PaymentError || error instanceof VendixHttpException) {
         throw error;
       }
       throw new PaymentError(PaymentErrorCodes.INVALID_ORDER, error.message);
@@ -385,10 +386,9 @@ export class PaymentGatewayService {
    *
    * El otro llamador legítimo —`chargeAdoptedOrder` del POS, que cobra sobre una
    * orden ya existente— no necesitaba nada de esto: un cobro de orden adoptada
-   * pasa `validateOrder` (los estados `finished` y "ya pagada por completo" son
-   * *warnings*, no errores; solo `cancelled`, `refunded`, orden ajena a la
-   * tienda o sin ítems son errores) y pasa `validatePaymentAmount` porque su
-   * monto es exactamente el saldo pendiente. Lo cubre el caso "deja pasar el
+   * parcialmente pagada pasa `validateOrder` y `validatePaymentAmount` porque
+   * su monto es exactamente el saldo pendiente. Una orden ya saldada devuelve
+   * `ORD_PAY_ALREADY_PAID_001`. Lo cubre el caso "deja pasar el
    * cobro legítimo de una orden adoptada" del spec.
    *
    * `metadata` queda como carga OPACA: se persiste en `payments.gateway_response`
@@ -419,6 +419,14 @@ export class PaymentGatewayService {
       await Promise.all(validations);
 
     if (!orderValid.valid) {
+      if (orderValid.errorCode) {
+        const typedError = Object.values(ErrorCodes).find(
+          (entry) => entry.code === orderValid.errorCode,
+        );
+        if (typedError) {
+          throw new VendixHttpException(typedError, orderValid.errors?.join(', '));
+        }
+      }
       throw new PaymentError(
         PaymentErrorCodes.INVALID_ORDER,
         orderValid.errors?.join(', ') || 'Invalid order',

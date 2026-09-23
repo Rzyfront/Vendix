@@ -20,8 +20,12 @@ import { buildOrder, buildPayment } from 'src/testing/money-fixtures';
 describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2)', () => {
   const DTO: any = { store_payment_method_id: 1, payment_type: PaymentType.DIRECT };
 
-  const harness = (consumedAtFire = false) => {
-    let state = 'draft';
+  const harness = (
+    consumedAtFire = false,
+    initialState = 'draft',
+    existingPayments: Array<{ state: string; amount: number }> = [],
+  ) => {
+    let state = initialState;
     const reservations: Array<{ product_id: number; status: string }> = [];
     const events: Array<string> = [];
     const tx: any = {
@@ -91,7 +95,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     );
     jest.spyOn(service as any, 'getOrder').mockImplementation(async () => ({
       id: 1, state, store_id: 4, customer_id: 44, delivery_type: 'direct_delivery',
-      grand_total: 100, currency: 'COP',
+      grand_total: 100, currency: 'COP', payments: existingPayments,
     }));
     jest.spyOn(service as any, 'appendFlowMetadata').mockResolvedValue(undefined);
     jest.spyOn(service as any, 'updateOrderState').mockImplementation(async (_id: number, nextState: string) => {
@@ -135,6 +139,38 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     expect(error.getStatus()).toBe(409);
     expect(h.stock.reserveStock).toHaveBeenCalledTimes(1);
     expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechaza draft ya pagado después del claim sin reservar ni crear otro pago', async () => {
+    const h = harness(false, 'draft', [{ state: 'succeeded', amount: 60 }, { state: 'captured', amount: 40 }]);
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_PAY_ALREADY_PAID_001');
+    expect(error.getStatus()).toBe(409);
+    expect(h.prismaMock.orders.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ state: 'processing' }),
+    }));
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.stock.reserveStock).not.toHaveBeenCalled();
+    expect(h.stock.releaseReservation).not.toHaveBeenCalled();
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('rechaza orden created ya pagada y revierte el claim sin crear otro pago', async () => {
+    const h = harness(false, 'created', [{ state: 'succeeded', amount: 100 }]);
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error.errorCode).toBe('ORD_PAY_ALREADY_PAID_001');
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.getState()).toBe('created');
+  });
+
+  it('permite un abono parcial y cobra solo el saldo pendiente', async () => {
+    const h = harness(false, 'created', [{ state: 'succeeded', amount: 40 }]);
+    await h.service.payOrder(1, DTO);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ amount: 60, state: 'succeeded' }),
+    }));
+    expect(h.getState()).toBe('finished');
   });
 
   it('stock agotado no bloquea el cobro; consumo en cocina evita descontar otra vez', async () => {

@@ -807,6 +807,21 @@ export class OrderFlowService {
     let order = await this.getOrder(orderId);
     draftStoreId = order.store_id;
 
+    // The winning state claim serializes flow/pay attempts. Re-read settled
+    // payments AFTER it, before draft reservation or any new payment row.
+    const settledAmount = (order.payments ?? [])
+      .filter((payment) => payment.state === 'succeeded' || payment.state === 'captured')
+      .reduce((sum, payment) => sum.plus(payment.amount), new Prisma.Decimal(0));
+    if (settledAmount.gte(order.grand_total)) {
+      if (preClaimState && preClaimState !== 'draft') {
+        await this.prisma.orders.updateMany({
+          where: { id: orderId, state: 'processing' },
+          data: { state: preClaimState, updated_at: new Date() },
+        });
+      }
+      throw new VendixHttpException(ErrorCodes.ORD_PAY_ALREADY_PAID_001);
+    }
+
     // CP-POS-MODAL-SCOPE-001 / Phase C.4 — defense in depth: edit→pay without
     // customer is only allowed when the POS escape hatch is on
     // (`pos.allow_anonymous_sales=true`). Otherwise the cashier must
@@ -1056,6 +1071,11 @@ export class OrderFlowService {
       }
     }
 
+    // Existing partial abonos remain valid; charge only the outstanding
+    // balance, including any tip just persisted above.
+    const amountToCharge = new Prisma.Decimal(order.grand_total)
+      .minus(settledAmount).toNumber();
+
     // Shipped orders: register payment without changing state
     if (order.state === 'shipped') {
       const transactionId = await this.generateTransactionId();
@@ -1065,11 +1085,11 @@ export class OrderFlowService {
         paymentMethod.system_payment_method.type === 'cash' &&
         dto.amount_received
       ) {
-        change = dto.amount_received - Number(order.grand_total);
+        change = dto.amount_received - amountToCharge;
         if (change < 0) {
           throw this.wrapPaymentFailure('amount_received_short', {
             amount_received: dto.amount_received,
-            grand_total: Number(order.grand_total),
+            grand_total: amountToCharge,
           });
         }
       }
@@ -1078,7 +1098,7 @@ export class OrderFlowService {
         data: {
           order_id: orderId,
           store_payment_method_id: dto.store_payment_method_id,
-          amount: order.grand_total,
+          amount: amountToCharge,
           currency: order.currency,
           state: 'succeeded',
           transaction_id: transactionId,
@@ -1113,7 +1133,7 @@ export class OrderFlowService {
       this.recordPayOrderCashMovement(
         order.store_id,
         orderId,
-        Number(order.grand_total),
+        amountToCharge,
         paymentMethod.system_payment_method.type,
       ).catch(() => {});
 
@@ -1140,11 +1160,11 @@ export class OrderFlowService {
         paymentMethod.system_payment_method.type === 'cash' &&
         dto.amount_received
       ) {
-        change = dto.amount_received - Number(order.grand_total);
+        change = dto.amount_received - amountToCharge;
         if (change < 0) {
           throw this.wrapPaymentFailure('amount_received_short', {
             amount_received: dto.amount_received,
-            grand_total: Number(order.grand_total),
+            grand_total: amountToCharge,
           });
         }
       }
@@ -1153,7 +1173,7 @@ export class OrderFlowService {
         data: {
           order_id: orderId,
           store_payment_method_id: dto.store_payment_method_id,
-          amount: order.grand_total,
+          amount: amountToCharge,
           currency: order.currency,
           state: 'succeeded',
           transaction_id: transactionId,
@@ -1196,7 +1216,7 @@ export class OrderFlowService {
         this.recordPayOrderCashMovement(
           order.store_id,
           orderId,
-          Number(order.grand_total),
+          amountToCharge,
           paymentMethod.system_payment_method.type,
         ).catch(() => {});
 
@@ -1316,7 +1336,7 @@ export class OrderFlowService {
       this.recordPayOrderCashMovement(
         order.store_id,
         orderId,
-        Number(order.grand_total),
+        amountToCharge,
         paymentMethod.system_payment_method.type,
       ).catch(() => {});
 
@@ -1338,7 +1358,7 @@ export class OrderFlowService {
         data: {
           order_id: orderId,
           store_payment_method_id: dto.store_payment_method_id,
-          amount: order.grand_total,
+          amount: amountToCharge,
           currency: order.currency,
           state: 'pending',
           transaction_id: transactionId,
