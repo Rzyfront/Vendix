@@ -1968,12 +1968,31 @@ export class AutoEntryService {
         covering_entry_ids: prior.entry_ids,
       };
     }
+    // Cobertura PARCIAL (orden a medio pagar al aceptarse la factura): los
+    // pagos ya reconocieron su porción de venta. La factura sólo reconoce lo
+    // NO cubierto (DR 1305 / CR ingreso + impuestos proporcionales) y el cobro
+    // posterior cruza esa 1305. Postearla completa duplicaba lo ya reconocido.
+    let uncovered_cents: bigint | null = null;
     if (prior && prior.entry_ids.length > 0) {
+      const invoice_cents = getCents(data.total);
+      uncovered_cents = invoice_cents - prior.recognized_payment_cents;
+      if (uncovered_cents <= 0n) {
+        await this.markInvoiceRecognizedElsewhere(
+          data.invoice_id,
+          data.organization_id,
+        );
+        return {
+          id: null,
+          skipped: true,
+          reason: 'sale_already_recognized',
+          covering_entry_ids: prior.entry_ids,
+        };
+      }
       this.logger.warn(
-        `invoice.validated #${data.invoice_id}: la orden #${prior.order_id} tiene ` +
-          `asiento(s) de venta [${prior.entry_ids.join(', ')}] por ` +
-          `${formatCents(prior.recognized_cents)} que NO cubren el total de la ` +
-          `factura (${data.total}); se contabiliza la factura completa.`,
+        `invoice.validated #${data.invoice_id}: la orden #${prior.order_id} ya ` +
+          `reconoció ${formatCents(prior.recognized_payment_cents)} en ` +
+          `[${prior.entry_ids.join(', ')}]; la factura (${data.total}) sólo ` +
+          `reconoce el saldo ${formatCents(uncovered_cents)}.`,
       );
     }
 
@@ -2076,10 +2095,42 @@ export class AutoEntryService {
       organization_id: data.organization_id,
       store_id: data.store_id,
       accounting_entity_id: data.accounting_entity_id,
-      description: `Invoice validated #${data.invoice_id}`,
-      lines,
+      description:
+        uncovered_cents != null
+          ? `Invoice validated #${data.invoice_id} (saldo no reconocido por pagos)`
+          : `Invoice validated #${data.invoice_id}`,
+      lines:
+        uncovered_cents != null
+          ? this.scaleEntryLines(lines, uncovered_cents)
+          : lines,
       user_id: data.user_id,
     });
+  }
+
+  /**
+   * Escala un asiento cuadrado a `target_cents` por lado: cada lado se reparte
+   * en proporción a sus líneas por mayor residuo, así DR = CR = target al
+   * centavo y cada cuenta conserva su peso. Si el asiento de entrada no
+   * cuadra, se devuelve intacto (la validación de createAutoEntry decide).
+   */
+  private scaleEntryLines(
+    lines: (AutoEntryLine | null)[],
+    target_cents: bigint,
+  ): (AutoEntryLine | null)[] {
+    const present = lines.filter((l): l is AutoEntryLine => !!l);
+    const debits = present.map((l) => getCents(l.debit_amount ?? 0));
+    const credits = present.map((l) => getCents(l.credit_amount ?? 0));
+    const sumOf = (values: bigint[]) => values.reduce((a, b) => a + b, 0n);
+    if (sumOf(debits) !== sumOf(credits) || sumOf(debits) <= 0n) return lines;
+    const scaled_debits = proportional(target_cents, debits);
+    const scaled_credits = proportional(target_cents, credits);
+    return present
+      .map((line, index) => ({
+        ...line,
+        debit_amount: Number(formatCents(scaled_debits[index])),
+        credit_amount: Number(formatCents(scaled_credits[index])),
+      }))
+      .filter((line) => line.debit_amount > 0 || line.credit_amount > 0);
   }
 
   /**
@@ -2131,6 +2182,8 @@ export class AutoEntryService {
     order_id: number;
     entry_ids: number[];
     recognized_cents: bigint;
+    /** Dinero (o CxC de venta a crédito) ya reconocido como venta. */
+    recognized_payment_cents: bigint;
     covered: boolean;
   } | null> {
     const db = this.prisma.withoutScope();
@@ -2153,9 +2206,12 @@ export class AutoEntryService {
 
     const payments = await db.payments.findMany({
       where: { order_id },
-      select: { id: true },
+      select: { id: true, amount: true },
     });
     const payment_ids = payments.map((row: any) => row.id);
+    const payment_amount = new Map<number, bigint>(
+      payments.map((row: any) => [row.id, getCents(row.amount ?? 0)]),
+    );
 
     const candidates = await db.accounting_entries.findMany({
       where: {
@@ -2176,6 +2232,7 @@ export class AutoEntryService {
       select: {
         id: true,
         source_type: true,
+        source_id: true,
         total_credit: true,
         accounting_entry_lines: {
           select: {
@@ -2203,10 +2260,24 @@ export class AutoEntryService {
       invoice.total_amount ?? params.invoice_total ?? 0,
     );
 
+    // Para la cobertura parcial: lo que los pagos ya reconocieron es su MONTO
+    // (DR caja), no el total_credit (que suma el descuento de 4175). Sin
+    // monto conocido se usa total_credit.
+    const recognized_payment_cents = sale_entries.reduce(
+      (sum: bigint, entry: any) =>
+        sum +
+        (entry.source_type === 'payment.received' &&
+        payment_amount.has(entry.source_id)
+          ? payment_amount.get(entry.source_id)!
+          : getCents(entry.total_credit ?? 0)),
+      0n,
+    );
+
     return {
       order_id,
       entry_ids: sale_entries.map((entry: any) => entry.id),
       recognized_cents,
+      recognized_payment_cents,
       covered: sale_entries.length > 0 && recognized_cents + 1n >= invoice_cents,
     };
   }

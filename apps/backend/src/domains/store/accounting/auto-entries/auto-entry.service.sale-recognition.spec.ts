@@ -349,26 +349,102 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
     );
   });
 
-  it('asiento de venta que NO cubre el total de la factura ⇒ se contabiliza la factura completa', async () => {
-    const { service, createAutoEntry } = build({
-      entries: [
-        {
-          id: 800,
-          source_type: 'payment.received',
-          total_credit: 5000,
-          accounting_entry_lines: [
-            { credit_amount: 5000, account: { code: '4135' } },
-          ],
-        },
-      ],
+  describe('cobertura parcial (A3): orden a medio pagar al aceptarse la factura', () => {
+    const HALF = SALE.total / 2; // 8.450
+
+    it('pago 50 + factura 100 + cobro 50 ⇒ ingreso 100 una vez, 1305 en 0, todo cuadrado', async () => {
+      // 1) Pago de la mitad sin factura: venta directa por la PORCIÓN del
+      //    pago (el emisor manda la cuota de computePaymentSaleShare).
+      const first = build();
+      await first.service.onPaymentReceived({
+        payment_id: SALE.payment_id,
+        organization_id: 1,
+        store_id: 2,
+        order_id: SALE.order_id,
+        amount: HALF,
+        subtotal_amount: SALE.subtotal / 2,
+        tax_amount: SALE.tax / 2,
+        shipping_amount: SALE.shipping / 2,
+      });
+      const payment_lines = linesOf(first.createAutoEntry.mock.calls[0]);
+      expect(sum(payment_lines, 'debit_amount')).toBe(HALF);
+      expect(sum(payment_lines, 'credit_amount')).toBe(HALF);
+
+      // 2) Factura aceptada por el total: sólo reconoce el saldo no cubierto.
+      const second = build({
+        payments: [{ id: SALE.payment_id, amount: HALF }],
+        entries: [
+          {
+            ...asPostedEntry(700, 'payment.received', payment_lines),
+            source_id: SALE.payment_id,
+          },
+        ],
+      });
+      await second.service.onInvoiceValidated(invoiceEvent);
+      expect(second.createAutoEntry).toHaveBeenCalledTimes(1);
+      expect(second.unscoped.invoices.updateMany).not.toHaveBeenCalled();
+      const invoice_lines = linesOf(second.createAutoEntry.mock.calls[0]);
+      expect(sum(invoice_lines, 'debit_amount')).toBe(HALF);
+      expect(sum(invoice_lines, 'credit_amount')).toBe(HALF);
+      expect(invoice_lines).toContainEqual(
+        expect.objectContaining({ account_code: '1305', debit_amount: HALF }),
+      );
+
+      // 3) Cobro del resto con la factura ya emitida: recaudo contra 1305.
+      const third = build();
+      third.service['prisma'].invoices.findFirst = jest
+        .fn()
+        .mockResolvedValue({ id: SALE.invoice_id });
+      await third.service.onPaymentReceived({
+        payment_id: 901,
+        organization_id: 1,
+        store_id: 2,
+        order_id: SALE.order_id,
+        amount: HALF,
+        subtotal_amount: SALE.subtotal,
+        tax_amount: SALE.tax,
+        shipping_amount: SALE.shipping,
+      });
+      const collection_lines = linesOf(third.createAutoEntry.mock.calls[0]);
+
+      const all = [...payment_lines, ...invoice_lines, ...collection_lines];
+      expect(creditOn(all, '4135')).toBe(SALE.subtotal);
+      expect(creditOn(all, '414505')).toBe(SALE.shipping);
+      // El pago sin desglose tipado acredita 2408 y la factura 240802: el IVA
+      // total reconocido es la suma de ambas, una sola vez.
+      expect(creditOn(all, '2408') + creditOn(all, '240802')).toBe(SALE.tax);
+      const net_1305 =
+        sum(
+          all.filter((l) => l.account_code === '1305'),
+          'debit_amount',
+        ) - creditOn(all, '1305');
+      expect(net_1305).toBe(0);
+      expect(sum(all, 'debit_amount')).toBe(sum(all, 'credit_amount'));
     });
 
-    await service.onInvoiceValidated(invoiceEvent);
+    it('pagos que ya igualan la factura por monto ⇒ la factura no postea', async () => {
+      const { service, createAutoEntry, unscoped } = build({
+        payments: [{ id: SALE.payment_id, amount: SALE.total }],
+        entries: [
+          {
+            id: 800,
+            source_type: 'payment.received',
+            source_id: SALE.payment_id,
+            // total_credit bajo (p. ej. asiento histórico sin envío) pero el
+            // dinero cubre la factura completa.
+            total_credit: 5000,
+            accounting_entry_lines: [
+              { credit_amount: 5000, account: { code: '4135' } },
+            ],
+          },
+        ],
+      });
 
-    expect(createAutoEntry).toHaveBeenCalledTimes(1);
-    expect(createAutoEntry.mock.calls[0][0].source_type).toBe(
-      'invoice.validated',
-    );
+      await service.onInvoiceValidated(invoiceEvent);
+
+      expect(createAutoEntry).not.toHaveBeenCalled();
+      expect(unscoped.invoices.updateMany).toHaveBeenCalled();
+    });
   });
 
   it('nota débito nunca se omite aunque la orden tenga venta reconocida', async () => {
