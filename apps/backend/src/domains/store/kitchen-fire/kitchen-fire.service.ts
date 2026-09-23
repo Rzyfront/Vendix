@@ -295,7 +295,6 @@ export class KitchenFireService {
         // `table_session_id`: la relación vive al revés (table_sessions.order_id).
         // La más reciente; el índice one_open_per_table (A.3) garantiza una sola.
         table_sessions: {
-          where: { closed_at: null },
           orderBy: { opened_at: 'desc' },
           take: 1,
           select: { id: true, table_id: true },
@@ -1186,7 +1185,6 @@ export class KitchenFireService {
         // tiene `table_id` directo; la relación vive en table_sessions.
         // El fire normal usa el mismo patrón (líneas 278-283).
         table_sessions: {
-          where: { closed_at: null },
           orderBy: { opened_at: 'desc' },
           take: 1,
           select: { id: true, table_id: true },
@@ -1943,7 +1941,6 @@ export class KitchenFireService {
         // `table_session_id`: la relación vive al revés (table_sessions.order_id).
         // La más reciente; el índice one_open_per_table (A.3) garantiza una sola.
         table_sessions: {
-          where: { closed_at: null },
           orderBy: { opened_at: 'desc' },
           take: 1,
           select: { id: true, table_id: true },

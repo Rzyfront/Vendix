@@ -3864,6 +3864,7 @@ export class PaymentsService {
     const updated = await tx.orders.update({
       where: { id: session.order_id },
       data: {
+        delivery_type: 'dine_in',
         ...(session.order?.created_by_user_id == null && tableSellerUserId
           ? { created_by_user_id: tableSellerUserId }
           : {}),
