@@ -729,6 +729,10 @@ export class AccountingEventsListener {
     // REFUND OVERHAUL — emitted by RefundFlowService since step 3. Drives
     // the credit-side mapping key in onRefundCompleted (1105/1110/2335).
     refund_method?: string;
+    /** Base de productos devuelta; separa la base neta del envío. */
+    subtotal?: number;
+    /** Envío devuelto BRUTO; su base neta se reversa contra 414505. */
+    shipping?: number;
   }) {
     try {
       if (
@@ -750,6 +754,8 @@ export class AccountingEventsListener {
         return_type: event.return_type,
         user_id: event.user_id,
         refund_method: event.refund_method,
+        subtotal: event.subtotal != null ? Number(event.subtotal) : undefined,
+        shipping: event.shipping != null ? Number(event.shipping) : undefined,
       });
       this.logger.log(
         `Auto-entry created for refund.completed #${event.refund_id}`,

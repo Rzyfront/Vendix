@@ -253,3 +253,44 @@ describe('AccountingEventsListener — omisión de asiento instrumentada (C.9)',
     );
   });
 });
+
+describe('AccountingEventsListener refund.completed', () => {
+  it('reenvía subtotal y envío para separar la reversa del ingreso por fletes', async () => {
+    const auto_entry_service = {
+      onRefundCompleted: jest.fn().mockResolvedValue({ id: 3 }),
+      prisma: {
+        stores: {
+          findUnique: jest.fn().mockResolvedValue({ organization_id: 1 }),
+        },
+      },
+    };
+    const listener = new AccountingEventsListener(
+      auto_entry_service as any,
+      { getMapping: jest.fn() } as any,
+      { isSubflowEnabled: jest.fn().mockResolvedValue(true) } as any,
+      { getPlatformContext: jest.fn() } as any,
+      { recordSkip: jest.fn(), recordFailure: jest.fn() } as any,
+    );
+
+    await listener.handleRefundCompleted({
+      refund_id: 31,
+      organization_id: 1,
+      store_id: 2,
+      amount: 7140,
+      tax_amount: 1140,
+      subtotal: 5000,
+      shipping: 1190,
+      refund_method: 'cash',
+    });
+
+    expect(auto_entry_service.onRefundCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        refund_id: 31,
+        amount: 7140,
+        tax_amount: 1140,
+        subtotal: 5000,
+        shipping: 1190,
+      }),
+    );
+  });
+});

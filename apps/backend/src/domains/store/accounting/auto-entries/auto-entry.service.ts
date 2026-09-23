@@ -1887,6 +1887,46 @@ export class AutoEntryService {
         description: `Financial account invoice #${data.invoice_id}`, lines: [], user_id: data.user_id,
       });
     }
+
+    // Venta ya reconocida por el carril POS (doble conteo). `payment.received`
+    // sale ANTES de que exista la factura (payments.service emite el pago y
+    // luego POS_SALE_COMPLETED_EVENT crea la factura), así que el asiento del
+    // pago toma la rama «sin factura» y acredita ingreso + impuestos. Lo mismo
+    // hace `credit_sale.created` con la CxC. Si aquí se volviera a acreditar
+    // ingreso + impuestos contra 1305, la venta quedaría DOS veces en 4135 /
+    // 2408 / 2436 / 414505 y la 1305 nunca se cruzaría.
+    const prior = await this.findPriorSaleRecognition({
+      invoice_id: data.invoice_id,
+      organization_id: data.organization_id,
+      invoice_total: data.total,
+    });
+    if (prior?.covered) {
+      this.logger.log(
+        `invoice.validated #${data.invoice_id}: la venta de la orden #${prior.order_id} ` +
+          `ya se reconoció en ${prior.entry_ids.length} asiento(s) ` +
+          `[${prior.entry_ids.join(', ')}] por ${formatCents(prior.recognized_cents)}; ` +
+          `se omite el asiento de ingreso/impuestos de la factura.`,
+      );
+      await this.markInvoiceRecognizedElsewhere(
+        data.invoice_id,
+        data.organization_id,
+      );
+      return {
+        id: null,
+        skipped: true,
+        reason: 'sale_already_recognized',
+        covering_entry_ids: prior.entry_ids,
+      };
+    }
+    if (prior && prior.entry_ids.length > 0) {
+      this.logger.warn(
+        `invoice.validated #${data.invoice_id}: la orden #${prior.order_id} tiene ` +
+          `asiento(s) de venta [${prior.entry_ids.join(', ')}] por ` +
+          `${formatCents(prior.recognized_cents)} que NO cubren el total de la ` +
+          `factura (${data.total}); se contabiliza la factura completa.`,
+      );
+    }
+
     const customer_third_party: AutoEntryThirdParty | undefined = data.customer
       ? {
           id: data.customer.id,
@@ -1989,6 +2029,147 @@ export class AutoEntryService {
       description: `Invoice validated #${data.invoice_id}`,
       lines,
       user_id: data.user_id,
+    });
+  }
+
+  /**
+   * Tipos de documento que reconocen una VENTA de la orden. Las notas (crédito,
+   * débito, de ajuste) mueven el saldo de una venta ya reconocida y nunca se
+   * omiten por esta regla.
+   */
+  private static readonly SALE_RECOGNITION_INVOICE_TYPES = [
+    'sales_invoice',
+    'export_invoice',
+    'pos_equivalent_document',
+  ];
+
+  /**
+   * ¿La venta que documenta esta factura ya se reconoció en el libro por otro
+   * carril? Busca, para la orden de la factura:
+   *
+   *  - `credit_sale.created` con `source_id = orders.id` (venta a crédito POS:
+   *    DR 1305 / CR ingreso + impuestos), y
+   *  - `payment.received` con `source_id ∈ payments.id` de la orden que
+   *    reconocieron INGRESO (rama «sin factura»: alguna línea CR en clase 4 del
+   *    PUC). Los asientos de «Recaudo factura» (DR caja / CR 1305) no cuentan:
+   *    sólo cruzan cartera.
+   *
+   * `covered` exige que Σ total_credit de esos asientos alcance el total de la
+   * factura (tolerancia de 1 centavo). Es una cota segura: cada asiento de
+   * venta POS se construye con los totales de la ORDEN y sólo se postea si
+   * cuadra, y su total_credit incluye además descuento bruto y propina; por eso
+   * nunca queda por debajo del total de una factura de la misma orden. Si no
+   * alcanza (orden facturada por más de lo reconocido), NO se omite nada.
+   *
+   * Lecturas sin scope con predicado de tenant explícito: corre dentro de un
+   * listener, sin AsyncLocalStorage de tienda garantizado.
+   */
+  private async findPriorSaleRecognition(params: {
+    invoice_id: number;
+    organization_id: number;
+    invoice_total: number;
+  }): Promise<{
+    order_id: number;
+    entry_ids: number[];
+    recognized_cents: bigint;
+    covered: boolean;
+  } | null> {
+    const db = this.prisma.withoutScope();
+    const invoice = await db.invoices.findFirst({
+      where: {
+        id: params.invoice_id,
+        organization_id: params.organization_id,
+      },
+      select: { order_id: true, invoice_type: true, total_amount: true },
+    });
+    if (
+      !invoice?.order_id ||
+      !AutoEntryService.SALE_RECOGNITION_INVOICE_TYPES.includes(
+        invoice.invoice_type as string,
+      )
+    ) {
+      return null;
+    }
+    const order_id = invoice.order_id;
+
+    const payments = await db.payments.findMany({
+      where: { order_id },
+      select: { id: true },
+    });
+    const payment_ids = payments.map((row: any) => row.id);
+
+    const candidates = await db.accounting_entries.findMany({
+      where: {
+        organization_id: params.organization_id,
+        status: 'posted',
+        OR: [
+          { source_type: 'credit_sale.created', source_id: order_id },
+          ...(payment_ids.length
+            ? [
+                {
+                  source_type: 'payment.received',
+                  source_id: { in: payment_ids },
+                },
+              ]
+            : []),
+        ],
+      },
+      select: {
+        id: true,
+        source_type: true,
+        total_credit: true,
+        accounting_entry_lines: {
+          select: {
+            credit_amount: true,
+            account: { select: { code: true } },
+          },
+        },
+      },
+      orderBy: { id: 'asc' },
+    });
+
+    const recognizesRevenue = (entry: any) =>
+      entry.source_type === 'credit_sale.created' ||
+      (entry.accounting_entry_lines ?? []).some(
+        (line: any) =>
+          getCents(line.credit_amount ?? 0) > 0n &&
+          String(line.account?.code ?? '').startsWith('4'),
+      );
+    const sale_entries = candidates.filter(recognizesRevenue);
+    const recognized_cents = sale_entries.reduce(
+      (sum: bigint, entry: any) => sum + getCents(entry.total_credit ?? 0),
+      0n,
+    );
+    const invoice_cents = getCents(
+      invoice.total_amount ?? params.invoice_total ?? 0,
+    );
+
+    return {
+      order_id,
+      entry_ids: sale_entries.map((entry: any) => entry.id),
+      recognized_cents,
+      covered: sale_entries.length > 0 && recognized_cents + 1n >= invoice_cents,
+    };
+  }
+
+  /**
+   * La factura no genera asiento propio porque su venta ya está en el libro:
+   * mismo estado terminal que usa la cuenta financiera
+   * (`financial_account_already_recognized`), para que no quede `blocked`
+   * pareciendo un asiento pendiente.
+   */
+  private async markInvoiceRecognizedElsewhere(
+    invoice_id: number,
+    organization_id: number,
+  ) {
+    const db = this.prisma.withoutScope();
+    await db.invoices.updateMany({
+      where: { id: invoice_id, organization_id },
+      data: { accounting_status: 'not_applicable' },
+    });
+    await db.fiscal_transmissions.updateMany({
+      where: { source_type: 'invoice', source_id: invoice_id, organization_id },
+      data: { accounting_status: 'not_applicable' },
     });
   }
 
@@ -3979,6 +4160,15 @@ export class AutoEntryService {
     //   bank_transfer     → 1110 Bancos
     //   store_credit      → 2335 Wallet Pasivo (customer credit liability)
     refund_method?: string;
+    /**
+     * Base de productos devuelta (`calculation.subtotal_refund`). Junto con
+     * `shipping` permite separar la base NETA del envío devuelto:
+     * `amount − tax_amount − subtotal` (amount lleva el envío BRUTO y
+     * tax_amount ya incluye el impuesto del envío).
+     */
+    subtotal?: number;
+    /** Envío devuelto BRUTO (`calculation.shipping_refund`). */
+    shipping?: number;
   }) {
     // Replacements only move inventory — no financial entry needed
     if (data.return_type === 'replacement') {
@@ -3991,15 +4181,34 @@ export class AutoEntryService {
     const tax = Number(data.tax_amount || 0);
     const revenue_amount = tax > 0 ? data.amount - tax : data.amount;
 
+    // La base del envío devuelto se reversa contra el ingreso por fletes
+    // (414505), la misma cuenta que la acreditó en la venta, no contra 4135.
+    // FALLBACK: si la organización no puede resolver la clave o no tiene la
+    // cuenta en su plan, se reversa todo contra `refund.completed.revenue`,
+    // exactamente como antes (organizaciones existentes sin el mapping).
+    const shipping_line = await this.resolveRefundShippingLine({
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      amount: data.amount,
+      tax,
+      subtotal: data.subtotal,
+      shipping: data.shipping,
+      revenue_amount,
+    });
+    const product_revenue_amount = shipping_line
+      ? Math.round((revenue_amount - shipping_line.debit_amount) * 100) / 100
+      : revenue_amount;
+
     const lines: (AutoEntryLine | null)[] = [
       await this.resolveAccountLine(
         data.organization_id,
         'refund.completed.revenue',
         'Ingresos (reversa)',
-        revenue_amount,
+        product_revenue_amount,
         0,
         data.store_id,
       ),
+      ...(shipping_line ? [shipping_line] : []),
     ];
 
     // Reverse tax per fiscal type (debit side): IVA→2408, INC→2436, ICA→241205
@@ -4058,6 +4267,68 @@ export class AutoEntryService {
       lines,
       user_id: data.user_id,
     });
+  }
+
+  /**
+   * Línea DR de reversa del ingreso por fletes de una devolución, o `null` para
+   * caer al comportamiento histórico (todo contra `refund.completed.revenue`).
+   *
+   * Base neta = `amount − tax − subtotal`, acotada a [0, min(shipping, ingreso
+   * reversado)]. Sin `subtotal` o sin `shipping` no hay forma de separarla sin
+   * inventar el dato, y se devuelve `null`.
+   */
+  private async resolveRefundShippingLine(params: {
+    organization_id: number;
+    store_id?: number;
+    amount: number;
+    tax: number;
+    subtotal?: number;
+    shipping?: number;
+    revenue_amount: number;
+  }): Promise<AutoEntryLine | null> {
+    const shipping_gross = Number(params.shipping || 0);
+    if (!(shipping_gross > 0) || params.subtotal == null) return null;
+    const derived =
+      Math.round(
+        (Number(params.amount) - params.tax - Number(params.subtotal)) * 100,
+      ) / 100;
+    const shipping_net = Math.min(
+      Math.max(0, derived),
+      shipping_gross,
+      Math.max(0, params.revenue_amount),
+    );
+    if (!(shipping_net > 0)) return null;
+
+    const line = await this.resolveAccountLine(
+      params.organization_id,
+      'refund.completed.shipping_income_reversal',
+      'Ingreso por fletes (reversa)',
+      shipping_net,
+      0,
+      params.store_id,
+    );
+    if (!line) return null;
+    // `getMapping` cae al default constante (414505) aunque la organización no
+    // tenga esa cuenta en su plan; postear así haría fallar el asiento entero
+    // (`Account code not found`). Sin la cuenta ⇒ fallback histórico.
+    const account = await this.prisma
+      .withoutScope()
+      .chart_of_accounts.findFirst({
+        where: {
+          organization_id: params.organization_id,
+          code: line.account_code,
+        },
+        select: { id: true },
+      });
+    if (!account) {
+      this.logger.warn(
+        `refund.completed: cuenta ${line.account_code} de ` +
+          `'refund.completed.shipping_income_reversal' no existe en la org ` +
+          `#${params.organization_id}; el envío se reversa contra el ingreso.`,
+      );
+      return null;
+    }
+    return line;
   }
 
   // REFUND OVERHAUL — selecciona la llave de mapeo del crédito a partir del
