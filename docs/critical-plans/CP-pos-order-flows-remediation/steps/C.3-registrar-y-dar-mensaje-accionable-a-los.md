@@ -30,12 +30,12 @@ skills: [vendix-error-handling, vendix-restaurant-ops, vendix-frontend, how-to-t
   - `curl -s -X PATCH "$API/store/table-sessions/$SID/items/$IID_NO_READY/deliver" -H "Authorization: Bearer $TOKEN_MESERO" -o evidence/C.3-item-not-deliverable.json -w '%{http_code}\n'` → 409 con `errorCode: ORDER_ITEM_NOT_DELIVERABLE`.
   - Playwright MCP: provocar los tres rechazos y capturar el toast visible en `evidence/C.3-toasts/`.
 - **Acceptance checklist:**
-  - [ ] `KITCHEN_TICKET_NOT_TAKEAWAY` vive en `error-codes.ts` con el mismo `code` y el mismo HTTP 422 que tenía inline.
-  - [ ] El spec de cocina que fija ese `errorCode` pasa sin modificarlo: la migración no cambió el contrato.
-  - [ ] `KDS_STATION_LOCKED`, `KITCHEN_TICKET_NOT_TAKEAWAY` y `ORDER_ITEM_NOT_DELIVERABLE` tienen mensaje en `error-messages.ts`.
-  - [ ] El mensaje de estación bloqueada nombra la salida concreta: pedir cierre de turno o tomar la estación.
-  - [ ] El mensaje de plato no listo lleva al KDS, no describe el estado interno del ticket.
-  - [ ] El docblock del servicio de mesa del frontend cita el código realmente lanzado, no la entrada muerta.
-  - [ ] La entrada sin lanzadores queda marcada como deprecada con puntero al código vigente; sigue en 0 lanzadores.
+  - [x] `KITCHEN_TICKET_NOT_TAKEAWAY` vive en `error-codes.ts` con el mismo `code` y el mismo HTTP 422 que tenía inline.
+  - [x] El spec de cocina que fija ese `errorCode` pasa sin modificarlo: la migración no cambió el contrato.
+  - [x] `KDS_STATION_LOCKED`, `KITCHEN_TICKET_NOT_TAKEAWAY` y `ORDER_ITEM_NOT_DELIVERABLE` tienen mensaje en `error-messages.ts`.
+  - [x] El mensaje de estación bloqueada nombra la salida concreta: pedir cierre de turno o tomar la estación.
+  - [x] El mensaje de plato no listo lleva al KDS, no describe el estado interno del ticket.
+  - [x] El docblock del servicio de mesa del frontend cita el código realmente lanzado, no la entrada muerta.
+  - [x] La entrada sin lanzadores queda marcada como deprecada con puntero al código vigente; sigue en 0 lanzadores.
   - [ ] Los tres rechazos se provocan por curl y ninguno devuelve 500 ni cae al texto genérico.
-- **Status:** in-progress — catálogo/mensajes en 83f5e67f2; falta Jest estable, curl y E2E.
+- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/C3-http-rejection.md`: catálogo/mensajes 83f5e67f2/69f4a4caa; controller `de529b29f` corrigió ticket mixto de HTTP201/body422 a HTTP422 real, sin mutación; plato pendiente HTTP409 con CTA KDS. Jest cocina 33/33, controller 1/1, OrderFlow 118/118; Angular error-messages 20/20. Falta 403 real de `KDS_STATION_LOCKED` en turno ajeno seguro y Playwright de toasts; ADR-06 sigue proposed.
