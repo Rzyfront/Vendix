@@ -331,7 +331,7 @@ export class TableSessionsService {
    *   - `openedBy`     null for anonymous QR sessions, userId for POS.
    *   - `customerId`   null for anonymous, userId fallback for POS.
    *   - `channel`      'pos' for POS, 'ecommerce' for QR.
-   *   - `deliveryType` 'direct_delivery' for POS, 'dine_in' for QR.
+   *   - `deliveryType` 'dine_in' for both POS and QR table sessions.
    *
    * QUI-535: the DB work now lives in `createOpenSessionInTx` so a
    * caller that already owns a transaction (the POS payment, which opens
@@ -548,7 +548,7 @@ export class TableSessionsService {
       openedBy: userId,
       customerId,
       channel: 'pos',
-      deliveryType: 'direct_delivery',
+      deliveryType: 'dine_in',
       guestCount: dto.guest_count ?? null,
       // QUI-737 (B.4 / FB-21) — el DTO ya lo declara y el controller ya lo
       // liga; sin este paso el alias moria aca y la orden nacia sin el.

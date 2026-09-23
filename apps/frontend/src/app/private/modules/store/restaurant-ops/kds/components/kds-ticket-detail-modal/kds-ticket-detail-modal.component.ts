@@ -67,7 +67,11 @@ export class KdsTicketDetailModalComponent {
   /** Ver `KdsTicketCardComponent.allTakeaway`: "Entregar" se habilita solo
    *  para tickets todo-para-llevar; el resto lo registra mesero/cajero. */
   readonly allTakeaway = computed(() => {
-    const items = this.ticketDisplay()?.items ?? [];
+    const ticket = this.ticketDisplay();
+    if (ticket?.order?.delivery_type === 'direct_delivery') {
+      return true;
+    }
+    const items = ticket?.items ?? [];
     return (
       items.length > 0 &&
       items.every((it) => it.order_item?.is_takeaway === true)
@@ -158,6 +162,19 @@ export class KdsTicketDetailModalComponent {
         return null;
     }
   });
+
+  itemDeliveryBadge(item: KitchenTicketItem): string | null {
+    if (this.ticketDisplay()?.order?.delivery_type === 'home_delivery') {
+      return 'ENVÍO';
+    }
+    if (
+      this.ticketDisplay()?.order?.delivery_type === 'direct_delivery' ||
+      item.order_item?.is_takeaway === true
+    ) {
+      return 'PARA LLEVAR';
+    }
+    return null;
+  }
 
   readonly statusLabel = computed(() => {
     const t = this.ticketDisplay();

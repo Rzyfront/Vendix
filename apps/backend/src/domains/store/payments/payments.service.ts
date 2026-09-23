@@ -4107,7 +4107,7 @@ export class PaymentsService {
       openedBy: user?.id ?? null,
       customerId: dto.customer_id ?? null,
       channel: 'pos',
-      deliveryType: 'direct_delivery',
+      deliveryType: 'dine_in',
       // The POS charge does not capture the party size; the mesa can be
       // annotated later via `setGuestCount` exactly like a QR open.
       guestCount: null,
@@ -4606,7 +4606,9 @@ export class PaymentsService {
             ? (dto.delivery_type === 'home_delivery'
                 ? 'home_delivery'
                 : 'pickup')
-            : dto.delivery_type || 'direct_delivery',
+            : (dto.table_id != null || dto.table_session_id != null || dto.delivery_type === 'dine_in')
+              ? 'dine_in'
+              : (dto.delivery_type || 'direct_delivery'),
           payment_form: dto.is_draft
             ? null
             : dto.payment_form || (dto.requires_payment ? '1' : '2'),

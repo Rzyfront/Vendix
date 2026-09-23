@@ -393,6 +393,7 @@ export class PosPaymentService {
     // QUI-653 — decisión "Para llevar" de la orden (el shell la computa como
     // `isTakeawayOrder`). Se estampa en las líneas sin mutar el carrito.
     takeawayOrder?: boolean | null,
+    deliveryType?: string | null,
   ): Observable<PosSalePaymentResponse> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
@@ -496,6 +497,11 @@ export class PosPaymentService {
       // único momento en que el POS ocupa una mesa. Mutuamente excluyente con
       // `table_session_id`, que sigue siendo el camino del módulo de mesas y del QR.
       ...(tableId != null && tableSessionId == null ? { table_id: tableId } : {}),
+      ...(deliveryType
+        ? { delivery_type: deliveryType }
+        : tableId != null || tableSessionId != null
+          ? { delivery_type: 'dine_in' }
+          : {}),
     };
 
     // For anonymous sales, use "Consumidor Final" as customer name

@@ -336,6 +336,24 @@ export class PosCheckoutShellComponent {
   );
 
   /**
+   * Tipo de entrega para persistencia de la orden al pagar.
+   * Si la entrega es 'mesa' o hay mesa/sesión asignada, es 'dine_in'.
+   */
+  readonly deliveryTypeForPayment = computed<string>(() => {
+    if (
+      this.entregaChoice() === 'mesa' ||
+      this.checkoutTableId() != null ||
+      this.checkoutSessionId() != null
+    ) {
+      return 'dine_in';
+    }
+    if (this.entregaChoice() === 'enviar') {
+      return 'home_delivery';
+    }
+    return 'direct_delivery';
+  });
+
+  /**
    * Orden dinámico de pasos.
    * Entrega SIEMPRE va primero (Paso 0).
    * Si entregaChoice es 'enviar', se inserta dinámicamente el paso 'Envío'.
