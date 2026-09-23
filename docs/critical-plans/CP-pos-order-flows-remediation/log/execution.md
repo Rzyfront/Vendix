@@ -22,3 +22,6 @@
 | 2026-09-22 | Mencius | B.3 | Tile muestra Pagada desde paid_at persistido o session_paid; no confunde pago parcial. Watch posterior y E2E pendientes. | 86138fbd5 |
 | 2026-09-22 | Descartes | B.5 | Apertura devuelve estado anterior; POS avisa limpieza sin bloquear. Contrato frontend tipado. | c72634710; 640ba2bcc; 627ab494a; 48 tests |
 | 2026-09-22 | Epicurus | B.2 | Webhook y flow/pay proyectan cuenta sin cerrar mesa; fallo post-commit tipado. Runtime pendiente por watcher. | 086ba3133; 113 tests |
+| 2026-09-22 | Ohm | D.1 | Reversa BOM multihoja/variante cubierta; mutaciones de control pendientes por archivo compartido. | 091dab185; 90+45 tests |
+| 2026-09-22 | Turing | B.4 | Página y tile resuelven mesero desde opener; impresión aún usaba pivote y pasó a follow-up. | 70b74852c; 52 tests |
+| 2026-09-22 | Gibbs | E.1 | Editor usa direct_delivery para llevar; etiquetas corrigen pickup diferido. Excepción serializada pendiente de dueño. | 42f9bc008; 4684727a2 |

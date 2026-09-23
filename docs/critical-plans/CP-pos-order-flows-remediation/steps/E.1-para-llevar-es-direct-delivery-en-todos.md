@@ -39,4 +39,4 @@ skills: [vendix-frontend, vendix-zoneless-signals, vendix-backend, vendix-restau
   - [ ] `resolveDeliveryType` del paso Envío sigue produciendo `pickup` para un método de envío tipo `pickup`.
   - [ ] `order_items.is_takeaway` no cambia de valor ni de reglas: conteo por valor idéntico antes y después.
   - [ ] Los cuatro carriles de cobro verificados: POS directo, borrador reabierto, detalle de orden, orden adoptada.
-- **Status:** in-progress — implementación paralela iniciada; sin verificación aún.
+- **Status:** in-progress — editor/etiquetas en 42f9bc008 y 4684727a2; serializados fuerzan pickup, decisión pendiente; E2E pendiente.

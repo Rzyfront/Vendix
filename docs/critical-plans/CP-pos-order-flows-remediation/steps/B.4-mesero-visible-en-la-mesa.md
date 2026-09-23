@@ -2,8 +2,8 @@
 id: B.4
 title: "Mesero visible en la mesa"
 phase: B
-status: pending
-owner: none
+status: in-progress
+owner: Turing
 updated: 2026-09-20
 contracts: [FB-21, FB-44, FB-45, DB-16, DB-45]
 adrs: [ADR-04]
@@ -43,4 +43,4 @@ skills: [vendix-backend, vendix-prisma-scopes, vendix-restaurant-ops, vendix-fro
   - [ ] El mapa de salón no aumenta su número de consultas por mesa
   - [ ] Queda anotado en el pivote que ya no alimenta esta proyección
   - [ ] Las filas FB-21, FB-44, FB-45, DB-16 y DB-45 quedan marcadas con su evidencia enlazada
-- **Status:** pending
+- **Status:** in-progress — opener visible en página/tile (70b74852c), 52 tests; tiquetes en follow-up y E2E pendiente.
