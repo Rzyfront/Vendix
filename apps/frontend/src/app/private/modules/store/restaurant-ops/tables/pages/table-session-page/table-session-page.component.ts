@@ -710,10 +710,11 @@ export class TableSessionPageComponent implements OnInit {
     });
   }
 
-  /** Live kitchen status for an item (SSE map first, then findOne fallback). */
+  /** The order delivery fact outranks a stale KDS/SSE ready projection. */
   kitchenStatusFor(
     item: TableSessionOrderItem,
   ): KitchenTicketItemRefStatus | null {
+    if (item.delivered_at != null) return 'delivered';
     return (
       this.liveKitchenState().get(item.id) ??
       this.deriveStaticKitchenStatus(item)
@@ -1274,13 +1275,9 @@ export class TableSessionPageComponent implements OnInit {
    *   - Plain string error       → shown as-is (network/auth path).
    *   - Anything else             → generic fallback.
    *
-   * The user-reported bug (toast says success when backend rejected) is
-   * covered by:
-   *   1. `markDelivered` only shows the success toast when the response
-   *      payload's `status === 'delivered'` (this method is never called
-   *      on success), and
-   *   2. `canDeliver` hides the button for `pending` items so the operator
-   *      can't trigger a guaranteed-rejected call in the first place.
+   * The success toast belongs only to the HTTP success callback in
+   * `deliverTableSessionItem`; rejected writes arrive here. `canDeliver`
+   * also hides the action for pending kitchen items.
    */
   private onKitchenMutationError(err: unknown): void {
     if (typeof err === 'string') {

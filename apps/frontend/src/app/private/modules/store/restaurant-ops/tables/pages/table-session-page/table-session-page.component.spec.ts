@@ -105,6 +105,11 @@ describe('TableSessionPageComponent waiter delivery', () => {
     response.complete();
     expect(component.deliveringItemId()).toBeNull();
     expect(component.session()?.order?.order_items.filter((row) => row.delivered_at != null).map((row) => row.id)).toEqual([101]);
+    // The order delivery fact outranks a stale KDS `ready` projection in the
+    // returned session; otherwise this row still renders as "Listo".
+    expect(component.kitchenStatusFor(delivered.order!.order_items[0])).toBe('delivered');
+    expect(component.inKitchenCount()).toBe(1);
+    expect(component.deliveredCount()).toBe(1);
     expect(toast.success).toHaveBeenCalledOnceWith('Item marcado como entregado');
   });
 

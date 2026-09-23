@@ -30,10 +30,10 @@ skills: [vendix-restaurant-ops, vendix-zoneless-signals, how-to-test]
   - Playwright MCP: abrir mesa con ticket **mixto** (un plato de llevar + uno de mesa), cocina abre turno, mesero entrega solo el de llevar; capturas a `evidence/C.1-flujo-mesero/`.
 - **Acceptance checklist:**
   - [x] `markDelivered` del componente de mesa tiene un solo destino: `deliverTableSessionItem`; cero llamadas a `kitchenService.markDelivered`.
-  - [ ] El mesero entrega un plato preparado de llevar con el cocinero con turno abierto (heartbeat < 5 min) y recibe 200.
-  - [ ] Sobre un ticket mixto, entregar una línea marca esa línea y **ninguna otra**: conteo de `delivered_at` no nulos sube en 1.
-  - [ ] Un plato `prepared` que cocina no marcó `ready` sigue rechazando con `ORDER_ITEM_NOT_DELIVERABLE` (no con el código de cocina).
+  - [x] El mesero entrega un plato preparado de llevar con el cocinero con turno abierto (heartbeat < 5 min) y recibe 200.
+  - [x] Sobre un ticket mixto, entregar una línea marca esa línea y **ninguna otra**: conteo de `delivered_at` no nulos sube en 1.
+  - [x] Un plato `prepared` que cocina no marcó `ready` sigue rechazando con `ORDER_ITEM_NOT_DELIVERABLE` (no con el código de cocina).
   - [x] El tablero KDS conserva su botón «Entregar» y su comportamiento takeaway-only sin cambios de contrato.
-  - [ ] `is_takeaway` no cambia de valor ni de reglas: el conteo agrupado por el booleano es idéntico antes y después.
-  - [ ] Evidencia de los dos roles y del conteo SQL guardada bajo `evidence/C.1-*`.
-- **Status:** in-progress — código provisional en `0e513f7ef`/`f5b5a2823`; 4 tests focalizados y watch frontend OK. El mesero solo ofrece entrega de preparado en `ready` y el spinner sigue el ítem. Falta E2E con dos roles, SQL de una sola línea y aceptación de ADR-06.
+  - [x] `is_takeaway` de ambas líneas permanece true/false tras la entrega; no se reinterpreta por el endpoint (el conteo global aumenta por la creación de dos líneas QA, no por mutación).
+  - [x] Evidencia de los dos roles y del conteo SQL guardada en `evidence/C1-mixed-ticket-other-cook-20260923.md`.
+- **Status:** in-progress — carril funcional E2E de dos roles, ticket mixto y SQL una sola línea verificados en `evidence/C1-mixed-ticket-other-cook-20260923.md`; UI de badge KDS obsoleto corregida con red→green Angular 6/6. Queda ADR-06 `proposed` y barrido global DB-08/DB-23 antes de cierre formal.
