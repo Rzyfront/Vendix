@@ -2,8 +2,8 @@
 id: B.5
 title: "Aviso de mesa que venía de limpieza"
 phase: B
-status: pending
-owner: none
+status: in-progress
+owner: Descartes
 updated: 2026-09-20
 contracts: [FB-46, DB-21, ERR-39]
 adrs: []
@@ -43,4 +43,4 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-error-handling, vendix-fr
   - [ ] No se añade columna, migración ni historial de transiciones de mesa
   - [ ] Hay un test que cubre los dos caminos: mesa en limpieza y mesa libre
   - [ ] Las filas FB-46, DB-21 y ERR-39 quedan marcadas con su evidencia enlazada
-- **Status:** pending
+- **Status:** in-progress — backend/modal/contrato en c72634710, 640ba2bcc, 627ab494a; 45+3 tests; falta E2E.

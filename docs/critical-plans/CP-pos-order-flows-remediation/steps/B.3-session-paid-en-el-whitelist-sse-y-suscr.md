@@ -41,4 +41,4 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-frontend, vendix-zoneless
   - [ ] Abrir la pantalla después del cobro muestra el mismo estado que verla en vivo
   - [ ] Hay un test del whitelist que falla si el evento se quita de la lista
   - [ ] Las filas FB-42, FB-43, FB-45 y DB-17 quedan marcadas con su evidencia enlazada
-- **Status:** in-progress — SSE/snapshots/página en 1316bfae5; falta tile y E2E.
+- **Status:** in-progress — SSE/snapshots/página en 1316bfae5, tile en 86138fbd5; falta watch posterior y E2E.
