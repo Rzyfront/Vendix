@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
@@ -6,12 +7,17 @@ import {
   Granularity,
   PurchasesBySupplierQueryDto,
 } from '../dto/analytics-query.dto';
+import { PurchaseTrendsQueryDto } from '../dto/purchase-trends-query.dto';
 import {
   getDateTruncInterval,
   getPreviousPeriod,
   parseDateRange,
 } from '../utils/date.util';
-import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
+import {
+  resolveStoreTimezone,
+  assertSafeTimezone,
+  localPeriodSql,
+} from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   PURCHASE_COMMITTED_STATES,
@@ -463,16 +469,14 @@ export class PurchasesAnalyticsService {
   }
 
   /**
-   * QUI-547: serie temporal de compras agregada por período
-   * (hour|day|week|month|year según query.granularity, default day).
+   * QUI-547: Consulta y agrega series temporales de órdenes de compra
+   * agrupadas por período y proveedor.
    *
-   * Trae todas las POs del rango y las bucketa en JS. Para un store
-   * típico con miles de POs por mes es perfectamente manejable y evita
-   * depender de $queryRaw que StorePrismaService no expone. Si el
-   * dataset crece a >100k POs por período conviene migrar a SQL
-   * nativo.
+   * Utiliza $queryRaw con agregación nativa en Postgres para evitar producto
+   * cartesiano con purchase_order_items (que inflaría total_amount) y
+   * garantizar que el cálculo sea idéntico entre la vista paginada y el export XLSX.
    */
-  async getPurchasesTrendsForExport(query: AnalyticsQueryDto) {
+  private async fetchPurchaseTrendsRows(query: PurchaseTrendsQueryDto) {
     const context = RequestContextService.getContext();
     if (!context?.store_id || !context.organization_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
@@ -481,69 +485,148 @@ export class PurchasesAnalyticsService {
     const organizationId = context.organization_id;
 
     const tz = await resolveStoreTimezone(this.prisma, storeId);
-    const { startDate, endDate } = parseDateRange(query, tz);
-    const granularity: Granularity = query.granularity ?? Granularity.DAY;
-    const interval = getDateTruncInterval(granularity);
+    const safeTz = assertSafeTimezone(tz);
+    const { startDate, endDate } = parseDateRange(query, safeTz);
 
-    const purchaseOrders = await this.prisma.purchase_orders.findMany({
-      where: {
-        organization_id: organizationId,
-        location: { store_id: storeId },
-        status: { in: PURCHASE_COMMITTED_STATES },
-        order_date: { gte: startDate, lte: endDate }, // tz-audit:date-only — business-date en TZ del store
-      },
-      select: {
-        status: true,
-        subtotal_amount: true,
-        total_amount: true,
-        order_date: true,
-      },
+    const granularity: Granularity = query.granularity ?? Granularity.DAY;
+    const periodSql = localPeriodSql(
+      'COALESCE(po.order_date, po.created_at)',
+      safeTz,
+      granularity,
+    );
+
+    const supplierCondition = query.supplier_id
+      ? Prisma.sql`AND po.supplier_id = ${query.supplier_id}`
+      : Prisma.empty;
+
+    const searchCondition = query.search?.trim()
+      ? Prisma.sql`AND s.name ILIKE ${'%' + query.search.trim() + '%'}`
+      : Prisma.empty;
+
+    const rawClient = this.prisma.withoutScope() as any;
+
+    const rows = await rawClient.$queryRaw<
+      Array<{
+        period: string;
+        supplier_id: number | null;
+        supplier_name: string | null;
+        purchase_count: number | bigint;
+        total_amount: number | string;
+        items_received: number | string;
+      }>
+    >`
+      SELECT
+        ${periodSql} AS period,
+        s.id AS supplier_id,
+        COALESCE(s.name, 'Sin Proveedor') AS supplier_name,
+        COUNT(po.id)::int AS purchase_count,
+        COALESCE(SUM(CASE WHEN po.total_amount > 0 THEN po.total_amount ELSE po.subtotal_amount END), 0)::float8 AS total_amount,
+        COALESCE(SUM(poi.items_received), 0)::float8 AS items_received
+      FROM purchase_orders po
+      JOIN inventory_locations l ON l.id = po.location_id
+      LEFT JOIN suppliers s ON s.id = po.supplier_id
+      LEFT JOIN (
+        SELECT i.purchase_order_id,
+               COALESCE(SUM(i.quantity_received * COALESCE(p.purchase_to_stock_factor, 1)), 0)::float8 AS items_received
+        FROM purchase_order_items i
+        LEFT JOIN products p ON p.id = i.product_id
+        GROUP BY i.purchase_order_id
+      ) poi ON poi.purchase_order_id = po.id
+      WHERE po.organization_id = ${organizationId}
+        AND l.store_id = ${storeId}
+        AND po.status::text IN (${sqlStateList(PURCHASE_COMMITTED_STATES)})
+        AND COALESCE(po.order_date, po.created_at) >= ${startDate}
+        AND COALESCE(po.order_date, po.created_at) <= ${endDate}
+        ${supplierCondition}
+        ${searchCondition}
+      GROUP BY 1, s.id, s.name
+      ORDER BY 1 DESC, total_amount DESC
+    `;
+
+    const allRows = (rows || []).map((r) => {
+      const purchaseCount = Number(r.purchase_count) || 0;
+      const totalAmount = round2(Number(r.total_amount) || 0);
+      const itemsReceived = round2(Number(r.items_received) || 0);
+      const avgPurchase =
+        purchaseCount > 0 ? round2(totalAmount / purchaseCount) : 0;
+      const supplierId = r.supplier_id ? Number(r.supplier_id) : 0;
+      const period = r.period;
+      const trackId = `${period}_${supplierId}`;
+
+      return {
+        track_id: trackId,
+        id: trackId,
+        period,
+        supplier_id: supplierId,
+        supplier_name: r.supplier_name || 'Sin Proveedor',
+        purchase_count: purchaseCount,
+        total_amount: totalAmount,
+        avg_purchase: avgPurchase,
+        items_received: itemsReceived,
+      };
     });
 
-    // Bucketing en JS. Usamos UTC porque la conversión a TZ ya se hizo
-    // en parseDateRange, y date_trunc('day', timestamp) en Postgres
-    // opera en la TZ de la sesión. Para mantener consistencia con
-    // `getDateTruncInterval` (que es solo el nombre del intervalo),
-    // truncamos manualmente en UTC al inicio del bucket correspondiente.
-    const buckets = new Map<number, {
-      period: Date;
-      order_count: number;
-      total_spent: number;
-      pending_count: number;
-      completed_count: number;
-    }>();
+    let totalPurchases = 0;
+    let totalSpent = 0;
+    let totalReceived = 0;
 
-    for (const po of purchaseOrders) {
-      const period = truncateToGranularity(po.order_date, granularity);
-      const key = period.getTime();
-      const bucket = buckets.get(key) ?? {
-        period,
-        order_count: 0,
-        total_spent: 0,
-        pending_count: 0,
-        completed_count: 0,
-      };
-      bucket.order_count += 1;
-      bucket.total_spent += Number(po.subtotal_amount || po.total_amount || 0);
-      if (this.PENDING_STATES.includes(po.status as any)) {
-        bucket.pending_count += 1;
-      } else if (this.COMPLETED_STATES.includes(po.status as any)) {
-        bucket.completed_count += 1;
-      }
-      buckets.set(key, bucket);
+    for (const row of allRows) {
+      totalPurchases += row.purchase_count;
+      totalSpent += row.total_amount;
+      totalReceived += row.items_received;
     }
 
-    return Array.from(buckets.values())
-      .sort((a, b) => a.period.getTime() - b.period.getTime())
-      .map((b) => ({
-        period: b.period,
-        order_count: b.order_count,
-        total_spent: Math.round(b.total_spent * 100) / 100,
-        pending_count: b.pending_count,
-        completed_count: b.completed_count,
-        granularity: interval,
-      }));
+    const summary = {
+      purchase_count: totalPurchases,
+      total_amount: round2(totalSpent),
+      avg_purchase:
+        totalPurchases > 0 ? round2(totalSpent / totalPurchases) : 0,
+      items_received: round2(totalReceived),
+    };
+
+    return { allRows, summary, tz: safeTz };
   }
+
+  /**
+   * QUI-547: Obtiene las tendencias de compra paginadas para visualización en pantalla.
+   */
+  async getPurchaseTrends(query: PurchaseTrendsQueryDto) {
+    const { allRows, summary } = await this.fetchPurchaseTrendsRows(query);
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.max(1, Math.min(100, Number(query.limit) || 20));
+    const total = allRows.length;
+    const startIndex = (page - 1) * limit;
+    const paginatedRows = allRows.slice(startIndex, startIndex + limit);
+
+    return {
+      data: paginatedRows,
+      meta: {
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit) || 1,
+        },
+      },
+      summary,
+    };
+  }
+
+  /**
+   * QUI-547: Obtiene todas las filas de tendencias de compra para exportación XLSX (hasta 10.000).
+   */
+  async getPurchaseTrendsForExport(query: PurchaseTrendsQueryDto) {
+    const { allRows } = await this.fetchPurchaseTrendsRows(query);
+    const MAX_EXPORT_ROWS = 10000;
+    return allRows.slice(0, MAX_EXPORT_ROWS);
+  }
+
+  /** Alias para retrocompatibilidad con referencias anteriores. */
+  async getPurchasesTrendsForExport(query: PurchaseTrendsQueryDto) {
+    return this.getPurchaseTrendsForExport(query);
+  }
+
 
   /**
    * QUI-542: cuentas por pagar a proveedores con bucketing de

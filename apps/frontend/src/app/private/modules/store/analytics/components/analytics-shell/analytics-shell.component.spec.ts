@@ -100,6 +100,13 @@ describe('AnalyticsShellComponent', () => {
     expect(navigateSpy.calls.mostRecent().args[0]).toEqual(['/admin/reports/sales/sales-by-product']);
   });
 
+  it('navigates to purchase-trends report route from purchase trends analytics URL', () => {
+    spyOnProperty(router, 'url', 'get').and.returnValue('/admin/analytics/purchases/trends');
+    component.onActionClick('view-reports');
+    expect(navigateSpy).toHaveBeenCalledTimes(1);
+    expect(navigateSpy.calls.mostRecent().args[0]).toEqual(['/admin/reports/purchases/purchase-trends']);
+  });
+
   it('falls back to the category-level report route for unmapped URLs', () => {
     spyOnProperty(router, 'url', 'get').and.returnValue('/admin/analytics/sales/some-unmapped');
     component.onActionClick('view-reports');

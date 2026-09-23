@@ -304,7 +304,7 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     icon: 'coins',
   },
 
-  // Purchases (2)
+  // Purchases (3)
   {
     key: 'purchases_summary',
     title: 'Resumen de Compras',
@@ -322,6 +322,15 @@ export const ANALYTICS_VIEWS: AnalyticsView[] = [
     route: '/admin/analytics/purchases/by-supplier',
     category: 'purchases',
     icon: 'truck',
+  },
+  {
+    key: 'purchases_trends',
+    title: 'Tendencias de Compra',
+    description: 'Evolución temporal del gasto en proveedores y órdenes',
+    detailedDescription: 'Analiza la evolución temporal de compras, volumen de órdenes, ticket promedio y unidades recibidas por período.',
+    route: '/admin/analytics/purchases/trends',
+    category: 'purchases',
+    icon: 'trending-up',
   },
 
   // Customers (4)
