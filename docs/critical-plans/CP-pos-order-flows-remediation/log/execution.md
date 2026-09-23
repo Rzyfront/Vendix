@@ -25,4 +25,8 @@
 | 2026-09-22 | Ohm | D.1 | Reversa BOM multihoja/variante cubierta; mutaciones de control pendientes por archivo compartido. | 091dab185; 90+45 tests |
 | 2026-09-22 | Turing | B.4 | Página y tile resuelven mesero desde opener; impresión aún usaba pivote y pasó a follow-up. | 70b74852c; 52 tests |
 | 2026-09-22 | Gibbs | E.1 | Editor usa direct_delivery para llevar; etiquetas corrigen pickup diferido. Excepción serializada pendiente de dueño. | 42f9bc008; 4684727a2 |
+| 2026-09-23 | Bacon | B.2 | Confirmar pago manual proyecta solo cuenta saldada post-commit; reintento repara sin recobro. | 497042873; 10 tests |
+| 2026-09-23 | Banach | B.4 | Tiquetes POS/cocina usan opener incluso al reimprimir sesión cerrada. Jest pendiente por carga. | 8c74f9683 |
+| 2026-09-23 | Leibniz | C.3 | Errores de cocina centralizados y con copy accionable; Jest/API pendientes por carga. | 83f5e67f2 |
+| 2026-09-23 | Beauvoir | E.2 | Stock de borrador se reserva bajo claim de cobro; compensación de fallos en ejecución. | 1ca4c0083 |
 | 2026-09-23 | Orquestador | I.1 | Baseline local: 10 órdenes históricas sobrepagadas; aceptación exige 0 desbordes causados por pagos posteriores al corte, no 0 histórico. | evidence/I1-overpayment-baseline.sql/txt |

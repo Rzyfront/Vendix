@@ -44,4 +44,4 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-payment-processors, vendi
   - [ ] Hay spec por escritor que verifica que delega y no escribe directo
   - [ ] Queda registrado como deuda que las sesiones cerradas de más por el webhook no se reabren
   - [ ] Las filas FB-03, FB-04, FB-11, FB-12, FB-53, DB-17, DB-18, DB-21, ERR-05 y ERR-33 quedan marcadas
-- **Status:** in-progress — POS+split en 5848a2a24; webhook/flow-pay en ejecución; falta runtime/E2E.
+- **Status:** in-progress — cuatro escritores y confirmación staff en 5848a2a24, 086ba3133, 497042873; falta runtime/E2E.

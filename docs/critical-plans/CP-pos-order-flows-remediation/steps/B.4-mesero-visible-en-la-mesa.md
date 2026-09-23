@@ -43,4 +43,4 @@ skills: [vendix-backend, vendix-prisma-scopes, vendix-restaurant-ops, vendix-fro
   - [ ] El mapa de salón no aumenta su número de consultas por mesa
   - [ ] Queda anotado en el pivote que ya no alimenta esta proyección
   - [ ] Las filas FB-21, FB-44, FB-45, DB-16 y DB-45 quedan marcadas con su evidencia enlazada
-- **Status:** in-progress — opener visible en página/tile (70b74852c), 52 tests; tiquetes en follow-up y E2E pendiente.
+- **Status:** in-progress — opener en página/tile (70b74852c) y tiquetes (8c74f9683); falta Jest de impresión/E2E.

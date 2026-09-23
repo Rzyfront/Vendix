@@ -2,8 +2,8 @@
 id: E.2
 title: "Reserva de stock del borrador POS"
 phase: E
-status: pending
-owner: none
+status: in-progress
+owner: Beauvoir
 updated: 2026-09-20
 contracts: [FB-04, DB-12, DB-27, ERR-22, ERR-23, ERR-36]
 adrs: []
@@ -38,4 +38,4 @@ skills: [vendix-inventory-stock, vendix-backend, vendix-prisma-scopes, vendix-er
   - [ ] Se emite la auditoría de promoción con su conteo de reservas.
   - [ ] Una orden cobrada desde borrador genera remisión sin rechazo por stock insuficiente.
   - [ ] El carril de mesa y el de split conservan su comportamiento actual de promoción.
-- **Status:** pending
+- **Status:** in-progress — reserva bajo claim en 1ca4c0083; compensación en ejecución; falta Jest/runtime.
