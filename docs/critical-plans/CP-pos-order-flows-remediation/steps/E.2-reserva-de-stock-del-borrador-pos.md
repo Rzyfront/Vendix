@@ -37,5 +37,5 @@ skills: [vendix-inventory-stock, vendix-backend, vendix-prisma-scopes, vendix-er
   - [x] La reserva sigue siendo no bloqueante: falta de stock no rechaza el cobro.
   - [x] Se emite la auditoría de promoción con su conteo de reservas.
   - [x] Una orden cobrada desde borrador genera remisión sin rechazo por stock insuficiente.
-  - [ ] El carril de mesa y el de split conservan su comportamiento actual de promoción.
-- **Status:** in-progress · Fabio · 2026-09-23 · reserva bajo claim `1ca4c0083` y compensación `a9371ab55`; Jest focalizado E.2 16/16. `evidence/E2-flowpay-reservation.md`: #1140 reserva y #1142 doble submit 200+409. `evidence/E2-home-draft-fulfillment-20260923.md`: #1174 POS draft home → reserva → remisión #228 → entrega, una sola transacción -1 y reserva consumida. Falta barrido global, mesa/split; DB-27 permanece abierto. La consulta DB-12 debe separar BOM multihoja.
+  - [ ] El carril de mesa y el de split conservan su comportamiento actual de promoción: split #1176 consumió stock una vez; falta mesa.
+- **Status:** in-progress · Fabio · 2026-09-23 · reserva bajo claim `1ca4c0083` y compensación `a9371ab55`; Jest focalizado E.2 16/16. `evidence/E2-flowpay-reservation.md`: #1140 reserva y #1142 doble submit 200+409. `evidence/E2-home-draft-fulfillment-20260923.md`: #1174 draft home → remisión #228 → una transacción -1. `evidence/E2-split-draft-20260923.md`: #1176 split pagó dos cuentas, una reserva consumida y una transacción -2. Falta barrido global y mesa; DB-27 abierto. DB-12 debe separar BOM y reservas partidas.
