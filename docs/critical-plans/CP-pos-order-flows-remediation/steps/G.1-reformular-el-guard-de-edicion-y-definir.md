@@ -2,9 +2,9 @@
 id: G.1
 title: "Reformular el guard de edición y definir la elegibilidad"
 phase: G
-status: pending
+status: in-progress
 owner: none
-updated: 2026-09-20
+updated: 2026-09-23
 contracts: [FB-18, FB-50, DB-19, DB-20, ERR-06, ERR-29, ERR-30, ERR-31]
 adrs: [ADR-07]
 skills: [vendix-backend, vendix-restaurant-ops, vendix-prisma-scopes, vendix-error-handling, how-to-test]
@@ -34,4 +34,4 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-prisma-scopes, vendix-err
   - [ ] Los tres códigos están en `error-codes.ts` con HTTP real y con `details.state` / `details.reason` poblados
   - [ ] Todo test de rechazo fija el `errorCode`; ninguno se conforma con `toBeInstanceOf(VendixHttpException)`
   - [ ] Evidencia de los curl y del SQL guardada bajo `evidence/`
-- **Status:** pending
+- **Status:** in-progress — guard/editor + PUT items y elegibilidad pura en `evidence/G1-edit-eligibility-code-20260923.md` (Jest 126/126); `evidence/G2-reassign-runtime-20260923.md` probó add-items sobre sesión nueva. Faltan curl cerrado-solo y barrido SQL dedicado.

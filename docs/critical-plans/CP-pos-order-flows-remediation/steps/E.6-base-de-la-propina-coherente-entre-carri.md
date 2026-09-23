@@ -38,4 +38,4 @@ skills: [vendix-backend, vendix-currency-formatting, vendix-accounting-rules, ho
   - [ ] Ninguna venta queda con pagos por encima de su total tras el cambio.
   - [ ] Ninguna propina histórica se reliquida ni se reescribe.
   - [ ] Un cobro con propina de cero se comporta igual que antes en los tres carriles.
-- **Status:** in-progress — ADR-11 aceptado por elección delegada del dueño; implementación y pruebas en curso.
+- **Status:** in-progress — ADR-11 aceptado por elección delegada del dueño; código unificado en `evidence/E6-tip-base-code-20260923.md`, Jest 249/249; falta curl/SQL de los tres carriles.

@@ -2,9 +2,9 @@
 id: G.2
 title: "Endpoint y UI de reasignación de mesa"
 phase: G
-status: pending
+status: in-progress
 owner: none
-updated: 2026-09-20
+updated: 2026-09-23
 contracts: [FB-49, FB-48, FB-50, FB-21, DB-19, DB-20, DB-22, DB-11, DB-16, ERR-28, ERR-29, ERR-30, ERR-31, ERR-32, ERR-42]
 adrs: [ADR-07, ADR-04]
 skills: [vendix-backend, vendix-restaurant-ops, vendix-prisma-scopes, vendix-error-handling, vendix-frontend-modal, vendix-zoneless-signals, how-to-test]
@@ -40,4 +40,4 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-prisma-scopes, vendix-err
   - [ ] El endpoint toma `lockOrderLifecycle`; si el util no está en el árbol, el paso queda bloqueado y se dice en el log
   - [ ] El modal de traslado ofrece la acción solo cuando la orden es elegible, y el mapa de mensajes cubre los cinco rechazos
   - [ ] Todo test de rechazo fija el `errorCode` y el conteo de filas antes/después
-- **Status:** pending
+- **Status:** in-progress — endpoint atómico y QA real `evidence/G2-reassign-backend-20260923.md`, `G2-reassign-runtime-20260923.md`: HTTP201 misma orden + nueva sesión, add-items 201, 409/400 tipados, 2 sesiones históricas, QA cerrada/mesas disponibles. Falta KDS con ticket y UI modal.
