@@ -1,0 +1,15 @@
+ committed_lines | unclaimed_deductions | unit_mismatches | exact_lines 
+-----------------+----------------------+-----------------+-------------
+              13 |                    0 |               0 |          13
+(1 row)
+
+ paid_physical_orders_without_reservation 
+------------------------------------------
+                                        0
+(1 row)
+
+ prepared_postcut_lines | fired_lines 
+------------------------+-------------
+                      0 |           0
+(1 row)
+

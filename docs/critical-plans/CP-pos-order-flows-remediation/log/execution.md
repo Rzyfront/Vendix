@@ -32,6 +32,7 @@
 | 2026-09-23 | Fabio | E.2 | POS draft físico #1174 reservó al cobrar; remisión #228 entregada consumió una vez. Falta barrido global y mesa/split. | evidence/E2-home-draft-fulfillment-20260923.md |
 | 2026-09-23 | Fabio | E.2 | Split del draft #1176 cobró 2 cuentas y consumió 2 unidades una sola vez; reintento sin nuevo pago. Falta mesa y barrido global. | evidence/E2-split-draft-20260923.md |
 | 2026-09-23 | Fabio | E.2 | POS mesa #1177 cobró una vez y consumió una unidad; replay 409, cierre explícito. Falta barrido global. | evidence/E2-pos-table-physical-20260923.md |
+| 2026-09-23 | Fabio | E.2 | Auditoría post-corte 13/13 físicos exactos, cero sin claim/reserva; specs preparados 12/12. E.2 cerrado; histórico sin backfill. | evidence/E2-postcut-stock-audit.sql/txt; 04849c73c |
 | 2026-09-23 | Orquestador | I.1 | Baseline local: 10 órdenes históricas sobrepagadas; aceptación exige 0 desbordes causados por pagos posteriores al corte, no 0 histórico. | evidence/I1-overpayment-baseline.sql/txt |
 | 2026-09-23 | Nash/Wegener | I.1 | Validador y flow-pay rechazan ya pagada; gateway propaga código. Orden QA1113 creada con un pago: POST 409 ORD_PAY_ALREADY_PAID_001, sigue un pago. | 25855f688; af5e566d8; evidence/I1-reject-overpay.* |
 | 2026-09-23 | Orquestador | H.3 | Área fiscal LOCKED, tienda 3: POS sin mesa y mesa 13 vendieron servicio sin asignación por 50000/IVA 0; suscripción seed se habilitó temporalmente y restauró expired. | evidence/H3-active-fiscal-*; H3-local-api-verification.md |

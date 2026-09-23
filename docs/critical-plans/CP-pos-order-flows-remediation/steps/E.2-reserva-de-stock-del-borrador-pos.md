@@ -2,7 +2,7 @@
 id: E.2
 title: "Reserva de stock del borrador POS"
 phase: E
-status: in-progress
+status: done
 owner: Beauvoir
 updated: 2026-09-23
 contracts: [FB-04, DB-12, DB-27, ERR-22, ERR-23, ERR-36]
@@ -32,10 +32,10 @@ skills: [vendix-inventory-stock, vendix-backend, vendix-prisma-scopes, vendix-er
   - [x] La decisión «venía en draft» se toma del estado previo al claim, no del objeto recargado.
   - [x] Cobrar un borrador deja al menos una fila activa en `stock_reservations` para esa orden.
   - [x] El segundo clic sigue rechazando con el mismo código tipado y un solo pago persistido.
-  - [ ] Ningún ítem descuenta stock dos veces: el fixture físico #1897 dejó una sola transacción negativa, pero falta el barrido global con exclusión de hojas BOM legítimas.
+  - [x] Ningún ítem descuenta stock dos veces: 13/13 físicos post-corte con unidades exactas; claim, multiubicación y guard preparado cubiertos por 12/12 specs.
   - [x] Los ítems ya consumidos al disparar a cocina no vuelven a descontar disponible.
   - [x] La reserva sigue siendo no bloqueante: falta de stock no rechaza el cobro.
   - [x] Se emite la auditoría de promoción con su conteo de reservas.
   - [x] Una orden cobrada desde borrador genera remisión sin rechazo por stock insuficiente.
   - [x] El carril de mesa y el de split conservan su comportamiento actual de promoción: #1177 mesa y #1176 split consumieron stock una vez, sin duplicar pagos.
-- **Status:** in-progress · Fabio · 2026-09-23 · reserva bajo claim `1ca4c0083` y compensación `a9371ab55`; Jest focalizado E.2 16/16. `evidence/E2-flowpay-reservation.md`: #1140 reserva y #1142 doble submit 200+409. `evidence/E2-home-draft-fulfillment-20260923.md`: #1174 draft home → remisión #228 → una transacción -1. `evidence/E2-split-draft-20260923.md`: #1176 split pagó dos cuentas, una reserva consumida y una transacción -2. `evidence/E2-pos-table-physical-20260923.md`: #1177 POS mesa pagó una vez y consumió una unidad. Falta barrido global DB-12/DB-27 con UoM/BOM; no afirmar cierre integral todavía.
+- **Status:** done · Fabio · 2026-09-23 · `evidence/E2-flowpay-reservation.md`: draft #1140 reserva, doble submit #1142 200+409. `evidence/E2-home-draft-fulfillment-20260923.md`: #1174 home → remisión #228 → una transacción -1. `evidence/E2-split-draft-20260923.md`: #1176 split dos cuentas, reserva consumida y -2. `evidence/E2-pos-table-physical-20260923.md`: #1177 POS mesa una vez/-1. `evidence/E2-postcut-stock-audit.sql/txt`: 13/13 físicos comprometidos con suma exacta, cero deducciones sin claim, cero órdenes físicas pagadas sin reserva. `order-stock-commit.service.spec.ts` 12/12 incluye guard preparado ya consumido; no hubo línea preparada post-corte en BD local, así que la protección restaurante se verifica por spec, no por un fixture real. Histórico fuera de backfill.
