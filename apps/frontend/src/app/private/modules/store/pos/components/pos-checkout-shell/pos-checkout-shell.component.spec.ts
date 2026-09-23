@@ -677,6 +677,19 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     );
   });
 
+  it(`Al abrir con mesa vinculada, auto-selecciona entrega 'mesa' y no 'llevar'`, () => {
+    restaurantMode.set(true);
+    fixture.componentRef.setInput('isOpen', false);
+    fixture.detectChanges();
+    fixture.componentRef.setInput('tableId', 42);
+    fixture.componentRef.setInput('initialEntrega', 'llevar');
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+
+    expect(component.entregaChoice()).toBe('mesa');
+    expect(component.isTakeawayOrder()).toBeFalse();
+  });
+
   const prepareShippingEdit = () => {
     const state = {
       items: [{ product: { id: '7', name: 'Producto' }, quantity: 1,

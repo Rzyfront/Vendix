@@ -838,7 +838,15 @@ export class PosCheckoutShellComponent {
           // lo que traiga `initialEntrega()` es la naturaleza de la orden, no
           // una decisión del cajero. `seededEntrega` guarda ese valor para que
           // el effect de detección no lo confunda con un click.
-          this.seededEntrega = this.initialEntrega();
+          const hasTable =
+            this.tableId() != null || this.integration.hasOpenTableSession();
+          const defaultEntrega =
+            this.initialEntrega() === 'enviar'
+              ? 'enviar'
+              : hasTable && this.initialEntrega() === 'llevar'
+                ? 'mesa'
+                : this.initialEntrega();
+          this.seededEntrega = defaultEntrega;
           this.entregaChoice.set(this.seededEntrega);
           this.entregaTouched.set(false);
           this.focusActiveStepSoon();

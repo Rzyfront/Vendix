@@ -1839,7 +1839,7 @@ export class PosComponent {
     // gate + saveDraft call; the parent just opens it. The (checkoutCompleted)
     // output stays reserved for the flow-pay path that Cobrar drives.
     this.mode.set('create-draft');
-    this.initialEntrega.set('llevar');
+    this.initialEntrega.set(this.resolveDefaultEntrega());
     this.showCheckoutModal.set(true);
   }
 
@@ -1860,7 +1860,7 @@ export class PosComponent {
     // the flow-pay path; the draft path emits `(draftSaved)` and never opens
     // a payment collector.
     this.mode.set('create-draft');
-    this.initialEntrega.set('llevar');
+    this.initialEntrega.set(this.resolveDefaultEntrega());
     this.showCheckoutModal.set(true);
   }
 
@@ -2339,6 +2339,22 @@ export class PosComponent {
     return deliveryTypeToEntregaChoice(context);
   }
 
+  /**
+   * Resuelve el carril de entrega predeterminado al abrir el wizard o guardar borrador.
+   * Si la tienda es restaurante y hay una sesión de mesa abierta o activa, la entrega
+   * por defecto DEBE ser 'mesa', evitando que los platos se marquen como "para llevar".
+   */
+  private resolveDefaultEntrega(): EntregaChoice {
+    if (
+      this.restaurantIntegration.isRestaurantMode() &&
+      (this.restaurantIntegration.hasOpenTableSession() ||
+        this.restaurantIntegration.currentTableSession()?.table_id != null)
+    ) {
+      return 'mesa';
+    }
+    return 'llevar';
+  }
+
   onCheckout(): void {
     if (!this.cartState() || this.isEmpty) return;
 
@@ -2358,7 +2374,7 @@ export class PosComponent {
     // Fase 5·B3: el checkout pasa por el SHELL con stepper — único checkout del POS.
     // mode='create-payment' so the shell skips Actualizar and shows only the Cobro CTA.
     this.mode.set('create-payment');
-    this.initialEntrega.set('llevar');
+    this.initialEntrega.set(this.resolveDefaultEntrega());
     this.showCheckoutModal.set(true);
   }
 
@@ -2812,7 +2828,7 @@ export class PosComponent {
       this.editingOrder.set(null);
       this.readyToPayOrder.set(null);
       this.mode.set('create-draft');
-      this.initialEntrega.set('llevar');
+      this.initialEntrega.set(this.resolveDefaultEntrega());
     }
 
     // CP-DTLP Phase E.2 / QUI-764 — encadenar tiquete de despacho
@@ -2854,7 +2870,7 @@ export class PosComponent {
     this.currentOrderNumber.set(null);
     this.readyToPayOrder.set(null);
     this.mode.set('create-draft');
-    this.initialEntrega.set('llevar');
+    this.initialEntrega.set(this.resolveDefaultEntrega());
     this.showCheckoutModal.set(false);
 
     // Drop the `editOrder` query param too so a browser refresh on the same
