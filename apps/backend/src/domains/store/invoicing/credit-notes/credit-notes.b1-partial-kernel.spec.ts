@@ -213,8 +213,8 @@ describe('credit-notes · parcial por kernel (B.1/F-020)', () => {
     // Factura de `createFromOrder`: plato 50.000 + INC 4.000 (línea 1) y
     // Envío 12.605,04 + IVA 2.394,96 (línea 2), cada fila ligada a su línea.
     const mixedRelated = () => [
-      { id: 1, product_id: 11, product_variant_id: null, is_inclusive: false, tax_amount: 4000 },
-      { id: 2, product_id: null, product_variant_id: null, is_inclusive: false, tax_amount: 2394.96 },
+      { id: 1, product_id: 11, product_variant_id: null, is_inclusive: false, tax_amount: 4000, quantity: 1, unit_price: 50000, discount_amount: 0 },
+      { id: 2, product_id: null, product_variant_id: null, is_inclusive: false, tax_amount: 2394.96, quantity: 1, unit_price: 12605.04, discount_amount: 0 },
     ];
     const mixedTaxes = () => [
       { ...scheme({ tax_rate_id: 68, tax_name: 'INC' }), invoice_item_id: 1 },
@@ -224,7 +224,7 @@ describe('credit-notes · parcial por kernel (B.1/F-020)', () => {
       },
     ];
 
-    it('NC parcial sólo del Envío ⇒ IVA 19 % desde la fila ligada, sin exigir taxes', () => {
+    it('NC que acredita el Envío COMPLETO ⇒ IVA 19 % desde la fila ligada y la cuota facturada', () => {
       const result = derivePartialNoteLinesViaKernel(
         [{ product_id: null, description: 'Envio', quantity: 1, unit_price: 12605.04 }],
         mixedRelated(),
@@ -233,19 +233,33 @@ describe('credit-notes · parcial por kernel (B.1/F-020)', () => {
         'credit_note',
       );
       expect(result.lines[0].base_amount.toString()).toBe('12605.04');
-      // trunc(12.605,04 × 19 %) = 2.394,95: 1 ¢ bajo la cuota facturada
-      // (2.394,96, truncado del despeje al vender) — la nota acredita de menos.
-      expect(result.lines[0].tax_amount.toString()).toBe('2394.95');
+      // El re-despeje daría trunc(12.605,04 × 19 %) = 2.394,95; la nota que
+      // cubre la línea entera devuelve la cuota facturada (2.394,96) y
+      // acredita exactamente el bruto cobrado.
+      expect(result.lines[0].tax_amount.toString()).toBe('2394.96');
+      expect(result.lines[0].total_amount.toString()).toBe('15000');
       expect(result.taxes).toEqual([
         {
           tax_rate_id: 1,
           tax_name: 'IVA 19%',
           tax_rate: 19,
           taxable_amount: 12605.04,
-          tax_amount: 2394.95,
+          tax_amount: 2394.96,
           tax_type: 'iva',
         },
       ]);
+    });
+
+    it('NC de una PARTE del Envío ⇒ cuota del kernel, no la de la gemela', () => {
+      const result = derivePartialNoteLinesViaKernel(
+        [{ product_id: null, description: 'Envio', quantity: 1, unit_price: 6000 }],
+        mixedRelated(),
+        mixedTaxes(),
+        915,
+        'credit_note',
+      );
+      expect(result.lines[0].tax_amount.toString()).toBe('1140');
+      expect(result.totals.total.toString()).toBe('7140');
     });
 
     it('NC parcial de plato + Envío ⇒ una fila por tributo, cada una con sus bases', () => {
@@ -269,10 +283,10 @@ describe('credit-notes · parcial por kernel (B.1/F-020)', () => {
       expect(result.taxes.find((t) => t.tax_type === 'iva')).toMatchObject({
         tax_rate: 19,
         taxable_amount: 12605.04,
-        tax_amount: 2394.95,
+        tax_amount: 2394.96,
       });
       // Σ filas = impuesto de cabecera; Σ bases = subtotal.
-      expect(result.totals.tax.toString()).toBe('4394.95');
+      expect(result.totals.tax.toString()).toBe('4394.96');
       expect(result.totals.subtotal.toString()).toBe('37605.04');
     });
 
@@ -317,6 +331,58 @@ describe('credit-notes · parcial por kernel (B.1/F-020)', () => {
           'credit_note',
         ),
       ).toThrow(expect.objectContaining({ errorCode: 'INVOICING_CALC_001' }));
+    });
+  });
+
+  describe('línea con cuota truncada al vender (forma base desde la orden)', () => {
+    // Producto 5.000 con IVA 19 % incluido en la orden ⇒ factura en forma
+    // base 4.201,69 + 798,31; el re-despeje daría trunc(4.201,69 × 19 %) = 798,32.
+    const truncatedTwin = (overrides: Record<string, unknown> = {}) => ({
+      ...relatedLine({ is_inclusive: false, tax_amount: 798.31 }),
+      quantity: 2,
+      unit_price: 4201.69,
+      discount_amount: 0,
+      tax_amount: 1596.62,
+      ...overrides,
+    });
+    const iva19 = () => [scheme({ tax_rate_id: 1, tax_name: 'IVA 19%', tax_rate: 19, tax_type: 'iva' })];
+
+    it('NC de la línea completa ⇒ hereda la cuota persistida (1.596,62, no 1.596,64)', () => {
+      const result = derivePartialNoteLinesViaKernel(
+        [{ product_id: 11, quantity: 2, unit_price: 4201.69 }],
+        [truncatedTwin()],
+        iva19(),
+        916,
+        'credit_note',
+      );
+      // Re-despeje: trunc(8.403,38 × 19 %) = 1.596,64 — dos centavos: NO es
+      // holgura de truncado, el kernel manda.
+      expect(result.lines[0].tax_amount.toString()).toBe('1596.64');
+    });
+
+    it('NC de la línea completa con holgura de un centavo ⇒ cuota persistida', () => {
+      const result = derivePartialNoteLinesViaKernel(
+        [{ product_id: 11, quantity: 1, unit_price: 4201.69 }],
+        [truncatedTwin({ quantity: 1, tax_amount: 798.31 })],
+        iva19(),
+        917,
+        'credit_note',
+      );
+      expect(result.lines[0].base_amount.toString()).toBe('4201.69');
+      expect(result.lines[0].tax_amount.toString()).toBe('798.31');
+      expect(result.lines[0].total_amount.toString()).toBe('5000');
+      expect(result.taxes[0]).toMatchObject({ taxable_amount: 4201.69, tax_amount: 798.31 });
+    });
+
+    it('NC de MENOS cantidad que la gemela ⇒ kernel', () => {
+      const result = derivePartialNoteLinesViaKernel(
+        [{ product_id: 11, quantity: 1, unit_price: 4201.69 }],
+        [truncatedTwin()],
+        iva19(),
+        918,
+        'credit_note',
+      );
+      expect(result.lines[0].tax_amount.toString()).toBe('798.32');
     });
   });
 

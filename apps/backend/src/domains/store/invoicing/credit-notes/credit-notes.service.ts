@@ -946,6 +946,11 @@ export function derivePartialNoteLinesViaKernel(
     // estas dos para exención por gemela y divisor de presentación.
     tax_amount?: Prisma.Decimal | number | null;
     price_unit_quantity?: Prisma.Decimal | number | null;
+    // Sólo para reconocer una nota que acredita la línea COMPLETA y heredar
+    // su cuota persistida (ver `fullTwinQuota`).
+    quantity?: Prisma.Decimal | number | null;
+    unit_price?: Prisma.Decimal | number | null;
+    discount_amount?: Prisma.Decimal | number | null;
   }>,
   invoice_taxes: Array<{
     tax_rate_id: number | null;
@@ -1187,7 +1192,19 @@ export function derivePartialNoteLinesViaKernel(
       );
     }
 
-    const quota = kernel.quotas[0]?.quota ?? new Prisma.Decimal(0);
+    const kernel_quota = kernel.quotas[0]?.quota ?? new Prisma.Decimal(0);
+    // La nota que acredita la línea ENTERA devuelve exactamente la cuota que
+    // la factura declaró, no su re-despeje: una cuota truncada al vender
+    // (envío gravado, precio con impuesto incluido) difiere hasta un centavo.
+    const twin_quota = fullTwinQuota(
+      item,
+      related_items,
+      single_related,
+      is_inclusive,
+      kernel_quota,
+    );
+    const quota = twin_quota ?? kernel_quota;
+    const delta = quota.minus(kernel_quota);
     const claimed_tax = new Prisma.Decimal(item.tax_amount || 0);
     if (!claimed_tax.equals(quota)) {
       logger?.warn(
@@ -1196,9 +1213,13 @@ export function derivePartialNoteLinesViaKernel(
       );
     }
     return {
-      base_amount: kernel.base,
+      // Inclusiva: el total queda (es el bruto) y la base absorbe el delta.
+      // Adicional: la base queda y el total lo suma.
+      base_amount: is_inclusive ? kernel.base.minus(delta) : kernel.base,
       tax_amount: quota,
-      total_amount: kernel.closed_total,
+      total_amount: is_inclusive
+        ? kernel.closed_total
+        : kernel.closed_total.plus(delta),
       is_inclusive,
     };
   });
@@ -1269,6 +1290,79 @@ export function derivePartialNoteLinesViaKernel(
     lines,
     totals,
   };
+}
+
+const FULL_TWIN_MAX_DELTA = new Prisma.Decimal('0.01');
+
+const decimalOrNull = (value: unknown): Prisma.Decimal | null => {
+  if (value == null) return null;
+  try {
+    return new Prisma.Decimal(value as Prisma.Decimal.Value);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Cuota persistida de la línea gemela cuando la nota la acredita COMPLETA:
+ * misma pareja producto+variante (o la única línea), misma cantidad, mismo
+ * precio unitario, mismo descuento y misma inclusividad. Sólo se hereda si
+ * difiere del re-despeje en un centavo o menos —la holgura de un truncado
+ * hecho al vender—; más que eso no es truncado y el kernel manda. `null` =
+ * no aplica (nota parcial de la línea, o sin gemela exacta).
+ */
+function fullTwinQuota(
+  item: {
+    product_id?: number | null;
+    product_variant_id?: number | null;
+    quantity: number;
+    unit_price: number;
+    discount_amount?: number | null;
+  },
+  related_items: Array<{
+    product_id: number | null;
+    product_variant_id: number | null;
+    is_inclusive: boolean | null;
+    tax_amount?: Prisma.Decimal | number | null;
+    quantity?: Prisma.Decimal | number | null;
+    unit_price?: Prisma.Decimal | number | null;
+    discount_amount?: Prisma.Decimal | number | null;
+  }>,
+  single_related: (typeof related_items)[number] | undefined,
+  is_inclusive: boolean,
+  kernel_quota: Prisma.Decimal,
+): Prisma.Decimal | null {
+  const quantity = new Prisma.Decimal(item.quantity);
+  const unit_price = new Prisma.Decimal(item.unit_price);
+  const discount = new Prisma.Decimal(item.discount_amount || 0);
+  const candidates = single_related
+    ? [single_related]
+    : related_items.filter(
+        (rel) =>
+          (rel.product_id ?? null) === (item.product_id ?? null) &&
+          (rel.product_variant_id ?? null) ===
+            (item.product_variant_id ?? null),
+      );
+  const twin = candidates.find((rel) => {
+    const rel_quantity = decimalOrNull(rel.quantity);
+    const rel_price = decimalOrNull(rel.unit_price);
+    return (
+      rel_quantity !== null &&
+      rel_price !== null &&
+      rel_quantity.equals(quantity) &&
+      rel_price.equals(unit_price) &&
+      (decimalOrNull(rel.discount_amount) ?? new Prisma.Decimal(0)).equals(
+        discount,
+      ) &&
+      (rel.is_inclusive === true) === is_inclusive &&
+      decimalOrNull(rel.tax_amount) !== null
+    );
+  });
+  if (!twin) return null;
+  const persisted = decimalOrNull(twin.tax_amount) as Prisma.Decimal;
+  const delta = persisted.minus(kernel_quota).abs();
+  if (delta.isZero() || delta.greaterThan(FULL_TWIN_MAX_DELTA)) return null;
+  return persisted;
 }
 
 /** Clave de tributo de `distinctInvoiceTaxSchemes` (untyped ⇒ iva, tarifa a 4 decimales). */
