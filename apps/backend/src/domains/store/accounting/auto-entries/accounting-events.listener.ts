@@ -271,6 +271,11 @@ export class AccountingEventsListener {
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
+    /**
+     * Flete NETO (`shipping_cost − shipping_tax_amount`) para 414505 en la
+     * rama sin factura. Sin él el asiento no cuadra cuando hay envío.
+     */
+    shipping_amount?: number;
     /** GAP-6 — propina (sin IVA): pasivo custodio, línea CR en el asiento. */
     tip_amount?: number;
     currency: string;
@@ -308,6 +313,10 @@ export class AccountingEventsListener {
         discount_amount:
           event.discount_amount != null
             ? Number(event.discount_amount)
+            : undefined,
+        shipping_amount:
+          event.shipping_amount != null
+            ? Number(event.shipping_amount)
             : undefined,
         tip_amount:
           event.tip_amount != null ? Number(event.tip_amount) : undefined,
