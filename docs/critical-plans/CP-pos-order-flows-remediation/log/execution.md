@@ -11,3 +11,4 @@
 | 2026-09-22 | Orquestador | A.4 | Draft cancelable con estado compartido y guard de mesa abierta 409 tipado en d13ce5b79; lectura de política usa sesiones existentes. API/E2E pendientes. | 2 suites/129 tests; watch frontend OK; backend health 200 |
 | 2026-09-22 | Orquestador | H.3/A.4 | Negativos H.3: 400 cantidad, 404 mesa ajena, 409 doble cobro. A.4: draft QA cancelado 200; draft con mesa abierta bloqueado 409. E2E pendiente. | evidence/H3-local-api-verification.md; A4-local-api-verification.md |
 | 2026-09-22 | Orquestador | H.3 | Regresión de línea histórica gravada: el cierre de mesa conserva snapshot persistido y total 11900 aunque el catálogo nuevo carezca de impuesto. | c5a4e09c1; payments.service.spec.ts 76/76 |
+| 2026-09-22 | Orquestador | H.3 | API local: categoría 0 %, IVA 19 % y mixto en POS sin mesa; mixto en mesa 12. Todos 201, tasas persistidas correctas, un pago por orden. | evidence/H3-tax-matrix.sql/txt; H3-local-api-verification.md |
