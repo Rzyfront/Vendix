@@ -1167,6 +1167,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La orden se guardó pero no se pudo recargar. Actualiza el detalle.',
   ORD_FLOW_PAYMENT_FAILED_001:
     'No se pudo registrar el cobro. La orden sigue pendiente.',
+  ORD_PAY_ALREADY_PAID_001:
+    'Esta orden ya está pagada por completo. Actualiza el detalle antes de intentar otro cobro.',
 
   // Coupons (QUI-783). El backend rechaza el cupón con estos códigos cuando
   // un cupón aplicado a una venta no puede ser validado server-side (antes

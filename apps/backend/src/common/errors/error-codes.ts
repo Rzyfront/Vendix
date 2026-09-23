@@ -1414,6 +1414,11 @@ export const ErrorCodes = {
     devMessage:
       'Order payment could not be processed; the order remains ready-to-pay',
   },
+  ORD_PAY_ALREADY_PAID_001: {
+    code: 'ORD_PAY_ALREADY_PAID_001',
+    httpStatus: 409,
+    devMessage: 'Order is already fully paid',
+  },
   // CP-POS-MODAL-SCOPE-001 / Phase C.4 — edit→pay sin cliente cuando el escape
   // hatch está apagado. 409: el cashier debe seleccionar cliente (vía
   // Actualizar) antes de cobrar.
