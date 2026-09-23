@@ -40,6 +40,7 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
     'credit_note.accepted.sales_returns': '4175',
     'credit_note.accepted.iva_payable': '240802',
     'credit_note.accepted.accounts_receivable': '1305',
+    'credit_note.accepted.customer_refund_payable': '2805',
     'payment.received.sales_discount': '4175',
     'payment.received.inc_payable': '243605',
     'credit_sale.created.sales_discount': '4175',
@@ -71,6 +72,10 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
     creditNotes?: any[];
     refunds?: any[];
     returnOrders?: any[];
+    /** Otra factura de venta posterior de la orden (re-emisión). */
+    sibling?: any;
+    /** invoice_data_requests en curso de la orden. */
+    dataRequest?: any;
   } = {}) => {
     const codes = opts.codes ?? CODES;
     const unscoped = {
@@ -78,6 +83,8 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
         findFirst: jest.fn(async (args: any) =>
           args?.select?.related_invoice
             ? (opts.creditNote ?? null)
+            : args?.where?.id?.gt !== undefined
+              ? (opts.sibling ?? null)
             : opts.invoice === undefined
               ? {
                   order_id: SALE.order_id,
@@ -94,6 +101,9 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
       },
       return_orders: {
         findMany: jest.fn().mockResolvedValue(opts.returnOrders ?? []),
+      },
+      invoice_data_requests: {
+        findFirst: jest.fn().mockResolvedValue(opts.dataRequest ?? null),
       },
       fiscal_transmissions: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -528,12 +538,14 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
     };
     const skippedOriginal = {
       related_invoice: {
+        id: SALE.invoice_id,
         order_id: SALE.order_id,
         accounting_status: 'not_applicable',
+        total_amount: SALE.total,
       },
     };
 
-    it('sin refund: reversa ingreso/impuestos contra la caja que recibió el cobro, nunca 1305', async () => {
+    it('sin refund: reversa ingreso/impuestos contra saldo a favor del cliente (2805), nunca caja ni 1305', async () => {
       const { service, createAutoEntry } = build({
         creditNote: skippedOriginal,
         bySource: { 'payment.received': [posPaymentEntry] },
@@ -549,9 +561,10 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
         expect.objectContaining({ account_code: '240802', debit_amount: 950 }),
       );
       expect(lines).toContainEqual(
-        expect.objectContaining({ account_code: '1105', credit_amount: 5950 }),
+        expect.objectContaining({ account_code: '2805', credit_amount: 5950 }),
       );
       expect(lines.some((l) => l.account_code === '1305')).toBe(false);
+      expect(lines.some((l) => l.account_code === '1105')).toBe(false);
       expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
     });
 
@@ -676,6 +689,101 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
         expect.objectContaining({ account_code: '4135', debit_amount: 5000 }),
       );
       expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
+    });
+
+    describe('re-emisión nominativa (B1)', () => {
+      // Venta POS pagada (payment.received reconoció 16.900) facturada con A;
+      // el cliente pide factura nominativa: NC espejo de A + factura B.
+      const mirrorNc = {
+        ...NC,
+        subtotal: SALE.subtotal + SALE.shipping,
+        tax_amount: SALE.tax,
+        tax_breakdown: [{ tax_type: 'iva' as const, tax_amount: SALE.tax }],
+        total: SALE.total,
+      };
+      const paymentLines = posPaymentEntry.accounting_entry_lines.map((l) => ({
+        account_code: l.account.code,
+        debit_amount: l.debit_amount,
+        credit_amount: l.credit_amount,
+      }));
+
+      const runReissue = async (opts: { sibling?: any; dataRequest?: any }) => {
+        const { service, createAutoEntry, unscoped } = build({
+          creditNote: skippedOriginal,
+          bySource: { 'payment.received': [posPaymentEntry] },
+          entries: [asPostedEntry(501, 'payment.received', paymentLines)],
+          ...opts,
+        });
+        const nc: any = await service.onCreditNoteAccepted(mirrorNc);
+        const invoiceB: any = await service.onInvoiceValidated({
+          ...invoiceEvent,
+          invoice_id: 56,
+        });
+        return { nc, invoiceB, createAutoEntry, unscoped };
+      };
+
+      it('NC espejo + factura nueva: ninguna postea; Σ ingreso = venta y caja intacta', async () => {
+        const { nc, invoiceB, createAutoEntry, unscoped } = await runReissue({
+          sibling: { id: 56 },
+        });
+        expect(nc).toEqual(
+          expect.objectContaining({ skipped: true, reason: 'reissue_mirror_credit_note' }),
+        );
+        expect(invoiceB).toEqual(
+          expect.objectContaining({ skipped: true, reason: 'sale_already_recognized' }),
+        );
+        expect(createAutoEntry).not.toHaveBeenCalled();
+        // Libro = sólo el asiento del pago: ingreso 10.000 + flete 5.000, caja 16.900.
+        expect(creditOn(paymentLines, '4135')).toBe(SALE.subtotal);
+        expect(sum(paymentLines.filter((l) => l.account_code === '1105'), 'debit_amount')).toBe(
+          SALE.total,
+        );
+        expect(unscoped.invoices.updateMany).toHaveBeenCalledWith({
+          where: { id: NC.invoice_id, organization_id: 1 },
+          data: { accounting_status: 'not_applicable' },
+        });
+      });
+
+      it('NC espejo aceptada antes de crear la factura B (solicitud en curso): tampoco postea', async () => {
+        const { nc, createAutoEntry } = await runReissue({
+          dataRequest: { id: 9 },
+        });
+        expect(nc.reason).toBe('reissue_mirror_credit_note');
+        expect(createAutoEntry).not.toHaveBeenCalled();
+      });
+
+      it('NC parcial sin re-emisión: saldo a favor 2805 y el refund posterior lo cruza', async () => {
+        const { service, createAutoEntry } = build({
+          creditNotes: [{ id: NC.invoice_id }],
+          bySource: {
+            'credit_note.accepted': [
+              {
+                id: 961,
+                total_credit: 5950,
+                accounting_entry_lines: [
+                  { credit_amount: 0, account: { code: '4175' } },
+                  { credit_amount: 5950, account: { code: '2805' } },
+                ],
+              },
+            ],
+          },
+          refunds: [{ id: 32, amount: 5950 }],
+        });
+        await service.onRefundCompleted({
+          refund_id: 32,
+          order_id: SALE.order_id,
+          organization_id: 1,
+          store_id: 2,
+          amount: 5950,
+          tax_amount: 950,
+          effective_channel: 'cash',
+        });
+        const lines = linesOf(createAutoEntry.mock.calls[0]);
+        expect(lines).toEqual([
+          expect.objectContaining({ account_code: '2805', debit_amount: 5950 }),
+          expect.objectContaining({ account_code: '1105', credit_amount: 5950 }),
+        ]);
+      });
     });
 
     describe('devolución de return-orders (A1)', () => {

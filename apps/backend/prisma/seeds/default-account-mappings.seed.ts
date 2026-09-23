@@ -142,6 +142,7 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'credit_note.accepted.inc_payable': '2436',
   'credit_note.accepted.ica_payable': '2412',
   'credit_note.accepted.accounts_receivable': '1305',
+  'credit_note.accepted.customer_refund_payable': '2805',
   // Phase 2: Sales discounts (POS coupons, manual discounts)
   'payment.received.sales_discount': '4175',
   'credit_sale.created.sales_discount': '4175',

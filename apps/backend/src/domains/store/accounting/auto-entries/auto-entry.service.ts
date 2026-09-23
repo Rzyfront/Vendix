@@ -2320,6 +2320,51 @@ export class AutoEntryService {
   }
 
   /**
+   * ¿La NC es el espejo de una re-emisión nominativa
+   * (`invoice-data-requests` → `credit_note_reissue`)? Lo es si reversa TODA
+   * su factura de origen y la orden tiene otra factura de venta vigente
+   * posterior a esa, o una solicitud de datos en curso (`processing`: la
+   * factura nueva todavía no se crea cuando la DIAN acepta la NC).
+   */
+  private async isReissueMirrorCreditNote(
+    credit_note_id: number,
+    organization_id: number,
+    credit_note_total: number,
+  ): Promise<boolean> {
+    const db = this.prisma.withoutScope();
+    const note = await db.invoices.findFirst({
+      where: { id: credit_note_id, organization_id },
+      select: {
+        related_invoice: {
+          select: { id: true, order_id: true, total_amount: true },
+        },
+      },
+    });
+    const original = (note as any)?.related_invoice;
+    if (!original?.order_id) return false;
+    if (getCents(credit_note_total) + 1n < getCents(original.total_amount ?? 0))
+      return false;
+    const sibling = await db.invoices.findFirst({
+      where: {
+        organization_id,
+        order_id: original.order_id,
+        id: { gt: original.id },
+        invoice_type: {
+          in: AutoEntryService.SALE_RECOGNITION_INVOICE_TYPES as any,
+        },
+        status: { notIn: ['cancelled', 'voided', 'rejected'] },
+      },
+      select: { id: true },
+    });
+    if (sibling) return true;
+    const in_progress = await db.invoice_data_requests.findFirst({
+      where: { order_id: original.order_id, status: 'processing' },
+      select: { id: true },
+    });
+    return !!in_progress;
+  }
+
+  /**
    * Σ de las reversas de venta posteadas para una orden: `refund.completed` de
    * sus `refunds` y `return_order.refund` de sus devoluciones (`return_orders`
    * con `related_order_id`). Cada uno en su propio espacio de ids, así que un
@@ -2490,6 +2535,30 @@ export class AutoEntryService {
             `${formatCents(refunded.cents)}, menos que la NC (${data.total}); ` +
             `se postea la NC completa: revisar reverso parcial duplicado.`,
         );
+      } else if (
+        await this.isReissueMirrorCreditNote(
+          data.invoice_id,
+          data.organization_id,
+          data.total,
+        )
+      ) {
+        // Re-emisión nominativa (NC espejo + factura nueva de la misma orden)
+        // sin dinero devuelto: la venta sigue viva y ya está en el libro por
+        // payment.received. La NC no reversa nada y la factura nueva se omite
+        // por findPriorSaleRecognition ⇒ efecto neto cero, caja intacta.
+        this.logger.log(
+          `credit_note.accepted #${data.invoice_id}: NC espejo de re-emisión de la ` +
+            `orden #${pos_sale.order_id}; la venta sigue reconocida, sin asiento.`,
+        );
+        await this.markInvoiceRecognizedElsewhere(
+          data.invoice_id,
+          data.organization_id,
+        );
+        return {
+          id: null,
+          skipped: true,
+          reason: 'reissue_mirror_credit_note',
+        };
       }
     }
 
@@ -2502,13 +2571,18 @@ export class AutoEntryService {
         0,
         data.store_id,
       ),
+      // Venta POS ya cobrada, sin refund: la NC NO saca dinero de caja. Queda
+      // un saldo a favor del cliente (2805) que el refund.completed posterior
+      // cruza (DR 2805 / CR canal real, ver onRefundCompleted).
       pos_sale
-        ? Promise.resolve<AutoEntryLine>({
-            account_code: pos_sale.cash_account_code,
-            description: 'Reembolso al cliente (reversa nota crédito POS)',
-            debit_amount: 0,
-            credit_amount: data.total,
-          })
+        ? this.resolveAccountLine(
+            data.organization_id,
+            'credit_note.accepted.customer_refund_payable',
+            'Saldo a favor del cliente (nota crédito POS)',
+            0,
+            data.total,
+            data.store_id,
+          )
         : this.resolveAccountLine(
             data.organization_id,
             'credit_note.accepted.accounts_receivable',
