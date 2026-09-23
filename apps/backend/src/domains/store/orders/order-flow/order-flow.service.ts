@@ -1553,10 +1553,9 @@ export class OrderFlowService {
         (p: { state?: string | null }) =>
           !!p?.state && p.state !== 'failed' && p.state !== 'cancelled',
       );
-      const paymentStatus = (order as { payment_status?: string | null })
-        .payment_status;
-      const orderIsCharged =
-        chargedPayment || (paymentStatus != null && paymentStatus !== 'pending');
+      // La señal es SOLO el arreglo `payments`: `orders` no tiene columna
+      // `payment_status`.
+      const orderIsCharged = chargedPayment;
 
       if (orderIsCharged) {
         const chargedShippingCents = Math.round(
