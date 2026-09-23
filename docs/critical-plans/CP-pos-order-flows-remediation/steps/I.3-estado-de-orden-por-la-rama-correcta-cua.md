@@ -4,7 +4,7 @@ title: "Estado de orden por la rama correcta cuando el pago queda pendiente"
 phase: I
 status: in-progress
 owner: Hypatia
-updated: 2026-09-20
+updated: 2026-09-23
 contracts: [FB-01, DB-03, DB-14, ERR-20]
 adrs: []
 skills: [vendix-backend, vendix-payment-processors, vendix-error-handling, how-to-test]
@@ -28,12 +28,12 @@ skills: [vendix-backend, vendix-payment-processors, vendix-error-handling, how-t
   - SQL de solo lectura: `SELECT o.id, o.state, o.remaining_balance, p.state FROM orders o JOIN payments p ON p.order_id = o.id WHERE o.created_at > :deploy AND p.state = 'pending';` → ninguna fila con `o.state = 'finished'`, evidencia en `evidence/I3-estado-vs-pago.txt`
   - `curl -s "$API/store/dispatch-notes/from-order/$ORDER_ID" …` sobre la contra-entrega → ya no rechaza por estado, evidencia en `evidence/I3-remision.json`
 - **Acceptance checklist:**
-  - [ ] El estado de la orden y el del pago se derivan del mismo dato de método, sin segunda bifurcación por nombre
-  - [ ] Una contra-entrega de mostrador termina con saldo vivo y no como venta terminada
-  - [ ] Una contra-entrega a domicilio termina en el mismo estado que la de mostrador
-  - [ ] Efectivo, tarjeta y pasarela conservan exactamente su conducta actual
-  - [ ] Ninguna orden histórica se reescribe: el cambio solo afecta a ventas nuevas
-  - [ ] El comentario del cliente POS describe la conducta real del backend
-  - [ ] El procesador COD sigue registrado para el gateway genérico; POS escribe pending de forma transaccional sin invocarlo, y la razón queda documentada
-  - [ ] La consulta que cruza estado de orden contra estado de pago no devuelve ninguna venta terminada sin cobro
-- **Status:** in-progress — 88235b0e2; COD mostrador 201 con orden/pago pendientes y saldo vivo; falta domicilio/remisión.
+  - [x] El estado de la orden y el del pago se derivan del mismo dato de método, sin segunda bifurcación por nombre
+  - [x] Una contra-entrega de mostrador termina con saldo vivo y no como venta terminada
+  - [x] Una contra-entrega a domicilio termina en el mismo estado que la de mostrador
+  - [x] Efectivo, tarjeta y pasarela conservan exactamente su conducta actual
+  - [x] Ninguna orden histórica se reescribe: el cambio solo afecta a ventas nuevas
+  - [x] El comentario del cliente POS describe la conducta real del backend
+  - [x] El procesador COD sigue registrado para el gateway genérico; POS escribe pending de forma transaccional sin invocarlo, y la razón queda documentada
+  - [x] La consulta que cruza estado de orden contra estado de pago no devuelve ninguna venta terminada sin cobro
+- **Status:** in-progress — `evidence/I3-cod-home-20260923.md`: COD domicilio #1167 201, orden/pago pendientes, saldo $10.000 y remisión #227 201; mostrador #1115 ya probado. PaymentsService 106/106; SQL de nuevas órdenes `finished`+pago `pending` = 0. Negativo de método inexistente descubrió 500 no tipado en POS; corregir y revalidar antes de cerrar.
