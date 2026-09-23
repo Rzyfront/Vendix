@@ -1644,12 +1644,12 @@ export class TableSessionsService {
         return null;
       }
 
-      await this.markSessionPaid(openSession.id, paymentId, client);
+      const marked = await this.markSessionPaid(openSession.id, paymentId, client);
       let emitted = false;
       return {
         sessionId: openSession.id,
         emitAfterCommit: () => {
-          if (!openSession.paid_at && !emitted) {
+          if (marked.newlyPaid && !emitted) {
             emitted = true;
             this.emitSessionPaid(storeId, openSession.id, orderId, paymentId);
           }
@@ -1671,10 +1671,9 @@ export class TableSessionsService {
    * `payments`.
    *
    * Comportamiento:
-   *  - Idempotente sobre `paid_at`: si ya está pagado, no vuelve a escribir
-   *    y retorna el row actual (un segundo cobro POS contra la misma mesa
-   *    se bloquea aguas arriba por el guard `POS_TABLE_SESSION_ALREADY_CHARGED`
-   *    en `applyPosPaymentToTableSession`, pero igual defendemos aquí).
+   *  - Idempotente y seguro ante dos proyectores concurrentes: el claim
+   *    condicional `paid_at IS NULL` deja un solo ganador. Sólo él emite SSE;
+   *    el segundo conserva el timestamp original sin nuevo evento.
    *  - Acepta `tx` opcional para ejecutarse dentro de la transacción del
    *    pago POS; sin tx abre una propia.
    *
@@ -1686,29 +1685,26 @@ export class TableSessionsService {
     sessionId: number,
     paymentId: number | null,
     tx?: any,
-  ): Promise<{ id: number; paid_at: Date | null; order_id: number }> {
+  ): Promise<{ id: number; paid_at: Date | null; order_id: number; newlyPaid: boolean }> {
     const run = async (client: any) => {
-      const existing = await client.table_sessions.findUnique({
-        where: { id: sessionId },
+      const { storeId } = this.requireStoreContext();
+      const claimed = await client.table_sessions.updateMany({
+        where: { id: sessionId, store_id: storeId, paid_at: null },
+        data: { paid_at: new Date(), updated_at: new Date() },
+      });
+      const current = await client.table_sessions.findUnique({
+        where: { id: sessionId, store_id: storeId },
         select: { id: true, paid_at: true, order_id: true },
       });
-      if (!existing) {
+      if (!current) {
         throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
       }
-      if (existing.paid_at) {
-        // Ya pagada — no reescribir el timestamp (auditoría de cuándo fue
-        // el primer pago, no el último).
-        return existing;
+      if (claimed.count === 1) {
+        this.logger.log(
+          `Table session marked paid: session=${sessionId} order=${current.order_id} payment=${paymentId ?? 'n/a'}`,
+        );
       }
-      const updated = await client.table_sessions.update({
-        where: { id: sessionId },
-        data: { paid_at: new Date(), updated_at: new Date() },
-        select: { id: true, paid_at: true, order_id: true },
-      });
-      this.logger.log(
-        `Table session marked paid: session=${sessionId} order=${updated.order_id} payment=${paymentId ?? 'n/a'}`,
-      );
-      return updated;
+      return { ...current, newlyPaid: claimed.count === 1 };
     };
     return tx ? run(tx) : this.prisma.$transaction(run);
   }
