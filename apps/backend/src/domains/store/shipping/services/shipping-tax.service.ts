@@ -35,7 +35,8 @@ export type ShippingTaxDbClient = Pick<
 export interface ShippingRateTaxCategoryView {
   id: number;
   name: string;
-  tax_type: ShippingTaxType;
+  /** 'iva' | 'inc' si es elegible; el tipo real (p. ej. 'ibua') si no. */
+  tax_type: ShippingTaxType | string;
   rate_percent: number;
 }
 
@@ -312,12 +313,13 @@ export class ShippingTaxService {
     category: CategoryRow | null | undefined,
   ): ShippingRateTaxCategoryView | null {
     if (!category) return null;
+    // `evaluation.tax_type` ya viene resuelto en la fila de origen: sin tipo ⇒
+    // 'iva'; cualquier otro tipo se muestra tal cual (y sigue no elegible).
     const evaluation = evaluateShippingTaxCategory(category);
-    const tax_type = (evaluation.tax_type === 'inc' ? 'inc' : 'iva') as ShippingTaxType;
     return {
       id: category.id,
       name: category.name,
-      tax_type,
+      tax_type: evaluation.tax_type,
       rate_percent: evaluation.rate_percent ?? 0,
     };
   }

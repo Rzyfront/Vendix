@@ -326,8 +326,15 @@ export class StoreShippingZonesService {
     }
 
     // `undefined` ⇒ no se toca; `null` ⇒ se quita el impuesto; número ⇒ se
-    // valida (404/400/412) y se asigna.
-    if (tax_category_id !== undefined) {
+    // valida (404/400/412) y se asigna. Solo se valida si CAMBIA: el frontend
+    // reenvía la categoría actual en toda edición, y si esa categoría dejó de
+    // ser elegible (otra tasa, emisor sin O-48) no debe bloquear un cambio de
+    // nombre o de activo.
+    const tax_category_changes =
+      tax_category_id !== undefined &&
+      (tax_category_id === null ? null : Number(tax_category_id)) !==
+        (rate.tax_category_id ?? null);
+    if (tax_category_changes) {
       await this.shippingTax.assertCategoryAssignable(tax_category_id);
     }
 
@@ -335,7 +342,7 @@ export class StoreShippingZonesService {
       where: { id },
       data: {
         ...update_data,
-        ...(tax_category_id !== undefined ? { tax_category_id } : {}),
+        ...(tax_category_changes ? { tax_category_id } : {}),
       },
       include: RATE_INCLUDE,
     });

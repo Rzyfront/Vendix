@@ -71,6 +71,7 @@ describe('StoreShippingZonesService — impuesto de tarifa', () => {
       prisma.shipping_rates.findFirst.mockResolvedValue({
         id: 5,
         shipping_zone_id: 11,
+        tax_category_id: 7,
         shipping_zone: { is_system: false },
       });
       prisma.shipping_rates.update.mockResolvedValue({ id: 5, tax_category: null });
@@ -80,6 +81,27 @@ describe('StoreShippingZonesService — impuesto de tarifa', () => {
       await service.updateStoreRate(5, { tax_category_id: null } as any);
       expect(shippingTax.assertCategoryAssignable).toHaveBeenCalledWith(null);
       expect(prisma.shipping_rates.update.mock.calls[0][0].data).toEqual({ tax_category_id: null });
+    });
+
+    it('misma categoría reenviada ⇒ no se revalida ni se escribe (no bloquea editar nombre/activo)', async () => {
+      shippingTax.assertCategoryAssignable.mockRejectedValue(new Error('ya no elegible'));
+      await service.updateStoreRate(5, { tax_category_id: 7, name: 'Express' } as any);
+      expect(shippingTax.assertCategoryAssignable).not.toHaveBeenCalled();
+      expect(prisma.shipping_rates.update.mock.calls[0][0].data).toEqual({ name: 'Express' });
+    });
+
+    it('categoría distinta ⇒ se valida y se escribe', async () => {
+      await service.updateStoreRate(5, { tax_category_id: 9 } as any);
+      expect(shippingTax.assertCategoryAssignable).toHaveBeenCalledWith(9);
+      expect(prisma.shipping_rates.update.mock.calls[0][0].data).toEqual({ tax_category_id: 9 });
+    });
+
+    it('categoría distinta no elegible ⇒ propaga el rechazo y no escribe', async () => {
+      shippingTax.assertCategoryAssignable.mockRejectedValue(new Error('412'));
+      await expect(
+        service.updateStoreRate(5, { tax_category_id: 9 } as any),
+      ).rejects.toThrow('412');
+      expect(prisma.shipping_rates.update).not.toHaveBeenCalled();
     });
 
     it('sin tax_category_id no toca el impuesto', async () => {

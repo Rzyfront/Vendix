@@ -232,5 +232,18 @@ describe('ShippingTaxService', () => {
       });
       expect(ShippingTaxService.toTaxCategoryView(null)).toBeNull();
     });
+
+    it('sin tipo ⇒ iva; otro tipo ⇒ su tipo real (no se etiqueta como iva)', () => {
+      const base = { id: 9, name: 'X', tax_rates: [{ id: 90, name: 'X', rate: 0.1 }] };
+      expect(
+        ShippingTaxService.toTaxCategoryView({ ...base, tax_type: null } as any)?.tax_type,
+      ).toBe('iva');
+      expect(
+        ShippingTaxService.toTaxCategoryView({ ...base, tax_type: 'ibua' } as any)?.tax_type,
+      ).toBe('ibua');
+      expect(
+        ShippingTaxService.toTaxCategoryView({ ...base, tax_type: 'withholding' } as any)?.tax_type,
+      ).toBe('withholding');
+    });
   });
 });
