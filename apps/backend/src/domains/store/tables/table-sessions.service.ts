@@ -2390,6 +2390,8 @@ export class TableSessionsService {
    *     row is already in a final state — e.g. a webhook landed first).
    *   - Updates `orders.total_paid` / `remaining_balance` so the order
    *     reflects the new paid amount.
+   *   - Once the paid sum covers `grand_total`, projects `table_sessions.paid_at`
+   *     after commit; partial payments leave the session unpaid.
    *   - Emits `payment.received` with the canonical shape so the auto-entry
    *     listener + notification listener both fire identically to the POS
    *     fresh-sale path.
@@ -2433,6 +2435,8 @@ export class TableSessionsService {
               tax_amount: true,
               discount_amount: true,
               tip_amount: true,
+              grand_total: true,
+              total_paid: true,
               customer_id: true,
               stores: { select: { organization_id: true } },
             },
@@ -2472,7 +2476,16 @@ export class TableSessionsService {
         this.logger.log(
           `[confirmPayment] payment ${paymentId} state=${payment.state}; idempotent skip.`,
         );
-        return { state: 'succeeded' as const, payment_id: payment.id, noop: true };
+        return {
+          state: 'succeeded' as const,
+          payment_id: payment.id,
+          noop: true,
+          orderId: payment.orders.id,
+          shouldProject:
+            payment.state === 'succeeded' &&
+            Number(payment.orders.total_paid || 0) >=
+              Number(payment.orders.grand_total || 0),
+        };
       }
 
       // 5. Transition + balance update.
@@ -2528,8 +2541,19 @@ export class TableSessionsService {
         amount: Number(payment.amount),
         methodType,
         newTotalPaid: orderTotalPaid,
+        shouldProject: orderTotalPaid >= Number(order.grand_total || 0),
       };
     });
+
+    // The payment and order balance are committed before B.1 opens its own
+    // transaction. A succeeded retry repairs a missed projection; B.1 keeps
+    // both paid_at and session_paid idempotent.
+    if (result.shouldProject) {
+      await this.projectOrderPaymentToTableSession(
+        result.orderId,
+        result.payment_id,
+      );
+    }
 
     // 7. Post-commit side effects — fire-and-await because the SSE push
     //    + notification broadcast are the only consumer-facing signal that

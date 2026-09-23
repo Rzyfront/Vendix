@@ -51,6 +51,10 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         // tengan un spy válido con el cual comparar (jest exige mock o spy).
         findUnique: jest.fn(),
       },
+      payments: {
+        findFirst: jest.fn(),
+        update: jest.fn(),
+      },
       order_items: {
         create: jest.fn(),
         findMany: jest.fn().mockResolvedValue([]),
@@ -227,6 +231,144 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       projection?.emitAfterCommit();
       projection?.emitAfterCommit();
       expect((service as any).notificationsSseService.push).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('confirmPayment — paid table projection (B.2)', () => {
+    const orderId = 9001;
+    const paymentId = 501;
+    const sessionId = 77;
+
+    const payment = (state: string, totalPaid: number, amount = 60) => ({
+      id: paymentId,
+      order_id: orderId,
+      state,
+      amount,
+      currency: 'COP',
+      store_payment_method: {
+        display_name: 'Efectivo',
+        system_payment_method: { type: 'cash', display_name: 'Efectivo' },
+      },
+      orders: {
+        id: orderId,
+        order_number: 'T-9001',
+        store_id: STORE_ID,
+        grand_total: 100,
+        total_paid: totalPaid,
+        subtotal_amount: 100,
+        tax_amount: 0,
+        discount_amount: 0,
+        tip_amount: 0,
+        customer_id: null,
+        stores: { organization_id: 1 },
+      },
+    });
+
+    beforeEach(() => {
+      jest.spyOn(service, 'findOne').mockResolvedValue({
+        id: sessionId,
+        order_id: orderId,
+        closed_at: null,
+      } as any);
+    });
+
+    it('projects a settled check only after the payment transaction commits', async () => {
+      prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 40));
+      prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100, total_paid: 40 });
+      prismaMock.table_sessions.findFirst.mockResolvedValue({ id: sessionId, paid_at: null });
+      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: null, order_id: orderId });
+      prismaMock.table_sessions.update.mockResolvedValue({ id: sessionId, paid_at: new Date(), order_id: orderId });
+      let paymentCommitted = false;
+      prismaMock.$transaction.mockImplementationOnce(async (run: any) => {
+        const result = await run(prismaMock);
+        expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+        paymentCommitted = true;
+        return result;
+      });
+      prismaMock.table_sessions.update.mockImplementationOnce(async () => {
+        expect(paymentCommitted).toBe(true);
+        return { id: sessionId, paid_at: new Date(), order_id: orderId };
+      });
+
+      await expect(service.confirmPayment(sessionId, paymentId)).resolves.toEqual({
+        state: 'succeeded', payment_id: paymentId,
+      });
+
+      expect(prismaMock.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ total_paid: 100, remaining_balance: 0 }),
+      }));
+      expect(prismaMock.table_sessions.update).toHaveBeenCalledTimes(1);
+      expect((service as any).notificationsSseService.push).toHaveBeenCalledWith(
+        STORE_ID,
+        expect.objectContaining({ type: 'session_paid' }),
+      );
+    });
+
+    it('does not project a partial payment', async () => {
+      prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 20));
+      prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100, total_paid: 20 });
+
+      await service.confirmPayment(sessionId, paymentId);
+
+      expect(prismaMock.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({ total_paid: 80, remaining_balance: 20 }),
+      }));
+      expect(prismaMock.table_sessions.findFirst).not.toHaveBeenCalled();
+      expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+    });
+
+    it('repairs a succeeded retry once, without repeating the payment transition', async () => {
+      prismaMock.payments.findFirst.mockResolvedValue(payment('succeeded', 100));
+      const paidAt = new Date('2026-09-20T12:00:00.000Z');
+      let sessionPaidAt: Date | null = null;
+      prismaMock.table_sessions.findFirst.mockImplementation(async () => ({ id: sessionId, paid_at: sessionPaidAt }));
+      prismaMock.table_sessions.findUnique.mockImplementation(async () => ({ id: sessionId, paid_at: sessionPaidAt, order_id: orderId }));
+      prismaMock.table_sessions.update.mockImplementation(async () => {
+        sessionPaidAt = paidAt;
+        return { id: sessionId, paid_at: paidAt, order_id: orderId };
+      });
+
+      await service.confirmPayment(sessionId, paymentId);
+      await service.confirmPayment(sessionId, paymentId);
+
+      expect(prismaMock.payments.update).not.toHaveBeenCalled();
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+      expect(prismaMock.table_sessions.update).toHaveBeenCalledTimes(1);
+      expect((service as any).notificationsSseService.push).toHaveBeenCalledTimes(1);
+    });
+
+    it('can retry a projection failure after the payment already committed', async () => {
+      prismaMock.payments.findFirst
+        .mockResolvedValueOnce(payment('pending', 40))
+        .mockResolvedValueOnce(payment('succeeded', 100));
+      prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100, total_paid: 40 });
+      prismaMock.table_sessions.findFirst.mockResolvedValue({ id: sessionId, paid_at: null });
+      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: null, order_id: orderId });
+      prismaMock.table_sessions.update
+        .mockRejectedValueOnce(new Error('projection failed'))
+        .mockResolvedValueOnce({ id: sessionId, paid_at: new Date(), order_id: orderId });
+
+      await expect(service.confirmPayment(sessionId, paymentId)).rejects.toThrow('projection failed');
+      await expect(service.confirmPayment(sessionId, paymentId)).resolves.toEqual({
+        state: 'succeeded', payment_id: paymentId,
+      });
+
+      expect(prismaMock.payments.update).toHaveBeenCalledTimes(1);
+      expect(prismaMock.orders.update).toHaveBeenCalledTimes(1);
+      expect(prismaMock.table_sessions.update).toHaveBeenCalledTimes(2);
+      expect((service as any).notificationsSseService.push).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not project a failed payment or a succeeded partial retry', async () => {
+      prismaMock.payments.findFirst
+        .mockResolvedValueOnce(payment('failed', 100))
+        .mockResolvedValueOnce(payment('succeeded', 80));
+
+      await service.confirmPayment(sessionId, paymentId);
+      await service.confirmPayment(sessionId, paymentId);
+
+      expect(prismaMock.table_sessions.findFirst).not.toHaveBeenCalled();
+      expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
     });
   });
 
