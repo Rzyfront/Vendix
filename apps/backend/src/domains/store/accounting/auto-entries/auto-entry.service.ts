@@ -2084,6 +2084,10 @@ export class AutoEntryService {
    * débito, de ajuste) mueven el saldo de una venta ya reconocida y nunca se
    * omiten por esta regla.
    */
+  /** Reclasificación caja/banco de un refund cuya venta ya reversó una NC. */
+  private static readonly REFUND_RECLASSIFICATION_SOURCE =
+    'refund.reclassification';
+
   private static readonly SALE_RECOGNITION_INVOICE_TYPES = [
     'sales_invoice',
     'export_invoice',
@@ -2321,13 +2325,11 @@ export class AutoEntryService {
     const entries = await db.accounting_entries.findMany({
       where: {
         organization_id,
+        // La reclasificación posterior a una NC (`refund.reclassification`)
+        // no reversa la venta: queda fuera por su propio source_type.
         source_type: 'refund.completed',
         source_id: { in: refunds.map((row: any) => row.id) },
         status: 'posted',
-        // La reclasificación posterior a una NC no reversa la venta.
-        NOT: {
-          description: { contains: '(reclasificación tras nota crédito)' },
-        },
       },
       select: { id: true, total_credit: true },
     });
@@ -4525,8 +4527,12 @@ export class AutoEntryService {
             covering_entry_ids: credit_note_lane.entry_ids,
           };
         }
+        // Marca estructurada: source_type propio. `sumPostedRefundEntries`
+        // cuenta sólo reversas de venta (`refund.completed`), nunca esta
+        // reclasificación de caja/banco. La deduplicación por
+        // (source_type, source_id) sigue siendo por refund.
         return this.createAutoEntry({
-          source_type: 'refund.completed',
+          source_type: AutoEntryService.REFUND_RECLASSIFICATION_SOURCE,
           source_id: data.refund_id,
           organization_id: data.organization_id,
           store_id: data.store_id,

@@ -629,6 +629,14 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
         expect.objectContaining({ account_code: '1105', debit_amount: 5950 }),
         expect.objectContaining({ account_code: '1110', credit_amount: 5950 }),
       ]);
+      // M2 — marca estructurada: la reclasificación no es `refund.completed`,
+      // así `sumPostedRefundEntries` nunca la cuenta como reversa de venta.
+      expect(createAutoEntry.mock.calls[0][0]).toEqual(
+        expect.objectContaining({
+          source_type: 'refund.reclassification',
+          source_id: 31,
+        }),
+      );
       expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
     });
 
