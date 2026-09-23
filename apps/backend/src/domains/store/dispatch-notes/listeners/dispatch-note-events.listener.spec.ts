@@ -844,6 +844,7 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
   let listener: DispatchNoteEventsListener;
   let prismaMock: any;
   let orderFlowMock: any;
+  let storeContextRunnerMock: any;
 
   const note = {
     id: 900,
@@ -893,7 +894,13 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
       },
       kitchen_ticket_items: { findMany: jest.fn().mockResolvedValue([]) },
     };
-    orderFlowMock = { reconcileOrderFromDispatch: jest.fn().mockResolvedValue(undefined) };
+    orderFlowMock = {
+      reconcileKitchenAfterDispatch: jest.fn().mockResolvedValue(undefined),
+      reconcileOrderFromDispatch: jest.fn().mockResolvedValue(undefined),
+    };
+    storeContextRunnerMock = {
+      runInStoreContext: jest.fn(async (_storeId: number, callback: () => Promise<void>) => callback()),
+    };
 
     listener = new DispatchNoteEventsListener(
       prismaMock as unknown as StorePrismaService,
@@ -911,6 +918,7 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
       undefined,
       undefined,
       orderFlowMock,
+      storeContextRunnerMock,
     );
   };
 
@@ -942,6 +950,27 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
     // Idempotencia: sólo sella donde está NULL — un re-disparo no mueve la fecha.
     expect(arg.where.delivered_at).toBeNull();
     expect(arg.data.delivered_at).toBeInstanceOf(Date);
+    expect(storeContextRunnerMock.runInStoreContext).toHaveBeenCalledWith(100, expect.any(Function));
+    expect(orderFlowMock.reconcileKitchenAfterDispatch).toHaveBeenCalledWith(7777, 100);
+  });
+
+  it('(dispatch KDS) projects the stamped delivery before order-state reconciliation', async () => {
+    arrange([{ id: 11, product_id: 1, product_variant_id: null }], [{ status: 'delivered' }]);
+    const calls: string[] = [];
+    prismaMock.order_items.updateMany.mockImplementation(async () => {
+      calls.push('stamp');
+      return { count: 1 };
+    });
+    orderFlowMock.reconcileKitchenAfterDispatch.mockImplementation(async () => {
+      calls.push('kitchen');
+    });
+    orderFlowMock.reconcileOrderFromDispatch.mockImplementation(async () => {
+      calls.push('order');
+    });
+
+    await fire();
+
+    expect(calls).toEqual(['stamp', 'kitchen', 'order']);
   });
 
   it('(r) despacho parcial: sólo sella las líneas que viajan en ESTA remisión', async () => {
@@ -1016,6 +1045,8 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
     await fire();
 
     expect(prismaMock.order_items.updateMany).not.toHaveBeenCalled();
+    // A replay still reconciles a previously stamped item if KDS failed.
+    expect(orderFlowMock.reconcileKitchenAfterDispatch).toHaveBeenCalledWith(7777, 100);
     // El reconciliador sí corre igual: el estado de la orden no depende del sello.
     expect(orderFlowMock.reconcileOrderFromDispatch).toHaveBeenCalledWith(7777, 100);
   });

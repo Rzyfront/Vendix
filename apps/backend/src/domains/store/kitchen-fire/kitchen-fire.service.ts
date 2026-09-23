@@ -171,6 +171,7 @@ export interface KdsSseEvent {
     | 'ticket.created'
     | 'ticket.started'
     | 'ticket.ready'
+    | 'ticket.updated'
     | 'ticket.delivered'
     | 'ticket.cancelled'
     | 'ticket.reverted'
@@ -2943,6 +2944,27 @@ export class KitchenFireService {
         `QUI-760: failed to attribute cancelled ticket ${ticketId} consumption: ${
           (err as Error).message
         }`,
+      );
+    }
+  }
+
+  /**
+   * Order-side item delivery changes the latest KDS row without necessarily
+   * delivering the whole ticket. Push the full ticket after commit so an open
+   * board updates immediately; `ticket.delivered` would be a false event name
+   * while another dish of the same ticket is still ready/pending.
+   */
+  async emitTicketUpdatedEvent(ticketId: number): Promise<void> {
+    try {
+      const { ticket, store_id } = await this.getTicketForStore(ticketId);
+      this.pushKitchenEvent(store_id, {
+        type: 'ticket.updated',
+        ticket,
+        ts: Date.now(),
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to emit ticket.updated for ticket ${ticketId}: ${(err as Error).message}`,
       );
     }
   }

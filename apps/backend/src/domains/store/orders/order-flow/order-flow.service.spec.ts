@@ -1830,6 +1830,9 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
     orderTickets?: Array<{ status: string }>;
   }) => {
     const eventEmitter = { emit: jest.fn() };
+    const kitchenFireService = {
+      emitTicketUpdatedEvent: jest.fn().mockResolvedValue(undefined),
+    };
     const orderView = {
       id: ORDER_ID,
       store_id: STORE_ID,
@@ -1870,13 +1873,14 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
       {} as any,
       {} as any,
       { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      kitchenFireService as any,
     );
     jest.spyOn(service as any, 'getOrder').mockResolvedValue(orderView);
-    return { service, prismaMock, eventEmitter, orderView };
+    return { service, prismaMock, eventEmitter, kitchenFireService, orderView };
   };
 
   it('(a) ticket ready mono-ítem no-takeaway → estampa, cierra ticket y emite puente', async () => {
-    const { service, prismaMock, eventEmitter, orderView } = buildService({
+    const { service, prismaMock, eventEmitter, kitchenFireService, orderView } = buildService({
       latestRow: { id: 900, status: 'ready', kitchen_ticket_id: TICKET_ID },
       ticketRows: [{ status: 'delivered' }],
       orderTickets: [{ status: 'delivered' }],
@@ -1900,6 +1904,7 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
       where: { id: TICKET_ID },
       data: expect.objectContaining({ status: 'delivered' }),
     });
+    expect(kitchenFireService.emitTicketUpdatedEvent).toHaveBeenCalledWith(TICKET_ID);
     // Puente all-terminal (mismo criterio que markDelivered): el listener
     // mueve la orden `processing -> delivered`.
     expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
@@ -1912,7 +1917,7 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
   });
 
   it('(b) ticket con hermano pendiente → solo la fila del ítem cambia, sin evento', async () => {
-    const { service, prismaMock, eventEmitter } = buildService({
+    const { service, prismaMock, eventEmitter, kitchenFireService } = buildService({
       latestRow: { id: 900, status: 'ready', kitchen_ticket_id: TICKET_ID },
       ticketRows: [{ status: 'delivered' }, { status: 'pending' }],
       orderTickets: [{ status: 'ready' }],
@@ -1927,6 +1932,7 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
     });
     // El ticket sigue abierto (hermano pendiente) → no se cierra ni se emite.
     expect(prismaMock.kitchen_tickets.update).not.toHaveBeenCalled();
+    expect(kitchenFireService.emitTicketUpdatedEvent).toHaveBeenCalledWith(TICKET_ID);
     expect(eventEmitter.emit).not.toHaveBeenCalled();
   });
 
@@ -1973,6 +1979,58 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
     expect(prismaMock.kitchen_tickets.update).not.toHaveBeenCalled();
     expect(eventEmitter.emit).not.toHaveBeenCalled();
     expect(result).toEqual(orderView);
+  });
+
+  it('(dispatch) reconciles a pending kitchen row after physical delivery without a KDS order-state bridge', async () => {
+    const { service, prismaMock, eventEmitter } = buildService({
+      latestRow: { id: 901, status: 'pending', kitchen_ticket_id: TICKET_ID },
+      ticketRows: [{ status: 'delivered' }],
+      orderTickets: [{ status: 'delivered' }],
+    });
+    prismaMock.orders = {
+      findFirst: jest.fn().mockResolvedValue({ id: ORDER_ID }),
+    };
+    prismaMock.order_items.findMany = jest.fn().mockResolvedValue([{ id: ITEM_ID }]);
+
+    await (service as any).reconcileKitchenAfterDispatch(ORDER_ID, STORE_ID);
+
+    expect(prismaMock.orders.findFirst).toHaveBeenCalledWith({
+      where: { id: ORDER_ID, store_id: STORE_ID },
+      select: { id: true },
+    });
+    expect(prismaMock.order_items.findMany).toHaveBeenCalledWith({
+      where: {
+        order_id: ORDER_ID,
+        delivered_at: { not: null },
+        cancelled_at: null,
+        kitchen_ticket_items: { some: {} },
+      },
+      select: { id: true },
+    });
+    expect(prismaMock.kitchen_ticket_items.update).toHaveBeenCalledWith({
+      where: { id: 901 },
+      data: expect.objectContaining({ status: 'delivered' }),
+    });
+    expect(prismaMock.kitchen_tickets.update).toHaveBeenCalledWith({
+      where: { id: TICKET_ID },
+      data: expect.objectContaining({ status: 'delivered' }),
+    });
+    expect(prismaMock.order_items.updateMany).not.toHaveBeenCalled();
+    expect(eventEmitter.emit).not.toHaveBeenCalledWith(
+      'kitchen.order_all_delivered',
+      expect.anything(),
+    );
+  });
+
+  it('(dispatch) does not project kitchen for an order outside the explicit store', async () => {
+    const { service, prismaMock } = buildService({});
+    prismaMock.orders = { findFirst: jest.fn().mockResolvedValue(null) };
+    prismaMock.order_items.findMany = jest.fn();
+
+    await service.reconcileKitchenAfterDispatch(ORDER_ID, STORE_ID);
+
+    expect(prismaMock.order_items.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.kitchen_ticket_items.update).not.toHaveBeenCalled();
   });
 
   it('(e) sin filas de cocina → nada que hacer, contrato intacto', async () => {

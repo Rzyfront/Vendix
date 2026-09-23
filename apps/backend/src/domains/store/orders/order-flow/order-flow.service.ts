@@ -2199,11 +2199,21 @@ export class OrderFlowService {
    *     + ≥1 delivered. El listener mueve la orden `processing -> delivered`.
    *   - Última fila en `pending`/`in_preparation` (re-disparo en cocina) o ya
    *     terminal → NO tocar. Sin filas → nada que hacer.
+   *   - Excepción despacho (`fromDispatch`, C.2): la remisión entregada es el
+   *     hecho físico — la orden manda aunque KDS siga `pending` — así que la
+   *     fila vigente se proyecta a `delivered` sin exigir `ready`, y NO se
+   *     emite el puente `kitchen.order_all_delivered` (el despacho gobierna
+   *     el estado de la orden vía `reconcileOrderFromDispatch`).
+   *   - Cada proyección (parcial o de cierre) emite `ticket.updated` con el
+   *     ticket completo vía `KitchenFireService`, para que el tablero KDS
+   *     abierto se actualice sin esperar un `ticket.delivered` que sería
+   *     falso mientras otro plato del ticket sigue abierto.
    */
   private async syncKitchenOnOrderItemDelivered(
     orderId: number,
     orderItemId: number,
     storeId: number | null,
+    options: { fromDispatch?: boolean } = {},
   ): Promise<void> {
     try {
       // La última fila manda (los re-disparos crean filas nuevas con mayor id).
@@ -2215,7 +2225,13 @@ export class OrderFlowService {
       if (!latest) {
         return;
       }
-      if (latest.status !== 'ready') {
+      // The waiter may hand off only a ready dish. A delivered remisión is
+      // different: the customer already received the order, so the order-side
+      // delivery fact wins even if KDS still says pending/in_preparation.
+      if (
+        latest.status === 'delivered' ||
+        (!options.fromDispatch && latest.status !== 'ready')
+      ) {
         return;
       }
 
@@ -2234,6 +2250,9 @@ export class OrderFlowService {
           (r) => r.status === 'delivered' || r.status === 'cancelled',
         );
       if (!allTerminal) {
+        await this.kitchenFireService?.emitTicketUpdatedEvent(
+          latest.kitchen_ticket_id,
+        );
         return;
       }
 
@@ -2245,6 +2264,9 @@ export class OrderFlowService {
           updated_at: new Date(),
         },
       });
+      await this.kitchenFireService?.emitTicketUpdatedEvent(
+        latest.kitchen_ticket_id,
+      );
 
       const orderTickets = await this.prisma.kitchen_tickets.findMany({
         where: {
@@ -2261,7 +2283,9 @@ export class OrderFlowService {
       const anyOrderDelivered = orderTickets.some(
         (t) => t.status === 'delivered',
       );
-      if (allOrderTerminal && anyOrderDelivered) {
+      // Dispatch owns the order-state transition. Emitting the KDS bridge here
+      // could race reconcileOrderFromDispatch and advance the order too early.
+      if (!options.fromDispatch && allOrderTerminal && anyOrderDelivered) {
         this.eventEmitter.emit('kitchen.order_all_delivered', {
           orderId,
           storeId,
@@ -2275,6 +2299,41 @@ export class OrderFlowService {
         `Failed to sync kitchen on delivery of order item #${orderItemId} (order #${orderId}): ${
           (e as Error).message
         }`,
+      );
+    }
+  }
+
+  /**
+   * Post-commit projection for a physically delivered remisión. Reconciles
+   * every already-stamped line, not only new stamps, so a replay can heal a
+   * previous best-effort KDS failure without changing the delivery timestamp.
+   * The caller supplies an isolated store context and the explicit store id.
+   */
+  async reconcileKitchenAfterDispatch(
+    orderId: number,
+    storeId: number,
+  ): Promise<void> {
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId, store_id: storeId },
+      select: { id: true },
+    });
+    if (!order) return;
+
+    const deliveredItems = await this.prisma.order_items.findMany({
+      where: {
+        order_id: orderId,
+        delivered_at: { not: null },
+        cancelled_at: null,
+        kitchen_ticket_items: { some: {} },
+      },
+      select: { id: true },
+    });
+    for (const item of deliveredItems) {
+      await this.syncKitchenOnOrderItemDelivered(
+        orderId,
+        item.id,
+        storeId,
+        { fromDispatch: true },
       );
     }
   }
