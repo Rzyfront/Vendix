@@ -3181,7 +3181,7 @@ describe('PaymentsService', () => {
           findUnique: jest.fn().mockResolvedValue({ industries: ['retail'] }),
         },
         store_payment_methods: {
-          findUnique: jest.fn().mockResolvedValue({
+          findFirst: jest.fn().mockResolvedValue({
             id: 9,
             system_payment_method: { type: methodType },
           }),
@@ -3439,6 +3439,29 @@ describe('PaymentsService', () => {
 
     afterEach(() => {
       jest.restoreAllMocks();
+    });
+
+    it.each([
+      ['missing', undefined, 'payment_method_required'],
+      ['unknown or foreign-store', 999999, 'payment_method_not_found'],
+    ])('rechaza método %s con 400 tipado antes de escribir pago', async (_case, methodId, reason) => {
+      const { tx } = arrangePosSale({
+        type: 'cash',
+        processing_mode: payment_processing_mode_enum.DIRECT,
+      });
+      if (methodId != null) {
+        tx.store_payment_methods.findFirst.mockResolvedValueOnce(null);
+      }
+
+      const error = await service.processPosPayment(
+        buildPosDto({ store_payment_method_id: methodId }), posUser,
+      ).catch((caught) => caught);
+
+      expect(error).toMatchObject({ errorCode: 'PAY_METHOD_DISABLED_001' });
+      expect(error.getStatus()).toBe(400);
+      expect(error.getResponse()).toMatchObject({ details: { reason } });
+      expect(tx.payments.create).not.toHaveBeenCalled();
+      expect(tx.orders.update).not.toHaveBeenCalled();
     });
 
     it('el pago nace pending y NO emite el evento de caja: el dinero todavía no entró', async () => {

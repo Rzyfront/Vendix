@@ -3557,10 +3557,24 @@ export class PaymentsService {
     if (!dto.requires_payment) {
       return { isDigitalPayment: false, isOnDelivery: false };
     }
-    const method = await tx.store_payment_methods.findUnique({
-      where: { id: dto.store_payment_method_id },
+    if (dto.store_payment_method_id == null) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_METHOD_DISABLED_001,
+        'Selecciona un método de pago para continuar.',
+        { reason: 'payment_method_required' },
+      );
+    }
+    const method = await tx.store_payment_methods.findFirst({
+      where: { id: dto.store_payment_method_id, store_id: dto.store_id },
       include: { system_payment_method: true },
     });
+    if (!method) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_METHOD_DISABLED_001,
+        'El método de pago ya no está disponible. Elige otro.',
+        { reason: 'payment_method_not_found' },
+      );
+    }
     const type = method?.system_payment_method?.type || '';
     const isOnDelivery = this.isOnDeliveryMethod(
       dto.store_payment_method_id,
@@ -4759,18 +4773,26 @@ export class PaymentsService {
 
     // Get payment method details
     if (!dto.store_payment_method_id) {
-      throw new Error('Payment method is required when payment is enabled');
+      throw new VendixHttpException(
+        ErrorCodes.PAY_METHOD_DISABLED_001,
+        'Selecciona un método de pago para continuar.',
+        { reason: 'payment_method_required' },
+      );
     }
 
     const paymentMethod = await tx.store_payment_methods.findFirst({
-      where: { id: dto.store_payment_method_id },
+      where: { id: dto.store_payment_method_id, store_id: dtoStoreId },
       include: {
         system_payment_method: true,
       },
     });
 
     if (!paymentMethod) {
-      throw new Error('Payment method not found');
+      throw new VendixHttpException(
+        ErrorCodes.PAY_METHOD_DISABLED_001,
+        'El método de pago ya no está disponible. Elige otro.',
+        { reason: 'payment_method_not_found' },
+      );
     }
 
     // Contra entrega — resuelto ANTES de leer `system_payment_method.type`
