@@ -2,8 +2,8 @@
 id: I.1
 title: "Validador de sobrepago en el carril `flow/pay`"
 phase: I
-status: pending
-owner: none
+status: in-progress
+owner: Fabio
 updated: 2026-09-20
 contracts: [FB-04, DB-02, DB-03, DB-14, ERR-37]
 adrs: []
@@ -35,4 +35,4 @@ skills: [vendix-backend, vendix-error-handling, vendix-prisma-scopes, how-to-tes
   - [ ] El spec que fijaba el warning quedó invertido y ahora fija el `errorCode`, no el texto del mensaje
   - [ ] El baseline histórico queda separado y la consulta de sobrepagos con pagos posteriores al corte devuelve cero filas
   - [ ] Evidencia de los tres curl y del SQL guardada bajo `evidence/`
-- **Status:** pending
+- **Status:** in-progress — validador/flow-pay/gateway en 25855f688 y af5e566d8; 409 runtime orden1113; falta abono parcial/E2E.
