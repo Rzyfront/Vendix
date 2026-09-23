@@ -96,6 +96,7 @@ export class PosShippingStepComponent {
 
   // ── Inputs / two-way ──────────────────────────────────────────────────────
   readonly cartState = input<CartState | null>(null);
+  readonly editingOrderId = input<number | null>(null);
   // ── Address capture (owned by shipping step according to method type) ───
   readonly address = signal<AddressPayload | null>(null);
   readonly addressValid = signal<boolean>(false);
@@ -951,6 +952,7 @@ export class PosShippingStepComponent {
         paymentRequest,
         'current_user',
         creditConfig,
+        this.editingOrderId(),
       )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

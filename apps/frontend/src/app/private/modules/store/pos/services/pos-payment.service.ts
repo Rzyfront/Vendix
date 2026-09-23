@@ -546,6 +546,7 @@ export class PosPaymentService {
       initial_payment: number;
       initial_payment_method_id?: number;
     },
+    editingOrderId?: number | null,
   ): Observable<any> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
@@ -579,6 +580,11 @@ export class PosPaymentService {
       customer_email: cartState.customer.email,
       customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
+      // A reopened draft is already a persisted order. Reuse its id instead
+      // of materializing a second row when this shipping checkout charges it.
+      ...((editingOrderId ?? cartState.linkedOrderId) != null
+        ? { order_id: editingOrderId ?? cartState.linkedOrderId }
+        : {}),
       // QUI-653 — el envío (recoger en tienda o domicilio) siempre se empaca
       // para llevar: estampa `is_takeaway` en todas las líneas para que el
       // ticket KDS lo muestre. Esta función solo sirve al flujo de envío.

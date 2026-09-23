@@ -383,6 +383,7 @@
           <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'envio'">
             <app-pos-shipping-step
               [cartState]="cartState()"
+              [editingOrderId]="editingOrderId()"
               (shippingCompleted)="onShippingCompleted($event)"
             ></app-pos-shipping-step>
           </div>

@@ -293,6 +293,22 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(context.shippingRateId).toBe(93);
     expect(posShippingRateIdForPayload(context)).toBeUndefined();
   });
+
+  it('passes the reopened order id to the shipping charge', () => {
+    const payment = TestBed.inject(PosPaymentService) as any;
+    payment.processShippingSale = jasmine.createSpy('processShippingSale').and.returnValue(
+      of({ success: true, order: { id: 700 } }),
+    );
+    fixture.componentRef.setInput('editingOrderId', 700);
+    mount();
+
+    (component as any).processOrder(
+      component.buildShippingContext()!.shippingAddress,
+      'home_delivery', null, 33,
+    );
+
+    expect(payment.processShippingSale.calls.mostRecent().args[5]).toBe(700);
+  });
 });
 
 describe('posShippingRateIdForPayload', () => {
