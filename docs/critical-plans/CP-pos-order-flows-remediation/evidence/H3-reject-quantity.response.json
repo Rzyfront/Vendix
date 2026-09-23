@@ -1,0 +1,10 @@
+{
+  "statusCode": 400,
+  "error_code": "SYS_VALIDATION_001",
+  "message": "Validation failed",
+  "details": {
+    "validationErrors": [
+      "items.0.quantity: quantity must not be less than 1"
+    ]
+  }
+}

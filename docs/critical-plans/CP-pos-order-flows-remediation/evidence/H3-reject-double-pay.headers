@@ -1,0 +1,18 @@
+HTTP/1.1 409 Conflict
+X-Powered-By: Express
+Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate
+Pragma: no-cache
+Expires: 0
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Access-Control-Expose-Headers: Authorization,Cache-Control,Pragma,Content-Disposition
+X-RateLimit-Limit: 300
+X-RateLimit-Remaining: 297
+X-RateLimit-Reset: 60
+X-Request-Id: e25f7b80-8cde-4651-976e-d2818c4933ec
+Content-Type: application/json; charset=utf-8
+Content-Length: 1175
+ETag: W/"497-0QNMZPmmxKQjktfMUdcXQPnRO9Q"
+Date: Wed, 23 Sep 2026 04:12:38 GMT
+Connection: keep-alive
+Keep-Alive: timeout=65

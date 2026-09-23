@@ -1,0 +1,15 @@
+{
+  "success": true,
+  "message": "Orden obtenida exitosamente",
+  "data": {
+    "id": 1104,
+    "store_id": 10,
+    "state": "draft",
+    "cancellation_policy": {
+      "can_cancel": true,
+      "can_cancel_payment": false,
+      "reason_code": null
+    },
+    "table_sessions": []
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "statusCode": 409,
+  "error_code": "POS_TABLE_SESSION_ALREADY_CHARGED",
+  "message": "La sesión de mesa ya fue cobrada (payment #797 / POS-1790136068854-JZFJK0VJF por 10000)",
+  "details": null
+}
