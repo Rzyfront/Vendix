@@ -742,6 +742,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       const result = await runPublicOpen(7, null);
 
       expect(result.id).toBe(88);
+      expect(result.previous_table_status).toBe('available');
       expect(result.opened_by).toBeNull();
       // Order created with the QR-specific channel + delivery_type.
       expect(prismaMock.orders.create).toHaveBeenCalledWith(

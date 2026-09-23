@@ -626,7 +626,10 @@ export class TableSessionsService {
       `Public table session opened: session=${session.id} table=${tableId} order=${session.order_id}`,
     );
 
-    return this.findOne(session.id);
+    return {
+      ...(await this.findOne(session.id)),
+      previous_table_status: session.previous_table_status,
+    };
   }
 
   // ---------------------------------------------------------- guest count
