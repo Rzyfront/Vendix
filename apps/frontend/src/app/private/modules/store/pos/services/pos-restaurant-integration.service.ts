@@ -60,6 +60,10 @@ export interface CounterOrderResult {
   id: number;
   order_number?: string;
   state?: string;
+  subtotal_amount?: number | string;
+  tax_amount?: number | string;
+  grand_total?: number | string;
+  customer_alias?: string | null;
   order_items: Array<{
     id: number;
     product_id: number | null;
@@ -406,6 +410,10 @@ export class PosRestaurantIntegrationService {
       id: Number(order?.id ?? orderId),
       order_number: order?.order_number,
       state: order?.state,
+      subtotal_amount: order?.subtotal_amount,
+      tax_amount: order?.tax_amount,
+      grand_total: order?.grand_total,
+      customer_alias: order?.customer_alias,
       order_items: (order?.order_items ?? []).map((it: any) => ({
         id: Number(it.id),
         product_id: it.product_id ?? null,

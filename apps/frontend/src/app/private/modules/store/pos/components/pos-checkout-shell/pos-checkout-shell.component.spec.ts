@@ -291,7 +291,7 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
         { provide: PosCartService, useValue: {} },
         { provide: PosPaymentService, useValue: {} },
         { provide: PosRestaurantIntegrationService, useValue: integrationMock },
-        { provide: StoreOrdersService, useValue: {} },
+        { provide: StoreOrdersService, useValue: { getOrderById: (id: string) => of({ id: Number(id) }) } },
         { provide: ToastService, useValue: {} },
         { provide: CurrencyFormatService, useValue: { loadCurrency: () => {} } },
       ],
@@ -764,6 +764,26 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
       }
     });
   }
+
+  it('la confirmación del borrador usa el snapshot completo releído, no solo el id', () => {
+    const persisted = {
+      id: 1132,
+      order_number: 'T-1132',
+      customer_alias: 'Mesa de Ana',
+      subtotal_amount: '38000',
+      tax_amount: '0',
+      grand_total: '38000',
+      order_items: [{ id: 1, product_name: 'Coca-Cola 400ml', quantity: 1 }],
+    };
+    const getOrderById = jasmine.createSpy('getOrderById').and.returnValue(of(persisted));
+    Object.assign(TestBed.inject(StoreOrdersService), { getOrderById });
+    const finish = spyOn<any>(component, 'finishDraft').and.stub();
+
+    (component as any).finishPersistedDraft(1132, [1], false, { id: 1132 });
+
+    expect(getOrderById).toHaveBeenCalledOnceWith('1132');
+    expect(finish).toHaveBeenCalledOnceWith(persisted, [1], false);
+  });
 
   it('visitar Envío y Actualizar omite todas las claves y conserva el total original', () => {
     const { update } = prepareShippingEdit();

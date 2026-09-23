@@ -1888,6 +1888,7 @@ export class PosComponent {
     }
     const sc = this.selectedCustomer();
     const customerName =
+      result.order?.customer_alias ||
       result.order?.customer_name ||
       (result.order?.customer?.first_name
         ? `${result.order.customer.first_name} ${result.order.customer.last_name || ''}`.trim()

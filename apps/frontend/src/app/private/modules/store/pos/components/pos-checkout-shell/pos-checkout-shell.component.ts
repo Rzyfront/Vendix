@@ -2006,7 +2006,7 @@ export class PosCheckoutShellComponent {
         next: (order) => {
           const orderId = order?.id;
           const preparedIds = this.preparedItemIdsFromOrder(order);
-          this.maybeFireAndFinish(orderId, preparedIds, state);
+          this.maybeFireAndFinish(orderId, preparedIds, state, order);
         },
         error: (err) => {
           this.submittingDraft.set(false);
@@ -2110,7 +2110,7 @@ export class PosCheckoutShellComponent {
           const orderItemIds = this.preparedItemIdsFromOrder(
             updated?.order,
           ).filter((id) => justAdded.has(id));
-          this.maybeFireAndFinish(orderId, orderItemIds, state);
+          this.maybeFireAndFinish(orderId, orderItemIds, state, updated?.order);
         },
         error: (err) => {
           this.submittingDraft.set(false);
@@ -2193,6 +2193,7 @@ export class PosCheckoutShellComponent {
     orderId: number | undefined,
     orderItemIds: number[],
     state: CartState,
+    fallbackOrder?: any,
   ): void {
     if (!orderId) {
       this.finishDraft(null, orderItemIds, false);
@@ -2209,8 +2210,7 @@ export class PosCheckoutShellComponent {
           } else {
             this.toastService.success('Orden creada');
           }
-          this.finishDraft({ id: orderId } as any, orderItemIds, fired);
-          void state; // keep for future extensions (notes / customer)
+          this.finishPersistedDraft(orderId, orderItemIds, fired, fallbackOrder);
         },
         error: (err) => {
           // Order already persisted — surface the error but do not roll back.
@@ -2218,7 +2218,34 @@ export class PosCheckoutShellComponent {
             'La orden se creó pero no se pudo enviar a cocina. Reintenta desde el panel.',
           );
           console.error('maybeFireKitchen failed', err);
-          this.finishDraft({ id: orderId } as any, orderItemIds, false);
+          this.finishPersistedDraft(orderId, orderItemIds, false, fallbackOrder);
+        },
+      });
+    void state; // keep for future extensions (notes / customer)
+  }
+
+  private finishPersistedDraft(
+    orderId: number,
+    orderItemIds: number[],
+    firedToKitchen: boolean,
+    fallbackOrder?: any,
+  ): void {
+    // El resultado de fire contiene solo ids. La confirmación/tiquete debe
+    // mostrar el número, alias y totales PERSISTIDOS, no un {id} parcial que
+    // pinta Borrador #N/A y $0 tras guardar correctamente la mesa.
+    this.ordersService.getOrderById(String(orderId))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (order) => this.finishDraft(order, orderItemIds, firedToKitchen),
+        error: () => {
+          this.toastService.warning(
+            'La orden se guardó, pero no se pudo cargar su resumen. Revisa el detalle antes de cobrar.',
+          );
+          this.finishDraft(
+            { ...fallbackOrder, id: orderId, order_number: fallbackOrder?.order_number || String(orderId) },
+            orderItemIds,
+            firedToKitchen,
+          );
         },
       });
   }
