@@ -99,9 +99,8 @@ class PaymentStub {
   readonly autoExecute = input(true);
   readonly amountOverride = input<number | null>(null);
   readonly paymentResetKey = input(0);
-  // La plantilla del shell enlaza `[takeawayOrder]` (`:79`) y el doble no lo
-  // declaraba: NG0303 al primer `detectChanges()`, que tumbaba las 20 pruebas.
   readonly takeawayOrder = input(false);
+  readonly deliveryType = input<string | null>(null);
   readonly paymentCompleted = output<unknown>();
   readonly paymentReady = output<unknown>();
   readonly amountConfirmed = output<void>();
