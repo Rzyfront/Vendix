@@ -2,7 +2,7 @@
 id: E.5
 title: "Despachar la orden de envío después de finalizarla"
 phase: E
-status: pending
+status: in-progress
 owner: none
 updated: 2026-09-20
 contracts: [FB-20, FB-60, FB-61, DB-07, ERR-04, ERR-19, ERR-20, ERR-21]
@@ -31,13 +31,13 @@ skills: [vendix-backend, vendix-dispatch-routes, vendix-error-handling, vendix-f
   - Playwright MCP contra `https://vendix.com`: POS → envío → dirección sin método → el botón de cobro sigue bloqueado con razón visible; luego elegir método → cobrar → generar remisión. Capturas en `evidence/E.5-envio-e2e/`.
 - **Acceptance checklist:**
   - [ ] Existe un test que falla antes del arreglo: venta con dirección y sin método nacía como entrega en el acto.
-  - [ ] Guardar o cobrar una venta con envío sin método se rechaza con código tipado y texto en español.
-  - [ ] El POS deshabilita el cobro y muestra la razón antes de llamar al backend.
-  - [ ] El cobro directo de mostrador, que no manda tipo de entrega, sigue funcionando con su default.
-  - [ ] «Para llevar» y la recogida en tienda siguen cobrando sin método de envío.
+  - [x] Guardar o cobrar una venta con envío sin método se rechaza con código tipado y texto en español.
+  - [x] El POS deshabilita el cobro y muestra la razón antes de llamar al backend.
+  - [x] El cobro directo de mostrador, que no manda tipo de entrega, sigue funcionando con su default.
+  - [x] «Para llevar» y la recogida en tienda siguen cobrando sin método de envío.
   - [ ] El gate de tipo de entrega de la remisión no se relaja: la entrega en el acto sigue sin generar remisión.
   - [ ] El gate de estado de la remisión no se relaja y su mensaje nombra el estado real.
   - [ ] Una venta con envío y método genera remisión y el badge del detalle la muestra.
-  - [ ] El conteo de órdenes huérfanas históricas queda registrado como evidencia.
+  - [x] El conteo de órdenes huérfanas históricas queda registrado como evidencia.
   - [ ] Ninguna venta con envío nueva queda sin dirección con FK y snapshot.
-- **Status:** pending
+- **Status:** in-progress — API local: sin método 400 tipado (dos variantes), con método 201 orden #1119 `processing`, remisión #226 201 y `by-order` devuelve una fila; mostrador #1120 y pickup #1121 siguen 201. Evidencia `evidence/E5-*`. Falta UI E2E/badge y DB-07: #1119 tiene snapshot pero `shipping_address_id` nulo por el contrato alias+dirección pendiente de ADR-05/F.2.

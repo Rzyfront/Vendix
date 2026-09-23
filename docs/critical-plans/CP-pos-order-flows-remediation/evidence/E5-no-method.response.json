@@ -1,0 +1,7 @@
+{
+  "success": null,
+  "message": "Selecciona un método de envío antes de guardar o cobrar esta venta.",
+  "error_code": "ORD_SHIP_REQUIRED_FOR_FLOW_001",
+  "order_id": null,
+  "payment_id": null
+}

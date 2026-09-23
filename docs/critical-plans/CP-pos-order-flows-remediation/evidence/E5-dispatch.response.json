@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "message": "Remisión creada desde orden exitosamente",
+  "error_code": null,
+  "data": {
+    "id": 226,
+    "order_id": 1119,
+    "status": "draft",
+    "dispatch_number": "REM2609230001"
+  }
+}
