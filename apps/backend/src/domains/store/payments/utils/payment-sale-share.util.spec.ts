@@ -224,4 +224,73 @@ describe('resolvePaymentReceivedSaleFields', () => {
     expect(c(first.discount_amount) + c(last.discount_amount)).toBe(c(8906.87));
     expect(c(first.subtotal_amount) + c(last.subtotal_amount)).toBe(c(220000));
   });
+  it('M6 · sin descuento: la porción de mesa lleva el desglose tipado sin cambiar montos', async () => {
+    // IVA 19 % 1.900 + INC 8 % 800 + envío con IVA 190 ⇒ 23.890, pagado 10.000 + 13.890.
+    const base_order = {
+      subtotal_amount: 20000,
+      discount_amount: 0,
+      tax_amount: 2700,
+      shipping_cost: 1190,
+      shipping_tax_type: 'iva',
+      shipping_tax_rate: 0.19,
+      shipping_tax_amount: 190,
+      tip_amount: 0,
+      grand_total: 23890,
+    };
+    const order = {
+      ...base_order,
+      order_items: [
+        {
+          quantity: 1,
+          total_price: 10000,
+          tax_amount_item: 1900,
+          order_item_taxes: [{ tax_type: 'iva', tax_rate: 0.19, tax_amount: 1900 }],
+        },
+        {
+          quantity: 1,
+          total_price: 10000,
+          tax_amount_item: 800,
+          order_item_taxes: [{ tax_type: 'inc', tax_rate: 0.08, tax_amount: 800 }],
+        },
+      ],
+    };
+    const c = (n: number) => Math.round(n * 100);
+    const run = async (source: any, payment_id: number, amount: number, prior: number[]) =>
+      resolvePaymentReceivedSaleFields(
+        {
+          orders: { findUnique: jest.fn().mockResolvedValue(source) },
+          payments: {
+            findMany: jest
+              .fn()
+              .mockResolvedValue(prior.map((value) => ({ amount: value }))),
+          },
+        },
+        { order_id: 71, payment_id, amount },
+      );
+    const first = await run(order, 1, 10000, []);
+    const last = await run(order, 2, 13890, [10000]);
+    const first_legacy = await run(base_order, 1, 10000, []);
+    const last_legacy = await run(base_order, 2, 13890, [10000]);
+
+    // Montos idénticos al reparto histórico; sólo se añade el desglose.
+    const { tax_breakdown: first_rows, ...first_amounts } = first;
+    const { tax_breakdown: last_rows, ...last_amounts } = last;
+    expect(first_amounts).toEqual(first_legacy);
+    expect(last_amounts).toEqual(last_legacy);
+    expect(first_legacy.tax_breakdown).toBeUndefined();
+
+    for (const fields of [first, last]) {
+      const taxes = (fields.tax_breakdown ?? []).reduce(
+        (sum, row) => sum + c(row.tax_amount),
+        0,
+      );
+      expect(taxes).toBe(c(fields.tax_amount));
+    }
+    const typed = (type: string) =>
+      [...(first_rows ?? []), ...(last_rows ?? [])]
+        .filter((row) => row.tax_type === type)
+        .reduce((sum, row) => sum + c(row.tax_amount), 0);
+    expect(typed('iva')).toBe(c(1900 + 190));
+    expect(typed('inc')).toBe(c(800));
+  });
 });

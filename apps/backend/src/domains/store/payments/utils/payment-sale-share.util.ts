@@ -151,8 +151,9 @@ export interface PaymentReceivedSaleFields {
   discount_amount: number;
   tip_amount: number;
   /**
-   * Desglose por tipo de la porción. Sólo con descuento de orden proyectado
-   * (sin descuento el payload es el histórico, sin desglose).
+   * Desglose por tipo de la porción: el proyectado con descuento/deriva, o
+   * (M6) el de las filas tipadas de la orden repartiendo el impuesto
+   * histórico de la porción, sin cambiar montos.
    */
   tax_breakdown?: TaxBreakdownItem[];
 }
@@ -245,7 +246,7 @@ export async function resolvePaymentReceivedSaleFields(
   }
 
   const shipping_tax = Number(order.shipping_tax_amount || 0);
-  const share = computePaymentSaleShare({
+  const legacy_share_input = {
     subtotal_amount: Number(order.subtotal_amount || 0),
     discount_amount: Number(order.discount_amount || 0),
     // `orders.tax_amount` NO incluye el impuesto del envío (va bruto en
@@ -256,6 +257,89 @@ export async function resolvePaymentReceivedSaleFields(
     grand_total: Number(order.grand_total || 0),
     amount: args.amount,
     prior_amounts: prior.map((row) => Number(row.amount || 0)),
+  };
+  const share = computePaymentSaleShare(legacy_share_input);
+  if (!share) return legacy;
+  const tax_breakdown = typedShareBreakdown(order, args.order_id, share, (tax_rows) =>
+    computePaymentSaleShare({ ...legacy_share_input, tax_rows }),
+  );
+  return tax_breakdown ? { ...share, tax_breakdown } : share;
+}
+
+/**
+ * M6 — desglose tipado de la porción SIN proyección (sin descuento ni
+ * deriva). No cambia ningún monto: reparte el `tax_amount` ya calculado de la
+ * porción entre las filas tipadas de la orden (productos por tipo + envío).
+ * Sin él el asiento cae a la línea legada `vat_payable` (2408) y pierde el
+ * tipo (IVA 240802 / INC 243605).
+ *
+ * `undefined` cuando la orden no tiene filas tipadas o no suman su impuesto.
+ */
+function typedShareBreakdown(
+  order: any,
+  order_id: number,
+  share: PaymentSaleShare,
+  shareWithRows: (
+    tax_rows: Array<Pick<TaxBreakdownItem, 'tax_type' | 'tax_amount'>>,
+  ) => PaymentSaleShare | null,
+): TaxBreakdownItem[] | undefined {
+  const items: any[] = Array.isArray(order.order_items) ? order.order_items : [];
+  const product_tax_rows = items.flatMap((item) =>
+    (item.order_item_taxes ?? []).map((row: any) => ({
+      tax_type: row.tax_type ?? null,
+      tax_amount: row.tax_amount,
+      tax_rate: row.tax_rate,
+      taxable_amount: item.total_price,
+    })),
+  );
+  if (product_tax_rows.length === 0) return undefined;
+  // Descuento en 0 sólo para esta lectura: sin líneas la proyección no corre y
+  // el desglose es el de las filas de la orden (el descuento no lo altera).
+  const typed = buildOrderSaleTaxPayload({
+    product_tax_rows,
+    order: { ...order, id: order_id, discount_amount: 0 },
   });
-  return share ?? legacy;
+  // Una fila por tipo (el desglose de la porción no lleva tarifa ni base).
+  const by_type = new Map<TaxBreakdownItem['tax_type'], number>();
+  for (const row of typed.tax_breakdown) {
+    by_type.set(row.tax_type, (by_type.get(row.tax_type) ?? 0) + toCents(row.tax_amount));
+  }
+  const rows = [...by_type.entries()].map(([tax_type, cents]) => ({
+    tax_type,
+    tax_amount: fromCents(cents),
+  }));
+  const row_cents = rows.map((row) => toCents(row.tax_amount));
+  const share_tax_cents = toCents(share.tax_amount);
+  if (
+    rows.length === 0 ||
+    row_cents.some((c) => c < 0) ||
+    row_cents.reduce((a, b) => a + b, 0) !==
+      toCents(Number(order.tax_amount || 0) + Number(order.shipping_tax_amount || 0))
+  ) {
+    return undefined;
+  }
+  // Preferente: el reparto por filas del mismo historial de pagos (el último
+  // pago cierra cada fila al centavo). Si su impuesto difiere del de la
+  // porción histórica, se reparte el de la porción por peso de fila.
+  const with_rows = shareWithRows(rows);
+  const tax_cents =
+    with_rows?.tax_breakdown &&
+    toCents(with_rows.tax_amount) === share_tax_cents
+      ? rows.map(
+          (row) =>
+            toCents(
+              with_rows.tax_breakdown!.find((r) => r.tax_type === row.tax_type)
+                ?.tax_amount,
+            ),
+        )
+      : allocate(share_tax_cents, row_cents);
+  if (tax_cents.reduce((a, b) => a + b, 0) !== share_tax_cents) {
+    return undefined;
+  }
+  return rows
+    .map((row, index) => ({
+      tax_type: row.tax_type,
+      tax_amount: fromCents(tax_cents[index]),
+    }))
+    .filter((row) => row.tax_amount > 0);
 }
