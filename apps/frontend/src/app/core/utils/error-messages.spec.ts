@@ -14,6 +14,20 @@ import { parseApiError } from './parse-api-error';
  */
 const DEBT_WORDS = ['pago', 'deuda', 'mora', 'pendiente'];
 
+describe('ERROR_MESSAGES — POS draft payment guards', () => {
+  for (const errorCode of ['POS_DRAFT_DUPLICATE_ORDER_001', 'POS_DRAFT_REQUIRES_PAYMENT_001'] as const) {
+    it(`maps ${errorCode} to an actionable Spanish message`, () => {
+      const parsed = parseApiError({
+        error: { statusCode: 409, error_code: errorCode, message: 'POS draft rejected' },
+      });
+      expect(parsed.errorCode).toBe(errorCode);
+      expect(parsed.userMessage).toBe(ERROR_MESSAGES[errorCode]);
+      expect(parsed.userMessage).not.toBe(DEFAULT_ERROR_MESSAGE);
+      expect(parsed.userMessage).not.toContain('POS draft rejected');
+    });
+  }
+});
+
 describe('ERROR_MESSAGES — SUBSCRIPTION_011 (plan retired from catalog)', () => {
   it('resolves to its own copy, not the generic DEFAULT_ERROR_MESSAGE', () => {
     const copy = ERROR_MESSAGES['SUBSCRIPTION_011'];
@@ -95,7 +109,11 @@ describe('ERROR_MESSAGES — CASH_REGISTER_DISABLE_001 (caja con sesiones abiert
     });
 
     expect(parsed.errorCode).toBe('CASH_REGISTER_DISABLE_001');
-    expect(parsed.userMessage).toBe(ERROR_MESSAGES['CASH_REGISTER_DISABLE_001']);
+    // A presentable, specific Spanish backend message takes precedence over
+    // the generic catalog copy (e.g. it names the register to close).
+    expect(parsed.userMessage).toBe(
+      'No se puede deshabilitar la caja registradora: la tienda tiene 1 sesión abierta en "Caja Principal".',
+    );
     expect(parsed.details).toEqual({
       open_sessions: 1,
       registers: [{ id: 19, name: 'Caja Principal' }],

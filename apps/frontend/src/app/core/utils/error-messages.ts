@@ -1135,6 +1135,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Selecciona o crea un cliente antes de guardar la orden.',
   POS_DRAFT_REQUIRES_PAYMENT_001:
     'No puedes cobrar y guardar borrador al mismo tiempo. Guarda la orden primero y luego cobra.',
+  POS_DRAFT_DUPLICATE_ORDER_001:
+    'Esta orden ya tiene un cobro o no se puede volver a cobrar. Revisa su detalle antes de intentar otra venta.',
   POS_STOCK_INSUFFICIENT_001:
     'No hay stock suficiente para uno o más productos.',
   // Round 3 MAJOR #5 — added to keep the mobile POS payment modal and the
