@@ -57,6 +57,7 @@ import {
 } from '../utils/product-tax-inclusive.util';
 import { CategoryQuickCreateComponent } from './category-quick-create.component';
 import { TaxQuickCreateComponent } from './tax-quick-create.component';
+import { taxCategoryBlockReason } from '../utils/product-tax-combination.util';
 import { AccountCodeSelectComponent } from './account-code-select.component';
 
 @Component({
@@ -105,7 +106,7 @@ export class ProductCreateModalComponent {
   productForm: FormGroup = this.createForm();
   categoryOptions = signal<SelectorOption[]>([]);
   brandOptions = signal<SelectorOption[]>([]);
-  taxCategoryOptions = signal<MultiSelectorOption[]>([]);
+  private readonly baseTaxCategoryOptions = signal<MultiSelectorOption[]>([]);
 
   readonly taxInclusiveMap = signal<Record<number, boolean>>({});
 
@@ -122,6 +123,25 @@ export class ProductCreateModalComponent {
     return ids
       .map((id) => this.allTaxCategories.find((c) => c.id === id))
       .filter((c): c is TaxCategory => !!c);
+  });
+
+  /**
+   * P1-4 — opciones del selector con la combinación legal aplicada (espejo
+   * del 400 PROD_TAX_COMBO_001): lo que chocaría con la selección actual se
+   * deshabilita con el motivo. `allTaxCategories` no es señal, pero cambia
+   * siempre junto a `baseTaxCategoryOptions`, que sí invalida el computed.
+   */
+  readonly taxCategoryOptions = computed<MultiSelectorOption[]>(() => {
+    const base = this.baseTaxCategoryOptions();
+    const selectedIds = new Set(this.selectedTaxCategoryIds() || []);
+    const selected = this.allTaxCategories.filter((c) => selectedIds.has(c.id));
+    return base.map((opt) => {
+      const cat = this.allTaxCategories.find((c) => c.id === opt.value);
+      const reason = cat ? taxCategoryBlockReason(cat, selected) : null;
+      return reason
+        ? { ...opt, description: reason, disabled: true, icon: 'ban' }
+        : opt;
+    });
   });
 
   isTaxInclusive(taxId: number): boolean {
@@ -381,7 +401,7 @@ export class ProductCreateModalComponent {
         this.taxInclusiveMap.set(map);
 
         if (taxCategories.length > 0) {
-          this.taxCategoryOptions.set(taxCategories.map((cat: TaxCategory) => {
+          this.baseTaxCategoryOptions.set(taxCategories.map((cat: TaxCategory) => {
             const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;
             const rate = parseFloat(String(rawRate));
             const finalRate = isNaN(rate) ? 0 : rate;
@@ -451,7 +471,7 @@ export class ProductCreateModalComponent {
     const rawRate = taxCategory.rate ?? taxCategory.tax_rates?.[0]?.rate ?? 0;
     const rate = parseFloat(String(rawRate));
     const finalRate = isNaN(rate) ? 0 : rate;
-    this.taxCategoryOptions.update(options => [
+    this.baseTaxCategoryOptions.update(options => [
       ...options,
       {
         value: taxCategory.id,

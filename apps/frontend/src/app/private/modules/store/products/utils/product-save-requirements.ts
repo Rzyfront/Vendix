@@ -56,6 +56,14 @@ export const PRODUCT_SAVE_ERROR_MAP: Record<string, ProductSaveErrorInfo> = {
     actionLabel: 'Ir a variantes',
     actionTarget: 'variants',
   },
+  // P1-4 — combinación de impuestos inválida (IVA+INC, dos del mismo tipo,
+  // retención, categoría con varias tarifas). El motivo exacto lo trae el
+  // backend y se usa como `reason` (ver mapBackendErrorToRequirements).
+  PROD_TAX_COMBO_001: {
+    label: 'Impuestos incompatibles',
+    reason:
+      'La combinación de impuestos seleccionada no es válida. Revisa los impuestos aplicables del producto.',
+  },
   PROD_VALIDATE_002: {
     label: 'Falta el SKU del producto',
     reason:
@@ -163,6 +171,13 @@ export function mapBackendErrorToRequirements(err: unknown): SaveRequirement[] {
   const info = parsed.errorCode ? PRODUCT_SAVE_ERROR_MAP[parsed.errorCode] : undefined;
   if (parsed.errorCode && info) {
     let reason = info.reason;
+
+    // PROD_TAX_COMBO_001: el backend redacta el motivo exacto en español
+    // (qué categorías chocan y por qué); ese texto ES la razón.
+    if (parsed.errorCode === 'PROD_TAX_COMBO_001') {
+      const detail = readBackendMessage(err)?.trim();
+      if (detail && detail !== parsed.errorCode) reason = detail;
+    }
 
     // PROD_VALIDATE_001 es el ÚNICO código sobrecargado: un mismo código cubre
     // varias violaciones de regla distintas. Anexar el `message` específico del
