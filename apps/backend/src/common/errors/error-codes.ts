@@ -5671,6 +5671,12 @@ export const ErrorCodes = {
     devMessage:
       'La sesión de mesa ya fue cobrada; no se puede cobrar dos veces',
   },
+  POS_TABLE_SESSION_PROJECTION_FAILED_001: {
+    code: 'POS_TABLE_SESSION_PROJECTION_FAILED_001',
+    httpStatus: 409,
+    devMessage:
+      'La orden tiene sesiones de mesa, pero ninguna permanece abierta para proyectar el cobro',
+  },
   // ── Split Order (Restaurant Suite Fase E) ────────────────────
   SPLIT_ORDER_NOT_FOUND: {
     code: 'SPLIT_ORDER_NOT_FOUND',

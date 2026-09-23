@@ -1556,6 +1556,55 @@ export class TableSessionsService {
 
   // --------------------------------------------------------------- mark paid
   /**
+   * Canonical payment projection for an order's CURRENT (open) table session.
+   * An order may retain closed sessions after a table transfer; those must
+   * never receive the payment. With an external transaction, the caller owns
+   * the commit and must invoke `emitAfterCommit` only after it succeeds.
+   */
+  async projectOrderPaymentToTableSession(
+    orderId: number,
+    paymentId: number,
+    tx?: Prisma.TransactionClient,
+  ): Promise<{ sessionId: number; emitAfterCommit: () => void } | null> {
+    const { storeId } = this.requireStoreContext();
+    const run = async (client: Prisma.TransactionClient) => {
+      const openSession = await client.table_sessions.findFirst({
+        where: { order_id: orderId, store_id: storeId, closed_at: null },
+        orderBy: [{ opened_at: 'desc' }, { id: 'desc' }],
+        select: { id: true, paid_at: true },
+      });
+      if (!openSession) {
+        const closedSession = await client.table_sessions.findFirst({
+          where: { order_id: orderId, store_id: storeId },
+          select: { id: true },
+        });
+        if (closedSession) {
+          throw new VendixHttpException(
+            ErrorCodes.POS_TABLE_SESSION_PROJECTION_FAILED_001,
+          );
+        }
+        return null;
+      }
+
+      await this.markSessionPaid(openSession.id, paymentId, client);
+      let emitted = false;
+      return {
+        sessionId: openSession.id,
+        emitAfterCommit: () => {
+          if (!openSession.paid_at && !emitted) {
+            emitted = true;
+            this.emitSessionPaid(storeId, openSession.id, orderId, paymentId);
+          }
+        },
+      };
+    };
+
+    const projection = tx ? await run(tx) : await this.prisma.$transaction(run);
+    if (!tx) projection?.emitAfterCommit();
+    return projection;
+  }
+
+  /**
    * carril D / lina — D1 / QUI: marca la sesión de mesa como pagada.
    *
    * La mesa SIGUE `occupied` y la sesión SIGUE ABIERTA; este flag es la

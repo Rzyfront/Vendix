@@ -1082,6 +1082,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Esta mesa ya tiene una cuenta abierta.',
   TABLE_SESSION_CLOSED:
     'La cuenta de esta mesa ya fue cerrada.',
+  POS_TABLE_SESSION_PROJECTION_FAILED_001:
+    'El cobro quedó registrado; refresca la mesa.',
   TABLE_SESSION_CUSTOMER_REQUIRED:
     'Necesitamos tus datos para abrir la cuenta de la mesa.',
   TABLE_INVALID_STATUS:
