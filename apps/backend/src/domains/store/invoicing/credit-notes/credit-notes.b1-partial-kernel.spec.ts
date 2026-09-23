@@ -148,6 +148,67 @@ describe('credit-notes · parcial por kernel (B.1/F-020)', () => {
     expect(thrown).toMatchObject({ errorCode: 'INVOICING_CALC_001' });
   });
 
+  it('H1: plato INC 8% + Envío INC 8% (2 filas del mismo tributo) ⇒ la parcial deriva sin taxes', () => {
+    const result = derivePartialNoteLinesViaKernel(
+      [
+        { product_id: 11, description: 'Plato', quantity: 1, unit_price: 3000 },
+        {
+          product_id: null,
+          description: 'Envío',
+          quantity: 1,
+          unit_price: 13888.89,
+        },
+      ],
+      [
+        relatedLine({ tax_amount: 222.22 }),
+        relatedLine({
+          product_id: null,
+          is_inclusive: false,
+          tax_amount: 1111.11,
+        }),
+      ],
+      // Fila del plato + fila ligada al Envío: mismo tipo y misma tarifa.
+      [scheme(), scheme({ tax_rate: 8.0 })],
+      906,
+      'credit_note',
+    );
+
+    expect(result.lines[0].base_amount.toString()).toBe('2777.78');
+    expect(result.lines[0].tax_amount.toString()).toBe('222.22');
+    expect(result.lines[1].base_amount.toString()).toBe('13888.89');
+    expect(result.lines[1].tax_amount.toString()).toBe('1111.11');
+    expect(result.totals.subtotal.toString()).toBe('16666.67');
+    expect(result.totals.tax.toString()).toBe('1333.33');
+    expect(result.totals.total.toString()).toBe('18000');
+    // Un solo tributo en la nota: el INC 8% cuadra base × tarifa.
+    expect(result.taxes).toHaveLength(1);
+    expect(result.taxes[0]).toMatchObject({
+      tax_rate_id: 7,
+      tax_name: 'INC 8%',
+      tax_rate: 8,
+      tax_type: 'inc',
+      taxable_amount: 16666.67,
+      tax_amount: 1333.33,
+    });
+  });
+
+  it('H1: dos filas del mismo tipo con tarifas distintas (INC 8% + INC 16%) siguen exigiendo taxes', () => {
+    expect(() =>
+      derivePartialNoteLinesViaKernel(
+        [{ product_id: 11, quantity: 1, unit_price: 3000 }],
+        [relatedLine()],
+        [
+          scheme(),
+          scheme({ tax_rate_id: 8, tax_name: 'INC 16%', tax_rate: 16 }),
+        ],
+        907,
+        'credit_note',
+      ),
+    ).toThrow(
+      expect.objectContaining({ errorCode: 'INVOICING_CALC_001' }),
+    );
+  });
+
   it('bruto inalcanzable ($17/INC 8%) ⇒ CALC_005 antes de numerar', () => {
     // Mismo caso que el gate del motor (A.2): f(15.74) = 16.99 y f(15.75)
     // salta a 17.01 — el kernel persiste closest-below y la nota bloquea.

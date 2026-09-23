@@ -903,6 +903,23 @@ export interface DerivedPartialNoteLine {
  * (`divisor_for`, N3 y —desde R3-01— también N2): el precio del DTO copia la
  * escala de la factura (paquete de 12 a $36000, no $3000/unidad).
  */
+/**
+ * Agrupa las filas de `invoice_taxes` por tributo (tipo fiscal normalizado,
+ * untyped ⇒ iva) + tarifa. Conserva la PRIMERA fila de cada grupo como
+ * representante (su `tax_rate_id`/`tax_name` viajan a la fila de la nota).
+ */
+export function distinctInvoiceTaxSchemes<
+  T extends { tax_type: string | null; tax_rate: Prisma.Decimal | number },
+>(invoice_taxes: T[]): T[] {
+  const seen = new Map<string, T>();
+  for (const row of invoice_taxes) {
+    const type = (row.tax_type ?? '').trim().toLowerCase() || 'iva';
+    const key = `${type}|${Number(row.tax_rate).toFixed(4)}`;
+    if (!seen.has(key)) seen.set(key, row);
+  }
+  return Array.from(seen.values());
+}
+
 export function derivePartialNoteLinesViaKernel(
   items: Array<{
     product_id?: number | null;
@@ -978,7 +995,14 @@ export function derivePartialNoteLinesViaKernel(
       ? Math.floor(divisor_raw)
       : 1;
   };
-  if (invoice_taxes.length !== 1) {
+  // Un MISMO tributo puede venir en varias filas de `invoice_taxes`: desde el
+  // domicilio con INC (restaurante O-33) la factura de 1 plato + envío trae dos
+  // filas «INC 8%» (la del plato y la ligada al Envío). El despeje sólo necesita
+  // tipo + tarifa, así que se agrupa por ese par (untyped ⇒ iva, tarifa a 4
+  // decimales) antes de decidir si el esquema es único. Una factura de una fila
+  // se comporta idéntico: su único grupo ES su fila.
+  const schemes = distinctInvoiceTaxSchemes(invoice_taxes);
+  if (schemes.length !== 1) {
     const label = type === 'credit_note' ? 'nota crédito' : 'nota débito';
     const claimed = items.reduce(
       (acc, i) => acc.plus(new Prisma.Decimal(i.tax_amount || 0)),
@@ -988,7 +1012,7 @@ export function derivePartialNoteLinesViaKernel(
     // camino cero preservado (la regresión funcional: antes no lanzaba).
     // R3-01: la base también se escala por el divisor de la gemela — una
     // presentación en factura sin impuestos no vale 12× por omitir N3.
-    if (invoice_taxes.length === 0 && claimed.equals(0)) {
+    if (schemes.length === 0 && claimed.equals(0)) {
       const zero_lines = items.map((item) => {
         const base = new Prisma.Decimal(item.quantity)
           .times(new Prisma.Decimal(item.unit_price))
@@ -1023,17 +1047,17 @@ export function derivePartialNoteLinesViaKernel(
     }
     throw new VendixHttpException(
       ErrorCodes.INVOICING_CALC_001,
-      invoice_taxes.length === 0
+      schemes.length === 0
         ? `Las líneas de la ${label} declaran ${claimed.toString()} de impuesto, pero la factura que corrigen no tiene ningún impuesto registrado del que derivarlo. Envía el desglose en «taxes».`
-        : `La factura que corrige esta ${label} mezcla ${invoice_taxes.length} impuestos (${invoice_taxes.map((t) => t.tax_name).join(', ')}), y las líneas sólo traen el importe total. Envía el desglose en «taxes» indicando cuánto corresponde a cada uno.`,
+        : `La factura que corrige esta ${label} mezcla ${schemes.length} impuestos (${schemes.map((t) => t.tax_name).join(', ')}), y las líneas sólo traen el importe total. Envía el desglose en «taxes» indicando cuánto corresponde a cada uno.`,
       {
         note_tax_amount: claimed.toNumber(),
-        invoice_tax_schemes: invoice_taxes.length,
+        invoice_tax_schemes: schemes.length,
       },
     );
   }
 
-  const scheme = invoice_taxes[0];
+  const scheme = schemes[0];
   const scheme_type = (scheme.tax_type ?? '').trim().toLowerCase() || 'iva';
   // Espejo de `resolveRateBasis` del motor y de `rateFractionPpm` del
   // preview: sin `rate_basis` explícito el ICA (y su retención) van POR MIL.
