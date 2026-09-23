@@ -20,7 +20,7 @@ describe('financial account invoice projection', () => {
     const projections = fixture().map((a) => projectFinancialAccountInvoice(a, 'QA-001'));
     expect(projections.map((p) => p.total.toFixed(2))).toEqual(['2305.00', '3000.00', '7000.00']);
     expect(projections.reduce((sum, p) => sum + Number(p.total), 0)).toBe(12305);
-    for (const p of projections) expect(p.subtotal.minus(p.discount).plus(p.tax).equals(p.total)).toBe(true);
+    for (const p of projections) expect(p.subtotal.plus(p.tax).equals(p.total)).toBe(true);
   });
   it('represents financial participation explicitly without claiming additional stock units', () => {
     const p = projectFinancialAccountInvoice(fixture()[1], 'QA-001');
@@ -46,8 +46,12 @@ describe('financial account invoice projection', () => {
     expect(() => projectFinancialAccountInvoice(a, 'QA')).toThrow('tax snapshot');
   });
   it('uses per mille for ICA instead of blindly multiplying all taxes by 100', () => {
+    // Sin descuento: la tarifa ficticia no pasa por la proyección del descuento
+    // (que despeja con la tarifa); sólo se prueba la conversión de unidad.
     const a = fixture()[1];
-    const p = projectFinancialAccountInvoice({ ...a, lines: a.lines.map((l) => ({ ...l, taxes: l.taxes.map((t) => ({ ...t, tax_type: 'ica' as const, tax_rate: '0.007' })) })) }, 'QA');
+    const lines = a.lines.map((l) => ({ ...l, discount_amount: '0.00', total_amount: (Number(l.subtotal_amount) + Number(l.tax_amount)).toFixed(2), taxes: l.taxes.map((t) => ({ ...t, tax_type: 'ica' as const, tax_rate: '0.007' })) }));
+    const grand_total = lines.reduce((n, l) => n + Number(l.total_amount), 0).toFixed(2);
+    const p = projectFinancialAccountInvoice({ ...a, discount_amount: '0.00', grand_total, lines }, 'QA');
     expect(p.items[0].taxes[0].tax_rate.toString()).toBe('7');
   });
 });
@@ -69,7 +73,7 @@ describe('financial account fiscal pipeline (real prevalidator and UBL totals)',
     }));
     const result = new FiscalDocumentValidator().validate({
       document_type: 'sales_invoice', invoice_number: 'FE6', issue_date: '2026-09-20', currency: 'COP', operation_type: '10',
-      subtotal_amount: p.subtotal.minus(p.discount).toFixed(2), discount_amount: p.discount.toFixed(2),
+      subtotal_amount: p.subtotal.toFixed(2), discount_amount: p.discount.toFixed(2),
       tax_amount: p.tax.toFixed(2), total_amount: p.total.toFixed(2), withholding_amount: '0', items, taxes,
       resolution: { id: 7, resolution_number: '18760000001', prefix: 'FE', range_from: 1, range_to: 1000, current_number: 5, valid_from: '2026-01-01', valid_to: '2026-12-31', is_active: true, technical_key: 'a1b2c3d4e5'.repeat(4) },
     });

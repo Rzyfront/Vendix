@@ -3060,7 +3060,9 @@ export class InvoicingService {
     const account = await this.prisma.order_financial_accounts.findFirst({
       where: { id: accountId, state: 'active', store_id: context.store_id },
       include: {
-        split: { include: { source_order: true } },
+        // Hermanas de la división: su flete bruto reparte el impuesto del envío
+        // de la orden igual que el asiento de la cuenta.
+        split: { include: { source_order: true, accounts: { orderBy: { ordinal: 'asc' }, select: { id: true, shipping_cost: true } } } },
         customer: true,
         lines: { orderBy: { id: 'asc' }, include: { taxes: { orderBy: { id: 'asc' } } } },
         payments: ORDER_PAYMENT_MEANS_INCLUDE,
@@ -3072,7 +3074,10 @@ export class InvoicingService {
     }
     if (account.customer_id) await this.assertCustomerResolvable(account.customer_id);
     const source = account.split.source_order;
-    const projected = projectFinancialAccountInvoice(account, source.order_number);
+    const projected = projectFinancialAccountInvoice(account, source.order_number, {
+      source_order: source,
+      accounts: account.split.accounts,
+    });
     const identity = resolveAcquirerRail(account.customer ?? {}).identity;
     const payments = account.role === 'paid_original'
       ? await this.prisma.payments.findMany({ where: { id: { in: account.split.original_payment_ids }, order_id: source.id }, include: { store_payment_method: { include: { system_payment_method: true } } } })

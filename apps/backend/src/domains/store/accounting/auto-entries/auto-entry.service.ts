@@ -8,7 +8,7 @@ import { TaxBreakdownItem } from '@common/interfaces/tax-breakdown.interface';
 import { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
 import { AccountingEntryFailureService } from './accounting-entry-failure.service';
 import { projectOrderDiscountedTaxes } from '../../payments/utils/order-sale-tax-payload.util';
-import { buildShippingTaxBreakdownRow } from '../../shipping/utils/shipping-tax.util';
+import { allocateFinancialAccountShippingTax } from '../../shipping/utils/financial-account-shipping-tax.util';
 import { VendixHttpException } from '../../../../common/errors/vendix-http.exception';
 import { ErrorCodes } from '../../../../common/errors/error-codes';
 import {
@@ -1924,28 +1924,12 @@ export class AutoEntryService {
   private financialAccountShippingTax(
     account: any,
   ): { amount: bigint; tax_type: TaxBreakdownItem['tax_type'] } | null {
-    const order = account?.split?.source_order;
-    const row = buildShippingTaxBreakdownRow(order);
-    const accountShipping = getCents(account?.shipping_cost ?? 0);
-    if (!row || accountShipping <= 0n) return null;
-    const orderShipping = getCents(order.shipping_cost ?? 0);
-    const orderTax = getCents(order.shipping_tax_amount ?? 0);
-    if (orderShipping <= 0n || orderTax <= 0n || orderTax >= orderShipping)
-      return null;
-    const siblings: any[] = account.split.accounts ?? [];
-    const weights = siblings.map((row: any) => getCents(row.shipping_cost ?? 0));
-    const index = siblings.findIndex((row: any) => row.id === account.id);
-    const amount =
-      index >= 0 &&
-      weights.every((weight) => weight >= 0n) &&
-      weights.reduce((a, b) => a + b, 0n) === orderShipping
-        ? proportional(orderTax, weights)[index]
-        : proportional(orderTax, [
-            accountShipping,
-            orderShipping > accountShipping ? orderShipping - accountShipping : 0n,
-          ])[0];
-    if (amount <= 0n || amount >= accountShipping) return null;
-    return { amount, tax_type: row.tax_type };
+    // Definición única compartida con la factura de la cuenta
+    // (`projectFinancialAccountInvoice`): factura = asiento al centavo.
+    const shipping = allocateFinancialAccountShippingTax(account);
+    return shipping
+      ? { amount: shipping.amount, tax_type: shipping.row.tax_type }
+      : null;
   }
 
   /**
