@@ -1263,6 +1263,120 @@ describe('PaymentsService', () => {
     });
   });
 
+  describe('createOrUpdateOrderFromPos — adopted order', () => {
+    const user = { id: 1, roles: ['super_admin'] };
+    const item = {
+      item_type: 'custom', product_name: 'Artículo', quantity: 1,
+      unit_price: 1000, total_price: 1000,
+    };
+    const dto = (overrides: Record<string, unknown> = {}) => ({
+      store_id: 1, order_id: 41, currency: 'COP', items: [item],
+      requires_payment: true, ...overrides,
+    });
+    const order = { id: 41, order_number: 'POS-41', state: 'draft' };
+    const tx = (found: any = order, paid: any = null) => ({
+      orders: {
+        findFirst: jest.fn().mockResolvedValue(found),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        update: jest.fn().mockResolvedValue({
+          ...order, state: 'created', store_id: 1, grand_total: 1000,
+          order_items: [], stores: { id: 1 },
+        }),
+        create: jest.fn(),
+      },
+      payments: { findFirst: jest.fn().mockResolvedValue(paid) },
+      bookings: { updateMany: jest.fn() },
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('rejects another store as not found without probing payments or creating an order', async () => {
+      const client = tx(null);
+      let caught: any;
+      try {
+        await (service as any).createOrUpdateOrderFromPos(client, dto(), user);
+      } catch (error) { caught = error; }
+
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught.errorCode).toBe(ErrorCodes.ORD_FIND_001.code);
+      expect(client.orders.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 41, store_id: 1 },
+      }));
+      expect(client.payments.findFirst).not.toHaveBeenCalled();
+      expect(client.orders.create).not.toHaveBeenCalled();
+    });
+
+    it.each(['succeeded', 'captured'])('rejects an already %s payment with typed 409 and order number', async (state) => {
+      const client = tx(order, { id: 9, state });
+      let caught: any;
+      try {
+        await (service as any).createOrUpdateOrderFromPos(client, dto(), user);
+      } catch (error) { caught = error; }
+
+      expect(caught).toBeInstanceOf(VendixHttpException);
+      expect(caught.errorCode).toBe(ErrorCodes.POS_DRAFT_DUPLICATE_ORDER_001.code);
+      expect(caught.getStatus()).toBe(409);
+      expect(caught.message).toContain('POS-41');
+      expect(client.payments.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: { order_id: 41, state: { in: ['succeeded', 'captured'] } },
+      }));
+      expect(client.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-chargeable order state before writing a payment', async () => {
+      const client = tx({ ...order, state: 'finished' });
+      let caught: any;
+      try {
+        await (service as any).createOrUpdateOrderFromPos(client, dto(), user);
+      } catch (error) { caught = error; }
+
+      expect(caught.errorCode).toBe(ErrorCodes.POS_DRAFT_DUPLICATE_ORDER_001.code);
+      expect(caught.message).toContain('POS-41');
+      expect(client.orders.updateMany).not.toHaveBeenCalled();
+      expect(client.payments.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('rejects a stale row claim instead of creating a second order', async () => {
+      const client = tx();
+      client.orders.updateMany.mockResolvedValue({ count: 0 });
+      let caught: any;
+      try {
+        await (service as any).createOrUpdateOrderFromPos(client, dto(), user);
+      } catch (error) { caught = error; }
+
+      expect(caught.errorCode).toBe(ErrorCodes.POS_DRAFT_DUPLICATE_ORDER_001.code);
+      expect(client.payments.findFirst).not.toHaveBeenCalled();
+      expect(client.orders.create).not.toHaveBeenCalled();
+    });
+
+    it('updates the adopted order header and never creates another order', async () => {
+      const client = tx();
+      jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+      jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+        product_name: 'Artículo', quantity: 1, total_price: 1000,
+        tax_amount_item: 0,
+      });
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: null, coupon_code: null, discount_amount: 0,
+      });
+
+      const result = await (service as any).createOrUpdateOrderFromPos(
+        client, dto({ shipping_cost: 500 }), user,
+      );
+
+      expect(result.order.id).toBe(41);
+      expect(client.orders.create).not.toHaveBeenCalled();
+      expect(client.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 41, store_id: 1 },
+        data: expect.objectContaining({ state: 'created', shipping_cost: 500 }),
+      }));
+      expect(client.orders.update.mock.calls[0][0].data.order_items).toBeUndefined();
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Table lifecycle contract: a POS sale (deferred or not) MUST NOT close the
   // table session or flip `tables.status` to 'cleaning'. Only the canonical

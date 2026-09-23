@@ -13,6 +13,8 @@ import {
   PosPaymentResponseDto,
 } from './dto';
 import { payments_state_enum } from '@prisma/client';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 
 describe('PaymentsController', () => {
   let controller: PaymentsController;
@@ -96,6 +98,17 @@ describe('PaymentsController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  it('accepts a positive order_id on the POS DTO under the global whitelist contract', () => {
+    const valid = plainToInstance(CreatePosPaymentDto, { order_id: '41' });
+    expect(valid.order_id).toBe(41);
+    expect(validateSync(valid, { whitelist: true, forbidNonWhitelisted: true })
+      .some((error) => error.property === 'order_id')).toBe(false);
+
+    const invalid = plainToInstance(CreatePosPaymentDto, { order_id: '0' });
+    expect(validateSync(invalid, { whitelist: true, forbidNonWhitelisted: true })
+      .some((error) => error.property === 'order_id')).toBe(true);
   });
 
   describe('processPayment', () => {

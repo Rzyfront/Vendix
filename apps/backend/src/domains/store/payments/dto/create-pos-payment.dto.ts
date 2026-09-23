@@ -262,6 +262,13 @@ export class PosInstallmentTermsDto {
 }
 
 export class CreatePosPaymentDto {
+  // Orden ya adoptada por el carrito POS: el cobro reutiliza esta fila.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  order_id?: number;
+
   // Datos del cliente (opcionales para ventas anónimas)
   @IsOptional()
   @IsInt()

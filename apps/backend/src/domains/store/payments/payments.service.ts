@@ -4170,6 +4170,56 @@ export class PaymentsService {
       );
     }
 
+    // An adopted POS cart already has an order. Claim that row inside the
+    // payment transaction before checking payments, so concurrent POS retries
+    // cannot both pass the state gate and create a second charge/order.
+    const existingOrder = dto.order_id != null
+      ? await tx.orders.findFirst({
+          where: { id: dto.order_id, store_id: dtoStoreId },
+          select: { id: true, order_number: true, state: true },
+        })
+      : null;
+    if (dto.order_id != null && !existingOrder) {
+      // Identical response for missing and cross-store ids: no tenant leak.
+      throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+    }
+    if (existingOrder) {
+      const orderLabel = existingOrder.order_number || `#${existingOrder.id}`;
+      if (dto.is_draft || !['draft', 'created'].includes(existingOrder.state)) {
+        throw new VendixHttpException(
+          ErrorCodes.POS_DRAFT_DUPLICATE_ORDER_001,
+          `La orden ${orderLabel} no está pendiente de cobro. Actualiza la lista de órdenes antes de intentarlo de nuevo.`,
+        );
+      }
+      const claimed = await tx.orders.updateMany({
+        where: {
+          id: existingOrder.id,
+          store_id: dtoStoreId,
+          state: existingOrder.state,
+        },
+        data: { state: 'created', updated_at: new Date() },
+      });
+      if (claimed.count !== 1) {
+        throw new VendixHttpException(
+          ErrorCodes.POS_DRAFT_DUPLICATE_ORDER_001,
+          `La orden ${orderLabel} cambió mientras se cobraba. Actualiza la lista de órdenes antes de intentarlo de nuevo.`,
+        );
+      }
+      const paid = await tx.payments.findFirst({
+        where: {
+          order_id: existingOrder.id,
+          state: { in: ['succeeded', 'captured'] },
+        },
+        select: { id: true },
+      });
+      if (paid) {
+        throw new VendixHttpException(
+          ErrorCodes.POS_DRAFT_DUPLICATE_ORDER_001,
+          `La orden ${orderLabel} ya tiene un pago registrado. Actualiza la lista de órdenes antes de intentarlo de nuevo.`,
+        );
+      }
+    }
+
     // Venta normal (sin sesión de mesa): los ítems son obligatorios para
     // construir la orden. `dto.items` es opcional a nivel de DTO solo para
     // soportar el cierre de mesa (manejado arriba), así que lo estrechamos
@@ -4205,7 +4255,8 @@ export class PaymentsService {
     while (retries > 0) {
       try {
         // Generate order number for this store
-        orderNumber = await this.generateOrderNumber(tx, dtoStoreId);
+        orderNumber = existingOrder?.order_number ??
+          await this.generateOrderNumber(tx, dtoStoreId);
 
         // Create order items from backend-normalized financial snapshots.
         const orderItems = await Promise.all(
@@ -4406,14 +4457,25 @@ export class PaymentsService {
           orderData.customer_id = null;
         }
 
-        // Create the order
-        const order = await tx.orders.create({
-          data: orderData,
-          include: {
-            order_items: true,
-            stores: true,
-          },
-        });
+        // Adopted carts persist their item edits through the orders endpoint.
+        // Keep those item ids (and their dependent tax/inventory rows); only
+        // refresh the header from this checkout and reuse the existing id.
+        const adoptedOrderData = { ...orderData };
+        delete adoptedOrderData.order_items;
+        delete adoptedOrderData.order_number;
+        delete adoptedOrderData.created_by_user_id;
+        delete adoptedOrderData.store_id;
+        delete adoptedOrderData.channel;
+        const order = existingOrder
+          ? await tx.orders.update({
+              where: { id: existingOrder.id, store_id: dtoStoreId },
+              data: adoptedOrderData,
+              include: { order_items: true, stores: true },
+            })
+          : await tx.orders.create({
+              data: orderData,
+              include: { order_items: true, stores: true },
+            });
 
         // Link pending bookings to this order
         if (dto.booking_ids?.length) {

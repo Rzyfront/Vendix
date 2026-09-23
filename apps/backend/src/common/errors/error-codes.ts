@@ -1291,6 +1291,11 @@ export const ErrorCodes = {
     devMessage:
       'A draft (is_draft=true) cannot be combined with requires_payment=true; save the order first, then charge it via flow/pay',
   },
+  POS_DRAFT_DUPLICATE_ORDER_001: {
+    code: 'POS_DRAFT_DUPLICATE_ORDER_001',
+    httpStatus: 409,
+    devMessage: 'The referenced POS order has already been paid or cannot be charged',
+  },
   // CP-POS-SVC-PERF-001 / C.4 hardening — atomic booking requires a
   // customer. `bookings.customer_id` is NOT NULL in the schema; an
   // anonymous order carrying a `booking` block would violate FK and
