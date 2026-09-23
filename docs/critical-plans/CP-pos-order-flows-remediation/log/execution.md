@@ -38,6 +38,7 @@
 | 2026-09-23 | Nash/Wegener | I.1 | Validador y flow-pay rechazan ya pagada; gateway propaga código. Orden QA1113 creada con un pago: POST 409 ORD_PAY_ALREADY_PAID_001, sigue un pago. | 25855f688; af5e566d8; evidence/I1-reject-overpay.* |
 | 2026-09-23 | Orquestador | H.3 | Área fiscal LOCKED, tienda 3: POS sin mesa y mesa 13 vendieron servicio sin asignación por 50000/IVA 0; suscripción seed se habilitó temporalmente y restauró expired. | evidence/H3-active-fiscal-*; H3-local-api-verification.md |
 | 2026-09-23 | Orquestador | B.2/H.3 | Tras proyección canónica, POS mesa14 taxless 201; sesión106 pagada/abierta y mesa ocupada, un pago y cero filas fiscales. | evidence/B2-pos-taxless-table.* |
+| 2026-09-23 | Fabio | B.2 | Split mesa #1178: pago parcial no proyecta, último pago marca paid_at sin cerrar. Guard de origen split bajo lock bloquea edición. | evidence/B2-split-table-projection-20260923.md; 3e53d4f16 |
 | 2026-09-23 | Carver/Herschel | E.4 | Detalle y backend con salidas tipadas; DELETE pagado por dueño 400 sin borrar, mesero 403 RBAC. E2E pendiente. | adf8bddd0; 26a7d7205; evidence/E4-reject-paid-delete-* |
 | 2026-09-23 | E4/Fabio | E.4 | Claim fallido restaura estado; UI cancela draft y nombra platos; GET ajeno devuelve 404 real. Sigue in-progress. | evidence/E4-closeout-20260923.md |
 | 2026-09-23 | Sagan/Fabio | E.4 | Clic UI mesa #26→orden #1175 cobró 200, un pago/sesión pagada; cierre UI 201. Paso E.4 cerrado; semántica de delivery queda transversal. | evidence/E4-clickpay-ui-20260923.md |

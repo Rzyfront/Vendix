@@ -37,4 +37,4 @@ skills: [vendix-restaurant-ops, vendix-backend-api, vendix-zoneless-signals, how
   - [ ] `is_takeaway` conserva valor y reglas: conteo agrupado idéntico y compuerta takeaway-only sin cambio de comportamiento.
   - [ ] El botón «Entregar» del KDS sigue habilitándose exactamente con el mismo criterio que antes del paso.
   - [ ] El paso se despliega después de que `delivery_type` se persista de verdad; si no, el badge queda leyendo el default del esquema.
-- **Status:** in-progress — contrato/badges en 37005e554; 30 tests y watch OK; falta E2E.
+- **Status:** in-progress — contrato/badges en 37005e554; 30 tests y watch OK. `evidence/C4-kds-readonly-20260923.md`: lista histórica trae `delivery_type` y `is_takeaway` coherentes en home/direct/dine-in, pero snapshot/SSE del día y UI están vacíos. Faltan tickets actuales seguros para los tres badges; no se abrió Cocina #1 por backfill de inventario.
