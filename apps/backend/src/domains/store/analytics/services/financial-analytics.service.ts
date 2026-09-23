@@ -1065,6 +1065,41 @@ export class FinancialAnalyticsService {
     return Number(result._sum.amount || 0);
   }
 
+  /**
+   * Freight TAX contained in the period's refunded shipping.
+   *
+   * `refunds.shipping_refund` is GROSS (the shipping rate's tax is always
+   * included in `orders.shipping_cost`). There is no persisted per-refund
+   * shipping-tax column, so the portion is derived from the order's own frozen
+   * ratio `shipping_tax_amount / shipping_cost`. Same states and instant as the
+   * P&L refund aggregate (`completed` + `approved`, `refunds.created_at`).
+   * Untaxed freight (ratio 0) or `shipping_cost = 0` contributes 0.
+   */
+  private async aggregateRefundShippingTax(
+    storeId: number,
+    startDate: Date,
+    endDate: Date,
+  ): Promise<number> {
+    const rows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{ shipping_tax_refund: unknown }>
+    >`
+      SELECT
+        COALESCE(SUM(
+          COALESCE(r.shipping_refund, 0)
+            * COALESCE(o.shipping_tax_amount, 0)
+            / NULLIF(o.shipping_cost, 0)
+        ), 0) AS shipping_tax_refund
+      FROM refunds r
+      INNER JOIN orders o ON o.id = r.order_id
+      WHERE o.store_id = ${storeId}
+        AND r.state IN ('completed', 'approved')
+        AND r.created_at >= ${startDate}
+        AND r.created_at <= ${endDate}
+        AND COALESCE(o.shipping_tax_amount, 0) > 0
+    `;
+    return Number(rows?.[0]?.shipping_tax_refund ?? 0);
+  }
+
   private async computeProfitLossSummary(
     query: AnalyticsQueryDto,
     storeId: number,
@@ -1095,6 +1130,8 @@ export class FinancialAnalyticsService {
       previousCogsResult,
       previousExpenseAggregates,
       previousRefundAggregates,
+      refundShippingTax,
+      previousRefundShippingTax,
     ] = await Promise.all([
       this.aggregateRevenueOrders(startDate, endDate),
       this.aggregateCogs(storeId, startDate, endDate),
@@ -1133,6 +1170,12 @@ export class FinancialAnalyticsService {
           shipping_refund: true,
         },
       }),
+      this.aggregateRefundShippingTax(storeId, startDate, endDate),
+      this.aggregateRefundShippingTax(
+        storeId,
+        previousStartDate,
+        previousEndDate,
+      ),
     ]);
 
     // ── CASH BASIS ────────────────────────────────────────────────────────────
@@ -1242,12 +1285,16 @@ export class FinancialAnalyticsService {
     const refundTax = Number(refundAggregates._sum.tax_refund || 0);
     const refundShipping = Number(refundAggregates._sum.shipping_refund || 0);
     // REFUND REFLECTION (QUI-662): an order delivered + refunded inside the
-    // same period must net to zero, not to the original subtotal. We subtract
-    // `refundSubtotal` and add back `refundShipping` so the operating_revenue
-    // base and the refund base line up — `computeOperatingRevenue` already
-    // excludes tax, so `tax_refund` is intentionally NOT subtracted here.
+    // same period must net to zero, not to the original subtotal. Both the
+    // refunded subtotal AND the refunded freight are SUBTRACTED (the freight
+    // was added to operating revenue, so returning it must take it out — it
+    // used to be added a second time). `shipping_refund` is GROSS: when the
+    // shipping rate carried a tax, that tax portion is removed first so only
+    // the freight BASE leaves revenue, mirroring `computeOperatingRevenue`.
+    // `tax_refund` is intentionally NOT subtracted: revenue already excludes tax.
+    const refundShippingBase = refundShipping - refundShippingTax;
     const operatingRevenueNetRefunds =
-      operatingRevenue - refundSubtotal + refundShipping;
+      operatingRevenue - refundSubtotal - refundShippingBase;
     const grossProfit = operatingRevenueNetRefunds - totalCOGS;
     const grossMargin =
       operatingRevenueNetRefunds > 0
@@ -1309,8 +1356,8 @@ export class FinancialAnalyticsService {
     );
     const previousOperatingRevenueNetRefunds =
       previousOperatingRevenue -
-      previousRefundSubtotal +
-      previousRefundShipping;
+      previousRefundSubtotal -
+      (previousRefundShipping - previousRefundShippingTax);
 
     // DATA-CELL-1: apply the SINGLE rounding policy (`round2`) to every emitted
     // number. Internal math above stays RAW so derived figures (margins,

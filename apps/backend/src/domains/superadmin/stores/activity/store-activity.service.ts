@@ -127,6 +127,7 @@ const seriesOrderSelect = {
   subtotal_amount: true,
   discount_amount: true,
   shipping_cost: true,
+  shipping_tax_amount: true,
   created_at: true,
 } satisfies Prisma.ordersSelect;
 
@@ -387,6 +388,7 @@ export class StoreActivityService {
           subtotal: Number(order.subtotal_amount ?? 0),
           discounts: Number(order.discount_amount ?? 0),
           shipping: Number(order.shipping_cost ?? 0),
+          shipping_tax: Number(order.shipping_tax_amount ?? 0),
           tax: 0,
         });
       }
@@ -490,6 +492,7 @@ export class StoreActivityService {
           subtotal_amount: true,
           discount_amount: true,
           shipping_cost: true,
+          shipping_tax_amount: true,
         },
       }),
       this.prisma.audit_logs.groupBy({
@@ -540,6 +543,7 @@ export class StoreActivityService {
             subtotal: Number(row._sum.subtotal_amount ?? 0),
             discounts: Number(row._sum.discount_amount ?? 0),
             shipping: Number(row._sum.shipping_cost ?? 0),
+            shipping_tax: Number(row._sum.shipping_tax_amount ?? 0),
             tax: 0,
           }),
         ),
