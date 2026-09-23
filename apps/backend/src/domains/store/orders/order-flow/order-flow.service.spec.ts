@@ -17,6 +17,142 @@ import {
 } from 'src/testing/prisma-mock';
 import { buildOrder, buildPayment } from 'src/testing/money-fixtures';
 
+describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2)', () => {
+  const DTO: any = { store_payment_method_id: 1, payment_type: PaymentType.DIRECT };
+
+  const harness = (consumedAtFire = false) => {
+    let state = 'draft';
+    const reservations: Array<{ product_id: number; status: string }> = [];
+    const events: Array<string> = [];
+    const tx: any = {
+      $queryRaw: jest.fn(async () => [{ id: 1, state }]),
+      orders: {
+        findFirst: jest.fn(async () => ({
+          id: 1,
+          store_id: 4,
+          order_items: [{
+            product_id: 701,
+            product_variant_id: null,
+            quantity: 2,
+            inventory_consumed_at_fire: consumedAtFire,
+            products: { id: 701, track_inventory: true, product_type: 'product' },
+          }],
+        })),
+        update: jest.fn(async ({ data }: any) => { state = data.state; return { id: 1, state }; }),
+      },
+      stock_reservations: {
+        findFirst: jest.fn(async () => reservations.find((row) => row.status === 'active') ?? null),
+      },
+    };
+    const prismaMock: any = {
+      $transaction: jest.fn(async (callback: any) => callback(tx)),
+      orders: {
+        findFirst: jest.fn(async ({ select }: any) => select?.state
+          ? { state }
+          : { active_financial_split_id: null, delivery_type: 'direct_delivery', shipping_method_id: null, order_items: [{ products: { product_type: 'product' } }] }),
+        updateMany: jest.fn(async ({ where, data }: any) => {
+          if (where.state?.in && !where.state.in.includes(state)) return { count: 0 };
+          if (where.state && typeof where.state === 'string' && where.state !== state) return { count: 0 };
+          state = data.state;
+          return { count: 1 };
+        }),
+      },
+      stock_reservations: {
+        count: jest.fn(async () => reservations.filter((row) => row.status === 'active').length),
+      },
+      store_payment_methods: { findFirst: jest.fn(async () => ({ id: 1, system_payment_method: { type: 'card' } })) },
+      payments: { create: jest.fn(async () => { events.push('payment'); return { id: 99, gateway_response: {} }; }) },
+    };
+    const stock: any = {
+      getDefaultLocationForProduct: jest.fn(async () => 11),
+      reserveStock: jest.fn(async (...args: any[]) => {
+        events.push('reserve');
+        reservations.push({ product_id: args[0], status: 'active' });
+      }),
+    };
+    const audit: any = { logCustom: jest.fn(async () => undefined) };
+    const service = new OrderFlowService(
+      prismaMock, {} as any, {} as any, {} as any, {} as any, stock,
+      {} as any, {} as any, audit,
+    );
+    jest.spyOn(service as any, 'getOrder').mockImplementation(async () => ({
+      id: 1, state, store_id: 4, customer_id: 44, delivery_type: 'direct_delivery',
+      grand_total: 100, currency: 'COP',
+    }));
+    jest.spyOn(service as any, 'appendFlowMetadata').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'updateOrderState').mockImplementation(async (_id: number, nextState: string) => {
+      state = nextState;
+      return { id: 1, state };
+    });
+    jest.spyOn(service as any, 'commitCouponUseForOrder').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'generateTransactionId').mockResolvedValue('TXN-1');
+    jest.spyOn(service as any, 'hasPendingKitchenItems').mockResolvedValue(false);
+    jest.spyOn(service as any, 'recordPayOrderCashMovement').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'computeAndPersistEta').mockResolvedValue(undefined);
+    jest.spyOn(service as any, 'emitPosSaleCompletedIfFullyPaid').mockResolvedValue(undefined);
+    return { service, prismaMock, tx, stock, audit, reservations, events, getState: () => state };
+  };
+
+  it('reserva antes del pago, mantiene processing durante el cobro y audita el conteo', async () => {
+    const h = harness();
+    await h.service.payOrder(1, DTO);
+    expect(h.reservations).toHaveLength(1);
+    expect(h.events).toEqual(['reserve', 'payment']);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+    const args = h.stock.reserveStock.mock.calls[0];
+    expect(args.slice(0, 6)).toEqual([701, undefined, 11, 2, 'order', 1]);
+    expect([args[7], args[8], args[10], args[12]]).toEqual([
+      false, h.tx, false, true,
+    ]);
+    expect(h.audit.logCustom).toHaveBeenCalledWith(
+      expect.any(Number), 'order.promoted_to_created', expect.anything(),
+      expect.objectContaining({ order_id: 1, reservation_count: 1 }), 1,
+    );
+    expect(h.getState()).toBe('finished');
+  });
+
+  it('segundo submit no reserva ni cobra y conserva el 409 tipado', async () => {
+    const h = harness();
+    await h.service.payOrder(1, DTO);
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(error.getStatus()).toBe(409);
+    expect(h.stock.reserveStock).toHaveBeenCalledTimes(1);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('stock agotado no bloquea el cobro; consumo en cocina evita descontar otra vez', async () => {
+    const h = harness(true);
+    await h.service.payOrder(1, DTO);
+    const args = h.stock.reserveStock.mock.calls[0];
+    expect([args[7], args[8], args[10], args[12]]).toEqual([
+      false, h.tx, true, true,
+    ]);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('si falla la infraestructura de reserva, no cobra y restaura el draft', async () => {
+    const h = harness();
+    h.stock.reserveStock.mockRejectedValueOnce(new Error('db unavailable'));
+    const error = await h.service.payOrder(1, DTO).catch((failure) => failure);
+    expect(error).toBeInstanceOf(VendixHttpException);
+    expect(error.errorCode).toBe('ORD_FLOW_PAYMENT_FAILED_001');
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+    expect(h.reservations).toHaveLength(0);
+    expect(h.getState()).toBe('draft');
+  });
+
+  it('la promoción independiente de mesa/split sigue dejando created', async () => {
+    const h = harness();
+    const promoted = await (h.service as any).promoteDraftToCreated(1, 4);
+    expect(promoted).toBe(true);
+    expect(h.getState()).toBe('created');
+    expect(h.reservations).toHaveLength(1);
+    expect(h.prismaMock.payments.create).not.toHaveBeenCalled();
+  });
+});
+
 /**
  * Regresión de la compensación de pago en {@link OrderFlowService.payOrder}
  * rama `direct → finished` (POS).

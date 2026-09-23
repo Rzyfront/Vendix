@@ -505,19 +505,15 @@ export class OrderFlowService {
   }
 
   /**
-   * Promote a `draft` order to `created`, reserving stock idempotently.
+   * Reserve stock for a draft promotion, without releasing payOrder's claim.
    *
-   * Table orders (restaurant flow) are born in `draft` WITHOUT a stock
-   * reservation; retail orders are born in `created` WITH one. `payOrder`
-   * only accepts `created`/`shipped`, so a draft order could never be paid.
-   * This method bridges that gap: it reserves stock for each tracked,
-   * non-service item (mirroring `reactivateOrder`) and then transitions the
-   * order draft -> created through `updateOrderState` (the single audited
-   * state-change seam).
+   * Table/POS drafts can be born without a stock reservation. Reserve each
+   * tracked, non-service item before charging. The standalone table/split
+   * path transitions draft -> created; payOrder has already claimed the row
+   * as processing and must keep that state until the charge completes.
    *
-   * IDEMPOTENT: if the order is no longer `draft` it returns immediately, and
-   * each item is skipped when an active `order` reservation already exists for
-   * it (prevents a double reservation on retries / re-pay).
+   * IDEMPOTENT: if the row is not in the expected state it returns false, and
+   * each item is skipped when an active order reservation already exists.
    *
    * Reservation is NON-BLOCKING (`validate_availability = false`): the table
    * flow must never refuse a payment because of stock, matching POS semantics.
@@ -525,7 +521,11 @@ export class OrderFlowService {
    * `skip_reservation = true` so the stock manager records the reservation row
    * without decrementing available stock again.
    */
-  private async promoteDraftToCreated(orderId: number): Promise<boolean> {
+  private async promoteDraftToCreated(
+    orderId: number,
+    storeId: number,
+    alreadyClaimedForPayment = false,
+  ): Promise<boolean> {
     // QUI-POS-E2E-R8-LIVE: FB-10 double-click race. 10 concurrent flow/pay
     // calls previously produced 8 succeeded payments on a $100 order ($800
     // overcharge) because the original flow read state then mutated state
@@ -538,12 +538,12 @@ export class OrderFlowService {
     // row lock; the second wave sees state != 'draft' and bails. The state
     // is updated inside the same tx so the lock covers the full claim
     // window.
-    await this.prisma.$transaction(
+    const promoted = await this.prisma.$transaction(
       async (tx) => {
         // 1) Lock the order row + read its state under the lock.
         const locked = await tx.$queryRaw<
           Array<{ id: number; state: OrderState }>
-        >`SELECT id, state FROM orders WHERE id = ${orderId} FOR UPDATE`;
+        >`SELECT id, state FROM orders WHERE id = ${orderId} AND store_id = ${storeId} FOR UPDATE`;
 
         if (!locked.length) {
           throw new NotFoundException(`Order #${orderId} not found`);
@@ -555,14 +555,18 @@ export class OrderFlowService {
         // `false` so `payOrder` knows WE did not win the claim and must
         // bail with `state_not_payable` instead of inserting a duplicate
         // payment.
-        if (locked[0].state !== 'draft') {
+        // payOrder already owns the atomic draft -> processing claim. Its
+        // reservation must run under that claim WITHOUT resetting the state
+        // to created: doing so would let a second flow/pay claim and charge.
+        const expectedState = alreadyClaimedForPayment ? 'processing' : 'draft';
+        if (locked[0].state !== expectedState) {
           return false;
         }
 
         // 2) Load order items + products for the reservation loop. Use `tx`
         // so the read is part of the same locked transaction.
         const order = await tx.orders.findFirst({
-          where: { id: orderId },
+          where: { id: orderId, store_id: storeId },
           include: {
             order_items: {
               include: {
@@ -640,35 +644,44 @@ export class OrderFlowService {
           );
         }
 
-        // 4) Update state inside the same tx — the FOR UPDATE lock holds
-        // until commit, so the next concurrent caller observes state='created'
-        // and bails at step 1. updateOrderState (which writes flow metadata
-        // to internal_notes) runs after this returns; that's safe because
-        // it's idempotent on 'created'.
-        this.validateTransition('draft', 'created');
-        await tx.orders.update({
-          where: { id: orderId },
-          data: { state: 'created', updated_at: new Date() },
-        });
+        // 4) Standalone table/split promotion changes state under the lock.
+        // Payment promotion only reserves: the processing claim must remain
+        // intact so a second payOrder cannot claim the same order.
+        if (!alreadyClaimedForPayment) {
+          this.validateTransition('draft', 'created');
+          await tx.orders.update({
+            where: { id: orderId },
+            data: { state: 'created', updated_at: new Date() },
+          });
+        }
+        return true;
       },
       { timeout: 30_000 },
     );
 
-    // 5) Flow metadata (promoted_from_draft / promoted_at) — best effort,
-    // written AFTER the claim commits. If it fails the order is already
-    // 'created' and the payment path can still proceed.
+    if (!promoted) return false;
+
+    // 5) Flow metadata is best effort after the reservation commits. In the
+    // payment path, append without changing processing back to created.
     try {
-      await this.updateOrderState(orderId, 'created', {
+      const metadata = {
         promoted_from_draft: true,
         promoted_at: new Date(),
-      });
+      };
+      if (alreadyClaimedForPayment) {
+        await this.appendFlowMetadata(orderId, metadata);
+      } else {
+        await this.updateOrderState(orderId, 'created', metadata);
+      }
     } catch (metaErr) {
       this.logger.warn(
         `[promoteDraftToCreated metadata failed] order=${orderId}: ${(metaErr as Error).message}`,
       );
     }
 
-    this.logger.log(`Order #${orderId} promoted draft -> created before payment`);
+    this.logger.log(
+      `Order #${orderId} promoted from draft${alreadyClaimedForPayment ? ' under payment claim' : ' to created'}`,
+    );
     return true;
   }
 
@@ -752,8 +765,7 @@ export class OrderFlowService {
     // en vez de quedar varada en `processing`. El pago compensado con su
     // motivo se conserva.
     const preClaimRow = await this.prisma.orders
-      .findFirst({ where: { id: orderId }, select: { state: true } })
-      .catch(() => null);
+      .findFirst({ where: { id: orderId }, select: { state: true } });
     const preClaimState = (preClaimRow?.state as OrderState | undefined) ?? null;
     const claim = await this.prisma.orders.updateMany({
       where: {
@@ -808,10 +820,11 @@ export class OrderFlowService {
       }
     }
 
-    // Table orders are born in 'draft' without a stock reservation. Promote
-    // them to 'created' (reserving stock) so the guard below accepts them.
-    // Idempotent + non-blocking; fastTrackOrder inherits this via payOrder.
-    if (order.state === 'draft') {
+    // The post-claim reload is always processing. The pre-claim state tells us
+    // whether this winning payment owns a draft's missing stock reservation.
+    // Keep the order in processing throughout the charge; only the standalone
+    // table/split path physically transitions draft -> created.
+    if (preClaimState === 'draft') {
       try {
         // QUI-POS-E2E-R8-LIVE: FB-10 double-click race. promoteDraftToCreated
         // returns `false` when another concurrent caller already won the
@@ -821,7 +834,11 @@ export class OrderFlowService {
         // insert duplicate payment rows. Reject the second wave here with
         // the same `state_not_payable` shape every other terminal-order
         // attempt produces.
-        const didPromote = await this.promoteDraftToCreated(orderId);
+        const didPromote = await this.promoteDraftToCreated(
+          orderId,
+          order.store_id,
+          true,
+        );
         if (!didPromote) {
           throw this.wrapPaymentFailure('state_not_payable', {
             message: `Cannot pay order: another concurrent charge already claimed the draft promotion.`,
@@ -895,9 +912,10 @@ export class OrderFlowService {
             `[order.draft_promotion_failed audit failed] order=${orderId}: ${(auditErr as Error).message}`,
           );
         }
+        await this.restorePreClaimState(orderId, preClaimState);
         throw this.wrapPaymentFailure('draft_promote_failed', err);
       }
-      order = await this.getOrder(orderId); // reload: now 'created'
+      order = await this.getOrder(orderId); // reload while the payment claim remains processing
     }
 
     const allowedPayStates: OrderState[] = ['created', 'shipped', 'processing'];
@@ -1353,7 +1371,7 @@ export class OrderFlowService {
     if (paid.lt(order.grand_total)) return;
     const table = await this.prisma.table_sessions.findFirst({ where: { order_id: orderId, store_id: order.store_id }, select: { id: true } });
     if (table) return;
-    if (order.state === 'draft') await this.promoteDraftToCreated(orderId);
+    if (order.state === 'draft') await this.promoteDraftToCreated(orderId, order.store_id);
     await this.prisma.orders.updateMany({
       where: { id: orderId, store_id: order.store_id, state: { in: ['created', 'pending_payment'] }, active_financial_split_id: order.active_financial_split_id },
       data: { state: 'processing', updated_at: new Date() },
