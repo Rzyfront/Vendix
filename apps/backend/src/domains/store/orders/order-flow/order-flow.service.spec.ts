@@ -1036,15 +1036,20 @@ describe('OrderFlowService — charge-time shipping gate (A.2 CP-facturacion-fix
     ...over,
   });
 
-  it('blocks charging a shippyless whatsapp-like order BEFORE the state claim', async () => {
-    const { service, prismaMock } = buildService(physicalProbe());
+  it.each(['home_delivery', 'other'])(
+    'blocks charging a %s order without shipping BEFORE the state claim',
+    async (delivery_type) => {
+      const { service, prismaMock } = buildService(
+        physicalProbe({ delivery_type }),
+      );
 
-    await expect(service.payOrder(1, DTO)).rejects.toMatchObject({
-      errorCode: ErrorCodes.ORD_SHIP_CHARGE_001.code,
-    });
-    // Read-only gate: the race claim was never taken.
-    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
-  });
+      await expect(service.payOrder(1, DTO)).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_SHIP_CHARGE_001.code,
+      });
+      // Read-only gate: the race claim was never taken.
+      expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    },
+  );
 
   it('lets the charge through once a method is assigned', async () => {
     const { service, prismaMock } = buildService(
@@ -1060,17 +1065,23 @@ describe('OrderFlowService — charge-time shipping gate (A.2 CP-facturacion-fix
     expect(prismaMock.orders.updateMany).toHaveBeenCalled();
   });
 
-  it('exempts direct_delivery and services-only carts', async () => {
-    const direct = buildService(
-      physicalProbe({ delivery_type: 'direct_delivery' }),
-    );
-    try {
-      await direct.service.payOrder(1, DTO);
-    } catch (e: any) {
-      expect(e?.errorCode).not.toBe(ErrorCodes.ORD_SHIP_CHARGE_001.code);
-    }
-    expect(direct.prismaMock.orders.updateMany).toHaveBeenCalled();
+  it.each(['pickup', 'direct_delivery', 'dine_in'])(
+    'does not block a %s order without shipping',
+    async (delivery_type) => {
+      const { service, prismaMock } = buildService(
+        physicalProbe({ delivery_type }),
+      );
+      try {
+        await service.payOrder(1, DTO);
+      } catch (e: any) {
+        // A later, unmocked payment step may reject; the shipping gate may not.
+        expect(e?.errorCode).not.toBe(ErrorCodes.ORD_SHIP_CHARGE_001.code);
+      }
+      expect(prismaMock.orders.updateMany).toHaveBeenCalled();
+    },
+  );
 
+  it('exempts services-only carts', async () => {
     const servicesOnly = buildService(
       physicalProbe({
         order_items: [{ products: { product_type: 'service' } }],

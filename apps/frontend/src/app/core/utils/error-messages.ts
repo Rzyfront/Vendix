@@ -270,6 +270,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'No se puede entregar inventario de una orden cancelada o reembolsada.',
   ORD_SHIP_001: 'Metodo de envio no encontrado.',
   ORD_SHIP_REQUIRED_001: 'Debes asignar un método de envío antes de continuar.',
+  ORD_SHIP_CHARGE_001: 'Elige el método de envío antes de cobrar.',
   ORD_SHIP_INVALID_METHOD_001: 'El método de envío no pertenece a esta tienda.',
   ORD_SHIP_RATE_MISMATCH_001:
     'La tarifa seleccionada no corresponde al método de envío.',

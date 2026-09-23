@@ -14,7 +14,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { Prisma, order_state_enum } from '@prisma/client';
+import { Prisma, order_delivery_type_enum, order_state_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { resolveTip } from '@common/utils/tip.util';
@@ -84,6 +84,14 @@ const CANCELABLE_STATES: OrderState[] = [
   'processing',
 ];
 const REFUNDABLE_STATES: OrderState[] = ['delivered', 'finished'];
+
+// Una mesa se consume en el local: dine_in, pickup y direct_delivery no
+// requieren despacho. Mantener esta lista alineada con la del detalle de orden.
+const SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES = new Set<order_delivery_type_enum>([
+  order_delivery_type_enum.pickup,
+  order_delivery_type_enum.direct_delivery,
+  order_delivery_type_enum.dine_in,
+]);
 
 /**
  * Resultado del puente de cocina (KDS → orden).
@@ -655,8 +663,9 @@ export class OrderFlowService {
     // that needs dispatch cannot be CHARGED without a shipping method: assign it
     // first, then charge. Read-only and placed BEFORE the state claim, so rejection
     // touches nothing; a concurrent assignment races toward a retryable error, never
-    // toward a shippyless charge. `direct_delivery` (POS in-person) and `pickup`
-    // are exempt; services-only carts have no physical items. NOTE: checkout's extra
+    // toward a shippyless charge. La mesa (`dine_in`), `direct_delivery` y
+    // `pickup` no requieren despacho; services-only carts have no physical items.
+    // NOTE: checkout's extra
     // `requires_shipping === false` carve-out is skipped here — it is not a Prisma
     // column (hydrated cart object only), and `product_type !== 'service'` covers it.
     {
@@ -675,8 +684,8 @@ export class OrderFlowService {
       });
       if (probe) assertNoActiveFinancialSplit(probe);
       const needsDispatch =
-        probe?.delivery_type !== 'pickup' &&
-        probe?.delivery_type !== 'direct_delivery' &&
+        (!probe?.delivery_type ||
+          !SHIPPING_METHOD_EXEMPT_DELIVERY_TYPES.has(probe.delivery_type)) &&
         (probe?.order_items ?? []).some((item: any) => {
           const product = item.products;
           if (!product) return true;
