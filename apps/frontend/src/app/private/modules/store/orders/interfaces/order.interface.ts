@@ -36,6 +36,7 @@ export interface OrderCancellationPolicy {
   reason_code:
     | 'ORD_CANCEL_STOCK_COMMITTED_001'
     | 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001'
+    | 'ORD_CANCEL_OPEN_TABLE_001'
     | null;
 }
 

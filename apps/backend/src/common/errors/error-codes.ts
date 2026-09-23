@@ -1080,6 +1080,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Confirmed payment requires a processor reversal or reconciliation, not local cancellation',
   },
+  ORD_CANCEL_OPEN_TABLE_001: {
+    code: 'ORD_CANCEL_OPEN_TABLE_001',
+    httpStatus: 409,
+    devMessage: 'La orden pertenece a una mesa abierta; cierra la cuenta desde Mesas antes de cancelarla.',
+  },
   ORD_STOCK_COMMIT_STATE_001: {
     code: 'ORD_STOCK_COMMIT_STATE_001',
     httpStatus: 409,

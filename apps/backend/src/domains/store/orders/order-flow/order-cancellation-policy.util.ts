@@ -1,6 +1,7 @@
 export type CancellationBlockerCode =
   | 'ORD_CANCEL_STOCK_COMMITTED_001'
-  | 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001';
+  | 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001'
+  | 'ORD_CANCEL_OPEN_TABLE_001';
 
 /** Structural snapshot: callers must load lines and payment-method relations. */
 export interface OrderCancellationSnapshot {
@@ -21,6 +22,7 @@ export interface OrderCancellationSnapshot {
       } | null;
     } | null;
   }>;
+  table_sessions?: ReadonlyArray<{ id: number; closed_at?: Date | string | null }>;
 }
 
 export interface OrderCancellationPolicy {
@@ -29,7 +31,10 @@ export interface OrderCancellationPolicy {
   reason_code: CancellationBlockerCode | null;
 }
 
-const CANCELABLE_STATES = new Set(['created', 'pending_payment', 'processing']);
+export const CANCELABLE_ORDER_STATES = [
+  'draft', 'created', 'pending_payment', 'processing',
+] as const;
+const CANCELABLE_STATES = new Set<string>(CANCELABLE_ORDER_STATES);
 const PAYMENT_CANCELABLE_STATES = new Set(['pending_payment', 'processing']);
 const DELIVERED_STATES = new Set(['delivered', 'finished', 'refunded']);
 export const SETTLED_PAYMENT_STATES: ReadonlySet<string> = new Set([
@@ -92,7 +97,12 @@ export function getCancellationBlocker(
 export function getOrderCancellationPolicy(
   order: OrderCancellationSnapshot,
 ): OrderCancellationPolicy {
-  const reason_code = getCancellationBlocker(order);
+  const reason_code = getCancellationBlocker(order) ?? (
+    order.state === 'draft' &&
+    (order.table_sessions ?? []).some((session) => session.closed_at == null)
+      ? 'ORD_CANCEL_OPEN_TABLE_001'
+      : null
+  );
   return {
     can_cancel: reason_code === null && CANCELABLE_STATES.has(order.state),
     can_cancel_payment:

@@ -1883,6 +1883,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       orders: ['updateMany', 'update'],
       order_items: ['findMany'],
       payments: ['findMany', 'update'],
+      table_sessions: ['findFirst'],
     });
     prismaMock.$queryRaw = jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'processing' }]);
     // Sin ítems de cocina: la rama KDS de `cancelOrder` no participa aquí.
@@ -1898,6 +1899,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     // Por defecto: ningún pago del lote es en efectivo. Cada test que necesita
     // efectivo lo declara explícitamente.
     prismaMock.payments.findMany.mockResolvedValue([]);
+    prismaMock.table_sessions.findFirst.mockResolvedValue(null);
 
     settings = {
       getSettings: jest
@@ -1930,6 +1932,36 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       {} as any,
       audit as any,
     );
+  });
+
+  it('cancela un draft sin mesa mediante el claim condicional', async () => {
+    const draft = { ...cancelableOrder([]), state: 'draft', order_items: [] };
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue(draft);
+
+    await expect(service.cancelOrder(ORDER_ID, DTO)).resolves.toMatchObject({ state: 'cancelled' });
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: ORDER_ID, state: { in: expect.arrayContaining(['draft']) },
+      }),
+    }));
+    expect(prismaMock.table_sessions.findFirst).toHaveBeenCalledWith({
+      where: { order_id: ORDER_ID, store_id: 100, closed_at: null },
+      select: { id: true },
+    });
+  });
+
+  it('rechaza draft con mesa abierta antes de escribir, con código y sesión', async () => {
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({
+      ...cancelableOrder([]), state: 'draft', order_items: [],
+    });
+    prismaMock.table_sessions.findFirst.mockResolvedValue({ id: 55 });
+
+    await expect(service.cancelOrder(ORDER_ID, DTO)).rejects.toMatchObject({
+      errorCode: 'ORD_CANCEL_OPEN_TABLE_001',
+      response: expect.objectContaining({ details: { table_session_id: 55 } }),
+    });
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(stock.releaseReservationsByReference).not.toHaveBeenCalled();
   });
 
   it('pago succeeded en efectivo: registra el egreso por el monto exacto', async () => {
@@ -2013,7 +2045,7 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
     expect(prismaMock.orders.updateMany).toHaveBeenCalledWith({
       where: {
         id: ORDER_ID,
-        state: { in: ['created', 'pending_payment', 'processing'] },
+        state: { in: ['draft', 'created', 'pending_payment', 'processing'] },
       },
       data: expect.objectContaining({ state: 'cancelled' }),
     });

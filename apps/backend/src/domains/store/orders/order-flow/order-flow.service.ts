@@ -4,6 +4,7 @@ import {
   getCancellationBlocker,
   getOrderCancellationPolicy,
   SETTLED_PAYMENT_STATES,
+  CANCELABLE_ORDER_STATES,
 } from './order-cancellation-policy.util';
 import {
   Injectable,
@@ -84,11 +85,7 @@ export const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
   pending_delivery: ['shipped', 'delivered'],
 };
 
-const CANCELABLE_STATES: OrderState[] = [
-  'created',
-  'pending_payment',
-  'processing',
-];
+const CANCELABLE_STATES: OrderState[] = [...CANCELABLE_ORDER_STATES];
 const REFUNDABLE_STATES: OrderState[] = ['delivered', 'finished'];
 
 // Una mesa se consume en el local: dine_in, pickup y direct_delivery no
@@ -203,6 +200,24 @@ export class OrderFlowService {
   private assertCancellationAllowed(order: Parameters<typeof getCancellationBlocker>[0]): void {
     const blocker = getCancellationBlocker(order);
     if (blocker) throw new VendixHttpException(ErrorCodes[blocker]);
+  }
+
+  private async assertNoOpenTableForDraft(
+    order: { id: number; store_id: number; state: order_state_enum },
+    client: Prisma.TransactionClient | StorePrismaService = this.prisma,
+  ): Promise<void> {
+    if (order.state !== 'draft') return;
+    const session = await client.table_sessions.findFirst({
+      where: { order_id: order.id, store_id: order.store_id, closed_at: null },
+      select: { id: true },
+    });
+    if (session) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_CANCEL_OPEN_TABLE_001,
+        undefined,
+        { table_session_id: session.id },
+      );
+    }
   }
 
   /**
@@ -3088,6 +3103,7 @@ export class OrderFlowService {
   async cancelOrder(orderId: number, dto: CancelOrderDto, force = false) {
     const order = await this.getOrder(orderId);
     assertNoActiveFinancialSplit(order);
+    await this.assertNoOpenTableForDraft(order);
     let previousState = order.state as OrderState;
 
     const notCancelableError = () =>
@@ -3213,6 +3229,7 @@ export class OrderFlowService {
     const updatedOrder = await this.prisma.$transaction(async (tx) => {
       await lockOrderLifecycle(tx, orderId, order.store_id);
       const freshOrder = await this.getOrder(orderId, tx);
+      await this.assertNoOpenTableForDraft(freshOrder, tx);
       this.assertCancellationAllowed(freshOrder);
       previousState = freshOrder.state as OrderState;
       claimableStates = force ? [previousState] : CANCELABLE_STATES;

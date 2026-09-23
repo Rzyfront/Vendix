@@ -266,6 +266,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Esta orden tiene inventario consumido o evidencia de entrega. No se puede anular: revisa la entrega y tramita una devolución real; si es un caso anterior sin entrega, requiere conciliación de inventario.',
   ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001:
     'Esta orden tiene un pago confirmado que requiere reversión o conciliación. Usa el flujo de reembolso cuando corresponda; anular la orden no devuelve el dinero de la pasarela.',
+  ORD_CANCEL_OPEN_TABLE_001:
+    'Esta cuenta pertenece a una mesa abierta. Cierra o cobra la cuenta desde Mesas antes de cancelar la orden.',
   ORD_ITEM_CANCEL_PAID_001:
     'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
   ORD_ITEM_CANCEL_STATE_001:

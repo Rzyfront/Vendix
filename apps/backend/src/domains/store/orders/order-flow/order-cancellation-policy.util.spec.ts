@@ -34,18 +34,18 @@ describe('Order cancellation policy', () => {
     ]);
     expect(SETTLED_PAYMENT_STATES.has('pending')).toBe(false);
   });
-  it.each(['created', 'pending_payment', 'processing'])(
+  it.each(['draft', 'created', 'pending_payment', 'processing'])(
     'permits cancellation of %s with reservations only',
     (state) => {
       expect(getOrderCancellationPolicy(snapshot({ state }))).toEqual({
         can_cancel: true,
-        can_cancel_payment: state !== 'created',
+        can_cancel_payment: state !== 'created' && state !== 'draft',
         reason_code: null,
       });
     },
   );
 
-  it.each(['draft', 'shipped', 'cancelled'])(
+  it.each(['shipped', 'cancelled'])(
     'keeps state eligibility separate from the force-safe blocker: %s',
     (state) => {
       const order = snapshot({ state });
@@ -55,6 +55,18 @@ describe('Order cancellation policy', () => {
       });
     },
   );
+
+  it('blocks a draft attached to an open table but not a closed one', () => {
+    expect(getOrderCancellationPolicy(snapshot({
+      state: 'draft', table_sessions: [{ id: 17, closed_at: null }],
+    }))).toEqual({
+      can_cancel: false, can_cancel_payment: false,
+      reason_code: 'ORD_CANCEL_OPEN_TABLE_001',
+    });
+    expect(getOrderCancellationPolicy(snapshot({
+      state: 'draft', table_sessions: [{ id: 17, closed_at: new Date() }],
+    })).can_cancel).toBe(true);
+  });
 
   it.each(['delivered', 'finished', 'refunded'])(
     'blocks forced cancellation from %s even without line snapshots',
