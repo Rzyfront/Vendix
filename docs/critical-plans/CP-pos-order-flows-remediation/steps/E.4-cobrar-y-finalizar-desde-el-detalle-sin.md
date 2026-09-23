@@ -2,7 +2,7 @@
 id: E.4
 title: "Cobrar y finalizar desde el detalle sin callejones"
 phase: E
-status: in-progress
+status: done
 owner: Fabio
 updated: 2026-09-23
 contracts: [FB-04, FB-05, FB-20, FB-22, ERR-03, ERR-18, ERR-36]
@@ -38,5 +38,5 @@ skills: [vendix-backend, vendix-error-handling, vendix-frontend, vendix-zoneless
   - [x] El borrado duro rechaza sobre una orden con pagos y no tiene llamadores nuevos en el frontend.
   - [x] Finalizar con platos pendientes devuelve la lista de platos en el detalle del error.
   - [x] Cada test de rechazo fija el código del error, no solo el tipo de excepción.
-  - [ ] Los cuatro carriles de cobro verificados sobre esta pantalla, con evidencia por carril.
-- **Status:** in-progress — `evidence/E4-closeout-20260923.md` documenta UI/APIs, 122 tests de flujo, 3 de detalle, claim concurrente, rechazo `refunded` y el 404 de transporte corregido. `evidence/E4-fresh-mesas-partial-20260923.md`: UI mesa→pedido→detalle y cobro API #1170 200, una transacción y sesión pagada; falta clic final en UI. Staff abrió mesa con `direct_delivery` y `flow/pay` auto-finalizó: auditar si la semántica debe ser `dine_in`. Cuatro carriles heredados de `evidence/A2-four-lane-matrix.md`, no reejecutados íntegramente aquí. La orden QA pre-fix #1165 no fue reparada por SQL.
+  - [x] Los cuatro carriles de cobro verificados sobre esta pantalla, con evidencia por carril.
+- **Status:** done — `evidence/E4-clickpay-ui-20260923.md` prueba clic UI mesa→pedido→detalle→cobro #1175 (200, pago único y sesión pagada/abierta) y cierre explícito; `evidence/A2-four-lane-matrix.md` enlaza POS directo, borrador reabierto, detalle y adoptada. `E4-closeout-20260923.md` cubre negativos y 122 tests de flujo/3 de detalle. Semántica staff `direct_delivery` vs QR `dine_in` pendiente de decisión transversal; la orden QA pre-fix #1165 no se reparó por SQL.
