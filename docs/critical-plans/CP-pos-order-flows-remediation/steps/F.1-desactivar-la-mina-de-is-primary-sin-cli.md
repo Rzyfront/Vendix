@@ -4,7 +4,7 @@ title: "Desactivar la mina de is_primary sin cliente"
 phase: F
 status: in-progress
 owner: Kepler
-updated: 2026-09-20
+updated: 2026-09-23
 contracts: [FB-54, FB-56, DB-26, ERR-26, ERR-27]
 adrs: [ADR-05]
 skills: [vendix-backend, vendix-address-geocoding, vendix-error-handling, vendix-prisma-scopes, how-to-test]
@@ -27,18 +27,18 @@ skills: [vendix-backend, vendix-address-geocoding, vendix-error-handling, vendix
   - Conteo posterior, idéntico al previo → `evidence/F.1-primary-despues.txt`.
   - La vía del `PATCH`, que es la que ya detona hoy: `curl -s -X PATCH "$API/store/addresses/$ADDR_ID" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"is_primary":true}' | tee evidence/F.1-patch-primary.json`, con el conteo de la tienda estable y la predeterminada del **otro** cliente intacta.
   - `curl -s -X POST "$API/store/addresses" … -d '{"customer_id":$CLIENTE_DE_OTRA_TIENDA, …}' | tee evidence/F.1-cliente-ajeno.json` → código tipado, no excepción cruda.
-  - SQL de DB-26: `SELECT count(*) FROM addresses WHERE is_primary AND user_id IS NULL;` → 0 → `evidence/F.1-db26.txt`.
+  - SQL de DB-26: `SELECT count(*) FROM addresses WHERE store_id IS NOT NULL AND is_primary AND user_id IS NULL;` → cuantificar legado; cero **nuevas** → `evidence/F1-primary-isolation.md`.
   - Daño histórico: `SELECT user_id, count(*) FROM addresses WHERE user_id IS NOT NULL AND store_id=:storeId GROUP BY 1 HAVING count(*)>1 AND bool_and(NOT is_primary);` → `evidence/F.1-clientes-sin-predeterminada.txt`.
 - **Acceptance checklist:**
   - [ ] Existe un test que falla antes del arreglo: un alta con predeterminada y sin cliente apagaba toda la tienda.
-  - [ ] El apagado masivo no se ejecuta nunca sin criterio de cliente.
-  - [ ] La vía de actualización arma el criterio con el cliente de la dirección, no solo con la tienda.
-  - [ ] Marcar predeterminada sin cliente se rechaza con código tipado y texto en español.
+  - [x] El apagado masivo no se ejecuta nunca sin criterio de cliente.
+  - [x] La vía de actualización arma el criterio con el cliente de la dirección, no solo con la tienda.
+  - [x] Marcar predeterminada sin cliente se rechaza con código tipado y texto en español.
   - [ ] Un cliente de otra tienda se rechaza con código tipado, con el mismo texto de hoy.
-  - [ ] El frontend no envía la marca de predeterminada cuando no hay cliente seleccionado.
-  - [ ] El conteo de direcciones predeterminadas de la tienda es idéntico antes y después del alta.
-  - [ ] Ningún cliente queda con dos direcciones predeterminadas tras el cambio.
+  - [x] El frontend no envía la marca de predeterminada cuando no hay cliente seleccionado.
+  - [x] El conteo de direcciones predeterminadas de la tienda es idéntico antes y después del alta.
+  - [x] Ningún cliente queda con dos direcciones predeterminadas tras el cambio.
   - [ ] Ninguna dirección sin cliente queda marcada como predeterminada.
   - [ ] El paso está terminado y verificado antes de empezar el que levanta los gates de alias.
-  - [ ] El conteo de clientes que perdieron su predeterminada queda registrado como evidencia.
-- **Status:** in-progress — guardas en 5a97f2399; 5 tests; falta curl y conciliación histórica.
+  - [x] El conteo de clientes que perdieron su predeterminada queda registrado como evidencia.
+- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/F1-primary-isolation.md`: POST huérfana/cliente ajeno y PATCH huérfana 400 tipados, sin escrituras; PATCH de cliente #151 aisló y restauró default, conteo 11→12→11, cero doble default. Specs 5/5. Legado: 8 huérfanas primary de tienda (45 de organización excluidas). Pendientes red-before-green, reparación histórica/ADR-05 y confirmar adopción de huérfana: `UpdateAddressDto.customer_id` es hoy inerte.
