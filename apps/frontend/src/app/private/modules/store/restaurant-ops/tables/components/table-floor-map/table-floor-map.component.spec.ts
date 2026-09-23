@@ -80,4 +80,38 @@ describe('TableFloorMapComponent auto-layout', () => {
     expect(fixture.componentInstance.cells().map(({ table: item, x, y }) => [item.id, x, y]))
       .toEqual([[15, 0, 0], [2, 522, 0], [3, 190, 0], [16, 696, 0]]);
   });
+
+  it('shows the session opener in the occupied tile and accessible label', () => {
+    fixture.componentRef.setInput('tables', [{
+      ...table(7, 0, 0),
+      status: 'occupied',
+      active_session: {
+        id: 41, order_id: 90, opened_by: 4,
+        waiter: { id: 4, first_name: 'Ana', last_name: 'Rojas' },
+        opened_at: '2026-09-23T12:00:00Z', closed_at: null, guest_count: 2,
+      },
+    }]);
+    fixture.detectChanges();
+
+    const tile = fixture.nativeElement.querySelector('.table-cell') as HTMLElement;
+    expect(tile.getAttribute('aria-label')).toContain('Mesero: Ana Rojas');
+    expect(tile.querySelector('.footer-meta')?.textContent?.trim()).toBe('Ana Rojas');
+    expect(tile.textContent).not.toContain('#41');
+  });
+
+  it('keeps an anonymous QR session unnamed rather than inventing a waiter', () => {
+    fixture.componentRef.setInput('tables', [{
+      ...table(8, 0, 0),
+      status: 'occupied',
+      active_session: {
+        id: 42, order_id: 91, opened_by: null, waiter: null,
+        opened_at: '2026-09-23T12:00:00Z', closed_at: null, guest_count: 2,
+      },
+    }]);
+    fixture.detectChanges();
+
+    const tile = fixture.nativeElement.querySelector('.table-cell') as HTMLElement;
+    expect(tile.getAttribute('aria-label')).not.toContain('Mesero:');
+    expect(tile.querySelector('.footer-meta')?.textContent?.trim()).toBe('#42');
+  });
 });

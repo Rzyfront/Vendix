@@ -140,4 +140,25 @@ describe('TableSessionPageComponent waiter delivery', () => {
     expect(component.canDeliver({ ...direct, delivered_at: '2026-09-23T12:05:00Z' })).toBeFalse();
     expect(component.canDeliver({ ...direct, cancelled_at: '2026-09-23T12:05:00Z' })).toBeFalse();
   });
+
+  it('resolves the visible waiter name from the session table projection', () => {
+    component.session.set({
+      ...session([]),
+      table: {
+        id: 2, name: 'Mesa 2', zone: null, status: 'occupied',
+        waiter: { id: 4, first_name: 'Ana', last_name: 'Rojas' },
+      },
+    });
+
+    expect(component.waiterName()).toBe('Ana Rojas');
+  });
+
+  it('leaves the waiter label empty for a QR session without an opener', () => {
+    component.session.set({
+      ...session([]), opened_by: null,
+      table: { id: 2, name: 'Mesa 2', zone: null, status: 'occupied', waiter: null },
+    });
+
+    expect(component.waiterName()).toBeNull();
+  });
 });
