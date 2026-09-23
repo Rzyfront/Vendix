@@ -1,5 +1,4 @@
 import { Component, computed, inject, input, output, signal } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
 import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, of, catchError, map } from 'rxjs';
@@ -29,12 +28,45 @@ import {
 } from '../../../price-tiers';
 import { PriceResolverService } from '../../../../../../shared/services/pricing';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import {
+  estimateNetBase,
+  parseTaxRateFraction,
+} from '../../../products/utils/product-tax-inclusive.util';
+
+/**
+ * Tasa de una línea para el ESTIMADO del modal (P1-1). El impuesto real lo
+ * resuelve el backend al guardar (`quotation-line-tax.util.ts`); aquí sólo se
+ * replica el signo: lo incluido se despeja del precio, lo agregado se suma.
+ */
+interface QuotationLineTaxEntry {
+  rate: number;
+  inclusive: boolean;
+  /** `iva`, `inc`, … — `null` en línea libre (sin categoría que lo afirme). */
+  type: string | null;
+}
+
+/** Tasas del producto con la misma cadena que el backend: asignación ?? tasa. */
+function taxEntriesFromAssignments(assignments: any[] | null | undefined): QuotationLineTaxEntry[] {
+  const entries: QuotationLineTaxEntry[] = [];
+  for (const assignment of assignments ?? []) {
+    const category = assignment?.tax_categories;
+    for (const taxRate of category?.tax_rates ?? []) {
+      const rate = parseTaxRateFraction(taxRate?.rate);
+      if (rate <= 0) continue;
+      entries.push({
+        rate,
+        inclusive: !!(assignment?.is_inclusive ?? taxRate?.is_inclusive ?? false),
+        type: category?.tax_type ?? 'iva',
+      });
+    }
+  }
+  return entries;
+}
 
 @Component({
   selector: 'app-quotation-form-modal',
   standalone: true,
   imports: [
-    DecimalPipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -300,9 +332,9 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                           {{ itemGroup.get('variant_sku')?.value }}
                         </span>
                       }
-                      @if (itemGroup.get('tax_rate')?.value > 0) {
+                      @if (!isCustomLine(itemGroup) && taxLabel(itemGroup)) {
                         <span class="text-xs" style="color: var(--color-text-secondary);">
-                          IVA: {{ (itemGroup.get('tax_rate')?.value * 100) | number:'1.0-0' }}%
+                          {{ taxLabel(itemGroup) }}
                         </span>
                       }
                       @if (canShowTierSelector(asFormGroup(itemGroup))) {
@@ -351,7 +383,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                             class="w-[56px] rounded border px-1 py-1 text-center text-xs"
                             style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 16px;"
                             (change)="onCustomTaxChange(i, $event)"
-                          />% IVA
+                          />% imp.
                         </span>
                       } @else {
                         <span class="whitespace-nowrap text-xs" style="color: var(--color-text-secondary);">
@@ -360,7 +392,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                       }
 
                       <span class="whitespace-nowrap font-mono text-sm font-semibold" style="color: var(--color-text-primary);">
-                        {{ itemGroup.get('total_price')?.value | currency }}
+                        {{ itemGroup.get('line_final_total')?.value | currency }}
                       </span>
 
                       <button
@@ -391,7 +423,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                 }
                 @if (taxAmount() > 0) {
                   <div class="flex justify-between text-sm">
-                    <span style="color: var(--color-text-secondary);">Impuestos</span>
+                    <span style="color: var(--color-text-secondary);">Impuestos (estimado)</span>
                     <span class="font-mono">{{ taxAmount() | currency }}</span>
                   </div>
                 }
@@ -671,8 +703,12 @@ export class QuotationFormModalComponent {
                 1,
             ) || 1,
           base_price: Number(anyItem.product?.base_price ?? item.unit_price),
+          tax_entries: taxEntriesFromAssignments(anyItem.product?.product_tax_assignments),
         }));
       });
+      // Re-estima cada línea con el flag incluido/agregado real: el
+      // `tax_amount_item` guardado por cotizaciones viejas sumaba a ciegas.
+      for (let i = 0; i < this.itemsArray.length; i++) this.recalculateItem(i);
       this.recalculateGrandTotal();
     }
   }
@@ -753,7 +789,8 @@ export class QuotationFormModalComponent {
 
   addProductWithVariant(product: any, variant: any): void {
     const basePrice = variant?.price_override ?? product.price;
-    const taxRate = this.calculateRateSum(product);
+    const taxEntries = taxEntriesFromAssignments(product.tax_assignments);
+    const taxRate = taxEntries.reduce((sum, entry) => sum + entry.rate, 0);
 
     const productId = Number(product.id);
     if (Number.isFinite(productId)) {
@@ -780,6 +817,7 @@ export class QuotationFormModalComponent {
       units_per_package: null,
       price_unit_quantity: Number(product.price_unit_quantity ?? 1) || 1,
       base_price: Number(product.price ?? basePrice),
+      tax_entries: taxEntries,
     }));
 
     // El total y el impuesto de la línea los deriva `recalculateItem`, que es
@@ -825,7 +863,7 @@ export class QuotationFormModalComponent {
     return pid === undefined || pid === null || pid === '';
   }
 
-  /** IVA en % (0-100) para la fila personalizada; guarda fraccion 0-1. */
+  /** Impuesto en % (0-100) para la fila personalizada; guarda fraccion 0-1. */
   customTaxPercent(itemGroup: any): number {
     return Number(itemGroup.get('tax_rate')?.value || 0) * 100;
   }
@@ -869,24 +907,57 @@ export class QuotationFormModalComponent {
     return Number.isFinite(scale) && scale > 1 ? scale : 1;
   }
 
+  /** Tasas de la línea: las del producto, o la digitada en una línea libre. */
+  private lineTaxEntries(group: FormGroup): QuotationLineTaxEntry[] {
+    if (this.isCustomLine(group)) {
+      const rate = Number(group.get('tax_rate')?.value || 0);
+      // Línea libre: la tasa digitada se suma sobre el precio (sin tipo fiscal).
+      return rate > 0 ? [{ rate, inclusive: false, type: null }] : [];
+    }
+    return (group.get('tax_entries')?.value as QuotationLineTaxEntry[] | null) ?? [];
+  }
+
+  /** Rótulo por tipo real: «IVA 19% incl.», «INC 8% incl.», «IVA 19% + IBUA 5%». */
+  taxLabel(itemGroup: any): string {
+    return this.lineTaxEntries(itemGroup as FormGroup)
+      .map((entry) => {
+        const pct = Math.round(entry.rate * 10000) / 100;
+        const type = (entry.type || 'iva').toUpperCase();
+        return `${type} ${pct}%${entry.inclusive ? ' incl.' : ''}`;
+      })
+      .join(' + ');
+  }
+
+  /**
+   * ESTIMADO de la línea (P1-1). El backend recalcula el impuesto al guardar
+   * con las tasas del producto; esto sólo anticipa el signo con la misma regla:
+   * lo incluido se despeja del precio (no crece el total) y lo agregado se
+   * suma sobre la base neta. Puede diferir en centavos del truncado DIAN.
+   */
   recalculateItem(index: number): void {
     const group = this.itemsArray.at(index) as FormGroup;
     const qty = Number(group.get('quantity')?.value || 0);
     const price = Number(group.get('unit_price')?.value || 0);
     const discount = Number(group.get('discount_amount')?.value || 0);
-    const taxRate = Number(group.get('tax_rate')?.value || 0);
+    const entries = this.lineTaxEntries(group);
+    const inclusiveRate = entries
+      .filter((entry) => entry.inclusive)
+      .reduce((sum, entry) => sum + entry.rate, 0);
+    const totalRate = entries.reduce((sum, entry) => sum + entry.rate, 0);
 
-    // `total_price` es el BRUTO de la línea: el backend resta el descuento una
-    // sola vez en la cabecera (`subtotal - descuentos + impuestos`). Mandarlo
-    // ya neteado lo restaba dos veces y la cotización guardada quedaba por
-    // debajo de lo que mostraba esta pantalla.
-    const totalPrice = (price * qty) / this.effectivePriceUnit(group);
+    // `total_price` es la base NETA de la línea antes del descuento: el
+    // backend resta el descuento una sola vez en la cabecera
+    // (`subtotal - descuentos + impuestos`).
+    const lineUnits = qty / this.effectivePriceUnit(group);
+    const totalPrice = estimateNetBase(price, inclusiveRate) * lineUnits;
     // La base gravable va después del descuento, no sobre el bruto.
-    const taxAmountItem = Math.max(totalPrice - discount, 0) * taxRate;
+    const taxAmountItem = Math.max(totalPrice - discount, 0) * totalRate;
 
     group.patchValue({
+      tax_rate: totalRate,
       total_price: totalPrice,
       tax_amount_item: taxAmountItem,
+      line_final_total: Math.max(totalPrice - discount, 0) + taxAmountItem,
     });
     this.recalculateGrandTotal();
   }
@@ -907,19 +978,6 @@ export class QuotationFormModalComponent {
     // Misma fórmula que la cabecera del backend, para que lo que se ve acá sea
     // exactamente lo que queda guardado.
     this.grandTotal.set(subtotal - discount + tax);
-  }
-
-  private calculateRateSum(product: any): number {
-    return (
-      product.tax_assignments?.reduce((rateSum: number, assignment: any) => {
-        const assignmentRate =
-          assignment.tax_categories?.tax_rates?.reduce(
-            (sum: number, tr: any) => sum + parseFloat(tr.rate || '0'),
-            0,
-          ) || 0;
-        return rateSum + assignmentRate;
-      }, 0) || 0
-    );
   }
 
   // ── Save ──
@@ -994,6 +1052,7 @@ export class QuotationFormModalComponent {
     /** *Price unit* del producto: 1000 = `unit_price` cotiza 1.000 unidades. */
     price_unit_quantity?: number | null;
     base_price?: number;
+    tax_entries?: QuotationLineTaxEntry[];
   }): FormGroup {
     return this.fb.group({
       product_id: [item.product_id],
@@ -1014,6 +1073,9 @@ export class QuotationFormModalComponent {
       units_per_package: [item.units_per_package ?? null],
       price_unit_quantity: [item.price_unit_quantity ?? 1],
       base_price: [item.base_price ?? item.unit_price],
+      // Estimado del modal (P1-1): no viajan al backend.
+      tax_entries: [item.tax_entries ?? []],
+      line_final_total: [0],
     });
   }
 
