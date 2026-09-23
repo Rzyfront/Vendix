@@ -167,6 +167,88 @@ describe('RefundFlowService — refund overhaul invariants', () => {
     });
   });
 
+  describe('impuesto del envío en la devolución', () => {
+    it('suma el impuesto del envío devuelto a tax_amount y al desglose, después del prorrateo de productos', async () => {
+      mockPrisma.orders.findFirst.mockResolvedValue({
+        id: 1, store_id: 10, state: 'finished',
+        payments: [{ id: 100, state: 'succeeded' }],
+        stores: { id: 10, organization_id: 1 },
+        order_items: [],
+      });
+      // Productos: 10.000 + INC 800. Envío bruto 15.000 con INC 1.111,11
+      // incluido; se devuelve todo ⇒ 1.111,11 de INC del envío.
+      mockCalculationService.calculate.mockResolvedValue({
+        items: [],
+        subtotal_refund: 10000,
+        tax_refund: 800,
+        shipping_refund: 15000,
+        shipping_tax_refund: 1111.11,
+        shipping_tax_type: 'inc',
+        total_refund: 25800,
+        is_full_refund: false,
+        already_refunded: 0,
+        max_refundable: 25800,
+      });
+      mockPrisma.stores.findUnique.mockResolvedValue({ default_location_id: null, organization_id: 1 });
+      mockPrisma.refunds.create.mockResolvedValue({ id: 999, state: 'pending' });
+      mockPrisma.refunds.update.mockResolvedValue({ id: 999, state: 'completed', refund_items: [] });
+      mockPrisma.order_items.findMany.mockResolvedValue([
+        { order_item_taxes: [{ tax_type: 'inc', tax_amount: 800 }] },
+      ]);
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockPrisma));
+      mockPrisma.refund_items.create.mockResolvedValue({ id: 1 });
+      mockPrisma.payments.update.mockResolvedValue({});
+
+      await service.createRefund(1, {
+        items: [], include_shipping: true, refund_method: 'store_credit', reason: 'test',
+      } as any);
+
+      const payload = eventEmitter.emit.mock.calls.find(([n]) => n === 'refund.completed')![1];
+      expect(payload.tax_amount).toBe(1911.11);
+      expect(payload.tax).toBe(1911.11);
+      expect(payload.tax_breakdown).toEqual([
+        { tax_type: 'inc', tax_amount: 800 },
+        { tax_type: 'inc', tax_amount: 1111.11 },
+      ]);
+      // Asiento de devolución: DR ingreso (amount − tax) + DR impuestos = CR caja.
+      const debit =
+        Math.round((payload.amount - payload.tax_amount) * 100) +
+        payload.tax_breakdown.reduce((s: number, r: any) => s + Math.round(r.tax_amount * 100), 0);
+      expect(debit).toBe(Math.round(payload.amount * 100));
+    });
+
+    it('sin copia del envío: payload idéntico al histórico', async () => {
+      mockPrisma.orders.findFirst.mockResolvedValue({
+        id: 1, store_id: 10, state: 'finished',
+        payments: [{ id: 100, state: 'succeeded' }],
+        stores: { id: 10, organization_id: 1 },
+        order_items: [],
+      });
+      mockCalculationService.calculate.mockResolvedValue({
+        items: [], subtotal_refund: 10000, tax_refund: 800, shipping_refund: 5000,
+        shipping_tax_refund: 0, shipping_tax_type: null,
+        total_refund: 15800, is_full_refund: false, already_refunded: 0, max_refundable: 15800,
+      });
+      mockPrisma.stores.findUnique.mockResolvedValue({ default_location_id: null, organization_id: 1 });
+      mockPrisma.refunds.create.mockResolvedValue({ id: 999, state: 'pending' });
+      mockPrisma.refunds.update.mockResolvedValue({ id: 999, state: 'completed', refund_items: [] });
+      mockPrisma.order_items.findMany.mockResolvedValue([
+        { order_item_taxes: [{ tax_type: 'inc', tax_amount: 800 }] },
+      ]);
+      mockPrisma.$transaction.mockImplementation(async (cb: any) => cb(mockPrisma));
+      mockPrisma.refund_items.create.mockResolvedValue({ id: 1 });
+      mockPrisma.payments.update.mockResolvedValue({});
+
+      await service.createRefund(1, {
+        items: [], include_shipping: true, refund_method: 'store_credit', reason: 'test',
+      } as any);
+
+      const payload = eventEmitter.emit.mock.calls.find(([n]) => n === 'refund.completed')![1];
+      expect(payload.tax_amount).toBe(800);
+      expect(payload.tax_breakdown).toEqual([{ tax_type: 'inc', tax_amount: 800 }]);
+    });
+  });
+
   describe('cash-register gate', () => {
     it('does NOT record a cash-register movement for original_payment', async () => {
       // ARRANGE: same as above but refund_method = 'original_payment' and

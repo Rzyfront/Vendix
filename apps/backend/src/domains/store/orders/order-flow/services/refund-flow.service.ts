@@ -13,6 +13,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import {
   buildTaxBreakdown,
   scaleBreakdownToTotal,
+  type TaxBreakdownItem,
 } from 'src/common/interfaces/tax-breakdown.interface';
 import {
   RefundCalculationService,
@@ -476,6 +477,25 @@ export class RefundFlowService {
             buildTaxBreakdown(items.flatMap((i) => i.order_item_taxes || [])),
             Number(calculation.tax_refund || 0),
           );
+          // Impuesto del envío devuelto (proporcional a la copia de la orden):
+          // se suma DESPUÉS del prorrateo de productos, con su propio tipo,
+          // para reversar 2408/2436 y no el ingreso de flete. Si los productos
+          // no dejaron desglose tipado pero sí devolvieron impuesto, se
+          // antepone una fila IVA por él (misma cuenta que la línea legada):
+          // un desglose no vacío hace que el asiento ignore el total escalar.
+          const shipping_tax_refund = Number(calculation.shipping_tax_refund || 0);
+          const product_tax_refund = Number(calculation.tax_refund || 0);
+          if (shipping_tax_refund > 0 && calculation.shipping_tax_type) {
+            if (tax_breakdown.length === 0 && product_tax_refund > 0) {
+              tax_breakdown.push({ tax_type: 'iva', tax_amount: product_tax_refund });
+            }
+            tax_breakdown.push({
+              tax_type: calculation.shipping_tax_type as TaxBreakdownItem['tax_type'],
+              tax_amount: shipping_tax_refund,
+            });
+          }
+          const refund_tax_total =
+            Math.round(product_tax_refund * 100 + shipping_tax_refund * 100) / 100;
 
           // Match manual resolution: emit only after successful completion.
           if (refundCompleted) {
@@ -486,8 +506,9 @@ export class RefundFlowService {
               store_id: order.store_id,
               amount: calculation.total_refund,
               subtotal: calculation.subtotal_refund,
-              tax: calculation.tax_refund,
-              tax_amount: calculation.tax_refund,
+              // Productos + impuesto del envío devuelto.
+              tax: refund_tax_total,
+              tax_amount: refund_tax_total,
               tax_breakdown,
               shipping: calculation.shipping_refund,
               is_full_refund: calculation.is_full_refund,

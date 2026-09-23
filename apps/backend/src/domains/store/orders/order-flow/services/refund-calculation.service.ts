@@ -37,6 +37,16 @@ export interface RefundCalculationResult {
   subtotal_refund: number;
   tax_refund: number;
   shipping_refund: number;
+  /**
+   * Impuesto del envío contenido en `shipping_refund` (que es BRUTO): la
+   * parte proporcional de la copia `orders.shipping_tax_amount`, a centavos.
+   * 0 si la orden no tiene copia o no se devuelve envío. NO se suma a
+   * `total_refund` (ya va dentro de `shipping_refund`) ni a `tax_refund`
+   * (impuesto de productos, como `orders.tax_amount`).
+   */
+  shipping_tax_refund: number;
+  /** Tipo fiscal de la copia del envío (null sin copia). */
+  shipping_tax_type: string | null;
   total_refund: number;
   is_full_refund: boolean;
   already_refunded: number;
@@ -226,6 +236,21 @@ export class RefundCalculationService {
 
     const total_refund = subtotal_refund + tax_refund + shipping_refund;
 
+    // Impuesto del envío: proporcional a lo devuelto del envío BRUTO, sobre
+    // la copia congelada de la orden (nunca la tarifa actual), en centavos.
+    const shipping_refund_cents = Math.round(shipping_refund * 100);
+    const shipping_cost_cents = Math.round((Number(order.shipping_cost) || 0) * 100);
+    const shipping_tax_cents = Math.round(
+      (Number(order.shipping_tax_amount) || 0) * 100,
+    );
+    const shipping_tax_refund_cents =
+      shipping_refund_cents > 0 && shipping_cost_cents > 0 && shipping_tax_cents > 0
+        ? Math.min(
+            shipping_tax_cents,
+            Math.round((shipping_tax_cents * shipping_refund_cents) / shipping_cost_cents),
+          )
+        : 0;
+
     if (total_refund > max_refundable + 0.01) {
       throw new BadRequestException(
         `Total refund (${total_refund.toFixed(2)}) exceeds max refundable amount (${max_refundable.toFixed(2)})`,
@@ -246,6 +271,11 @@ export class RefundCalculationService {
       subtotal_refund: Math.round(subtotal_refund * 100) / 100,
       tax_refund: Math.round(tax_refund * 100) / 100,
       shipping_refund: Math.round(shipping_refund * 100) / 100,
+      shipping_tax_refund: shipping_tax_refund_cents / 100,
+      shipping_tax_type:
+        shipping_tax_refund_cents > 0
+          ? (order.shipping_tax_type ?? null)
+          : null,
       total_refund: Math.round(total_refund * 100) / 100,
       is_full_refund,
       already_refunded,
