@@ -2125,7 +2125,7 @@ export class OrderFlowService {
         if (kitchenStatus !== 'ready') {
           throw new VendixHttpException(
             ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE,
-            `El plato "${item.product_name}" todavia no esta listo en cocina (estado: ${kitchenStatus ?? 'sin enviar'})`,
+            `El plato "${item.product_name}" todavía no está listo (estado: ${kitchenStatus ?? 'sin enviar'}). Espera a que cocina lo marque como listo en el KDS antes de entregarlo.`,
           );
         }
       }

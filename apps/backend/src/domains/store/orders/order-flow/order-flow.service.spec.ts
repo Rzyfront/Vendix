@@ -1923,6 +1923,19 @@ describe('OrderFlowService.deliverOrderItem — sync orden→cocina (paso 2)', (
     expect(eventEmitter.emit).not.toHaveBeenCalled();
     expect(result).toEqual(orderView);
   });
+
+  it('un plato pendiente rechaza sin escribir y dirige al operador al KDS', async () => {
+    const { service, prismaMock } = buildService({
+      item: readyItem({ kitchen_ticket_items: [{ id: 901, status: 'pending' }] }),
+    });
+
+    await expect(service.deliverOrderItem(ORDER_ID, ITEM_ID)).rejects.toMatchObject({
+      errorCode: ErrorCodes.ORDER_ITEM_NOT_DELIVERABLE.code,
+      message: expect.stringMatching(/KDS/),
+    });
+    expect(prismaMock.order_items.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.kitchen_ticket_items.update).not.toHaveBeenCalled();
+  });
 });
 
 /**
