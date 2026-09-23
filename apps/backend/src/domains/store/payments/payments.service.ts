@@ -1337,10 +1337,8 @@ export class PaymentsService {
         // 2. Process payment if required
         let payment: any = null;
         let paidSessionId: number | null = null;
-        const isDigitalPayment = await this.isDeferredDigitalMethod(
-          tx,
-          createPosPaymentDto,
-        );
+        const { isDigitalPayment, isOnDelivery } =
+          await this.resolvePosPaymentRoute(tx, createPosPaymentDto);
 
         if (createPosPaymentDto.requires_payment && !isDigitalPayment) {
           // Direct methods (cash, card, bank_transfer) — process inside transaction
@@ -1348,6 +1346,7 @@ export class PaymentsService {
             tx,
             order,
             createPosPaymentDto,
+            isOnDelivery,
           );
           if (
             orderCreation.tableSessionOrderId != null &&
@@ -1365,7 +1364,7 @@ export class PaymentsService {
           await this.updateOrderPaymentStatus(
             tx,
             order.id,
-            'succeeded',
+            isOnDelivery ? 'pending_payment' : 'succeeded',
             // QUI-431 — difiere a fulfillment para domicilio O serializado.
             // OJO: tras forzar el delivery_type, order.delivery_type ya es
             // 'pickup' para serializado, por eso se incluye `hasSerialized`.
@@ -1433,6 +1432,7 @@ export class PaymentsService {
         const isDirectDeliveryFinished =
           createPosPaymentDto.requires_payment &&
           !isDigitalPayment &&
+          !isOnDelivery &&
           order.delivery_type !== 'home_delivery' &&
           !hasSerialized;
 
@@ -3501,28 +3501,30 @@ export class PaymentsService {
   }
 
   /**
-   * True when a POS payment must be DEFERRED past the payment transaction
-   * commit: the method requires a real charge (`requires_payment`) AND is a
-   * digital gateway (`wompi` | `wallet`) that only settles asynchronously via
-   * webhook. Cash / card / bank_transfer settle in-band and return `false`.
-   *
-   * Single source of truth (mirror of the historical inline `isDigitalPayment`
-   * check in `processPosPayment`). Also gates the table-session close in
-   * `applyPosPaymentToTableSession`: a deferred digital payment must NOT close
-   * the table until its webhook confirms the charge (otherwise the mesa would
-   * flip to `cleaning` while the diner could still abandon the Wompi widget).
+   * Resolve POS routing once from the selected method. Digital gateways are
+   * processed after commit; ON_DELIVERY is recorded now but settled later.
+   * The latter flag drives both the payment row and the order state.
    */
-  private async isDeferredDigitalMethod(
+  private async resolvePosPaymentRoute(
     tx: any,
     dto: CreatePosPaymentDto,
-  ): Promise<boolean> {
-    if (!dto.requires_payment) return false;
+  ): Promise<{ isDigitalPayment: boolean; isOnDelivery: boolean }> {
+    if (!dto.requires_payment) {
+      return { isDigitalPayment: false, isOnDelivery: false };
+    }
     const method = await tx.store_payment_methods.findUnique({
       where: { id: dto.store_payment_method_id },
       include: { system_payment_method: true },
     });
     const type = method?.system_payment_method?.type || '';
-    return ['wompi', 'wallet'].includes(type);
+    const isOnDelivery = this.isOnDeliveryMethod(
+      dto.store_payment_method_id,
+      method,
+    );
+    return {
+      isDigitalPayment: !isOnDelivery && ['wompi', 'wallet'].includes(type),
+      isOnDelivery,
+    };
   }
 
   /**
@@ -4697,6 +4699,7 @@ export class PaymentsService {
     tx: any,
     order: any,
     dto: CreatePosPaymentDto,
+    resolvedIsOnDelivery?: boolean,
   ) {
     // store_id is guaranteed by processPosPayment (resolved from RequestContext).
     // Re-assert here so PaymentGateway gets a non-null storeId.
@@ -4726,16 +4729,15 @@ export class PaymentsService {
 
     // Contra entrega — resuelto ANTES de leer `system_payment_method.type`
     // para que una fila incompleta deje rastro en el log en vez de morir muda.
-    const isOnDelivery = this.isOnDeliveryMethod(
-      dto.store_payment_method_id,
-      paymentMethod,
-    );
+    const isOnDelivery =
+      resolvedIsOnDelivery ??
+      this.isOnDeliveryMethod(dto.store_payment_method_id, paymentMethod);
 
     // Check if method requires gateway processing (digital/async methods)
     const methodType = paymentMethod.system_payment_method.type;
     const digitalMethods = ['wompi', 'wallet'];
 
-    if (digitalMethods.includes(methodType)) {
+    if (!isOnDelivery && digitalMethods.includes(methodType)) {
       // Decrypt credentials before passing to gateway processor
       const decryptedConfig = this.paymentEncryption.decryptConfig(
         (paymentMethod.custom_config || {}) as Record<string, any>,

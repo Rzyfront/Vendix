@@ -633,11 +633,9 @@ export class PosPaymentService {
         initial_payment_method_id: creditConfig.initial_payment_method_id,
       };
     } else if (paymentRequest) {
-      // Pago del método elegido. Incluye cash_on_delivery: su
-      // `store_payment_method_id` se envía igual y el processor backend
-      // (cash-on-delivery.processor) devuelve 'pending', dejando la orden en
-      // pending_payment. Ya NO existe el eje "contra entrega" sin pago: siempre
-      // se envía el pago producido por el collector.
+      // Pago del método elegido. Incluye contra entrega: el backend usa el
+      // `processing_mode` del método para crear el pago `pending`, conservar
+      // el saldo y dejar la orden en `pending_payment` hasta el recaudo.
       sale_data['requires_payment'] = true;
       sale_data['payment_form'] = '1'; // DIAN: contado
       sale_data['store_payment_method_id'] = parseInt(

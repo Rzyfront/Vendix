@@ -3185,6 +3185,7 @@ describe('PaymentsService', () => {
         processing_mode?: payment_processing_mode_enum | null;
       },
       tableSessionOrderId: number | null = null,
+      deliveryType: 'home_delivery' | 'direct_delivery' = 'home_delivery',
     ) => {
       mockRequestContext({ store_id: 1, organization_id: 1 });
 
@@ -3195,7 +3196,7 @@ describe('PaymentsService', () => {
         // Contra entrega real: la mercancía viaja y el dinero se recauda en
         // destino. `home_delivery` mantiene el consumo de stock diferido a
         // fulfillment, así que el caso aísla el reconocimiento del dinero.
-        delivery_type: 'home_delivery',
+        delivery_type: deliveryType,
         grand_total: new Prisma.Decimal(100),
         total_paid: new Prisma.Decimal(0),
         remaining_balance: new Prisma.Decimal(100),
@@ -3337,6 +3338,98 @@ describe('PaymentsService', () => {
           }),
         }),
       );
+    });
+
+    it.each(['home_delivery', 'direct_delivery'] as const)(
+      'ON_DELIVERY %s deja pago y orden pendientes sin consumir stock',
+      async (deliveryType) => {
+        // El nombre NO es el discriminador: cualquier tipo ON_DELIVERY
+        // debe seguir la misma rama de estado y saldo.
+        const { tx } = arrangePosSale(
+          {
+            type: 'card_at_door',
+            processing_mode: payment_processing_mode_enum.ON_DELIVERY,
+          },
+          null,
+          deliveryType,
+        );
+
+        await expect(
+          service.processPosPayment(buildPosDto(), posUser),
+        ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+        expect(tx.payments.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ state: 'pending' }),
+          }),
+        );
+        expect(tx.orders.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ state: 'pending_payment' }),
+          }),
+        );
+        expect(tx.orders.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              total_paid: 0,
+              remaining_balance: 100,
+            }),
+          }),
+        );
+        expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
+        expect(emittedEventNames()).not.toContain('payment.received');
+      },
+    );
+
+    it.each(['cash', 'card'])(
+      '%s DIRECT conserva pago succeeded y estado de orden existente',
+      async (type) => {
+        const { tx } = arrangePosSale(
+          { type, processing_mode: payment_processing_mode_enum.DIRECT },
+          null,
+          'direct_delivery',
+        );
+        jest
+          .spyOn(service as any, 'hasPendingKitchenItemsTx')
+          .mockResolvedValue(false);
+
+        await expect(
+          service.processPosPayment(buildPosDto(), posUser),
+        ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+        expect(tx.payments.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ state: 'succeeded' }),
+          }),
+        );
+        expect(tx.orders.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ state: 'finished' }),
+          }),
+        );
+      },
+    );
+
+    it('Wompi sigue en pending_payment para procesar tras el commit', async () => {
+      const { tx } = arrangePosSale({
+        type: 'wompi',
+        processing_mode: payment_processing_mode_enum.DIRECT,
+      });
+      // La pasarela no escribe saldo dentro de esta transacción; la primera
+      // lectura de orden ya es el refresh posterior a eventos.
+      tx.orders.findUnique.mockReset().mockRejectedValue(new Error(STOP_AFTER_EVENTS));
+
+      await expect(
+        service.processPosPayment(buildPosDto(), posUser),
+      ).rejects.toThrow(STOP_AFTER_EVENTS);
+
+      expect(tx.payments.create).not.toHaveBeenCalled();
+      expect(tx.orders.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ state: 'pending_payment' }),
+        }),
+      );
+      expect(commitOrderDeliveryMock).not.toHaveBeenCalled();
     });
 
     it('el efectivo normal sigue reconociendo caja y emitiendo su evento (no-regresión)', async () => {
