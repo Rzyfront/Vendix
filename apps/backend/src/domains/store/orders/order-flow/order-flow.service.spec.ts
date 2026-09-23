@@ -180,6 +180,217 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
   });
 });
 
+/** D.1 — la reversa de cocina devuelve consumos reales del ítem, no el plato vendido. */
+describe('OrderFlowService.cancelOrder — kitchenDisposition y reversa de hojas BOM', () => {
+  const ORDER_ID = 8101;
+  const ITEM_ID = 8102;
+  const TICKET_ID = 8103;
+  const reason = '  cliente canceló el plato  ';
+
+  const firedItem = (status: 'pending' | 'in_preparation' | 'ready') => ({
+    id: ITEM_ID,
+    inventory_consumed_at_fire: true,
+    cancelled_at: null,
+    products: { product_type: 'prepared' },
+    kitchen_ticket_items: [{
+      kitchen_ticket_id: TICKET_ID,
+      kitchen_ticket: { id: TICKET_ID, status },
+    }],
+  });
+
+  const buildKitchenHarness = (
+    status: 'pending' | 'in_preparation' | 'ready',
+    consumptions: Array<{
+      product_id: number;
+      product_variant_id: number | null;
+      quantity_change: number;
+    }> = [],
+  ) => {
+    const prismaMock = createPrismaMock({
+      orders: ['updateMany', 'update'],
+      order_items: ['findMany', 'update'],
+      inventory_transactions: ['findMany'],
+      kitchen_tickets: ['findFirst'],
+    });
+    prismaMock.$queryRaw = jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'processing' }]);
+    prismaMock.orders.updateMany.mockResolvedValue({ count: 1 });
+    prismaMock.orders.update.mockResolvedValue({ id: ORDER_ID, store_id: 100, state: 'cancelled' });
+    prismaMock.order_items.findMany.mockResolvedValue([firedItem(status)]);
+    prismaMock.order_items.update.mockResolvedValue({});
+    prismaMock.inventory_transactions.findMany.mockResolvedValue(consumptions);
+    prismaMock.kitchen_tickets.findFirst.mockResolvedValue({ status });
+
+    const stock = {
+      getDefaultLocationForProduct: jest.fn().mockImplementation(
+        async (productId: number, variantId?: number) => {
+          if (productId === 701 && variantId === undefined) return 11;
+          if (productId === 702 && variantId === 91) return 22;
+          if (productId === 703 && variantId === undefined) return 33;
+          throw new Error(`Unexpected leaf/location lookup ${productId}/${variantId}`);
+        },
+      ),
+      updateStock: jest.fn().mockResolvedValue({}),
+      releaseReservationsByReference: jest.fn().mockResolvedValue(undefined),
+    };
+    const kds = {
+      cancelTicketInTx: jest.fn().mockResolvedValue(undefined),
+      emitTicketCancelledEvent: jest.fn().mockResolvedValue(undefined),
+    };
+    const emitter = { emit: jest.fn() };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      emitter as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      stock as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn().mockResolvedValue(undefined) } as any,
+      kds as any,
+    );
+    jest.spyOn(service, 'getOrder').mockResolvedValue(buildOrder({
+      id: ORDER_ID,
+      state: 'processing',
+      internal_notes: null,
+      payments: [],
+      order_items: [{ id: ITEM_ID, inventory_consumed_at_fire: true }],
+    }) as any);
+    return { service, prismaMock, stock, kds, emitter };
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRequestContext({ store_id: 100, organization_id: 1, user_id: 7 });
+  });
+
+  it('kitchenDisposition reuse: devuelve exactamente las tres hojas consumidas, con signo absoluto y ubicación por variante', async () => {
+    // Tres transacciones del ítem (una hoja variante) deliberadamente distintas
+    // del producto preparado vendido; los valores esperados NO salen del mock.
+    const { service, prismaMock, stock, kds, emitter } = buildKitchenHarness('in_preparation', [
+      { product_id: 701, product_variant_id: null, quantity_change: -2.5 },
+      { product_id: 702, product_variant_id: 91, quantity_change: -1.25 },
+      { product_id: 703, product_variant_id: null, quantity_change: -4 },
+    ]);
+
+    await expect(service.cancelOrder(ORDER_ID, { reason, kitchenDisposition: 'reuse' }))
+      .resolves.toMatchObject({ state: 'cancelled' });
+
+    expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledWith({
+      where: { order_item_id: ITEM_ID, quantity_change: { lt: 0 } },
+      select: { product_id: true, product_variant_id: true, quantity_change: true },
+    });
+    expect(stock.getDefaultLocationForProduct.mock.calls).toEqual([
+      [701, undefined], [702, 91], [703, undefined],
+    ]);
+    expect(stock.updateStock).toHaveBeenCalledTimes(3);
+    const expectedReturns = [
+      { product_id: 701, variant_id: undefined, location_id: 11, quantity_change: 2.5 },
+      { product_id: 702, variant_id: 91, location_id: 22, quantity_change: 1.25 },
+      { product_id: 703, variant_id: undefined, location_id: 33, quantity_change: 4 },
+    ];
+    expectedReturns.forEach((leaf, index) => {
+      const [movement, tx] = stock.updateStock.mock.calls[index];
+      expect(movement).toEqual({
+        ...leaf,
+        movement_type: 'return',
+        reason: expect.stringContaining(`orden #${ORDER_ID} ítem #${ITEM_ID}`),
+        source_module: 'order_item_cancellation',
+        create_movement: true,
+        validate_availability: false,
+      });
+      expect(movement).not.toHaveProperty('order_item_id');
+      expect(tx).toBe(prismaMock);
+    });
+    expect(prismaMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({
+        cancellation_type: 'after_fire_reused',
+        cancellation_reason: 'cliente canceló el plato',
+      }),
+    });
+    expect(prismaMock.order_items.update.mock.calls[0][0].data)
+      .not.toHaveProperty('inventory_consumed_at_fire');
+    expect(kds.cancelTicketInTx).not.toHaveBeenCalled();
+    expect(emitter.emit).toHaveBeenCalledWith('order.status_changed', expect.objectContaining({
+      order_id: ORDER_ID, new_state: 'cancelled',
+    }));
+  });
+
+  it('kitchenDisposition waste: registra merma sin consultar consumos ni devolver stock', async () => {
+    const { service, prismaMock, stock, kds } = buildKitchenHarness('ready', [
+      { product_id: 701, product_variant_id: null, quantity_change: -2.5 },
+      { product_id: 702, product_variant_id: 91, quantity_change: -1.25 },
+    ]);
+
+    await expect(service.cancelOrder(ORDER_ID, { reason, kitchenDisposition: 'waste' }))
+      .resolves.toMatchObject({ state: 'cancelled' });
+
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({ cancellation_type: 'after_fire_waste' }),
+    });
+    expect(prismaMock.order_items.update.mock.calls[0][0].data)
+      .not.toHaveProperty('inventory_consumed_at_fire');
+    expect(prismaMock.inventory_transactions.findMany).not.toHaveBeenCalled();
+    expect(stock.getDefaultLocationForProduct).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(kds.cancelTicketInTx).not.toHaveBeenCalled();
+  });
+
+  it('sin kitchenDisposition y ticket avanzado: error tipado antes del claim, sin efectos', async () => {
+    const { service, prismaMock, stock } = buildKitchenHarness('in_preparation');
+
+    await expect(service.cancelOrder(ORDER_ID, { reason })).rejects.toMatchObject({
+      errorCode: 'TABLE_SESSION_ADD_ITEMS_INVALID',
+    });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    expect(prismaMock.order_items.update).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('ticket pending: cancela sin kitchenDisposition y conserva after_fire_waste', async () => {
+    const { service, prismaMock, stock, kds, emitter } = buildKitchenHarness('pending');
+
+    await expect(service.cancelOrder(ORDER_ID, { reason }))
+      .resolves.toMatchObject({ state: 'cancelled' });
+
+    expect(prismaMock.kitchen_tickets.findFirst).toHaveBeenCalledWith({
+      where: { id: TICKET_ID }, select: { status: true },
+    });
+    expect(kds.cancelTicketInTx).toHaveBeenCalledWith(prismaMock, TICKET_ID);
+    expect(kds.emitTicketCancelledEvent).toHaveBeenCalledWith(TICKET_ID);
+    expect(prismaMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({ cancellation_type: 'after_fire_waste' }),
+    });
+    expect(prismaMock.inventory_transactions.findMany).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(emitter.emit).toHaveBeenCalledWith('order.status_changed', expect.anything());
+  });
+
+  it('kitchenDisposition reuse sin consumo registrado: cancela la línea sin devoluciones ni excepción', async () => {
+    const { service, prismaMock, stock } = buildKitchenHarness('ready', []);
+
+    await expect(service.cancelOrder(ORDER_ID, { reason, kitchenDisposition: 'reuse' }))
+      .resolves.toMatchObject({ state: 'cancelled' });
+
+    expect(prismaMock.inventory_transactions.findMany).toHaveBeenCalledWith({
+      where: { order_item_id: ITEM_ID, quantity_change: { lt: 0 } },
+      select: { product_id: true, product_variant_id: true, quantity_change: true },
+    });
+    expect(prismaMock.order_items.update).toHaveBeenCalledWith({
+      where: { id: ITEM_ID },
+      data: expect.objectContaining({ cancellation_type: 'after_fire_reused' }),
+    });
+    expect(stock.getDefaultLocationForProduct).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+  });
+});
+
 /**
  * Tabla de derivación de {@link OrderFlowService.reconcileOrderFromDispatch}
  * (fuente única de verdad orden ↔ remisión). Se mockea prisma (orden, notas,
