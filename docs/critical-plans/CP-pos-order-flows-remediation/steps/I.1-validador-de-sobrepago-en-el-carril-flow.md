@@ -17,7 +17,7 @@ skills: [vendix-backend, vendix-error-handling, vendix-prisma-scopes, how-to-tes
 - **Why:** el hallazgo se leía como cerrado y no lo está. El commit que eliminó `skipOrderValidation` cerró que el cliente eligiera qué validaciones corrían, pero dejó dos huecos: el validador sigue tratando fully-paid como advertencia, y `payOrder` **nunca lo llama**. Con `allowedPayStates` admitiendo `processing`, una orden ya saldada que esté en ese estado se cobra otra vez completa, por el importe completo, sin que nada falle. El descuadre resultante es exactamente el que rompe el tope de `RefundCalculationService`, anclado a `grand_total`.
 - **Output:** `ORD_PAY_ALREADY_PAID_001` dado de alta en `error-codes.ts` con su 409; la rama fully-paid del validador convertida en error; `payOrder` invocando el validador dentro del lock de ciclo de vida, antes de crear el pago; y el spec `:140-152` invertido para que fije el `errorCode` en vez del texto del warning.
 - **Contracts touched:** FB-04, DB-02, DB-03, DB-14, ERR-37
-- **Data impact:** none — el paso solo **impide** escrituras: no crea, no actualiza y no borra ninguna fila. Su efecto sobre los datos es negativo por diseño: deja de aparecer el segundo `payments` por el importe completo sobre una orden saldada. Sin migración. El invariante que debe quedar cerrado es `Σ payments succeeded|captured ≤ orders.grand_total` para toda orden no reembolsada.
+- **Data impact:** none — el paso solo **impide** escrituras: no crea, no actualiza y no borra ninguna fila. Su efecto sobre los datos es negativo por diseño: deja de aparecer el segundo `payments` por el importe completo sobre una orden saldada. Sin migración. El invariante se exige hacia adelante: el dataset local ya tiene 10 órdenes sobrepagadas históricas (`evidence/I1-overpayment-baseline.txt`), que este paso no corrige.
 - **Blast radius:** los cuatro carriles de cobro (POS directo, borrador reabierto, detalle de orden, orden adoptada). Si el rechazo se aplica de más, un abono parcial legítimo o el cobro de una cuota de crédito podría quedar bloqueado y lo nota el cajero con la caja parada. Si se aplica de menos, sigue siendo posible cobrar dos veces y lo nota contabilidad al cierre, como caja sobrante contra una orden con un solo importe.
 - **Rollback:** revertir el commit devuelve el warning y deja a `payOrder` sin validador, es decir la conducta de hoy. Sin dato que deshacer; los pagos duplicados anteriores al paso siguen ahí y se identifican con la consulta de verificación.
 - **Verification:**
@@ -26,13 +26,13 @@ skills: [vendix-backend, vendix-error-handling, vendix-prisma-scopes, how-to-tes
   - `curl -s -o evidence/I1-pay-1.json -w '%{http_code}' -X POST "$API/store/orders/$ORDER_ID/flow/pay" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d @pay.json` → 200
   - repetir el mismo `curl` → 409 con `errorCode` `ORD_PAY_ALREADY_PAID_001`, evidencia en `evidence/I1-pay-2.json`
   - abono parcial legítimo sobre orden con saldo: sigue devolviendo 200 → `evidence/I1-abono-parcial.json`
-  - SQL de solo lectura: `SELECT p.order_id, SUM(p.amount), o.grand_total FROM payments p JOIN orders o ON o.id = p.order_id WHERE p.state IN ('succeeded','captured') GROUP BY 1, o.grand_total HAVING SUM(p.amount) > o.grand_total + 0.01;` = 0 filas → `evidence/I1-invariante-sobrepago.txt`
+  - SQL de solo lectura: guardar baseline `evidence/I1-overpayment-baseline.sql/txt`; tras desplegar, agrupar todos los pagos exitosos por orden y filtrar desbordes con `EXISTS` de un pago exitoso `created_at > :deploy` para detectar también una orden vieja sobrecobrada después del corte. Solo las filas nuevas deben ser 0 → `evidence/I1-invariante-sobrepago.txt`.
 - **Acceptance checklist:**
   - [ ] El validador devuelve error, no advertencia, cuando la orden ya está pagada por completo
   - [ ] `payOrder` invoca el validador dentro del lock y antes de crear el pago, en las tres ramas de estado permitidas
   - [ ] El segundo cobro íntegro sobre una orden saldada devuelve 409 tipado y cero filas nuevas en `payments`
   - [ ] Un abono parcial sobre una orden con saldo pendiente sigue aceptándose
   - [ ] El spec que fijaba el warning quedó invertido y ahora fija el `errorCode`, no el texto del mensaje
-  - [ ] La consulta de invariante de sobrepago devuelve cero filas sobre el dataset representativo
+  - [ ] El baseline histórico queda separado y la consulta de sobrepagos con pagos posteriores al corte devuelve cero filas
   - [ ] Evidencia de los tres curl y del SQL guardada bajo `evidence/`
 - **Status:** pending
