@@ -184,7 +184,11 @@ export type ShippingTaxSkipReason =
   | 'no_shipping'
   | ShippingTaxIneligibleReason
   | 'vat_not_responsible'
-  /** Defensivo: el despeje no cerró al centavo contra el bruto. */
+  /**
+   * Defensivo: el kernel rechazó la entrada o la cuota trunca a cero (bruto de
+   * pocos centavos). NO se usa por brutos que no cierran exacto: esos se
+   * gravan con base = bruto − impuesto.
+   */
   | 'clearing_unclosed';
 
 export interface ShippingTaxSnapshotInput {
@@ -205,7 +209,7 @@ export type ShippingTaxResolution =
       snapshot: AppliedShippingTax;
       /** Bruto redondeado a centavos. `gross = base + shipping_tax_amount`. */
       gross: number;
-      /** Base neta despejada (truncado DIAN). */
+      /** Base neta = bruto − impuesto (cierra al centavo por construcción). */
       base: number;
     }
   | {
@@ -221,10 +225,20 @@ const skip = (reason: ShippingTaxSkipReason): ShippingTaxResolution => ({
 });
 
 /**
- * Resuelve la copia del impuesto del envío. Siempre incluido: despeja la base
- * con `resolveInclusiveClearing` (el mismo kernel de la factura), así que
- * `base + impuesto = bruto` al centavo. Si no cerrara, gravar movería lo que
- * paga el cliente ⇒ se prefiere no gravar (copia vacía).
+ * Resuelve la copia del impuesto del envío. Siempre incluido.
+ *
+ * REGLA (nunca copia vacía por redondeo):
+ *   · impuesto = cuota del kernel (`resolveInclusiveClearing`, el mismo de la
+ *     factura): truncado DIAN de `bruto × r ÷ (1 + r)`.
+ *   · base     = bruto − impuesto, en centavos enteros. Cierra por
+ *     construcción: `base + impuesto = bruto` al centavo, siempre.
+ *
+ * Hay brutos que ninguna base a 2 decimales reproduce exactamente con
+ * `base × r` (p. ej. 10.000 al 19 %): el kernel los marca como no cerrados.
+ * No se deja de gravar por eso: la diferencia `base × r − impuesto` queda en
+ * a lo sumo un centavo, dentro de la holgura de línea DIAN (±2.00, Anexo 1.9
+ * §5.2.1.1 — FAX07) y de la tolerancia de un centavo del prevalidador
+ * (`checkTaxSubtotals`). Lo que paga el cliente no se mueve.
  */
 export function resolveShippingTaxSnapshot(
   input: ShippingTaxSnapshotInput,
@@ -233,8 +247,9 @@ export function resolveShippingTaxSnapshot(
 
   const raw = Number(input.shipping_cost ?? 0);
   if (!Number.isFinite(raw) || raw <= 0) return skip('no_shipping');
-  const gross = Math.round(raw * 100) / 100;
-  if (gross <= 0) return skip('no_shipping');
+  const gross_cents = Math.round(raw * 100);
+  if (gross_cents <= 0) return skip('no_shipping');
+  const gross = gross_cents / 100;
 
   const evaluation = evaluateShippingTaxCategory(input.category);
   if (!evaluation.eligible) return skip(evaluation.reason_code);
@@ -250,16 +265,21 @@ export function resolveShippingTaxSnapshot(
       is_inclusive: true,
     },
   ]);
-  const base = clearing.base.toNumber();
-  const amount = clearing.rates[0]?.amount.toNumber() ?? 0;
+  const amount_cents = Math.round(
+    (clearing.rates[0]?.amount.toNumber() ?? 0) * 100,
+  );
+  const base_cents = gross_cents - amount_cents;
+  // Defensivo: entrada que el kernel rechaza, o bruto tan chico que la cuota
+  // trunca a cero (o se come toda la base). Gravar ahí no tiene sentido.
   if (
-    clearing.unclosed_residual_cents !== 0 ||
     clearing.invalid_inputs.length > 0 ||
-    amount <= 0 ||
-    Math.round(base * 100) + Math.round(amount * 100) !== Math.round(gross * 100)
+    amount_cents <= 0 ||
+    base_cents <= 0
   ) {
     return skip('clearing_unclosed');
   }
+  const amount = amount_cents / 100;
+  const base = base_cents / 100;
 
   return {
     applies: true,

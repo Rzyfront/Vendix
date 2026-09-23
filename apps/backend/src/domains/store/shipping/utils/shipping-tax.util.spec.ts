@@ -5,6 +5,8 @@ import {
   resolveShippingTaxSnapshot,
   shippingNetBase,
 } from './shipping-tax.util';
+import { Prisma } from '@prisma/client';
+import { dianAmount } from '../../../../common/money-kernel/dian-money';
 
 const inc8 = {
   id: 7,
@@ -68,13 +70,16 @@ describe('shipping-tax.util', () => {
       expect(r.applies && r.snapshot.shipping_tax_type).toBe('iva');
     });
 
-    it('bruto inalcanzable al centavo (10.000 con IVA 19 %) ⇒ vacía, no mueve lo que paga el cliente', () => {
-      // 8.403,36 + 1.596,63 = 9.999,99 y 8.403,37 + 1.596,64 = 10.000,01.
+    it('bruto inalcanzable exacto (10.000 con IVA 19 %) ⇒ grava igual: impuesto del kernel, base = bruto − impuesto', () => {
+      // Ninguna base a 2 decimales da exacto: 8.403,36 + 1.596,63 = 9.999,99 y
+      // 8.403,37 + 1.596,64 = 10.000,01. Se toma la cuota del kernel y la base
+      // cierra por resta; lo que paga el cliente no se mueve.
       const r = resolveShippingTaxSnapshot({ shipping_cost: 10000, category: iva19 });
-      expect(r).toEqual({
-        applies: false,
-        reason: 'clearing_unclosed',
-        snapshot: EMPTY_SHIPPING_TAX,
+      expect(r).toMatchObject({
+        applies: true,
+        gross: 10000,
+        base: 8403.37,
+        snapshot: { shipping_tax_type: 'iva', shipping_tax_amount: 1596.63 },
       });
     });
 
@@ -132,19 +137,51 @@ describe('shipping-tax.util', () => {
       expect(Object.isFrozen(EMPTY_SHIPPING_TAX)).toBe(true);
     });
 
-    it('cierre al centavo en montos con decimales', () => {
-      for (const cost of [0.01, 1, 999.99, 4500, 12345.67, 87000]) {
+    it('cierre al centavo en montos con decimales (nunca vacía por redondeo)', () => {
+      for (const cost of [1, 999.99, 4500, 12345.67, 87000]) {
         for (const cat of [inc8, iva19]) {
           const r = resolveShippingTaxSnapshot({ shipping_cost: cost, category: cat });
-          if (!r.applies) {
-            expect(r.snapshot).toEqual(EMPTY_SHIPPING_TAX);
-            continue;
-          }
+          expect(r.applies).toBe(true);
+          if (!r.applies) continue;
           expect(
             Math.round(r.base * 100) + Math.round(r.snapshot.shipping_tax_amount * 100),
           ).toBe(Math.round(cost * 100));
         }
       }
+    });
+
+    it('bruto de un centavo: la cuota trunca a cero ⇒ vacía defensiva', () => {
+      const r = resolveShippingTaxSnapshot({ shipping_cost: 0.01, category: iva19 });
+      expect(r).toEqual({
+        applies: false,
+        reason: 'clearing_unclosed',
+        snapshot: EMPTY_SHIPPING_TAX,
+      });
+    });
+
+    describe.each([
+      ['IVA 19 %', iva19, 0.19],
+      ['INC 8 %', inc8, 0.08],
+    ])('tabla 1.000–50.000 paso 500 · %s', (_label, cat, rate) => {
+      const costs: number[] = [];
+      for (let c = 1000; c <= 50000; c += 500) costs.push(c);
+
+      it.each(costs)('%p ⇒ copia no vacía, base + impuesto = bruto, cuota dentro de tolerancia', (cost) => {
+        const r = resolveShippingTaxSnapshot({ shipping_cost: cost, category: cat });
+        expect(r.applies).toBe(true);
+        if (!r.applies) return;
+        const base_c = Math.round(r.base * 100);
+        const tax_c = Math.round(r.snapshot.shipping_tax_amount * 100);
+        expect(tax_c).toBeGreaterThan(0);
+        expect(base_c + tax_c).toBe(Math.round(cost * 100));
+        // Prevalidador (`checkTaxSubtotals`): |impuesto − dianAmount(base × r)| ≤ 0,01.
+        const recomputed_c = Number(
+          dianAmount(new Prisma.Decimal(r.base).times(rate)).replace('.', ''),
+        );
+        expect(Math.abs(tax_c - recomputed_c)).toBeLessThanOrEqual(1);
+        // FAX07 (Anexo 1.9 §5.2.1.1): |impuesto − base × r| ≤ 2,00.
+        expect(Math.abs(r.snapshot.shipping_tax_amount - r.base * rate)).toBeLessThanOrEqual(2);
+      });
     });
   });
 

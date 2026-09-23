@@ -114,8 +114,8 @@ export class ShippingTaxService {
    * shipping_tax_rate, shipping_tax_amount }`.
    *
    * Nunca lanza por el impuesto (es accesorio a la venta): tarifa ajena o
-   * inexistente, sin categoría, categoría no elegible, costo 0 o despeje que
-   * no cierra ⇒ copia vacía. IVA con emisor sin O-48 ⇒ copia vacía + warn.
+   * inexistente, sin categoría, categoría no elegible o costo 0 ⇒ copia
+   * vacía. Un bruto que no cierra exacto SÍ se grava (base = bruto − impuesto). IVA con emisor sin O-48 ⇒ copia vacía + warn.
    * Costo digitado a mano ⇒ el llamador NO debe llamar a esto (copia vacía).
    *
    * `client`: pasar el `tx` si se está dentro de una transacción (evita tomar
