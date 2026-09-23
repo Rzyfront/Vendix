@@ -2126,6 +2126,30 @@ describe('PaymentsService', () => {
           expect(result.order_item_taxes).toBeUndefined();
         },
       );
+
+      it.each(['block', 'warn', 'off', undefined] as const)(
+        'ignora la configuración legada tax_line_gate=%s para la línea sin impuesto',
+        async (severity) => {
+          const settingsRead = jest.spyOn(
+            (service as any).settingsService,
+            'getSettings',
+          ).mockResolvedValue({ pos: { tax_line_gate: severity } });
+          const falseWarning = jest.spyOn((service as any).logger, 'warn');
+          calculateProductTaxesMock.mockResolvedValue(taxless);
+
+          const result = await (service as any).buildPosOrderItem(
+            tx, item, dtoStoreId, posUser, undefined, 123,
+          );
+
+          expect(result.tax_amount_item).toBe(0);
+          expect(result.final_unit_price).toBe(10000);
+          expect(result.order_item_taxes).toBeUndefined();
+          expect(settingsRead).not.toHaveBeenCalled();
+          expect(falseWarning.mock.calls.some(([message]) =>
+            String(message).includes('pos_table_line_tax_unresolvable'),
+          )).toBe(false);
+        },
+      );
     });
 
     /**
