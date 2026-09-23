@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { buildOrderSaleTaxPayload } from './order-sale-tax-payload.util';
 
 const cents = (n: number) => Math.round(n * 100);
@@ -171,8 +172,11 @@ describe('buildOrderSaleTaxPayload', () => {
       ).toEqual(buildOrderSaleTaxPayload({ product_tax_rows, order: without }));
     });
 
-    it('orden que no reconcilia con sus líneas: payload histórico', () => {
-      const broken = { ...order, tax_amount: 26000 };
+    it('orden que no reconcilia con sus líneas: payload histórico y aviso sin PII', () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      const broken = { ...order, id: 5928, tax_amount: 26000 };
       const payload = buildOrderSaleTaxPayload({
         product_tax_rows,
         order: broken,
@@ -180,6 +184,23 @@ describe('buildOrderSaleTaxPayload', () => {
       });
       expect(payload.discount_projected).toBe(false);
       expect(payload.discount_amount).toBe(10000);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain('no_reconcilia');
+      expect(warn.mock.calls[0][0]).toContain('"id":5928');
+      warn.mockRestore();
+    });
+
+    it('sin descuento no avisa', () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      buildOrderSaleTaxPayload({
+        product_tax_rows,
+        order: { ...order, discount_amount: 0 },
+        order_items: items(),
+      });
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
     });
   });
 });

@@ -221,7 +221,7 @@ export async function resolvePaymentReceivedSaleFields(
   const sale_tax = Array.isArray(order.order_items)
     ? buildOrderSaleTaxPayload({
         product_tax_rows: [],
-        order,
+        order: { ...order, id: args.order_id },
         order_items: order.order_items,
       })
     : null;

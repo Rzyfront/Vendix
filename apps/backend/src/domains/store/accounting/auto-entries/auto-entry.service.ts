@@ -7,6 +7,7 @@ import { FiscalGateService } from '@common/services/fiscal-gate.service';
 import { TaxBreakdownItem } from '@common/interfaces/tax-breakdown.interface';
 import { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
 import { AccountingEntryFailureService } from './accounting-entry-failure.service';
+import { projectOrderDiscountedTaxes } from '../../payments/utils/order-sale-tax-payload.util';
 import { VendixHttpException } from '../../../../common/errors/vendix-http.exception';
 import { ErrorCodes } from '../../../../common/errors/error-codes';
 import {
@@ -1607,9 +1608,55 @@ export class AutoEntryService {
 
     const asMoney = (value: bigint) => Number(formatCents(value));
     const total = getCents(account.grand_total);
-    const discount = getCents(account.discount_amount);
+    // Descuento de ORDEN repartido en la cuenta: el snapshot de líneas trae el
+    // impuesto PRE-descuento. Misma proyección que los asientos POS
+    // (`projectOrderDiscountedTaxes`, 3f658ffc5): cada impuesto por su cuota
+    // proyectada, 4175 sólo por la parte de base del descuento, ingreso por la
+    // base bruta; envío y propina sin descuento. Sin descuento (o si no
+    // reconcilia, con aviso) los componentes son los históricos.
+    const itemLines = account.lines.filter((line: any) => line.kind === 'item');
+    const discountedTaxes =
+      getCents(account.discount_amount) > 0n &&
+      itemLines.every((line: any) =>
+        (line.taxes ?? []).every((row: any) => !row.is_compound),
+      )
+        ? projectOrderDiscountedTaxes(
+            itemLines.map((line: any) => ({
+              quantity: 1,
+              total_price: line.subtotal_amount,
+              tax_amount_item: line.tax_amount,
+              order_item_taxes: line.taxes ?? [],
+            })),
+            {
+              id: account.id,
+              discount_amount: account.discount_amount,
+              tax_amount: account.tax_amount,
+              subtotal_amount: account.subtotal_amount,
+            },
+            'cuenta financiera',
+          )
+        : null;
+    if (
+      !discountedTaxes &&
+      getCents(account.discount_amount) > 0n &&
+      itemLines.some((line: any) =>
+        (line.taxes ?? []).some((row: any) => row.is_compound),
+      )
+    ) {
+      this.logger.warn(
+        `Descuento de cuenta financiera sin proyección fiscal (impuesto_compuesto); el asiento usa el impuesto pre-descuento. {"id":${account.id}}`,
+      );
+    }
+    const discount = discountedTaxes
+      ? BigInt(discountedTaxes.discount_cents)
+      : getCents(account.discount_amount);
     const netRevenue = getCents(account.subtotal_amount) - discount;
-    const taxRows = account.lines.flatMap((line: any) => line.taxes ?? []);
+    const taxRows = discountedTaxes
+      ? discountedTaxes.product_breakdown
+      : account.lines.flatMap((line: any) => line.taxes ?? []);
+    const expectedTax = discountedTaxes
+      ? BigInt(discountedTaxes.product_tax_cents)
+      : getCents(account.tax_amount);
     const components: Array<{
       kind: 'revenue' | 'tax' | 'shipping' | 'tip';
       amount: bigint;
@@ -1631,7 +1678,7 @@ export class AutoEntryService {
       sumCents(components.map((row) => row.amount)) !== total ||
       sumCents(
         components.filter((row) => row.kind === 'tax').map((row) => row.amount),
-      ) !== getCents(account.tax_amount)
+      ) !== expectedTax
     ) {
       throw new Error('Financial account components do not reconcile');
     }

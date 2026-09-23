@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import {
   buildTaxBreakdown,
   type TaxBreakdownItem,
@@ -42,6 +43,8 @@ export interface OrderSaleTaxPayloadOrder extends ShippingTaxOrderInput {
   discount_amount?: unknown;
   /** `orders.subtotal_amount` = Σ `order_items.total_price` (base). */
   subtotal_amount?: unknown;
+  /** Sólo para el aviso cuando la proyección no reconcilia (sin PII). */
+  id?: unknown;
 }
 
 export interface OrderSaleTaxPayload {
@@ -97,12 +100,12 @@ export function buildOrderSaleTaxPayload(input: {
   order: OrderSaleTaxPayloadOrder;
   /**
    * Líneas de la orden con sus `order_item_taxes` (tarifa en fracción). Sólo
-   * se usan si la orden trae descuento de orden: ver `projectDiscountedSale`.
+   * se usan si la orden trae descuento de orden: ver `projectOrderDiscountedTaxes`.
    */
   order_items?: ReadonlyArray<OrderSaleLineSource> | null;
 }): OrderSaleTaxPayload {
   const { order } = input;
-  const projected = projectDiscountedSale(input.order_items, order);
+  const projected = projectOrderDiscountedTaxes(input.order_items, order, 'orden');
   const product_breakdown = projected
     ? projected.product_breakdown
     : buildTaxBreakdown([...(input.product_tax_rows ?? [])]);
@@ -170,16 +173,52 @@ export function buildOrderSaleTaxPayload(input: {
  * `orders.tax_amount`, Σ `total_price` ≠ `orders.subtotal_amount`, o la parte
  * de base + la parte de impuesto ≠ descuento).
  */
-function projectDiscountedSale(
+export interface OrderDiscountedTaxes {
+  /** Desglose por tipo (y tarifa) con la cuota neta del descuento. */
+  product_breakdown: TaxBreakdownItem[];
+  /** Σ cuotas proyectadas, en centavos. */
+  product_tax_cents: number;
+  /** Parte de BASE del descuento (4175), en centavos. */
+  discount_cents: number;
+}
+
+const logger = new Logger('OrderSaleTaxPayload');
+
+/**
+ * Aviso de caída al payload histórico: la orden trae descuento pero la
+ * proyección no reconcilia. Sólo identificadores y cifras, nunca datos del
+ * cliente.
+ */
+function warnFallback(
+  scope: string,
+  order: OrderSaleTaxPayloadOrder,
+  reason: string,
+  detail: Record<string, unknown> = {},
+) {
+  logger.warn(
+    `Descuento de ${scope} sin proyección fiscal (${reason}); el asiento usa el impuesto pre-descuento. ` +
+      JSON.stringify({ id: order.id ?? null, ...detail }),
+  );
+}
+
+/**
+ * Proyección del descuento de orden sobre las líneas para los ASIENTOS
+ * (POS, crédito, webhook, cuenta dividida y cuenta financiera). Única
+ * definición: la usan `buildOrderSaleTaxPayload` y el carril de cuenta
+ * financiera de `AutoEntryService`.
+ *
+ * `null` sin descuento (sin aviso: el asiento es el histórico por diseño) o
+ * cuando no reconcilia (con `logger.warn`).
+ */
+export function projectOrderDiscountedTaxes(
   order_items: ReadonlyArray<OrderSaleLineSource> | null | undefined,
   order: OrderSaleTaxPayloadOrder,
-): {
-  product_breakdown: TaxBreakdownItem[];
-  product_tax_cents: number;
-  discount_cents: number;
-} | null {
+  scope: string,
+): OrderDiscountedTaxes | null {
   const discount_cents = toCents(order.discount_amount);
-  if (discount_cents <= 0 || !order_items || order_items.length === 0) {
+  if (discount_cents <= 0) return null;
+  if (!order_items || order_items.length === 0) {
+    warnFallback(scope, order, 'sin_lineas');
     return null;
   }
   const projection = projectOrderInvoiceLines(
@@ -190,6 +229,10 @@ function projectDiscountedSale(
     projection.error ||
     toCents(projection.allocated_discount.toString()) !== discount_cents
   ) {
+    warnFallback(scope, order, projection.error?.code ?? 'descuento_no_repartido', {
+      discount: discount_cents / 100,
+      allocated: projection.allocated_discount.toFixed(2),
+    });
     return null;
   }
 
@@ -227,6 +270,13 @@ function projectDiscountedSale(
       discount_cents ||
     base_discount_cents < 0
   ) {
+    warnFallback(scope, order, 'no_reconcilia', {
+      tax_lines: original_tax_cents / 100,
+      tax_header: toCents(order.tax_amount) / 100,
+      subtotal_lines: subtotal_cents / 100,
+      subtotal_header:
+        order.subtotal_amount != null ? toCents(order.subtotal_amount) / 100 : null,
+    });
     return null;
   }
 
