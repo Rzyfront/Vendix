@@ -22,6 +22,7 @@ const KITCHEN_TICKET_INCLUDE = {
   order: {
     select: {
       order_number: true,
+      delivery_type: true,
       customer_alias: true,
       users: { select: { first_name: true, last_name: true } },
     },

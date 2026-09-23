@@ -267,6 +267,31 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     );
   });
 
+  it('C.4 — snapshot and ticket list select order delivery_type without changing takeaway selection', async () => {
+    const ticket = {
+      id: 1,
+      order: { order_number: 'ORD-1', delivery_type: 'home_delivery' },
+      items: [{ order_item: { is_takeaway: true } }],
+    };
+    prismaMock.kitchen_tickets = {
+      findMany: jest.fn().mockResolvedValue([ticket]),
+      count: jest.fn().mockResolvedValue(1),
+    };
+    jest.spyOn(service as any, 'getBusinessDate').mockResolvedValue('2026-09-22');
+
+    const snapshot = await service.getActiveTicketsSnapshot();
+    const list = await service.findTickets({ order_id: 100 });
+
+    expect(snapshot.data[0].order.delivery_type).toBe('home_delivery');
+    expect(list.data[0].order.delivery_type).toBe('home_delivery');
+    for (const [query] of prismaMock.kitchen_tickets.findMany.mock.calls) {
+      expect(query.include).toMatchObject({
+        order: { select: { delivery_type: true } },
+        items: { include: { order_item: { select: { is_takeaway: true } } } },
+      });
+    }
+  });
+
   it('consumes 3 leaf components (merma + sub-recipe + direct), flips flag, emits kitchen.fired with COGS', async () => {
     // Order has 1 prepared order_item (id=10, product=50) and the
     // operator asked to fire only that one. The other 2 items in the
