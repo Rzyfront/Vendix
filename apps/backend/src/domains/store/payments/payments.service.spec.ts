@@ -1273,7 +1273,10 @@ describe('PaymentsService', () => {
       store_id: 1, order_id: 41, currency: 'COP', items: [item],
       requires_payment: true, ...overrides,
     });
-    const order = { id: 41, order_number: 'POS-41', state: 'draft' };
+    const order = {
+      id: 41, order_number: 'POS-41', state: 'draft',
+      subtotal_amount: 1000, tax_amount: 0,
+    };
     const tx = (found: any = order, paid: any = null) => ({
       orders: {
         findFirst: jest.fn().mockResolvedValue(found),
@@ -1353,7 +1356,8 @@ describe('PaymentsService', () => {
       const client = tx();
       jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
       jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
-        product_name: 'Artículo', quantity: 1, total_price: 1000,
+        // Stale checkout snapshot must not replace persisted adopted items.
+        product_name: 'Artículo', quantity: 1, total_price: 2000,
         tax_amount_item: 0,
       });
       jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
@@ -1371,7 +1375,10 @@ describe('PaymentsService', () => {
       expect(client.orders.create).not.toHaveBeenCalled();
       expect(client.orders.update).toHaveBeenCalledWith(expect.objectContaining({
         where: { id: 41, store_id: 1 },
-        data: expect.objectContaining({ state: 'created', shipping_cost: 500 }),
+        data: expect.objectContaining({
+          state: 'created', subtotal_amount: 1000,
+          shipping_cost: 500, grand_total: 1500,
+        }),
       }));
       expect(client.orders.update.mock.calls[0][0].data.order_items).toBeUndefined();
     });

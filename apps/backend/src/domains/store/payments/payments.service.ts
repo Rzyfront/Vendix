@@ -4176,7 +4176,10 @@ export class PaymentsService {
     const existingOrder = dto.order_id != null
       ? await tx.orders.findFirst({
           where: { id: dto.order_id, store_id: dtoStoreId },
-          select: { id: true, order_number: true, state: true },
+          select: {
+            id: true, order_number: true, state: true,
+            subtotal_amount: true, tax_amount: true,
+          },
         })
       : null;
     if (dto.order_id != null && !existingOrder) {
@@ -4276,14 +4279,17 @@ export class PaymentsService {
           ),
         );
 
-        const calculatedSubtotal = this.roundMoney(
-          orderItems.reduce(
-            (sum, item) => sum + Number(item.total_price || 0),
-            0,
-          ),
-        );
-        const calculatedTaxAmount = this.roundMoney(
-          orderItems.reduce((sum, item) => {
+        // The adopted cart has already persisted item edits via the orders
+        // endpoint. Its stored item totals, not a potentially stale checkout
+        // payload, are authoritative for this existing order's header.
+        const calculatedSubtotal = existingOrder
+          ? this.roundMoney(Number(existingOrder.subtotal_amount))
+          : this.roundMoney(orderItems.reduce(
+              (sum, item) => sum + Number(item.total_price || 0), 0,
+            ));
+        const calculatedTaxAmount = existingOrder
+          ? this.roundMoney(Number(existingOrder.tax_amount))
+          : this.roundMoney(orderItems.reduce((sum, item) => {
             const nestedTaxes = item.order_item_taxes?.create || [];
             if (nestedTaxes.length > 0) {
               return (
@@ -4308,8 +4314,7 @@ export class PaymentsService {
                     item.price_unit_quantity,
                   );
             return sum + Number(item.tax_amount_item || 0) * multiplier;
-          }, 0),
-        );
+          }, 0));
 
         // Backend is the source of truth for promotion and coupon discounts.
         // Any `dto.discount_amount` sent by the frontend is intentionally
