@@ -357,6 +357,8 @@ jobs:
           --include='**/pos/components/pos-checkout-shell/pos-checkout-shell.component.spec.ts'
           --include='**/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.spec.ts'
           --include='**/print-formats/services/print-annex-validator.service.spec.ts'
+          --include='**/settings/shipping/components/add-rate-wizard-modal/add-rate-wizard-modal.component.spec.ts'
+          --include='**/settings/shipping/components/method-zones-inline/method-zones-inline.component.spec.ts'
 
   backend-build:
     name: Backend Build (prisma + nest)
