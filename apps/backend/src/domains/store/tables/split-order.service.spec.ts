@@ -394,6 +394,36 @@ describe('SplitOrderService financial ledger', () => {
     ).rejects.toThrow('desglose fiscal');
   });
 
+  it('rechaza dividir una orden con domicilio y líneas INC; con envío sin INC sigue permitida', async () => {
+    // Fixture base: envío 5 con IVA ⇒ se divide (como hoy).
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).resolves.toMatchObject({ original_total: '130.00' });
+
+    // Mismo envío, pero la orden cobra INC ⇒ el domicilio lleva INC incluido
+    // y sólo se proyecta facturando la orden entera.
+    source.order_items[0].order_item_taxes[0] = {
+      ...source.order_items[0].order_item_taxes[0],
+      tax_rate_id: 68,
+      tax_name: 'INC',
+      tax_type: 'inc',
+      tax_rate: '0.08',
+      tax_amount: '4.00',
+    };
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).rejects.toThrow('domicilio gravado con INC');
+
+    // Sin envío, la misma orden INC se divide (totales recuadrados:
+    // 100 + 4 + 9,50 + propina 6 = 119,50).
+    source.shipping_cost = '0.00';
+    source.tax_amount = '13.50';
+    source.grand_total = '119.50';
+    await expect(
+      service.preview(100, { mode: 'equal', n_splits: 2 }),
+    ).resolves.toMatchObject({ original_total: '119.50' });
+  });
+
   it('supports items and custom remainder, rejecting duplicate/omitted items', async () => {
     expect(
       (

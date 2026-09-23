@@ -5846,9 +5846,12 @@ model invoices {
   discount_amount                  Decimal                         @default(0) @db.Decimal(12, 2)
   tax_amount                       Decimal                         @default(0) @db.Decimal(12, 2)
   // Plan Despacho Economía — FASE 4 paso 13. Ingreso de flete separado en
-  // cuenta 414505 "Transporte Terrestre". Persistido desde order.shipping_cost
-  // en invoicing.service.ts:590. Excluido de IVA (tax_amount sólo cubre
-  // producto). shipping_amount = 0 ⇒ comportamiento legacy (sin línea extra).
+  // cuenta 414505 "Transporte Terrestre". Es la BASE NETA del envío que
+  // `createFromOrder` proyecta desde order.shipping_cost: igual al bruto,
+  // salvo en restaurantes responsables de INC (O-33) cuya orden cobra INC,
+  // donde el domicilio lleva el INC incluido (ver invoicing/utils/
+  // shipping-inc.util.ts) y aquí queda sólo la base; ese INC sí entra en
+  // tax_amount. shipping_amount = 0 ⇒ comportamiento legacy (sin línea extra).
   shipping_amount                  Decimal                         @default(0) @db.Decimal(12, 2)
   withholding_amount               Decimal                         @default(0) @db.Decimal(12, 2)
   total_amount                     Decimal                         @default(0) @db.Decimal(12, 2)

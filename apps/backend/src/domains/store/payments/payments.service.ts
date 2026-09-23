@@ -79,6 +79,13 @@ import type { WithholdingResolution } from '../withholding-tax/withholding-flow.
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { TableSessionsService } from '../tables/table-sessions.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
+import { isIncResponsible } from '../../../common/helpers/vat-responsibility.helper';
+import {
+  orderHasIncLines,
+  resolveShippingInc,
+  type ShippingIncOrderLine,
+  type ShippingIncResult,
+} from '../invoicing/utils/shipping-inc.util';
 import { resolveTip } from '../../../common/utils/tip.util';
 import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
@@ -168,6 +175,64 @@ export class PaymentsService {
     // without touching the module wiring.
     private readonly auditService: AuditService,
   ) {}
+
+  /**
+   * INC del domicilio para el asiento de la venta POS sin factura / a crédito.
+   * Misma definición que `createFromOrder` (`shipping-inc.util`). Consulta
+   * industrias y `fiscal_data` SÓLO si la orden trae envío y líneas INC; ante
+   * cualquier fallo de lectura degrada a «no aplica» (la venta nunca se cae
+   * por esto) y lo registra.
+   */
+  private async resolvePosShippingInc(
+    tx: any,
+    order: { id: number; shipping_cost?: unknown },
+    store_id: number | undefined,
+    order_items: ShippingIncOrderLine[],
+  ): Promise<ShippingIncResult> {
+    const shipping_cost = Number(order.shipping_cost || 0);
+    if (!(shipping_cost > 0) || !orderHasIncLines(order_items)) {
+      return resolveShippingInc({
+        shipping_cost,
+        inc_responsible: false,
+        is_restaurant: false,
+        order_items,
+      });
+    }
+    try {
+      const storeRow = store_id
+        ? await tx.stores.findUnique({
+            where: { id: store_id },
+            select: { industries: true },
+          })
+        : null;
+      const is_restaurant = storeIsRestaurant(storeRow?.industries);
+      const inc_responsible = is_restaurant
+        ? isIncResponsible(
+            (await this.settingsService.getFiscalData()) as any,
+          )
+        : false;
+      const result = resolveShippingInc({
+        shipping_cost,
+        inc_responsible,
+        is_restaurant,
+        order_items,
+      });
+      if (!result.applies && result.reason === 'ambiguous_inc_rate') {
+        this.logger.warn(
+          `order ${order.id}: domicilio sin INC en el asiento (ambiguous_inc_rate): ` +
+            'la orden cobra INC con más de una tarifa',
+        );
+      }
+      return result;
+    } catch (error) {
+      this.logger.warn(
+        `resolvePosShippingInc failed for order ${order.id}; shipping stays untaxed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return { applies: false, reason: 'not_inc_responsible' };
+    }
+  }
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
     try {
@@ -1507,14 +1572,45 @@ export class PaymentsService {
               // comparación correcta sin mirar el flag. Traerlo sugeriría una
               // corrección que no hay que hacer.
               order_item_taxes: {
-                select: { tax_type: true, tax_amount: true, tax_rate: true },
+                select: {
+                  tax_type: true,
+                  tax_amount: true,
+                  tax_rate: true,
+                  // `resolveShippingInc` elige la tarifa del domicilio de las
+                  // filas INC de la orden (id + nombre de la tarifa cobrada).
+                  tax_rate_id: true,
+                  tax_name: true,
+                },
               },
             },
           });
-          const tax_breakdown = buildTaxBreakdown(
-            orderItemsWithTaxes.flatMap((item) =>
+
+          // DOMICILIO CON INC INCLUIDO (restaurante O-33): la MISMA proyección
+          // que `createFromOrder` hace al facturar (`shipping-inc.util`), para
+          // que el asiento de la venta sin factura / a crédito lleve el INC del
+          // envío a 2436 y sólo la base a 414505. Sin envío o sin líneas INC no
+          // hace ninguna consulta: tiendas IVA idénticas a hoy.
+          const shippingInc = await this.resolvePosShippingInc(
+            tx,
+            order,
+            createPosPaymentDto.store_id,
+            orderItemsWithTaxes,
+          );
+          const shipping_amount_for_entry = shippingInc.applies
+            ? shippingInc.base
+            : Number(order.shipping_cost || 0);
+          const tax_amount_for_entry = shippingInc.applies
+            ? Math.round(
+                (Number(order.tax_amount || 0) + shippingInc.inc_amount) * 100,
+              ) / 100
+            : Number(order.tax_amount || 0);
+
+          const tax_breakdown = buildTaxBreakdown([
+            ...orderItemsWithTaxes.flatMap((item) =>
               (item.order_item_taxes || []).map((tax) => ({
-                ...tax,
+                tax_type: tax.tax_type,
+                tax_amount: tax.tax_amount,
+                tax_rate: tax.tax_rate,
                 // F-111 — la base de CADA impuesto de la línea es el
                 // `total_price` COMPLETO de esa línea. Una línea con más de
                 // un tipo de impuesto (p.ej. IVA + ICA) usa la misma base
@@ -1523,7 +1619,19 @@ export class PaymentsService {
                 taxable_amount: Number(item.total_price || 0),
               })),
             ),
-          );
+            // El INC del domicilio: tarifa en FRACCIÓN y su base neta, para
+            // que la compuerta F-111 de `resolveTaxLines` cuadre el grupo.
+            ...(shippingInc.applies
+              ? [
+                  {
+                    tax_type: 'inc',
+                    tax_amount: shippingInc.inc_amount,
+                    tax_rate: shippingInc.rate_fraction,
+                    taxable_amount: shippingInc.base,
+                  },
+                ]
+              : []),
+          ]);
 
           // CASO 2 (suffered): a customer who is a withholding agent retains
           // us on this sale, turning the withheld amount into an advance asset
@@ -1592,10 +1700,12 @@ export class PaymentsService {
                 order_number: order.order_number,
                 amount: payment.amount,
                 subtotal_amount: Number(order.subtotal_amount || 0),
-                tax_amount: Number(order.tax_amount || 0),
+                // Con INC en el domicilio: + INC del envío (ver arriba).
+                tax_amount: tax_amount_for_entry,
                 // Plan Despacho Economía — FASE 4 paso 15. Ingreso de flete
                 // separado en cuenta 414505 al pagar un POS directo con flete.
-                shipping_amount: Number(order.shipping_cost || 0),
+                // Con INC en el domicilio es la BASE neta del envío.
+                shipping_amount: shipping_amount_for_entry,
                 tax_breakdown,
                 withholding_breakdown: wh.lines,
                 discount_amount: Number(order.discount_amount || 0),
@@ -1665,10 +1775,12 @@ export class PaymentsService {
               customer_id: order.customer_id ? Number(order.customer_id) : null,
               document_number: order.order_number,
               subtotal_amount: Number(order.subtotal_amount || 0),
-              tax_amount: Number(order.tax_amount || 0),
+              // Con INC en el domicilio: + INC del envío (ver arriba).
+              tax_amount: tax_amount_for_entry,
               // Plan Despacho Economía — FASE 4 paso 15. Crédito con flete →
               // se reconoce también ingreso de flete en cuenta 414505.
-              shipping_amount: Number(order.shipping_cost || 0),
+              // Con INC en el domicilio es la BASE neta del envío.
+              shipping_amount: shipping_amount_for_entry,
               tax_breakdown,
               withholding_breakdown: wh.lines,
               discount_amount: Number(order.discount_amount || 0),

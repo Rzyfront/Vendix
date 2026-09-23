@@ -24,6 +24,7 @@ import {
   FinancialSplitAllocationResult,
   SplitAllocationError,
 } from './utils/split-allocation.util';
+import { orderHasIncLines } from '../invoicing/utils/shipping-inc.util';
 
 const RECEIVED = ['succeeded', 'captured'];
 const RESERVED = ['pending', 'authorized'];
@@ -158,6 +159,19 @@ export class SplitOrderService {
     }
     if (!order.order_items.length)
       throw new VendixHttpException(ErrorCodes.SPLIT_ORDER_EMPTY);
+    // El domicilio de un restaurante INC lleva el INC incluido, pero sólo se
+    // proyecta al facturar la orden ENTERA (`createFromOrder`); la proyección
+    // de cuentas divididas trata el envío sin impuestos y descuadraría. Guarda
+    // conservadora (no lee `fiscal_data`): dividir un domicilio es raro — las
+    // divisiones son de mesa, con envío en 0.
+    if (
+      Number(order.shipping_cost || 0) > 0 &&
+      orderHasIncLines(order.order_items)
+    ) {
+      this.reject(
+        'La orden tiene domicilio gravado con INC; factúrala sin dividir.',
+      );
+    }
     if (
       (order.invoices ?? []).some(
         (invoice: any) => !VOID_INVOICES.includes(invoice.status),
