@@ -1495,6 +1495,7 @@ describe('PaymentsService', () => {
       const snapshot = {
         address_line1: 'Cra 7 # 1-2', city: 'Bogotá', country_code: 'CO',
         latitude: 4.6, longitude: -74.08, recipient_phone: '3001234567',
+        municipality_code: '11001',
       };
 
       const result = await (service as any).createOrUpdateOrderFromPos(
@@ -1509,7 +1510,7 @@ describe('PaymentsService', () => {
         data: expect.objectContaining({
           store_id: 1, user_id: null, is_primary: false,
           address_line1: snapshot.address_line1, city: snapshot.city,
-          latitude: 4.6, longitude: -74.08,
+          latitude: 4.6, longitude: -74.08, municipality_code: '11001',
         }),
         select: { id: true },
       });

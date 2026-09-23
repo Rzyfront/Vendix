@@ -36,6 +36,7 @@ import {
 import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
 import { assertVariantRequiredForPrepared } from '../orders/utils/variant-required.validator';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { findDianMunicipality } from '../invoicing/providers/dian-direct/constants/dian-geography';
 import {
   resolveTierSnapshotsForItems,
   type TierSnapshot,
@@ -4327,6 +4328,14 @@ export class PaymentsService {
         { reason: 'alias_shipping_address_invalid', field: 'country_code' },
       );
     }
+    const municipalityCode = optional('municipality_code', 10);
+    if (municipalityCode && !findDianMunicipality(municipalityCode)) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'El municipio DANE de la dirección no es válido.',
+        { reason: 'alias_shipping_address_invalid', field: 'municipality_code' },
+      );
+    }
     return {
       store_id: storeId,
       organization_id: null,
@@ -4339,6 +4348,7 @@ export class PaymentsService {
       state_province: optional('state_province', 100),
       postal_code: optional('postal_code', 20),
       country_code: country,
+      municipality_code: municipalityCode,
       phone_number: optional('recipient_phone', 50),
       latitude: coordinate('latitude', 90),
       longitude: coordinate('longitude', 180),
