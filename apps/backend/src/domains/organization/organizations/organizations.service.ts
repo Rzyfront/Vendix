@@ -18,7 +18,14 @@ import {
   OrganizationOperatingScope,
 } from './dto';
 import { Prisma } from '@prisma/client';
-import { OPERATING_REVENUE_SQL } from '../../store/analytics/analytics-metrics.contract';
+import {
+  COMPLETED_SALE_STATES,
+  OPERATING_REVENUE_SQL,
+  sqlStateList,
+} from '../../store/analytics/analytics-metrics.contract';
+
+/** Venta consumada, derivada del contrato (nunca `'finished'` a mano). */
+const SALE_STATES_SQL = sqlStateList(COMPLETED_SALE_STATES);
 import {
   resolveOrganizationTimezone,
   localBucketSql,
@@ -164,7 +171,7 @@ export class OrganizationsService {
             ...(store_id && { id: Number(store_id) }),
           },
           created_at: { gte: current_month_start },
-          state: 'finished',
+          state: { in: [...COMPLETED_SALE_STATES] as any },
         },
       }),
 
@@ -176,7 +183,7 @@ export class OrganizationsService {
             ...(store_id && { id: Number(store_id) }),
           },
           created_at: { gte: today_start },
-          state: 'finished',
+          state: { in: [...COMPLETED_SALE_STATES] as any },
         },
       }),
 
@@ -536,7 +543,7 @@ export class OrganizationsService {
         where: {
           stores: { organization_id: org_id },
           created_at: { gte: current_month_start },
-          state: { not: 'cancelled' },
+          state: { in: [...COMPLETED_SALE_STATES] as any },
         },
       }),
 
@@ -545,7 +552,7 @@ export class OrganizationsService {
         where: {
           stores: { organization_id: org_id },
           created_at: { gte: today_start },
-          state: { not: 'cancelled' },
+          state: { in: [...COMPLETED_SALE_STATES] as any },
         },
       }),
 
@@ -569,13 +576,12 @@ export class OrganizationsService {
             EXTRACT(MONTH FROM ${createdAtLocal})::int as month,
             EXTRACT(YEAR FROM ${createdAtLocal})::int as year,
             -- Ingreso operativo del contrato: subtotal − descuentos + base del
-            -- envío (sin IVA/INC de líneas ni el impuesto del envío). Antes era
-            -- grand_total − shipping_cost, que contaba el IVA como ingreso.
+            -- envío, sin IVA/INC de líneas ni el impuesto del envío.
             COALESCE(SUM(${OPERATING_REVENUE_SQL}), 0) as revenue
           FROM orders o
           INNER JOIN stores s ON s.id = o.store_id
           WHERE s.organization_id = ${org_id}
-            AND o.state = 'finished'
+            AND o.state IN (${SALE_STATES_SQL})
             AND o.created_at >= ${trend_start_date}
           GROUP BY EXTRACT(MONTH FROM ${createdAtLocal}), EXTRACT(YEAR FROM ${createdAtLocal})
         ),
@@ -588,7 +594,7 @@ export class OrganizationsService {
           INNER JOIN orders o ON oi.order_id = o.id
           INNER JOIN stores s ON s.id = o.store_id
           WHERE s.organization_id = ${org_id}
-            AND o.state = 'finished'
+            AND o.state IN (${SALE_STATES_SQL})
             AND o.created_at >= ${trend_start_date}
           GROUP BY EXTRACT(MONTH FROM ${createdAtLocal}), EXTRACT(YEAR FROM ${createdAtLocal})
         )
@@ -608,9 +614,10 @@ export class OrganizationsService {
       >`
         SELECT
           s.store_type as type,
-          COALESCE(SUM(o.grand_total), 0) as revenue
+          -- Ingreso operativo del contrato (sin IVA/INC ni impuesto del envío).
+          COALESCE(SUM(${OPERATING_REVENUE_SQL}), 0) as revenue
         FROM stores s
-        LEFT JOIN orders o ON o.store_id = s.id AND o.state = 'finished'
+        LEFT JOIN orders o ON o.store_id = s.id AND o.state IN (${SALE_STATES_SQL})
           AND o.created_at >= ${current_month_start}
         WHERE s.organization_id = ${org_id} AND s.is_active = true
         GROUP BY s.store_type
@@ -709,6 +716,22 @@ export class OrganizationsService {
     const storeFilter = storeId
       ? Prisma.sql`AND o.store_id = ${storeId}`
       : Prisma.empty;
+    // Mismo recorte para la CxP del transportador. Antes se reutilizaba
+    // `storeFilter` (alias `o.`) dentro de una consulta sobre `ap`, lo que
+    // rompía la consulta en cuanto llegaba un `storeId`.
+    const apStoreFilter = storeId
+      ? Prisma.sql`AND ap.store_id = ${storeId}`
+      : Prisma.empty;
+    // Ventana del costo de transporte = la MISMA ventana de instantes que las
+    // órdenes. Se filtra por `ap.created_at` (TIMESTAMP, instante de la
+    // liquidación de la ruta) y no por `issue_date`: el escritor
+    // (`AccountsPayableService.createFromEvent`) guarda `issue_date = new Date()`
+    // en una columna DATE, es decir la fecha UTC — no la fecha local —, y una
+    // liquidación a las 19:00 en Bogotá caería en el día (y a fin de mes, en el
+    // mes) siguiente. `created_at` es el mismo instante sin esa ambigüedad.
+    const apEndFilter = endDate
+      ? Prisma.sql`AND ap.created_at <= ${endDate}`
+      : Prisma.empty;
 
     // `revenue` es el ingreso operativo del contrato (subtotal − descuentos +
     // base del envío): excluye el IVA/INC de las líneas y el impuesto de una
@@ -723,7 +746,7 @@ export class OrganizationsService {
         FROM orders o
         INNER JOIN stores s ON s.id = o.store_id
         WHERE s.organization_id = ${organizationId}
-          AND o.state = 'finished'
+          AND o.state IN (${SALE_STATES_SQL})
           AND o.created_at >= ${startDate}
           ${endFilter}
           ${storeFilter}
@@ -733,7 +756,7 @@ export class OrganizationsService {
         INNER JOIN orders o ON o.id = oi.order_id
         INNER JOIN stores s ON s.id = o.store_id
         WHERE s.organization_id = ${organizationId}
-          AND o.state = 'finished'
+          AND o.state IN (${SALE_STATES_SQL})
           AND o.created_at >= ${startDate}
           ${endFilter}
           ${storeFilter}
@@ -758,7 +781,9 @@ export class OrganizationsService {
       FROM accounts_payable ap
       WHERE ap.organization_id = ${organizationId}
         AND ap.source_type = 'dispatch_route'
-        ${storeFilter}
+        AND ap.created_at >= ${startDate}
+        ${apEndFilter}
+        ${apStoreFilter}
     `;
     const transportCost = Number(transportCostRows[0]?.transport_cost ?? 0);
 
