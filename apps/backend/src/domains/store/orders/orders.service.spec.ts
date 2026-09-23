@@ -1485,6 +1485,39 @@ describe('OrdersService', () => {
         }
       });
 
+      it('mismo método, tarifa y costo (solo se edita la nota): conserva la copia aunque la tarifa haya cambiado su impuesto', async () => {
+        setupContext();
+        const contextSpy = spyContext();
+        try {
+          arrangeEditableDraft();
+          arrangeProduct();
+          // Tras la venta la tarifa pasó a no tener impuesto: re-copiarla
+          // borraría el INC ya cobrado. Nada del envío cambió ⇒ no se toca.
+          snapshotForRate.mockResolvedValue({
+            shipping_tax_rate_id: null, shipping_tax_name: null, shipping_tax_type: null,
+            shipping_tax_rate: null, shipping_tax_amount: 0,
+          });
+          const withShipping = {
+            ...draftOrder, shipping_cost: '10.00',
+            shipping_method_id: fullDto.shipping_method_id, shipping_rate_id: 7,
+            ...INC_SNAPSHOT,
+          };
+          mockPrismaService.orders.findFirst.mockReset();
+          mockPrismaService.orders.findFirst
+            .mockResolvedValueOnce(withShipping as any)
+            .mockResolvedValue(persistedOrder as any);
+          await service.updateOrderFromEditor(500, { ...fullDto, notes: 'nota editada' });
+          expect(snapshotForRate).not.toHaveBeenCalled();
+          const data = headerUpdate();
+          expect(data.shipping_rate_id).toBe(7);
+          expect(data.shipping_cost).toBe(10);
+          expect('shipping_tax_amount' in data).toBe(false);
+          expect('shipping_tax_rate_id' in data).toBe(false);
+        } finally {
+          contextSpy.mockRestore();
+        }
+      });
+
       it('dtoDropsShipment (pickup): limpia la copia y suelta shipping_rate_id', async () => {
         setupContext();
         const contextSpy = spyContext();

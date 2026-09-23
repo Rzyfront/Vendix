@@ -2197,9 +2197,27 @@ export class OrdersService {
     //    configuración vigente de la tarifa. El guard de tolerancia de arriba
     //    asegura que el costo es el de la tarifa (no hay costo manual aquí).
     //  - Método sin tarifa, o solo `shipping_cost` ⇒ copia vacía.
+    //  - Método, tarifa y costo IGUALES a los persistidos ⇒ `undefined`: se
+    //    conserva la copia congelada aunque la tarifa haya cambiado su
+    //    impuesto después de la venta (editar una nota no refactura el envío).
+    const persistedShippingCents = Math.round(
+      Number(existingOrder.shipping_cost ?? 0) * 100,
+    );
+    const effectiveShippingCost = dto.shipping_cost ?? shippingCost;
+    const shippingUnchanged =
+      !dtoDropsShipment &&
+      Math.round(Number(effectiveShippingCost ?? 0) * 100) ===
+        persistedShippingCents &&
+      (dto.shipping_method_id
+        ? dto.shipping_method_id === existingOrder.shipping_method_id &&
+          (resolvedShippingRateId ?? null) ===
+            (existingOrder.shipping_rate_id ?? null)
+        : true);
     let shippingTaxUpdate: ShippingTaxSnapshot | undefined;
     if (dtoDropsShipment) {
       shippingTaxUpdate = { ...EMPTY_SHIPPING_TAX };
+    } else if (shippingUnchanged) {
+      shippingTaxUpdate = undefined;
     } else if (dto.shipping_method_id) {
       shippingTaxUpdate = await this.snapshotShippingTax(
         resolvedShippingRateId,
