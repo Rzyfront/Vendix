@@ -190,6 +190,45 @@ describe('buildOrderSaleTaxPayload', () => {
       warn.mockRestore();
     });
 
+    it('A2 · sin descuento pero con deriva P2-1: proyecta como la factura y cuadra', () => {
+      // Fila con cuota 180 sobre base 1.000 al 19 % (debería ser 190): la
+      // factura despeja del bruto cobrado 1.180 → base 991,60 + IVA 188,40.
+      const drift_order = {
+        id: 77,
+        tax_amount: 180,
+        subtotal_amount: 1000,
+        discount_amount: 0,
+        shipping_cost: 0,
+      };
+      const drift_items = [
+        {
+          quantity: 1,
+          total_price: 1000,
+          tax_amount_item: 180,
+          order_item_taxes: [
+            { tax_type: 'iva', tax_rate: 0.19, tax_amount: 180 },
+          ],
+        },
+      ];
+      const payload = buildOrderSaleTaxPayload({
+        product_tax_rows: [
+          { tax_type: 'iva', tax_rate: 0.19, tax_amount: 180, taxable_amount: 1000 },
+        ],
+        order: drift_order,
+        order_items: drift_items,
+      });
+      expect(payload.discount_projected).toBe(true);
+      expect(payload.tax_amount).toBe(188.4);
+      expect(payload.discount_amount).toBe(8.4);
+      expect(payload.tax_breakdown).toEqual([
+        expect.objectContaining({ tax_type: 'iva', tax_amount: 188.4 }),
+      ]);
+      // DR caja 1.180 + DR 4175 8,40 = CR 4135 1.000 + CR IVA 188,40.
+      expect(Math.round((1180 + payload.discount_amount) * 100)).toBe(
+        Math.round((1000 + payload.tax_amount) * 100),
+      );
+    });
+
     it('sin descuento no avisa', () => {
       const warn = jest
         .spyOn(Logger.prototype, 'warn')

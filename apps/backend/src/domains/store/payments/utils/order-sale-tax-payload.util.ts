@@ -196,7 +196,7 @@ function warnFallback(
   detail: Record<string, unknown> = {},
 ) {
   logger.warn(
-    `Descuento de ${scope} sin proyección fiscal (${reason}); el asiento usa el impuesto pre-descuento. ` +
+    `Descuento o deriva de ${scope} sin proyección fiscal (${reason}); el asiento usa el impuesto de las filas de la orden. ` +
       JSON.stringify({ id: order.id ?? null, ...detail }),
   );
 }
@@ -207,24 +207,37 @@ function warnFallback(
  * definición: la usan `buildOrderSaleTaxPayload` y el carril de cuenta
  * financiera de `AutoEntryService`.
  *
- * `null` sin descuento (sin aviso: el asiento es el histórico por diseño) o
- * cuando no reconcilia (con `logger.warn`).
+ * `null` sin descuento ni deriva P2-1 de línea (sin aviso: el asiento es el
+ * histórico por diseño) o cuando no reconcilia (con `logger.warn`). Sin
+ * descuento pero con deriva, proyecta igual que la factura (A2).
  */
 export function projectOrderDiscountedTaxes(
   order_items: ReadonlyArray<OrderSaleLineSource> | null | undefined,
   order: OrderSaleTaxPayloadOrder,
   scope: string,
 ): OrderDiscountedTaxes | null {
-  const discount_cents = toCents(order.discount_amount);
-  if (discount_cents <= 0) return null;
+  const discount_cents = Math.max(0, toCents(order.discount_amount));
   if (!order_items || order_items.length === 0) {
-    warnFallback(scope, order, 'sin_lineas');
+    if (discount_cents > 0) warnFallback(scope, order, 'sin_lineas');
     return null;
   }
   const projection = projectOrderInvoiceLines(
     order_items as ReadonlyArray<OrderInvoiceLineSource>,
-    order.discount_amount,
+    discount_cents > 0 ? order.discount_amount : 0,
   );
+  // Sin descuento de orden, la factura sólo reproyecta las líneas con deriva
+  // P2-1 (cuota por unidad × cantidad ≠ cuota de la fila). Sin ninguna, el
+  // asiento es el histórico por diseño (idéntico, sin aviso). Con deriva, el
+  // asiento debe declarar el mismo impuesto que la factura: la diferencia
+  // base ↔ impuesto de esas líneas va, igual que el descuento, a 4175.
+  if (
+    discount_cents <= 0 &&
+    !projection.error &&
+    !projection.lines.some((line) => line.reason === 'line_tax_drift')
+  ) {
+    return null;
+  }
+  if (discount_cents <= 0 && projection.error) return null;
   if (
     projection.error ||
     toCents(projection.allocated_discount.toString()) !== discount_cents
