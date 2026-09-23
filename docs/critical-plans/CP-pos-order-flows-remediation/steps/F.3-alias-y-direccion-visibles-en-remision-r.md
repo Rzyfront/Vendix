@@ -27,7 +27,7 @@ skills: [vendix-dispatch-routes, vendix-address-geocoding, vendix-backend, how-t
   - `curl -s "$API/store/dispatch-notes/by-order/$ORDER_ALIAS_ID" -H "Authorization: Bearer $TOKEN" | tee evidence/F.3-by-order.json`
   - `curl -s -X PATCH "$API/store/dispatch-notes/$NOTE_ID/address" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"address_line1":"Cra 7 # 1-3","city":"Bogotá"}' | tee evidence/F.3-patch-address.json` → dirección recopiada, nombre intacto.
   - SQL de DB-35: `SELECT count(*) FROM dispatch_notes d JOIN orders o ON o.id=d.order_id WHERE o.customer_alias IS NOT NULL AND d.customer_address IS NULL;` → 0 → `evidence/F.3-db35.txt`.
-  - SQL de DB-36: `SELECT s.id FROM dispatch_route_stops s JOIN dispatch_notes d ON d.id=s.dispatch_note_id WHERE d.customer_address IS NULL;` → 0 filas → `evidence/F.3-db36.txt`.
+  - SQL de DB-36: consultar paradas creadas por el nuevo recorrido de alias y exigir dirección/coordenadas; **no cero global** (57 paradas legacy sin copia, `evidence/F3-historical-baseline-20260923.md`).
   - Daño histórico: `SELECT count(*) FROM dispatch_notes WHERE customer_id IS NULL AND coalesce(customer_name,'')='';` → `evidence/F.3-remisiones-sin-nombre.txt`.
   - Playwright MCP contra `https://vendix.com`: venta con alias → generar remisión → armar ruta → ver la parada en el mapa → descargar el PDF de ruta. Capturas y PDF en `evidence/F.3-alias-ruta-e2e/`.
 - **Acceptance checklist:**
@@ -41,5 +41,5 @@ skills: [vendix-dispatch-routes, vendix-address-geocoding, vendix-backend, how-t
   - [x] El documento impreso de la remisión declara el campo de nombre de referencia en el catálogo (spec).
   - [ ] Una venta con alias entra al pool de despacho con nombre y dirección legibles.
   - [ ] Ninguna remisión existente se reescribe durante el paso.
-  - [ ] El conteo de remisiones históricas sin nombre queda registrado como evidencia.
-- **Status:** in-progress — escritor + lectores/catálogo `4549a0a28`, 6 suites Jest/39 tests. Falta API/SQL real, PDF descargado, ruta y Playwright; Docker/Colima cayó durante pruebas paralelas y se recuperará antes de E2E.
+  - [x] El conteo de remisiones históricas sin nombre queda registrado en `evidence/F3-historical-baseline-20260923.md`.
+- **Status:** in-progress — escritor + lectores/catálogo `4549a0a28`, 6 suites Jest/39 tests. SQL de solo lectura: 2 remisiones alias sin nombre y 57 paradas sin dirección históricas; ver `evidence/F3-historical-baseline-20260923.md`. Falta API/UI nueva, PDF y ruta; Colima recuperado tras presión de pruebas.
