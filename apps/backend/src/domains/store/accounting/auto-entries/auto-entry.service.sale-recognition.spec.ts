@@ -165,6 +165,10 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
         codes[key] ? { account_code: codes[key], source: 'default' } : null,
       ),
     };
+    const failures = {
+      recordFailure: jest.fn(),
+      recordSkip: jest.fn().mockResolvedValue(undefined),
+    };
     const service = new AutoEntryService(
       prisma as any,
       accountMapping as any,
@@ -173,15 +177,12 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
         isAreaEnabled: jest.fn().mockResolvedValue(true),
         isSubflowEnabled: jest.fn().mockResolvedValue(true),
       } as any,
-      {
-        recordFailure: jest.fn(),
-        recordSkip: jest.fn().mockResolvedValue(undefined),
-      } as any,
+      failures as any,
     );
     const createAutoEntry = jest
       .spyOn(service, 'createAutoEntry')
       .mockResolvedValue({ id: 999 } as any);
-    return { service, createAutoEntry, unscoped };
+    return { service, createAutoEntry, unscoped, failures };
   };
 
   const linesOf = (call: any[]) => (call[0].lines as any[]).filter(Boolean);
@@ -562,7 +563,7 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
     it('cuenta sin resolver en cobertura parcial ⇒ se omite con registro, nunca la factura completa', async () => {
       const codes: Record<string, string> = { ...CODES };
       delete codes['invoice.validated.shipping_income'];
-      const { service, createAutoEntry } = build({
+      const { service, createAutoEntry, failures } = build({
         codes,
         entries: [
           {
@@ -586,6 +587,53 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
         }),
       );
       expect(createAutoEntry).not.toHaveBeenCalled();
+      expect(failures.recordSkip).toHaveBeenCalledWith(
+        expect.objectContaining({ cause: 'SKIPPED_MISSING_MAPPING' }),
+      );
+    });
+
+    it('retención mayor que el saldo no cubierto ⇒ causa propia, no «falta mapeo»', async () => {
+      const { service, createAutoEntry, failures } = build({
+        entries: [
+          {
+            id: 800,
+            source_type: 'payment.received',
+            source_id: SALE.payment_id,
+            total_credit: SALE.total - 100,
+            accounting_entry_lines: [
+              {
+                debit_amount: 0,
+                credit_amount: SALE.total - 100,
+                account: { code: '4135' },
+              },
+            ],
+          },
+        ],
+      });
+
+      const result: any = await service.onInvoiceValidated({
+        ...invoiceEvent,
+        withholding_breakdown: [
+          {
+            withholding_type: 'retefuente',
+            concept_code: 'RF-SERV',
+            rate: 0.025,
+            base: SALE.subtotal,
+            amount: 250,
+            account_role: 'invoice.validated.retefuente_receivable',
+          } as any,
+        ],
+      });
+
+      expect(result.reason).toBe('partial_coverage_unscalable');
+      expect(createAutoEntry).not.toHaveBeenCalled();
+      expect(failures.recordSkip).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cause: 'SKIPPED_PARTIAL_COVERAGE_UNSCALABLE',
+          source_type: 'invoice.validated',
+          source_id: SALE.invoice_id,
+        }),
+      );
     });
   });
 

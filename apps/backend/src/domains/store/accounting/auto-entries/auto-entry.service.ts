@@ -2155,18 +2155,24 @@ export class AutoEntryService {
         // Sin escalar no hay forma honesta de postear: la factura completa
         // duplicaría lo ya reconocido por los pagos. Se registra la omisión
         // para reproceso cuando se corrija el mapeo.
+        const missing_account = lines.some((line) => !line);
         const detail =
           `Cobertura parcial de la factura #${data.invoice_id} (orden ` +
           `#${prior!.order_id}): el asiento no se puede escalar al saldo ` +
-          `${formatCents(uncovered_cents)} (línea sin cuenta, asiento descuadrado ` +
-          `o retención mayor que el saldo). Asiento omitido.`;
+          `${formatCents(uncovered_cents)} (` +
+          (missing_account
+            ? 'línea sin cuenta PUC resuelta'
+            : 'asiento descuadrado o retención mayor que el saldo') +
+          `). Asiento omitido.`;
         this.logger.error(`invoice.validated #${data.invoice_id}: ${detail}`);
         await this.entry_failure_service.recordSkip({
           organization_id: data.organization_id,
           store_id: data.store_id,
           source_type: 'invoice.validated',
           source_id: data.invoice_id,
-          cause: 'SKIPPED_MISSING_MAPPING',
+          cause: missing_account
+            ? 'SKIPPED_MISSING_MAPPING'
+            : 'SKIPPED_PARTIAL_COVERAGE_UNSCALABLE',
           detail,
           event_payload: data,
         });
