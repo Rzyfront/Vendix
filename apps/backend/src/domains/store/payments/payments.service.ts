@@ -3822,32 +3822,9 @@ export class PaymentsService {
     // recortada. Ver ADR-07 — lo comercial se expresa en bruto.
     const newSubtotalGross = this.roundMoney(newSubtotal + newTax);
     const shippingCost = this.roundMoney(dto.shipping_cost || 0);
-    // GAP-6 — Propina del cierre de mesa. Aditiva al grand_total, SIN IVA:
-    // NO se suma a subtotal_amount ni tax_amount (no es ingreso ni base
-    // gravable). Se persiste aparte en orders.tip_amount y la contabilidad
-    // la reconoce como pasivo custodio (propinas por pagar).
-    //
-    // carril D / lina — D3: cálculo y metadatos de la propina.
-    //  - Si llega `tip_amount` directo, gana sobre cualquier porcentaje.
-    //  - Si NO llega `tip_amount` y llega `tip_type='percentage'`, se
-    //    calcula sobre `newSubtotal` (la base gravable): un % sobre
-    //    envío/envío + propina es absurdo, la convención contable
-    //    colombiana es "% sobre lo consumido". Si `tip_value` falta o
-    //    es <= 0, no se calcula nada (propina 0, no obligatoria).
-    //  - El % se guarda RESUELTO A MONTO (no como porcentaje crudo):
-    //    si mañana cambia el subtotal de esa orden, la propina ya
-    //    pactada no puede moverse sola. Persistimos `tip_value` con
-    //    el monto final y `tip_type='fixed'`, porque el operador ya
-    //    eligió la cifra que va a pagar el cliente.
-    //  - El `tip_type` que persiste es 'fixed' cuando se calculó desde
-    //    percentage; o el que vino cuando fue 'fixed' directo. La
-    //    auditoría ve la decisión original del operador en una
-    //    columna y el monto anclado en otra.
-    // Las reglas viven en `resolveTip` (common/utils/tip.util.ts). Se
-    // extrajeron de aquí cuando el pago desde el detalle de orden necesitó las
-    // mismas: dos implementaciones de la misma regla divergen, y una propina
-    // que se calcula distinto según por dónde cobró el operador es un
-    // descuadre que nadie ve hasta la conciliación.
+    // E.6 — el porcentaje usa productos brutos (subtotal + impuesto), nunca
+    // envío ni la propina previa. La propina suma al total, pero queda fuera
+    // de subtotal_amount y tax_amount; resolveTip ancla el monto pactado.
     const resolvedTip = resolveTip(dto, newSubtotalGross, (v) =>
       this.roundMoney(v),
     );
@@ -4541,37 +4518,14 @@ export class PaymentsService {
           orderItems,
         );
 
-        // carril D / lina — D3: cálculo y metadatos de la propina
-        // (rama retail / POS caja). Misma regla que mesa: el % se
-        // calcula sobre el subtotal (no sobre total con impuestos) y
-        // se guarda RESUELTO A MONTO, no como porcentaje crudo. Si
-        // llega tip_amount directo, gana sobre cualquier porcentaje.
-        let tip = this.roundMoney(dto.tip_amount || 0);
-        let resolvedTipType: 'percentage' | 'fixed' | null = dto.tip_type ?? null;
-        let resolvedTipValue: number | null =
-          dto.tip_value != null ? this.roundMoney(dto.tip_value) : null;
-        if (
-          tip === 0 &&
-          resolvedTipType === 'percentage' &&
-          resolvedTipValue != null &&
-          resolvedTipValue > 0
-        ) {
-          // F-017 — el porcentaje va sobre el BRUTO, igual que en el cierre
-          // de mesa (`resolveTip(dto, newSubtotalGross, …)`). Dos carriles
-          // que calculan distinto la misma propina es un descuadre que no se
-          // ve hasta la conciliación.
-          tip = this.roundMoney(
-            (calculatedSubtotalGross * resolvedTipValue) / 100,
-          );
-          resolvedTipType = 'fixed';
-          resolvedTipValue = tip;
-        }
-        if (resolvedTipType == null && tip > 0) {
-          resolvedTipType = 'fixed';
-        }
-        if (resolvedTipType === 'fixed' && resolvedTipValue == null && tip > 0) {
-          resolvedTipValue = tip;
-        }
+        // E.6 — retail shares the table/flow resolver and its gross product
+        // base; the tip remains outside taxable subtotal and product tax.
+        const resolvedTip = resolveTip(dto, calculatedSubtotalGross, (v) =>
+          this.roundMoney(v),
+        );
+        const tip = resolvedTip.amount;
+        const resolvedTipType = resolvedTip.type;
+        const resolvedTipValue = resolvedTip.value;
 
         const grandTotal = this.roundMoney(
           Math.max(

@@ -575,6 +575,38 @@ describe('OrderFlowService — compensación de pago POS cuando el finish bloque
     expect(projectTablePayment).toHaveBeenCalledWith(1, 999);
   });
 
+  it('E.6 flow/pay: 10% usa productos brutos, suma propina al cargo sin gravarla', async () => {
+    const orderRow = {
+      ...buildOrder(), customer_id: 44, subtotal_amount: 100000,
+      tax_amount: 19000, discount_amount: 2000, shipping_cost: 5000,
+      grand_total: 122000, tip_amount: 0,
+      payments: [],
+    };
+    jest.spyOn(service as any, 'getOrder').mockImplementation(async () => ({ ...orderRow }));
+    prismaMock.orders.update = jest.fn(async ({ data }: any) => {
+      Object.assign(orderRow, data);
+      return { ...orderRow };
+    });
+    jest.spyOn(service as any, 'updateOrderState')
+      .mockResolvedValue({ id: 1, state: 'finished' });
+
+    await service.payOrder(1, {
+      ...DTO, tip_type: 'percentage', tip_value: 10,
+    });
+
+    expect(prismaMock.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        tip_amount: 11900, tip_type: 'fixed', tip_value: 11900,
+        grand_total: 133900,
+      }),
+    }));
+    expect(orderRow.subtotal_amount).toBe(100000);
+    expect(orderRow.tax_amount).toBe(19000);
+    expect(prismaMock.payments.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ amount: 133900, state: 'succeeded' }),
+    }));
+  });
+
   it('proyección falla post-commit: conserva el pago y responde ERR-33 tipado (409)', async () => {
     jest.spyOn(service as any, 'updateOrderState').mockResolvedValue({ id: 1, state: 'finished' });
     projectTablePayment.mockRejectedValue(new Error('mesa cerrada'));

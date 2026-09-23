@@ -1052,9 +1052,14 @@ export class OrderFlowService {
     const roundTipMoney = (value: number) =>
       Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
     if (dto.tip_amount != null || dto.tip_type != null) {
+      // E.6: the percentage base is gross products, before discounts and
+      // excluding shipping or any previously persisted tip.
+      const grossProductsBase = roundTipMoney(
+        Number(order.subtotal_amount || 0) + Number(order.tax_amount || 0),
+      );
       const incomingTip = resolveTip(
         dto,
-        Number(order.subtotal_amount || 0),
+        grossProductsBase,
         roundTipMoney,
       );
       // Una propina sobre un abono de credito descuadra el plan de cuotas ya

@@ -47,6 +47,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { AuditService } from '@common/audit/audit.service';
 import { mockRequestContext } from 'src/testing/prisma-mock';
 import { buildOrder } from 'src/testing/money-fixtures';
+import * as tipUtil from '../../../common/utils/tip.util';
 
 /**
  * Tests for PaymentsService focused on the POS sale recalculation flow:
@@ -1469,6 +1470,39 @@ describe('PaymentsService', () => {
       }));
       expect(client.orders.update.mock.calls[0][0].data.order_items).toBeUndefined();
     });
+
+    it('E.6 retail: delegates 10% of gross products to resolveTip without taxing the tip', async () => {
+      const client = tx({ ...order, subtotal_amount: 100000, tax_amount: 19000 });
+      const resolveTipSpy = jest.spyOn(tipUtil, 'resolveTip');
+      jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+      jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+        product_name: 'Artículo', quantity: 1, total_price: 100000,
+        tax_amount_item: 19000,
+      });
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 2000, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: null, coupon_code: null, discount_amount: 0,
+      });
+
+      await (service as any).createOrUpdateOrderFromPos(
+        client, dto({ tip_type: 'percentage', tip_value: 10, shipping_cost: 5000 }), user,
+      );
+
+      expect(resolveTipSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ tip_type: 'percentage', tip_value: 10 }),
+        119000, expect.any(Function),
+      );
+      expect(client.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal_amount: 100000, tax_amount: 19000,
+          discount_amount: 2000, shipping_cost: 5000,
+          tip_amount: 11900, tip_type: 'fixed', tip_value: 11900,
+          grand_total: 133900,
+        }),
+      }));
+    });
   });
 
   describe('createOrderInstallments — projected persisted POS credit total', () => {
@@ -1751,6 +1785,36 @@ describe('PaymentsService', () => {
       expect(existingLine.order_item_taxes).toEqual([oldTaxSnapshot]);
       expect(tx.order_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
         where: { order_id: 1001, cancelled_at: null },
+      }));
+    });
+
+    it('E.6 mesa: calcula 10% del producto bruto sin sumar propina al subtotal o impuesto', async () => {
+      const { tx, posUser } = arrangeCashSale();
+      const resolveTipSpy = jest.spyOn(tipUtil, 'resolveTip');
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 2000, applied: [],
+      });
+      tx.order_items.findMany.mockResolvedValue([{
+        id: 17, quantity: 1, total_price: 100000,
+        order_item_taxes: [{ tax_amount: 19000 }],
+      }]);
+
+      await (service as any).applyPosPaymentToTableSession(
+        tx, buildDto({ tip_type: 'percentage', tip_value: 10, shipping_cost: 5000 }),
+        posUser, CONTEXT_STORE_ID,
+      );
+
+      expect(resolveTipSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ tip_type: 'percentage', tip_value: 10 }),
+        119000, expect.any(Function),
+      );
+      expect(tx.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal_amount: 100000, tax_amount: 19000,
+          discount_amount: 2000, shipping_cost: 5000,
+          tip_amount: 11900, tip_type: 'fixed', tip_value: 11900,
+          grand_total: 133900,
+        }),
       }));
     });
   });
