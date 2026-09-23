@@ -18,6 +18,7 @@
 | 2026-09-22 | Mencius | B.3 | SSE de staff, snapshots y página muestran mesa pagada; tile pendiente. | 1316bfae5; 47 tests |
 | 2026-09-22 | Rawls | E.3 | Creación persiste delivery_type/channel con defaults explícitos. | 91575a2c7; 75 tests |
 | 2026-09-22 | Bohr | C.4 | KDS distingue ENVÍO/PARA LLEVAR por delivery_type sin tocar is_takeaway. | 37005e554; 30 tests |
+| 2026-09-23 | Fabio | C.4 | Tickets QA del día #103-106: REST/SSE y UI tablero/modal distinguen home/direct/dine-in; cancelados sin inventario. Paso cerrado. | evidence/C4-current-day-full-matrix-20260923.md |
 | 2026-09-22 | Kepler | F.1 | Dirección primaria exige cliente y unset se limita a su user_id. Datos históricos no reparados. | 5a97f2399; 5 tests |
 | 2026-09-22 | Mencius | B.3 | Tile muestra Pagada desde paid_at persistido o session_paid; no confunde pago parcial. Watch posterior y E2E pendientes. | 86138fbd5 |
 | 2026-09-22 | Descartes | B.5 | Apertura devuelve estado anterior; POS avisa limpieza sin bloquear. Contrato frontend tipado. | c72634710; 640ba2bcc; 627ab494a; 48 tests |

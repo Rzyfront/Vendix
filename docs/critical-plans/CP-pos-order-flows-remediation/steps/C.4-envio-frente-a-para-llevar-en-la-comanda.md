@@ -2,9 +2,9 @@
 id: C.4
 title: "ENVÍO frente a PARA LLEVAR en la comanda del KDS"
 phase: C
-status: in-progress
-owner: Bohr
-updated: 2026-09-20
+status: done
+owner: Fabio
+updated: 2026-09-23
 contracts: [FB-36, FB-37, FB-38, FB-16, FB-19, DB-04, DB-10]
 adrs: [ADR-01, ADR-06]
 skills: [vendix-restaurant-ops, vendix-backend-api, vendix-zoneless-signals, how-to-test]
@@ -29,12 +29,12 @@ skills: [vendix-restaurant-ops, vendix-backend-api, vendix-zoneless-signals, how
   - `grep -rn "is_takeaway" apps/frontend/src/app/private/modules/store/restaurant-ops/kds/ > evidence/C.4-censo-is-takeaway.txt` — los usos de REGLA siguen; solo cambia el del badge.
   - Playwright MCP: disparar a cocina una orden `home_delivery` y una `direct_delivery` y capturar los dos rótulos distintos en `evidence/C.4-badges/`.
 - **Acceptance checklist:**
-  - [ ] El `order.select` del include de ticket incluye `delivery_type`, y snapshot, stream y listado lo devuelven los tres.
-  - [ ] El tipo del frontend declara `delivery_type` en `KitchenTicket.order` con los valores reales del enum.
-  - [ ] Una orden `home_delivery` muestra ENVÍO en el tablero; una `direct_delivery` muestra PARA LLEVAR.
-  - [ ] Una orden `dine_in` no muestra ninguno de los dos rótulos de empaque.
-  - [ ] Al recargar el tablero el rótulo se conserva: viene del snapshot, no solo del SSE.
-  - [ ] `is_takeaway` conserva valor y reglas: conteo agrupado idéntico y compuerta takeaway-only sin cambio de comportamiento.
-  - [ ] El botón «Entregar» del KDS sigue habilitándose exactamente con el mismo criterio que antes del paso.
-  - [ ] El paso se despliega después de que `delivery_type` se persista de verdad; si no, el badge queda leyendo el default del esquema.
-- **Status:** in-progress — contrato/badges en 37005e554; 30 tests y watch OK. `evidence/C4-kds-readonly-20260923.md`: lista histórica trae `delivery_type` y `is_takeaway` coherentes en home/direct/dine-in, pero snapshot/SSE del día y UI están vacíos. Faltan tickets actuales seguros para los tres badges; no se abrió Cocina #1 por backfill de inventario.
+  - [x] El `order.select` del include de ticket incluye `delivery_type`, y snapshot, stream y listado lo devuelven los tres.
+  - [x] El tipo del frontend declara `delivery_type` en `KitchenTicket.order` con los valores reales del enum.
+  - [x] Una orden `home_delivery` muestra ENVÍO en el tablero; una `direct_delivery` muestra PARA LLEVAR.
+  - [x] Una orden `dine_in` no muestra ninguno de los dos rótulos de empaque.
+  - [x] Al recargar el tablero el rótulo se conserva: viene del snapshot, no solo del SSE.
+  - [x] `is_takeaway` conserva valor y reglas: conteo agrupado idéntico y compuerta takeaway-only sin cambio de comportamiento.
+  - [x] El botón «Entregar» del KDS sigue habilitándose exactamente con el mismo criterio que antes del paso.
+  - [x] El paso se despliega después de que `delivery_type` se persista de verdad; si no, el badge queda leyendo el default del esquema.
+- **Status:** done — contrato/badges `37005e554`, KitchenFireService 33/33 y `evidence/C4-current-day-full-matrix-20260923.md`: snapshot/list/SSE inicial + `ticket.created` vivo, tablero y tres modales con rótulos correctos; `is_takeaway` sin cambio. Cuatro órdenes/tickets QA cancelados oficialmente sin inventario. C.3 lock de estación sigue pendiente por separado.
