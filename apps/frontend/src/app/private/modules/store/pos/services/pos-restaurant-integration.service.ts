@@ -17,6 +17,7 @@ import { MenusService } from '../../restaurant-ops/menus/services/menus.service'
 import type { MenuFull } from '../../restaurant-ops/menus/interfaces';
 import type {
   Table,
+  TableStatus,
   TableSession,
   OpenTableSessionDto,
   AddItemsToTableSessionDto,
@@ -73,6 +74,7 @@ export interface CounterOrderResult {
 }
 
 export interface OpenTableSessionResult {
+  previous_table_status: TableStatus;
   session: TableSession;
   order: {
     id: number;
