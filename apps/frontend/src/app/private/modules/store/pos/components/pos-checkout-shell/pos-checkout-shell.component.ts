@@ -857,7 +857,10 @@ export class PosCheckoutShellComponent {
           // una decisión del cajero. `seededEntrega` guarda ese valor para que
           // el effect de detección no lo confunda con un click.
           const hasTable =
-            this.tableId() != null || this.integration.hasOpenTableSession();
+            this.tableId() != null ||
+            (typeof this.integration?.hasOpenTableSession === 'function'
+              ? this.integration.hasOpenTableSession()
+              : this.integration?.currentTableSession?.() != null);
           const defaultEntrega =
             this.initialEntrega() === 'enviar'
               ? 'enviar'

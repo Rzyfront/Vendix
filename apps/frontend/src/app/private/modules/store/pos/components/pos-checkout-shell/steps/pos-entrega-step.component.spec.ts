@@ -16,6 +16,7 @@ describe('PosEntregaStepComponent', () => {
     const integrationMock = {
       isRestaurantMode: () => isRestaurant(),
       currentTableSession: () => null,
+      hasOpenTableSession: () => false,
     };
 
     await TestBed.configureTestingModule({

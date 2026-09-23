@@ -201,7 +201,11 @@ class CreditFieldsStub {
 describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBOARD)', () => {
   let fixture: ComponentFixture<PosCheckoutShellComponent>;
   let component: PosCheckoutShellComponent;
-  let integrationMock: { isRestaurantMode: () => boolean; currentTableSession: () => null };
+  let integrationMock: {
+    isRestaurantMode: () => boolean;
+    currentTableSession: () => null;
+    hasOpenTableSession: () => boolean;
+  };
   let settingsMock: { pos: () => null; checkout: () => null };
   let restaurantMode: WritableSignal<boolean>;
 
@@ -281,7 +285,11 @@ describe('PosCheckoutShellComponent — matriz de teclado (CP-POS-CHECKOUT-KEYBO
     // El mock lee una señal: los computed del shell que hacen short-circuit
     // antes de leer señales solo se invalidan por deps reactivas.
     restaurantMode = signal(false);
-    integrationMock = { isRestaurantMode: () => restaurantMode(), currentTableSession: () => null };
+    integrationMock = {
+      isRestaurantMode: () => restaurantMode(),
+      currentTableSession: () => null,
+      hasOpenTableSession: () => false,
+    };
     settingsMock = { pos: () => null, checkout: () => null };
 
     TestBed.configureTestingModule({
