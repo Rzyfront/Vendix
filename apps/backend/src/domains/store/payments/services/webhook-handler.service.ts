@@ -27,7 +27,7 @@ import {
   isPresentialPosSale,
 } from '../../invoicing/pos/presential-pos-sale';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
-import { buildTaxBreakdown } from '@common/interfaces/tax-breakdown.interface';
+import { buildOrderSaleTaxPayload } from '../utils/order-sale-tax-payload.util';
 
 interface WebhookPaymentTransition {
   paymentId: number | null;
@@ -465,8 +465,12 @@ export class WebhookHandlerService {
           },
         },
       });
-      const tax_breakdown = buildTaxBreakdown(
-        orderItemsWithTaxes.flatMap((item) =>
+      // Impuesto del envío (copia congelada en la orden): el helper
+      // compartido con el POS separa el flete NETO (414505) del impuesto
+      // (2408/2436) y lo suma al desglose. Antes este emisor omitía
+      // `shipping_amount`: el asiento de una orden con envío no cuadraba.
+      const sale_tax = buildOrderSaleTaxPayload({
+        product_tax_rows: orderItemsWithTaxes.flatMap((item) =>
           (item.order_item_taxes || []).map((tax) => ({
             ...tax,
             // F-111 — misma regla documentada en `payments.service.ts`: la
@@ -475,7 +479,8 @@ export class WebhookHandlerService {
             taxable_amount: Number(item.total_price || 0),
           })),
         ),
-      );
+        order,
+      });
 
       const systemPaymentMethod =
         payment.store_payment_method?.system_payment_method;
@@ -494,8 +499,9 @@ export class WebhookHandlerService {
         order_number: order.order_number,
         amount: Number(payment.amount),
         subtotal_amount: Number(order.subtotal_amount || 0),
-        tax_amount: Number(order.tax_amount || 0),
-        tax_breakdown,
+        tax_amount: sale_tax.tax_amount,
+        shipping_amount: sale_tax.shipping_amount,
+        tax_breakdown: sale_tax.tax_breakdown,
         // Webhooks do not compute suffered withholding on the fly (the POS
         // path resolves it via `WithholdingFlow.resolveSuffered` inside its
         // transaction). Leave the breakdown empty; the listener + auto-entry
