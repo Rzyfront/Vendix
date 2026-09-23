@@ -4,7 +4,7 @@ title: "Reserva de stock del borrador POS"
 phase: E
 status: in-progress
 owner: Beauvoir
-updated: 2026-09-20
+updated: 2026-09-23
 contracts: [FB-04, DB-12, DB-27, ERR-22, ERR-23, ERR-36]
 adrs: []
 skills: [vendix-inventory-stock, vendix-backend, vendix-prisma-scopes, vendix-error-handling, how-to-test]
@@ -32,10 +32,10 @@ skills: [vendix-inventory-stock, vendix-backend, vendix-prisma-scopes, vendix-er
   - [x] La decisión «venía en draft» se toma del estado previo al claim, no del objeto recargado.
   - [x] Cobrar un borrador deja al menos una fila activa en `stock_reservations` para esa orden.
   - [x] El segundo clic sigue rechazando con el mismo código tipado y un solo pago persistido.
-  - [ ] Ningún ítem descuenta stock dos veces: cero filas en la consulta de doble transacción.
+  - [ ] Ningún ítem descuenta stock dos veces: el fixture físico #1897 dejó una sola transacción negativa, pero falta el barrido global con exclusión de hojas BOM legítimas.
   - [x] Los ítems ya consumidos al disparar a cocina no vuelven a descontar disponible.
   - [x] La reserva sigue siendo no bloqueante: falta de stock no rechaza el cobro.
   - [x] Se emite la auditoría de promoción con su conteo de reservas.
-  - [ ] Una orden cobrada desde borrador genera remisión sin rechazo por stock insuficiente.
+  - [x] Una orden cobrada desde borrador genera remisión sin rechazo por stock insuficiente.
   - [ ] El carril de mesa y el de split conservan su comportamiento actual de promoción.
-- **Status:** in-progress · Fabio · 2026-09-23 · reserva bajo claim `1ca4c0083` y compensación `a9371ab55`; Jest focalizado E.2 16/16. `evidence/E2-flowpay-reservation.md`: POS draft físico #1140 nace sin reserva, flow/pay 200 crea una reserva activa antes del pago y auditoría count1; #1142 doble submit concurrente 200+409 con un pago/una reserva. Falta remisión desde borrador cobrado, consumo final sin doble descuento y barrido mesa/split; DB-27 permanece abierto.
+- **Status:** in-progress · Fabio · 2026-09-23 · reserva bajo claim `1ca4c0083` y compensación `a9371ab55`; Jest focalizado E.2 16/16. `evidence/E2-flowpay-reservation.md`: #1140 reserva y #1142 doble submit 200+409. `evidence/E2-home-draft-fulfillment-20260923.md`: #1174 POS draft home → reserva → remisión #228 → entrega, una sola transacción -1 y reserva consumida. Falta barrido global, mesa/split; DB-27 permanece abierto. La consulta DB-12 debe separar BOM multihoja.
