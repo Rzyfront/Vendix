@@ -35,6 +35,10 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
     'refund.completed.iva_payable': '240802',
     'refund.completed.vat_payable': '2408',
     'refund.completed.shipping_income_reversal': '414505',
+    'refund.completed.bank_transfer': '1110',
+    'credit_note.accepted.sales_returns': '4175',
+    'credit_note.accepted.iva_payable': '240802',
+    'credit_note.accepted.accounts_receivable': '1305',
   };
 
   // Venta: subtotal 10.000, IVA 19 % = 1.900, flete neto 5.000 → total 16.900.
@@ -54,20 +58,33 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
     entries?: any[];
     chartAccount?: any;
     codes?: Record<string, string>;
+    /** accounting_entries.findMany cuando el where trae source_type. */
+    bySource?: Record<string, any[]>;
+    /** accounting_entries.findFirst por source_type. */
+    firstBySource?: Record<string, any>;
+    creditNote?: any;
+    creditNotes?: any[];
+    refunds?: any[];
   } = {}) => {
     const codes = opts.codes ?? CODES;
     const unscoped = {
       invoices: {
-        findFirst: jest.fn().mockResolvedValue(
-          opts.invoice === undefined
-            ? {
-                order_id: SALE.order_id,
-                invoice_type: 'sales_invoice',
-                total_amount: SALE.total,
-              }
-            : opts.invoice,
+        findFirst: jest.fn(async (args: any) =>
+          args?.select?.related_invoice
+            ? (opts.creditNote ?? null)
+            : opts.invoice === undefined
+              ? {
+                  order_id: SALE.order_id,
+                  invoice_type: 'sales_invoice',
+                  total_amount: SALE.total,
+                }
+              : opts.invoice,
         ),
+        findMany: jest.fn().mockResolvedValue(opts.creditNotes ?? []),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      refunds: {
+        findMany: jest.fn().mockResolvedValue(opts.refunds ?? []),
       },
       fiscal_transmissions: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -78,7 +95,15 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
           .mockResolvedValue(opts.payments ?? [{ id: SALE.payment_id }]),
       },
       accounting_entries: {
-        findMany: jest.fn().mockResolvedValue(opts.entries ?? []),
+        findMany: jest.fn(async (args: any) => {
+          const type = args?.where?.source_type;
+          if (typeof type === 'string') return opts.bySource?.[type] ?? [];
+          return opts.entries ?? [];
+        }),
+        findFirst: jest.fn(
+          async (args: any) =>
+            opts.firstBySource?.[args?.where?.source_type] ?? null,
+        ),
       },
       invoice_items: { findMany: jest.fn().mockResolvedValue([]) },
       chart_of_accounts: {
@@ -412,6 +437,215 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
       expect(lines).toContainEqual(
         expect.objectContaining({ account_code: '4135', debit_amount: 5000 }),
       );
+    });
+  });
+  describe('cobro posterior de una venta a crédito sin factura', () => {
+    it('payment.received va por recaudo (DR caja / CR 1305) y no reconoce ingreso otra vez', async () => {
+      const { service, createAutoEntry } = build({
+        firstBySource: { 'credit_sale.created': { id: 601 } },
+      });
+
+      await service.onPaymentReceived({
+        payment_id: 901,
+        organization_id: 1,
+        store_id: 2,
+        order_id: SALE.order_id,
+        amount: 8000,
+        subtotal_amount: SALE.subtotal,
+        tax_amount: SALE.tax,
+        shipping_amount: SALE.shipping,
+      });
+
+      const lines = linesOf(createAutoEntry.mock.calls[0]);
+      expect(lines).toEqual([
+        expect.objectContaining({ account_code: '1105', debit_amount: 8000 }),
+        expect.objectContaining({ account_code: '1305', credit_amount: 8000 }),
+      ]);
+      expect(lines.some((l) => l.account_code.startsWith('4'))).toBe(false);
+      expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
+    });
+
+    it('sin credit_sale.created ni factura sigue siendo venta directa', async () => {
+      const { service, createAutoEntry } = build();
+
+      await service.onPaymentReceived({
+        payment_id: 902,
+        organization_id: 1,
+        store_id: 2,
+        order_id: SALE.order_id,
+        amount: SALE.total,
+        subtotal_amount: SALE.subtotal,
+        tax_amount: SALE.tax,
+        shipping_amount: SALE.shipping,
+      });
+
+      const lines = linesOf(createAutoEntry.mock.calls[0]);
+      expect(creditOn(lines, '4135')).toBe(SALE.subtotal);
+      expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
+    });
+  });
+
+  describe('nota crédito sobre venta POS ya reconocida (carril único)', () => {
+    const NC = {
+      invoice_id: 77,
+      organization_id: 1,
+      store_id: 2,
+      subtotal: 5000,
+      tax_amount: 950,
+      tax_breakdown: [{ tax_type: 'iva' as const, tax_amount: 950 }],
+      total: 5950,
+    };
+    const posPaymentEntry = {
+      id: 501,
+      accounting_entry_lines: [
+        { debit_amount: SALE.total, credit_amount: 0, account: { code: '1105' } },
+        { debit_amount: 0, credit_amount: SALE.subtotal, account: { code: '4135' } },
+        { debit_amount: 0, credit_amount: SALE.shipping, account: { code: '414505' } },
+        { debit_amount: 0, credit_amount: SALE.tax, account: { code: '240802' } },
+      ],
+    };
+    const skippedOriginal = {
+      related_invoice: {
+        order_id: SALE.order_id,
+        accounting_status: 'not_applicable',
+      },
+    };
+
+    it('sin refund: reversa ingreso/impuestos contra la caja que recibió el cobro, nunca 1305', async () => {
+      const { service, createAutoEntry } = build({
+        creditNote: skippedOriginal,
+        bySource: { 'payment.received': [posPaymentEntry] },
+      });
+
+      await service.onCreditNoteAccepted(NC);
+
+      const lines = linesOf(createAutoEntry.mock.calls[0]);
+      expect(lines).toContainEqual(
+        expect.objectContaining({ account_code: '4175', debit_amount: 5000 }),
+      );
+      expect(lines).toContainEqual(
+        expect.objectContaining({ account_code: '240802', debit_amount: 950 }),
+      );
+      expect(lines).toContainEqual(
+        expect.objectContaining({ account_code: '1105', credit_amount: 5950 }),
+      );
+      expect(lines.some((l) => l.account_code === '1305')).toBe(false);
+      expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
+    });
+
+    it('refund.completed ya reversó la venta: la NC no postea segundo reverso', async () => {
+      const { service, createAutoEntry, unscoped } = build({
+        creditNote: skippedOriginal,
+        bySource: {
+          'payment.received': [posPaymentEntry],
+          'refund.completed': [{ id: 950, total_credit: 5950 }],
+        },
+        refunds: [{ id: 31 }],
+      });
+
+      const result: any = await service.onCreditNoteAccepted(NC);
+
+      expect(createAutoEntry).not.toHaveBeenCalled();
+      expect(result).toEqual(
+        expect.objectContaining({
+          skipped: true,
+          reason: 'sale_reversal_already_posted_by_refund',
+          covering_entry_ids: [950],
+        }),
+      );
+      expect(unscoped.invoices.updateMany).toHaveBeenCalledWith({
+        where: { id: NC.invoice_id, organization_id: 1 },
+        data: { accounting_status: 'not_applicable' },
+      });
+    });
+
+    it('factura de origen de venta a crédito: la 1305 existe y la NC la acredita (histórico)', async () => {
+      const { service, createAutoEntry } = build({
+        creditNote: skippedOriginal,
+        firstBySource: { 'credit_sale.created': { id: 601 } },
+      });
+
+      await service.onCreditNoteAccepted(NC);
+
+      const lines = linesOf(createAutoEntry.mock.calls[0]);
+      expect(lines).toContainEqual(
+        expect.objectContaining({ account_code: '1305', credit_amount: 5950 }),
+      );
+      expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
+    });
+
+    const ncLane = {
+      creditNotes: [{ id: NC.invoice_id }],
+      bySource: {
+        'credit_note.accepted': [
+          {
+            id: 960,
+            total_credit: 5950,
+            accounting_entry_lines: [
+              { credit_amount: 0, account: { code: '4175' } },
+              { credit_amount: 5950, account: { code: '1105' } },
+            ],
+          },
+        ],
+      },
+      refunds: [{ id: 31, amount: 5950 }],
+    };
+    const refundAfterNc = {
+      refund_id: 31,
+      order_id: SALE.order_id,
+      organization_id: 1,
+      store_id: 2,
+      amount: 5950,
+      tax_amount: 950,
+    };
+
+    it('refund posterior por el mismo canal (caja): sin asiento, la NC ya reversó', async () => {
+      const { service, createAutoEntry } = build(ncLane);
+
+      const result: any = await service.onRefundCompleted({
+        ...refundAfterNc,
+        effective_channel: 'cash',
+      });
+
+      expect(createAutoEntry).not.toHaveBeenCalled();
+      expect(result.reason).toBe('sale_reversal_already_posted_by_credit_note');
+    });
+
+    it('refund posterior por banco: sólo reclasifica caja → banco, sin tocar ingreso ni impuestos', async () => {
+      const { service, createAutoEntry } = build(ncLane);
+
+      await service.onRefundCompleted({
+        ...refundAfterNc,
+        effective_channel: 'bank_transfer',
+      });
+
+      const lines = linesOf(createAutoEntry.mock.calls[0]);
+      expect(lines).toEqual([
+        expect.objectContaining({ account_code: '1105', debit_amount: 5950 }),
+        expect.objectContaining({ account_code: '1110', credit_amount: 5950 }),
+      ]);
+      expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
+    });
+
+    it('refund que supera lo reversado por la NC: asiento de devolución completo', async () => {
+      const { service, createAutoEntry } = build({
+        ...ncLane,
+        refunds: [
+          { id: 30, amount: 5950 },
+          { id: 31, amount: 5950 },
+        ],
+      });
+
+      await service.onRefundCompleted({
+        ...refundAfterNc,
+        effective_channel: 'cash',
+      });
+
+      const lines = linesOf(createAutoEntry.mock.calls[0]);
+      expect(lines).toContainEqual(
+        expect.objectContaining({ account_code: '4135', debit_amount: 5000 }),
+      );
+      expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
     });
   });
 });

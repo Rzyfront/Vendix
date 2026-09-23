@@ -2174,6 +2174,179 @@ export class AutoEntryService {
   }
 
   /**
+   * Para una NC: ¿su factura de origen se omitió porque la venta la reconoció
+   * `payment.received` (venta POS pagada)? Devuelve la orden y la cuenta de
+   * caja/banco que recibió el cobro (la línea DR del asiento de pago que no es
+   * ingreso, descuento 4175 ni retención 1355). `null` ⇒ carril histórico
+   * (CR 1305). Una venta a crédito (`credit_sale.created`) también devuelve
+   * `null`: ahí la 1305 SÍ existe.
+   */
+  private async findPosRecognizedSaleForCreditNote(
+    credit_note_id: number,
+    organization_id: number,
+  ): Promise<{ order_id: number; cash_account_code: string } | null> {
+    const db = this.prisma.withoutScope();
+    const note = await db.invoices.findFirst({
+      where: { id: credit_note_id, organization_id },
+      select: {
+        related_invoice: {
+          select: { order_id: true, accounting_status: true },
+        },
+      },
+    });
+    const original = (note as any)?.related_invoice;
+    if (!original?.order_id || original.accounting_status !== 'not_applicable')
+      return null;
+    const order_id: number = original.order_id;
+
+    const credit_sale = await db.accounting_entries.findFirst({
+      where: {
+        organization_id,
+        source_type: 'credit_sale.created',
+        source_id: order_id,
+        status: 'posted',
+      },
+      select: { id: true },
+    });
+    if (credit_sale) return null;
+
+    const payments = await db.payments.findMany({
+      where: { order_id },
+      select: { id: true },
+    });
+    if (!payments.length) return null;
+    const entries = await db.accounting_entries.findMany({
+      where: {
+        organization_id,
+        source_type: 'payment.received',
+        source_id: { in: payments.map((row: any) => row.id) },
+        status: 'posted',
+      },
+      select: {
+        id: true,
+        accounting_entry_lines: {
+          select: {
+            debit_amount: true,
+            credit_amount: true,
+            account: { select: { code: true } },
+          },
+        },
+      },
+      orderBy: { id: 'asc' },
+    });
+    for (const entry of entries as any[]) {
+      const lines = entry.accounting_entry_lines ?? [];
+      const is_sale = lines.some(
+        (l: any) =>
+          getCents(l.credit_amount ?? 0) > 0n &&
+          String(l.account?.code ?? '').startsWith('4'),
+      );
+      if (!is_sale) continue;
+      const cash = lines
+        .filter((l: any) => {
+          const code = String(l.account?.code ?? '');
+          return (
+            getCents(l.debit_amount ?? 0) > 0n &&
+            code &&
+            !code.startsWith('4') &&
+            !code.startsWith('1355')
+          );
+        })
+        .sort((a: any, b: any) =>
+          getCents(b.debit_amount) > getCents(a.debit_amount) ? 1 : -1,
+        )[0];
+      if (cash) return { order_id, cash_account_code: String(cash.account.code) };
+    }
+    return null;
+  }
+
+  /** Σ de asientos refund.completed posteados de los refunds de una orden. */
+  private async sumPostedRefundEntries(
+    order_id: number,
+    organization_id: number,
+  ): Promise<{ cents: bigint; entry_ids: number[] }> {
+    const db = this.prisma.withoutScope();
+    const refunds = await db.refunds.findMany({
+      where: { order_id },
+      select: { id: true },
+    });
+    if (!refunds.length) return { cents: 0n, entry_ids: [] };
+    const entries = await db.accounting_entries.findMany({
+      where: {
+        organization_id,
+        source_type: 'refund.completed',
+        source_id: { in: refunds.map((row: any) => row.id) },
+        status: 'posted',
+        // La reclasificación posterior a una NC no reversa la venta.
+        NOT: {
+          description: { contains: '(reclasificación tras nota crédito)' },
+        },
+      },
+      select: { id: true, total_credit: true },
+    });
+    return {
+      cents: entries.reduce(
+        (sum: bigint, e: any) => sum + getCents(e.total_credit ?? 0),
+        0n,
+      ),
+      entry_ids: entries.map((e: any) => e.id),
+    };
+  }
+
+  /**
+   * NC de venta POS ya posteadas para la orden (carril NC primero): devuelve
+   * el total reversado y la cuenta de caja/banco que acreditaron. `null` si
+   * ninguna NC tomó el carril.
+   */
+  private async findPostedPosCreditNoteReversal(
+    order_id: number,
+    organization_id: number,
+  ): Promise<{ cents: bigint; entry_ids: number[]; cash_account_code: string } | null> {
+    const db = this.prisma.withoutScope();
+    const notes = await db.invoices.findMany({
+      where: {
+        organization_id,
+        invoice_type: 'credit_note',
+        related_invoice: { order_id, accounting_status: 'not_applicable' },
+      },
+      select: { id: true },
+    });
+    if (!notes.length) return null;
+    const entries = await db.accounting_entries.findMany({
+      where: {
+        organization_id,
+        source_type: 'credit_note.accepted',
+        source_id: { in: notes.map((row: any) => row.id) },
+        status: 'posted',
+      },
+      select: {
+        id: true,
+        total_credit: true,
+        accounting_entry_lines: {
+          select: { credit_amount: true, account: { select: { code: true } } },
+        },
+      },
+      orderBy: { id: 'asc' },
+    });
+    if (!entries.length) return null;
+    const credit_line = (entries as any[])
+      .flatMap((e) => e.accounting_entry_lines ?? [])
+      .filter((l: any) => getCents(l.credit_amount ?? 0) > 0n)
+      .sort((a: any, b: any) =>
+        getCents(b.credit_amount) > getCents(a.credit_amount) ? 1 : -1,
+      )[0];
+    if (!credit_line?.account?.code) return null;
+    return {
+      cents: (entries as any[]).reduce(
+        (sum: bigint, e: any) => sum + getCents(e.total_credit ?? 0),
+        0n,
+      ),
+      entry_ids: (entries as any[]).map((e) => e.id),
+      cash_account_code: String(credit_line.account.code),
+    };
+  }
+
+  /**
    * Credit note acceptance (nota crédito DIAN): mirror reversal of the sale
    * entry posted by `onInvoiceValidated`.
    *
@@ -2197,6 +2370,52 @@ export class AutoEntryService {
     total: number;
     user_id?: number;
   }) {
+    // Factura de origen omitida porque su venta ya se reconoció en el carril POS
+    // (`not_applicable`, ver findPriorSaleRecognition): la 1305 nunca se debitó,
+    // así que la NC no puede acreditarla. Un solo carril reversa la venta por
+    // orden — el primero que postea — y el otro se abstiene:
+    //   · refund.completed ya posteado para la orden y cubre la NC ⇒ la NC NO
+    //     postea (el refund ya reversó ingreso/impuestos y sacó el dinero).
+    //   · si no ⇒ la NC reversa contra la cuenta de caja/banco que REALMENTE
+    //     recibió el cobro (línea DR del asiento payment.received), y un
+    //     refund.completed posterior de la orden sólo reclasifica esa cuenta
+    //     contra su canal (ver onRefundCompleted).
+    const pos_sale = await this.findPosRecognizedSaleForCreditNote(
+      data.invoice_id,
+      data.organization_id,
+    );
+    if (pos_sale) {
+      const refunded = await this.sumPostedRefundEntries(
+        pos_sale.order_id,
+        data.organization_id,
+      );
+      if (refunded.cents > 0n && refunded.cents + 1n >= getCents(data.total)) {
+        this.logger.log(
+          `credit_note.accepted #${data.invoice_id}: la orden #${pos_sale.order_id} ya ` +
+            `reversó la venta en refund.completed [${refunded.entry_ids.join(', ')}]; ` +
+            `la nota crédito no postea un segundo reverso.`,
+        );
+        await this.markInvoiceRecognizedElsewhere(
+          data.invoice_id,
+          data.organization_id,
+        );
+        return {
+          id: null,
+          skipped: true,
+          reason: 'sale_reversal_already_posted_by_refund',
+          covering_entry_ids: refunded.entry_ids,
+        };
+      }
+      if (refunded.cents > 0n) {
+        this.logger.warn(
+          `credit_note.accepted #${data.invoice_id}: refund.completed de la orden ` +
+            `#${pos_sale.order_id} [${refunded.entry_ids.join(', ')}] reversó ` +
+            `${formatCents(refunded.cents)}, menos que la NC (${data.total}); ` +
+            `se postea la NC completa: revisar reverso parcial duplicado.`,
+        );
+      }
+    }
+
     const lines: (AutoEntryLine | null)[] = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -2206,14 +2425,21 @@ export class AutoEntryService {
         0,
         data.store_id,
       ),
-      this.resolveAccountLine(
-        data.organization_id,
-        'credit_note.accepted.accounts_receivable',
-        'Cuentas por Cobrar (reversa nota crédito)',
-        0,
-        data.total,
-        data.store_id,
-      ),
+      pos_sale
+        ? Promise.resolve<AutoEntryLine>({
+            account_code: pos_sale.cash_account_code,
+            description: 'Reembolso al cliente (reversa nota crédito POS)',
+            debit_amount: 0,
+            credit_amount: data.total,
+          })
+        : this.resolveAccountLine(
+            data.organization_id,
+            'credit_note.accepted.accounts_receivable',
+            'Cuentas por Cobrar (reversa nota crédito)',
+            0,
+            data.total,
+            data.store_id,
+          ),
     ]);
 
     lines.push(
@@ -2665,6 +2891,24 @@ export class AutoEntryService {
         select: { id: true },
       });
       has_invoice = !!invoice;
+      // Venta a crédito sin factura: `credit_sale.created` ya reconoció el
+      // ingreso + impuestos contra 1305. El cobro posterior sólo cruza cartera
+      // (DR caja / CR 1305); por la rama «sin factura» reconocería la venta
+      // otra vez.
+      if (!has_invoice) {
+        const credit_sale = await this.prisma
+          .withoutScope()
+          .accounting_entries.findFirst({
+            where: {
+              organization_id: data.organization_id,
+              source_type: 'credit_sale.created',
+              source_id: data.order_id,
+              status: 'posted',
+            },
+            select: { id: true },
+          });
+        has_invoice = !!credit_sale;
+      }
     }
 
     const payment_desc = data.payment_method
@@ -4169,6 +4413,11 @@ export class AutoEntryService {
     subtotal?: number;
     /** Envío devuelto BRUTO (`calculation.shipping_refund`). */
     shipping?: number;
+    /**
+     * Orden del refund (sólo refund-flow la emite). Habilita el carril único
+     * de reversa frente a una nota crédito de venta POS.
+     */
+    order_id?: number;
   }) {
     // Replacements only move inventory — no financial entry needed
     if (data.return_type === 'replacement') {
@@ -4176,6 +4425,77 @@ export class AutoEntryService {
         `Skipping accounting entry for replacement return #${data.refund_id}`,
       );
       return null;
+    }
+
+    // Carril único de reversa (ver onCreditNoteAccepted): si una NC de la venta
+    // POS de esta orden YA reversó ingreso/impuestos contra la caja/banco del
+    // cobro, este refund no los reversa otra vez. Sólo reclasifica esa cuenta
+    // contra el canal real de salida del dinero (p.ej. NC acreditó 1105 y el
+    // refund salió por banco 1110). Misma cuenta ⇒ no hay nada que postear.
+    const credit_note_lane = data.order_id
+      ? await this.findPostedPosCreditNoteReversal(
+          data.order_id,
+          data.organization_id,
+        )
+      : null;
+    if (credit_note_lane) {
+      // Σ de TODOS los refunds completados de la orden (incluye éste): los que
+      // se abstuvieron no dejan asiento, así que se cuenta desde `refunds`.
+      const completed = await this.prisma.withoutScope().refunds.findMany({
+        where: { order_id: data.order_id, state: 'completed' },
+        select: { id: true, amount: true },
+      });
+      const ids = new Set(completed.map((row: any) => row.id));
+      const refunded_cents =
+        completed.reduce(
+          (sum: bigint, row: any) => sum + getCents(row.amount ?? 0),
+          0n,
+        ) + (ids.has(data.refund_id) ? 0n : getCents(data.amount));
+      if (credit_note_lane.cents + 1n >= refunded_cents) {
+        const channel_line = await this.resolveAccountLine(
+          data.organization_id,
+          this.resolveRefundCreditKey({
+            effective_channel: data.effective_channel,
+            refund_method: data.refund_method,
+          }),
+          'Reembolso al cliente (canal real)',
+          0,
+          data.amount,
+          data.store_id,
+        );
+        if (
+          !channel_line ||
+          channel_line.account_code === credit_note_lane.cash_account_code
+        ) {
+          this.logger.log(
+            `refund.completed #${data.refund_id}: la NC [${credit_note_lane.entry_ids.join(', ')}] ` +
+              `ya reversó la venta de la orden #${data.order_id}; sin asiento adicional.`,
+          );
+          return {
+            id: null,
+            skipped: true,
+            reason: 'sale_reversal_already_posted_by_credit_note',
+            covering_entry_ids: credit_note_lane.entry_ids,
+          };
+        }
+        return this.createAutoEntry({
+          source_type: 'refund.completed',
+          source_id: data.refund_id,
+          organization_id: data.organization_id,
+          store_id: data.store_id,
+          description: `Devolución #${data.refund_id} (reclasificación tras nota crédito)`,
+          lines: [
+            {
+              account_code: credit_note_lane.cash_account_code,
+              description: 'Reverso ya contabilizado por nota crédito',
+              debit_amount: data.amount,
+              credit_amount: 0,
+            },
+            channel_line,
+          ],
+          user_id: data.user_id,
+        });
+      }
     }
 
     const tax = Number(data.tax_amount || 0);

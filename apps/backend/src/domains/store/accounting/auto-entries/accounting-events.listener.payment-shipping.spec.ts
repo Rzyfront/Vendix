@@ -14,7 +14,13 @@ describe('AccountingEventsListener.handlePaymentReceived — envío', () => {
   function setup() {
     const service: any = Object.create(AutoEntryService.prototype);
     service.logger = { log: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
-    service.prisma = { invoices: { findFirst: jest.fn().mockResolvedValue(null) } };
+    service.prisma = {
+      invoices: { findFirst: jest.fn().mockResolvedValue(null) },
+      // Sin credit_sale.created posteado ⇒ rama de venta directa.
+      withoutScope: () => ({
+        accounting_entries: { findFirst: jest.fn().mockResolvedValue(null) },
+      }),
+    };
     service.account_mapping_service = {
       getMapping: jest.fn().mockImplementation((_o: number, key: string) =>
         Promise.resolve({ account_code: key }),

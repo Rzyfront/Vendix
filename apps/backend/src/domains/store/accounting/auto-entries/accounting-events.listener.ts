@@ -733,6 +733,10 @@ export class AccountingEventsListener {
     subtotal?: number;
     /** Envío devuelto BRUTO; su base neta se reversa contra 414505. */
     shipping?: number;
+    /** Canal EFECTIVO de salida del dinero (resolveEffectiveRefundChannel). */
+    effective_channel?: string;
+    /** Orden del refund (refund-flow). */
+    order_id?: number;
   }) {
     try {
       if (
@@ -756,6 +760,8 @@ export class AccountingEventsListener {
         refund_method: event.refund_method,
         subtotal: event.subtotal != null ? Number(event.subtotal) : undefined,
         shipping: event.shipping != null ? Number(event.shipping) : undefined,
+        effective_channel: event.effective_channel,
+        order_id: event.order_id != null ? Number(event.order_id) : undefined,
       });
       this.logger.log(
         `Auto-entry created for refund.completed #${event.refund_id}`,

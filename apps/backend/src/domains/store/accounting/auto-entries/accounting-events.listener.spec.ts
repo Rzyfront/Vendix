@@ -281,6 +281,8 @@ describe('AccountingEventsListener refund.completed', () => {
       subtotal: 5000,
       shipping: 1190,
       refund_method: 'cash',
+      effective_channel: 'bank_transfer',
+      order_id: 70,
     });
 
     expect(auto_entry_service.onRefundCompleted).toHaveBeenCalledWith(
@@ -290,6 +292,8 @@ describe('AccountingEventsListener refund.completed', () => {
         tax_amount: 1140,
         subtotal: 5000,
         shipping: 1190,
+        effective_channel: 'bank_transfer',
+        order_id: 70,
       }),
     );
   });
