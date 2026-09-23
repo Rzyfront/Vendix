@@ -32,3 +32,6 @@
 | 2026-09-23 | Orquestador | I.1 | Baseline local: 10 órdenes históricas sobrepagadas; aceptación exige 0 desbordes causados por pagos posteriores al corte, no 0 histórico. | evidence/I1-overpayment-baseline.sql/txt |
 | 2026-09-23 | Nash/Wegener | I.1 | Validador y flow-pay rechazan ya pagada; gateway propaga código. Orden QA1113 creada con un pago: POST 409 ORD_PAY_ALREADY_PAID_001, sigue un pago. | 25855f688; af5e566d8; evidence/I1-reject-overpay.* |
 | 2026-09-23 | Orquestador | H.3 | Área fiscal LOCKED, tienda 3: POS sin mesa y mesa 13 vendieron servicio sin asignación por 50000/IVA 0; suscripción seed se habilitó temporalmente y restauró expired. | evidence/H3-active-fiscal-*; H3-local-api-verification.md |
+| 2026-09-23 | Orquestador | B.2/H.3 | Tras proyección canónica, POS mesa14 taxless 201; sesión106 pagada/abierta y mesa ocupada, un pago y cero filas fiscales. | evidence/B2-pos-taxless-table.* |
+| 2026-09-23 | Carver/Herschel | E.4 | Detalle y backend con salidas tipadas; DELETE pagado por dueño 400 sin borrar, mesero 403 RBAC. E2E pendiente. | adf8bddd0; 26a7d7205; evidence/E4-reject-paid-delete-* |
+| 2026-09-23 | Hypatia | I.3 | COD mostrador deja orden/pago pendientes, saldo 10000 y 0 stock; processor genérico queda registrado. | 88235b0e2; evidence/I3-cod-counter.* |

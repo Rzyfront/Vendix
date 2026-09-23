@@ -2,8 +2,8 @@
 id: I.3
 title: "Estado de orden por la rama correcta cuando el pago queda pendiente"
 phase: I
-status: pending
-owner: none
+status: in-progress
+owner: Hypatia
 updated: 2026-09-20
 contracts: [FB-01, DB-03, DB-14, ERR-20]
 adrs: []
@@ -36,4 +36,4 @@ skills: [vendix-backend, vendix-payment-processors, vendix-error-handling, how-t
   - [ ] El comentario del cliente POS describe la conducta real del backend
   - [ ] El procesador COD registrado y nunca invocado queda invocado o dado de baja con razón escrita
   - [ ] La consulta que cruza estado de orden contra estado de pago no devuelve ninguna venta terminada sin cobro
-- **Status:** pending
+- **Status:** in-progress — 88235b0e2; COD mostrador 201 con orden/pago pendientes y saldo vivo; falta domicilio/remisión.
