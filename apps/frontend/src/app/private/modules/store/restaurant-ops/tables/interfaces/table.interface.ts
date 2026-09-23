@@ -98,6 +98,8 @@ export interface TableSessionSummary {
   order_id: number;
   opened_by: number;
   opened_at: string | Date;
+  /** Marca de cuenta saldada; la mesa permanece ocupada hasta su cierre. */
+  paid_at?: string | Date | null;
   closed_at: string | Date | null;
   guest_count: number | null;
 }

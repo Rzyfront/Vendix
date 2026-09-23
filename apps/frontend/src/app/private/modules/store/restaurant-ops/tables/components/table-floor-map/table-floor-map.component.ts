@@ -4,6 +4,7 @@ import {
   afterNextRender,
   computed,
   effect,
+  inject,
   input,
   output,
   signal,
@@ -16,7 +17,7 @@ import type { IconName } from '../../../../../../../shared/components/icon/icons
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { Table, TableStatus } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
-import type { AdminTablesLivePayload } from '../../services/admin-tables-sse.service';
+import { AdminTablesSseService, type AdminTablesLivePayload } from '../../services/admin-tables-sse.service';
 
 interface TableCell {
   table: Table;
@@ -26,6 +27,8 @@ interface TableCell {
   statusIcon: IconName;
   isOccupied: boolean;
   guestCount: number | null;
+  /** Pagada por snapshot persistido o por el evento específico session_paid. */
+  isPaid: boolean;
   /**
    * Live counts del SSE staff (si la mesa tiene una sesión abierta).
    * Se hidrata desde `liveCounts()` (input opcional); ausente para
@@ -107,6 +110,7 @@ const WHEEL_ZOOM_FACTOR = 0.0015;
   styleUrl: './table-floor-map.component.scss',
 })
 export class TableFloorMapComponent {
+  private readonly adminTablesSse = inject(AdminTablesSseService);
   readonly tables = input.required<Table[]>();
   readonly editable = input<boolean>(false);
   /**
@@ -160,6 +164,7 @@ export class TableFloorMapComponent {
 
   /** Id de la mesa con destello visible (expira 1s tras el llamado). */
   private readonly callingVisibleId = signal<number | null>(null);
+  private readonly paidSessionIds = signal<Set<number>>(new Set());
   private callingTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Id de la mesa en drag (null = se está paneando el fondo o nada). */
@@ -189,6 +194,19 @@ export class TableFloorMapComponent {
   private static readonly MAX_FIT_ATTEMPTS = 5;
 
   constructor() {
+    // Only session_paid certifies a settled check. payment.confirmed can be
+    // partial, so the generic live payment_state is not enough for "Pagada".
+    effect(() => {
+      const event = this.adminTablesSse.lastEvent();
+      if (event?.type === 'snapshot') {
+        this.paidSessionIds.set(new Set(
+          event.data.sessions.filter((session) => !!session.paid_at).map((session) => session.id),
+        ));
+      } else if (event?.type === 'session_paid') {
+        this.paidSessionIds.update((ids) => new Set(ids).add(event.data.table_session_id));
+      }
+    });
+
     // Destello dorado del llamado al mesero: refleja `callingTableId`
     // en una señal interna que expira 4s después (signals + setTimeout,
     // sin NgZone). Un llamado nuevo reinicia el temporizador.
@@ -248,6 +266,7 @@ export class TableFloorMapComponent {
     const overrides = this.localPositions();
     const liveMap = this.liveCounts();
     const callingId = this.callingVisibleId();
+    const paidSessionIds = this.paidSessionIds();
     let autoIndex = 0;
     return list.map((t) => {
       const status = t.effective_status ?? t.status;
@@ -280,6 +299,9 @@ export class TableFloorMapComponent {
         statusIcon: TablesService.statusIcon(status),
         isOccupied: status === 'occupied',
         guestCount: t.active_session?.guest_count ?? null,
+        isPaid: sessionId != null && (
+          !!t.active_session?.paid_at || paidSessionIds.has(sessionId)
+        ),
         live,
         isCalling: callingId != null && callingId === t.id,
         x,
