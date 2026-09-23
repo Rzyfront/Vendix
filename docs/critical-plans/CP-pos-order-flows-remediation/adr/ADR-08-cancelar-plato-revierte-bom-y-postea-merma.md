@@ -1,9 +1,9 @@
 ---
 id: ADR-08
 title: "Cancelar un plato revierte el BOM por el seam existente y postea merma a 5295"
-status: proposed
+status: accepted
 reversibility: costly
-updated: 2026-09-20
+updated: 2026-09-23
 ---
 # ADR-08 — Cancelar un plato revierte el BOM por el seam existente y postea merma a 5295
 
@@ -12,3 +12,5 @@ updated: 2026-09-20
 - **Consequences:** El primer trabajo de la fase D es escribir el test de esa rama **antes** de reutilizarla: el plan no puede apoyarse en una red que no existe. La contabilidad de merma, en cambio, no hay que diseñarla — `account-mapping.service.ts` ya declara la llave `inventory.adjusted.shrinkage` → PUC 5295, `auto-entry.service.ts` ya construye el asiento por signo y `accounting-events.listener.ts` ya lo dispara con `@OnEvent('inventory.adjusted')`: «desechar» **pasa por el seam de ajuste** (crea la fila de `inventory_adjustments`, único emisor de `inventory.adjusted` en `inventory-adjustments.service.ts:404`) y no añade contabilidad nueva: emitir el evento por fuera no alcanza, porque el listener deduplica por `adjustment_id` y lo usa como `source_id`. Ojo a la compuerta `cost_amount > 0`: una hoja con costo resuelto en cero **no produce asiento**, y su rastro tiene que quedar en la auditoría. El inventario deja de inflarse y el margen bruto del periodo deja de mentir. La merma queda contabilizada donde el contador la busca. Si la reversa devuelve cantidades equivocadas el daño es un movimiento de inventario que exige ajuste manual, no una pérdida de dinero: por eso «desechar» (que no toca stock) es el valor por defecto seguro. El `confirm()` nativo actual (`order-details-page.component.ts:4152-4157`) no puede ofrecer esta elección; se reemplaza por un modal con las dos opciones explícitas.
 - **Reversibility:** costly — los movimientos de inventario y los asientos emitidos quedan; revertir el código no los deshace.
 - **Revisit if:** el negocio quiere distinguir entre merma por calidad, error de cocina y devolución del cliente, lo que pediría un catálogo de motivos mapeado a cuentas distintas.
+
+- **Owner approval:** 2026-09-23 — el dueño autorizó expresamente las cuatro propuestas ADR-05/06/07/08 para completar el plan.
