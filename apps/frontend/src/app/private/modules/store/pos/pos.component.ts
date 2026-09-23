@@ -150,6 +150,19 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
   totalItems: 0,
 };
 
+export function resolvePosPaymentCustomerName(
+  order: { customer_alias?: string | null; customer_name?: string | null } | null | undefined,
+  selectedCustomer: Pick<PosCustomer, 'first_name' | 'last_name'> | null | undefined,
+  isAnonymousSale: boolean,
+): string {
+  // The persisted alias identifies a quick sale even when the payment event
+  // carries the anonymous flag; it must reach both confirmation and receipt.
+  if (order?.customer_alias) return order.customer_alias;
+  if (isAnonymousSale) return 'Consumidor Final';
+  return order?.customer_name ||
+    (selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : '');
+}
+
 @Component({
   selector: 'app-pos',
   standalone: true,
@@ -2740,10 +2753,11 @@ export class PosComponent {
         discount_amount:
           paymentData.order?.discount_amount || csm.discountAmount,
         total_amount: paymentData.order?.total_amount || csm.total,
-        customer_name: paymentData.isAnonymousSale
-          ? 'Consumidor Final'
-          : paymentData.order?.customer_name ||
-            (sc ? `${sc.first_name} ${sc.last_name}` : ''),
+        customer_name: resolvePosPaymentCustomerName(
+          paymentData.order,
+          sc,
+          !!paymentData.isAnonymousSale,
+        ),
         customer_email:
           !paymentData.isAnonymousSale && sc?.email
             ? sc.email
