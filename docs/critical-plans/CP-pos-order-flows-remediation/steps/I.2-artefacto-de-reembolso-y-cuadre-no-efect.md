@@ -7,7 +7,7 @@ owner: none
 updated: 2026-09-20
 contracts: [FB-24, DB-33, DB-34, DB-03, ERR-38]
 adrs: [ADR-02, ADR-12]
-skills: [vendix-backend, vendix-accounting-rules, vendix-payment-processors, vendix-error-handling, how-to-test]
+skills: [vendix-backend, vendix-accounting-rules, vendix-payment-processors, vendix-error-handling, vendix-prisma-migrations, how-to-test]
 ---
 # I.2 — Artefacto de reembolso y cuadre no-efectivo al cancelar
 
@@ -17,7 +17,7 @@ skills: [vendix-backend, vendix-accounting-rules, vendix-payment-processors, ven
 - **Why:** hoy hay **cero `refunds.create`** en todo el archivo de flujo de orden: la devolución al cliente no deja ningún artefacto propio, solo el egreso de caja del efectivo. Y los pagos `succeeded` por tarjeta, transferencia o pasarela no generan ninguna reversa al cancelar: ni egreso, ni reembolso, ni marca. El hallazgo se lee como cerrado porque el tramo de efectivo sí se arregló, y el test que existe fija el vacío restante como si fuera una decisión tomada. No lo es: no hay ADR que lo declare.
 - **Output:** cancelación atómica/idempotente con refund por pierna pagada y estado honesto; pago original intacto. Efectivo produce un solo cash-out, no efectivo queda `requested` hasta egreso comprobado. Saldo CxC se anula sin fingir reembolso de dinero no recibido. Gate de nota crédito DIAN antes de mutar. Specs cubren efectivo, tarjeta, transferencia, pasarela, mixto, fiado parcial, retry y rechazo fiscal. No se reescribe `PaymentGatewayService`: no hay reversa automática al cancelar.
 - **Contracts touched:** FB-24, DB-33, DB-34, DB-03, ERR-38
-- **Data impact:** escribe ≥1 fila en `refunds` por orden cancelada con pago liquidado, y conserva el `cash_register_movements` de tipo egreso que ya se escribe para el efectivo. Actualiza `orders.total_paid` / `remaining_balance` por el camino que ya los mantiene. Sin migración: `refunds` existe con `state`, `amount` y `refund_method`. Invariante: `orders.state = 'cancelled'` con algún pago `succeeded` ⇒ existe al menos una fila de `refunds` para esa orden.
+- **Data impact:** crea un refund por cobro real a devolver; conserva cada pago liquidado y el egreso de efectivo registrado. Mantiene `orders.total_paid`, anula `remaining_balance`; cierra solo el saldo CxC/cuotas no pagado. **Migración aditiva ADR-12**: estado de cuota `cancelled`, importe CxC anulado y clave única de refund de abono CxC manual; no backfill destructivo. Invariante: orden cancelada con pago recibido ⇒ refund correspondiente, pendiente o completado según egreso real.
 - **Blast radius:** cancelación de ventas cobradas, cuadre de caja y contabilidad del periodo. Si el reembolso se crea de más —por ejemplo dos veces por reintento— la caja queda con un egreso fantasma y lo nota el cajero al cerrar. Si el rechazo se aplica de más, una cancelación legítima queda bloqueada y el operador no puede cerrar la venta. Si no se crea nada, sigue habiendo dinero devuelto sin rastro y lo nota el contador, tarde y sin poder reconstruirlo.
 - **Rollback:** revertir el commit. Las filas de `refunds` ya creadas quedan y son válidas: describen devoluciones que efectivamente ocurrieron. El egreso de caja del efectivo no cambia de conducta en ningún caso, porque ese tramo no se toca.
 - **Verification:**
