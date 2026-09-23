@@ -29,10 +29,7 @@ describe('CreditNotesService — QUI-INC: tax_type de invoice_taxes', () => {
   const ENTITY_ID = 3;
   const STORE_ID = 100;
 
-  function setup(
-    parent_taxes: Array<Record<string, unknown>>,
-    parent_overrides: Record<string, unknown> = {},
-  ) {
+  function setup(parent_taxes: Array<Record<string, unknown>>) {
     mockRequestContext({ store_id: STORE_ID });
 
     const parent = buildInvoice({
@@ -59,7 +56,6 @@ describe('CreditNotesService — QUI-INC: tax_type de invoice_taxes', () => {
         },
       ],
       invoice_taxes: parent_taxes,
-      ...parent_overrides,
     });
 
     const prisma = createPrismaMock({
@@ -220,73 +216,5 @@ describe('CreditNotesService — QUI-INC: tax_type de invoice_taxes', () => {
 
     expect(prisma.tax_rates.findMany).not.toHaveBeenCalled();
     expect(created[0].invoice_taxes.create[0].tax_type).toBe('inc');
-  });
-
-  it('NC total de una factura con domicilio INC incluido reversa también el INC del envío', async () => {
-    // Factura de `createFromOrder` para restaurante O-33: plato 50.000 + INC
-    // 4.000 y Envío 13.888,89 + INC 1.111,11, cada fila ligada a su línea.
-    const { service, created } = setup(
-      [
-        incParentTax({
-          invoice_item_id: 1,
-          taxable_amount: money(50000),
-          tax_amount: money(4000),
-          is_inclusive: false,
-        }),
-        incParentTax({
-          invoice_item_id: 2,
-          taxable_amount: money('13888.89'),
-          tax_amount: money('1111.11'),
-          is_inclusive: false,
-        }),
-      ],
-      {
-        subtotal_amount: money('63888.89'),
-        tax_amount: money('5111.11'),
-        shipping_amount: money('13888.89'),
-        total_amount: money(69000),
-        invoice_items: [
-          {
-            id: 1,
-            product_id: 100,
-            product_variant_id: null,
-            description: 'Plato',
-            quantity: money(1),
-            unit_price: money(50000),
-            discount_amount: money(0),
-            tax_amount: money(4000),
-            total_amount: money(54000),
-            price_unit_quantity: 1,
-            is_inclusive: false,
-          },
-          {
-            id: 2,
-            product_id: null,
-            product_variant_id: null,
-            description: 'Envío',
-            quantity: money(1),
-            unit_price: money('13888.89'),
-            discount_amount: money(0),
-            tax_amount: money('1111.11'),
-            total_amount: money(15000),
-            price_unit_quantity: 1,
-            is_inclusive: false,
-          },
-        ],
-      },
-    );
-
-    await service.createCreditNote(totalNote());
-
-    const rows = created[0].invoice_taxes.create as Array<Record<string, any>>;
-    expect(rows).toHaveLength(2);
-    expect(rows.every((row) => row.tax_type === 'inc')).toBe(true);
-    const creditedTax = rows.reduce((sum, row) => sum + Number(row.tax_amount), 0);
-    expect(Math.round(creditedTax * 100)).toBe(511111);
-    expect(
-      rows.some((row) => Number(row.taxable_amount) === 13888.89 && Number(row.tax_amount) === 1111.11),
-    ).toBe(true);
-    expect(created[0].tax_amount.toString()).toBe('5111.11');
-    expect(created[0].total_amount.toString()).toBe('69000');
   });
 });

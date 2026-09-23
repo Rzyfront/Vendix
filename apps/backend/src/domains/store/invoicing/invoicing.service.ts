@@ -113,13 +113,6 @@ import { normalizeInvoiceTaxRate } from './utils/invoice-tax-rate.util';
 // (Σ `order_item_taxes` → escalar × `resolveLineUnits`). Definición ÚNICA
 // compartida con mesas, pagos y remisiones: ver `createFromOrder`.
 import { resolveOrderLineTaxTotal } from '../taxes/utils/final-price.util';
-import { isIncResponsible } from '../../../common/helpers/vat-responsibility.helper';
-import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
-import {
-  orderHasIncLines,
-  resolveShippingInc,
-  type ShippingIncResult,
-} from './utils/shipping-inc.util';
 
 /**
  * Listing rows whose send/transmission state is an error or a pending send get
@@ -2331,9 +2324,6 @@ export class InvoicingService {
         // compilación: se queda sin `dian_code` y declara silenciosamente el
         // default, que es exactamente el defecto que esto cierra.
         payments: ORDER_PAYMENT_MEANS_INCLUDE,
-        // P3 de `resolveShippingInc`: el INC del domicilio es doctrina de
-        // expendio de comidas; sólo un restaurante lo proyecta.
-        stores: { select: { industries: true } },
       },
     });
 
@@ -2421,49 +2411,25 @@ export class InvoicingService {
       };
     });
     const shippingCost = Number(order.shipping_cost || 0);
-    // DOMICILIO CON INC INCLUIDO (restaurante O-33, ver `shipping-inc.util`).
-    // Cuando aplica, la línea Envío se expresa en forma base —`unit_price` =
-    // base despejada, `tax_amount` = INC, `is_inclusive = false`, igual que
-    // las líneas de producto— y el total de la línea sigue siendo el bruto
-    // que pagó el cliente: `total_amount` de la factura no se mueve.
-    // Cuando no aplica, la línea sale EXACTAMENTE como antes (sin
-    // `is_inclusive`, sin tributo): tiendas IVA byte a byte iguales.
-    const shippingInc = await this.resolveOrderShippingInc(
-      order,
-      accounting_entity_id,
-      context,
-    );
-    const shippingBase = shippingInc.applies ? shippingInc.base : shippingCost;
-    const shippingLine = shippingInc.applies
-      ? {
-          product_id: null,
-          product_variant_id: null,
-          description: 'Envío',
-          quantity: new Prisma.Decimal(1),
-          unit_price: new Prisma.Decimal(shippingInc.base),
-          discount_amount: new Prisma.Decimal(0),
-          tax_amount: new Prisma.Decimal(shippingInc.inc_amount),
-          total_amount: new Prisma.Decimal(shippingInc.gross),
-          is_inclusive: false,
-          applied_price_tier_name: null,
-          stock_units_consumed: null,
-          serial_numbers_snapshot: null,
-        }
-      : {
-          product_id: null,
-          product_variant_id: null,
-          description: 'Envio',
-          quantity: new Prisma.Decimal(1),
-          unit_price: new Prisma.Decimal(shippingCost),
-          discount_amount: new Prisma.Decimal(0),
-          tax_amount: new Prisma.Decimal(0),
-          total_amount: new Prisma.Decimal(shippingCost),
-          applied_price_tier_name: null,
-          stock_units_consumed: null,
-          serial_numbers_snapshot: null,
-        };
     const items =
-      shippingCost > 0 ? [...productItems, shippingLine] : productItems;
+      shippingCost > 0
+        ? [
+            ...productItems,
+            {
+              product_id: null,
+              product_variant_id: null,
+              description: 'Envio',
+              quantity: new Prisma.Decimal(1),
+              unit_price: new Prisma.Decimal(shippingCost),
+              discount_amount: new Prisma.Decimal(0),
+              tax_amount: new Prisma.Decimal(0),
+              total_amount: new Prisma.Decimal(shippingCost),
+              applied_price_tier_name: null,
+              stock_units_consumed: null,
+              serial_numbers_snapshot: null,
+            },
+          ]
+        : productItems;
 
     // A.4: el subtotal es Σ de BASES gravables y ya llega despejado desde
     // los canales (POS y checkout persisten la base en `unit_price`): no se
@@ -2473,11 +2439,9 @@ export class InvoicingService {
     // F-056: fórmula fijada y documentada en `computeOrderInvoiceSubtotal`
     // (arriba del todo en este archivo) — ahí está el porqué de las tres
     // lecturas descartadas de ADR-04.
-    // Con INC en el domicilio el subtotal suma la BASE del envío, no el
-    // bruto: el INC viaja en `tax` y `subtotal + tax` sigue dando el total.
     const subtotal = computeOrderInvoiceSubtotal(
       order.order_items || [],
-      shippingBase,
+      shippingCost,
     );
     const discount = items.reduce(
       (acc: number, item: any) => acc + Number(item.discount_amount),
@@ -2529,38 +2493,7 @@ export class InvoicingService {
     // La línea de ENVÍO, cuando existe, se añade al final de `items` y no
     // lleva tributos: se representa como un arreglo vacío para que el
     // alineamiento por posición contra `invoice_items` siga siendo cierto.
-    //
-    // Con INC en el domicilio la línea lleva SU fila (base del envío + INC),
-    // y esa misma fila se funde en el agregado de cabecera —misma clave que
-    // `aggregateOrderTaxes`: (nombre|tarifa|tipo|id|inclusivo)— para que el
-    // respaldo de `persistLineTaxes` (cabecera sin vínculo) también la lleve.
-    if (shippingCost > 0) {
-      if (shippingInc.applies) {
-        const row = shippingInc.tax_row;
-        orderLineTaxes.push([{ ...row }]);
-        const round2 = (n: number) => Math.round(n * 100) / 100;
-        const group = invoiceTaxRows.find(
-          (existing) =>
-            existing.tax_name === row.tax_name &&
-            Number(existing.tax_rate) === Number(row.tax_rate) &&
-            existing.tax_type === row.tax_type &&
-            (existing.tax_rate_id ?? null) === (row.tax_rate_id ?? null) &&
-            (existing.is_inclusive === true) === (row.is_inclusive === true),
-        );
-        if (group) {
-          group.taxable_amount = round2(
-            Number(group.taxable_amount || 0) + Number(row.taxable_amount || 0),
-          );
-          group.tax_amount = round2(
-            Number(group.tax_amount || 0) + Number(row.tax_amount || 0),
-          );
-        } else {
-          invoiceTaxRows.push({ ...row });
-        }
-      } else {
-        orderLineTaxes.push([]);
-      }
-    }
+    if (shippingCost > 0) orderLineTaxes.push([]);
     const taxGroups = { size: distinctGroupCount };
 
     // `needsOrderLineTaxSplit`: multi-tributo O cualquier línea inclusiva.
@@ -2569,13 +2502,10 @@ export class InvoicingService {
     // cabecera no lleva `invoice_item_id`, el prevalidador no usa la base
     // persistida y recomputa `bruto − impuesto` sobre unidades que ya son
     // netas (doble despeje). Ver `needsPersistedLineTaxes` para create/update.
-    //
-    // El INC del domicilio FUERZA el split: su fila tiene que quedar ligada a
-    // la línea Envío (`invoice_item_id`) para que el «todo o nada» de
-    // `invoice-flow` y FAU04 se validen contra bases persistidas.
-    const split_order_line_taxes =
-      needsOrderLineTaxSplit(taxGroups.size, orderLineTaxes) ||
-      shippingInc.applies;
+    const split_order_line_taxes = needsOrderLineTaxSplit(
+      taxGroups.size,
+      orderLineTaxes,
+    );
     // Forma base (ver arriba): el split ya se decidió con la inclusividad de
     // ORIGEN; lo que se persiste es base + cuota, así que toda fila de
     // tributo nace `is_inclusive = false` — el gate lee `tax.is_inclusive`
@@ -2670,11 +2600,7 @@ export class InvoicingService {
         // Plan Despacho Economía — FASE 4 paso 13. Persistir el monto del flete
         // separado del subtotal de productos. El asiento diferenciará producto
         // (4135) vs flete (414505) al validar la factura.
-        //
-        // Es la BASE NETA del envío: con INC en el domicilio, `onInvoiceValidated`
-        // separa ingreso de producto (subtotal − shipping → 4135) de flete
-        // (shipping → 414505) y el INC va a 2436 por `tax_breakdown`.
-        shipping_amount: new Prisma.Decimal(shippingBase),
+        shipping_amount: new Prisma.Decimal(shippingCost),
         total_amount: new Prisma.Decimal(total),
         currency: 'COP',
         issue_date: new Date(),
@@ -2722,96 +2648,6 @@ export class InvoicingService {
       `Invoice #${created.id} created numberless from order #${order_id} (A.1: numbered at validate)`,
     );
     return created;
-  }
-
-  /**
-   * Proyección del INC del domicilio para `createFromOrder` (ver
-   * `utils/shipping-inc.util.ts`). Lee `fiscal_data` SÓLO cuando las demás
-   * condiciones ya se cumplen (envío > 0, restaurante, líneas INC): una
-   * orden de tienda IVA no hace ninguna consulta nueva.
-   */
-  private async resolveOrderShippingInc(
-    order: {
-      id: number;
-      shipping_cost?: unknown;
-      stores?: { industries?: unknown } | null;
-      order_items?: any[] | null;
-    },
-    accounting_entity_id: number,
-    context: { store_id?: number; organization_id?: number },
-  ): Promise<ShippingIncResult> {
-    const shipping_cost = Number(order.shipping_cost || 0);
-    const is_restaurant = storeIsRestaurant(
-      (order.stores?.industries as string[] | null | undefined) ?? null,
-    );
-    const candidate =
-      shipping_cost > 0 && is_restaurant && orderHasIncLines(order.order_items);
-    const inc_responsible = candidate
-      ? isIncResponsible(
-          await this.readIssuerFiscalData(
-            accounting_entity_id,
-            context.organization_id,
-          ),
-        )
-      : false;
-    const result = resolveShippingInc({
-      shipping_cost,
-      inc_responsible,
-      is_restaurant,
-      order_items: order.order_items,
-    });
-    if (
-      !result.applies &&
-      (result.reason === 'ambiguous_inc_rate' ||
-        result.reason === 'clearing_unclosed')
-    ) {
-      this.logger.warn(
-        `[invoice:create-from-order]${formatGateCorrelation({
-          store_id: context.store_id ?? null,
-          organization_id: context.organization_id ?? null,
-          order_id: order.id,
-        })} domicilio sin INC (${result.reason}): la orden cobra INC con ` +
-          'más de una tarifa o el despeje no cerró; el envío sale sin tributo',
-      );
-    }
-    return result;
-  }
-
-  /**
-   * `fiscal_data` del EMISOR con el mismo alcance que usa el XML
-   * (`dian-direct.provider.ts` `loadIssuerData`): la entidad contable decide
-   * si la casilla 53 vive en `store_settings` o en `organization_settings`.
-   * Así la fila INC del domicilio y el `PartyTaxScheme 04/ZA` salen de la
-   * misma lectura.
-   */
-  private async readIssuerFiscalData(
-    accounting_entity_id: number,
-    organization_id?: number,
-  ): Promise<Record<string, unknown> | null> {
-    const entity = await this.prisma
-      .withoutScope()
-      .accounting_entities.findFirst({
-        where: {
-          id: accounting_entity_id,
-          ...(organization_id != null ? { organization_id } : {}),
-        },
-        select: {
-          fiscal_scope: true,
-          store: { select: { store_settings: { select: { settings: true } } } },
-          organization: {
-            select: { organization_settings: { select: { settings: true } } },
-          },
-        },
-      });
-    if (!entity) return null;
-    const settings =
-      entity.fiscal_scope === 'STORE'
-        ? (entity.store as any)?.store_settings?.settings
-        : (entity.organization as any)?.organization_settings?.settings;
-    return ((settings as any)?.fiscal_data ?? null) as Record<
-      string,
-      unknown
-    > | null;
   }
 
   /** Independently invoiceable account: no new physical order or inventory line. */
