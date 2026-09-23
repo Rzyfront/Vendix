@@ -2,9 +2,9 @@
 id: A.2
 title: "Exención de dine_in en la compuerta de cobro de envío"
 phase: A
-status: pending
-owner: none
-updated: 2026-09-20
+status: in-progress
+owner: A2-dinein-gate
+updated: 2026-09-22
 contracts: [FB-04, FB-05, FB-20, ERR-03]
 adrs: []
 skills: [vendix-backend, vendix-error-handling, vendix-restaurant-ops, vendix-frontend, vendix-zoneless-signals, how-to-test]
@@ -42,4 +42,4 @@ skills: [vendix-backend, vendix-error-handling, vendix-restaurant-ops, vendix-fr
   - [ ] `registerCreditPayment` no adquiere la compuerta: el fiado sobre mesa responde sin 422 de envío
   - [ ] Los cuatro carriles de cobro quedan verificados con su evidencia en `evidence/`
   - [ ] Las filas FB-04, FB-05, FB-20 y ERR-03 quedan marcadas con su evidencia enlazada
-- **Status:** pending
+- **Status:** in-progress
