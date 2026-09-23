@@ -17,8 +17,11 @@ import { buildOrder, buildOrderItem } from '../../../testing/money-fixtures';
  * `createFromOrder` — impuesto opcional del envío, leído de la COPIA congelada
  * en la orden (`orders.shipping_tax_*`), nunca de la tarifa.
  *
- * Importes LITERALES calculados a mano (truncado DIAN al vender):
- * · 15.000 con IVA 19 % ⇒ base 12.605,04 + IVA 2.394,96
+ * Importes LITERALES calculados a mano:
+ * · 15.000 con IVA 19 % ⇒ base 12.605,04 + IVA 2.394,96 — par SINTÉTICO con
+ *   un centavo de holgura (trunc(12.605,04 × 19 %) = 2.394,95); el productor
+ *   real da 12.605,05 + 2.394,95 para este bruto, pero sí produce pares así
+ *   para otros (5.000 ⇒ 4.201,69 + 798,31, ver el caso de `update()`).
  * · 15.000 con INC 8 %  ⇒ base 13.888,89 + INC 1.111,11
  * El total de la factura es el MISMO de hoy: el impuesto va incluido.
  */
@@ -73,9 +76,9 @@ describe('InvoicingService.createFromOrder — impuesto del envío (copia de la 
 
     prisma = createPrismaMock({
       orders: ['findFirst'],
-      invoices: ['findFirst', 'create'],
-      invoice_items: ['findMany'],
-      invoice_taxes: ['createMany'],
+      invoices: ['findFirst', 'create', 'update'],
+      invoice_items: ['findMany', 'deleteMany'],
+      invoice_taxes: ['createMany', 'deleteMany'],
     });
     prisma.invoices.findFirst.mockResolvedValue(null);
     prisma.invoices.create.mockImplementation(
@@ -361,46 +364,163 @@ describe('InvoicingService.createFromOrder — impuesto del envío (copia de la 
     },
   );
 
-  it('update() del borrador que reenvía la línea Envío con su fila conserva el impuesto', async () => {
-    const { data, line_tax_rows } = await createDraft({
-      shipping_cost: money(15000),
-      ...ivaShippingCopy,
+  /**
+   * `update()` completo sobre el borrador nacido de la orden. Se falsean sólo
+   * las lecturas de contexto (período, catálogo, perfil, AIU); el motor, el
+   * pineo y `persistLineTaxes` son los reales.
+   */
+  const updateDraft = async (
+    draft: { data: any; line_tax_rows: any[] },
+    editLine: (line: any, index: number) => any = (line) => line,
+  ) => {
+    const invoice_items = draft.data.invoice_items.create.map(
+      (line: any, index: number) => ({ ...line, id: 501 + index }),
+    );
+    jest.spyOn(service, 'findOne').mockResolvedValue({
+      ...draft.data,
+      id: 7001,
+      status: 'draft',
+      financial_account_id: null,
+      profile_id: null,
+      profile_version: null,
+      invoice_items,
+      invoice_taxes: draft.line_tax_rows,
+    } as any);
+    const internals = service as any;
+    jest.spyOn(internals, 'assertFiscalPeriodOpen').mockResolvedValue(undefined);
+    jest
+      .spyOn(internals, 'resolveLinePricingSnapshots')
+      .mockImplementation(async (items: any) => items.map(() => ({})));
+    jest
+      .spyOn(internals, 'resolveTenantTaxRateCatalog')
+      .mockResolvedValue(undefined);
+    jest.spyOn(internals, 'loadFrozenProfileConfig').mockResolvedValue(null);
+    jest
+      .spyOn(internals, 'resolveAiuContext')
+      .mockResolvedValue({ aiu: undefined, contract_object: null });
+    prisma.invoices.update.mockImplementation(async ({ data }: any) => ({
+      ...data,
+      id: 7001,
+    }));
+    prisma.invoices.findFirst.mockResolvedValue(null);
+    prisma.invoice_taxes.createMany.mockClear();
+
+    const items = invoice_items.map((line: any, index: number) =>
+      editLine(
+        {
+          product_id: line.product_id,
+          description: line.description,
+          quantity: Number(line.quantity),
+          unit_price: Number(line.unit_price),
+          discount_amount: Number(line.discount_amount),
+          tax_amount: Number(line.tax_amount),
+          is_inclusive: line.is_inclusive,
+          taxes: draft.line_tax_rows
+            .filter((row) => row.invoice_item_id === line.id)
+            .map((row) => ({
+              tax_rate_id: row.tax_rate_id,
+              tax_name: row.tax_name,
+              tax_rate: Number(row.tax_rate),
+              tax_type: row.tax_type,
+              taxable_amount: Number(row.taxable_amount),
+              tax_amount: Number(row.tax_amount),
+              is_inclusive: row.is_inclusive,
+            })),
+        },
+        index,
+      ),
+    );
+    await service.update(7001, { items } as any);
+    const data = prisma.invoices.update.mock.calls[0][0].data;
+    const rows = (prisma.invoice_taxes.createMany.mock.calls[0]?.[0]?.data ??
+      []) as any[];
+    return { data, rows };
+  };
+
+  // Par REAL del productor (`resolveShippingTaxSnapshot`): 5.000 con IVA 19 %
+  // ⇒ 4.201,69 + 798,31, y el motor re-deriva trunc(4.201,69 × 19 %) = 798,32.
+  const ivaShipping5000 = {
+    shipping_cost: money(5000),
+    ...ivaShippingCopy,
+    shipping_tax_amount: money('798.31'),
+  };
+
+  it('update() que re-guarda el borrador sin cambios conserva la cuota del envío: total idéntico', async () => {
+    const draft = await createDraft({
+      ...ivaShipping5000,
       order_items: [incPlato()],
     });
-    const lines = data.invoice_items.create.map((line: any, index: number) => ({
-      product_id: line.product_id,
-      description: line.description,
-      quantity: Number(line.quantity),
-      unit_price: Number(line.unit_price),
-      discount_amount: Number(line.discount_amount),
-      tax_amount: Number(line.tax_amount),
-      is_inclusive: line.is_inclusive,
-      taxes: line_tax_rows
-        .filter((row) => row.invoice_item_id === 501 + index)
-        .map((row) => ({
-          tax_rate_id: row.tax_rate_id,
-          tax_name: row.tax_name,
-          tax_rate: Number(row.tax_rate),
-          tax_type: row.tax_type,
-          taxable_amount: Number(row.taxable_amount),
-          tax_amount: Number(row.tax_amount),
-          is_inclusive: row.is_inclusive,
-        })),
-    }));
-    const calculated = (service as any).recalculateDocument(
-      lines,
-      lines.map(() => ({})),
-      'invoice:update:7001',
+    expect(draft.data.total_amount.toString()).toBe('59000');
+
+    const { data, rows } = await updateDraft(draft);
+
+    expect(data.subtotal_amount.toString()).toBe('54201.69');
+    expect(data.tax_amount.toString()).toBe('4798.31');
+    expect(data.total_amount.toString()).toBe('59000');
+    const shipping = data.invoice_items.create[1];
+    expect(shipping.tax_amount.toString()).toBe('798.31');
+    expect(shipping.total_amount.toString()).toBe('5000');
+    // El desglose sigue ligado por línea: la próxima edición también pinea.
+    const shippingRow = rows.find((r) => r.invoice_item_id === 502);
+    expect(shippingRow.tax_amount.toString()).toBe('798.31');
+    expect(shippingRow.taxable_amount.toString()).toBe('4201.69');
+    expect(sumCents(rows, 'tax_amount')).toBe(479831);
+    expect(taxSubtotalFindings(rows)).toEqual([]);
+  });
+
+  it('update() conserva la cuota aunque el documento sea de un solo tributo (IVA + IVA)', async () => {
+    const draft = await createDraft({
+      ...ivaShipping5000,
+      order_items: [ivaProducto()],
+    });
+    const { data, rows } = await updateDraft(draft);
+    expect(data.tax_amount.toString()).toBe('10298.31');
+    expect(data.total_amount.toString()).toBe('64500');
+    expect(data.invoice_taxes).toBeUndefined();
+    expect(rows.find((r) => r.invoice_item_id === 502).tax_amount.toString()).toBe(
+      '798.31',
     );
-    expect(calculated.lines[1].line_extension_amount).toBe('12605.04');
-    // HALLAZGO documentado: `update()` re-deriva la cuota de una línea
-    // adicional como trunc(12.605,04 × 19 %) = 2.394,95 — 1 ¢ bajo la copia
-    // (2.394,96), así que re-guardar a mano el borrador baja el total a
-    // 68.999,99. `createFromOrder` no pasa por aquí; con INC 8 % (13.888,89 ×
-    // 8 % = 1.111,1112) no hay diferencia.
-    expect(calculated.lines[1].tax_amount).toBe('2394.95');
-    expect(calculated.totals.total_amount).toBe('68999.99');
-    expect(calculated.totals.total_before_tax).toBe('62605.04');
+  });
+
+  it('update() que CAMBIA la base del envío deja mandar al motor (sin pineo)', async () => {
+    const draft = await createDraft({
+      ...ivaShipping5000,
+      order_items: [incPlato()],
+    });
+    const { data } = await updateDraft(draft, (line, index) =>
+      index === 1
+        ? {
+            ...line,
+            unit_price: 4201.7,
+            taxes: line.taxes.map((t: any) => ({
+              ...t,
+              taxable_amount: 4201.7,
+              tax_amount: undefined,
+            })),
+          }
+        : line,
+    );
+    const shipping = data.invoice_items.create[1];
+    // trunc(4.201,70 × 19 %) = 798,32: la cuota nueva es la del motor.
+    expect(shipping.tax_amount.toString()).toBe('798.32');
+    expect(data.total_amount.toString()).toBe('59000.02');
+  });
+
+  it('update() no pinea si el PATCH declara una cuota distinta de la persistida', async () => {
+    const draft = await createDraft({
+      ...ivaShipping5000,
+      order_items: [incPlato()],
+    });
+    const { data } = await updateDraft(draft, (line, index) =>
+      index === 1
+        ? {
+            ...line,
+            taxes: line.taxes.map((t: any) => ({ ...t, tax_amount: 798.32 })),
+          }
+        : line,
+    );
+    expect(data.invoice_items.create[1].tax_amount.toString()).toBe('798.32');
+    expect(data.total_amount.toString()).toBe('59000.01');
   });
 });
 

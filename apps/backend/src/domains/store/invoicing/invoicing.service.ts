@@ -657,6 +657,154 @@ export function resolveInvoiceShippingTax(
   };
 }
 
+/** Fila de impuesto persistida de un borrador, tal como la lee `update()`. */
+export interface PersistedLineTaxRow {
+  invoice_item_id?: number | null;
+  tax_type?: string | null;
+  tax_rate: Prisma.Decimal | number | string;
+  taxable_amount: Prisma.Decimal | number | string;
+  tax_amount: Prisma.Decimal | number | string;
+  is_inclusive?: boolean | null;
+}
+
+/** Impuesto declarado por el PATCH para una línea (sólo lo que se contrasta). */
+export interface DeclaredLineTax {
+  tax_type?: string | null;
+  tax_rate?: number | string | null;
+  tax_amount?: number | string | null;
+}
+
+const PINNED_QUOTA_MAX_DELTA = new Prisma.Decimal('0.01');
+
+const rateInPersistedUnit = (tax: CalculatedTax): Prisma.Decimal => {
+  const rate = new Prisma.Decimal(tax.tax_rate);
+  return tax.rate_basis === 'fraction' ? rate.times(100) : rate;
+};
+
+const sameDecimal = (
+  a: Prisma.Decimal | number | string | null | undefined,
+  b: Prisma.Decimal | number | string | null | undefined,
+): boolean =>
+  a != null &&
+  b != null &&
+  new Prisma.Decimal(a as Prisma.Decimal.Value).equals(
+    new Prisma.Decimal(b as Prisma.Decimal.Value),
+  );
+
+/**
+ * Conserva, al re-editar un borrador, la cuota de impuesto que la línea YA
+ * tiene persistida cuando el motor la re-deriva con un centavo de diferencia.
+ *
+ * ## Por qué existe
+ *
+ * Una línea nacida de un precio con impuesto INCLUIDO (el envío gravado de una
+ * orden, cualquier ítem despejado al vender) se congeló como
+ * `base = bruto − trunc(cuota)`. Re-editar el borrador la vuelve a pasar por
+ * el motor en forma base, y `trunc(base × tarifa)` puede dar un centavo más o
+ * menos que la cuota original: 5.000 con IVA 19 % se congela como
+ * 4.201,69 + 798,31, y el motor re-deriva 798,32. Sin esto, guardar el
+ * borrador sin tocar nada movía el total del documento un centavo respecto de
+ * lo que cobró la orden.
+ *
+ * ## Cuándo pinea (y cuándo no)
+ *
+ * Sólo si existe una fila GEMELA persistida y ligada a una línea
+ * (`invoice_item_id`), adicional, del mismo tipo, misma tarifa y MISMA base
+ * gravable, cuya cuota difiere de la recalculada en exactamente un centavo o
+ * menos (y no es igual). Si el PATCH declara la cuota, tiene que ser la
+ * persistida. Cada fila gemela se usa una sola vez. Cambiar la cantidad, el
+ * precio, la tarifa o el tipo rompe la igualdad de base y el motor manda,
+ * como hasta hoy. Un centavo es la tolerancia que ya aceptan el prevalidador
+ * (`checkTaxSubtotals`, `ONE_CENT`), FAU04 y FAX07.
+ *
+ * Devuelve cuántas cuotas pineó; el resultado se corrige EN SITIO (línea,
+ * cabecera por tributo, esquemas y totales), con el mismo delta.
+ */
+export function pinPersistedLineQuotas(
+  calculated: InvoiceCalculatorResult,
+  persisted_rows: ReadonlyArray<PersistedLineTaxRow>,
+  declared_lines: ReadonlyArray<{ taxes?: ReadonlyArray<DeclaredLineTax> | null }>,
+): number {
+  const available = persisted_rows.filter(
+    (row) => row.invoice_item_id != null && row.is_inclusive !== true,
+  );
+  const used = new Set<PersistedLineTaxRow>();
+  let pinned = 0;
+
+  for (const line of calculated.lines) {
+    for (const tax of line.taxes) {
+      if (tax.is_inclusive) continue;
+      const type = (tax.tax_type || 'iva').toLowerCase();
+      const rate = rateInPersistedUnit(tax);
+      const twin = available.find(
+        (row) =>
+          !used.has(row) &&
+          (row.tax_type || 'iva').toLowerCase() === type &&
+          new Prisma.Decimal(row.tax_rate as Prisma.Decimal.Value).equals(
+            rate,
+          ) &&
+          sameDecimal(row.taxable_amount, tax.taxable_amount),
+      );
+      if (!twin) continue;
+
+      const persisted = new Prisma.Decimal(
+        twin.tax_amount as Prisma.Decimal.Value,
+      );
+      const delta = persisted.minus(new Prisma.Decimal(tax.tax_amount));
+      if (delta.isZero() || delta.abs().greaterThan(PINNED_QUOTA_MAX_DELTA)) {
+        continue;
+      }
+      const declared = (declared_lines[line.index]?.taxes ?? []).find(
+        (d) =>
+          (d.tax_type || 'iva').toLowerCase() === type &&
+          d.tax_rate != null &&
+          new Prisma.Decimal(d.tax_rate).equals(rate),
+      );
+      if (
+        declared?.tax_amount != null &&
+        !sameDecimal(declared.tax_amount, persisted)
+      ) {
+        continue;
+      }
+
+      used.add(twin);
+      pinned += 1;
+      const shift = (value: string) =>
+        new Prisma.Decimal(value).plus(delta).toFixed(2);
+      tax.tax_amount = persisted.toFixed(2);
+      line.tax_amount = shift(line.tax_amount);
+      line.total_amount = shift(line.total_amount);
+
+      const header = calculated.header_taxes.find(
+        (h) =>
+          h.tax_name === tax.tax_name &&
+          h.tax_rate === tax.tax_rate &&
+          h.tax_type === tax.tax_type &&
+          h.is_inclusive === tax.is_inclusive &&
+          h.dian_tax_code === tax.dian_tax_code,
+      );
+      if (header) header.tax_amount = shift(header.tax_amount);
+      const scheme = calculated.tax_schemes.find(
+        (s) => s.dian_tax_code === tax.dian_tax_code,
+      );
+      if (scheme) scheme.tax_amount = shift(scheme.tax_amount);
+
+      const totals = calculated.totals;
+      totals.tax_amount = shift(totals.tax_amount);
+      if (tax.dian_tax_code === '01') totals.tax_iva = shift(totals.tax_iva);
+      else if (tax.dian_tax_code === '04')
+        totals.tax_inc = shift(totals.tax_inc);
+      else if (tax.dian_tax_code === '03')
+        totals.tax_ica = shift(totals.tax_ica);
+      else totals.tax_other = shift(totals.tax_other);
+      totals.tax_inclusive_amount = shift(totals.tax_inclusive_amount);
+      totals.total_amount = shift(totals.total_amount);
+    }
+  }
+
+  return pinned;
+}
+
 /**
  * Correlación espejo↔motor (B.1, F-063): lo mínimo para unir un warn del
  * motor o un 422 del gate con el documento que lo produjo, sin re-ejecutar
@@ -3759,6 +3907,14 @@ export class InvoicingService {
           invoice_id: id,
         },
       );
+      // La línea que ya declaraba una cuota truncada al vender (envío gravado,
+      // precio con impuesto incluido) la conserva: re-guardar el borrador no
+      // puede mover el total un centavo. Ver `pinPersistedLineQuotas`.
+      const pinned_quotas = pinPersistedLineQuotas(
+        calculated,
+        (invoice.invoice_taxes ?? []) as PersistedLineTaxRow[],
+        dto.items as ReadonlyArray<{ taxes?: DeclaredLineTax[] | null }>,
+      );
       // EL SNAPSHOT SE REFRESCA EN CADA EDICIÓN QUE TOCA LÍNEAS.
       //
       // Dejarlo quieto sería peor que no tenerlo: los importes de abajo se
@@ -3788,10 +3944,11 @@ export class InvoicingService {
       }
 
       recalculated_header_taxes = calculated.header_taxes;
-      recalculated_line_taxes = this.needsPersistedLineTaxes(
-        calculated.header_taxes,
-        calculated.lines,
-      )
+      // Una cuota pineada sólo sobrevive a la PRÓXIMA edición si su fila queda
+      // ligada a la línea: se fuerza el desglose, igual que `createFromOrder`.
+      recalculated_line_taxes =
+        pinned_quotas > 0 ||
+        this.needsPersistedLineTaxes(calculated.header_taxes, calculated.lines)
         ? calculated.lines.map((line) => line.taxes)
         : [];
 
