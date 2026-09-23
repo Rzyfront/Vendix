@@ -513,24 +513,30 @@ export class DispatchNoteEventsListener {
           allFulfilled ? 'orden completa' : 'despacho parcial'
         })`,
       );
-      // Confirmar qué líneas estampó ESTA escritura (no solo las candidatas,
-      // que pueden perder la carrera contra otro escritor) antes de reportar
-      // la excepción sin ticket.
-      const stamped = await db.order_items.findMany({
-        where: { id: { in: targetIds }, delivered_at: now },
-        select: { id: true },
-      });
-      const ticketLinks = await db.kitchen_ticket_items.findMany({
-        where: { order_item_id: { in: stamped.map((item) => item.id) } },
-        select: { order_item_id: true },
-      });
-      const linkedIds = new Set(ticketLinks.map((link) => link.order_item_id));
-      const withoutTicket = stamped
-        .map((item) => item.id)
-        .filter((id) => !linkedIds.has(id));
-      if (withoutTicket.length > 0) {
+      try {
+        // Confirmar qué líneas estampó ESTA escritura (no solo las candidatas,
+        // que pueden perder la carrera contra otro escritor) antes de reportar
+        // la excepción sin ticket.
+        const stamped = await db.order_items.findMany({
+          where: { id: { in: targetIds }, delivered_at: now },
+          select: { id: true },
+        });
+        const ticketLinks = await db.kitchen_ticket_items.findMany({
+          where: { order_item_id: { in: stamped.map((item) => item.id) } },
+          select: { order_item_id: true },
+        });
+        const linkedIds = new Set(ticketLinks.map((link) => link.order_item_id));
+        const withoutTicket = stamped
+          .map((item) => item.id)
+          .filter((id) => !linkedIds.has(id));
+        if (withoutTicket.length > 0) {
+          this.logger.warn(
+            `[delivered] Dispatch note #${dispatch_note.id} stamped order #${order_id} line(s) without kitchen ticket: ${withoutTicket.join(', ')}`,
+          );
+        }
+      } catch (error) {
         this.logger.warn(
-          `[delivered] Dispatch note #${dispatch_note.id} stamped order #${order_id} line(s) without kitchen ticket: ${withoutTicket.join(', ')}`,
+          `[delivered] Dispatch note #${dispatch_note.id}: could not audit stamped lines without kitchen tickets: ${(error as Error).message}`,
         );
       }
     }

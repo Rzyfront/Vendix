@@ -998,6 +998,18 @@ describe('DispatchNoteEventsListener — handleDelivered → sello de order_item
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it('(C.2) keeps the committed stamp and order reconciliation when audit lookup fails', async () => {
+    arrange([{ id: 11, product_id: 1, product_variant_id: null }], [{ status: 'delivered' }]);
+    prismaMock.kitchen_ticket_items.findMany.mockRejectedValue(new Error('audit lookup unavailable'));
+    const warn = jest.spyOn((listener as any).logger, 'warn').mockImplementation(() => undefined);
+
+    await fire();
+
+    expect(prismaMock.order_items.updateMany).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not audit stamped lines'));
+    expect(orderFlowMock.reconcileOrderFromDispatch).toHaveBeenCalledWith(7777, 100);
+  });
+
   it('(s) nada pendiente: no escribe (idempotente ante re-disparo del evento)', async () => {
     arrange([], [{ status: 'delivered' }]);
 
