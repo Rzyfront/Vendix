@@ -17,7 +17,7 @@ import {
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { Prisma, order_delivery_type_enum, order_state_enum } from '@prisma/client';
+import { Prisma, order_delivery_type_enum, order_state_enum, payments_state_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { resolveTip } from '@common/utils/tip.util';
@@ -208,6 +208,21 @@ export class OrderFlowService {
     }
 
     return order;
+  }
+
+  private async assertUnsplitOrderAfterLock(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    storeId: number,
+  ): Promise<{ state: string }> {
+    const locked = await lockOrderLifecycle(tx, orderId, storeId);
+    const current = await tx.orders.findFirst({
+      where: { id: orderId, store_id: storeId },
+      select: { active_financial_split_id: true },
+    });
+    if (!current) throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+    assertNoActiveFinancialSplit(current);
+    return locked;
   }
 
   private assertCancellationAllowed(order: Parameters<typeof getCancellationBlocker>[0]): void {
@@ -2275,12 +2290,8 @@ export class OrderFlowService {
    *
    * Reglas (única copia):
    *
-   *   1. GUARDS — bloquea solo si la orden está cobrada o en estado terminal
-   *      (`completed`/`cancelled`/`refunded`). NOTA: el guard de
-   *      `payment_status` es muerto hoy (`orders` no tiene esa columna y el
-   *      select no la trae, así que siempre es `undefined`); se conserva
-   *      verbatim para cero divergencia con mesa — el plan lo deja fuera de
-   *      alcance como follow-up auditado.
+   *   1. GUARDS — bloquea split activo, pago liquidado real o estado terminal
+   *      (`finished`/`cancelled`/`refunded`) antes de modificar dinero/stock.
    *   2. MOTIVO obligatorio (mín 3 chars): el DTO lo exige (400 sin `reason`);
    *      la validación acá queda como defensa en profundidad para callers
    *      directos.
@@ -2314,20 +2325,20 @@ export class OrderFlowService {
     // 1. Orden debe existir en la tienda del contexto. `getOrder` lanza 404
     //    si no la encuentra o no pertenece al scope.
     const order = await this.getOrder(orderId);
+    assertNoActiveFinancialSplit(order);
 
-    // Guards paid/terminal — espejo exacto de mesa (ver nota del docblock
-    // sobre el guard muerto de `payment_status`).
-    const BLOCKED_STATES = ['completed', 'cancelled', 'refunded'] as const;
-    const isPaid =
-      (order as any).payment_status === 'paid' ||
-      (order as any).payment_status === 'succeeded';
+    // No `payment_status` column exists on orders. Settlement is evidenced by
+    // the payment rows, just as in cancelDeliveredOrderItem (ADR-02).
+    const isPaid = order.payments?.some((payment) =>
+      SETTLED_PAYMENT_STATES.has(payment.state),
+    );
     if (isPaid) {
       throw new VendixHttpException(
         ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
         'No se puede cancelar un ítem de una orden ya cobrada',
       );
     }
-    if (BLOCKED_STATES.includes(order.state as any)) {
+    if (['finished', 'cancelled', 'refunded'].includes(order.state)) {
       throw new VendixHttpException(
         ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
         `No se puede cancelar un ítem en estado '${order.state}'`,
@@ -2418,6 +2429,26 @@ export class OrderFlowService {
     let cancelledTicketId: number | null = null;
 
     await this.prisma.$transaction(async (tx) => {
+      const lockedOrder = await this.assertUnsplitOrderAfterLock(tx, orderId, order.store_id);
+      if (['finished', 'cancelled', 'refunded'].includes(lockedOrder.state)) {
+        throw new VendixHttpException(
+          ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+          `No se puede cancelar un ítem en estado '${lockedOrder.state}'`,
+        );
+      }
+      const settledPayment = await tx.payments.findFirst({
+        where: {
+          order_id: orderId,
+          state: { in: [...SETTLED_PAYMENT_STATES] as payments_state_enum[] },
+        },
+        select: { id: true },
+      });
+      if (settledPayment) {
+        throw new VendixHttpException(
+          ErrorCodes.TABLE_SESSION_ITEM_NOT_REMOVABLE,
+          'No se puede cancelar un ítem de una orden ya cobrada',
+        );
+      }
       // Cancelar el ticket KDS SOLO si está en `pending`.
       if (isPendingTicket && ticketId != null) {
         // TOCTOU guard: el cocinero puede haber avanzado el ticket entre la
@@ -2606,6 +2637,7 @@ export class OrderFlowService {
     // 1. Orden debe existir en la tienda del contexto; no recalcular una
     //    venta cobrada ni una orden terminal antes de abrir la transacción.
     const order = await this.getOrder(orderId);
+    assertNoActiveFinancialSplit(order);
 
     // Una orden reembolsada/cancelada ya es terminal: su estado debe explicar
     // el rechazo aunque conserve el pago histórico (incluido refunded).
@@ -2687,6 +2719,27 @@ export class OrderFlowService {
     const userId = RequestContextService.getUserId() ?? null;
 
     await this.prisma.$transaction(async (tx) => {
+      const lockedOrder = await this.assertUnsplitOrderAfterLock(tx, orderId, order.store_id);
+      if (['cancelled', 'refunded', 'finished'].includes(lockedOrder.state)) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_ITEM_CANCEL_STATE_001,
+          `No se puede cancelar un plato de una orden en estado '${lockedOrder.state}'.`,
+          { state: lockedOrder.state },
+        );
+      }
+      const settledPayment = await tx.payments.findFirst({
+        where: {
+          order_id: orderId,
+          state: { in: [...SETTLED_PAYMENT_STATES] as payments_state_enum[] },
+        },
+        select: { id: true },
+      });
+      if (settledPayment) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_ITEM_CANCEL_PAID_001,
+          'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
+        );
+      }
       // Destino restock: devolver las unidades al stock. `waste` no toca
       // stock (la merma queda en la auditoría del paso 7).
       if (destination === 'restock' && orderItem.product_id != null) {

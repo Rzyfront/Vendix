@@ -1373,6 +1373,7 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     withKds?: boolean;
   }) => {
     const txMock: any = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'created' }]),
       kitchen_tickets: {
         findFirst: jest.fn().mockResolvedValue(
           opts.freshTicketStatus == null
@@ -1381,13 +1382,17 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
         ),
       },
       inventory_transactions: { findMany: jest.fn().mockResolvedValue([]) },
+      payments: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: {
         update: jest.fn().mockResolvedValue({}),
         findMany: jest.fn().mockResolvedValue(
           opts.activeItems ?? [{ total_price: 50000, order_item_taxes: [] }],
         ),
       },
-      orders: { update: jest.fn().mockResolvedValue({}) },
+      orders: {
+        findFirst: jest.fn().mockResolvedValue({ active_financial_split_id: null }),
+        update: jest.fn().mockResolvedValue({}),
+      },
     };
     const prismaMock: any = {
       order_items: {
@@ -1446,6 +1451,30 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     expect(prismaMock.$transaction).not.toHaveBeenCalled();
   });
 
+  it('no cancela una línea cuando la orden ya tiene cuentas financieras activas', async () => {
+    const { service, prismaMock } = buildService({
+      order: { id: ORDER_ID, store_id: 4, state: 'draft', active_financial_split_id: 3 },
+    });
+
+    await expect(service.cancelOrderItem(
+      ORDER_ID, ITEM_ID, 'cliente se arrepintió',
+    )).rejects.toMatchObject({ errorCode: 'SPLIT_ACCOUNT_LOCKED' });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('si el split aparece tras la prelectura, el lock lo detecta antes del soft cancel', async () => {
+    const { service, txMock } = buildService({
+      order: { id: ORDER_ID, store_id: 4, state: 'draft', active_financial_split_id: null },
+    });
+    txMock.orders.findFirst.mockResolvedValueOnce({ active_financial_split_id: 3 });
+
+    await expect(service.cancelOrderItem(
+      ORDER_ID, ITEM_ID, 'cliente se arrepintió',
+    )).rejects.toMatchObject({ errorCode: 'SPLIT_ACCOUNT_LOCKED' });
+    expect(txMock.order_items.update).not.toHaveBeenCalled();
+    expect(txMock.orders.update).not.toHaveBeenCalled();
+  });
+
   it('404 si el ítem no pertenece a la orden (sin filtrar)', async () => {
     const { service, prismaMock } = buildService({ item: null });
 
@@ -1477,9 +1506,9 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     expect(kitchenFireService.emitTicketCancelledEvent).not.toHaveBeenCalled();
   });
 
-  it('409 si la orden está cobrada (payment_status paid)', async () => {
+  it('409 si la orden tiene pago real succeeded, no un payment_status inexistente', async () => {
     const { service } = buildService({
-      order: { id: ORDER_ID, state: 'created', payment_status: 'paid' },
+      order: { id: ORDER_ID, state: 'created', payments: [{ state: 'succeeded' }] },
     });
 
     await expect(
@@ -1489,9 +1518,32 @@ describe('OrderFlowService.cancelOrderItem — seam compartido', () => {
     });
   });
 
+  it('si el pago entra después de la prelectura, el lock impide cancelar la línea', async () => {
+    const { service, txMock } = buildService({
+      order: { id: ORDER_ID, store_id: 4, state: 'created', payments: [] },
+    });
+    txMock.payments.findFirst.mockResolvedValueOnce({ id: 81 });
+
+    await expect(service.cancelOrderItem(
+      ORDER_ID, ITEM_ID, 'cliente se arrepintió',
+    )).rejects.toMatchObject({ errorCode: 'TABLE_SESSION_ITEM_NOT_REMOVABLE' });
+    expect(txMock.order_items.update).not.toHaveBeenCalled();
+    expect(txMock.orders.update).not.toHaveBeenCalled();
+  });
+
+  it('409 si la orden está finished aunque no traiga el campo legado completed', async () => {
+    const { service } = buildService({
+      order: { id: ORDER_ID, state: 'finished', payments: [] },
+    });
+
+    await expect(service.cancelOrderItem(
+      ORDER_ID, ITEM_ID, 'cliente se arrepintió',
+    )).rejects.toMatchObject({ errorCode: 'TABLE_SESSION_ITEM_NOT_REMOVABLE' });
+  });
+
   it('409 si la orden está en estado terminal', async () => {
     const { service, prismaMock } = buildService({
-      order: { id: ORDER_ID, state: 'completed' },
+      order: { id: ORDER_ID, state: 'cancelled' },
     });
 
     await expect(
@@ -2090,13 +2142,18 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
     }>;
   }) => {
     const txMock: any = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'created' }]),
+      payments: { findFirst: jest.fn().mockResolvedValue(null) },
       order_items: {
         update: jest.fn().mockResolvedValue({}),
         findMany: jest.fn().mockResolvedValue(
           opts.activeItems ?? [{ total_price: 30000, order_item_taxes: [] }],
         ),
       },
-      orders: { update: jest.fn().mockResolvedValue({}) },
+      orders: {
+        findFirst: jest.fn().mockResolvedValue({ active_financial_split_id: null }),
+        update: jest.fn().mockResolvedValue({}),
+      },
     };
     const prismaMock: any = {
       order_items: {
@@ -2149,6 +2206,44 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
       expect(auditService.logCustom).not.toHaveBeenCalled();
     },
   );
+
+  it('no reversa una línea entregada mientras exista split financiero activo', async () => {
+    const { service, prismaMock, stockLevelManager } = buildService({
+      order: { state: 'created', active_financial_split_id: 3, payments: [] },
+    });
+
+    await expect(service.cancelDeliveredOrderItem(
+      ORDER_ID, ITEM_ID, 'cliente se arrepintió', 'waste',
+    )).rejects.toMatchObject({ errorCode: 'SPLIT_ACCOUNT_LOCKED' });
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+  });
+
+  it('relee el split bajo lock antes de reversar una entrega', async () => {
+    const { service, txMock, stockLevelManager } = buildService({
+      order: { state: 'created', active_financial_split_id: null, payments: [] },
+    });
+    txMock.orders.findFirst.mockResolvedValueOnce({ active_financial_split_id: 3 });
+
+    await expect(service.cancelDeliveredOrderItem(
+      ORDER_ID, ITEM_ID, 'cliente se arrepintió', 'restock',
+    )).rejects.toMatchObject({ errorCode: 'SPLIT_ACCOUNT_LOCKED' });
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(txMock.order_items.update).not.toHaveBeenCalled();
+  });
+
+  it('si el cobro entra tras la prelectura, no reversa entrega ni stock', async () => {
+    const { service, txMock, stockLevelManager } = buildService({
+      order: { state: 'created', payments: [] },
+    });
+    txMock.payments.findFirst.mockResolvedValueOnce({ id: 81 });
+
+    await expect(service.cancelDeliveredOrderItem(
+      ORDER_ID, ITEM_ID, 'cliente se arrepintió', 'restock',
+    )).rejects.toMatchObject({ errorCode: 'ORD_ITEM_CANCEL_PAID_001' });
+    expect(stockLevelManager.updateStock).not.toHaveBeenCalled();
+    expect(txMock.order_items.update).not.toHaveBeenCalled();
+  });
 
   it.each(['cancelled', 'refunded', 'finished'])(
     '409 tipado para estado terminal %s sin pago',

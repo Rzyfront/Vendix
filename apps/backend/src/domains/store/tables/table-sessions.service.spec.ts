@@ -74,6 +74,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         findFirst: jest.fn().mockResolvedValue({ currency: 'COP' }),
       },
       $transaction: jest.fn((cb: any) => cb(prismaMock)),
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'draft', active_financial_split_id: null }]),
     };
 
     jest
@@ -566,6 +567,34 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       await expect(
         service.addItems(1, { items: [{ product_id: 1, quantity: 1 }] } as any),
       ).rejects.toBeInstanceOf(VendixHttpException);
+    });
+
+    it('rechaza agregar líneas a una cuenta con split activo antes de escribir ítems o totales', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue({
+        id: 1,
+        order_id: 100,
+        closed_at: null,
+        table_id: 5,
+        order: { id: 100, state: 'draft', order_items: [] },
+        table: { id: 5, name: 'Mesa 5', zone: null, status: 'occupied' },
+      });
+      prismaMock.products.findMany.mockResolvedValue([{
+        id: 425,
+        name: 'Servicio QA',
+        base_price: 10000,
+        is_sellable: true,
+        product_type: 'service',
+        track_inventory: false,
+      }]);
+      prismaMock.$queryRaw.mockResolvedValueOnce([{
+        id: 100, state: 'draft', active_financial_split_id: 2,
+      }]);
+
+      await expect(service.addItems(1, {
+        items: [{ product_id: 425, quantity: 1 }],
+      } as any)).rejects.toMatchObject({ errorCode: 'SPLIT_ACCOUNT_LOCKED' });
+      expect(prismaMock.order_items.create).not.toHaveBeenCalled();
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
     });
 
     it('appends lines and re-derives totals in a single transaction', async () => {

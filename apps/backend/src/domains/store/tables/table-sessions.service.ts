@@ -22,6 +22,7 @@ import {
 } from '../taxes/utils/final-price.util';
 import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
 import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale-share.util';
+import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
 // QUI-INC — el enum fiscal canónico. Se importa (en vez de tipar `string`)
 // para que la fila de `order_item_taxes` de la cuenta abierta no pueda
 // persistir un valor que el `tax_type_enum` de Postgres no reconozca, ni
@@ -794,6 +795,27 @@ export class TableSessionsService {
     // que `payments.service.ts:1769` para el mismo tipo de transacción con
     // trabajo variable por línea (N ítems, exclusiones, KDS).
     await this.prisma.$transaction(async (tx) => {
+      // SplitOrderService locks this same source row before freezing account
+      // allocations. Take that lock BEFORE inserting any line, then re-check
+      // the split under it: a stale pre-read of the table may still say draft
+      // after the source became financially immutable.
+      const lockedOrders: Array<{
+        id: number;
+        state: string;
+        active_financial_split_id: number | null;
+      }> = await tx.$queryRaw`
+        SELECT id, state, active_financial_split_id FROM orders
+        WHERE id = ${session.order_id} AND store_id = ${storeId}
+        FOR UPDATE
+      `;
+      if (!lockedOrders.length) {
+        throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
+      }
+      assertNoActiveFinancialSplit(lockedOrders[0]);
+      if (lockedOrders[0].state !== 'draft') {
+        throw new VendixHttpException(ErrorCodes.TABLE_SESSION_ORDER_NOT_DRAFT);
+      }
+
       // CP-POLLO-ARABE-727 C.4 — validación ERR-15 ANTES del bucle, en UN solo
       // `findMany` (no un findFirst por ítem — presión de pool, ver A.7). Una
       // variante ajena al `product_id` de la línea descuadra inventario/coste.
