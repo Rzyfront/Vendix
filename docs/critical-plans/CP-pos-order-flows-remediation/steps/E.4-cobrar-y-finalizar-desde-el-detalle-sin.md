@@ -39,4 +39,4 @@ skills: [vendix-backend, vendix-error-handling, vendix-frontend, vendix-zoneless
   - [x] Finalizar con platos pendientes devuelve la lista de platos en el detalle del error.
   - [x] Cada test de rechazo fija el código del error, no solo el tipo de excepción.
   - [ ] Los cuatro carriles de cobro verificados sobre esta pantalla, con evidencia por carril.
-- **Status:** in-progress — `evidence/E4-closeout-20260923.md` documenta UI/APIs, 121 tests de flujo, 3 de detalle, claim concurrente y el 404 de transporte corregido. Falta recorrido fresco mesa→pedido→detalle→cobro y rechazo específico de `refunded`; cuatro carriles heredados de `evidence/A2-four-lane-matrix.md`, no reejecutados íntegramente aquí. La orden QA pre-fix #1165 no fue reparada por SQL.
+- **Status:** in-progress — `evidence/E4-closeout-20260923.md` documenta UI/APIs, 122 tests de flujo, 3 de detalle, claim concurrente, rechazo `refunded` y el 404 de transporte corregido. Falta recorrido fresco mesa→pedido→detalle→cobro; cuatro carriles heredados de `evidence/A2-four-lane-matrix.md`, no reejecutados íntegramente aquí. La orden QA pre-fix #1165 no fue reparada por SQL.
