@@ -8,7 +8,7 @@ import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } 
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { forkJoin, firstValueFrom } from 'rxjs';
+import { forkJoin, firstValueFrom, Observable } from 'rxjs';
 import { switchMap } from 'rxjs/operators';
 import {
   StoreOrdersService,
@@ -195,6 +195,32 @@ interface PaymentReceiptPreview {
   safeUrl: SafeResourceUrl;
   kind: PaymentReceiptPreviewKind;
   uploadedAt?: string | null;
+}
+
+type ItemCancellationDestination = 'waste' | 'reuse';
+type ItemCancellationMode = 'cancel' | 'reverse';
+
+/** Mirror the backend's settled-payment gate; UI is advisory, API remains authoritative. */
+export function isOrderItemCancellationPaid(order: Pick<Order, 'payments'> | null): boolean {
+  return !!order?.payments?.some((payment) =>
+    ['succeeded', 'captured', 'partially_refunded', 'refunded'].includes(payment.state),
+  );
+}
+
+export function cancellationBody(
+  mode: ItemCancellationMode,
+  reason: string,
+  destination: ItemCancellationDestination,
+  preparedFired: boolean,
+): { reason: string; cancellation_type?: 'after_fire_waste'; destination?: 'waste' | 'restock' } {
+  if (mode === 'reverse') {
+    return { reason, destination: destination === 'reuse' ? 'restock' : 'waste' };
+  }
+  // The current CancelOrderItemDto does not accept after_fire_reused.
+  if (preparedFired && destination === 'reuse') {
+    throw new Error('El contrato de cancelación aún no admite reutilizar este plato.');
+  }
+  return preparedFired ? { reason, cancellation_type: 'after_fire_waste' } : { reason };
 }
 
 /**
@@ -4022,6 +4048,37 @@ export class OrderDetailsPageComponent {
    * del botón Cancelar mientras corre el backend.
    */
   readonly cancellingItemId = signal<number | null>(null);
+  readonly cancellationTarget = signal<{ item: OrderItem; mode: ItemCancellationMode } | null>(null);
+  readonly cancellationReason = signal('');
+  readonly cancellationDestination = signal<ItemCancellationDestination>('waste');
+  readonly cancellationError = signal<string | null>(null);
+  readonly cancellationModalOpen = computed(() => this.cancellationTarget() !== null);
+  readonly cancellationPaid = computed(() => isOrderItemCancellationPaid(this.order()));
+
+  readonly cancellationPreparedFired = computed(() => {
+    const item = this.cancellationTarget()?.item;
+    return item?.products?.product_type === 'prepared' && item.inventory_consumed_at_fire === true;
+  });
+
+  readonly canReuseCancellation = computed(() =>
+    this.cancellationTarget()?.mode === 'reverse',
+  );
+
+  private cancellationBlockedByPayment(): boolean {
+    if (!isOrderItemCancellationPaid(this.order())) return false;
+    this.closeItemCancellationModal();
+    this.toastService.warning('La orden ya fue cobrada. Usa Reembolso para devolver el plato.');
+    this.openRefundModal();
+    return true;
+  }
+
+  closeItemCancellationModal(): void {
+    if (this.cancellingItemId() !== null || this.reversingItemId() !== null) return;
+    this.cancellationTarget.set(null);
+    this.cancellationReason.set('');
+    this.cancellationDestination.set('waste');
+    this.cancellationError.set(null);
+  }
 
   /**
    * Espejo del gate de mesa (`canRemoveItem` en
@@ -4039,6 +4096,8 @@ export class OrderDetailsPageComponent {
    * y divergiría de ella.
    */
   canCancelItem(item: OrderItem): boolean {
+    if (isOrderItemCancellationPaid(this.order())) return false;
+    if (['finished', 'cancelled', 'refunded'].includes(this.order()?.state ?? '')) return false;
     if (item.cancelled_at) return false;
     if (item.delivered_at) return false;
     const ks = this.kitchenStateFor(item);
@@ -4056,9 +4115,14 @@ export class OrderDetailsPageComponent {
    * ítems proyectados, igual que deliver — patrón de `deliverItem`).
    */
   cancelItem(item: OrderItem): void {
+    if (this.cancellationBlockedByPayment()) return;
     if (!this.canCancelItem(item)) return;
     const orderId = this.order()?.id;
     if (!orderId) return;
+    if (item.products?.product_type === 'prepared') {
+      this.openItemCancellationModal(item, 'cancel');
+      return;
+    }
     const firedPending = this.kitchenStateFor(item)?.status === 'pending';
     this.dialogService
       .confirm({
@@ -4136,92 +4200,79 @@ export class OrderDetailsPageComponent {
    * ofrecer un 403 por sorpresa.
    */
   canReverseDeliveredItem(item: OrderItem): boolean {
-    return !!item.delivered_at && !item.cancelled_at;
+    return !!item.delivered_at && !item.cancelled_at &&
+      !['finished', 'cancelled', 'refunded'].includes(this.order()?.state ?? '') &&
+      !isOrderItemCancellationPaid(this.order());
   }
 
   /**
    * Acción: reversa la entrega vía
    * POST /store/orders/:orderId/flow/items/:orderItemId/cancel-delivered
    * con body `{ reason, destination: 'restock' | 'waste' }`.
-   * Reutiliza el patrón de motivo de `cancelItem` (`dialogService.confirm`
-   * + `dialogService.prompt`, motivo mín 3 chars). `DialogService` no
-   * tiene selector (solo confirm/prompt), así que el destino se elige con
-   * `confirm()` nativo: Aceptar = restock, Cancelar = waste.
+   * Motivo y destino se capturan en un único modal accesible de la app.
    * Tras éxito, toast + refreshOrder() (patrón de `deliverItem`).
    */
   reverseDeliveredItem(item: OrderItem): void {
+    if (this.cancellationBlockedByPayment()) return;
     if (!this.canReverseDeliveredItem(item) || !this.canUseReverseDelivered())
       return;
+    this.openItemCancellationModal(item, 'reverse');
+  }
+
+  private openItemCancellationModal(item: OrderItem, mode: ItemCancellationMode): void {
+    if (!this.order()?.id || this.cancellationTarget()) return;
+    this.cancellationReason.set('');
+    this.cancellationDestination.set('waste');
+    this.cancellationError.set(null);
+    this.cancellationTarget.set({ item, mode });
+  }
+
+  submitItemCancellation(): void {
+    if (this.cancellationBlockedByPayment()) return;
+    const target = this.cancellationTarget();
     const orderId = this.order()?.id;
-    if (!orderId) return;
-    this.dialogService
-      .confirm({
-        title: 'Reversar entrega',
-        message: `¿Reversar la entrega de "${item.product_name}"? El ítem quedará cancelado, se ajustará el total y se registrará el motivo.`,
-        confirmText: 'Continuar',
-        cancelText: 'Atrás',
-        confirmVariant: 'danger',
-      })
-      .then((confirmed) => {
-        if (!confirmed) return;
-        this.dialogService
-          .prompt({
-            title: 'Motivo de reversión',
-            message: 'Quedará registrado en el pedido.',
-            placeholder: 'Describe el motivo (mínimo 3 caracteres)',
-            confirmText: 'Reversar entrega',
-            cancelText: 'Atrás',
-          })
-          .then((reasonInput) => {
-            if (reasonInput === undefined) {
-              this.toastService.error('Reversión abortada');
-              return;
-            }
-            const reason = reasonInput.trim();
-            if (reason.length < 3) {
-              this.toastService.error(
-                'El motivo debe tener al menos 3 caracteres',
-              );
-              return;
-            }
-            const destination = confirm(
-              'Destino del ítem reversado:\n\nAceptar = reingresar al stock (restock).\nCancelar = registrar como merma (waste).',
-            )
-              ? 'restock'
-              : 'waste';
-            this.reversingItemId.set(item.id);
-            this.http
-              .post(
-                `${environment.apiUrl}/store/orders/${orderId}/flow/items/${item.id}/cancel-delivered`,
-                { reason, destination },
-              )
-              .pipe(takeUntilDestroyed(this.destroyRef))
-              .subscribe({
-                next: () => {
-                  this.reversingItemId.set(null);
-                  this.toastService.success('Entrega reversada');
-                  this.refreshOrder();
-                },
-                error: (err: unknown) => {
-                  this.reversingItemId.set(null);
-                  const wrapped = err as {
-                    status?: number;
-                    cause?: { status?: number } | null;
-                  };
-                  const forbidden =
-                    wrapped?.status === 403 ||
-                    wrapped?.cause?.status === 403;
-                  this.toastService.error(
-                    forbidden
-                      ? 'No tienes permiso para reversar entregas'
-                      : parseApiError(err).userMessage ||
-                          'Error al reversar la entrega',
-                  );
-                  console.error('Reverse delivered item failed', err);
-                },
-              });
-          });
-      });
+    if (!target || !orderId || this.cancellingItemId() !== null || this.reversingItemId() !== null) return;
+    const reason = this.cancellationReason().trim();
+    if (reason.length < 3 || reason.length > 500) {
+      this.cancellationError.set('El motivo debe tener entre 3 y 500 caracteres.');
+      return;
+    }
+    let body: ReturnType<typeof cancellationBody>;
+    try {
+      body = cancellationBody(target.mode, reason, this.cancellationDestination(),
+        this.cancellationPreparedFired());
+    } catch (err) {
+      this.cancellationError.set((err as Error).message);
+      return;
+    }
+    const request: Observable<unknown> = target.mode === 'reverse'
+      ? this.http.post(
+          `${environment.apiUrl}/store/orders/${orderId}/flow/items/${target.item.id}/cancel-delivered`,
+          body,
+        )
+      : this.ordersFlowService.cancelOrderItem(orderId, target.item.id, body);
+    const inFlight = target.mode === 'reverse' ? this.reversingItemId : this.cancellingItemId;
+    inFlight.set(target.item.id);
+    this.cancellationError.set(null);
+    request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        inFlight.set(null);
+        this.closeItemCancellationModal();
+        this.toastService.success(target.mode === 'reverse' ? 'Entrega reversada' : 'Plato cancelado');
+        this.refreshOrder();
+      },
+      error: (err: unknown) => {
+        inFlight.set(null);
+        const parsed = parseApiError(err);
+        if (parsed.errorCode === 'ORD_ITEM_CANCEL_PAID_001') {
+          this.closeItemCancellationModal();
+          this.toastService.warning('La orden ya fue cobrada. Usa Reembolso para devolver el plato.');
+          this.openRefundModal();
+          return;
+        }
+        this.cancellationError.set(parsed.userMessage || 'No se pudo cancelar el plato');
+      },
+    });
   }
 
   /** Localised label for the KDS state badge. */

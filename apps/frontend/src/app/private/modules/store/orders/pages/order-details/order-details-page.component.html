@@ -819,6 +819,14 @@
                           Reversar
                         </app-button>
                       }
+                      @if ((item.delivered_at || !item.cancelled_at) && cancellationPaid()) {
+                        <span class="text-xs text-amber-700">
+                          Orden cobrada: no se puede cancelar este plato.
+                          <button type="button" class="underline font-semibold" (click)="openRefundModal()">
+                            Abrir Reembolso
+                          </button>
+                        </span>
+                      }
                       <!-- Paso 2 PLAN-order-detail-cancel-item — badge de
                            cancelado + motivo persistido (misma data que ya
                            viaja en el GET), y botón Cancelar con el guard
@@ -2495,6 +2503,81 @@
     <!-- ═══════════════════════════════════════════════════════════
          FLOW MODALS
          ═══════════════════════════════════════════════════════════ -->
+
+    <app-modal
+      [isOpen]="cancellationModalOpen()"
+      (isOpenChange)="!$event && closeItemCancellationModal()"
+      [dialog]="true"
+      [closeOnBackdrop]="false"
+      [closeOnEscape]="cancellingItemId() === null && reversingItemId() === null"
+      [showCloseButton]="cancellingItemId() === null && reversingItemId() === null"
+      title="Destino del plato"
+      [subtitle]="cancellationTarget()?.item?.product_name || ''"
+      size="md"
+    >
+      @if (cancellationTarget(); as target) {
+        <div class="space-y-4 p-1">
+          <p class="text-sm text-text-secondary">
+            Este plato se excluirá de la cuenta. El destino elegido quedará registrado junto con el motivo.
+          </p>
+          @if (target.mode === 'reverse' || cancellationPreparedFired()) {
+          <fieldset class="space-y-2">
+            <legend class="text-sm font-semibold text-gray-900 mb-2">¿Qué sucede con el plato?</legend>
+            <label class="flex gap-3 rounded-lg border border-border p-3 cursor-pointer">
+              <input type="radio" name="item-cancellation-destination" value="waste"
+                [checked]="cancellationDestination() === 'waste'"
+                [disabled]="cancellingItemId() !== null || reversingItemId() !== null"
+                (change)="cancellationDestination.set('waste')" />
+              <span><strong>Desechar / registrar merma</strong><br />
+                <span class="text-sm text-text-secondary">No se devuelve al inventario lo que ya se consumió. Es la opción segura por defecto.</span>
+              </span>
+            </label>
+            <label class="flex gap-3 rounded-lg border border-border p-3"
+              [class.opacity-50]="!canReuseCancellation()"
+              [class.cursor-pointer]="canReuseCancellation()">
+              <input type="radio" name="item-cancellation-destination" value="reuse"
+                [checked]="cancellationDestination() === 'reuse'"
+                [disabled]="!canReuseCancellation() || cancellingItemId() !== null || reversingItemId() !== null"
+                (change)="cancellationDestination.set('reuse')" />
+              <span><strong>Reutilizar / devolver a stock</strong><br />
+                <span class="text-sm text-text-secondary">
+                  @if (canReuseCancellation()) {
+                    Devuelve los recursos aprovechables según la reversa de entrega.
+                  } @else {
+                    No disponible en la cancelación sin entrega: la API aún no admite este destino.
+                  }
+                </span>
+              </span>
+            </label>
+          </fieldset>
+          } @else {
+            <p class="text-sm text-text-secondary">Aún no se ha preparado: no hay ingredientes consumidos que desechar o reutilizar.</p>
+          }
+          <label for="item-cancellation-reason" class="block text-sm font-semibold text-gray-900">Motivo obligatorio</label>
+          <textarea id="item-cancellation-reason" #cancellationReasonInput rows="3" maxlength="500"
+            class="w-full rounded-lg border border-border p-3 text-sm"
+            placeholder="Describe el motivo (mínimo 3 caracteres)"
+            [disabled]="cancellingItemId() !== null || reversingItemId() !== null"
+            [value]="cancellationReason()"
+            (input)="cancellationReason.set(cancellationReasonInput.value); cancellationError.set(null)"></textarea>
+          @if (cancellationError()) {
+            <p role="alert" class="text-sm text-red-700">{{ cancellationError() }}</p>
+          }
+          <p class="text-sm text-text-secondary">
+            Total actual: {{ order()?.grand_total || 0 | currency }}.
+            El nuevo total y la propina se confirmarán al actualizar la orden después de guardar.
+          </p>
+        </div>
+      }
+      <div slot="footer" class="flex justify-end gap-2">
+        <app-button variant="outline" [disabled]="cancellingItemId() !== null || reversingItemId() !== null"
+          (clicked)="closeItemCancellationModal()">Volver sin cancelar</app-button>
+        <app-button variant="outline-danger"
+          [loading]="cancellingItemId() !== null || reversingItemId() !== null"
+          [disabled]="cancellingItemId() !== null || reversingItemId() !== null || cancellationReason().trim().length < 3 || cancellationReason().trim().length > 500"
+          (clicked)="submitItemCancellation()">Confirmar cancelación</app-button>
+      </div>
+    </app-modal>
 
     <app-modal
       [isOpen]="showPaymentReceiptModal()"
