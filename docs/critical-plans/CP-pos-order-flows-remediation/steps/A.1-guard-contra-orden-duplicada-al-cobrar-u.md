@@ -4,7 +4,7 @@ title: "Guard contra orden duplicada al cobrar un borrador reabierto"
 phase: A
 status: in-progress
 owner: A1-pos-draft
-updated: 2026-09-22
+updated: 2026-09-23
 contracts: [FB-01, FB-02, ERR-34, ERR-35, DB-02, DB-14]
 adrs: []
 skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-error-handling, vendix-prisma-scopes, vendix-zoneless-signals, how-to-test]
@@ -32,18 +32,18 @@ skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-error-han
   - `npx ng test --include='**/pos-shipping-step.component.spec.ts' --watch=false --browsers=ChromeHeadless` desde `apps/frontend`
   - Playwright MCP — recorrido 1 del hub: guardar borrador de envío → reabrir → editar → cobrar; capturar el conteo de `orders` antes y después en `evidence/A.1-e2e-recorrido1.md`
 - **Acceptance checklist:**
-  - [ ] `CreatePosPaymentDto` declara `order_id?: number` con `@IsOptional() @IsInt() @Min(1) @Type(() => Number)`
-  - [ ] La orden referida por `order_id` se resuelve dentro del scope de tienda; una orden ajena devuelve 404 sin filtrar datos
-  - [ ] Con `order_id` presente, `createOrUpdateOrderFromPos` liquida esa orden y NO llama a la rama de venta fresca
-  - [ ] `POS_DRAFT_DUPLICATE_ORDER_001` está registrado en `error-codes.ts` con HTTP 409 y se lanza con `VendixHttpException`
-  - [ ] El guard rechaza cuando la orden referida ya tiene un pago `succeeded` o `captured`, y el mensaje nombra el número de orden
-  - [ ] `pos-shipping-step.component.ts` declara `editingOrderId` como `input<number | null>(null)` y el shell se lo pasa
-  - [ ] `processShippingSale` envía `order_id` cuando el carrito está adoptado y lo omite cuando no lo está
+  - [x] `CreatePosPaymentDto` declara `order_id?: number` con `@IsOptional() @IsInt() @Min(1) @Type(() => Number)`
+  - [x] La orden referida por `order_id` se resuelve dentro del scope de tienda; una orden ajena devuelve 404 sin filtrar datos
+  - [x] Con `order_id` presente, `createOrUpdateOrderFromPos` liquida esa orden y NO llama a la rama de venta fresca
+  - [x] `POS_DRAFT_DUPLICATE_ORDER_001` está registrado en `error-codes.ts` con HTTP 409 y se lanza con `VendixHttpException`
+  - [x] El guard rechaza cuando la orden referida ya tiene un pago `succeeded` o `captured`, y el mensaje nombra el número de orden
+  - [x] `pos-shipping-step.component.ts` declara `editingOrderId` como `input<number | null>(null)` y el shell se lo pasa
+  - [x] `processShippingSale` envía `order_id` cuando el carrito está adoptado y lo omite cuando no lo está
   - [ ] El fiado (`:717`) y el fiado con plazos (`:801`) dejan de responder 400 y registran la cuenta por cobrar
-  - [ ] Cobrar un borrador reabierto no incrementa el conteo de filas de `orders`, verificado por SQL antes/después
-  - [ ] `payments.order_id` del cobro apunta a la orden preexistente, no a una nueva
-  - [ ] Hay un test que falla antes del fix y que fija `errorCode` (no solo `toBeInstanceOf(VendixHttpException)`)
-  - [ ] `error-messages.ts` mapea `POS_DRAFT_DUPLICATE_ORDER_001` y `POS_DRAFT_REQUIRES_PAYMENT_001` a texto accionable en español
+  - [x] Cobrar un borrador reabierto no incrementa el conteo de filas de `orders`, verificado por SQL antes/después
+  - [x] `payments.order_id` del cobro apunta a la orden preexistente, no a una nueva
+  - [x] Hay un test que falla antes del fix y que fija `errorCode` (no solo `toBeInstanceOf(VendixHttpException)`)
+  - [x] `error-messages.ts` mapea `POS_DRAFT_DUPLICATE_ORDER_001` y `POS_DRAFT_REQUIRES_PAYMENT_001` a texto accionable en español
   - [ ] Ningún carril de este paso termina en 500: las evidencias no contienen `SYS_INTERNAL_001`
   - [ ] Las filas FB-01, FB-02, ERR-34, ERR-35, DB-02 y DB-14 quedan marcadas con su evidencia enlazada
-- **Status:** in-progress
+- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/A1-same-order-api.md`: draft domicilio #1139 cobrado contra la misma orden, un pago #829 y replay 409; orden de tienda ajena 404; fiado libre #1145 misma orden/saldo Decimal $1500.00. Jest PaymentsService 106/106, controller 9/9, Angular shipping 18/18 y error-messages 16/16. Faltan E2E UI guardar→reabrir→editar→cobrar y fiado con cuotas; no se afirma cobertura de esos carriles. Cancelar fixtures de fiado dejó CxC abiertas #110/#111: hallazgo de integridad aparte, no se corrige con SQL manual.
