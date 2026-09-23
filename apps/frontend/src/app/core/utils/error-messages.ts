@@ -172,6 +172,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   STORE_VALIDATE_001: 'La validacion de la tienda fallo.',
   STORE_PERM_001: 'No tiene permisos para acceder a esta tienda.',
   STORE_CONTEXT_001: 'Debe seleccionar una tienda.',
+  ADDR_PRIMARY_REQUIRES_CUSTOMER_001:
+    'Selecciona un cliente antes de marcar su dirección como predeterminada.',
+  ADDR_CUSTOMER_NOT_IN_STORE_001:
+    'Este cliente no pertenece a la tienda. Verifica su ficha en Clientes o créala primero aquí.',
 
   // Marketing
   MKT_AD_STORAGE_001:

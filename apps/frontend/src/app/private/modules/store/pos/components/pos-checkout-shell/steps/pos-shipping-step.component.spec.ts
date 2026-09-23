@@ -309,6 +309,18 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
 
     expect(payment.processShippingSale.calls.mostRecent().args[5]).toBe(700);
   });
+
+  it('does not save a primary address without a valid customer id', () => {
+    const state = cart();
+    state.customer = { ...state.customer!, id: null as any, addresses: [] };
+    mount(state);
+    const process = spyOn<any>(component, 'processOrder');
+
+    (component as any).persistAddressThenProcess(originalAddress, originalAddress, 'direct_delivery', null);
+
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(process).toHaveBeenCalled();
+  });
 });
 
 describe('posShippingRateIdForPayload', () => {

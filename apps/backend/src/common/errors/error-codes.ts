@@ -760,6 +760,16 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Store context required',
   },
+  ADDR_PRIMARY_REQUIRES_CUSTOMER_001: {
+    code: 'ADDR_PRIMARY_REQUIRES_CUSTOMER_001',
+    httpStatus: 400,
+    devMessage: 'A primary address requires a customer',
+  },
+  ADDR_CUSTOMER_NOT_IN_STORE_001: {
+    code: 'ADDR_CUSTOMER_NOT_IN_STORE_001',
+    httpStatus: 400,
+    devMessage: 'Customer does not belong to this store',
+  },
 
   // Marketing
   MKT_AD_STORAGE_001: {

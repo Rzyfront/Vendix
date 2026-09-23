@@ -816,10 +816,14 @@ export class PosShippingStepComponent {
     creditConfig?: ShippingCreditConfig,
   ): void {
     const customer = this.cartState()?.customer;
+    const customerId = Number(customer?.id);
     const existingId = this.addressId();
 
-    // Recoger en tienda, sin cliente o dirección incompleta → procesa sin persistir dirección.
-    if (this.isPickupMethod() || !customer || !a?.address_line1 || !a?.city) {
+    // Sin un cliente válido no se persiste ni se envía is_primary.
+    if (
+      this.isPickupMethod() || !Number.isInteger(customerId) || customerId <= 0 ||
+      !a?.address_line1 || !a?.city
+    ) {
       this.processOrder(
         shippingAddress,
         deliveryType,
@@ -830,13 +834,13 @@ export class PosShippingStepComponent {
       return;
     }
 
-    const dto = this.mapAddressToDto(a, Number(customer.id));
+    const dto = this.mapAddressToDto(a, customerId);
 
     // Caso 1: sin dirección guardada → CREAR y usar el nuevo id.
     if (!existingId) {
       const createDto: CustomerAddressPayload = {
         ...dto,
-        is_primary: !customer.addresses?.length,
+        is_primary: !customer?.addresses?.length,
       };
       this.customersService
         .createCustomerAddress(createDto)
