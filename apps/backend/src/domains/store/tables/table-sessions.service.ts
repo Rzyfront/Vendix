@@ -727,6 +727,11 @@ export class TableSessionsService {
         id: true,
         name: true,
         base_price: true,
+        // P2-2 — oferta del producto base: tercer peldaño de la escalera de
+        // precio del POS (`resolveCatalogUnitBasePrice`), tras la oferta y el
+        // override de la variante.
+        is_on_sale: true,
+        sale_price: true,
         is_sellable: true,
         product_type: true,
         track_inventory: true,
@@ -842,12 +847,20 @@ export class TableSessionsService {
         const overridePrice = Number(
           (variant?.price_override as number | null | undefined) ?? NaN,
         );
+        // P2-2 — misma escalera que `PaymentsService.resolveCatalogUnitBasePrice`
+        // (cobro POS): oferta de variante → override de variante → oferta del
+        // producto → base. Sin el tercer peldaño la mesa cobraba el base a un
+        // producto sin variantes en oferta, y el POS lo cobraba en oferta.
+        const productSalePrice =
+          product.is_on_sale === true ? Number(product.sale_price ?? 0) : 0;
         const catalogUnitPrice =
           salePrice > 0
             ? salePrice
             : Number.isFinite(overridePrice) && overridePrice > 0
               ? (overridePrice as number)
-              : Number(product.base_price ?? 0);
+              : productSalePrice > 0
+                ? productSalePrice
+                : Number(product.base_price ?? 0);
 
         // ADR-08 commit 5 (F-038/F-042/F-050/F-093) — el precio del catálogo
         // (`catalogUnitPrice`) es el precio FINAL publicado, igual que

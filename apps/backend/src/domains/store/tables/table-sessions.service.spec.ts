@@ -510,6 +510,155 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       );
     });
 
+    // P2-2 — escalera de precio del POS (`resolveCatalogUnitBasePrice`):
+    // oferta de variante → override de variante → oferta del producto → base.
+    describe('P2-2 — oferta del producto en la cuenta de mesa', () => {
+      const openSession = () =>
+        prismaMock.table_sessions.findFirst.mockResolvedValue({
+          id: 1,
+          order_id: 100,
+          closed_at: null,
+          table_id: 5,
+          order: { state: 'draft', order_items: [] },
+          table: { id: 5, name: 'Mesa 5', zone: null, status: 'occupied' },
+        });
+
+      beforeEach(() => {
+        openSession();
+        prismaMock.order_items.findMany.mockResolvedValue([]);
+        prismaMock.order_items.create.mockResolvedValue({});
+        prismaMock.orders.update.mockResolvedValue({});
+      });
+
+      it('cobra el sale_price de un producto sin variantes en oferta', async () => {
+        prismaMock.products.findMany.mockResolvedValue([
+          {
+            id: 70,
+            name: 'Limonada',
+            base_price: 10000,
+            is_on_sale: true,
+            sale_price: new Prisma.Decimal(8000),
+            is_sellable: true,
+            product_type: 'physical',
+            track_inventory: false,
+            product_variants: [],
+          },
+        ]);
+
+        await service.addItems(1, {
+          items: [{ product_id: 70, quantity: 2 }],
+        } as any);
+        expect(prismaMock.order_items.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              unit_price: new Prisma.Decimal(8000),
+              total_price: new Prisma.Decimal(16000),
+              final_unit_price: new Prisma.Decimal(8000),
+            }),
+          }),
+        );
+      });
+
+      it('ignora sale_price cuando is_on_sale=false', async () => {
+        prismaMock.products.findMany.mockResolvedValue([
+          {
+            id: 70,
+            name: 'Limonada',
+            base_price: 10000,
+            is_on_sale: false,
+            sale_price: new Prisma.Decimal(8000),
+            is_sellable: true,
+            product_type: 'physical',
+            track_inventory: false,
+            product_variants: [],
+          },
+        ]);
+
+        await service.addItems(1, {
+          items: [{ product_id: 70, quantity: 1 }],
+        } as any);
+        expect(prismaMock.order_items.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              unit_price: new Prisma.Decimal(10000),
+            }),
+          }),
+        );
+      });
+
+      it('el override de la variante gana sobre la oferta del producto', async () => {
+        prismaMock.products.findMany.mockResolvedValue([
+          {
+            id: 60,
+            name: 'Camiseta',
+            base_price: 50000,
+            is_on_sale: true,
+            sale_price: new Prisma.Decimal(40000),
+            is_sellable: true,
+            product_type: 'physical',
+            track_inventory: false,
+            product_variants: [{ id: 61 }],
+          },
+        ]);
+        prismaMock.product_variants.findMany.mockResolvedValue([
+          {
+            id: 61,
+            product_id: 60,
+            price_override: new Prisma.Decimal(65000),
+            is_on_sale: false,
+            sale_price: null,
+          },
+        ]);
+
+        await service.addItems(1, {
+          items: [{ product_id: 60, product_variant_id: 61, quantity: 1 }],
+        } as any);
+        expect(prismaMock.order_items.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              unit_price: new Prisma.Decimal(65000),
+            }),
+          }),
+        );
+      });
+
+      it('la oferta del producto aplica a una variante sin override ni oferta propia', async () => {
+        prismaMock.products.findMany.mockResolvedValue([
+          {
+            id: 60,
+            name: 'Camiseta',
+            base_price: 50000,
+            is_on_sale: true,
+            sale_price: new Prisma.Decimal(40000),
+            is_sellable: true,
+            product_type: 'physical',
+            track_inventory: false,
+            product_variants: [{ id: 61 }],
+          },
+        ]);
+        prismaMock.product_variants.findMany.mockResolvedValue([
+          {
+            id: 61,
+            product_id: 60,
+            price_override: null,
+            is_on_sale: false,
+            sale_price: null,
+          },
+        ]);
+
+        await service.addItems(1, {
+          items: [{ product_id: 60, product_variant_id: 61, quantity: 1 }],
+        } as any);
+        expect(prismaMock.order_items.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              unit_price: new Prisma.Decimal(40000),
+            }),
+          }),
+        );
+      });
+    });
+
     // F-129 (major, CP-pos-exclusive-tax-double-charge) — el único spec vivo
     // de este archivo para `addItems` (el de arriba, "prices the line with
     // the VARIANT value") prueba un producto SIN filas de impuesto: con cero
