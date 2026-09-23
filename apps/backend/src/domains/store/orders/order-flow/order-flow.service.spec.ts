@@ -28,6 +28,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     let state = initialState;
     const reservations: Array<{ product_id: number; status: string }> = [];
     const events: Array<string> = [];
+    const stateUpdates: Array<{ state: string; metadata: Record<string, unknown> }> = [];
     const tx: any = {
       $queryRaw: jest.fn(async () => [{ id: 1, state }]),
       orders: {
@@ -98,9 +99,10 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
       grand_total: 100, currency: 'COP', payments: existingPayments,
     }));
     jest.spyOn(service as any, 'appendFlowMetadata').mockResolvedValue(undefined);
-    jest.spyOn(service as any, 'updateOrderState').mockImplementation(async (_id: number, nextState: string) => {
+    jest.spyOn(service as any, 'updateOrderState').mockImplementation(async (_id: number, nextState: string, metadata: Record<string, unknown> = {}) => {
+      stateUpdates.push({ state: nextState, metadata });
       state = nextState;
-      return { id: 1, state };
+      return { id: 1, state, ...metadata };
     });
     jest.spyOn(service as any, 'commitCouponUseForOrder').mockResolvedValue(undefined);
     jest.spyOn(service as any, 'generateTransactionId').mockResolvedValue('TXN-1');
@@ -108,7 +110,7 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
     jest.spyOn(service as any, 'recordPayOrderCashMovement').mockResolvedValue(undefined);
     jest.spyOn(service as any, 'computeAndPersistEta').mockResolvedValue(undefined);
     jest.spyOn(service as any, 'emitPosSaleCompletedIfFullyPaid').mockResolvedValue(undefined);
-    return { service, prismaMock, tx, stock, audit, reservations, events, getState: () => state };
+    return { service, prismaMock, tx, stock, audit, reservations, events, stateUpdates, getState: () => state };
   };
 
   it('reserva antes del pago, mantiene processing durante el cobro y audita el conteo', async () => {
@@ -166,11 +168,33 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
 
   it('permite un abono parcial y cobra solo el saldo pendiente', async () => {
     const h = harness(false, 'created', [{ state: 'succeeded', amount: 40 }]);
-    await h.service.payOrder(1, DTO);
+    const result = await h.service.payOrder(1, DTO);
     expect(h.prismaMock.payments.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ amount: 60, state: 'succeeded' }),
     }));
+    expect(h.stateUpdates).toContainEqual({
+      state: 'finished',
+      metadata: expect.objectContaining({ total_paid: 100, remaining_balance: 0 }),
+    });
+    expect(result.order).toEqual(expect.objectContaining({ total_paid: 100, remaining_balance: 0 }));
     expect(h.getState()).toBe('finished');
+  });
+
+  it('restaura shipped y proyecta el saldo al cobrar el remanente', async () => {
+    const h = harness(false, 'shipped', [{ state: 'captured', amount: 40 }]);
+    h.prismaMock.orders.findFirst.mockImplementation(async () => ({
+      id: 1, state: h.getState(), total_paid: 100, remaining_balance: 0,
+    }));
+    const result = await h.service.payOrder(1, DTO);
+    expect(h.prismaMock.payments.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ amount: 60, state: 'succeeded' }),
+    }));
+    expect(h.stateUpdates).toContainEqual({
+      state: 'shipped',
+      metadata: { total_paid: 100, remaining_balance: 0 },
+    });
+    expect(result.order).toEqual(expect.objectContaining({ total_paid: 100, remaining_balance: 0 }));
+    expect(h.getState()).toBe('shipped');
   });
 
   it('stock agotado no bloquea el cobro; consumo en cocina evita descontar otra vez', async () => {

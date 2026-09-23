@@ -346,10 +346,16 @@ export class OrderFlowService {
     if (metadata.placed_at) {
       schemaFields.placed_at = metadata.placed_at;
     }
+    if (metadata.total_paid !== undefined) {
+      schemaFields.total_paid = metadata.total_paid;
+    }
+    if (metadata.remaining_balance !== undefined) {
+      schemaFields.remaining_balance = metadata.remaining_balance;
+    }
 
     // Store additional metadata as JSON in internal_notes
     const metadataKeys = Object.keys(metadata).filter(
-      (k) => !['paid_at', 'finished_at', 'placed_at'].includes(k),
+      (k) => !['paid_at', 'finished_at', 'placed_at', 'total_paid', 'remaining_balance'].includes(k),
     );
 
     if (metadataKeys.length > 0) {
@@ -1077,9 +1083,14 @@ export class OrderFlowService {
     // balance, including any tip just persisted above.
     const amountToCharge = new Prisma.Decimal(order.grand_total)
       .minus(settledAmount).toNumber();
+    const paidBalance = new Prisma.Decimal(order.grand_total).toNumber();
+    const settledBalanceMetadata = {
+      total_paid: paidBalance,
+      remaining_balance: 0,
+    };
 
     // Shipped orders: register payment without changing state
-    if (order.state === 'shipped') {
+    if (preClaimState === 'shipped') {
       const transactionId = await this.generateTransactionId();
 
       let change = 0;
@@ -1114,6 +1125,10 @@ export class OrderFlowService {
         },
       });
       paymentPersisted = true;
+
+      // The claim temporarily moved shipped -> processing. Restore its
+      // logistics state and persist the settled balance with the payment.
+      await this.updateOrderState(orderId, 'shipped', settledBalanceMetadata);
 
       // Round 1 MAJOR #13 — cupón en `flow/pay` (shipped):
       // si la orden trae `coupon_id` y no existe `coupon_uses` aún,
@@ -1207,6 +1222,7 @@ export class OrderFlowService {
           'processing',
           {
             paid_at: new Date(),
+            ...settledBalanceMetadata,
           },
         );
 
@@ -1289,6 +1305,7 @@ export class OrderFlowService {
         updatedOrder = await this.updateOrderState(orderId, 'finished', {
           paid_at: new Date(),
           finished_at: new Date(),
+          ...settledBalanceMetadata,
         });
       } catch (e) {
         if (e instanceof VendixHttpException) {
