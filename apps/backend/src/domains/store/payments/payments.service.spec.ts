@@ -1604,6 +1604,37 @@ describe('PaymentsService', () => {
       );
       expect(result.order).toBeDefined();
     });
+
+    it('conserva el impuesto persistido de una línea antigua aunque el catálogo actual no tenga asignación', async () => {
+      const { tx, posUser } = arrangeCashSale();
+      const oldTaxSnapshot = {
+        tax_rate_id: 501, tax_type: TaxFiscalType.IVA,
+        tax_rate: 0.19, tax_amount: 1900,
+      };
+      const existingLine = {
+        id: 17, product_id: 425, quantity: 1, total_price: 10000,
+        tax_amount_item: 1900, order_item_taxes: [oldTaxSnapshot],
+      };
+      tx.order_items.findMany.mockResolvedValue([existingLine]);
+      const taxResolver = jest.spyOn(service as any, 'buildPosOrderItem');
+
+      await (service as any).applyPosPaymentToTableSession(
+        tx, buildDto({ items: [] }), posUser, CONTEXT_STORE_ID,
+      );
+
+      expect(taxResolver).not.toHaveBeenCalled();
+      expect(tx.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          subtotal_amount: 10000,
+          tax_amount: 1900,
+          grand_total: 11900,
+        }),
+      }));
+      expect(existingLine.order_item_taxes).toEqual([oldTaxSnapshot]);
+      expect(tx.order_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { order_id: 1001, cancelled_at: null },
+      }));
+    });
   });
 
   // QUI-783 — the `orders` table has `grand_total` but NO `total_amount`
