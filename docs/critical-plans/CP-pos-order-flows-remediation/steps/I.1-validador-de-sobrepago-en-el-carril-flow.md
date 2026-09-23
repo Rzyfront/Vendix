@@ -2,9 +2,9 @@
 id: I.1
 title: "Validador de sobrepago en el carril `flow/pay`"
 phase: I
-status: in-progress
+status: done
 owner: Fabio
-updated: 2026-09-20
+updated: 2026-09-23
 contracts: [FB-04, DB-02, DB-03, DB-14, ERR-37]
 adrs: []
 skills: [vendix-backend, vendix-error-handling, vendix-prisma-scopes, how-to-test]
@@ -29,10 +29,10 @@ skills: [vendix-backend, vendix-error-handling, vendix-prisma-scopes, how-to-tes
   - SQL de solo lectura: guardar baseline `evidence/I1-overpayment-baseline.sql/txt`; tras desplegar, agrupar todos los pagos exitosos por orden y filtrar desbordes con `EXISTS` de un pago exitoso `created_at > :deploy` para detectar también una orden vieja sobrecobrada después del corte. Solo las filas nuevas deben ser 0 → `evidence/I1-invariante-sobrepago.txt`.
 - **Acceptance checklist:**
   - [x] El validador devuelve error, no advertencia, cuando la orden ya está pagada por completo
-  - [ ] `payOrder` invoca el validador dentro del lock y antes de crear el pago, en las tres ramas de estado permitidas
+  - [x] `payOrder` invoca el validador dentro del lock y antes de crear el pago, en las tres ramas de estado permitidas
   - [x] El segundo cobro íntegro sobre una orden saldada devuelve 409 tipado y cero filas nuevas en `payments`
   - [x] Un abono parcial sobre una orden con saldo pendiente sigue aceptándose
   - [x] El spec que fijaba el warning quedó invertido y ahora fija el `errorCode`, no el texto del mensaje
   - [x] El baseline histórico queda separado y la consulta de sobrepagos con pagos posteriores al corte devuelve cero filas
-  - [ ] Evidencia de los tres curl y del SQL guardada bajo `evidence/`
-- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/I1-overpay-matrix-20260923.md`: validador/flow-pay/gateway 25855f688/af5e566d8; controller `8b2de5e6f` expone 409 `ORD_PAY_ALREADY_PAID_001` para created/shipped/processing (#1113/#1158/#1144), un pago cada una. Crédito #1156 abonó $3000/saldo $7000; carrera #1157 dio 200+409 con un pago. Histórico: 10 sobrepagos, 0 posteriores al corte. Specs servicio 118/118, validador 23/23, controller 4/4. Falta cablear literalmente `PaymentValidatorService` dentro del claim (hoy hay guard Decimal inline) y completar evidencia cruda bajo `evidence/`; no se alteró historia.
+  - [x] Evidencia de los tres curl y del SQL guardada bajo `evidence/`
+- **Status:** done · Fabio · 2026-09-23 · `evidence/I1-overpay-matrix-20260923.md`, `I1-runtime-curl.json`, `I1-verification.sql/txt`: validador compartido `isOrderFullyPaid` (`94ec9515f`) lo invocan POS y `payOrder` tras el claim, antes de crear pago, con Decimal exacto; controller `8b2de5e6f` expone 409 `ORD_PAY_ALREADY_PAID_001` en created/shipped/processing (#1113/#1158/#1144), sin pagos nuevos. Crédito #1156 abonó $3000/saldo $7000; carrera #1157 dio 200+409 con un pago. Histórico: 10 sobrepagos, 0 posteriores al corte QA (sin backfill, Non-Goal). Specs servicio 118/118, validador 24/24, controller 4/4; backend health 200.
