@@ -23,6 +23,8 @@ import {
 import { resolveLineTotals } from '../taxes/utils/tax-inclusive-math.util';
 import { resolvePaymentReceivedSaleFields } from '../payments/utils/payment-sale-share.util';
 import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-policy';
+import { canReassignOrderToTable } from '../orders/shared/order-table-reassignment-policy.util';
+import { lockOrderLifecycle } from '../orders/order-flow/order-lifecycle-lock.util';
 // QUI-INC — el enum fiscal canónico. Se importa (en vez de tipar `string`)
 // para que la fila de `order_item_taxes` de la cuenta abierta no pueda
 // persistir un valor que el `tax_type_enum` de Postgres no reconozca, ni
@@ -30,6 +32,7 @@ import { assertNoActiveFinancialSplit } from '../orders/shared/financial-split-p
 import { TaxFiscalType } from '../taxes/dto';
 import { resolvePriceUnitScale } from '../products/services/price-unit.util';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
+import { ReassignTableSessionDto } from './dto/table-session.dto';
 
 /**
  * QUI-INC — fila de impuesto COMPLETA de una línea de cuenta abierta: lo que
@@ -1260,6 +1263,142 @@ export class TableSessionsService {
       `Table session closed: session=${sessionId} table=${session.table_id} order=${session.order_id} (order state unchanged — see docblock)`,
     );
     return this.findOne(sessionId);
+  }
+
+  /**
+   * ADR-07: append a new open session to an existing, previously closed
+   * table order. Never reopen or mutate its closed-session history, order,
+   * items, or inventory. The order lifecycle lock serializes this with pay.
+   */
+  async reassignSessionToTable(dto: ReassignTableSessionDto): Promise<TableSessionView> {
+    const { storeId, userId } = this.requireContext();
+
+    // The raw lifecycle lock needs an id/store pair from a scoped read, not
+    // directly from the request body. The authoritative eligibility read is
+    // repeated inside the transaction after the lock.
+    const scopedOrder = await this.prisma.orders.findFirst({
+      where: { id: dto.order_id, store_id: storeId },
+      select: { id: true, store_id: true },
+    });
+    if (!scopedOrder) throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+
+    let newSession: Pick<
+      TableSessionView,
+      'id' | 'order_id' | 'table_id' | 'opened_at' | 'opened_by'
+    >;
+    let targetTable: { id: number; name: string; zone: string | null };
+    try {
+      ({ newSession, targetTable } = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await lockOrderLifecycle(tx, scopedOrder.id, scopedOrder.store_id);
+
+        const order = await tx.orders.findFirst({
+          where: { id: scopedOrder.id, store_id: storeId },
+          select: { id: true, state: true, active_financial_split_id: true },
+        });
+        if (!order) throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+
+        const sessions = await tx.table_sessions.findMany({
+          where: { order_id: order.id, store_id: storeId },
+          orderBy: [{ opened_at: 'desc' }, { id: 'desc' }],
+          select: { id: true, table_id: true, closed_at: true, guest_count: true },
+        });
+        const payments = await tx.payments.findMany({
+          where: { order_id: order.id },
+          select: { state: true },
+        });
+        const invoices = await tx.invoices.findMany({
+          where: { order_id: order.id, store_id: storeId },
+          select: { status: true },
+        });
+        const eligibility = canReassignOrderToTable({
+          state: order.state,
+          active_financial_split_id: order.active_financial_split_id,
+          table_sessions: sessions,
+          payments,
+          invoices,
+        });
+        if (!eligibility.eligible) {
+          throw new VendixHttpException(
+            ErrorCodes[eligibility.errorCode],
+            undefined,
+            'details' in eligibility ? eligibility.details : undefined,
+          );
+        }
+
+        const target = await tx.tables.findFirst({
+          where: { id: dto.target_table_id, store_id: storeId },
+          select: { id: true, name: true, zone: true, status: true },
+        });
+        if (!target) throw new VendixHttpException(ErrorCodes.TABLE_NOT_FOUND);
+        if (target.status === 'occupied') {
+          throw new VendixHttpException(ErrorCodes.TABLE_SESSION_ALREADY_OPEN);
+        }
+        if (target.status !== 'available') {
+          throw new VendixHttpException(
+            ErrorCodes.TABLE_INVALID_STATUS,
+            target.status === 'reserved'
+              ? 'La mesa de destino está reservada; elige otra mesa'
+              : 'La mesa de destino está en limpieza; elige otra mesa',
+          );
+        }
+
+        // Check-then-act remains protected by the partial unique index; the
+        // transaction catch maps its residual P2002 race to a typed 409.
+        const occupied = await tx.table_sessions.findFirst({
+          where: { table_id: target.id, store_id: storeId, closed_at: null },
+          select: { id: true },
+        });
+        if (occupied) throw new VendixHttpException(ErrorCodes.TABLE_SESSION_ALREADY_OPEN);
+
+        // Claim the available table row before creating the session. The
+        // conditional write closes the status race with reserve/cleaning;
+        // a failed claim rolls back with a typed retryable conflict.
+        const tableClaim = await tx.tables.updateMany({
+          where: { id: target.id, store_id: storeId, status: 'available' },
+          data: { status: 'occupied', updated_at: new Date() },
+        });
+        if (tableClaim.count !== 1) {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_CONFLICT_001,
+            'La mesa cambió de estado; actualiza y reintenta la operación',
+          );
+        }
+
+        const created = await tx.table_sessions.create({
+          data: {
+            store_id: storeId,
+            table_id: target.id,
+            order_id: order.id,
+            opened_by: userId,
+            guest_count: sessions[0].guest_count,
+            updated_at: new Date(),
+          },
+        });
+        await tx.kitchen_tickets.updateMany({
+          where: { order_id: order.id, store_id: storeId },
+          data: { table_id: target.id },
+        });
+        return { newSession: created, targetTable: target };
+      }));
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          throw new VendixHttpException(ErrorCodes.TABLE_SESSION_ALREADY_OPEN);
+        }
+        if (error.code === 'P2034') {
+          throw new VendixHttpException(
+            ErrorCodes.SYS_CONFLICT_001,
+            'Conflicto de escritura al reasignar la mesa; reintenta la operación',
+          );
+        }
+      }
+      throw error;
+    }
+
+    // Post-commit only. Failed or rolled-back writes must not reach floor-map.
+    this.emitSessionOpened(storeId, newSession);
+    this.emitTransferTableStatus(storeId, targetTable, 'occupied');
+    return this.findOne(newSession.id);
   }
 
   // ------------------------------------------------------- transfer / swap
