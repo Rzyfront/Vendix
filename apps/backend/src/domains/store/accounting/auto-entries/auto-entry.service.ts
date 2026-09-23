@@ -1231,6 +1231,9 @@ export class AutoEntryService {
       'order.completed': 'auto_inventory',
       'production.completed': 'auto_inventory',
       'refund.completed': 'auto_return',
+      'refund.reclassification': 'auto_return',
+      'return_order.refund': 'auto_return',
+      'return_order.reclassification': 'auto_return',
       'purchase_order.received': 'auto_purchase',
       'purchase_order.payment': 'auto_purchase',
       // Anticipo a proveedores (pago de OC sin recepciones) y su reclasificación
@@ -2087,6 +2090,11 @@ export class AutoEntryService {
   /** Reclasificación caja/banco de un refund cuya venta ya reversó una NC. */
   private static readonly REFUND_RECLASSIFICATION_SOURCE =
     'refund.reclassification';
+  /** Reversa de venta de una devolución (`return_orders.id`). */
+  private static readonly RETURN_ORDER_REFUND_SOURCE = 'return_order.refund';
+  /** Reclasificación de una devolución cuya venta ya reversó una NC. */
+  private static readonly RETURN_ORDER_RECLASSIFICATION_SOURCE =
+    'return_order.reclassification';
 
   private static readonly SALE_RECOGNITION_INVOICE_TYPES = [
     'sales_invoice',
@@ -2311,26 +2319,46 @@ export class AutoEntryService {
     return null;
   }
 
-  /** Σ de asientos refund.completed posteados de los refunds de una orden. */
+  /**
+   * Σ de las reversas de venta posteadas para una orden: `refund.completed` de
+   * sus `refunds` y `return_order.refund` de sus devoluciones (`return_orders`
+   * con `related_order_id`). Cada uno en su propio espacio de ids, así que un
+   * `refunds.id` nunca choca con un `return_orders.id`. Las reclasificaciones
+   * posteriores a una NC tienen source_type propio y no cuentan.
+   */
   private async sumPostedRefundEntries(
     order_id: number,
     organization_id: number,
   ): Promise<{ cents: bigint; entry_ids: number[] }> {
     const db = this.prisma.withoutScope();
-    const refunds = await db.refunds.findMany({
-      where: { order_id },
-      select: { id: true },
-    });
-    if (!refunds.length) return { cents: 0n, entry_ids: [] };
+    const [refunds, returns] = await Promise.all([
+      db.refunds.findMany({ where: { order_id }, select: { id: true } }),
+      db.return_orders.findMany({
+        where: { related_order_id: order_id, organization_id },
+        select: { id: true },
+      }),
+    ]);
+    const sources = [
+      ...(refunds.length
+        ? [
+            {
+              source_type: 'refund.completed',
+              source_id: { in: refunds.map((row: any) => row.id) },
+            },
+          ]
+        : []),
+      ...(returns.length
+        ? [
+            {
+              source_type: AutoEntryService.RETURN_ORDER_REFUND_SOURCE,
+              source_id: { in: returns.map((row: any) => row.id) },
+            },
+          ]
+        : []),
+    ];
+    if (!sources.length) return { cents: 0n, entry_ids: [] };
     const entries = await db.accounting_entries.findMany({
-      where: {
-        organization_id,
-        // La reclasificación posterior a una NC (`refund.reclassification`)
-        // no reversa la venta: queda fuera por su propio source_type.
-        source_type: 'refund.completed',
-        source_id: { in: refunds.map((row: any) => row.id) },
-        status: 'posted',
-      },
+      where: { organization_id, status: 'posted', OR: sources },
       select: { id: true, total_credit: true },
     });
     return {
@@ -4463,11 +4491,24 @@ export class AutoEntryService {
     /** Envío devuelto BRUTO (`calculation.shipping_refund`). */
     shipping?: number;
     /**
-     * Orden del refund (sólo refund-flow la emite). Habilita el carril único
-     * de reversa frente a una nota crédito de venta POS.
+     * Orden del refund (refund-flow) o de la devolución (return-orders).
+     * Habilita el carril único de reversa frente a una nota crédito de venta
+     * POS.
      */
     order_id?: number;
+    /**
+     * `return_order` ⇒ `refund_id` es `return_orders.id`: el asiento usa
+     * source_type `return_order.refund` para no chocar con `refunds.id`.
+     */
+    source?: 'return_order';
   }) {
+    const from_return_order = data.source === 'return_order';
+    const reversal_source = from_return_order
+      ? AutoEntryService.RETURN_ORDER_REFUND_SOURCE
+      : 'refund.completed';
+    const reclassification_source = from_return_order
+      ? AutoEntryService.RETURN_ORDER_RECLASSIFICATION_SOURCE
+      : AutoEntryService.REFUND_RECLASSIFICATION_SOURCE;
     // Replacements only move inventory — no financial entry needed
     if (data.return_type === 'replacement') {
       this.logger.log(
@@ -4490,16 +4531,52 @@ export class AutoEntryService {
     if (credit_note_lane) {
       // Σ de TODOS los refunds completados de la orden (incluye éste): los que
       // se abstuvieron no dejan asiento, así que se cuenta desde `refunds`.
-      const completed = await this.prisma.withoutScope().refunds.findMany({
+      // Las devoluciones (`return_orders`) no guardan monto: cuentan por sus
+      // asientos posteados (reversa o reclasificación), más la actual.
+      const db = this.prisma.withoutScope();
+      const completed = await db.refunds.findMany({
         where: { order_id: data.order_id, state: 'completed' },
         select: { id: true, amount: true },
       });
+      const returns = await db.return_orders.findMany({
+        where: {
+          related_order_id: data.order_id,
+          organization_id: data.organization_id,
+        },
+        select: { id: true },
+      });
+      const return_ids = returns
+        .map((row: any) => row.id)
+        .filter((id: number) => !(from_return_order && id === data.refund_id));
+      const return_entries = return_ids.length
+        ? await db.accounting_entries.findMany({
+            where: {
+              organization_id: data.organization_id,
+              status: 'posted',
+              source_type: {
+                in: [
+                  AutoEntryService.RETURN_ORDER_REFUND_SOURCE,
+                  AutoEntryService.RETURN_ORDER_RECLASSIFICATION_SOURCE,
+                ],
+              },
+              source_id: { in: return_ids },
+            },
+            select: { total_credit: true },
+          })
+        : [];
       const ids = new Set(completed.map((row: any) => row.id));
       const refunded_cents =
         completed.reduce(
           (sum: bigint, row: any) => sum + getCents(row.amount ?? 0),
           0n,
-        ) + (ids.has(data.refund_id) ? 0n : getCents(data.amount));
+        ) +
+        return_entries.reduce(
+          (sum: bigint, row: any) => sum + getCents(row.total_credit ?? 0),
+          0n,
+        ) +
+        (!from_return_order && ids.has(data.refund_id)
+          ? 0n
+          : getCents(data.amount));
       if (credit_note_lane.cents + 1n >= refunded_cents) {
         const channel_line = await this.resolveAccountLine(
           data.organization_id,
@@ -4532,7 +4609,7 @@ export class AutoEntryService {
         // reclasificación de caja/banco. La deduplicación por
         // (source_type, source_id) sigue siendo por refund.
         return this.createAutoEntry({
-          source_type: AutoEntryService.REFUND_RECLASSIFICATION_SOURCE,
+          source_type: reclassification_source,
           source_id: data.refund_id,
           organization_id: data.organization_id,
           store_id: data.store_id,
@@ -4596,7 +4673,7 @@ export class AutoEntryService {
         breakdown: data.tax_breakdown,
         legacyKey: 'refund.completed.vat_payable',
         label: 'IVA (reversa devolución)',
-        source_type: 'refund.completed',
+        source_type: reversal_source,
         source_id: data.refund_id,
       })),
     );
@@ -4633,10 +4710,12 @@ export class AutoEntryService {
     );
 
     return this.createAutoEntry({
-      source_type: 'refund.completed',
+      source_type: reversal_source,
       source_id: data.refund_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,      description: `Devolución #${data.refund_id}`,
+      store_id: data.store_id,      description: from_return_order
+        ? `Devolución (orden de devolución) #${data.refund_id}`
+        : `Devolución #${data.refund_id}`,
       lines,
       user_id: data.user_id,
     });

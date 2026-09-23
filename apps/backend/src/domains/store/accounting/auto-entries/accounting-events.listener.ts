@@ -735,8 +735,10 @@ export class AccountingEventsListener {
     shipping?: number;
     /** Canal EFECTIVO de salida del dinero (resolveEffectiveRefundChannel). */
     effective_channel?: string;
-    /** Orden del refund (refund-flow). */
+    /** Orden del refund (refund-flow) o de la devolución (return-orders). */
     order_id?: number;
+    /** `return_order` ⇒ `refund_id` es `return_orders.id`. */
+    source?: 'return_order';
   }) {
     try {
       if (
@@ -762,6 +764,7 @@ export class AccountingEventsListener {
         shipping: event.shipping != null ? Number(event.shipping) : undefined,
         effective_channel: event.effective_channel,
         order_id: event.order_id != null ? Number(event.order_id) : undefined,
+        source: event.source === 'return_order' ? 'return_order' : undefined,
       });
       this.logger.log(
         `Auto-entry created for refund.completed #${event.refund_id}`,

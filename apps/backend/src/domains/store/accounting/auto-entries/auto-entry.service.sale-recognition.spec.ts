@@ -70,6 +70,7 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
     creditNote?: any;
     creditNotes?: any[];
     refunds?: any[];
+    returnOrders?: any[];
   } = {}) => {
     const codes = opts.codes ?? CODES;
     const unscoped = {
@@ -91,6 +92,9 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
       refunds: {
         findMany: jest.fn().mockResolvedValue(opts.refunds ?? []),
       },
+      return_orders: {
+        findMany: jest.fn().mockResolvedValue(opts.returnOrders ?? []),
+      },
       fiscal_transmissions: {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
@@ -103,6 +107,19 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
         findMany: jest.fn(async (args: any) => {
           const type = args?.where?.source_type;
           if (typeof type === 'string') return opts.bySource?.[type] ?? [];
+          if (Array.isArray(type?.in))
+            return type.in.flatMap((t: string) => opts.bySource?.[t] ?? []);
+          // Reversas por orden (refunds + devoluciones): OR de source_type.
+          const or = args?.where?.OR;
+          if (
+            Array.isArray(or) &&
+            or.every((row: any) =>
+              ['refund.completed', 'return_order.refund'].includes(
+                row.source_type,
+              ),
+            )
+          )
+            return or.flatMap((row: any) => opts.bySource?.[row.source_type] ?? []);
           return opts.entries ?? [];
         }),
         findFirst: jest.fn(
@@ -659,6 +676,85 @@ describe('AutoEntryService · reconocimiento único de la venta', () => {
         expect.objectContaining({ account_code: '4135', debit_amount: 5000 }),
       );
       expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
+    });
+
+    describe('devolución de return-orders (A1)', () => {
+      const returnAfterNc = {
+        refund_id: 31, // return_orders.id: choca a propósito con refunds.id 31
+        source: 'return_order' as const,
+        order_id: SALE.order_id,
+        organization_id: 1,
+        store_id: 2,
+        amount: 5950,
+        tax_amount: 950,
+      };
+
+      it('NC primero ⇒ la devolución no reversa otra vez (mismo canal) y no se confunde con el refund 31', async () => {
+        const { service, createAutoEntry } = build({
+          ...ncLane,
+          refunds: [],
+          returnOrders: [{ id: 31 }],
+        });
+        const result: any = await service.onRefundCompleted({
+          ...returnAfterNc,
+          effective_channel: 'cash',
+        });
+        expect(createAutoEntry).not.toHaveBeenCalled();
+        expect(result.reason).toBe('sale_reversal_already_posted_by_credit_note');
+      });
+
+      it('NC primero y devolución por otro canal ⇒ sólo reclasificación, con source_type propio', async () => {
+        const { service, createAutoEntry } = build({
+          ...ncLane,
+          refunds: [],
+          returnOrders: [{ id: 31 }],
+        });
+        await service.onRefundCompleted({
+          ...returnAfterNc,
+          effective_channel: 'bank_transfer',
+        });
+        expect(createAutoEntry.mock.calls[0][0]).toEqual(
+          expect.objectContaining({
+            source_type: 'return_order.reclassification',
+            source_id: 31,
+          }),
+        );
+        const lines = linesOf(createAutoEntry.mock.calls[0]);
+        expect(lines.some((l) => String(l.account_code).startsWith('4'))).toBe(false);
+        expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
+      });
+
+      it('sin NC ⇒ reversa completa bajo return_order.refund (no refund.completed)', async () => {
+        const { service, createAutoEntry } = build({ returnOrders: [{ id: 31 }] });
+        await service.onRefundCompleted({
+          ...returnAfterNc,
+          effective_channel: 'cash',
+        });
+        expect(createAutoEntry.mock.calls[0][0].source_type).toBe(
+          'return_order.refund',
+        );
+        const lines = linesOf(createAutoEntry.mock.calls[0]);
+        expect(sum(lines, 'debit_amount')).toBe(sum(lines, 'credit_amount'));
+      });
+
+      it('devolución primero ⇒ la NC no postea segundo reverso', async () => {
+        const { service, createAutoEntry } = build({
+          creditNote: skippedOriginal,
+          bySource: {
+            'payment.received': [posPaymentEntry],
+            'return_order.refund': [{ id: 970, total_credit: 5950 }],
+          },
+          returnOrders: [{ id: 31 }],
+        });
+        const result: any = await service.onCreditNoteAccepted(NC);
+        expect(createAutoEntry).not.toHaveBeenCalled();
+        expect(result).toEqual(
+          expect.objectContaining({
+            reason: 'sale_reversal_already_posted_by_refund',
+            covering_entry_ids: [970],
+          }),
+        );
+      });
     });
   });
 
