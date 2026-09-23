@@ -4277,6 +4277,74 @@ export class PaymentsService {
     }
   }
 
+  /** ADR-05/F.2: persist an alias delivery address with its POS order, never
+   * as an earlier standalone POST that could leave an unreferenced orphan. */
+  private aliasShippingAddressData(
+    snapshot: Record<string, unknown> | undefined,
+    storeId: number,
+  ): Prisma.addressesUncheckedCreateInput {
+    const required = (key: string, max: number): string => {
+      const value = snapshot?.[key];
+      if (typeof value !== 'string' || !value.trim() || value.trim().length > max) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          `Completa una dirección de envío válida: ${key}.`,
+          { reason: 'alias_shipping_address_invalid', field: key },
+        );
+      }
+      return value.trim();
+    };
+    const optional = (key: string, max: number): string | null => {
+      const value = snapshot?.[key];
+      if (value == null || value === '') return null;
+      if (typeof value !== 'string' || value.trim().length > max) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          `Corrige el campo ${key} de la dirección de envío.`,
+          { reason: 'alias_shipping_address_invalid', field: key },
+        );
+      }
+      return value.trim() || null;
+    };
+    const coordinate = (key: 'latitude' | 'longitude', max: number): number | null => {
+      const value = snapshot?.[key];
+      if (value == null || value === '') return null;
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || Math.abs(numeric) > max) {
+        throw new VendixHttpException(
+          ErrorCodes.PAY_VALIDATE_001,
+          `Corrige la coordenada ${key} de la dirección de envío.`,
+          { reason: 'alias_shipping_address_invalid', field: key },
+        );
+      }
+      return numeric;
+    };
+    const country = required('country_code', 3).toUpperCase();
+    if (!/^[A-Z]{2,3}$/.test(country)) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'El país de la dirección debe ser un código de dos o tres letras.',
+        { reason: 'alias_shipping_address_invalid', field: 'country_code' },
+      );
+    }
+    return {
+      store_id: storeId,
+      organization_id: null,
+      user_id: null,
+      is_primary: false,
+      type: 'shipping',
+      address_line1: required('address_line1', 255),
+      address_line2: optional('address_line2', 255),
+      city: required('city', 100),
+      state_province: optional('state_province', 100),
+      postal_code: optional('postal_code', 20),
+      country_code: country,
+      phone_number: optional('recipient_phone', 50),
+      latitude: coordinate('latitude', 90),
+      longitude: coordinate('longitude', 180),
+    };
+  }
+
   private async createOrUpdateOrderFromPos(
     tx: any,
     dto: CreatePosPaymentDto,
@@ -4347,6 +4415,7 @@ export class PaymentsService {
           select: {
             id: true, order_number: true, state: true,
             subtotal_amount: true, tax_amount: true,
+            shipping_address_id: true,
           },
         })
       : null;
@@ -4628,7 +4697,14 @@ export class PaymentsService {
         delete adoptedOrderData.created_by_user_id;
         delete adoptedOrderData.store_id;
         delete adoptedOrderData.channel;
-        const order = existingOrder
+        const aliasDeliveryAddress = dto.customer_alias?.trim() &&
+          dto.delivery_type === 'home_delivery'
+          ? this.aliasShippingAddressData(
+              dto.shipping_address_snapshot as Record<string, unknown> | undefined,
+              dtoStoreId,
+            )
+          : null;
+        let order = existingOrder
           ? await tx.orders.update({
               where: { id: existingOrder.id, store_id: dtoStoreId },
               data: adoptedOrderData,
@@ -4638,6 +4714,78 @@ export class PaymentsService {
               data: orderData,
               include: { order_items: true, stores: true },
             });
+
+        if (aliasDeliveryAddress) {
+          if (dto.shipping_address_id != null) {
+            // A customer-owned address is never silently converted to an
+            // alias address. Nor may a new alias borrow another sale's row.
+            if (existingOrder?.shipping_address_id !== dto.shipping_address_id) {
+              throw new VendixHttpException(
+                ErrorCodes.PAY_VALIDATE_001,
+                'La dirección del nombre de referencia debe crearse con esta venta.',
+                { reason: 'alias_shipping_address_not_owned' },
+              );
+            }
+            const supplied = await tx.addresses.findFirst({
+              where: { id: dto.shipping_address_id, store_id: dtoStoreId, user_id: null },
+              select: { id: true },
+            });
+            if (!supplied) {
+              throw new VendixHttpException(
+                ErrorCodes.PAY_VALIDATE_001,
+                'La dirección del nombre de referencia no pertenece a esta tienda.',
+                { reason: 'alias_shipping_address_not_owned' },
+              );
+            }
+          } else {
+            let addressId: number | null = null;
+            if (existingOrder?.shipping_address_id != null) {
+              const oldOrphan = await tx.addresses.findFirst({
+                where: {
+                  id: existingOrder.shipping_address_id,
+                  store_id: dtoStoreId,
+                  user_id: null,
+                },
+                select: { id: true },
+              });
+              if (oldOrphan) {
+                const referenceCounts = await Promise.all([
+                  tx.orders.count({
+                    where: {
+                      OR: [
+                        { shipping_address_id: oldOrphan.id, id: { not: order.id } },
+                        { billing_address_id: oldOrphan.id },
+                      ],
+                    },
+                  }),
+                  tx.sales_orders.count({ where: { shipping_address_id: oldOrphan.id } }),
+                  tx.bookings.count({ where: { service_address_id: oldOrphan.id } }),
+                  tx.inventory_locations.count({ where: { address_id: oldOrphan.id } }),
+                  tx.suppliers.count({ where: { address_id: oldOrphan.id } }),
+                ]);
+                if (referenceCounts.every((count) => count === 0)) {
+                  await tx.addresses.update({
+                    where: { id: oldOrphan.id, store_id: dtoStoreId },
+                    data: aliasDeliveryAddress,
+                  });
+                  addressId = oldOrphan.id;
+                }
+              }
+            }
+            if (addressId == null) {
+              const created = await tx.addresses.create({
+                data: aliasDeliveryAddress,
+                select: { id: true },
+              });
+              addressId = created.id;
+            }
+            order = await tx.orders.update({
+              where: { id: order.id, store_id: dtoStoreId },
+              data: { shipping_address_id: addressId },
+              include: { order_items: true, stores: true },
+            });
+          }
+        }
 
         // Link pending bookings to this order
         if (dto.booking_ids?.length) {

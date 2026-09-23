@@ -1471,6 +1471,134 @@ describe('PaymentsService', () => {
       expect(client.orders.update.mock.calls[0][0].data.order_items).toBeUndefined();
     });
 
+    it('F.2 creates an alias shipping address in the same order transaction and links its FK', async () => {
+      const client: any = tx(null);
+      client.orders.create.mockResolvedValue({
+        ...order, id: 42, state: 'draft', store_id: 1, order_items: [], stores: { id: 1 },
+      });
+      client.orders.update.mockResolvedValue({
+        ...order, id: 42, state: 'draft', store_id: 1,
+        shipping_address_id: 901, order_items: [], stores: { id: 1 },
+      });
+      client.addresses = { create: jest.fn().mockResolvedValue({ id: 901 }) };
+      jest.spyOn(service as any, 'generateOrderNumber').mockResolvedValue('POS-42');
+      jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+      jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+        product_name: 'Artículo', quantity: 1, total_price: 1000, tax_amount_item: 0,
+      });
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: null, coupon_code: null, discount_amount: 0,
+      });
+      const snapshot = {
+        address_line1: 'Cra 7 # 1-2', city: 'Bogotá', country_code: 'CO',
+        latitude: 4.6, longitude: -74.08, recipient_phone: '3001234567',
+      };
+
+      const result = await (service as any).createOrUpdateOrderFromPos(
+        client,
+        dto({ order_id: undefined, is_draft: true, requires_payment: false,
+          customer_alias: 'Portería torre B', delivery_type: 'home_delivery',
+          shipping_method_id: 1, shipping_address_snapshot: snapshot }),
+        user,
+      );
+
+      expect(client.addresses.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          store_id: 1, user_id: null, is_primary: false,
+          address_line1: snapshot.address_line1, city: snapshot.city,
+          latitude: 4.6, longitude: -74.08,
+        }),
+        select: { id: true },
+      });
+      expect(client.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 42, store_id: 1 },
+        data: { shipping_address_id: 901 },
+      }));
+      expect(result.order.shipping_address_id).toBe(901);
+      expect(client.orders.create.mock.calls[0][0].data).toEqual(expect.objectContaining({
+        customer_alias: 'Portería torre B', customer_id: null,
+        shipping_address_snapshot: snapshot,
+      }));
+    });
+
+    it('F.2 reuses the adopted alias draft orphan row instead of leaking a second address', async () => {
+      const client: any = tx({ ...order, shipping_address_id: 901 });
+      client.orders.count = jest.fn().mockResolvedValue(0);
+      client.sales_orders = { count: jest.fn().mockResolvedValue(0) };
+      client.bookings.count = jest.fn().mockResolvedValue(0);
+      client.inventory_locations = { count: jest.fn().mockResolvedValue(0) };
+      client.suppliers = { count: jest.fn().mockResolvedValue(0) };
+      client.addresses = {
+        findFirst: jest.fn().mockResolvedValue({ id: 901 }),
+        update: jest.fn().mockResolvedValue({ id: 901 }),
+        create: jest.fn(),
+      };
+      jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+      jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+        product_name: 'Artículo', quantity: 1, total_price: 1000, tax_amount_item: 0,
+      });
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: null, coupon_code: null, discount_amount: 0,
+      });
+
+      await (service as any).createOrUpdateOrderFromPos(
+        client,
+        dto({ customer_alias: 'Portería torre B', delivery_type: 'home_delivery',
+          shipping_method_id: 1,
+          shipping_address_snapshot: {
+            address_line1: 'Calle 5 # 4-3', city: 'Bogotá', country_code: 'CO',
+          } }),
+        user,
+      );
+
+      expect(client.addresses.update).toHaveBeenCalledWith({
+        where: { id: 901, store_id: 1 },
+        data: expect.objectContaining({ address_line1: 'Calle 5 # 4-3', user_id: null }),
+      });
+      expect(client.addresses.create).not.toHaveBeenCalled();
+      expect(client.orders.update).toHaveBeenLastCalledWith(expect.objectContaining({
+        data: { shipping_address_id: 901 },
+      }));
+    });
+
+    it('F.2 rejects borrowing another sale address under an alias', async () => {
+      const client: any = tx(null);
+      client.orders.create.mockResolvedValue({
+        ...order, id: 42, store_id: 1, order_items: [], stores: { id: 1 },
+      });
+      client.addresses = { findFirst: jest.fn(), create: jest.fn() };
+      jest.spyOn(service as any, 'generateOrderNumber').mockResolvedValue('POS-42');
+      jest.spyOn(service as any, 'orderHasSerializedItems').mockResolvedValue(false);
+      jest.spyOn(service as any, 'buildPosOrderItem').mockResolvedValue({
+        product_name: 'Artículo', quantity: 1, total_price: 1000, tax_amount_item: 0,
+      });
+      jest.spyOn(service as any, 'calculatePosPromotionQuote').mockResolvedValue({
+        total_discount: 0, order_promotions_snapshot: [], applied_promotions: [],
+      });
+      jest.spyOn(service as any, 'calculatePosCouponDiscount').mockResolvedValue({
+        coupon_id: null, coupon_code: null, discount_amount: 0,
+      });
+
+      await expect((service as any).createOrUpdateOrderFromPos(
+        client,
+        dto({ order_id: undefined, customer_alias: 'Portería torre B',
+          delivery_type: 'home_delivery', shipping_method_id: 1,
+          shipping_address_id: 777,
+          shipping_address_snapshot: {
+            address_line1: 'Calle 5 # 4-3', city: 'Bogotá', country_code: 'CO',
+          } }),
+        user,
+      )).rejects.toMatchObject({ errorCode: ErrorCodes.PAY_VALIDATE_001.code });
+      expect(client.addresses.findFirst).not.toHaveBeenCalled();
+      expect(client.addresses.create).not.toHaveBeenCalled();
+    });
+
     it('E.6 retail: delegates 10% of gross products to resolveTip without taxing the tip', async () => {
       const client = tx({ ...order, subtotal_amount: 100000, tax_amount: 19000 });
       const resolveTipSpy = jest.spyOn(tipUtil, 'resolveTip');
