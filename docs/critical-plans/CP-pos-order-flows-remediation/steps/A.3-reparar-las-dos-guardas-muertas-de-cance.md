@@ -2,9 +2,9 @@
 id: A.3
 title: "Reparar las dos guardas muertas de cancelación de línea entregada"
 phase: A
-status: pending
-owner: none
-updated: 2026-09-20
+status: in-progress
+owner: Fabio
+updated: 2026-09-22
 contracts: [FB-27, ERR-14, ERR-15, ERR-16, DB-02, DB-13, DB-37, DB-44]
 adrs: [ADR-02]
 skills: [vendix-backend, vendix-error-handling, vendix-prisma-scopes, vendix-restaurant-ops, how-to-test]
@@ -45,4 +45,4 @@ skills: [vendix-backend, vendix-error-handling, vendix-prisma-scopes, vendix-res
   - [ ] La fila de auditoría `order_item.cancel_delivered` se sigue escribiendo en el camino aceptado
   - [ ] El espejo de las mismas dos guardas en `cancelOrderItem` queda declarado como deuda de la fase D, no arreglado aquí
   - [ ] Las filas FB-27, ERR-14, ERR-15, ERR-16, DB-02, DB-13, DB-37 y DB-44 quedan marcadas con evidencia
-- **Status:** pending
+- **Status:** in-progress
