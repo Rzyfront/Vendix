@@ -1812,6 +1812,14 @@ export class PosComponent {
       });
   }
 
+  /** Payment success must never reuse the abandonment path that cancels an adopted order. */
+  private clearCartAfterCompletedSale(): void {
+    this.cartService
+      .clearCartAfterCompletedSale()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
+  }
+
   /**
    * CP-POS-CREAR-EDITAR-COBRAR-001 — Guardar must open the customer-selection
    * modal (Venta Anónima / Con Cliente) before persisting the order, like
@@ -2781,7 +2789,7 @@ export class PosComponent {
         : 'Venta procesada correctamente';
 
       this.toastService.success(successMessage);
-      this.onClearCart();
+      this.clearCartAfterCompletedSale();
       this.productRefreshCounter.update((v) => v + 1);
 
       if (sc?.fromQueue && sc?.queueEntryId && paymentData.order?.id) {
@@ -3732,7 +3740,7 @@ export class PosComponent {
 
       this.showOrderConfirmation.set(true);
       this.toastService.success('Orden con envío creada correctamente');
-      this.onClearCart();
+      this.clearCartAfterCompletedSale();
       this.productRefreshCounter.update((v) => v + 1);
 
       if (sc?.fromQueue && sc?.queueEntryId && shippingData.order?.id) {
