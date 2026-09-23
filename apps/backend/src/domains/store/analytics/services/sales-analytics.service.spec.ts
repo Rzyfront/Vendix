@@ -25,6 +25,10 @@ function makeOrder(overrides: {
   grand_total: number;
   itemCount: number;
   created_at?: Date;
+  subtotal_amount?: number;
+  tax_amount?: number;
+  shipping_cost?: number;
+  shipping_tax_amount?: number;
 }) {
   const items = Array.from({ length: overrides.itemCount }, (_, i) => ({
     product_name: `Producto ${i + 1}`,
@@ -42,10 +46,11 @@ function makeOrder(overrides: {
     channel: 'pos',
     state: 'delivered',
     currency: 'COP',
-    subtotal_amount: overrides.grand_total,
+    subtotal_amount: overrides.subtotal_amount ?? overrides.grand_total,
     discount_amount: 0,
-    tax_amount: 0,
-    shipping_cost: 0,
+    tax_amount: overrides.tax_amount ?? 0,
+    shipping_cost: overrides.shipping_cost ?? 0,
+    shipping_tax_amount: overrides.shipping_tax_amount ?? 0,
     tip_amount: null,
     grand_total: overrides.grand_total,
     users: {
@@ -116,6 +121,36 @@ describe('SalesAnalyticsService', () => {
   });
 
   describe('getOrdersForExport', () => {
+    it('separa el impuesto del envío: total_tax = tax + shipping_tax y la fila cuadra con el envío base', async () => {
+      // Envío $15.000 con INC 8 % incluido (1.111,11); IVA de líneas 190.
+      prisma.orders.findMany.mockResolvedValue([
+        makeOrder({
+          id: 11,
+          order_number: 'O-ENV',
+          grand_total: 1000 + 190 + 15000,
+          itemCount: 1,
+          subtotal_amount: 1000,
+          tax_amount: 190,
+          shipping_cost: 15000,
+          shipping_tax_amount: 1111.11,
+        }),
+      ]);
+      const result = await service.getOrdersForExport(QUERY as any);
+      const row = result.orders[0];
+
+      expect(row.tax).toBe(190);
+      expect(row.shipping_tax).toBe(1111.11);
+      expect(row.total_tax).toBe(1301.11);
+      expect(row.shipping).toBe(15000);
+      expect(row.shipping_base).toBe(13888.89);
+      // Subtotal − Descuento + Total impuestos + Envío (base) = Gran Total.
+      expect(
+        Math.round(
+          (row.subtotal - row.discount + row.total_tax + row.shipping_base) * 100,
+        ) / 100,
+      ).toBe(row.grand_total);
+    });
+
     it('DATA-COMPLETE-1: 3-item order counts grand_total ONCE (not ×3)', async () => {
       // A single order of 3 items with grand_total 300. Pre-fix, flattening one
       // row per item put grand_total 300 on each of the 3 rows, so summing the

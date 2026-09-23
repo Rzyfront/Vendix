@@ -264,8 +264,14 @@ export class AnalyticsController {
       { key: 'currency', header: 'Moneda', type: 'text' },
       { key: 'subtotal', header: 'Subtotal', type: 'currency' },
       { key: 'discount', header: 'Descuento', type: 'currency' },
-      { key: 'tax', header: 'Impuesto', type: 'currency' },
-      { key: 'shipping', header: 'Envío', type: 'currency' },
+      // Impuestos y envío separados: el impuesto de una tarifa de envío gravada
+      // NO está en `tax` (orders.tax_amount) y SÍ está dentro del envío cobrado.
+      // Se muestra la base del envío para que la fila cuadre sin doble conteo:
+      // Subtotal − Descuento + Total impuestos + Envío (base) + Propina = Gran Total.
+      { key: 'tax', header: 'Impuesto productos', type: 'currency' },
+      { key: 'shipping_tax', header: 'Impuesto envío', type: 'currency' },
+      { key: 'total_tax', header: 'Total impuestos', type: 'currency' },
+      { key: 'shipping_base', header: 'Envío (base)', type: 'currency' },
       { key: 'tip', header: 'Propina', type: 'currency' },
       { key: 'grand_total', header: 'Gran Total', type: 'currency' },
       { key: 'state', header: 'Estado', type: 'text' },

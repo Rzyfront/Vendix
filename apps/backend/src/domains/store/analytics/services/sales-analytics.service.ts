@@ -110,8 +110,19 @@ export interface OrderExportRow {
   currency: string | null;
   subtotal: number;
   discount: number;
+  /** `orders.tax_amount` — taxes of the product LINES only. */
   tax: number;
+  /**
+   * `orders.shipping_tax_amount` — tax embedded in the freight of a taxed
+   * shipping rate (frozen copy). NOT in `tax`, always inside `shipping`.
+   */
+  shipping_tax: number;
+  /** `tax + shipping_tax` — same "impuestos recaudados" as the sales summary. */
+  total_tax: number;
+  /** `orders.shipping_cost` — freight charged, GROSS (includes `shipping_tax`). */
   shipping: number;
+  /** `shipping − shipping_tax` — freight base, the part that is revenue. */
+  shipping_base: number;
   tip: number;
   grand_total: number;
   state: order_state_enum;
@@ -1347,6 +1358,9 @@ export class SalesAnalyticsService {
         // eligió, y es contrato visible de su columna «Método de Pago».
         const paymentMethod = resolveOrderPaymentLabel(order.payments) ?? 'N/A';
 
+        const lineTax = Number(order.tax_amount);
+        const shippingCharged = Number(order.shipping_cost);
+        const shippingTax = Number(order.shipping_tax_amount ?? 0);
         orders.push({
           order_number: order.order_number,
           // RAW instant — do NOT format here (emission phase renders in TZ).
@@ -1361,8 +1375,11 @@ export class SalesAnalyticsService {
           currency: order.currency ?? null,
           subtotal: Number(order.subtotal_amount),
           discount: Number(order.discount_amount),
-          tax: Number(order.tax_amount),
-          shipping: Number(order.shipping_cost),
+          tax: lineTax,
+          shipping_tax: shippingTax,
+          total_tax: round2(lineTax + shippingTax),
+          shipping: shippingCharged,
+          shipping_base: round2(shippingCharged - shippingTax),
           tip: Number(order.tip_amount ?? 0),
           grand_total: Number(order.grand_total),
           state: order.state,
