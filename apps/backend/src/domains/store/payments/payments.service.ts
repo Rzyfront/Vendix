@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
-import { Prisma, payment_processing_mode_enum } from '@prisma/client';
+import { Prisma, payment_processing_mode_enum, table_status_enum } from '@prisma/client';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import {
@@ -1864,6 +1864,10 @@ export class PaymentsService {
 
         return {
           success: true,
+          ...('previousTableStatus' in orderCreation &&
+          orderCreation.previousTableStatus != null
+            ? { previous_table_status: orderCreation.previousTableStatus }
+            : {}),
           message: isDigitalPayment
             ? 'Order created, processing payment...'
             : createPosPaymentDto.requires_payment
@@ -4060,7 +4064,7 @@ export class PaymentsService {
     dtoStoreId: number,
     dto: CreatePosPaymentDto,
     user: any,
-  ): Promise<number> {
+  ): Promise<{ id: number; previousTableStatus?: table_status_enum }> {
     const table = await tx.tables.findFirst({ where: { id: tableId } });
     if (!table) {
       throw new VendixHttpException(
@@ -4085,7 +4089,7 @@ export class PaymentsService {
       select: { id: true },
     });
     if (activeSession) {
-      return activeSession.id;
+      return { id: activeSession.id };
     }
 
     const opened = await this.tableSessionsService.createOpenSessionInTx(tx, {
@@ -4105,7 +4109,7 @@ export class PaymentsService {
       currency: dto.currency,
     });
 
-    return opened.id;
+    return { id: opened.id, previousTableStatus: opened.previous_table_status };
   }
 
   /**
@@ -4314,7 +4318,7 @@ export class PaymentsService {
     // more specific reference), which is why this branch is guarded on
     // its absence and sits after it.
     if (dto.table_id != null) {
-      const resolvedSessionId = await this.resolvePosTableSessionId(
+      const resolvedSession = await this.resolvePosTableSessionId(
         tx,
         dto.table_id,
         dtoStoreId,
@@ -4324,12 +4328,13 @@ export class PaymentsService {
       // Shallow clone instead of mutating the caller's DTO: the rest of
       // `processPosPayment` must keep seeing the request exactly as it
       // arrived, while the close-out helper reads a resolved session id.
-      return await this.applyPosPaymentToTableSession(
+      const paid = await this.applyPosPaymentToTableSession(
         tx,
-        { ...dto, table_session_id: resolvedSessionId },
+        { ...dto, table_session_id: resolvedSession.id },
         user,
         dtoStoreId,
       );
+      return { ...paid, previousTableStatus: resolvedSession.previousTableStatus };
     }
 
     // An adopted POS cart already has an order. Claim that row inside the

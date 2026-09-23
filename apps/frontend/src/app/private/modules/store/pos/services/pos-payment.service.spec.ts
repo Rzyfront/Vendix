@@ -55,3 +55,53 @@ describe('PosPaymentService.processShippingSale — adopted order reference', ()
     expect(post.calls.mostRecent().args[1].order_id).toBe(57);
   });
 });
+
+describe('PosPaymentService.processSaleWithPayment — prior table status', () => {
+  let service: PosPaymentService;
+  let post: jasmine.Spy;
+  const cart = {
+    items: [],
+    customer: null,
+    summary: { subtotal: 1000, taxAmount: 0, total: 1000 },
+    appliedDiscounts: [],
+  } as unknown as CartState;
+  const request = {
+    paymentMethod: { id: '1', type: 'cash' },
+    isAnonymousSale: true,
+  } as any;
+
+  beforeEach(() => {
+    post = jasmine.createSpy('post');
+    service = new PosPaymentService(
+      { post } as any,
+      { getUserId: () => 1, getStoreIdOrThrow: () => 1 } as any,
+      { isEnabled: false, getRegisterId: () => null } as any,
+      {} as any,
+      {} as any,
+    );
+  });
+
+  for (const previousStatus of ['cleaning', 'available', 'occupied', undefined] as const) {
+    it(`preserves ${previousStatus ?? 'absent'} status without a second request`, async () => {
+      post.and.returnValue(of({
+        data: {
+          success: true,
+          order: { id: 1124, payment_status: 'succeeded' },
+          payment: { id: 820 },
+          ...(previousStatus ? { previous_table_status: previousStatus } : {}),
+        },
+      }));
+
+      const result = await firstValueFrom(
+        service.processSaleWithPayment(cart, request, 'current_user', null, 4),
+      );
+
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(post.calls.mostRecent().args[1].table_id).toBe(4);
+      expect(result.previous_table_status).toBe(previousStatus);
+      expect(Object.prototype.hasOwnProperty.call(result, 'previous_table_status'))
+        .toBe(previousStatus !== undefined);
+      expect(result.order?.id).toBe(1124);
+    });
+  }
+});

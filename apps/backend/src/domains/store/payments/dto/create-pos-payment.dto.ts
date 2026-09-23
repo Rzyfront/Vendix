@@ -17,6 +17,7 @@ import {
   Matches,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
+import { table_status_enum } from '@prisma/client';
 
 export class PosOrderItemDto {
   @IsOptional()
@@ -769,6 +770,8 @@ export class UpdateOrderWithPaymentDto {
 export class PosPaymentResponseDto {
   success: boolean;
   message: string;
+  /** Prior status only when POS opened a new table session during this charge. */
+  previous_table_status?: table_status_enum;
   order?: {
     id: number;
     order_number: string;

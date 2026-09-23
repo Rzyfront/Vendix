@@ -21,6 +21,18 @@ import {
   posShippingRateIdForPayload,
 } from '../models/shipping.model';
 import { PosApiService } from './pos-api.service';
+import type { TableStatus } from '../../restaurant-ops/tables/interfaces';
+
+export interface PosSalePaymentResponse {
+  /** flow/pay reuses the checkout step but has no success flag. */
+  success?: boolean;
+  order?: any;
+  payment?: any;
+  message?: string;
+  change?: number;
+  nextAction?: { type: 'redirect' | '3ds' | 'await' | 'none'; url?: string; data?: any };
+  previous_table_status?: TableStatus;
+}
 
 // Re-export types for component usage
 export type {
@@ -381,7 +393,7 @@ export class PosPaymentService {
     // QUI-653 — decisión "Para llevar" de la orden (el shell la computa como
     // `isTakeawayOrder`). Se estampa en las líneas sin mutar el carrito.
     takeawayOrder?: boolean | null,
-  ): Observable<any> {
+  ): Observable<PosSalePaymentResponse> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
 
@@ -516,6 +528,9 @@ export class PosPaymentService {
 
           return {
             success: true,
+            ...(data.previous_table_status != null
+              ? { previous_table_status: data.previous_table_status as TableStatus }
+              : {}),
             order: data.order,
             payment: mappedPayment,
             message: data.message,

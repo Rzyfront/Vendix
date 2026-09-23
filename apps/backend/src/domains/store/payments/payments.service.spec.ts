@@ -376,6 +376,60 @@ describe('PaymentsService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('POS table payment previous status (B.5)', () => {
+    const dto = { store_id: 1, table_id: 4, currency: 'COP' } as any;
+    const user = { id: 7 };
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it.each(['cleaning', 'available', 'occupied'] as const)(
+      'carries %s only from a newly opened session through the single payment path',
+      async (previousStatus) => {
+        const tx = {
+          tables: { findFirst: jest.fn().mockResolvedValue({ id: 4, store_id: 1 }) },
+          table_sessions: { findFirst: jest.fn().mockResolvedValue(null) },
+        };
+        const opened = jest.fn().mockResolvedValue({
+          id: 107,
+          previous_table_status: previousStatus,
+        });
+        (service as any).tableSessionsService.createOpenSessionInTx = opened;
+        const apply = jest
+          .spyOn(service as any, 'applyPosPaymentToTableSession')
+          .mockResolvedValue({ order: { id: 1124 } });
+
+        const result = await (service as any).createOrUpdateOrderFromPos(tx, dto, user);
+
+        expect(opened).toHaveBeenCalledTimes(1);
+        expect(apply).toHaveBeenCalledTimes(1);
+        expect(apply.mock.calls[0][1]).toEqual({ ...dto, table_session_id: 107 });
+        expect(result).toMatchObject({
+          order: { id: 1124 },
+          previousTableStatus: previousStatus,
+        });
+      },
+    );
+
+    it('reuses an existing session without opening another or reporting its table status', async () => {
+      const tx = {
+        tables: { findFirst: jest.fn().mockResolvedValue({ id: 4, store_id: 1 }) },
+        table_sessions: { findFirst: jest.fn().mockResolvedValue({ id: 107 }) },
+      };
+      const opened = jest.fn();
+      (service as any).tableSessionsService.createOpenSessionInTx = opened;
+      const apply = jest
+        .spyOn(service as any, 'applyPosPaymentToTableSession')
+        .mockResolvedValue({ order: { id: 1124 } });
+
+      const result = await (service as any).createOrUpdateOrderFromPos(tx, dto, user);
+
+      expect(opened).not.toHaveBeenCalled();
+      expect(apply).toHaveBeenCalledTimes(1);
+      expect(apply.mock.calls[0][1]).toMatchObject({ table_session_id: 107 });
+      expect(result.previousTableStatus).toBeUndefined();
+    });
+  });
+
   describe('processPayment', () => {
     it('should process payment successfully', async () => {
       const createPaymentDto = {
