@@ -126,6 +126,7 @@ class PaymentStub {
 @Component({ selector: 'app-pos-shipping-step', standalone: true, template: `` })
 class ShippingStub {
   readonly cartState = input<unknown>(null);
+  readonly editingOrderId = input<number | null>(null);
   readonly shippingCompleted = output<unknown>();
   readonly shippingCost = signal(0);
   readonly shipSubStep = signal(0);
