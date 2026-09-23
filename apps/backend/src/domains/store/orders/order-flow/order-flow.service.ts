@@ -42,6 +42,7 @@ import { isPresentialPosSale } from '../../invoicing/pos/presential-pos-sale';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../cash-registers/movements/movements.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import { AutoEntryService } from '../../accounting/auto-entries/auto-entry.service';
 import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
 import { OrderEtaService } from '../services/order-eta.service';
 import { KitchenFireService } from '../../kitchen-fire/kitchen-fire.service';
@@ -66,6 +67,16 @@ type DraftReservationKey = {
   productId: number;
   variantId: number | undefined;
   locationId: number;
+};
+
+type ConsumedLeafDisposition = {
+  product_id: number;
+  product_variant_id: number | null;
+  location_id: number | null;
+  quantity: number;
+  unit_cost: number;
+  total_cost: number;
+  unknown_cost: boolean;
 };
 
 /**
@@ -178,7 +189,141 @@ export class OrderFlowService {
     @Optional() private readonly shippingTaxService?: ShippingTaxService,
     private readonly moduleRef?: ModuleRef,
     @Optional() private readonly refundFlowService?: RefundFlowService,
+    @Optional() private readonly autoEntryService?: AutoEntryService,
   ) {}
+
+  /** The fire transaction is the source of truth; never restock the sold dish. */
+  private async disposeConsumedPreparedLeaves(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    orderItemId: number,
+    organizationId: number,
+    disposition: 'reuse' | 'waste',
+    reason: string,
+    afterCommit: Array<() => void>,
+  ): Promise<ConsumedLeafDisposition[]> {
+    const consumed = await tx.inventory_transactions.findMany({
+      where: { order_item_id: orderItemId, quantity_change: { lt: 0 } },
+      select: {
+        id: true, product_id: true, product_variant_id: true,
+        quantity_change: true, unit_cost: true, total_cost: true,
+      },
+    });
+    const leaves: ConsumedLeafDisposition[] = [];
+    for (const ct of consumed) {
+      const quantity = Math.abs(ct.quantity_change);
+      const locationId = disposition === 'reuse'
+        ? await this.stockLevelManager.getDefaultLocationForProduct(
+            ct.product_id, ct.product_variant_id ?? undefined,
+          )
+        : null;
+      const totalCost = Number(ct.total_cost ?? 0);
+      const unitCost = Number(ct.unit_cost ?? (quantity > 0 ? totalCost / quantity : 0));
+      const leaf: ConsumedLeafDisposition = {
+        product_id: ct.product_id,
+        product_variant_id: ct.product_variant_id,
+        location_id: locationId,
+        quantity,
+        unit_cost: unitCost,
+        total_cost: totalCost,
+        unknown_cost: ct.total_cost == null || totalCost <= 0,
+      };
+      if (disposition === 'reuse') {
+        await this.stockLevelManager.updateStock({
+          product_id: ct.product_id,
+          variant_id: ct.product_variant_id ?? undefined,
+          location_id: locationId!,
+          quantity_change: quantity,
+          movement_type: 'return',
+          movement_unit_cost: unitCost > 0 ? unitCost : undefined,
+          reason: `REUSO-INSUMO: orden #${orderId} ítem #${orderItemId} (${reason})`,
+          source_module: 'order_item_cancellation',
+          create_movement: true,
+          validate_availability: false,
+          afterCommit,
+        }, tx);
+        // updateStock(return) restores quantity/value snapshots but does not
+        // recreate a cost layer. Without this, a later FIFO/CPP sale sees
+        // physical stock with no layer. Only the per-transaction consumed
+        // average is persisted, so restore one layer at that historical cost.
+        await tx.inventory_cost_layers.create({
+          data: {
+            organization_id: organizationId,
+            product_id: ct.product_id,
+            product_variant_id: ct.product_variant_id,
+            location_id: locationId!,
+            quantity_remaining: quantity,
+            unit_cost: new Prisma.Decimal(unitCost),
+            received_at: new Date(),
+          },
+        });
+      }
+      leaves.push(leaf);
+    }
+    return leaves;
+  }
+
+  private async postPreparedDispositionAfterCommit(
+    orderId: number,
+    orderItemId: number,
+    organizationId: number,
+    storeId: number,
+    disposition: 'reuse' | 'waste',
+    leaves: ConsumedLeafDisposition[],
+  ): Promise<void> {
+    const totalCost = leaves.reduce((sum, leaf) => sum + leaf.total_cost, 0);
+    if (totalCost <= 0) return; // Zero/unknown cost stays in the audit, not the ledger.
+    if (!this.autoEntryService) {
+      this.logger.error(`AutoEntryService no disponible: disposición de ítem #${orderItemId} requiere conciliación desde audit_logs`);
+      return;
+    }
+    try {
+      // createAutoEntry records disabled/missing-mapping skips and enqueues
+      // active failures; neither may undo an already-committed cancellation.
+      await this.autoEntryService.onPreparedDishDisposition({
+        order_id: orderId,
+        order_item_id: orderItemId,
+        organization_id: organizationId,
+        store_id: storeId,
+        disposition,
+        total_cost: totalCost,
+        user_id: RequestContextService.getUserId() ?? undefined,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Reclasificación pendiente para ítem #${orderItemId}; auditar order_item.prepared_disposition: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  private async auditPreparedDispositionInTx(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    orderItemId: number,
+    organizationId: number,
+    storeId: number,
+    reason: string,
+    disposition: 'reuse' | 'waste',
+    leaves: ConsumedLeafDisposition[],
+  ): Promise<void> {
+    const requestId = RequestContextService.getRequestId();
+    await tx.audit_logs.create({
+      data: {
+        user_id: RequestContextService.getUserId() ?? null,
+        organization_id: organizationId,
+        store_id: storeId,
+        action: 'order_item.prepared_disposition',
+        resource: AuditResource.ORDERS,
+        resource_id: orderId,
+        request_id: requestId && requestId.length <= 100 ? requestId : null,
+        metadata: {
+          order_id: orderId, order_item_id: orderItemId,
+          reason, destination: disposition, leaves,
+          consumed_cost: leaves.reduce((sum, leaf) => sum + leaf.total_cost, 0),
+        } as Prisma.InputJsonValue,
+      },
+    });
+  }
 
   /**
    * Read the canonical order shape used by the controller's pre-flight
@@ -191,7 +336,7 @@ export class OrderFlowService {
     const order = await client.orders.findFirst({
       where: { id: orderId },
       include: {
-        stores: { select: { id: true, name: true, store_code: true } },
+        stores: { select: { id: true, name: true, store_code: true, organization_id: true } },
         payments: {
           include: { store_payment_method: {
             select: { system_payment_method: {
@@ -2422,7 +2567,7 @@ export class OrderFlowService {
     orderId: number,
     orderItemId: number,
     reason: string,
-    cancellationType?: 'before_fire' | 'after_fire_waste',
+    cancellationType?: 'before_fire' | 'after_fire_waste' | 'after_fire_reused',
   ) {
     // 1. Orden debe existir en la tienda del contexto. `getOrder` lanza 404
     //    si no la encuentra o no pertenece al scope.
@@ -2455,6 +2600,7 @@ export class OrderFlowService {
         id: true,
         product_name: true,
         inventory_consumed_at_fire: true,
+        products: { select: { product_type: true } },
         cancelled_at: true,
         // 1060 paso 1 — el guard de entregado vive acá (el select debe
         // traerlo; sin él la guarda sería ciega).
@@ -2501,8 +2647,19 @@ export class OrderFlowService {
     // 4. Derivar el tipo contable si el caller no lo proveyó + motivo
     //    obligatorio (defensa en profundidad; el DTO ya lo exige).
     const wasFired = orderItem.inventory_consumed_at_fire === true;
-    const resolvedType: 'before_fire' | 'after_fire_waste' =
+    const resolvedType: 'before_fire' | 'after_fire_waste' | 'after_fire_reused' =
       cancellationType ?? (wasFired ? 'after_fire_waste' : 'before_fire');
+    const preparedFired = wasFired && orderItem.products?.product_type === 'prepared';
+    const preparedOrganizationId = preparedFired ? Number(order.stores?.organization_id) : 0;
+    if (preparedFired && (!Number.isInteger(preparedOrganizationId) || preparedOrganizationId <= 0)) {
+      throw new InternalServerErrorException('La organización de la orden no está disponible para la reclasificación');
+    }
+    if (preparedFired && resolvedType === 'before_fire') {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'Un plato disparado no puede cancelarse como antes de cocina',
+      );
+    }
 
     if (!reason || reason.trim().length < 3) {
       throw new VendixHttpException(
@@ -2529,6 +2686,10 @@ export class OrderFlowService {
     }
 
     let cancelledTicketId: number | null = null;
+    let preparedDisposition: 'reuse' | 'waste' | null = null;
+    let preparedLeaves: ConsumedLeafDisposition[] = [];
+    const preparedStockAfterCommit: Array<() => void> = [];
+    let alreadyCancelledInTx = false;
 
     await this.prisma.$transaction(async (tx) => {
       const lockedOrder = await this.assertUnsplitOrderAfterLock(tx, orderId, order.store_id);
@@ -2551,6 +2712,16 @@ export class OrderFlowService {
           'No se puede cancelar un ítem de una orden ya cobrada',
         );
       }
+      if (preparedFired) {
+        const freshItem = await tx.order_items.findFirst({
+          where: { id: orderItemId, order_id: orderId },
+          select: { cancelled_at: true },
+        });
+        if (freshItem?.cancelled_at) {
+          alreadyCancelledInTx = true;
+          return;
+        }
+      }
       // Cancelar el ticket KDS SOLO si está en `pending`.
       if (isPendingTicket && ticketId != null) {
         // TOCTOU guard: el cocinero puede haber avanzado el ticket entre la
@@ -2570,7 +2741,17 @@ export class OrderFlowService {
 
       // Reversión de stock SOLO en before_fire (no fired). En
       // after_fire_waste NO se revierte — queda como merma.
-      if (resolvedType === 'before_fire' && wasFired) {
+      if (preparedFired) {
+        preparedDisposition = resolvedType === 'after_fire_reused' ? 'reuse' : 'waste';
+        preparedLeaves = await this.disposeConsumedPreparedLeaves(
+          tx, orderId, orderItemId, preparedOrganizationId,
+          preparedDisposition, reason.trim(), preparedStockAfterCommit,
+        );
+        await this.auditPreparedDispositionInTx(
+          tx, orderId, orderItemId, preparedOrganizationId,
+          order.store_id, reason.trim(), preparedDisposition, preparedLeaves,
+        );
+      } else if (resolvedType === 'before_fire' && wasFired) {
         // Esto no debería ocurrir (si `wasFired` es true, resolvedType
         // sería `after_fire_waste`), pero se defiende igual por si el
         // caller envía un type explícito inconsistente.
@@ -2680,6 +2861,15 @@ export class OrderFlowService {
       });
     });
 
+    if (alreadyCancelledInTx) return this.getOrder(orderId);
+    for (const publish of preparedStockAfterCommit) publish();
+    if (preparedDisposition) {
+      await this.postPreparedDispositionAfterCommit(
+        orderId, orderItemId, preparedOrganizationId, order.store_id,
+        preparedDisposition, preparedLeaves,
+      );
+    }
+
     // Post-commit: emitir `ticket.cancelled` SOLO si cancelamos un ticket
     // que efectivamente estaba en `pending`.
     if (cancelledTicketId != null) {
@@ -2778,6 +2968,8 @@ export class OrderFlowService {
         quantity: true,
         delivered_at: true,
         cancelled_at: true,
+        inventory_consumed_at_fire: true,
+        products: { select: { product_type: true } },
       },
     });
 
@@ -2819,6 +3011,16 @@ export class OrderFlowService {
     const cancellationType =
       destination === 'restock' ? 'delivered_restock' : 'delivered_waste';
     const userId = RequestContextService.getUserId() ?? null;
+    // A prepared product is never restocked as the sold dish, even when its
+    // historical fire flag/consumption is absent (recipe-less or legacy row).
+    const preparedDish = orderItem.products?.product_type === 'prepared';
+    const preparedOrganizationId = preparedDish ? Number(order.stores?.organization_id) : 0;
+    if (preparedDish && (!Number.isInteger(preparedOrganizationId) || preparedOrganizationId <= 0)) {
+      throw new InternalServerErrorException('La organización de la orden no está disponible para la reclasificación');
+    }
+    let preparedLeaves: ConsumedLeafDisposition[] = [];
+    const preparedStockAfterCommit: Array<() => void> = [];
+    let alreadyCancelledInTx = false;
 
     await this.prisma.$transaction(async (tx) => {
       const lockedOrder = await this.assertUnsplitOrderAfterLock(tx, orderId, order.store_id);
@@ -2842,9 +3044,29 @@ export class OrderFlowService {
           'Esta orden ya fue cobrada. Usa Reembolso para devolver un plato.',
         );
       }
+      if (preparedDish) {
+        const freshItem = await tx.order_items.findFirst({
+          where: { id: orderItemId, order_id: orderId },
+          select: { cancelled_at: true },
+        });
+        if (freshItem?.cancelled_at) {
+          alreadyCancelledInTx = true;
+          return;
+        }
+      }
       // Destino restock: devolver las unidades al stock. `waste` no toca
       // stock (la merma queda en la auditoría del paso 7).
-      if (destination === 'restock' && orderItem.product_id != null) {
+      if (preparedDish) {
+        preparedLeaves = await this.disposeConsumedPreparedLeaves(
+          tx, orderId, orderItemId, preparedOrganizationId,
+          destination === 'restock' ? 'reuse' : 'waste', trimmedReason,
+          preparedStockAfterCommit,
+        );
+        await this.auditPreparedDispositionInTx(
+          tx, orderId, orderItemId, preparedOrganizationId, order.store_id,
+          trimmedReason, destination === 'restock' ? 'reuse' : 'waste', preparedLeaves,
+        );
+      } else if (destination === 'restock' && orderItem.product_id != null) {
         const locationId =
           await this.stockLevelManager.getDefaultLocationForProduct(
             orderItem.product_id,
@@ -2921,8 +3143,16 @@ export class OrderFlowService {
       });
     });
 
+    if (alreadyCancelledInTx) return this.getOrder(orderId);
+    for (const publish of preparedStockAfterCommit) publish();
+    if (preparedDish) {
+      await this.postPreparedDispositionAfterCommit(
+        orderId, orderItemId, preparedOrganizationId, order.store_id,
+        destination === 'restock' ? 'reuse' : 'waste', preparedLeaves,
+      );
+    }
     // 7. Auditoría post-commit (best-effort, nunca revierte la reversa).
-    try {
+    if (!preparedDish) try {
       await this.auditService.logCustom(
         userId ?? 0,
         'order_item.cancel_delivered',

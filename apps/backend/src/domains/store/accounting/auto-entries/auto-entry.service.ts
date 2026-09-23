@@ -4814,6 +4814,46 @@ export class AutoEntryService {
     });
   }
 
+  /** Reclassifies a fired dish's already-booked COGS inside the order claim. */
+  async onPreparedDishDisposition(data: {
+    order_id: number;
+    order_item_id: number;
+    organization_id: number;
+    store_id?: number;
+    disposition: 'reuse' | 'waste';
+    total_cost: number;
+    user_id?: number;
+  }) {
+    const amount = Number(data.total_cost || 0);
+    if (amount <= 0) return null;
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        data.disposition === 'waste'
+          ? 'order_item.prepared_waste.shrinkage'
+          : 'order_item.prepared_reuse.inventory',
+        `${data.disposition === 'waste' ? 'Merma' : 'Reuso'} plato cancelado (orden #${data.order_id}, ítem #${data.order_item_id})`,
+        amount, 0, data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'order_item.prepared_disposition.cogs',
+        `Reclasificación costo cocina (orden #${data.order_id}, ítem #${data.order_item_id})`,
+        0, amount, data.store_id,
+      ),
+    ]);
+    const entryData = {
+      source_type: 'order_item.prepared_disposition',
+      source_id: data.order_item_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      description: `${data.disposition === 'waste' ? 'Merma' : 'Reuso'} plato preparado — orden #${data.order_id}, ítem #${data.order_item_id}`,
+      lines,
+      user_id: data.user_id,
+    };
+    return this.createAutoEntry(entryData);
+  }
+
   /**
    * refund.completed: Debit Revenue + VAT (reversal), Credit Cash/Bank
    * For 'refund' type: reverse revenue + IVA, credit cash

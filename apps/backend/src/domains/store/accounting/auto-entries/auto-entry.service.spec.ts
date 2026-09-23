@@ -1,5 +1,72 @@
 import { AutoEntryService } from './auto-entry.service';
 
+describe('D.2 prepared dish disposition reclassification', () => {
+  it.each([
+    ['waste', 'order_item.prepared_waste.shrinkage', '5295'],
+    ['reuse', 'order_item.prepared_reuse.inventory', '1435'],
+  ] as const)('%s posts DR %s / CR 6135 by item id', async (disposition, debitKey, debitCode) => {
+    const service = new AutoEntryService({} as any, {} as any, {} as any, {} as any, {} as any);
+    const resolve = jest.spyOn(service as any, 'resolveAccountLine').mockImplementation(
+      async (_org: number, key: string, description: string, debit: number, credit: number) => ({
+        account_code: ({
+          'order_item.prepared_waste.shrinkage': '5295',
+          'order_item.prepared_reuse.inventory': '1435',
+          'order_item.prepared_disposition.cogs': '6135',
+        } as Record<string, string>)[key],
+        description, debit_amount: debit, credit_amount: credit,
+      }),
+    );
+    const create = jest.spyOn(service, 'createAutoEntry').mockResolvedValue({ id: 1 } as any);
+    await service.onPreparedDishDisposition({
+      order_id: 17, order_item_id: 901, organization_id: 2,
+      store_id: 4, total_cost: 29, user_id: 9, disposition,
+    });
+    expect(resolve.mock.calls.map((call) => call[1])).toEqual([
+      debitKey, 'order_item.prepared_disposition.cogs',
+    ]);
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      source_type: 'order_item.prepared_disposition', source_id: 901,
+      lines: [
+        expect.objectContaining({ account_code: debitCode, debit_amount: 29, credit_amount: 0 }),
+        expect.objectContaining({ account_code: '6135', debit_amount: 0, credit_amount: 29 }),
+      ],
+    }));
+  });
+
+  it('does not create a zero-cost journal', async () => {
+    const service = new AutoEntryService({} as any, {} as any, {} as any, {} as any, {} as any);
+    const create = jest.spyOn(service, 'createAutoEntry').mockResolvedValue({ id: 1 } as any);
+    await service.onPreparedDishDisposition({ order_id: 17, order_item_id: 901,
+      organization_id: 2, total_cost: 0, disposition: 'waste' });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('active posting failure records item-scoped retry payload for repair', async () => {
+    const failure = { recordFailure: jest.fn().mockResolvedValue(undefined) };
+    const service = new AutoEntryService(
+      {} as any, {} as any, {} as any, {} as any, failure as any,
+    );
+    jest.spyOn(service as any, 'resolveAccountLine').mockImplementation(
+      async (_org: number, key: string, description: string, debit: number, credit: number) => ({
+        account_code: key.endsWith('cogs') ? '6135' : '5295',
+        description, debit_amount: debit, credit_amount: credit,
+      }),
+    );
+    jest.spyOn(service, 'postAutoEntry').mockRejectedValue(new Error('Ledger unavailable'));
+    await expect(service.onPreparedDishDisposition({
+      order_id: 17, order_item_id: 901, organization_id: 2,
+      store_id: 4, disposition: 'waste', total_cost: 29,
+    })).rejects.toThrow('Ledger unavailable');
+    expect(failure.recordFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source_type: 'order_item.prepared_disposition', source_id: 901,
+        organization_id: 2,
+      }),
+      expect.objectContaining({ message: 'Ledger unavailable' }),
+    );
+  });
+});
+
 describe('AutoEntryService credit note reversal', () => {
   // Dual-source default codes for credit_note.accepted.* keys.
   const MAPPING_CODES: Record<string, string> = {

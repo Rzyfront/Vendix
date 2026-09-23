@@ -2537,6 +2537,203 @@ describe('OrderFlowService.cancelDeliveredOrderItem — reversa (1060 paso 2)', 
   });
 });
 
+describe('D.2 — cancelación de una línea prepared ya consumida', () => {
+  const orderId = 5017;
+  const itemId = 901;
+  const leaves = [
+    { id: 31, product_id: 701, product_variant_id: null, quantity_change: -2, unit_cost: 7, total_cost: 14 },
+    { id: 32, product_id: 702, product_variant_id: 91, quantity_change: -3, unit_cost: 5, total_cost: 15 },
+    { id: 33, product_id: 703, product_variant_id: null, quantity_change: -1, unit_cost: null, total_cost: null },
+  ];
+  const harness = (delivered: boolean, destination: 'restock' | 'waste', options: {
+    accountingFailure?: boolean;
+    accountingDisabled?: boolean;
+    alreadyCancelledInTx?: boolean;
+    zeroCost?: boolean;
+    paid?: boolean;
+    missingOrganization?: boolean;
+    unfired?: boolean;
+  } = {}) => {
+    const item = {
+      id: itemId, product_id: 333, product_variant_id: null,
+      product_name: 'Plato', quantity: 1, cancelled_at: null,
+      delivered_at: delivered ? new Date() : null,
+      inventory_consumed_at_fire: !options.unfired,
+      products: { product_type: 'prepared' },
+      kitchen_ticket_items: [],
+    };
+    const tx: any = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: orderId, state: 'created' }]),
+      orders: { findFirst: jest.fn().mockResolvedValue({ active_financial_split_id: null }), update: jest.fn() },
+      payments: { findFirst: jest.fn().mockResolvedValue(null) },
+      order_items: {
+        findFirst: jest.fn().mockResolvedValue({ cancelled_at: options.alreadyCancelledInTx ? new Date() : null }),
+        update: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([{ total_price: 10000, order_item_taxes: [{ tax_amount: 1900 }] }]),
+      },
+      inventory_transactions: { findMany: jest.fn().mockResolvedValue(
+        options.unfired ? [] : options.zeroCost
+          ? leaves.map((leaf) => ({ ...leaf, unit_cost: null, total_cost: null })) : leaves,
+      ) },
+      inventory_cost_layers: { create: jest.fn().mockResolvedValue({ id: 1 }) },
+      audit_logs: { create: jest.fn().mockResolvedValue({ id: 99 }) },
+    };
+    const prisma: any = {
+      order_items: { findFirst: jest.fn().mockResolvedValue(item) },
+      $transaction: jest.fn((fn: any) => fn(tx)),
+    };
+    const stock = {
+      getDefaultLocationForProduct: jest.fn()
+        .mockImplementation(async (productId: number, variantId?: number) => {
+          if (destination === 'waste') throw new Error('No default location');
+          return productId === 702 && variantId === 91 ? 82 : 81;
+        }),
+      updateStock: jest.fn().mockResolvedValue({}),
+    };
+    const events = { emit: jest.fn() };
+    const accounting = {
+      onPreparedDishDisposition: jest.fn().mockImplementation(async () => {
+        if (options.accountingFailure) throw new Error('Ledger unavailable');
+        if (options.accountingDisabled) return null;
+        return { id: 991 };
+      }),
+    };
+    const audit = { logCustom: jest.fn().mockResolvedValue(undefined) };
+    const service = new OrderFlowService(
+      prisma, events as any, {} as any, {} as any, {} as any,
+      stock as any, {} as any, {} as any, audit as any,
+      { cancelTicketInTx: jest.fn(), emitTicketCancelledEvent: jest.fn() } as any,
+      undefined, undefined, undefined, accounting as any,
+    );
+    jest.spyOn(service, 'getOrder').mockResolvedValue({
+      id: orderId, store_id: 4,
+      stores: { organization_id: options.missingOrganization ? null : 2 },
+      state: 'created', payments: options.paid ? [{ state: 'succeeded' }] : [],
+      shipping_cost: 500, tip_amount: 100, discount_amount: 50,
+    } as any);
+    const cancel = () => delivered
+      ? service.cancelDeliveredOrderItem(orderId, itemId, 'motivo válido', destination)
+      : service.cancelOrderItem(orderId, itemId, 'motivo válido',
+          destination === 'restock' ? 'after_fire_reused' : 'after_fire_waste');
+    return { cancel, tx, stock, events, audit, accounting, item };
+  };
+
+  it.each([false, true])('reuse delivered=%s devuelve SOLO hojas reales y excluye el plato del total', async (delivered) => {
+    const { cancel, tx, stock, events, accounting } = harness(delivered, 'restock');
+    await cancel();
+    expect(tx.inventory_transactions.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { order_item_id: itemId, quantity_change: { lt: 0 } },
+    }));
+    expect(stock.updateStock).toHaveBeenCalledTimes(3);
+    expect(tx.inventory_cost_layers.create).toHaveBeenCalledTimes(3);
+    expect(tx.inventory_cost_layers.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      organization_id: 2, product_id: 702, product_variant_id: 91,
+      location_id: 82, quantity_remaining: 3, unit_cost: new Prisma.Decimal(5),
+    }) });
+    expect(stock.updateStock.mock.calls.map(([p]) => [p.product_id, p.variant_id, p.location_id, p.quantity_change]))
+      .toEqual([[701, undefined, 81, 2], [702, 91, 82, 3], [703, undefined, 81, 1]]);
+    expect(stock.updateStock.mock.calls.every(([p]) =>
+      p.movement_type === 'return' && p.order_item_id === undefined && p.product_id !== 333)).toBe(true);
+    expect(events.emit).not.toHaveBeenCalledWith('order_item.prepared_waste', expect.anything());
+    expect(accounting.onPreparedDishDisposition).toHaveBeenCalledWith(expect.objectContaining({
+      organization_id: 2, disposition: 'reuse', total_cost: 29,
+    }));
+    expect(tx.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ subtotal_amount: new Prisma.Decimal(10000), grand_total: new Prisma.Decimal(12450) }),
+    }));
+    expect(tx.audit_logs.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      metadata: expect.objectContaining({ destination: 'reuse', leaves: expect.arrayContaining([
+        expect.objectContaining({ product_id: 702, product_variant_id: 91, quantity: 3 }),
+      ]) }),
+    }) });
+  });
+
+  it.each([false, true])('waste delivered=%s reclasifica costo sin segundo descuento', async (delivered) => {
+    const { cancel, tx, stock, events, accounting } = harness(delivered, 'waste');
+    await cancel();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(tx.inventory_cost_layers.create).not.toHaveBeenCalled();
+    expect(stock.getDefaultLocationForProduct).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalledWith('order_item.prepared_waste', expect.anything());
+    expect(accounting.onPreparedDishDisposition).toHaveBeenCalledWith(expect.objectContaining({
+      order_item_id: itemId, organization_id: 2, disposition: 'waste', total_cost: 29,
+    }));
+    expect(tx.audit_logs.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      metadata: expect.objectContaining({ destination: 'waste', leaves: expect.arrayContaining([
+        expect.objectContaining({ product_id: 703, unknown_cost: true }),
+      ]) }),
+    }) });
+    expect(tx.orders.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ grand_total: new Prisma.Decimal(12450) }),
+    }));
+  });
+
+  it('fallo contable activo deja la cancelación y auditoría persistidas para reparación', async () => {
+    const { cancel, tx } = harness(true, 'waste', { accountingFailure: true });
+    await expect(cancel()).resolves.toMatchObject({ id: orderId });
+    expect(tx.order_items.update).toHaveBeenCalledTimes(1);
+    expect(tx.orders.update).toHaveBeenCalledTimes(1);
+    expect(tx.audit_logs.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['restock', 'waste'] as const)('contabilidad inactiva no bloquea %s', async (destination) => {
+    const { cancel, tx, accounting, stock } = harness(true, destination, { accountingDisabled: true });
+    await expect(cancel()).resolves.toMatchObject({ id: orderId });
+    expect(tx.order_items.update).toHaveBeenCalledTimes(1);
+    expect(tx.audit_logs.create).toHaveBeenCalledTimes(1);
+    expect(accounting.onPreparedDishDisposition).toHaveBeenCalledTimes(1);
+    expect(stock.updateStock).toHaveBeenCalledTimes(destination === 'restock' ? 3 : 0);
+  });
+
+  it('relectura bajo lock hace replay idempotente antes de stock o asiento', async () => {
+    const { cancel, tx, stock, accounting } = harness(true, 'restock', { alreadyCancelledInTx: true });
+    await cancel();
+    expect(tx.inventory_transactions.findMany).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(tx.inventory_cost_layers.create).not.toHaveBeenCalled();
+    expect(accounting.onPreparedDishDisposition).not.toHaveBeenCalled();
+    expect(tx.order_items.update).not.toHaveBeenCalled();
+  });
+
+  it('costo cero no postea asiento pero la auditoría conserva las hojas desconocidas', async () => {
+    const { cancel, tx, stock, accounting } = harness(true, 'waste', { zeroCost: true });
+    await cancel();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(accounting.onPreparedDishDisposition).not.toHaveBeenCalled();
+    expect(tx.audit_logs.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      metadata: expect.objectContaining({ consumed_cost: 0, leaves: expect.arrayContaining([
+        expect.objectContaining({ product_id: 701, unknown_cost: true }),
+      ]) }),
+    }) });
+  });
+
+  it('orden cobrada rechaza antes de inventario, asiento y auditoría', async () => {
+    const { cancel, tx, stock, accounting } = harness(true, 'waste', { paid: true });
+    await expect(cancel()).rejects.toMatchObject({ errorCode: 'ORD_ITEM_CANCEL_PAID_001' });
+    expect(tx.inventory_transactions.findMany).not.toHaveBeenCalled();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(accounting.onPreparedDishDisposition).not.toHaveBeenCalled();
+    expect(tx.audit_logs.create).not.toHaveBeenCalled();
+  });
+
+  it('no acepta org=0 sintético aunque el contexto tenga actor', async () => {
+    const { cancel, tx, accounting } = harness(true, 'waste', { missingOrganization: true });
+    await expect(cancel()).rejects.toThrow('organización de la orden');
+    expect(tx.inventory_transactions.findMany).not.toHaveBeenCalled();
+    expect(accounting.onPreparedDishDisposition).not.toHaveBeenCalled();
+  });
+
+  it('prepared entregado sin consumo histórico nunca inventa stock del plato vendido', async () => {
+    const { cancel, tx, stock, accounting } = harness(true, 'restock', { unfired: true });
+    await cancel();
+    expect(stock.updateStock).not.toHaveBeenCalled();
+    expect(accounting.onPreparedDishDisposition).not.toHaveBeenCalled();
+    expect(tx.audit_logs.create).toHaveBeenCalledWith({ data: expect.objectContaining({
+      metadata: expect.objectContaining({ leaves: [], consumed_cost: 0 }),
+    }) });
+  });
+});
+
 /**
  * 1060 paso 3 — si el finish falla tras el claim, `payOrder` restaura el
  * estado previo al claim (el pago compensado con motivo se conserva).
