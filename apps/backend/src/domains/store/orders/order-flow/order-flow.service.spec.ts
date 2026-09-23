@@ -290,6 +290,65 @@ describe('OrderFlowService.payOrder — reserva del draft tras el claim POS (E.2
   });
 });
 
+describe('OrderFlowService.confirmDelivery — platos pendientes (E.4)', () => {
+  const pendingItems = [
+    { order_item_id: 11, status: 'ready', quantity: 2, variant_label: 'Grande', order_item: { product_name: 'Hamburguesa' } },
+    { order_item_id: 12, status: 'in_preparation', quantity: 1, variant_label: null, order_item: { product_name: 'Papas' } },
+  ];
+
+  const harness = (state: string, items: typeof pendingItems) => {
+    const prisma: any = {
+      kitchen_ticket_items: { findMany: jest.fn().mockResolvedValue(items) },
+    };
+    const service = new OrderFlowService(
+      prisma, {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, {} as any,
+    );
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({ id: 1, state });
+    const updateState = jest.spyOn(service as any, 'updateOrderState')
+      .mockResolvedValue({ id: 1, state: 'finished' });
+    return { service, prisma, updateState };
+  };
+
+  it.each(['processing', 'delivered'])(
+    'rechaza finalizar desde %s con lista de platos accionable',
+    async (state) => {
+      const { service, prisma, updateState } = harness(state, pendingItems);
+      await expect(service.confirmDelivery(1)).rejects.toMatchObject({
+        errorCode: 'ORDER_HAS_PENDING_KITCHEN_ITEMS',
+        response: expect.objectContaining({
+          details: {
+            pending_items: [
+              { order_item_id: 11, product_name: 'Hamburguesa', variant_label: 'Grande', quantity: 2, status: 'ready' },
+              { order_item_id: 12, product_name: 'Papas', variant_label: null, quantity: 1, status: 'in_preparation' },
+            ],
+          },
+        }),
+      });
+      expect(prisma.kitchen_ticket_items.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { kitchen_ticket: { order_id: 1 }, status: { notIn: ['delivered', 'cancelled'] } },
+      }));
+      expect(updateState).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['processing', 'delivered'])(
+    'finaliza desde %s cuando no quedan platos pendientes',
+    async (state) => {
+      const { service, updateState } = harness(state, []);
+      await expect(service.confirmDelivery(1)).resolves.toMatchObject({ state: 'finished' });
+      expect(updateState).toHaveBeenCalledWith(1, 'finished', expect.objectContaining({ finished_at: expect.any(Date) }));
+    },
+  );
+
+  it('no consulta cocina ni muta un estado no finalizable', async () => {
+    const { service, prisma, updateState } = harness('refunded', pendingItems);
+    await expect(service.confirmDelivery(1)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.kitchen_ticket_items.findMany).not.toHaveBeenCalled();
+    expect(updateState).not.toHaveBeenCalled();
+  });
+});
+
 /**
  * Regresión de la compensación de pago en {@link OrderFlowService.payOrder}
  * rama `direct → finished` (POS).
@@ -2452,6 +2511,21 @@ describe('OrderFlowService.cancelOrder — egreso de caja de la venta cobrada en
       select: { id: true },
     });
   });
+
+  it.each(['finished', 'refunded', 'cancelled'] as const)(
+    'rechaza cancelación de %s con código y estado, sin claim',
+    async (state) => {
+      jest.spyOn(service as any, 'getOrder').mockResolvedValue({
+        ...cancelableOrder([]), state,
+      });
+
+      await expect(service.cancelOrder(ORDER_ID, DTO)).rejects.toMatchObject({
+        errorCode: 'ORD_STATUS_001',
+        response: expect.objectContaining({ details: { state } }),
+      });
+      expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+    },
+  );
 
   it('rechaza draft con mesa abierta antes de escribir, con código y sesión', async () => {
     jest.spyOn(service as any, 'getOrder').mockResolvedValue({

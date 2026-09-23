@@ -3914,8 +3914,53 @@ export class OrdersService {
   }
 
   async remove(id: number) {
-    await this.findOne(id);
-    // Use scoped client (implicit via this.prisma)
+    const context = RequestContextService.getContext();
+    const order = await this.prisma.orders.findFirst({
+      where: {
+        id,
+        ...(context?.store_id ? { store_id: context.store_id } : {}),
+      },
+      select: {
+        state: true,
+        total_paid: true,
+        active_financial_split_id: true,
+        payments: { select: { id: true }, take: 1 },
+        invoices: { select: { id: true }, take: 1 },
+        refunds: { select: { id: true }, take: 1 },
+        order_installments: { select: { id: true }, take: 1 },
+        financial_splits: { select: { id: true }, take: 1 },
+        cash_register_movements: { select: { id: true }, take: 1 },
+        payment_links: { select: { id: true }, take: 1 },
+      },
+    });
+    if (!order) {
+      throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+    }
+
+    // Hard delete is only for orders without financial history. A cancelled
+    // payment still counts as evidence; cancellation keeps the audited row.
+    const financialRelations = [
+      order.payments,
+      order.invoices,
+      order.refunds,
+      order.order_installments,
+      order.financial_splits,
+      order.cash_register_movements,
+      order.payment_links,
+    ];
+    if (
+      Number(order.total_paid) !== 0 ||
+      order.active_financial_split_id != null ||
+      financialRelations.some((rows) => rows.length > 0)
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.ORD_VALIDATE_001,
+        'Cannot delete an order with financial records; use the cancellation or return flow.',
+        { state: order.state, reason: 'financial_evidence' },
+      );
+    }
+
+    // Use scoped client (implicit via this.prisma).
     return this.prisma.orders.delete({ where: { id } });
   }
 

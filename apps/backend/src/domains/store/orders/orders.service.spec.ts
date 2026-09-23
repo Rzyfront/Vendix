@@ -17,7 +17,7 @@ import { AuditService } from '@common/audit/audit.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import { order_channel_enum, order_delivery_type_enum, order_state_enum } from '@prisma/client';
+import { Prisma, order_channel_enum, order_delivery_type_enum, order_state_enum } from '@prisma/client';
 import { CreateOrderDto } from './dto/create-order.dto';
 
 /**
@@ -298,6 +298,76 @@ describe('OrdersService', () => {
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  describe('remove — conserva evidencia financiera (E.4)', () => {
+    let contextSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1,
+      } as any);
+    });
+
+    afterEach(() => contextSpy.mockRestore());
+
+    const emptyOrder = () => ({
+      state: 'draft',
+      total_paid: new Prisma.Decimal(0),
+      active_financial_split_id: null,
+      payments: [],
+      invoices: [],
+      refunds: [],
+      order_installments: [],
+      financial_splits: [],
+      cash_register_movements: [],
+      payment_links: [],
+    });
+
+    it.each(['draft', 'created'])('permite borrar orden %s sin evidencia financiera', async (state) => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({ ...emptyOrder(), state } as any);
+      mockPrismaService.orders.delete.mockResolvedValue({ id: 1 } as any);
+
+      await expect(service.remove(1)).resolves.toEqual({ id: 1 });
+      expect(mockPrismaService.orders.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 1, store_id: 1 },
+      }));
+      expect(mockPrismaService.orders.delete).toHaveBeenCalledWith({ where: { id: 1 } });
+    });
+
+    it.each([
+      ['payment', { payments: [{ id: 4 }] }],
+      ['cancelled payment', { payments: [{ id: 4, state: 'cancelled' }] }],
+      ['paid total', { total_paid: new Prisma.Decimal(100) }],
+      ['invoice', { invoices: [{ id: 5 }] }],
+      ['refund', { refunds: [{ id: 6 }] }],
+      ['installment', { order_installments: [{ id: 7 }] }],
+      ['financial split', { financial_splits: [{ id: 8 }] }],
+      ['cash movement', { cash_register_movements: [{ id: 9 }] }],
+      ['payment link', { payment_links: [{ id: 10 }] }],
+      ['active split', { active_financial_split_id: 11 }],
+    ])('rechaza %s sin borrar la fila', async (_caseName, evidence) => {
+      mockPrismaService.orders.findFirst.mockResolvedValue({
+        ...emptyOrder(), ...evidence,
+      } as any);
+
+      await expect(service.remove(1)).rejects.toMatchObject({
+        errorCode: 'ORD_VALIDATE_001',
+        response: expect.objectContaining({
+          details: { state: 'draft', reason: 'financial_evidence' },
+        }),
+      });
+      expect(mockPrismaService.orders.delete).not.toHaveBeenCalled();
+    });
+
+    it('no revela ni borra orden fuera del scope', async () => {
+      mockPrismaService.orders.findFirst.mockResolvedValue(null);
+      await expect(service.remove(1)).rejects.toMatchObject({ errorCode: 'ORD_FIND_001' });
+      expect(mockPrismaService.orders.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 1, store_id: 1 },
+      }));
+      expect(mockPrismaService.orders.delete).not.toHaveBeenCalled();
+    });
   });
 
   /**

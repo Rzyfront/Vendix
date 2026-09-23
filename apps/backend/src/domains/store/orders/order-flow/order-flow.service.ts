@@ -2818,9 +2818,33 @@ export class OrderFlowService {
     // path, so we THROW (the operator must wait for the kitchen or mark the
     // tickets delivered first). Automatic paths (credit payment, forgiveness,
     // POS payment, auto-finish job) handle this by NOT finishing instead.
-    if (await this.hasPendingKitchenItems(orderId)) {
+    const pendingKitchenItems = await this.prisma.kitchen_ticket_items.findMany({
+      where: {
+        kitchen_ticket: { order_id: orderId },
+        status: { notIn: ['delivered', 'cancelled'] },
+      },
+      select: {
+        order_item_id: true,
+        status: true,
+        quantity: true,
+        variant_label: true,
+        order_item: { select: { product_name: true } },
+      },
+      orderBy: { id: 'asc' },
+    });
+    if (pendingKitchenItems.length > 0) {
       throw new VendixHttpException(
         ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
+        undefined,
+        {
+          pending_items: pendingKitchenItems.map((item) => ({
+            order_item_id: item.order_item_id,
+            product_name: item.order_item.product_name,
+            variant_label: item.variant_label,
+            quantity: item.quantity,
+            status: item.status,
+          })),
+        },
       );
     }
 
@@ -3232,9 +3256,11 @@ export class OrderFlowService {
     let previousState = order.state as OrderState;
 
     const notCancelableError = () =>
-      new BadRequestException(
+      new VendixHttpException(
+        ErrorCodes.ORD_STATUS_001,
         `Cannot cancel order in state '${previousState}'. ` +
           `Cancellation is only allowed from: [${CANCELABLE_STATES.join(', ')}]`,
+        { state: previousState },
       );
 
     // Estados que el claim atómico acepta. Forzando es exactamente el estado
