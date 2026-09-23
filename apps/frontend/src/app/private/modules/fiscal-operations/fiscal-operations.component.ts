@@ -81,6 +81,23 @@ type AuditView = 'evidence' | 'history' | 'uncovered-sales';
     SelectorComponent,
     TooltipComponent,
   ],
+  styles: [`
+    @media (max-width: 767px) {
+      :host ::ng-deep .uncovered-sales-list .card-details-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      :host ::ng-deep .uncovered-sales-list .detail-item,
+      :host ::ng-deep .uncovered-sales-list .detail-value-wrap {
+        min-width: 0;
+      }
+
+      :host ::ng-deep .uncovered-sales-list .detail-value {
+        overflow-wrap: anywhere;
+        white-space: normal;
+      }
+    }
+  `],
   template: `
     <section class="w-full space-y-4 pb-6">
       @if (errorMessage(); as msg) {
@@ -550,6 +567,7 @@ type AuditView = 'evidence' | 'history' | 'uncovered-sales';
           </div>
           <div class="px-2 pb-2 pt-3 md:p-4">
             <app-responsive-data-view
+              class="uncovered-sales-list"
               [data]="uncoveredSales()"
               [columns]="uncoveredColumns"
               [cardConfig]="uncoveredCardConfig"
