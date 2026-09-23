@@ -1211,9 +1211,11 @@ export class AuthService {
     }
 
     // Generar tokens — registro de customer es STORE_ECOMMERCE
+    // store_id se pinea al store de registro (mismo patrón que loginCustomer)
+    // para que el scoping multi-tenant filtre por tienda desde el primer request.
     const tokens = await this.generateTokens(userWithRoles, {
       organization_id: store.organization_id,
-      store_id: null,
+      store_id: store.id,
       app_type: 'STORE_ECOMMERCE',
     });
     await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
