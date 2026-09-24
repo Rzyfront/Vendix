@@ -35,5 +35,5 @@ skills: [vendix-business-analysis, vendix-fiscal-scope, vendix-payment-processor
   - [ ] Las seis fichas de origen quedan con dueño, razón y condición escritas: ninguna queda abierta sin dueño
   - [ ] Ninguna línea de código, configuración o esquema cambió en este paso
   - [ ] F-009 — deep-link /admin/orders/sales/:id muerto: aceptar deuda o planear fix (minor)
-  - [ ] Deudas C.3: FB-41 force-take + raza S2-mesa/ready→revert: aceptar con dueño/razón o planear fix
+  - [ ] Deudas C.3: FB-41 force-take + raza S2-mesa/ready→revert + hueco in_preparation: aceptar con dueño/razón o planear fix
 - **Status:** pending
