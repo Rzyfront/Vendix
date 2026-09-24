@@ -47,6 +47,34 @@ import {
 
 const REFUNDABLE_STATES = ['delivered', 'finished'];
 
+/** ADR-12 — prefix of the deterministic `refund_transaction_id` placeholders
+ * that `recordCancellationPendingRefunds` stamps on cancellation refunds.
+ * A placeholder is NOT a gateway id: `manuallyResolveRefund` lets the real
+ * payout reference replace it, while a genuine gateway id stays protected.
+ */
+export const CANCELLATION_REFUND_TX_PREFIX = 'adr12:cancel:';
+
+export function buildCancellationRefundTxId(orderId: number, leg: string): string {
+  return `${CANCELLATION_REFUND_TX_PREFIX}o${orderId}:${leg}`;
+}
+
+export function isCancellationRefundPlaceholder(
+  txId: string | null | undefined,
+): boolean {
+  return !!txId && txId.startsWith(CANCELLATION_REFUND_TX_PREFIX);
+}
+
+/** One settled leg to return: either a `payments` row (`payment_id`) or a
+ * real CxC abono (`ar_payment_id`) — never both, never neither.
+ */
+export interface CancellationPendingLeg {
+  payment_id?: number;
+  ar_payment_id?: number;
+  amount: Prisma.Decimal;
+  /** Concrete rail for the audit notes (e.g. 'card', 'wompi', 'abono CxC #5 (transferencia)'). */
+  method_label: string;
+}
+
 @Injectable()
 export class RefundFlowService {
   private readonly logger = new Logger(RefundFlowService.name);
@@ -119,6 +147,113 @@ export class RefundFlowService {
       },
     });
     return { refund, breakdown };
+  }
+
+  /** ADR-12 — one `requested` refund per settled non-cash leg, created inside
+   * the caller's cancel transaction BEFORE the atomic claim, so a lost race
+   * rolls every leg back with the claim. The original payments stay
+   * `succeeded`: this method documents the debt to return, it never reverses.
+   *
+   * `alreadyPlanned` is the cash amount the caller already recorded in this
+   * same transaction: the cumulative ceiling (cash + every leg) is checked
+   * ONCE against `grand_total` here, because per-leg checks alone would let
+   * cash 60 + card 60 pass a ceiling of 100.
+   *
+   * `refund_method` is the domain vocabulary for "return via the original
+   * rail" (`original_payment` → 1110 fallback in accounting); the concrete
+   * rail travels on the linked payment row and in `notes`. Manual closure
+   * overwrites it with the real payout channel anyway.
+   */
+  async recordCancellationPendingRefunds(
+    tx: Prisma.TransactionClient,
+    order: {
+      id: number;
+      grand_total: Prisma.Decimal;
+      tax_amount: Prisma.Decimal;
+      shipping_cost: Prisma.Decimal;
+      shipping_tax_amount: Prisma.Decimal;
+      shipping_tax_type: string | null;
+      tip_amount?: Prisma.Decimal | null;
+      currency: string | null;
+      payments: { id: number; state: string }[];
+    },
+    legs: CancellationPendingLeg[],
+    reason: string,
+    alreadyPlanned: Prisma.Decimal = new Prisma.Decimal(0),
+  ) {
+    if (legs.length === 0) {
+      return [];
+    }
+    const ceiling = await this.calculationService.calculate(
+      { order_id: order.id, items: [], include_shipping: false }, tx,
+    );
+    const plannedTotal = legs.reduce(
+      (acc, leg) => acc.plus(new Prisma.Decimal(leg.amount as any)),
+      new Prisma.Decimal(alreadyPlanned as any),
+    );
+    if (plannedTotal.greaterThan(new Prisma.Decimal(ceiling.max_refundable).plus(0.01))) {
+      throw new VendixHttpException(
+        ErrorCodes.REF_VALIDATE_001,
+        `Cancellation refunds ${plannedTotal.toString()} exceed the remaining refundable total ${ceiling.max_refundable.toFixed(2)}`,
+      );
+    }
+    const created: Awaited<ReturnType<RefundFlowService['recordCancellationCashRefund']>>[] = [];
+    for (const leg of legs) {
+      const hasPayment = leg.payment_id != null;
+      const hasArPayment = leg.ar_payment_id != null;
+      if (hasPayment === hasArPayment) {
+        throw new VendixHttpException(
+          ErrorCodes.REF_VALIDATE_001,
+          'Cancellation refund leg must reference exactly one of payment_id or ar_payment_id',
+        );
+      }
+      const amount = new Prisma.Decimal(leg.amount as any);
+      if (amount.lessThanOrEqualTo(0)) {
+        this.logger.warn(
+          `recordCancellationPendingRefunds: skipping zero-value leg of order #${order.id} ` +
+            `(payment_id=${leg.payment_id ?? 'n/a'} ar_payment_id=${leg.ar_payment_id ?? 'n/a'}): nothing to return`,
+        );
+        continue;
+      }
+      const legKey = hasPayment ? `p${leg.payment_id}` : `ar${leg.ar_payment_id}`;
+      const refundTransactionId = buildCancellationRefundTxId(order.id, legKey);
+      const existing = await tx.refunds.findFirst({
+        where: { refund_transaction_id: refundTransactionId },
+        select: { id: true },
+      });
+      if (existing) {
+        this.logger.warn(
+          `recordCancellationPendingRefunds: refund for leg ${legKey} of order #${order.id} ` +
+            `already exists (#${existing.id}) — skipping duplicate`,
+        );
+        continue;
+      }
+      const breakdown = await this.calculationService.calculateCancellationRefund(
+        order.id, amount, tx, order,
+      );
+      const refund = await tx.refunds.create({
+        data: {
+          order_id: order.id,
+          payment_id: leg.payment_id ?? null,
+          ar_payment_id: leg.ar_payment_id ?? null,
+          amount: breakdown.amount,
+          subtotal_refund: breakdown.subtotal,
+          tax_refund: breakdown.tax,
+          shipping_refund: breakdown.shipping,
+          currency: order.currency,
+          reason,
+          notes: `Cancelación ADR-12; pierna ${leg.method_label}`,
+          refund_method: 'original_payment',
+          refund_transaction_id: refundTransactionId,
+          state: 'requested',
+          processed_by_user_id: RequestContextService.getUserId(),
+          requested_at: new Date(),
+          processed_at: null,
+        },
+      });
+      created.push({ refund, breakdown });
+    }
+    return created;
   }
 
   async completeCancellationCashRefund(refundId: number) {
@@ -1141,10 +1276,14 @@ export class RefundFlowService {
     if (
       targetState === 'completed' &&
       refund.refund_transaction_id &&
-      refund.refund_transaction_id !== reference
+      refund.refund_transaction_id !== reference &&
+      !isCancellationRefundPlaceholder(refund.refund_transaction_id)
     ) {
       // A gateway refund ID may already occupy this unique column. Never
-      // overwrite it with a different manual payout reference.
+      // overwrite it with a different manual payout reference. ADR-12
+      // placeholders are the deliberate exception: they are deterministic
+      // no-dup keys, not gateway ids, so the real payout reference replaces
+      // them — otherwise no cancellation refund could ever close manually.
       throw new VendixHttpException(ErrorCodes.REF_RESOLUTION_CONFLICT_001);
     }
 

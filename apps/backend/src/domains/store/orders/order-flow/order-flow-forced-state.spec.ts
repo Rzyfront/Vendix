@@ -78,6 +78,12 @@ describe('OrderFlowService — carril forzado (QUI-557)', () => {
       // vacía = ninguna línea disparada, que es el escenario que estos tests
       // miden (liberación de reservas + claim atómico), no la rama KDS.
       order_items: { findMany: jest.fn().mockResolvedValue([]) },
+      // ADR-12 (I.2): `cancelOrder` interroga el gate fiscal y la CxC in-tx
+      // antes del claim. Vacíos = orden sin factura ni fiado, el escenario
+      // que estos tests miden (claim atómico + precondiciones forzadas).
+      invoices: { findMany: jest.fn().mockResolvedValue([]) },
+      accounts_receivable: { findMany: jest.fn().mockResolvedValue([]) },
+      order_installments: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
       $transaction: jest.fn((cb: any) => cb(prismaMock)),
     };
 

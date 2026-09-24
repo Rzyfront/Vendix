@@ -56,7 +56,7 @@ import {
   AuditService,
   AuditResource,
 } from '@common/audit/audit.service';
-import { RefundFlowService } from './services/refund-flow.service';
+import { RefundFlowService, type CancellationPendingLeg } from './services/refund-flow.service';
 import {
   getSettledOrderAmount,
   isOrderFullyPaid,
@@ -3811,18 +3811,35 @@ export class OrderFlowService {
       await lockOrderLifecycle(tx, orderId, order.store_id);
       const freshOrder = await this.getOrder(orderId, tx);
       await this.assertNoOpenTableForDraft(freshOrder, tx);
-      this.assertCancellationAllowed(freshOrder);
-      // A direct card or transfer payment is settled money too: marking its
-      // local row cancelled would falsely claim an external reversal.
-      if (freshOrder.payments.some((payment) =>
-        SETTLED_PAYMENT_STATES.has(payment.state) && (
-          payment.state !== 'succeeded' ||
-          payment.store_payment_method?.system_payment_method?.type !== 'cash'
-        ),
-      )) {
+      // ADR-12: la reversa pendiente ya no bloquea cancelOrder — cada pierna
+      // recibida (`succeeded`/`captured`) no-efectivo deriva abajo a un
+      // reembolso `requested` y el pago original queda como hecho histórico.
+      // Solo el bloqueo de inventario/entrega sigue siendo fatal aquí;
+      // `cancelPayment` conserva la política completa (incluido ERR-38) vía
+      // assertCancellationAllowed.
+      const cancelBlocker = getCancellationBlocker(freshOrder);
+      if (cancelBlocker !== null && cancelBlocker !== 'ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001') {
+        throw new VendixHttpException(ErrorCodes[cancelBlocker]);
+      }
+      // Gate DIAN (antes de mutar): factura electrónica aceptada sin su nota
+      // crédito aceptada bloquea con 409 tipado — precondición, no efecto.
+      await this.assertNoBlockingFiscalInvoice(tx, orderId, freshOrder.store_id);
+      // ADR-12: el único liquidado que cancelOrder NO deriva solo es
+      // `partially_refunded` — una reversa parcial ya movió parte del dinero
+      // por el carril de reembolso y aquí no se sabe cuánto resta: crear una
+      // pierna por el total duplicaría lo ya devuelto. ERR-38 conserva su rol
+      // de "derivar al reembolso" para ese caso. `captured` (dinero recibido
+      // por pasarela, igual que `succeeded` para el webhook) genera su
+      // `requested` abajo; `refunded` se salta — su dinero ya volvió por su
+      // propio carril y bloquearlo dejaría al operador sin salida.
+      const externallyDerived = freshOrder.payments.filter((payment) =>
+        payment.state === 'partially_refunded',
+      );
+      if (externallyDerived.length > 0) {
         throw new VendixHttpException(
           ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
-          'El pago liquidado no es efectivo: realiza la reversa manual o por pasarela mediante el flujo de reembolso antes de cancelar.',
+          'La orden tiene pagos con reembolso parcial en curso: ciérralos en el flujo de reembolso antes de cancelar.',
+          { payment_ids: externallyDerived.map((payment) => payment.id) },
         );
       }
       previousState = freshOrder.state as OrderState;
@@ -3849,10 +3866,44 @@ export class OrderFlowService {
         notes: existingMetadata.original_notes || '',
       });
       cashReversal = await this.resolveCancelCashReversal(freshOrder, tx);
-      if (freshOrder.payments.some((payment) => payment.state === 'succeeded') && !cashReversal) {
+      const nonCashLegs = await this.resolveCancelNonCashLegs(freshOrder, tx);
+      const nonCashIds = new Set(nonCashLegs.map((leg) => leg.payment_id));
+      // ADR-12: la guarda es cash-only — un recibido (`succeeded`/`captured`)
+      // no-efectivo sin reversa ya no es un error (genera su `requested`
+      // abajo); solo falla si EXISTE efectivo liquidado y no se pudo
+      // resolver su monto.
+      const cashSucceededIds = freshOrder.payments
+        .filter(
+          (payment) =>
+            (payment.state === 'succeeded' || payment.state === 'captured') &&
+            !nonCashIds.has(payment.id),
+        )
+        .map((payment) => payment.id);
+      if (cashSucceededIds.length > 0 && !cashReversal) {
         throw new VendixHttpException(
           ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
           'No se pudo verificar el monto del pago en efectivo; concilia el cobro antes de cancelar.',
+        );
+      }
+      // Partición completa: todo recibido (`succeeded`/`captured`) está en el
+      // cash-out o en una pierna. Un huérfano (p. ej. `captured` con canal
+      // efectivo, imposible por código) falla cerrado en vez de perderse.
+      const coveredIds = new Set<number>([
+        ...(cashReversal?.paymentIds ?? []),
+        ...nonCashIds,
+      ]);
+      const orphanIds = freshOrder.payments
+        .filter(
+          (payment) =>
+            (payment.state === 'succeeded' || payment.state === 'captured') &&
+            !coveredIds.has(payment.id),
+        )
+        .map((payment) => payment.id);
+      if (orphanIds.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_CANCEL_PAYMENT_REVERSAL_REQUIRED_001,
+          'No se pudo clasificar un cobro recibido para su devolución; concilia el cobro antes de cancelar.',
+          { payment_ids: orphanIds },
         );
       }
       if (cashReversal) {
@@ -3861,6 +3912,34 @@ export class OrderFlowService {
         }
         cancellationRefund = await this.refundFlowService.recordCancellationCashRefund(
           tx, freshOrder, cashReversal.paymentIds, cashReversal.amount, dto.reason,
+        );
+      }
+      // ADR-12: CxC fiada — anula el saldo no cobrado y convierte cada abono
+      // real en pierna de reembolso. Los abonos cobrados por un pago que ya
+      // genera pierna propia (o cash-out) no duplican: el pago manda.
+      const coveredPaymentIds = new Set<number>([
+        ...nonCashLegs.map((leg) => leg.payment_id),
+        ...(cashReversal?.paymentIds ?? []),
+      ]);
+      const arLegs = await this.voidOrderCreditBalances(tx, freshOrder, dto.reason, coveredPaymentIds);
+      const pendingLegs: CancellationPendingLeg[] = [
+        ...nonCashLegs.map((leg) => ({
+          payment_id: leg.payment_id,
+          amount: leg.amount,
+          method_label: `pago #${leg.payment_id} (${leg.method_type ?? 'método desconocido'})`,
+        })),
+        ...arLegs,
+      ];
+      if (pendingLegs.length > 0) {
+        if (!this.refundFlowService) {
+          throw new InternalServerErrorException('RefundFlowService no disponible para documentar los reembolsos pendientes de la cancelación');
+        }
+        await this.refundFlowService.recordCancellationPendingRefunds(
+          tx,
+          freshOrder,
+          pendingLegs,
+          dto.reason,
+          cashReversal ? cashReversal.amount : new Prisma.Decimal(0),
         );
       }
       // ATOMIC CLAIM — the conditional UPDATE is the source of truth that
@@ -3877,9 +3956,14 @@ export class OrderFlowService {
         throw notCancelableError();
       }
 
-      // Winner: cancel any active payments (one-shot).
+      // Winner (ADR-12, cash-only): cancel pending attempts plus the
+      // succeeded CASH legs the cash-out just returned — the same SQL-verified
+      // set, never the include. Non-cash received rows (`succeeded`/`captured`)
+      // stay as the historical fact; their return travels in the `requested`
+      // refunds. `captured` never flips here even if its channel were cash.
+      const cashIds = new Set(cashReversal?.paymentIds ?? []);
       const activePayments = freshOrder.payments.filter(
-        (p) => p.state === 'pending' || p.state === 'succeeded',
+        (p) => p.state === 'pending' || (p.state === 'succeeded' && cashIds.has(p.id)),
       );
       for (const payment of activePayments) {
         await tx.payments.update({
@@ -4125,6 +4209,161 @@ export class OrderFlowService {
     }
 
     return { amount, paymentIds: cashPayments.map((p) => p.id) };
+  }
+
+  /**
+   * ADR-12 — piernas recibidas (`succeeded`/`captured`) NO-efectivo a devolver
+   * vía reembolso. `captured` es dinero recibido por pasarela (el webhook lo
+   * trata como pagado junto a `succeeded`) y deriva igual; nunca va al flip
+   * de caja — el cash-out solo cubre `succeeded` en efectivo.
+   *
+   * Espejo SQL de `resolveCancelCashReversal`: el canal se filtra en la
+   * consulta (nunca desde el include). Un pago sin relación de método (NULL)
+   * no iguala `cash`, así que el `NOT` lo trae con `method_type: null` y
+   * deriva a reembolso (fail closed, igual que la política de
+   * `order-cancellation-policy.util.ts`). `refunded` no genera pierna: su
+   * dinero ya volvió por su propio carril.
+   */
+  private async resolveCancelNonCashLegs(order: {
+    payments: { id: number; state: string }[];
+  }, tx: Prisma.TransactionClient): Promise<{ payment_id: number; amount: Prisma.Decimal; method_type: string | null }[]> {
+    const receivedIds = order.payments
+      .filter((p) => p.state === 'succeeded' || p.state === 'captured')
+      .map((p) => p.id);
+    if (receivedIds.length === 0) {
+      return [];
+    }
+
+    const rows = await tx.payments.findMany({
+      where: {
+        id: { in: receivedIds },
+        NOT: { store_payment_method: { system_payment_method: { type: 'cash' } } },
+      },
+      select: {
+        id: true,
+        amount: true,
+        store_payment_method: {
+          select: { system_payment_method: { select: { type: true } } },
+        },
+      },
+    });
+    return rows.map((row) => ({
+      payment_id: row.id,
+      amount: new Prisma.Decimal(row.amount as any),
+      method_type: row.store_payment_method?.system_payment_method?.type ?? null,
+    }));
+  }
+
+  /**
+   * ADR-12 — gate fiscal ANTES de mutar: cada factura electrónica de venta
+   * `accepted` de la orden exige su nota crédito `accepted` correspondiente.
+   * El `where` de la nota espeja `credit-notes.service.ts` (solo las
+   * `accepted` acreditan: un borrador no satisface a la DIAN).
+   */
+  private async assertNoBlockingFiscalInvoice(
+    tx: Prisma.TransactionClient,
+    orderId: number,
+    storeId: number,
+  ): Promise<void> {
+    const acceptedInvoices = await tx.invoices.findMany({
+      where: {
+        order_id: orderId,
+        store_id: storeId,
+        invoice_type: 'sales_invoice',
+        status: 'accepted',
+      },
+      select: { id: true, invoice_number: true, accounting_entity_id: true },
+    });
+    for (const invoice of acceptedInvoices) {
+      const note = await tx.invoices.findFirst({
+        where: {
+          related_invoice_id: invoice.id,
+          accounting_entity_id: invoice.accounting_entity_id,
+          invoice_type: 'credit_note',
+          status: 'accepted',
+        },
+        select: { id: true },
+      });
+      if (!note) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_CANCEL_CREDIT_NOTE_REQUIRED_001,
+          `La orden tiene la factura electrónica ${invoice.invoice_number ?? `#${invoice.id}`} aceptada por la DIAN: emite primero su nota crédito y luego cancela.`,
+          { invoice_id: invoice.id, invoice_number: invoice.invoice_number },
+        );
+      }
+    }
+  }
+
+  /**
+   * ADR-12 — anula el saldo CxC no cobrado de la orden y devuelve las piernas
+   * de reembolso por cada abono real. Corre in-tx bajo el lock de ciclo de
+   * vida (el mismo que `registerPayment` toma primero), así que ningún abono
+   * tardío puede colarse después del void.
+   *
+   * Fórmula espejo de `AccountsReceivableService.registerPayment`: el saldo
+   * vive como `original - paid - cancelled`; aquí el remanente no cobrado se
+   * mueve a `cancelled_amount` y el `balance` queda en 0 con estado
+   * `cancelled`. Las AR `written_off` no se retocan (su saldo ya se absorbió
+   * como pérdida) ni las ya `cancelled` (terminal).
+   *
+   * Dedupe: un abono cobrado vía un pago que ya genera pierna propia (o
+   * cash-out) no genera pierna de abono — el pago manda y el dinero es uno
+   * solo. `coveredPaymentIds` trae exactamente esos pagos.
+   */
+  private async voidOrderCreditBalances(
+    tx: Prisma.TransactionClient,
+    order: { id: number; store_id: number },
+    reason: string,
+    coveredPaymentIds: Set<number>,
+  ): Promise<CancellationPendingLeg[]> {
+    const ars = await tx.accounts_receivable.findMany({
+      where: {
+        source_id: order.id,
+        store_id: order.store_id,
+        source_type: { in: ['credit_sale', 'order'] },
+      },
+      include: { ar_payments: { orderBy: { id: 'asc' } } },
+    });
+    const legs: CancellationPendingLeg[] = [];
+    for (const ar of ars) {
+      for (const abono of ar.ar_payments) {
+        if (abono.payment_id != null && coveredPaymentIds.has(abono.payment_id)) {
+          continue;
+        }
+        legs.push({
+          ar_payment_id: abono.id,
+          amount: new Prisma.Decimal(abono.amount as any),
+          method_label: `abono CxC #${abono.id}${abono.payment_method ? ` (${abono.payment_method})` : ''}`,
+        });
+      }
+      if (ar.status === 'cancelled' || ar.status === 'written_off') {
+        continue;
+      }
+      const uncollected = new Prisma.Decimal(ar.balance as any);
+      const voided = uncollected.greaterThan(0) ? uncollected : new Prisma.Decimal(0);
+      await tx.accounts_receivable.update({
+        where: { id: ar.id },
+        data: {
+          cancelled_amount: new Prisma.Decimal(ar.cancelled_amount as any).plus(voided),
+          balance: 0,
+          status: 'cancelled',
+          cancelled_at: new Date(),
+          cancellation_reason: reason,
+          updated_at: new Date(),
+        },
+      });
+    }
+    // Cuotas pendientes → `cancelled` con remanente en 0 (mismo conjunto que
+    // `registerPayment` considera cobrable). Las `paid` quedan como historia:
+    // su dinero viaja en los reembolsos de abonos.
+    await tx.order_installments.updateMany({
+      where: {
+        order_id: order.id,
+        state: { in: ['pending', 'partial', 'overdue'] },
+      },
+      data: { state: 'cancelled', remaining_balance: 0, updated_at: new Date() },
+    });
+    return legs;
   }
 
   /**

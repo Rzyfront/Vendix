@@ -1105,6 +1105,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'La orden pertenece a una mesa abierta; cierra la cuenta desde Mesas antes de cancelarla.',
   },
+  ORD_CANCEL_CREDIT_NOTE_REQUIRED_001: {
+    code: 'ORD_CANCEL_CREDIT_NOTE_REQUIRED_001',
+    httpStatus: 409,
+    devMessage: 'Order has a DIAN-accepted electronic invoice without an accepted credit note; issue the credit note before cancelling',
+  },
   ORD_STOCK_COMMIT_STATE_001: {
     code: 'ORD_STOCK_COMMIT_STATE_001',
     httpStatus: 409,
