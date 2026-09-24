@@ -647,6 +647,7 @@ export class EcommerceComponent {
         ], // frontend-only, never sent to backend
         whatsapp_pitch: ['', [Validators.maxLength(500)]],
         require_registration: [false],
+        require_payment_receipt: [false],
       }),
     });
   }
@@ -750,6 +751,9 @@ export class EcommerceComponent {
   }
   get requireRegistrationControl() {
     return this.checkoutGroup.get('require_registration') as any;
+  }
+  get requirePaymentReceiptControl() {
+    return this.checkoutGroup.get('require_payment_receipt') as any;
   }
 
   /**
