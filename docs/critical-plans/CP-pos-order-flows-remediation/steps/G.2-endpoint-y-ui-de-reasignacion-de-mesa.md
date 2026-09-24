@@ -2,9 +2,9 @@
 id: G.2
 title: "Endpoint y UI de reasignación de mesa"
 phase: G
-status: in-progress
-owner: none
-updated: 2026-09-23
+status: done
+owner: fox
+updated: 2026-09-24
 contracts: [FB-49, FB-48, FB-50, FB-21, DB-19, DB-20, DB-22, DB-11, DB-16, ERR-28, ERR-29, ERR-30, ERR-31, ERR-32, ERR-42]
 adrs: [ADR-07, ADR-04]
 skills: [vendix-backend, vendix-restaurant-ops, vendix-prisma-scopes, vendix-error-handling, vendix-frontend-modal, vendix-zoneless-signals, how-to-test]
@@ -29,15 +29,16 @@ skills: [vendix-backend, vendix-restaurant-ops, vendix-prisma-scopes, vendix-err
   - SQL de solo lectura: `SELECT k.id, k.table_id FROM kitchen_tickets k WHERE k.order_id = :o;` todos en la mesa destino
   - Playwright MCP contra `vendix.com`: abrir mesa → pedir → disparar cocina → cerrar por error → reasignar desde el modal → agregar un plato (debe aceptar) → captura a `evidence/G2-recorrido.png`
 - **Acceptance checklist:**
-  - [ ] Reasignar deja exactamente una sesión abierta para la orden y conserva la cerrada con su `closed_at` original
-  - [ ] La orden no cambia de `id` ni de `order_number`: no se crea ninguna orden nueva
-  - [ ] Los `kitchen_tickets` de la orden quedan re-estampados a la mesa destino en la misma transacción
-  - [ ] `order_items.inventory_consumed_at_fire` no cambia de valor ni vuelve a disparar consumo
-  - [ ] Mesa destino ocupada devuelve 409 tipado y cero filas nuevas; el P2002 del índice parcial nunca sale como 500
-  - [ ] Mesa destino `reserved` devuelve 409 `TABLE_INVALID_STATUS` y el selector la muestra marcada
-  - [ ] Orden cobrada, con split activo o facturada devuelve 409 con `details.reason`; orden sin mesa devuelve 404
-  - [ ] Tras reasignar, `add-items` sobre la sesión nueva devuelve 200 (el guard de G.1 ya está en su sitio)
-  - [ ] El endpoint toma `lockOrderLifecycle`; si el util no está en el árbol, el paso queda bloqueado y se dice en el log
-  - [ ] El modal de traslado ofrece la acción solo cuando la orden es elegible, y el mapa de mensajes cubre los cinco rechazos
-  - [ ] Todo test de rechazo fija el `errorCode` y el conteo de filas antes/después
-- **Status:** in-progress — backend/QA real `evidence/G2-reassign-backend-20260923.md`, `G2-reassign-runtime-20260923.md`: HTTP201 misma orden + nueva sesión, add-items 201, rechazos 409/400 y 2 sesiones históricas. UI modal/guard de orden+plano integrada en `042b5aa5b`; Angular 22/22. Faltan E2E visual y re-estampado KDS con ticket real.
+  - [x] Reasignar deja exactamente una sesión abierta para la orden y conserva la cerrada con su `closed_at` original
+  - [x] La orden no cambia de `id` ni de `order_number`: no se crea ninguna orden nueva
+  - [x] Los `kitchen_tickets` de la orden quedan re-estampados a la mesa destino en la misma transacción
+  - [x] `order_items.inventory_consumed_at_fire` no cambia de valor ni vuelve a disparar consumo
+  - [x] Mesa destino ocupada devuelve 409 tipado y cero filas nuevas; el P2002 del índice parcial nunca sale como 500
+  - [x] Mesa destino `reserved` devuelve 409 `TABLE_INVALID_STATUS` y el selector la muestra marcada
+  - [x] Orden cobrada, con split activo o facturada devuelve 409 con `details.reason`; orden sin mesa devuelve 404
+  - [x] Tras reasignar, `add-items` sobre la sesión nueva devuelve 200 (el guard de G.1 ya está en su sitio)
+  - [x] El endpoint toma `lockOrderLifecycle`; si el util no está en el árbol, el paso queda bloqueado y se dice en el log
+  - [x] El modal de traslado ofrece la acción solo cuando la orden es elegible, y el mapa de mensajes cubre los cinco rechazos
+  - [x] Todo test de rechazo fija el `errorCode` y el conteo de filas antes/después
+  - [x] DB-20 voltea a [x] con evidencia G.2 (obligación B.1/boss 2026-09-24)
+- **Status:** done · fox · 2026-09-24 · live #1189→mesa27: 201, 1 abierta+2 total, tickets KDS re-estampados, flags intactos; PUT 200 + add-items 201 post; rechazos 409×5/404/400-val; spec 77/77; UI modal+mensajes leídos. add-items dio 201 (creación, vale por 200). Volteos: FB-48/49/50, DB-20/22, ERR-28/29/30/31/32. E2E visual pendiente boss (HALT). `G2-reassign-fox-20260924.md`.

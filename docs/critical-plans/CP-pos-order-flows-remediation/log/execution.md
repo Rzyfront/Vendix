@@ -55,3 +55,4 @@
 | 2026-09-24 | fox | B.3 | Legacy 33 clasificadas, 0 post-corte, sin backfill; snapshot live #1059 paid. Cerrado. | evidence/B3-legacy-paid-at-decision-20260924.md; B.3-sse.txt |
 | 2026-09-24 | loks | E.5 | Freno envío-sin-método 9/10: UX copy 3 códigos (spec 23/23), gate+mensajes ES verificados (backend OOM→lectura A.1), huérfanas 0. FB-19 trim 395. DB-07 abierto→F.2. | evidence/E.5-SA1-*, E.5-SA2-*, E5-* |
 | 2026-09-24 | fox | G.1 | Guard ABIERTA + util 107/107+19/19; live PUT cerrada 409, abierta 200; barrido #1192. Cerrado. | evidence/G1-guard-live-20260924.md |
+| 2026-09-24 | fox | G.2 | Reasignar live #1189→27 201, KDS re-estampado, rechazos 409×5/404/400; spec 77/77. Cerrado. | evidence/G2-reassign-fox-20260924.md |
