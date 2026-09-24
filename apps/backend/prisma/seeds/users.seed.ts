@@ -482,8 +482,38 @@ export async function seedUsers(
           settings: true,
         },
       };
+    } else if (user.roles.includes(supervisorRole.id)) {
+      app = 'STORE_ADMIN';
+      panel_ui = {
+        STORE_ADMIN: {
+          dashboard: true,
+          pos: true,
+          products: true,
+          orders: true,
+          orders_sales: true,
+          inventory: true,
+          cashier: true,
+          customers: true,
+          tables: true,
+          kitchen_display: true,
+          dispatch_routes: true,
+          settings: true,
+        },
+      };
+    } else if (user.roles.includes(employeeRole.id)) {
+      app = 'STORE_ADMIN';
+      panel_ui = {
+        STORE_ADMIN: {
+          pos: true,
+          products: true,
+          orders: true,
+          orders_sales: true,
+          customers: true,
+          tables: true,
+        },
+      };
     } else {
-      // Other roles (supervisor, employee, etc.)
+      // Other roles
       app = 'VENDIX_LANDING';
       panel_ui = {
         VENDIX_LANDING: {

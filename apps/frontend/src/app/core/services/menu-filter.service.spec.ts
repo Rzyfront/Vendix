@@ -235,3 +235,86 @@ describe('gating de contratos por industria (A.2, ADR-02)', () => {
     expect(getModulesHiddenByIndustries(null)).toEqual([]);
   });
 });
+
+describe('MenuFilterService.firstActiveModuleRoute (QUI-860)', () => {
+  let service: MenuFilterService;
+  let authFacade: {
+    fiscalScope: ReturnType<typeof signal<string>>;
+    operatingScope: ReturnType<typeof signal<string>>;
+    activeFiscalAreas: ReturnType<typeof signal<string[]>>;
+    storeSettings: ReturnType<typeof signal<any>>;
+    userIndustries: ReturnType<typeof signal<string[]>>;
+    userStoreType: ReturnType<typeof signal<string | null>>;
+    isModuleVisible: jasmine.Spy;
+    hasPermission: jasmine.Spy;
+    isOwner: jasmine.Spy;
+    isAdmin: jasmine.Spy;
+    getVisibleModules$: jasmine.Spy;
+    userStoreType$: unknown;
+    userIndustries$: unknown;
+    storeSettings$: unknown;
+    userOrganization$: unknown;
+    activeFiscalAreas$: unknown;
+  };
+
+  beforeEach(() => {
+    authFacade = {
+      fiscalScope: signal('STORE'),
+      operatingScope: signal('STORE'),
+      activeFiscalAreas: signal<string[]>([]),
+      storeSettings: signal<any>(null),
+      userIndustries: signal<string[]>(['retail']),
+      userStoreType: signal<string | null>('physical'),
+      isModuleVisible: jasmine.createSpy('isModuleVisible').and.returnValue(false),
+      hasPermission: jasmine.createSpy('hasPermission').and.returnValue(true),
+      isOwner: jasmine.createSpy('isOwner').and.returnValue(false),
+      isAdmin: jasmine.createSpy('isAdmin').and.returnValue(false),
+      getVisibleModules$: jasmine.createSpy('getVisibleModules$'),
+      userStoreType$: null,
+      userIndustries$: null,
+      storeSettings$: null,
+      userOrganization$: null,
+      activeFiscalAreas$: null,
+    };
+
+    TestBed.configureTestingModule({
+      providers: [
+        MenuFilterService,
+        { provide: AuthFacade, useValue: authFacade },
+        {
+          provide: SubscriptionAccessService,
+          useValue: { canUseAI: () => () => true },
+        },
+      ],
+    });
+    service = TestBed.inject(MenuFilterService);
+  });
+
+  it('un usuario operativo cajero con pos activo es enrutado a /admin/pos', () => {
+    authFacade.isModuleVisible.and.callFake((key: string) => key === 'pos');
+    const route = service.firstActiveModuleRoute([]);
+    expect(route).toBe('/admin/pos');
+  });
+
+  it('un usuario operativo con solo pedidos es enrutado a la primera ruta de pedidos visible', () => {
+    authFacade.isModuleVisible.and.callFake(
+      (key: string) => key === 'orders' || key === 'orders_sales',
+    );
+    const route = service.firstActiveModuleRoute([]);
+    expect(route).toBe('/admin/orders/sales');
+  });
+
+  it('un usuario sin ningún módulo visible es llevado a /admin/no-access', () => {
+    authFacade.isModuleVisible.and.returnValue(false);
+    const route = service.firstActiveModuleRoute([]);
+    expect(route).toBe('/admin/no-access');
+  });
+
+  it('un propietario (owner) siempre tiene acceso al panel y no cae a /admin/no-access', () => {
+    authFacade.isOwner.and.returnValue(true);
+    authFacade.isModuleVisible.and.returnValue(false);
+    const route = service.firstActiveModuleRoute([]);
+    expect(route).not.toBe('/admin/no-access');
+  });
+});
+
