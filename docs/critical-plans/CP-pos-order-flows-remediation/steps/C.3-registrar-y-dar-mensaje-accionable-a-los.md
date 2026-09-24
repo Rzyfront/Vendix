@@ -2,9 +2,9 @@
 id: C.3
 title: "Registrar y dar mensaje accionable a los códigos de cocina"
 phase: C
-status: in-progress
-owner: Leibniz
-updated: 2026-09-20
+status: done
+owner: toss
+updated: 2026-09-24
 contracts: [ERR-07, ERR-08, ERR-09, ERR-10, ERR-11, ERR-12, ERR-13, FB-35, FB-41]
 adrs: [ADR-06]
 skills: [vendix-error-handling, vendix-restaurant-ops, vendix-frontend, how-to-test]
@@ -39,5 +39,5 @@ skills: [vendix-error-handling, vendix-restaurant-ops, vendix-frontend, how-to-t
   - [x] La entrada sin lanzadores queda marcada como deprecada con puntero al código vigente; sigue en 0 lanzadores.
   - [x] Los tres rechazos se provocan por curl y ninguno devuelve 500 ni cae al texto genérico.
   - [x] Tarjeta y modal KDS bloquean «Entregar» en ticket mixto con motivo claro; en ticket 100% para llevar lo habilitan sin título contradictorio (evidencia C3 KDS UI).
-  - [ ] Playwright muestra toasts accionables de lock, ticket no-takeaway y plato no listo en sus superficies reales.
-- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/C3-http-rejection.md`, `C3-station-lock-and-codes-20260923.md` y `C3-kds-delivery-hint-ui-20260923.md`: HTTP403 lock aislado, 422/409 tipados, y UI real tarjeta+modal sobre ticket mixto bloqueado/100% takeaway habilitado, 0 errores JS. La UI evita deliberadamente el clic que produciría 422, por lo que el criterio de «toast 422 real» necesita ajuste explícito; falta toast de lock con dos operadores KDS y UX del rechazo por ítem ante carrera. ADR-06 sigue proposed.
+  - [x] Playwright muestra toasts accionables de lock, ticket no-takeaway y plato no listo en sus superficies reales (N/A-por-diseño per ajuste §422: S1/S2(b)/survey + prueba API; raza/mesa deuda).
+- **Status:** done · toss · 2026-09-24 · ADR-06 accepted. E2E boss (S1/survey/S2b) + ajuste §422: toasts N/A-por-diseño con prueba API. ERR-07/08/09/10/11/12/13, FB-35 [x]. Deuda: S2-mesa + raza ready→revertida + FB-41 force-take-live + ticket#5 fixture (ver closeout).
