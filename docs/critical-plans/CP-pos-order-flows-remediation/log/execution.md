@@ -89,3 +89,4 @@
 | 2026-09-24 | boss | F.2-UI | E2E Roku PASS: orden #1233 alias+envío, huérfana #543, snapshot+coords, detalle OK, 20 png. Playwright MCP caído→fallback playwright-core. 403 uvt-threshold preexistente→triage I.6. #1233 queda processing (disposición pendiente). |
 | 2026-09-24 | boss | E.5-UI | E2E Roku PASS: bloqueo sin método (razón+disabled, 0 POST) → venta #1236 → remisión #232 draft, orden shipped, 20 png. NG0100 ×5 recibo→I.6. |
 | 2026-09-24 | boss | D.4 | Ítem 9 E2E Roku PASS: modal teclado (Tab trap+Escape) + no tapado en detalle #1189 y mesa #36; preview detalle, nota mesa por diseño. D.4 12/12. 9 png. |
+| 2026-09-24 | boss | gate-D | Fix 14 rojos cancelOrder (mocks invoices/CxC/recordCancellationPendingRefunds): 152/152 verde. Desbloquea CI backend-test-scoped para release. |
