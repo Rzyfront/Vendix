@@ -735,5 +735,42 @@
     </div>
   </footer>
 </div>
+
+<script>
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var stories = document.querySelectorAll('.story');
+    if (reduce || !('IntersectionObserver' in window)) {
+      stories.forEach(function (s) { s.classList.add('in'); });
+    } else {
+      stories.forEach(function (s) {
+        var kids = s.querySelectorAll('.flow > *');
+        kids.forEach(function (k, i) { k.style.setProperty('--i', i); });
+      });
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+        });
+      }, { rootMargin: '0px 0px -12% 0px', threshold: 0.12 });
+      stories.forEach(function (s) { io.observe(s); });
+    }
+    var links = {};
+    document.querySelectorAll('nav.toc a').forEach(function (a) {
+      links[a.getAttribute('href').slice(1)] = a;
+    });
+    if ('IntersectionObserver' in window) {
+      var navIo = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          var a = links[e.target.id];
+          if (a && e.isIntersecting) {
+            Object.keys(links).forEach(function (k) { links[k].classList.remove('active'); });
+            a.classList.add('active');
+          }
+        });
+      }, { rootMargin: '-40% 0px -55% 0px' });
+      document.querySelectorAll('section.epic').forEach(function (s) { navIo.observe(s); });
+    }
+  })();
+</script>
 </body>
 </html>
