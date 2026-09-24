@@ -754,6 +754,11 @@
                 label="Whatsapp Checkout"
                 description="Permitir terminar compra en whatsapp"
               ></app-setting-toggle>
+              <app-setting-toggle
+                [formControl]="requirePaymentReceiptControl"
+                label="Soporte de pago obligatorio"
+                description="Exigir comprobante en transferencia y voucher"
+              ></app-setting-toggle>
               @if (whatsappCheckoutControl.value) {
                 <div class="col-span-1 md:col-span-2">
                   <div
