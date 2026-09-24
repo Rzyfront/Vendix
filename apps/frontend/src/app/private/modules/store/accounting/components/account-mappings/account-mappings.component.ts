@@ -167,7 +167,13 @@ const GROUP_DEFINITIONS: Array<{
     key: 'restaurant_ops',
     label: 'Cocina y Produccion',
     icon: 'chef-hat',
-    prefixes: ['kitchen.fired.', 'production.completed.'],
+    prefixes: [
+      'kitchen.fired.',
+      'production.completed.',
+      'order_item.prepared_waste.shrinkage',
+      'order_item.prepared_reuse.inventory',
+      'order_item.prepared_disposition.cogs',
+    ],
   },
   {
     key: 'settlements',
@@ -488,7 +494,11 @@ export class AccountMappingsComponent {
     return GROUP_DEFINITIONS.map((def) => ({
       ...def,
       mappings: mappings.filter((m) =>
-        def.prefixes.some((prefix) => m.mapping_key.startsWith(prefix)),
+        def.prefixes.some((prefix) =>
+          prefix.endsWith('.')
+            ? m.mapping_key.startsWith(prefix)
+            : m.mapping_key === prefix,
+        ),
       ),
     })).filter((g) => g.mappings.length > 0);
   }

@@ -1,9 +1,37 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { OrderValidationResult } from '../interfaces';
 import { ErrorCodes } from '../../../../common/errors/error-codes';
 
 type TypedOrderValidationResult = OrderValidationResult & { errorCode?: string };
+
+type MonetaryValue = Prisma.Decimal | number | string;
+type OrderSettlementSnapshot = {
+  grand_total: MonetaryValue | null | undefined;
+  payments?: ReadonlyArray<{ state: string; amount: MonetaryValue }>;
+};
+
+/** Shared, exact-money settlement check for POS and the locked order-pay path. */
+export function getSettledOrderAmount(
+  order: Pick<OrderSettlementSnapshot, 'payments'>,
+): Prisma.Decimal {
+  return (order.payments ?? [])
+    .filter((payment) =>
+      payment.state === 'succeeded' || payment.state === 'captured',
+    )
+    .reduce(
+      (sum, payment) => sum.plus(payment.amount),
+      new Prisma.Decimal(0),
+    );
+}
+
+export function isOrderFullyPaid(
+  order: OrderSettlementSnapshot,
+  settledAmount = getSettledOrderAmount(order),
+): boolean {
+  return settledAmount.gte(new Prisma.Decimal(order.grand_total ?? 0));
+}
 
 @Injectable()
 export class PaymentValidatorService {
@@ -59,10 +87,7 @@ export class PaymentValidatorService {
         warnings.push('Order is already finished');
       }
 
-      const totalPaid = order.payments
-        .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
-        .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
-      const alreadyPaid = totalPaid >= Number(order.grand_total);
+      const alreadyPaid = isOrderFullyPaid(order);
 
       if (alreadyPaid) {
         errors.push('Order is already fully paid');

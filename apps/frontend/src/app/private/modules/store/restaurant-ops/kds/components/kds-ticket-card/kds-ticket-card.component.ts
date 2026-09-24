@@ -100,15 +100,11 @@ export class KdsTicketCardComponent {
       items.every((it) => it.order_item?.is_takeaway === true)
     );
   });
-  /**
-   * Motivo del boton "Entregar" cuando esta deshabilitado. Si el ticket no
-   * es todo-para-llevar, el bloqueo es la regla takeaway; cuando esa regla
-   * no aplica (ticket todo-para-llevar), se conserva el motivo anterior.
-   */
+  /** Only explain a disabled delivery; an enabled takeaway ticket has no block. */
   readonly deliverDisabledReason = computed(() =>
     this.allTakeaway()
-      ? 'La entrega la registra el mesero o el cajero, no la cocina'
-      : 'Solo los platos para llevar se entregan en cocina',
+      ? null
+      : 'Este ticket incluye platos de mesa: entrégalos por ítem desde la mesa. Cocina solo entrega tickets 100% para llevar.',
   );
   /**
    * Gestión avanzada de tickets = admin/encargado: sin

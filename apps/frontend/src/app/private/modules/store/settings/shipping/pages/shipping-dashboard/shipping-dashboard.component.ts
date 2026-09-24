@@ -788,7 +788,7 @@ export class ShippingDashboardComponent implements OnInit {
   getTypeLabel(type: string): string {
     const label_map: Record<string, string> = {
       custom: 'Personalizado',
-      pickup: 'Recogida',
+      pickup: 'Recogida en tienda',
       own_fleet: 'Flota propia',
       carrier: 'Transportadora',
       third_party_provider: 'Externo'};

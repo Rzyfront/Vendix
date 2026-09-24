@@ -2064,8 +2064,9 @@ export class DispatchNotesService {
       );
     }
 
-    const customer_name =
-      `${order.users?.first_name || ''} ${order.users?.last_name || ''}`.trim();
+    const customer_name = order.users
+      ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
+      : order.customer_alias?.trim() || '';
 
     // Resolve the default dispatch location: the active reservation's location
     // for this order, falling back to the store default. Used when an item

@@ -22,6 +22,8 @@ import {
 import { StockLevelManager } from '../../../inventory/shared/services/stock-level-manager.service';
 import { resolveRefundStockUnits } from '../../../products/services/packaging.util';
 import { CreateRefundDto } from '../dto/create-refund.dto';
+import { RefundPayoutChannel } from '../dto/resolve-refund.dto';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { SettingsService } from '../../../settings/settings.service';
 import { SessionsService } from '../../../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../../cash-registers/movements/movements.service';
@@ -31,6 +33,12 @@ import { WalletService } from '../../../wallet/wallet.service';
 import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
 import { PaymentGatewayService } from '../../../payments/services/payment-gateway.service';
 import {
+  ManualRefundDeliveryService,
+  MANUAL_REFUND_DELIVERY_KEY,
+  MANUAL_REFUND_DELIVERY_SOURCE,
+  type ManualRefundDeliveryPayload,
+} from '../../../accounting/auto-entries/manual-refund-delivery.service';
+import {
   resolveEffectiveRefundChannel,
   awaitsExternalReversal,
   API_REVERSIBLE_REFUND_PROCESSORS,
@@ -38,6 +46,34 @@ import {
 } from './refund-channel.util';
 
 const REFUNDABLE_STATES = ['delivered', 'finished'];
+
+/** ADR-12 — prefix of the deterministic `refund_transaction_id` placeholders
+ * that `recordCancellationPendingRefunds` stamps on cancellation refunds.
+ * A placeholder is NOT a gateway id: `manuallyResolveRefund` lets the real
+ * payout reference replace it, while a genuine gateway id stays protected.
+ */
+export const CANCELLATION_REFUND_TX_PREFIX = 'adr12:cancel:';
+
+export function buildCancellationRefundTxId(orderId: number, leg: string): string {
+  return `${CANCELLATION_REFUND_TX_PREFIX}o${orderId}:${leg}`;
+}
+
+export function isCancellationRefundPlaceholder(
+  txId: string | null | undefined,
+): boolean {
+  return !!txId && txId.startsWith(CANCELLATION_REFUND_TX_PREFIX);
+}
+
+/** One settled leg to return: either a `payments` row (`payment_id`) or a
+ * real CxC abono (`ar_payment_id`) — never both, never neither.
+ */
+export interface CancellationPendingLeg {
+  payment_id?: number;
+  ar_payment_id?: number;
+  amount: Prisma.Decimal;
+  /** Concrete rail for the audit notes (e.g. 'card', 'wompi', 'abono CxC #5 (transferencia)'). */
+  method_label: string;
+}
 
 @Injectable()
 export class RefundFlowService {
@@ -65,6 +101,7 @@ export class RefundFlowService {
     // cycle (see order-flow.module.ts:39).
     @Inject(forwardRef(() => PaymentGatewayService))
     private readonly paymentGatewayService: PaymentGatewayService,
+    private readonly manualRefundDelivery: ManualRefundDeliveryService,
   ) {}
 
   /** Cash cancellation uses the same refund document and ceiling as returns,
@@ -80,6 +117,7 @@ export class RefundFlowService {
       shipping_cost: Prisma.Decimal;
       shipping_tax_amount: Prisma.Decimal;
       shipping_tax_type: string | null;
+      tip_amount?: Prisma.Decimal | null;
       currency: string | null;
       payments: { id: number; state: string }[];
     },
@@ -109,6 +147,113 @@ export class RefundFlowService {
       },
     });
     return { refund, breakdown };
+  }
+
+  /** ADR-12 — one `requested` refund per settled non-cash leg, created inside
+   * the caller's cancel transaction BEFORE the atomic claim, so a lost race
+   * rolls every leg back with the claim. The original payments stay
+   * `succeeded`: this method documents the debt to return, it never reverses.
+   *
+   * `alreadyPlanned` is the cash amount the caller already recorded in this
+   * same transaction: the cumulative ceiling (cash + every leg) is checked
+   * ONCE against `grand_total` here, because per-leg checks alone would let
+   * cash 60 + card 60 pass a ceiling of 100.
+   *
+   * `refund_method` is the domain vocabulary for "return via the original
+   * rail" (`original_payment` → 1110 fallback in accounting); the concrete
+   * rail travels on the linked payment row and in `notes`. Manual closure
+   * overwrites it with the real payout channel anyway.
+   */
+  async recordCancellationPendingRefunds(
+    tx: Prisma.TransactionClient,
+    order: {
+      id: number;
+      grand_total: Prisma.Decimal;
+      tax_amount: Prisma.Decimal;
+      shipping_cost: Prisma.Decimal;
+      shipping_tax_amount: Prisma.Decimal;
+      shipping_tax_type: string | null;
+      tip_amount?: Prisma.Decimal | null;
+      currency: string | null;
+      payments: { id: number; state: string }[];
+    },
+    legs: CancellationPendingLeg[],
+    reason: string,
+    alreadyPlanned: Prisma.Decimal = new Prisma.Decimal(0),
+  ) {
+    if (legs.length === 0) {
+      return [];
+    }
+    const ceiling = await this.calculationService.calculate(
+      { order_id: order.id, items: [], include_shipping: false }, tx,
+    );
+    const plannedTotal = legs.reduce(
+      (acc, leg) => acc.plus(new Prisma.Decimal(leg.amount as any)),
+      new Prisma.Decimal(alreadyPlanned as any),
+    );
+    if (plannedTotal.greaterThan(new Prisma.Decimal(ceiling.max_refundable).plus(0.01))) {
+      throw new VendixHttpException(
+        ErrorCodes.REF_VALIDATE_001,
+        `Cancellation refunds ${plannedTotal.toString()} exceed the remaining refundable total ${ceiling.max_refundable.toFixed(2)}`,
+      );
+    }
+    const created: Awaited<ReturnType<RefundFlowService['recordCancellationCashRefund']>>[] = [];
+    for (const leg of legs) {
+      const hasPayment = leg.payment_id != null;
+      const hasArPayment = leg.ar_payment_id != null;
+      if (hasPayment === hasArPayment) {
+        throw new VendixHttpException(
+          ErrorCodes.REF_VALIDATE_001,
+          'Cancellation refund leg must reference exactly one of payment_id or ar_payment_id',
+        );
+      }
+      const amount = new Prisma.Decimal(leg.amount as any);
+      if (amount.lessThanOrEqualTo(0)) {
+        this.logger.warn(
+          `recordCancellationPendingRefunds: skipping zero-value leg of order #${order.id} ` +
+            `(payment_id=${leg.payment_id ?? 'n/a'} ar_payment_id=${leg.ar_payment_id ?? 'n/a'}): nothing to return`,
+        );
+        continue;
+      }
+      const legKey = hasPayment ? `p${leg.payment_id}` : `ar${leg.ar_payment_id}`;
+      const refundTransactionId = buildCancellationRefundTxId(order.id, legKey);
+      const existing = await tx.refunds.findFirst({
+        where: { refund_transaction_id: refundTransactionId },
+        select: { id: true },
+      });
+      if (existing) {
+        this.logger.warn(
+          `recordCancellationPendingRefunds: refund for leg ${legKey} of order #${order.id} ` +
+            `already exists (#${existing.id}) — skipping duplicate`,
+        );
+        continue;
+      }
+      const breakdown = await this.calculationService.calculateCancellationRefund(
+        order.id, amount, tx, order,
+      );
+      const refund = await tx.refunds.create({
+        data: {
+          order_id: order.id,
+          payment_id: leg.payment_id ?? null,
+          ar_payment_id: leg.ar_payment_id ?? null,
+          amount: breakdown.amount,
+          subtotal_refund: breakdown.subtotal,
+          tax_refund: breakdown.tax,
+          shipping_refund: breakdown.shipping,
+          currency: order.currency,
+          reason,
+          notes: `Cancelación ADR-12; pierna ${leg.method_label}`,
+          refund_method: 'original_payment',
+          refund_transaction_id: refundTransactionId,
+          state: 'requested',
+          processed_by_user_id: RequestContextService.getUserId(),
+          requested_at: new Date(),
+          processed_at: null,
+        },
+      });
+      created.push({ refund, breakdown });
+    }
+    return created;
   }
 
   async completeCancellationCashRefund(refundId: number) {
@@ -1052,11 +1197,9 @@ export class RefundFlowService {
     targetState: 'completed' | 'failed',
     resolutionNotes: string,
     userId: number,
+    payoutReference?: string,
+    payoutChannel?: RefundPayoutChannel,
   ) {
-    // (3) Re-verificación defensiva de la nota — el DTO ya exige
-    // `@IsNotEmpty()`, pero esta función puede llamarse desde otros
-    // call-sites en el futuro. Trim explícito para no aceptar
-    // `"   "` como nota válida.
     const trimmedNotes =
       typeof resolutionNotes === 'string' ? resolutionNotes.trim() : '';
     if (!trimmedNotes) {
@@ -1064,151 +1207,169 @@ export class RefundFlowService {
         'resolution_notes is required for manual refund resolution',
       );
     }
+    const reference = typeof payoutReference === 'string' ? payoutReference.trim() : '';
+    if (
+      targetState === 'completed' &&
+      (!reference || reference.length > 255 ||
+        !Object.values(RefundPayoutChannel).includes(payoutChannel as RefundPayoutChannel))
+    ) {
+      throw new VendixHttpException(ErrorCodes.REF_PAYOUT_REQUIRED_001);
+    }
 
-    // (1) Scoped lookup (el Store scope del `StorePrismaService` filtra
-    // cross-tenant). Traemos `order_id` junto con `state` y
-    // `processed_at` para validar pertenencia y construir el update
-    // en la misma lectura.
-    const refund = await this.prisma.refunds.findFirst({
-      where: { id: refundId },
+    // refunds has no `stores` relation. The scoped order read establishes the
+    // real store and organization; the refund lookup remains bound to orderId.
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId },
       select: {
         id: true,
-        order_id: true,
-        state: true,
-        processed_at: true,
-        amount: true,
-        subtotal_refund: true,
-        tax_refund: true,
-        shipping_refund: true,
-        refund_method: true,
+        store_id: true,
+        grand_total: true,
+        shipping_cost: true,
+        shipping_tax_amount: true,
+        shipping_tax_type: true,
         stores: { select: { organization_id: true } },
+        order_items: {
+          select: {
+            order_item_taxes: { select: { tax_type: true, tax_amount: true } },
+          },
+        },
+        refunds: {
+          where: { state: 'completed' },
+          select: { id: true, amount: true, shipping_refund: true },
+        },
       },
     });
-    if (!refund || refund.order_id !== orderId) {
-      // ERR-02: 404 con código explícito. No distinguimos "no existe"
-      // de "no pertenece a esta orden / tienda" para no leakear la
-      // existencia de refunds de otras tiendas vía respuesta
-      // diferenciada.
-      throw new NotFoundException(`Refund #${refundId} not found`);
+    if (!order?.stores?.organization_id) {
+      throw new NotFoundException(`Order #${orderId} not found`);
     }
-
-    // (2) Guarda de estado no-terminal. `completed | failed | cancelled`
-    // son terminales: reescribir uno corrompería el histórico contable.
-    // El plan declara este caso ERR-01 (409) — aquí usamos
-    // BadRequestException porque ya es el patrón del archivo (línea
-    // 870 y siguientes); el filtro global del módulo contable acepta
-    // códigos 4xx indistintamente para mapeo cliente.
-    const terminalStates: refunds_state_enum[] = [
-      refunds_state_enum.completed,
-      refunds_state_enum.failed,
-      refunds_state_enum.cancelled,
-    ];
-    if (terminalStates.includes(refund.state)) {
-      throw new BadRequestException(
-        `Refund #${refundId} is already in terminal state '${refund.state}' and cannot be resolved again`,
-      );
-    }
-
-    const newState =
-      targetState === 'completed'
-        ? refunds_state_enum.completed
-        : refunds_state_enum.failed;
-
-    // `processed_at` se setea cuando el refund termina EXITOSAMENTE.
-    // Si va a `failed` y ya tenía valor (poco probable, pero por si
-    // el processor lo había marcado y luego queremos forzar `failed`
-    // vía manual), preservamos ese valor histórico. Si era null,
-    // sigue null — un `failed` no es una "ejecución completada".
-    const processedAt =
-      newState === refunds_state_enum.completed
-        ? new Date()
-        : refund.processed_at ?? null;
-
-    const updatedRefund = await this.prisma.refunds.update({
-      where: { id: refundId },
-      data: {
-        state: newState,
-        resolved_by_user_id: userId,
-        resolution_notes: trimmedNotes,
-        processed_at: processedAt,
-        updated_at: new Date(),
-      },
-    });
-
-    // (4) Emit canónico — exactamente el mismo shape que usa
-    // `createRefund` en líneas 485-509. Los listeners de contabilidad
-    // y de invalidación de caché consumen este evento.
-    if (newState === refunds_state_enum.completed) {
-      // Lookup del canal efectivo para que la contabilidad enrute a la
-      // PUC correcta (1105/1110/2335). Se calcula contra el método de
-      // pago ORIGINAL — el operador que cerró el refund no lo cambió,
-      // sólo cerró la fila. Re-llamamos al resolver con el input
-      // `paymentType` que la orden llevaba cuando se creó el refund.
-      //
-      // Esta consulta extra es aceptable: el resolve endpoint es
-      // operator-driven (1-2 clicks), no high-throughput. Si el
-      // resolver requiere `payments` que la fila no carga, devolvemos
-      // `null` y el listener cae al fallback `cash` — mismo
-      // comportamiento que el emit original cuando no hay pagos. El
-      // log warning deja rastro para diagnóstico.
-      const refundWithPayment = await this.prisma.refunds.findFirst({
-        where: { id: refundId },
-        include: {
-          payments: {
-            select: {
-              store_payment_method: {
-                select: { system_payment_method: { select: { type: true } } },
+    const refund = await this.prisma.refunds.findFirst({
+      where: { id: refundId, order_id: orderId },
+      include: {
+        refund_items: {
+          select: {
+            tax_amount: true,
+            order_items: {
+              select: {
+                order_item_taxes: { select: { tax_type: true, tax_amount: true } },
               },
             },
           },
         },
-      });
-      let paymentType: string | null = null;
-      if (
-        refundWithPayment?.payments?.store_payment_method?.system_payment_method
-          ?.type
-      ) {
-        paymentType =
-          refundWithPayment.payments.store_payment_method
-            .system_payment_method.type;
-      }
-      const effectiveChannel = resolveEffectiveRefundChannel(
-        refund.refund_method ?? 'original_payment',
-        paymentType,
-      );
-
-      this.eventEmitter.emit('refund.completed', {
-        refund_id: updatedRefund.id,
-        order_id: orderId,
-        organization_id: refund.stores?.organization_id,
-        store_id: undefined, // El refund row no carga store_id directamente;
-        //   el listener de cache lo usa opcionalmente. Lo dejamos
-        //   undefined para no inventar el id — si el listener lo
-        //   necesita, la organización ya está en el payload.
-        amount: Number(updatedRefund.amount),
-        subtotal: refund.subtotal_refund ? Number(refund.subtotal_refund) : undefined,
-        tax: refund.tax_refund ? Number(refund.tax_refund) : undefined,
-        tax_amount: refund.tax_refund ? Number(refund.tax_refund) : undefined,
-        shipping: refund.shipping_refund
-          ? Number(refund.shipping_refund)
-          : undefined,
-        is_full_refund: false, // El manual resolve NO es por flujo completo —
-        //   la UX permite ambos. Sin este dato en la URL no podemos
-        //   inferir; lo marcamos false para que contabilidad no
-        //   aplique lógica de refund total.
-        user_id: userId,
-        refund_method: refund.refund_method ?? undefined,
-        effective_channel: effectiveChannel,
-        resolution_notes: trimmedNotes,
-      });
+      },
+    });
+    if (!refund || refund.order_id !== orderId) {
+      throw new NotFoundException(`Refund #${refundId} not found`);
     }
 
-    // Log diagnóstico — el caller sólo necesita la fila actualizada, pero
-    // el equipo de soporte revisa el log para auditar quién cerró qué.
+    const nonterminalStates: refunds_state_enum[] = [
+      refunds_state_enum.requested,
+      refunds_state_enum.pending_approval,
+      refunds_state_enum.approved,
+      refunds_state_enum.processing,
+    ];
+    if (!nonterminalStates.includes(refund.state)) {
+      throw new VendixHttpException(
+        ErrorCodes.REF_RESOLUTION_CONFLICT_001,
+        `Refund #${refundId} is already in terminal state '${refund.state}' and cannot be resolved again`,
+      );
+    }
+    if (
+      targetState === 'completed' &&
+      refund.refund_transaction_id &&
+      refund.refund_transaction_id !== reference &&
+      !isCancellationRefundPlaceholder(refund.refund_transaction_id)
+    ) {
+      // A gateway refund ID may already occupy this unique column. Never
+      // overwrite it with a different manual payout reference. ADR-12
+      // placeholders are the deliberate exception: they are deterministic
+      // no-dup keys, not gateway ids, so the real payout reference replaces
+      // them — otherwise no cancellation refund could ever close manually.
+      throw new VendixHttpException(ErrorCodes.REF_RESOLUTION_CONFLICT_001);
+    }
+
+    const newState = targetState === 'completed'
+      ? refunds_state_enum.completed
+      : refunds_state_enum.failed;
+    const processedAt = newState === refunds_state_enum.completed
+      ? new Date()
+      : refund.processed_at ?? null;
+    const updateData = {
+      state: newState,
+      resolved_by_user_id: userId,
+      resolution_notes: trimmedNotes,
+      processed_at: processedAt,
+      updated_at: new Date(),
+      ...(targetState === 'completed' ? {
+        refund_transaction_id: reference,
+        refund_method: payoutChannel!,
+      } : {}),
+    };
+    let deliveryId: number | null = null;
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Serialize two manual completions for the same order, so the prior
+        // shipping/tip allocation snapshot has a deterministic predecessor.
+        await tx.$queryRaw`SELECT id FROM orders WHERE id = ${orderId} AND store_id = ${order.store_id} FOR UPDATE`;
+        const prior = await tx.refunds.findMany({
+          where: { order_id: orderId, state: 'completed' }, select: { id: true },
+        });
+        const claim = await tx.refunds.updateMany({
+          where: {
+            id: refundId, order_id: orderId,
+            state: { in: nonterminalStates },
+          },
+          data: updateData,
+        });
+        if (claim.count !== 1) throw new VendixHttpException(ErrorCodes.REF_RESOLUTION_CONFLICT_001);
+        if (targetState === 'completed') {
+          const payload: ManualRefundDeliveryPayload = {
+            version: 1, refund_id: refundId, order_id: orderId,
+            organization_id: order.stores.organization_id,
+            store_id: order.store_id, user_id: userId,
+            payout_channel: payoutChannel!,
+            prior_refund_ids: prior.map((row) => row.id),
+          };
+          const delivery = await tx.accounting_entry_failures.create({ data: {
+            organization_id: payload.organization_id,
+            store_id: payload.store_id,
+            handler_key: MANUAL_REFUND_DELIVERY_KEY,
+            source_type: MANUAL_REFUND_DELIVERY_SOURCE,
+            source_id: refundId,
+            event_payload: payload as unknown as Prisma.InputJsonValue,
+            error_message: 'PENDING_DELIVERY: manual refund accounting not yet posted',
+          } });
+          deliveryId = delivery.id;
+        }
+      });
+    } catch (error) {
+      if ((error as { code?: string })?.code === 'P2002') {
+        throw new VendixHttpException(ErrorCodes.REF_RESOLUTION_CONFLICT_001);
+      }
+      throw error;
+    }
+    const updatedRefund = { ...refund, ...updateData };
+    if (deliveryId !== null) {
+      // The row survives a process crash here; the retry worker also sweeps
+      // stranded rows. A journal failure cannot undo a real-world payout.
+      try { await this.manualRefundDelivery.deliver(deliveryId); }
+      catch (error) {
+        this.logger.error(`Refund #${refundId} accounting delivery #${deliveryId} remains unresolved: ${error}`);
+        try { await this.manualRefundDelivery.enqueue(deliveryId); }
+        catch (queueError) { this.logger.error(`Refund #${refundId} delivery retry could not be queued: ${queueError}`); }
+      }
+      try {
+        this.eventEmitter.emit('refund.completed', {
+          refund_id: refundId, order_id: orderId,
+          organization_id: order.stores.organization_id, store_id: order.store_id,
+          accounting_delivery: 'manual_durable',
+        });
+      } catch (error) {
+        this.logger.error(`Refund #${refundId} cache invalidation event failed: ${error}`);
+      }
+    }
     this.logger.log(
       `Refund #${refundId} (order #${orderId}) manually resolved to '${newState}' by user #${userId}: "${trimmedNotes.slice(0, 80)}${trimmedNotes.length > 80 ? '…' : ''}"`,
     );
-
     return updatedRefund;
   }
 

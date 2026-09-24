@@ -1,0 +1,12 @@
+# A.1 — POS reabre borrador de envío y cobra la misma orden (UI real)
+
+Local `vendix.com` / `api.vendix.com`, Playwright standalone (MCP browser no disponible), 2026-09-23, tienda #10. Datos sintéticos.
+
+1. Borrador `home_delivery` #1152 / `POS-2026-0338` creado por API con cliente #197, método #9, dirección persistida #489 y línea custom `QA-A1-UI-FINAL-20260923-1020`. **La creación inicial no fue por UI**, por lo que el recorrido literal «guardar en POS» sigue pendiente.
+2. Detalle de orden mostró estado BORRADOR, método, dirección y «Modificar Orden». Esa acción navegó a `/admin/pos?editOrder=1152` y rehidrató una línea, cliente y envío.
+3. Checkout de envío recorrió Entrega → Cliente (dos subpasos) → Envío → Cobro. «Actualizar» hizo `PUT /store/orders/1152/editor` **200**, con `item_type=custom` sin el ID sintético `custom-...` (antes daba **400 `SYS_VALIDATION_001`**). El CTA pasó a «Finalizar venta».
+4. «Finalizar venta» hizo `POST /store/payments/pos` **201** y mostró confirmación (`A1-reopened-paid-1152.png`). **No hubo `flow/cancel` posterior**. SQL: orden #1152 quedó `processing`, `grand_total=1500.00`, `total_paid=1500.00`, `shipping_address_id=489`; pago #836 `succeeded` y `order_id=1152`; consulta por nombre único de línea devolvió **una sola orden**, #1152.
+5. Regresión detectada y corregida durante este recorrido: el mismo flujo sobre #1151 hizo editor200/pago201 **seguido automáticamente** de `POST /store/orders/1151/flow/cancel` 200, dejando orden y pago cancelados mientras POS mostraba éxito. Causa: `onPaymentCompleted` usaba `onClearCart()` y `PosCartService.clearCart()` interpretaba carrito adoptado como abandono. El cambio separa reset tras venta exitosa de cancelación manual al pulsar Vaciar; spec cart 30/30. La orden #1151 permanece cancelada por la ejecución anterior al fix; no se revivió mediante SQL.
+6. Fixture negativo #1150 con solo `shipping_address_snapshot` y `shipping_address_id=NULL` pasó editor200 pero al finalizar volvió a Envío con «Completa la dirección». Se canceló con `flow/cancel` 200. Esta rama queda abierta bajo ADR-05/F.2; no se fingió éxito ni se sustituyó silenciosamente la dirección original.
+
+Tests de regresión: `pos-checkout-shell.component.spec.ts` 38/38 (ID custom), `pos-cart.service.spec.ts` 30/30 (reset pagado versus abandono), `pos-shipping-step.component.spec.ts` 18/18 y `error-messages.spec.ts` 16/16. Código `8545e2e5e`, `59780f68a`, además de commits A.1 anteriores. Falta guardar el borrador inicial desde la UI y fiado con cuotas; A.1 permanece in-progress.

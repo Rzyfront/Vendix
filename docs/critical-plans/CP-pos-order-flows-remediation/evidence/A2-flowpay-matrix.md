@@ -1,0 +1,7 @@
+# A.2 `dine_in` paga sin método; domicilio real conserva el gate
+
+QA local tienda #10, Playwright real en `vendix.com`. Mesa QA #25/sesión #117 con orden `dine_in` #1141 y producto físico302, sin `shipping_method_id`: el detalle mostró «Registrar Pago» y ningún aviso de método faltante (`A2-dinein-before.png`). El modal permitió efectivo (`A2-dinein-modal.png`), `POST /store/orders/1141/flow/pay` devolvió **200**; un pago succeeded $38.000, orden processing/total_paid=$38.000 y `table_sessions.paid_at` no nulo con mesa aún abierta (`A2-dinein-paid.png`, `A2-table-paid.png`).
+
+Carril negativo: `home_delivery` orden #1144 sin método → **422 `ORD_SHIP_CHARGE_001`**, estado `created`/cero pagos; `PATCH /store/orders/1144/shipping` método #9 → 200; nuevo flow/pay → **200**, processing/un pago. Fiado parcial sobre orden `dine_in` #1146 sin método → `flow/credit-payment` **200**, $10.000 cobrados/saldo $28.000; sobrepago posterior $30.000 → **400** sin cambiar pago ni saldo. Petición anónima → **401**. `A2-flowpay-matrix.sql/txt` fija el estado final. Jest OrderFlowService **114/114**, watcher Angular y backend health OK. Un reinicio watch produjo un 502 transitorio, repetido solo tras health200 sin escritura previa.
+
+Observación ajena a A.2: la creación de la sesión QR staff-confirm ocurrió pese a `qr_scan_behavior=menu_only`; requiere revisión independiente de política QR. No invalida el hecho fiscal/operativo de que la orden `dine_in` pagó sin método.

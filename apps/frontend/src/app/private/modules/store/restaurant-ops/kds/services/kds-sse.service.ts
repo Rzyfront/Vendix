@@ -292,8 +292,8 @@ export class KdsSseService {
       this.applySnapshot(event.tickets);
       return;
     }
-    // Todos los `ticket.*` (created/started/ready/delivered/cancelled/
-    // reverted) traen el ticket completo en `event.ticket` con el mismo
+    // Todos los `ticket.*` (created/started/ready/updated/delivered/
+    // cancelled/reverted) traen el ticket completo en `event.ticket` con el mismo
     // shape, por lo que `ticket.reverted` se reconcilia con el MISMO
     // upsert por id que `ticket.delivered` — sin lógica especial.
     if (!('ticket' in event) || !event.ticket) return;

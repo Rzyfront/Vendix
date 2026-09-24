@@ -2,9 +2,9 @@
 id: D.1
 title: "Test de la reversa de BOM antes de reutilizarla"
 phase: D
-status: in-progress
-owner: Ohm
-updated: 2026-09-20
+status: done
+owner: Fabio
+updated: 2026-09-23
 contracts: [FB-24, DB-09, DB-11, DB-30]
 adrs: [ADR-08]
 skills: [vendix-restaurant-ops, vendix-inventory-stock, how-to-test, buildcheck-dev]
@@ -27,12 +27,12 @@ skills: [vendix-restaurant-ops, vendix-inventory-stock, how-to-test, buildcheck-
   - Segunda mutación de control: resolver la ubicación ignorando la variante; el test debe fallar también.
   - `npx jest --runInBand apps/backend/src/domains/store/orders/order-flow/order-cancellation-policy.util.spec.ts` — la derivación de «orden cobrada» sigue verde.
 - **Acceptance checklist:**
-  - [ ] Existe cobertura de `kitchenDisposition` en el spec de flujo de orden: `reuse`, `waste`, ausente, ticket pendiente y línea sin consumo.
-  - [ ] El caso `reuse` afirma una devolución por cada transacción de consumo, con el valor absoluto exacto de cada una.
-  - [ ] El caso `reuse` afirma producto **y** variante en la resolución de ubicación, no solo producto.
-  - [ ] El caso `waste` afirma cero llamadas de devolución de stock.
-  - [ ] El caso sin `kitchenDisposition` sobre ticket avanzado fija el `errorCode`, no solo el tipo de excepción.
-  - [ ] El caso de ticket pendiente fija que se cancela sin destino y escribe el tipo de merma en duro.
-  - [ ] Invertir el signo de la devolución en el servicio pone el test en rojo; la evidencia de la mutación queda guardada.
-  - [ ] Ningún doble de prueba se tipa contra la función bajo prueba: la aserción no se recalcula sola.
-- **Status:** in-progress — 091dab185 cubre reuse/waste/pending/sin consumo; 90+45 tests; faltan mutaciones de control.
+  - [x] Existe cobertura de `kitchenDisposition` en el spec de flujo de orden: `reuse`, `waste`, ausente, ticket pendiente y línea sin consumo.
+  - [x] El caso `reuse` afirma una devolución por cada transacción de consumo, con el valor absoluto exacto de cada una.
+  - [x] El caso `reuse` afirma producto **y** variante en la resolución de ubicación, no solo producto.
+  - [x] El caso `waste` afirma cero llamadas de devolución de stock.
+  - [x] El caso sin `kitchenDisposition` sobre ticket avanzado fija el `errorCode`, no solo el tipo de excepción.
+  - [x] El caso de ticket pendiente fija que se cancela sin destino y escribe el tipo de merma en duro.
+  - [x] Invertir el signo de la devolución en el servicio pone el test en rojo; la evidencia de la mutación queda guardada.
+  - [x] Ningún doble de prueba se tipa contra la función bajo prueba: la aserción no se recalcula sola.
+- **Status:** done — código de pruebas `091dab185`; `evidence/D1-mutation-controls-20260923.md` documenta dos mutaciones rojas independientes y fuente restaurada; OrderFlow 122/122 + CancellationPolicy 46/46 verdes. No hubo modificación permanente del servicio ni de datos.

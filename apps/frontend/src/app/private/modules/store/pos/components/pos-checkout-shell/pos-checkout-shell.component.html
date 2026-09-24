@@ -155,8 +155,8 @@
                         <p class="sale-type-hint">
                           <app-icon name="info" [size]="14"></app-icon>
                           <span
-                            >No disponible para ventas con envío: se requiere un
-                            cliente con dirección.</span
+                            >No disponible para ventas con envío: indica un
+                            cliente o nombre de referencia con dirección.</span
                           >
                         </p>
                       } @else if (isAnonymousSale()) {
@@ -199,8 +199,6 @@
                         [attr.tabindex]="saleMode() === 'alias' ? 0 : -1"
                         class="sale-type-btn"
                         [class.selected]="saleMode() === 'alias'"
-                        [class.is-disabled]="aliasBlockedByDelivery()"
-                        [disabled]="aliasBlockedByDelivery()"
                         (click)="onSelectSaleMode('alias')"
                         (keydown)="onSaleTypeKeydown($event)"
                       >
@@ -220,15 +218,6 @@
                           >
                         </div>
                       </button>
-                      @if (aliasBlockedByDelivery()) {
-                        <p class="sale-type-hint">
-                          <app-icon name="info" [size]="14"></app-icon>
-                          <span
-                            >No disponible para ventas con envío: se requiere un
-                            cliente con dirección.</span
-                          >
-                        </p>
-                      }
                     }
 
                     <button
@@ -384,6 +373,7 @@
           <div class="step-panel" tabindex="-1" [class.step-hidden]="currentStepKey() !== 'envio'">
             <app-pos-shipping-step
               [cartState]="cartState()"
+              [customerAlias]="saleMode() === 'alias' ? customerAlias().trim() : ''"
               [editingOrderId]="editingOrderId()"
               (shippingCompleted)="onShippingCompleted($event)"
             ></app-pos-shipping-step>

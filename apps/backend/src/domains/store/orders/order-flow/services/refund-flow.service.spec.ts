@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RefundFlowService } from './refund-flow.service';
+import { RefundPayoutChannel } from '../dto/resolve-refund.dto';
 import { RefundCalculationService } from './refund-calculation.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -13,6 +14,7 @@ import { InventorySerialNumbersService } from '../../../inventory/serial-numbers
 import { WalletService } from '../../../wallet/wallet.service';
 import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
 import { PaymentGatewayService } from '../../../payments/services/payment-gateway.service';
+import { ManualRefundDeliveryService } from '../../../accounting/auto-entries/manual-refund-delivery.service';
 import { Prisma } from '@prisma/client';
 
 /**
@@ -40,16 +42,20 @@ describe('RefundFlowService — refund overhaul invariants', () => {
     refunds: {
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
     },
-    refund_items: { create: jest.fn() },
+    accounting_entry_failures: { create: jest.fn() },
+    $queryRaw: jest.fn(),
+    refund_items: { create: jest.fn(), findMany: jest.fn() },
     order_items: { findMany: jest.fn() },
     payments: {
       update: jest.fn(),
     },
     $transaction: jest.fn(),
   };
+  const manualRefundDelivery = { deliver: jest.fn(), enqueue: jest.fn() };
 
   const mockCalculationService = {
     calculate: jest.fn(),
@@ -76,6 +82,8 @@ describe('RefundFlowService — refund overhaul invariants', () => {
     paymentGatewayService = {
       reversePaymentWithProcessor: jest.fn(),
     };
+    manualRefundDelivery.deliver.mockResolvedValue(undefined);
+    manualRefundDelivery.enqueue.mockResolvedValue(undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -105,6 +113,7 @@ describe('RefundFlowService — refund overhaul invariants', () => {
           provide: PaymentGatewayService,
           useValue: paymentGatewayService,
         },
+        { provide: ManualRefundDeliveryService, useValue: manualRefundDelivery },
       ],
     }).compile();
 
@@ -1090,6 +1099,166 @@ describe('RefundFlowService — refund overhaul invariants', () => {
    * operador sin escape para refunds atorados en `pending_approval`.
    */
   describe('manuallyResolveRefund (W2-B — cierre manual por operador)', () => {
+    beforeEach(() => {
+      mockPrisma.orders.findFirst.mockReset().mockResolvedValue({
+        id: 3830, store_id: 10, stores: { organization_id: 1 },
+        grand_total: new Prisma.Decimal(20000),
+        shipping_cost: new Prisma.Decimal(0),
+        shipping_tax_amount: new Prisma.Decimal(0),
+        shipping_tax_type: null,
+        order_items: [{ order_item_taxes: [
+          { tax_type: 'iva', tax_amount: new Prisma.Decimal(3000) },
+        ] }],
+        refunds: [],
+      });
+      mockPrisma.refunds.findFirst.mockReset();
+      mockPrisma.refunds.updateMany.mockReset().mockResolvedValue({ count: 1 });
+      mockPrisma.refunds.findMany.mockResolvedValue([]);
+      mockPrisma.$queryRaw.mockResolvedValue([{ id: 3830 }]);
+      mockPrisma.accounting_entry_failures.create.mockResolvedValue({ id: 55 });
+      mockPrisma.$transaction.mockImplementation(async (callback: any) => callback(mockPrisma));
+    });
+
+    it('requires a payout reference and actual channel before completing', async () => {
+      const refund = {
+        id: 999, order_id: 3830, state: 'requested', amount: 100,
+      };
+      mockPrisma.refunds.findFirst.mockResolvedValue(refund);
+      mockPrisma.refunds.update.mockResolvedValue({ ...refund, state: 'completed' });
+
+      await expect(service.manuallyResolveRefund(
+        3830, 999, 'completed', 'Transferencia confirmada', 1, '   ', RefundPayoutChannel.BANK_TRANSFER,
+      )).rejects.toMatchObject({ errorCode: 'REF_PAYOUT_REQUIRED_001' });
+      expect(mockPrisma.refunds.update).not.toHaveBeenCalled();
+      expect(mockPrisma.refunds.updateMany).not.toHaveBeenCalled();
+      expect(eventEmitter.emit).not.toHaveBeenCalledWith('refund.completed', expect.anything());
+    });
+
+    it('only one parallel completion wins and emits the financial event once', async () => {
+      const refund = {
+        id: 999, order_id: 3830, state: 'requested', amount: 100,
+        subtotal_refund: 100, tax_refund: 0, shipping_refund: 0,
+        refund_method: 'original_payment', refund_transaction_id: null,
+        refund_items: [],
+      };
+      mockPrisma.orders.findFirst.mockResolvedValue({
+        id: 3830, store_id: 10, stores: { organization_id: 1 },
+        grand_total: new Prisma.Decimal(100), shipping_cost: new Prisma.Decimal(0),
+        shipping_tax_amount: new Prisma.Decimal(0), shipping_tax_type: null,
+        order_items: [], refunds: [],
+      });
+      mockPrisma.refunds.findFirst.mockResolvedValue(refund);
+      mockPrisma.refunds.update.mockResolvedValue({ ...refund, state: 'completed' });
+      mockPrisma.refund_items.findMany.mockResolvedValue([]);
+      mockPrisma.order_items.findMany.mockResolvedValue([]);
+      mockPrisma.refunds.updateMany.mockResolvedValueOnce({ count: 1 })
+        .mockResolvedValueOnce({ count: 0 });
+
+      const results = await Promise.allSettled([
+        service.manuallyResolveRefund(3830, 999, 'completed', 'Pago comprobado', 1, 'TRX-1', RefundPayoutChannel.BANK_TRANSFER),
+        service.manuallyResolveRefund(3830, 999, 'completed', 'Pago comprobado', 1, 'TRX-1', RefundPayoutChannel.BANK_TRANSFER),
+      ]);
+
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+      expect(mockPrisma.refunds.updateMany).toHaveBeenCalledTimes(2);
+      expect(eventEmitter.emit.mock.calls.filter(([name]) => name === 'refund.completed')).toHaveLength(1);
+      expect(paymentGatewayService.reversePaymentWithProcessor).not.toHaveBeenCalled();
+    });
+
+    it('persists a semantic delivery instead of posting a volatile tax snapshot', async () => {
+      mockPrisma.orders.findFirst.mockResolvedValue({
+        id: 3830, store_id: 10, stores: { organization_id: 1 },
+        grand_total: new Prisma.Decimal(109),
+        shipping_cost: new Prisma.Decimal(9),
+        shipping_tax_amount: new Prisma.Decimal(1),
+        shipping_tax_type: 'inc',
+        order_items: [{ order_item_taxes: [
+          { tax_type: 'iva', tax_amount: new Prisma.Decimal(6) },
+          { tax_type: 'inc', tax_amount: new Prisma.Decimal(4) },
+        ] }],
+        refunds: [],
+      });
+      setupPendingRefund({
+        state: 'requested', amount: new Prisma.Decimal(109),
+        subtotal_refund: new Prisma.Decimal(90),
+        tax_refund: new Prisma.Decimal(10),
+        shipping_refund: new Prisma.Decimal(9),
+      });
+
+      await service.manuallyResolveRefund(
+        3830, 999, 'completed', 'Egreso bancario verificado', 1,
+        'BANK-109', RefundPayoutChannel.BANK_TRANSFER,
+      );
+
+      expect(mockPrisma.accounting_entry_failures.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          handler_key: 'manual_refund_delivery_v1',
+          source_type: 'manual_refund.delivery', source_id: 999,
+        }),
+      });
+      expect(manualRefundDelivery.deliver).toHaveBeenCalledWith(55);
+      expect(eventEmitter.emit).toHaveBeenCalledWith('refund.completed',
+        expect.objectContaining({ accounting_delivery: 'manual_durable' }));
+    });
+
+    it('retains a delivery row for legacy tax that replay cannot safely type', async () => {
+      mockPrisma.orders.findFirst.mockResolvedValue({
+        id: 3830, store_id: 10, stores: { organization_id: 1 },
+        grand_total: new Prisma.Decimal(100), shipping_cost: new Prisma.Decimal(0),
+        shipping_tax_amount: new Prisma.Decimal(0), shipping_tax_type: null,
+        order_items: [], refunds: [],
+      });
+      setupPendingRefund({ amount: 100, subtotal_refund: 90, tax_refund: 10 });
+
+      await service.manuallyResolveRefund(
+        3830, 999, 'completed', 'Pago verificado', 1,
+        'BANK-100', RefundPayoutChannel.BANK_TRANSFER,
+      );
+      expect(mockPrisma.refunds.updateMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.accounting_entry_failures.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('stores the item refund identity for later typed fiscal reconstruction', async () => {
+      mockPrisma.orders.findFirst.mockResolvedValue({
+        id: 3830, store_id: 10, stores: { organization_id: 1 },
+        grand_total: new Prisma.Decimal(227), shipping_cost: new Prisma.Decimal(0),
+        shipping_tax_amount: new Prisma.Decimal(0), shipping_tax_type: null,
+        order_items: [{ order_item_taxes: [
+          { tax_type: 'iva', tax_amount: new Prisma.Decimal(19) },
+          { tax_type: 'inc', tax_amount: new Prisma.Decimal(8) },
+        ] }],
+        refunds: [],
+      });
+      setupPendingRefund({
+        amount: new Prisma.Decimal(108), subtotal_refund: new Prisma.Decimal(100),
+        tax_refund: new Prisma.Decimal(8), shipping_refund: new Prisma.Decimal(0),
+        refund_items: [{
+          tax_amount: new Prisma.Decimal(8),
+          order_items: { order_item_taxes: [
+            { tax_type: 'inc', tax_amount: new Prisma.Decimal(8) },
+          ] },
+        }],
+      });
+
+      await service.manuallyResolveRefund(
+        3830, 999, 'completed', 'Egreso verificado', 1,
+        'BANK-INC-8', RefundPayoutChannel.BANK_TRANSFER,
+      );
+      expect(mockPrisma.accounting_entry_failures.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ source_id: 999 }),
+      });
+    });
+
+    it('does not overwrite an existing gateway refund ID with a different payout reference', async () => {
+      setupPendingRefund({ refund_transaction_id: 'GATEWAY-REF-1' });
+      await expect(service.manuallyResolveRefund(
+        3830, 999, 'completed', 'Transferencia verificada', 1,
+        'BANK-REF-2', RefundPayoutChannel.BANK_TRANSFER,
+      )).rejects.toMatchObject({ errorCode: 'REF_RESOLUTION_CONFLICT_001' });
+      expect(mockPrisma.refunds.updateMany).not.toHaveBeenCalled();
+    });
+
     // Helper para setup del refund row pre-existente. Centraliza el
     // mock shape para que cada test se enfoque en lo que le importa.
     function setupPendingRefund(overrides: any = {}) {
@@ -1103,35 +1272,16 @@ describe('RefundFlowService — refund overhaul invariants', () => {
         tax_refund: 3000,
         shipping_refund: 0,
         refund_method: 'original_payment',
-        stores: { organization_id: 1 },
+        refund_transaction_id: null,
+        refund_items: [],
         ...overrides,
       };
-      // El primer findFirst (validación) devuelve la fila base.
-      // Un segundo findFirst (lookup de pago para emit) sólo ocurre en
-      // camino 'completed'; ese test lo configura explícitamente.
       mockPrisma.refunds.findFirst.mockResolvedValueOnce(refund);
-      mockPrisma.refunds.update.mockResolvedValue({
-        ...refund,
-        state: overrides.expectedFinalState ?? refund.state,
-        resolved_by_user_id: 1,
-        resolution_notes: overrides.notes ?? 'Confirmado por el dueño',
-      });
       return refund;
     }
 
     it('CAMINO A: target_state=completed → refund a "completed", resolved_by_user_id y notes persistidos, refund.completed emitido con payload canónico', async () => {
-      const refund = setupPendingRefund({ expectedFinalState: 'completed' });
-      // Segundo lookup (refund+payment) usado por el emit: devuelve un
-      // pago gateway para que `resolveEffectiveRefundChannel` resuelva
-      // `effective_channel='gateway'`.
-      mockPrisma.refunds.findFirst.mockResolvedValueOnce({
-        ...refund,
-        payments: {
-          store_payment_method: {
-            system_payment_method: { type: 'wompi' },
-          },
-        },
-      });
+      setupPendingRefund();
 
       eventEmitter.emit.mockClear();
 
@@ -1141,15 +1291,19 @@ describe('RefundFlowService — refund overhaul invariants', () => {
         'completed',
         'Reembolso confirmado por transferencia bancaria',
         1,
+        'BANK-REF-999',
+        RefundPayoutChannel.BANK_TRANSFER,
       );
 
       // 1. La fila se actualiza con state='completed', resolved_by_user_id,
       // resolution_notes, processed_at (Date), y updated_at.
-      expect(mockPrisma.refunds.update).toHaveBeenCalledWith(
+      expect(mockPrisma.refunds.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 999 },
+          where: { id: 999, order_id: 3830, state: { in: expect.arrayContaining(['pending_approval']) } },
           data: expect.objectContaining({
             state: 'completed',
+            refund_transaction_id: 'BANK-REF-999',
+            refund_method: 'bank_transfer',
             resolved_by_user_id: 1,
             resolution_notes:
               'Reembolso confirmado por transferencia bancaria',
@@ -1162,10 +1316,15 @@ describe('RefundFlowService — refund overhaul invariants', () => {
       // 2. El servicio retorna la fila actualizada.
       expect(result).toBeDefined();
       expect(result.state).toBe('completed');
+      expect(mockPrisma.orders.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 3830 } }),
+      );
+      expect(mockPrisma.refunds.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 999, order_id: 3830 } }),
+      );
 
-      // 3. refund.completed se emite con el payload canónico completo —
-      //    los listeners de accounting y cache-invalidation consumen
-      //    este shape, así que cualquier drift silenciaría los asientos.
+      // Cache invalidation retains the event, but accounting is owned by the
+      // transactional delivery row and must not consume this volatile emit.
       const refundCompleted = eventEmitter.emit.mock.calls.find(
         ([name]) => name === 'refund.completed',
       );
@@ -1175,18 +1334,16 @@ describe('RefundFlowService — refund overhaul invariants', () => {
           refund_id: 999,
           order_id: 3830,
           organization_id: 1,
-          amount: 20000,
-          refund_method: 'original_payment',
-          effective_channel: 'gateway',
-          resolution_notes:
-            'Reembolso confirmado por transferencia bancaria',
-          user_id: 1,
+          store_id: 10,
+          accounting_delivery: 'manual_durable',
         }),
       );
+      expect(mockPrisma.accounting_entry_failures.create).toHaveBeenCalledTimes(1);
+      expect(manualRefundDelivery.deliver).toHaveBeenCalledWith(55);
     });
 
     it('CAMINO B: target_state=failed → refund a "failed", NO emite refund.completed', async () => {
-      const refund = setupPendingRefund({ expectedFinalState: 'failed' });
+      setupPendingRefund();
 
       eventEmitter.emit.mockClear();
 
@@ -1200,9 +1357,9 @@ describe('RefundFlowService — refund overhaul invariants', () => {
 
       // 1. La fila se actualiza con state='failed', resolved_by_user_id,
       // resolution_notes, processed_at=null (un failed no "completó" nada).
-      expect(mockPrisma.refunds.update).toHaveBeenCalledWith(
+      expect(mockPrisma.refunds.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 999 },
+          where: { id: 999, order_id: 3830, state: { in: expect.arrayContaining(['pending_approval']) } },
           data: expect.objectContaining({
             state: 'failed',
             resolved_by_user_id: 1,
@@ -1228,7 +1385,7 @@ describe('RefundFlowService — refund overhaul invariants', () => {
       expect(refundCompleted).toBeUndefined();
     });
 
-    it('CAMINO C: refund en estado terminal (state=completed) lanza BadRequestException', async () => {
+    it('CAMINO C: refund en estado terminal (state=completed) lanza conflicto tipado', async () => {
       // ARRANGE: un refund que ya estaba 'completed' desde antes.
       mockPrisma.refunds.findFirst.mockResolvedValueOnce({
         id: 999,
@@ -1240,7 +1397,7 @@ describe('RefundFlowService — refund overhaul invariants', () => {
         tax_refund: 3000,
         shipping_refund: 0,
         refund_method: 'original_payment',
-        stores: { organization_id: 1 },
+        refund_transaction_id: null,
       });
 
       // ACT + ASSERT: ERR-01 — BadRequestException con mensaje que nombra
@@ -1252,10 +1409,12 @@ describe('RefundFlowService — refund overhaul invariants', () => {
           'completed',
           'Reapertura inválida',
           1,
+          'TRX-999',
+          RefundPayoutChannel.GATEWAY,
         ),
       ).rejects.toThrow(/already in terminal state 'completed'/);
 
-      expect(mockPrisma.refunds.update).not.toHaveBeenCalled();
+      expect(mockPrisma.refunds.updateMany).not.toHaveBeenCalled();
     });
 
     it('CAMINO D: refundId que no pertenece al orderId lanza NotFoundException (anti-IDOR)', async () => {
@@ -1273,7 +1432,7 @@ describe('RefundFlowService — refund overhaul invariants', () => {
         tax_refund: 3000,
         shipping_refund: 0,
         refund_method: 'original_payment',
-        stores: { organization_id: 1 },
+        refund_transaction_id: null,
       });
 
       // ACT + ASSERT: ERR-02 — NotFoundException. La respuesta NO
@@ -1286,10 +1445,12 @@ describe('RefundFlowService — refund overhaul invariants', () => {
           'completed',
           'Intento cruzado',
           1,
+          'TRX-999',
+          RefundPayoutChannel.GATEWAY,
         ),
       ).rejects.toThrow(/Refund #999 not found/);
 
-      expect(mockPrisma.refunds.update).not.toHaveBeenCalled();
+      expect(mockPrisma.refunds.updateMany).not.toHaveBeenCalled();
     });
 
     it('CAMINO E: resolution_notes vacío tras bypass de DTO lanza BadRequestException', async () => {

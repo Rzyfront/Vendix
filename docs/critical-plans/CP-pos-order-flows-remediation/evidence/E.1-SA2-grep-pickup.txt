@@ -1,0 +1,38 @@
+apps/frontend/src/app/private/modules/store/pos/models/cart.model.ts:254: * llevaba al shell a forzar `delivery_type: 'pickup'` sobre un borrador que
+apps/frontend/src/app/private/modules/store/pos/models/cart.model.ts:272:    case 'pickup':
+apps/frontend/src/app/private/modules/store/pos/models/shipping.model.ts:4:  type: string; // 'pickup' | 'own_fleet' | 'carrier' | 'custom' | 'third_party_provider'
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.spec.ts:290:    const pickup: PosShippingMethod = { id: 9, name: 'Recoger', type: 'pickup', is_active: true };
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.spec.ts:299:    expect(component.buildShippingContext()?.deliveryType).toBe('pickup');
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-payment-step.component.ts:97:  readonly checkoutIntent = input<CheckoutIntent>('pickup');
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-payment-step.component.ts:214:    return this.autoExecute() && this.checkoutIntent() === 'pickup' &&
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-payment-step.component.ts:710:    if (this.autoExecute() && this.checkoutIntent() === 'pickup' &&
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-payment-step.component.spec.ts:34:        checkoutIntent: () => 'pickup',
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-payment-step.component.spec.ts:77:      autoExecute: () => true, checkoutIntent: () => 'pickup', fulfillment: () => 'entrega',
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.ts:142:    if (!original.shippingAddress && original.deliveryType !== 'pickup') {
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.ts:163:    () => this.selectedShippingMethod()?.type === 'pickup',
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.ts:168:    return !!m && m.type !== 'pickup';
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.ts:410:      } else if (method.type === 'pickup') {
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.ts:583:    if (!method || !this.cartState()?.items?.length || method.type === 'pickup') return;
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/steps/pos-shipping-step.component.ts:758:    return method.type === 'pickup' ? 'pickup' : 'home_delivery';
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/pos-checkout-shell.component.spec.ts:88:  readonly checkoutIntent = input('pickup');
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/pos-checkout-shell.component.spec.ts:932:    expect(deliveryTypeToEntregaChoice({ ...context, deliveryType: 'pickup', shippingMethodId: 7 } as any)).toBe('enviar');
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/pos-checkout-shell.component.spec.ts:943:        ...state.shippingContext, deliveryType: 'pickup',
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/pos-checkout-shell.component.spec.ts:954:    expect(shouldAutoPrintDispatchTicket('automatic', { ...context, deliveryType: 'pickup' })).toBeTrue();
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/pos-checkout-shell.component.html:96:              [autoExecute]="mode() !== 'create-draft' && effectiveIntent() === 'pickup'"
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/pos-checkout-shell.component.ts:55:export type CheckoutIntent = 'pickup' | 'delivery';
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/pos-checkout-shell.component.ts:202:   * 'enviar' → 'delivery', 'llevar' | 'mesa' → 'pickup'.
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/pos-checkout-shell.component.ts:206:    this.entregaChoice() === 'enviar' ? 'delivery' : 'pickup',
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/pos-checkout-shell.component.ts:233:   * QUI-audit-round-1: la rama `effectiveIntent() === 'pickup'` que vivía aquí
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/pos-checkout-shell.component.ts:1431:      if (preserved?.deliveryType === 'pickup' && !hasShipmentContext(preserved) &&
+apps/frontend/src/app/private/modules/store/pos/components/pos-checkout-shell/pos-checkout-shell.component.ts:1439:        preserved?.deliveryType !== 'pickup' && !preserved?.shippingAddressId;
+apps/frontend/src/app/private/modules/store/pos/pos.component.ts:2323:   *    empujaba al shell a forzar `delivery_type: 'pickup'`.
+apps/frontend/src/app/private/modules/store/pos/services/pos-cart.service.ts:955:   * el shell terminaba mandando `delivery_type: 'pickup'` con el envío
+apps/frontend/src/app/private/modules/store/pos/services/pos-cart.service.spec.ts:1127: * reconstruía el envío desde cero: forzaba `delivery_type: 'pickup'` y dejaba
+apps/frontend/src/app/private/modules/store/pos/services/pos-cart.service.spec.ts:1232:      delivery_type: 'pickup',
+apps/frontend/src/app/private/modules/store/pos/services/pos-cart.service.spec.ts:1244:        deliveryType: 'pickup',
+apps/frontend/src/app/private/modules/store/orders/pages/order-details/order-details-page.component.html:2888:        orderData.delivery_type === 'pickup'
+apps/frontend/src/app/private/modules/store/orders/pages/order-details/order-details-page.component.ts:149:  'pickup',
+apps/frontend/src/app/private/modules/store/orders/pages/order-details/order-details-page.component.ts:944:    const isPickup = delivery === 'pickup';
+apps/frontend/src/app/private/modules/store/orders/pages/order-details/order-details-page.component.ts:1194:      case 'pickup':
+apps/frontend/src/app/private/modules/store/orders/pages/order-details/order-details-page.component.ts:2489:          const isPickup = order?.delivery_type === 'pickup';
+apps/frontend/src/app/private/modules/store/orders/interfaces/order.interface.ts:5:export type DeliveryType = 'pickup' | 'home_delivery' | 'direct_delivery' | 'dine_in' | 'other';

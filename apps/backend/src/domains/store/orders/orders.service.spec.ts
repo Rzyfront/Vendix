@@ -111,12 +111,8 @@ describe('OrdersService', () => {
     stores: { findFirst: jest.fn() },
     payments: { findFirst: jest.fn() },
     table_sessions: {
-      // CP-POLLO-ARABE-727 · fix/table-close-order. El guard del editor
-      // (OrdersService.updateOrderFromEditor) consulta `table_sessions.findFirst`
-      // por `order_id` para saber si hay una sesión CERRADA vinculada a la
-      // orden. Mock explícito para que las specs del guard puedan simular
-      // los 3 caminos: cerrada → rechaza, abierta → permite, sin sesión
-      // (POS-only) → permite.
+      // ADR-07: los dos escritores de ítems consultan la sesión ABIERTA
+      // vigente, y solo sin ella preguntan por historial de mesa.
       findFirst: jest.fn(),
     },
     audit_logs: {
@@ -295,6 +291,7 @@ describe('OrdersService', () => {
     });
 
     jest.clearAllMocks();
+    mockPrismaService.table_sessions.findFirst.mockReset().mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -2651,8 +2648,8 @@ describe('OrdersService', () => {
     // ----------------------------------------------------------------
     // CP-POLLO-ARABE-727 · fix/table-close-order — Option 2, leg 2.
     //
-    // El editor atómico debe bloquearse cuando existe una sesión de mesa
-    // CERRADA vinculada al order_id. Eso cierra el síntoma reportado en
+    // El editor atómico debe bloquearse cuando existe historial de mesa
+    // pero NINGUNA sesión abierta vinculada al order_id. Eso cierra el síntoma reportado en
     // QUI-726: el editor seguía aceptando mutaciones sobre órdenes que
     // ya tenían la mesa cerrada (típicamente porque el mesero cerró la
     // mesa pensando que el cliente se había ido, sin que la cuenta
@@ -2663,15 +2660,11 @@ describe('OrdersService', () => {
     // condicional con `state IN (created, draft)` que de todas formas
     // va a fallar después.
     //
-    // Decisión consciente: NO replicamos este guard en `update` /
-    // `updateOrderItems` en este PR — el reporte del líder menciona
-    // "el editor", y la fuente del leak reportada es el flujo del editor
-    // atómico. `updateOrderItems` ya valida `session.closed_at` por su
-    // propio camino (addItems/removeItem). Un sweep simétrico queda como
-    // follow-up explícito.
+    // ADR-07/G.1: updateOrderItems comparte ahora este guard, para que
+    // PUT items no reabra una orden cuyo historial solo tiene cierres.
     // ----------------------------------------------------------------
 
-    it('lanza 409 ORD_EDIT_NOT_ALLOWED_001 cuando existe una table_session CERRADA para el order_id', async () => {
+    it('lanza 409 ORD_EDIT_NOT_ALLOWED_001 cuando solo existe una table_session CERRADA', async () => {
       setupContext();
       const contextSpy = spyContext();
       try {
@@ -2679,11 +2672,9 @@ describe('OrdersService', () => {
         mockPrismaService.orders.findFirst.mockResolvedValue(editableOrder);
         // PERO la sesión de mesa ya fue cerrada (mesero la cerró sin cobrar).
         // El guard del editor tiene que detectarlo y cortar antes del claim.
-        mockPrismaService.table_sessions.findFirst.mockResolvedValue({
-          id: 77,
-          order_id: 500,
-          closed_at: new Date(),
-        });
+        mockPrismaService.table_sessions.findFirst
+          .mockResolvedValueOnce(null) // ninguna abierta
+          .mockResolvedValueOnce({ id: 77, closed_at: new Date() });
 
         let caught: VendixHttpException | null = null;
         try {
@@ -2751,7 +2742,7 @@ describe('OrdersService', () => {
           expect.objectContaining({
             where: expect.objectContaining({
               order_id: 500,
-              closed_at: { not: null },
+              closed_at: null,
             }),
           }),
         );
@@ -2764,11 +2755,7 @@ describe('OrdersService', () => {
       setupContext();
       const contextSpy = spyContext();
       try {
-        // El guard hace `findFirst({ where: { order_id, closed_at: { not: null } } })`.
-        // Una sesión con `closed_at: null` NO satisface ese WHERE (closed_at IS NULL,
-        // no NOT NULL), así que Prisma devuelve `null` aunque exista la sesión.
-        // Eso es lo correcto: la sesión existe pero sigue abierta → no bloqueamos.
-        mockPrismaService.table_sessions.findFirst.mockResolvedValue(null);
+        mockPrismaService.table_sessions.findFirst.mockResolvedValue({ id: 78, closed_at: null });
 
         arrangeEditableDraft();
 
@@ -2790,6 +2777,32 @@ describe('OrdersService', () => {
               state: { in: ['created', 'draft'] },
             }),
           }),
+        );
+        expect(mockPrismaService.table_sessions.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ order_id: 500, closed_at: null }) }),
+        );
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
+    it('PERMITE editar con historial cerrado y una sesión ABIERTA vigente', async () => {
+      setupContext();
+      const contextSpy = spyContext();
+      try {
+        mockPrismaService.table_sessions.findFirst.mockImplementation(async ({ where }) =>
+          where.closed_at === null ? { id: 79, closed_at: null } : { id: 77, closed_at: new Date() },
+        );
+        arrangeEditableDraft();
+        mockPrismaService.products.findUnique.mockResolvedValue({
+          id: 1, name: 'Test product', product_type: 'simple', product_variants: [],
+        } as any);
+
+        await service.updateOrderFromEditor(500, fullDto);
+
+        expect(mockPrismaService.orders.updateMany).toHaveBeenCalled();
+        expect(mockPrismaService.table_sessions.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ order_id: 500, closed_at: null }) }),
         );
       } finally {
         contextSpy.mockRestore();
@@ -2869,6 +2882,24 @@ describe('OrdersService', () => {
       } as any);
     };
 
+    it('rechaza PUT items sobre orden con solo sesión cerrada antes de escribir', async () => {
+      const contextSpy = jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: 1, organization_id: 1, user_id: 99,
+      } as any);
+      try {
+        arrange();
+        mockPrismaService.table_sessions.findFirst
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce({ id: 70 });
+
+        await expect(service.updateOrderItems(700, { items: [] } as any)).rejects
+          .toMatchObject({ errorCode: ErrorCodes.ORD_EDIT_NOT_ALLOWED_001.code });
+        expect(mockPrismaService.orders.update).not.toHaveBeenCalled();
+      } finally {
+        contextSpy.mockRestore();
+      }
+    });
+
     it('orden con order_item_taxes (antes 409): borra el desglose, recrea desde el catálogo y cabecera = Σ', async () => {
       const contextSpy = jest
         .spyOn(RequestContextService, 'getContext')
@@ -2882,6 +2913,11 @@ describe('OrdersService', () => {
         });
       try {
         arrange();
+        // La sesión abierta vigente habilita la edición aunque haya una
+        // sesión cerrada anterior para la misma orden (ADR-07).
+        mockPrismaService.table_sessions.findFirst.mockImplementation(async ({ where }) =>
+          where.closed_at === null ? { id: 71, closed_at: null } : { id: 70, closed_at: new Date() },
+        );
         // El cliente manda góndola 11.900 × 2, sin impuesto (payload tipo
         // reserva): el servidor despeja el incluido.
         await service.updateOrderItems(700, {
@@ -2897,6 +2933,10 @@ describe('OrdersService', () => {
           tax_amount: 0,
           total_amount: 23800,
         } as any);
+
+        expect(mockPrismaService.table_sessions.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ order_id: 700, closed_at: null }) }),
+        );
 
         expect(mockPrismaService.order_item_taxes.deleteMany).toHaveBeenCalledWith(
           { where: { order_items: { order_id: 700 } } },

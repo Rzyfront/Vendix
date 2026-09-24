@@ -1,9 +1,9 @@
 ---
 id: ADR-06
 title: "La entrega del mesero se enruta por el seam de orden, no por el de cocina"
-status: proposed
+status: accepted
 reversibility: trivial
-updated: 2026-09-20
+updated: 2026-09-23
 ---
 # ADR-06 — La entrega del mesero se enruta por el seam de orden, no por el de cocina
 
@@ -12,3 +12,5 @@ updated: 2026-09-20
 - **Consequences:** Los tres bugs se cierran con un cambio de destino en el frontend y cero cambios de contrato en backend, lo que hace la verificación barata y el rollback inmediato. La dirección de sincronización se invierte respecto de hoy — la orden manda y la cocina refleja —, que es la dirección correcta: la orden es lo que se cobra. Los tres códigos de error implicados siguen existiendo para el KDS, y se les da mensaje accionable en vez de eliminarlos. Quedan por reconciliar los caminos huérfanos que escriben `delivered_at` sin pasar por ningún seam (revert de ticket, despacho, bulk).
 - **Reversibility:** trivial — es una condición en el frontend; el endpoint de cocina permanece intacto.
 - **Revisit if:** aparece un flujo donde el mesero deba entregar un ticket entero deliberadamente (por ejemplo una bandeja completa), que sería una acción nueva sobre el seam de orden, no un retorno al de cocina.
+
+- **Owner approval:** 2026-09-23 — el dueño autorizó expresamente las cuatro propuestas ADR-05/06/07/08 para completar el plan.

@@ -1,0 +1,5 @@
+ tid | ticket | kti | kti_status | item | delivered_at 
+-----+--------+-----+------------+------+--------------
+ 115 | ready  | 123 | ready      | 1920 | 
+(1 row)
+

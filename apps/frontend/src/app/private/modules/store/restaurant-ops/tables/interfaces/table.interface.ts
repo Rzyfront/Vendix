@@ -229,13 +229,12 @@ export interface TableSessionOrderItem {
    * `cancelled_at` es la fuente de verdad (no hay columna `state` enum);
    * `cancellation_reason` queda persistido para auditoría y para que
    * el KDS / listado de ordenes puedan mostrarlo.
-   * `cancellation_type` clasifica el efecto contable:
-   *   - 'before_fire'      → stock revertido.
-   *   - 'after_fire_waste' → merma, stock NO revertido.
+   * `cancellation_type` clasifica el destino. `delivered_*` sólo se lee
+   * en registros históricos; ninguna cancelación nueva lo escribe.
    */
   cancelled_at: string | null;
   cancellation_reason: string | null;
-  cancellation_type: 'before_fire' | 'after_fire_waste' | null;
+  cancellation_type: 'before_fire' | 'after_fire_reused' | 'after_fire_waste' | 'delivered_restock' | 'delivered_waste' | null;
   /**
    * Snapshot of `products.product_type` taken at order creation by the
    * backend (see `table-sessions.service.ts:addItems`). The table
@@ -583,6 +582,23 @@ export interface ConfirmTablePaymentResult {
 export interface TransferTableSessionDto {
   source_table_id: number;
   target_table_id: number;
+}
+
+/** G.2: reuses the existing order and creates a new table session. */
+export interface ReassignTableSessionDto {
+  order_id: number;
+  target_table_id: number;
+}
+
+/** Read-side evidence for hiding reassignment when financial history exists. */
+export interface TableOrderReassignmentEvidence {
+  id: number;
+  state: string;
+  total_paid: number | string;
+  active_financial_split_id: number | null;
+  payments: Array<{ state: string }>;
+  // The orders detail endpoint currently projects only its latest invoice.
+  invoices: Array<{ status: string }>;
 }
 
 export type TransferMode = 'transfer' | 'swap';

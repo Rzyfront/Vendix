@@ -1,0 +1,10 @@
+ quantity_on_hand 
+------------------
+             9400
+(1 row)
+
+ quantity_on_hand 
+------------------
+                0
+(1 row)
+

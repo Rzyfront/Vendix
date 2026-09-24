@@ -104,10 +104,15 @@
                       → el mesero aún no la liberó).
                     - Pendiente (aún sin pagar).
                 -->
-                @if (isClosed()) {
+                @if (isClosed() && isPaid()) {
                   <app-badge variant="success" size="sm">
                     <app-icon name="circle-check" [size]="12"></app-icon>
                     Pagada / Cerrada
+                  </app-badge>
+                } @else if (isClosed()) {
+                  <app-badge variant="warning" size="sm">
+                    <app-icon name="clock" [size]="12"></app-icon>
+                    Cerrada · pago pendiente
                   </app-badge>
                 } @else if (isPaid()) {
                   <app-badge variant="info" size="sm">
@@ -438,8 +443,10 @@
                             >
                               <app-icon name="ban" [size]="11"></app-icon>
                               Cancelado
-                              @if (item.cancellation_type === 'after_fire_waste') {
+                              @if (item.cancellation_type === 'after_fire_waste' || item.cancellation_type === 'delivered_waste') {
                                 · merma
+                              } @else if (item.cancellation_type === 'after_fire_reused' || item.cancellation_type === 'delivered_restock') {
+                                · reuso
                               }
                             </span>
                           }
@@ -645,7 +652,7 @@
     }
   </div>
 
-  <!-- Mobile sticky-cta: [···] [Agregar items] [Cobrar] -->
+  <!-- Mobile sticky-cta: open check actions or closed-check reassignment. -->
   @if (session() && !isClosed()) {
     <div class="session-cta">
       <app-button
@@ -687,6 +694,19 @@
           Cobrar
         </app-button>
       }
+    </div>
+  } @else if (canReassignClosedOrder()) {
+    <div class="session-cta">
+      <app-button
+        variant="primary"
+        size="md"
+        customClasses="!h-11"
+        [fullWidth]="true"
+        (clicked)="onSecondaryAction('reassign')"
+      >
+        <app-icon slot="icon" name="arrow-right-left" [size]="15"></app-icon>
+        Volver a asignar mesa
+      </app-button>
     </div>
   }
 
@@ -732,8 +752,11 @@
     [isOpen]="isTransferOpen()"
     [table]="transferSourceTable()"
     [tables]="[]"
+    [mode]="tableMoveMode()"
+    [orderId]="session()?.order_id ?? null"
     (isOpenChange)="isTransferOpen.set($event)"
     (confirmed)="onTransferConfirmed($event)"
+    (reassigned)="onReassignmentConfirmed($event)"
   />
 
   @if (checkoutEnabled()) {
@@ -782,5 +805,19 @@
     [isSubmitting]="isFiring()"
     (confirmed)="onKitchenConfirmed($event)"
     (cancelled)="onKitchenCancelled()"
+  />
+
+  <!-- D.4 — modal compartido "Destino del plato" (mismo componente que detalle de orden). -->
+  <app-item-cancellation-modal
+    [isOpen]="cancellationModalOpen()"
+    (isOpenChange)="!$event && closeItemCancellationModal()"
+    [itemName]="cancellationTarget()?.product_name || ''"
+    [showDestination]="cancellationPreparedFired()"
+    [canReuse]="cancellationPreparedFired()"
+    [inFlight]="removingItemId() !== null"
+    [serverError]="cancellationError()"
+    [currentTotal]="orderTotal()"
+    [preview]="mesaCancellationPreview()"
+    (confirmed)="onCancellationConfirmed($event)"
   />
 </div>

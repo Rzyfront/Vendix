@@ -164,6 +164,19 @@ export class TransferTableSessionDto {
   target_table_id!: number;
 }
 
+/** Open a new session for an existing order without reopening its closed history. */
+export class ReassignTableSessionDto {
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  order_id!: number;
+
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  target_table_id!: number;
+}
+
 /**
  * DTO to add a batch of items to an existing open table session.
  *

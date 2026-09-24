@@ -4,7 +4,7 @@ import { TableSessionsService } from './table-sessions.service';
 import { TablesService } from './tables.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { VendixHttpException } from 'src/common/errors';
+import { ErrorCodes, VendixHttpException } from 'src/common/errors';
 // F-165: `resolveOrderLineFinals` (vía `findOne`) sólo expone `.total` — para
 // observar `unclosed_residual_cents` (el campo que declara el contrato
 // closest-below, F-158) hay que llamar al kernel directamente con los mismos
@@ -40,6 +40,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         findFirst: jest.fn(),
         findUnique: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       orders: {
         create: jest.fn(),
@@ -74,6 +75,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         findFirst: jest.fn().mockResolvedValue({ currency: 'COP' }),
       },
       $transaction: jest.fn((cb: any) => cb(prismaMock)),
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 100, state: 'draft', active_financial_split_id: null }]),
     };
 
     jest
@@ -159,8 +161,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
 
     it('marks the open session inside its own transaction and emits only after commit', async () => {
       prismaMock.table_sessions.findFirst.mockResolvedValue({ id: sessionId, paid_at: null });
-      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: null, order_id: orderId });
-      prismaMock.table_sessions.update.mockResolvedValue({ id: sessionId, paid_at: paidAt, order_id: orderId });
+      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: paidAt, order_id: orderId });
       const push = (service as any).notificationsSseService.push as jest.Mock;
       prismaMock.$transaction.mockImplementationOnce(async (run: any) => {
         const result = await run(prismaMock);
@@ -172,14 +173,14 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
 
       expect(projection?.sessionId).toBe(sessionId);
       expect(prismaMock.table_sessions.findUnique).toHaveBeenCalledWith({
-        where: { id: sessionId },
+        where: { id: sessionId, store_id: STORE_ID },
         select: { id: true, paid_at: true, order_id: true },
       });
-      expect(prismaMock.table_sessions.update).toHaveBeenCalledWith({
-        where: { id: sessionId },
+      expect(prismaMock.table_sessions.updateMany).toHaveBeenCalledWith({
+        where: { id: sessionId, store_id: STORE_ID, paid_at: null },
         data: { paid_at: expect.any(Date), updated_at: expect.any(Date) },
-        select: { id: true, paid_at: true, order_id: true },
       });
+      expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
       expect(prismaMock.tables.update).not.toHaveBeenCalled();
       expect(push).toHaveBeenCalledWith(STORE_ID, expect.objectContaining({
         type: 'session_paid',
@@ -205,22 +206,42 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       prismaMock.table_sessions.findFirst
         .mockResolvedValueOnce({ id: sessionId, paid_at: null })
         .mockResolvedValueOnce({ id: sessionId, paid_at: paidAt });
-      prismaMock.table_sessions.findUnique
-        .mockResolvedValueOnce({ id: sessionId, paid_at: null, order_id: orderId })
-        .mockResolvedValueOnce({ id: sessionId, paid_at: paidAt, order_id: orderId });
-      prismaMock.table_sessions.update.mockResolvedValue({ id: sessionId, paid_at: paidAt, order_id: orderId });
+      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: paidAt, order_id: orderId });
+      prismaMock.table_sessions.updateMany
+        .mockResolvedValueOnce({ count: 1 })
+        .mockResolvedValueOnce({ count: 0 });
 
       await service.projectOrderPaymentToTableSession(orderId, paymentId);
       await service.projectOrderPaymentToTableSession(orderId, paymentId);
 
-      expect(prismaMock.table_sessions.update).toHaveBeenCalledTimes(1);
+      expect(prismaMock.table_sessions.updateMany).toHaveBeenCalledTimes(2);
+      expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
       expect((service as any).notificationsSseService.push).toHaveBeenCalledTimes(1);
+    });
+
+    it('stale concurrent read loses the paid_at claim and emits no duplicate session_paid', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue({ id: sessionId, paid_at: null });
+      prismaMock.table_sessions.findUnique.mockImplementation(async () =>
+        prismaMock.table_sessions.updateMany.mock.calls.length
+          ? { id: sessionId, paid_at: paidAt, order_id: orderId }
+          : { id: sessionId, paid_at: null, order_id: orderId },
+      );
+      prismaMock.table_sessions.update.mockResolvedValue({ id: sessionId, paid_at: paidAt, order_id: orderId });
+      prismaMock.table_sessions.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.projectOrderPaymentToTableSession(orderId, paymentId);
+
+      expect(prismaMock.table_sessions.updateMany).toHaveBeenCalledWith({
+        where: { id: sessionId, store_id: STORE_ID, paid_at: null },
+        data: { paid_at: expect.any(Date), updated_at: expect.any(Date) },
+      });
+      expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+      expect((service as any).notificationsSseService.push).not.toHaveBeenCalled();
     });
 
     it('uses a supplied transaction and defers the event to its owner', async () => {
       prismaMock.table_sessions.findFirst.mockResolvedValue({ id: sessionId, paid_at: null });
-      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: null, order_id: orderId });
-      prismaMock.table_sessions.update.mockResolvedValue({ id: sessionId, paid_at: paidAt, order_id: orderId });
+      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: paidAt, order_id: orderId });
 
       const projection = await service.projectOrderPaymentToTableSession(
         orderId,
@@ -278,18 +299,17 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 40));
       prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100, total_paid: 40 });
       prismaMock.table_sessions.findFirst.mockResolvedValue({ id: sessionId, paid_at: null });
-      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: null, order_id: orderId });
-      prismaMock.table_sessions.update.mockResolvedValue({ id: sessionId, paid_at: new Date(), order_id: orderId });
+      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: new Date(), order_id: orderId });
       let paymentCommitted = false;
       prismaMock.$transaction.mockImplementationOnce(async (run: any) => {
         const result = await run(prismaMock);
-        expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+        expect(prismaMock.table_sessions.updateMany).not.toHaveBeenCalled();
         paymentCommitted = true;
         return result;
       });
-      prismaMock.table_sessions.update.mockImplementationOnce(async () => {
+      prismaMock.table_sessions.updateMany.mockImplementationOnce(async () => {
         expect(paymentCommitted).toBe(true);
-        return { id: sessionId, paid_at: new Date(), order_id: orderId };
+        return { count: 1 };
       });
 
       await expect(service.confirmPayment(sessionId, paymentId)).resolves.toEqual({
@@ -299,7 +319,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       expect(prismaMock.orders.update).toHaveBeenCalledWith(expect.objectContaining({
         data: expect.objectContaining({ total_paid: 100, remaining_balance: 0 }),
       }));
-      expect(prismaMock.table_sessions.update).toHaveBeenCalledTimes(1);
+      expect(prismaMock.table_sessions.updateMany).toHaveBeenCalledTimes(1);
       expect((service as any).notificationsSseService.push).toHaveBeenCalledWith(
         STORE_ID,
         expect.objectContaining({ type: 'session_paid' }),
@@ -316,7 +336,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         data: expect.objectContaining({ total_paid: 80, remaining_balance: 20 }),
       }));
       expect(prismaMock.table_sessions.findFirst).not.toHaveBeenCalled();
-      expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+      expect(prismaMock.table_sessions.updateMany).not.toHaveBeenCalled();
     });
 
     it('cuenta dividida: payment.received lleva la porción del pago (D=C) y el último el remanente', async () => {
@@ -368,9 +388,10 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       let sessionPaidAt: Date | null = null;
       prismaMock.table_sessions.findFirst.mockImplementation(async () => ({ id: sessionId, paid_at: sessionPaidAt }));
       prismaMock.table_sessions.findUnique.mockImplementation(async () => ({ id: sessionId, paid_at: sessionPaidAt, order_id: orderId }));
-      prismaMock.table_sessions.update.mockImplementation(async () => {
+      prismaMock.table_sessions.updateMany.mockImplementation(async () => {
+        if (sessionPaidAt) return { count: 0 };
         sessionPaidAt = paidAt;
-        return { id: sessionId, paid_at: paidAt, order_id: orderId };
+        return { count: 1 };
       });
 
       await service.confirmPayment(sessionId, paymentId);
@@ -378,8 +399,41 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
 
       expect(prismaMock.payments.update).not.toHaveBeenCalled();
       expect(prismaMock.orders.update).not.toHaveBeenCalled();
-      expect(prismaMock.table_sessions.update).toHaveBeenCalledTimes(1);
+      expect(prismaMock.table_sessions.updateMany).toHaveBeenCalledTimes(2);
       expect((service as any).notificationsSseService.push).toHaveBeenCalledTimes(1);
+    });
+
+    it('expone ERR-33 tipado al final sin perder SSE/caja cuando la proyección falla', async () => {
+      prismaMock.payments.findFirst.mockResolvedValue(payment('pending', 40));
+      prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100, total_paid: 40 });
+      prismaMock.table_sessions.findFirst.mockResolvedValue({ id: sessionId, paid_at: null });
+      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: null, order_id: orderId });
+      prismaMock.table_sessions.updateMany.mockRejectedValue(new Error('projection failed'));
+      const cashSpy = jest
+        .spyOn(service as any, 'recordStaffCashMovement')
+        .mockResolvedValue(undefined);
+
+      const error = await service.confirmPayment(sessionId, paymentId).catch((failure) => failure);
+
+      // Typed at the end — never the raw projection error, never a 500.
+      expect(error).toBeInstanceOf(VendixHttpException);
+      expect(error.errorCode).toBe('POS_TABLE_SESSION_PROJECTION_FAILED_001');
+      // Payment kept succeeded; balances committed.
+      expect(prismaMock.payments.update).toHaveBeenCalledTimes(1);
+      expect(prismaMock.orders.update).toHaveBeenCalledTimes(1);
+      // Side effects NOT skipped: comensal SSE, staff notification, cash.
+      expect((service as any).notificationsSseService.push).toHaveBeenCalledWith(
+        STORE_ID,
+        expect.objectContaining({ type: 'payment.confirmed' }),
+      );
+      expect((service as any).notificationsService.createAndBroadcast).toHaveBeenCalledWith(
+        STORE_ID,
+        'table_payment_confirmed',
+        expect.any(String),
+        expect.any(String),
+        expect.objectContaining({ table_session_id: sessionId, payment_id: paymentId }),
+      );
+      expect(cashSpy).toHaveBeenCalledTimes(1);
     });
 
     it('can retry a projection failure after the payment already committed', async () => {
@@ -388,20 +442,26 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         .mockResolvedValueOnce(payment('succeeded', 100));
       prismaMock.orders.findUnique.mockResolvedValue({ grand_total: 100, total_paid: 40 });
       prismaMock.table_sessions.findFirst.mockResolvedValue({ id: sessionId, paid_at: null });
-      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: null, order_id: orderId });
-      prismaMock.table_sessions.update
+      prismaMock.table_sessions.findUnique.mockResolvedValue({ id: sessionId, paid_at: new Date(), order_id: orderId });
+      prismaMock.table_sessions.updateMany
         .mockRejectedValueOnce(new Error('projection failed'))
-        .mockResolvedValueOnce({ id: sessionId, paid_at: new Date(), order_id: orderId });
+        .mockResolvedValueOnce({ count: 1 });
 
-      await expect(service.confirmPayment(sessionId, paymentId)).rejects.toThrow('projection failed');
+      // T5/G2: the first attempt fails typed AFTER the payment committed —
+      // never with the raw projection error — and the retry repairs it.
+      const first = await service.confirmPayment(sessionId, paymentId).catch((failure) => failure);
+      expect(first).toBeInstanceOf(VendixHttpException);
+      expect(first.errorCode).toBe('POS_TABLE_SESSION_PROJECTION_FAILED_001');
       await expect(service.confirmPayment(sessionId, paymentId)).resolves.toEqual({
         state: 'succeeded', payment_id: paymentId,
       });
 
       expect(prismaMock.payments.update).toHaveBeenCalledTimes(1);
       expect(prismaMock.orders.update).toHaveBeenCalledTimes(1);
-      expect(prismaMock.table_sessions.update).toHaveBeenCalledTimes(2);
-      expect((service as any).notificationsSseService.push).toHaveBeenCalledTimes(1);
+      expect(prismaMock.table_sessions.updateMany).toHaveBeenCalledTimes(2);
+      // First call still pushed `payment.confirmed`; the retry emits `session_paid`.
+      expect((service as any).notificationsSseService.push).toHaveBeenCalledTimes(2);
+      expect((service as any).notificationsService.createAndBroadcast).toHaveBeenCalledTimes(1);
     });
 
     it('does not project a failed payment or a succeeded partial retry', async () => {
@@ -566,6 +626,34 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       await expect(
         service.addItems(1, { items: [{ product_id: 1, quantity: 1 }] } as any),
       ).rejects.toBeInstanceOf(VendixHttpException);
+    });
+
+    it('rechaza agregar líneas a una cuenta con split activo antes de escribir ítems o totales', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue({
+        id: 1,
+        order_id: 100,
+        closed_at: null,
+        table_id: 5,
+        order: { id: 100, state: 'draft', order_items: [] },
+        table: { id: 5, name: 'Mesa 5', zone: null, status: 'occupied' },
+      });
+      prismaMock.products.findMany.mockResolvedValue([{
+        id: 425,
+        name: 'Servicio QA',
+        base_price: 10000,
+        is_sellable: true,
+        product_type: 'service',
+        track_inventory: false,
+      }]);
+      prismaMock.$queryRaw.mockResolvedValueOnce([{
+        id: 100, state: 'draft', active_financial_split_id: 2,
+      }]);
+
+      await expect(service.addItems(1, {
+        items: [{ product_id: 425, quantity: 1 }],
+      } as any)).rejects.toMatchObject({ errorCode: 'SPLIT_ACCOUNT_LOCKED' });
+      expect(prismaMock.order_items.create).not.toHaveBeenCalled();
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
     });
 
     it('appends lines and re-derives totals in a single transaction', async () => {
@@ -1888,6 +1976,212 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       prismaMock.table_sessions.update.mockRejectedValueOnce(raw);
 
       await expect(service.transferSession(SRC, DST)).rejects.toBe(raw);
+    });
+  });
+
+  describe('reassignSessionToTable (G.2 / ADR-07)', () => {
+    const ORDER_ID = 9001;
+    const TARGET_ID = 7;
+    const CLOSED_ID = 76;
+    const NEW_ID = 77;
+    const closedAt = new Date('2026-09-20T10:00:00Z');
+    const openedAt = new Date('2026-09-23T10:00:00Z');
+    const dto = { order_id: ORDER_ID, target_table_id: TARGET_ID };
+    const newSession = {
+      id: NEW_ID, store_id: STORE_ID, order_id: ORDER_ID, table_id: TARGET_ID,
+      opened_by: USER_ID, opened_at: openedAt, closed_at: null, guest_count: 2,
+    };
+
+    beforeEach(() => {
+      prismaMock.orders.findFirst
+        .mockResolvedValueOnce({ id: ORDER_ID, store_id: STORE_ID })
+        .mockResolvedValueOnce({ id: ORDER_ID, state: 'draft', active_financial_split_id: null });
+      prismaMock.$queryRaw
+        .mockResolvedValueOnce([{ id: ORDER_ID, state: 'draft' }])
+        .mockResolvedValueOnce([]);
+      prismaMock.table_sessions.findMany = jest.fn().mockResolvedValue([
+        { id: CLOSED_ID, table_id: 5, closed_at: closedAt, guest_count: 2 },
+      ]);
+      prismaMock.table_sessions.findFirst.mockResolvedValue(null);
+      prismaMock.table_sessions.create.mockResolvedValue(newSession);
+      prismaMock.invoices = { findMany: jest.fn().mockResolvedValue([]) };
+      prismaMock.kitchen_tickets = { updateMany: jest.fn().mockResolvedValue({ count: 1 }) };
+      prismaMock.tables.findFirst.mockResolvedValue({
+        id: TARGET_ID, store_id: STORE_ID, name: 'Mesa 7', zone: null, status: 'available',
+      });
+      prismaMock.tables.update.mockResolvedValue({});
+      prismaMock.tables.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      jest.spyOn(service, 'findOne').mockResolvedValue(newSession as any);
+    });
+
+    const expectNoWrites = () => {
+      expect(prismaMock.table_sessions.create).not.toHaveBeenCalled();
+      expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+      expect(prismaMock.tables.update).not.toHaveBeenCalled();
+      expect(prismaMock.tables.updateMany).not.toHaveBeenCalled();
+      expect(prismaMock.kitchen_tickets.updateMany).not.toHaveBeenCalled();
+      expect(prismaMock.orders.create).not.toHaveBeenCalled();
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+    };
+
+    it('locks, re-reads scoped eligibility, creates only a new session and re-stamps kitchen in one tx', async () => {
+      const push = (service as any).notificationsSseService.push as jest.Mock;
+      prismaMock.$transaction.mockImplementationOnce(async (run: any) => {
+        const result = await run(prismaMock);
+        expect(push).not.toHaveBeenCalled();
+        return result;
+      });
+
+      await expect(service.reassignSessionToTable(dto)).resolves.toMatchObject(newSession);
+
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1);
+      expect(prismaMock.orders.findFirst).toHaveBeenNthCalledWith(1, {
+        where: { id: ORDER_ID, store_id: STORE_ID },
+        select: { id: true, store_id: true },
+      });
+      expect(prismaMock.$queryRaw).toHaveBeenCalledTimes(2);
+      expect(prismaMock.$queryRaw.mock.invocationCallOrder[0])
+        .toBeLessThan(prismaMock.orders.findFirst.mock.invocationCallOrder[1]);
+      expect(prismaMock.$queryRaw.mock.invocationCallOrder[1])
+        .toBeLessThan(prismaMock.table_sessions.findMany.mock.invocationCallOrder[0]);
+      expect(prismaMock.table_sessions.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { order_id: ORDER_ID, store_id: STORE_ID },
+      }));
+      expect(prismaMock.payments.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { order_id: ORDER_ID },
+      }));
+      expect(prismaMock.invoices.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { order_id: ORDER_ID, store_id: STORE_ID },
+      }));
+      expect(prismaMock.table_sessions.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          order_id: ORDER_ID, table_id: TARGET_ID, store_id: STORE_ID,
+          opened_by: USER_ID, guest_count: 2,
+        }),
+      });
+      expect(prismaMock.kitchen_tickets.updateMany).toHaveBeenCalledWith({
+        where: { order_id: ORDER_ID, store_id: STORE_ID },
+        data: { table_id: TARGET_ID },
+      });
+      expect(prismaMock.tables.updateMany).toHaveBeenCalledWith({
+        where: { id: TARGET_ID, store_id: STORE_ID, status: 'available' },
+        data: { status: 'occupied', updated_at: expect.any(Date) },
+      });
+      expect(prismaMock.tables.update).not.toHaveBeenCalled();
+      expect(prismaMock.table_sessions.update).not.toHaveBeenCalled();
+      expect(prismaMock.orders.create).not.toHaveBeenCalled();
+      expect(prismaMock.orders.update).not.toHaveBeenCalled();
+      expect(prismaMock.order_items.create).not.toHaveBeenCalled();
+      expect(push).toHaveBeenCalledWith(STORE_ID, expect.objectContaining({ type: 'session_opened' }));
+      expect(push).toHaveBeenCalledWith(STORE_ID, expect.objectContaining({
+        type: 'table_status_changed',
+        data: expect.objectContaining({ table_id: TARGET_ID, status: 'occupied' }),
+      }));
+    });
+
+    it('rejects an order from another store before opening a transaction', async () => {
+      prismaMock.orders.findFirst.mockReset().mockResolvedValue(null);
+      await expect(service.reassignSessionToTable(dto)).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_FIND_001.code,
+      });
+      expect(prismaMock.$transaction).not.toHaveBeenCalled();
+      expectNoWrites();
+    });
+
+    it.each(['cancelled', 'refunded'])('rejects order state %s before writes', async (state) => {
+      prismaMock.orders.findFirst.mockReset()
+        .mockResolvedValueOnce({ id: ORDER_ID, store_id: STORE_ID })
+        .mockResolvedValueOnce({ id: ORDER_ID, state, active_financial_split_id: null });
+      await expect(service.reassignSessionToTable(dto)).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_TABLE_REASSIGN_ORDER_STATE_001.code,
+        response: { details: { state } },
+      });
+      expectNoWrites();
+    });
+
+    it('rejects an order without table history with typed 404', async () => {
+      prismaMock.table_sessions.findMany.mockResolvedValue([]);
+      await expect(service.reassignSessionToTable(dto)).rejects.toMatchObject({
+        errorCode: ErrorCodes.TABLE_SESSION_NOT_FOUND.code,
+      });
+      expectNoWrites();
+    });
+
+    it('rejects an order already holding an open table session', async () => {
+      prismaMock.table_sessions.findMany.mockResolvedValue([{ id: 88, closed_at: null }]);
+      await expect(service.reassignSessionToTable(dto)).rejects.toMatchObject({
+        errorCode: ErrorCodes.TABLE_SESSION_ALREADY_OPEN.code,
+      });
+      expectNoWrites();
+    });
+
+    it.each([
+      ['payment', 'settled_payment'],
+      ['split', 'active_financial_split'],
+      ['invoice', 'issued_invoice'],
+    ])('rejects %s financial evidence with details.reason', async (kind, reason) => {
+      if (kind === 'payment') prismaMock.payments.findMany.mockResolvedValue([{ state: 'partially_refunded' }]);
+      if (kind === 'split') {
+        prismaMock.orders.findFirst.mockReset()
+          .mockResolvedValueOnce({ id: ORDER_ID, store_id: STORE_ID })
+          .mockResolvedValueOnce({ id: ORDER_ID, state: 'draft', active_financial_split_id: 3 });
+      }
+      if (kind === 'invoice') prismaMock.invoices.findMany.mockResolvedValue([{ status: 'rejected' }]);
+      await expect(service.reassignSessionToTable(dto)).rejects.toMatchObject({
+        errorCode: ErrorCodes.ORD_TABLE_REASSIGN_NOT_ELIGIBLE_001.code,
+        response: { details: { reason } },
+      });
+      expectNoWrites();
+    });
+
+    it.each([
+      ['reserved', ErrorCodes.TABLE_INVALID_STATUS.code],
+      ['cleaning', ErrorCodes.TABLE_INVALID_STATUS.code],
+      ['occupied', ErrorCodes.TABLE_SESSION_ALREADY_OPEN.code],
+    ])('rejects target table status %s with %s', async (status, errorCode) => {
+      prismaMock.tables.findFirst.mockResolvedValue({ id: TARGET_ID, store_id: STORE_ID, status });
+      await expect(service.reassignSessionToTable(dto)).rejects.toMatchObject({ errorCode });
+      expectNoWrites();
+    });
+
+    it('rolls back and returns typed conflict when target loses available-status CAS', async () => {
+      prismaMock.tables.updateMany.mockResolvedValue({ count: 0 });
+      await expect(service.reassignSessionToTable(dto)).rejects.toMatchObject({
+        errorCode: ErrorCodes.SYS_CONFLICT_001.code,
+      });
+      expect(prismaMock.table_sessions.create).not.toHaveBeenCalled();
+      expect(prismaMock.kitchen_tickets.updateMany).not.toHaveBeenCalled();
+      expect(prismaMock.tables.update).not.toHaveBeenCalled();
+      expect((service as any).notificationsSseService.push).not.toHaveBeenCalled();
+    });
+
+    it('rejects a target table from another store with typed 404', async () => {
+      prismaMock.tables.findFirst.mockResolvedValue(null);
+      await expect(service.reassignSessionToTable(dto)).rejects.toMatchObject({
+        errorCode: ErrorCodes.TABLE_NOT_FOUND.code,
+      });
+      expectNoWrites();
+    });
+
+    it('rejects a raced target session before creating a new row', async () => {
+      prismaMock.table_sessions.findFirst.mockResolvedValue({ id: 99 });
+      await expect(service.reassignSessionToTable(dto)).rejects.toMatchObject({
+        errorCode: ErrorCodes.TABLE_SESSION_ALREADY_OPEN.code,
+      });
+      expectNoWrites();
+    });
+
+    it.each([
+      ['P2002', ErrorCodes.TABLE_SESSION_ALREADY_OPEN.code],
+      ['P2034', ErrorCodes.SYS_CONFLICT_001.code],
+    ])('maps Prisma %s to %s without post-commit event', async (code, errorCode) => {
+      prismaMock.table_sessions.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('raced', { code, clientVersion: 'test' }),
+      );
+      await expect(service.reassignSessionToTable(dto)).rejects.toMatchObject({ errorCode });
+      expect(prismaMock.tables.update).not.toHaveBeenCalled();
+      expect(prismaMock.kitchen_tickets.updateMany).not.toHaveBeenCalled();
+      expect((service as any).notificationsSseService.push).not.toHaveBeenCalled();
     });
   });
 

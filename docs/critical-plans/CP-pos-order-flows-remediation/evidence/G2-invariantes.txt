@@ -1,0 +1,35 @@
+# G.2 invariantes reassign 1189->mesa27 — 2026-09-24T01:21:44Z
+ abiertas | total 
+----------+-------
+        1 |     2
+(1 row)
+
+ id  | table_id | open | paid_at | opened_by 
+-----+----------+------+---------+-----------
+ 125 |       26 | f    |         |       241
+ 129 |       27 | t    |         |       162
+(2 rows)
+
+  id  | state |    order_number     
+------+-------+---------------------
+ 1189 | draft | T-1790173465842-444
+(1 row)
+
+ id  | table_id |  status   
+-----+----------+-----------
+ 114 |       27 | ready
+ 113 |       27 | delivered
+(2 rows)
+
+  id  | inventory_consumed_at_fire 
+------+----------------------------
+ 1914 | t
+ 1915 | t
+(2 rows)
+
+ id |  status  
+----+----------
+ 26 | cleaning
+ 27 | occupied
+(2 rows)
+

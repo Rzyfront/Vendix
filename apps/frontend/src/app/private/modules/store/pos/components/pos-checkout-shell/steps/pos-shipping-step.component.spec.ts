@@ -352,6 +352,127 @@ describe('PosShippingStepComponent — preserve order shipping and explicit edit
     expect(customers.createCustomerAddress).not.toHaveBeenCalled();
     expect(process).toHaveBeenCalled();
   });
+
+  it('sends alias delivery snapshot without creating an address or sending an id', () => {
+    const state = cart();
+    state.customer = null;
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    fixture.componentRef.setInput('customerAlias', 'Portería torre B');
+    mount(state);
+    component.address.set(originalAddress);
+    component.addressValid.set(true);
+    component.manualCostOverride.set(true);
+    component.shippingCost.set(5000);
+    const payment = TestBed.inject(PosPaymentService) as any;
+    payment.processShippingSale = jasmine.createSpy('processShippingSale').and.returnValue(
+      of({ success: true, order: { id: 700 } }),
+    );
+
+    expect(component.canConfirm()).toBeTrue();
+    component.execute({ mode: 'contado', method: { id: '1', type: 'cash' } } as any);
+
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(payment.processShippingSale.calls.mostRecent().args[1]).toEqual(jasmine.objectContaining({
+      customerAlias: 'Portería torre B', shippingAddressId: null,
+      shippingAddress: jasmine.objectContaining({
+        address_line1: originalAddress.address_line1, recipient_name: 'Portería torre B',
+        latitude: 3.45, longitude: -76.5, municipality_code: '76001',
+      }),
+    }));
+  });
+
+  it('builds alias draft context with snapshot but no address id or POST', () => {
+    const state = cart();
+    state.customer = null;
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    fixture.componentRef.setInput('customerAlias', 'Portería torre B');
+    mount(state);
+    component.address.set(originalAddress);
+    component.addressValid.set(true);
+    const context = component.buildShippingContext()!;
+    expect(context.customerAlias).toBe('Portería torre B');
+    expect(context.shippingAddress).toEqual(jasmine.objectContaining({
+      recipient_name: 'Portería torre B', latitude: 3.45, longitude: -76.5,
+      municipality_code: '76001',
+    }));
+    expect(context.shippingAddressId).toBeUndefined();
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+  });
+
+  it('retains zero map coordinates and omits absent municipality code in alias snapshot', () => {
+    const state = cart();
+    state.customer = null;
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    fixture.componentRef.setInput('customerAlias', 'Portería torre B');
+    mount(state);
+    component.address.set({ ...originalAddress, latitude: 0, longitude: 0, municipality_code: null });
+    const snapshot = component.buildShippingContext()!.shippingAddress;
+
+    expect(snapshot.latitude).toBe(0);
+    expect(snapshot.longitude).toBe(0);
+    expect(snapshot.municipality_code).toBeUndefined();
+  });
+
+  it('omits a registered customer address FK when switching an adopted draft to alias', () => {
+    const state = cart();
+    state.customer = null;
+    fixture.componentRef.setInput('customerAlias', 'Portería torre B');
+    mount(state);
+    component.address.set(originalAddress);
+    component.addressValid.set(true);
+    component.addressId.set(33);
+    expect(component.addressId()).toBe(33);
+    expect(component.buildShippingContext()?.shippingAddressId).toBeUndefined();
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+  });
+
+  it('charges alias delivery without calling the address API', () => {
+    const state = cart();
+    state.customer = null;
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    fixture.componentRef.setInput('customerAlias', 'Portería torre B');
+    mount(state);
+    component.address.set(originalAddress);
+    component.addressValid.set(true);
+    component.manualCostOverride.set(true);
+    const payment = TestBed.inject(PosPaymentService) as any;
+    payment.processShippingSale = jasmine.createSpy('processShippingSale').and.returnValue(
+      of({ success: true, order: { id: 700 } }),
+    );
+
+    component.execute({ mode: 'contado', method: { id: '1', type: 'cash' } } as any);
+
+    expect(customers.createCustomerAddress).not.toHaveBeenCalled();
+    expect(payment.processShippingSale).toHaveBeenCalledTimes(1);
+    expect(component.isProcessing()).toBeFalse();
+  });
+
+  it('keeps registered-customer address creation and primary flag', () => {
+    const state = cart();
+    state.shippingContext = undefined;
+    state.linkedOrderId = null;
+    state.customer = { ...state.customer!, addresses: [] };
+    mount(state);
+    component.address.set(originalAddress);
+    component.addressValid.set(true);
+    component.manualCostOverride.set(true);
+    customers.createCustomerAddress.and.returnValue(of({ id: 321 }));
+    const payment = TestBed.inject(PosPaymentService) as any;
+    payment.processShippingSale = jasmine.createSpy('processShippingSale').and.returnValue(
+      of({ success: true, order: { id: 700 } }),
+    );
+
+    component.execute({ mode: 'contado', method: { id: '1', type: 'cash' } } as any);
+
+    expect(customers.createCustomerAddress.calls.mostRecent().args[0]).toEqual(
+      jasmine.objectContaining({ customer_id: 99, is_primary: true }),
+    );
+    expect(payment.processShippingSale.calls.mostRecent().args[1].shippingAddressId).toBe(321);
+  });
 });
 
 describe('posShippingRateIdForPayload', () => {

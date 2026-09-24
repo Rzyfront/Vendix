@@ -2,9 +2,9 @@
 id: A.1
 title: "Guard contra orden duplicada al cobrar un borrador reabierto"
 phase: A
-status: in-progress
+status: done
 owner: A1-pos-draft
-updated: 2026-09-22
+updated: 2026-09-24
 contracts: [FB-01, FB-02, ERR-34, ERR-35, DB-02, DB-14]
 adrs: []
 skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-error-handling, vendix-prisma-scopes, vendix-zoneless-signals, how-to-test]
@@ -32,18 +32,18 @@ skills: [vendix-backend, vendix-backend-api, vendix-validation, vendix-error-han
   - `npx ng test --include='**/pos-shipping-step.component.spec.ts' --watch=false --browsers=ChromeHeadless` desde `apps/frontend`
   - Playwright MCP — recorrido 1 del hub: guardar borrador de envío → reabrir → editar → cobrar; capturar el conteo de `orders` antes y después en `evidence/A.1-e2e-recorrido1.md`
 - **Acceptance checklist:**
-  - [ ] `CreatePosPaymentDto` declara `order_id?: number` con `@IsOptional() @IsInt() @Min(1) @Type(() => Number)`
-  - [ ] La orden referida por `order_id` se resuelve dentro del scope de tienda; una orden ajena devuelve 404 sin filtrar datos
-  - [ ] Con `order_id` presente, `createOrUpdateOrderFromPos` liquida esa orden y NO llama a la rama de venta fresca
-  - [ ] `POS_DRAFT_DUPLICATE_ORDER_001` está registrado en `error-codes.ts` con HTTP 409 y se lanza con `VendixHttpException`
-  - [ ] El guard rechaza cuando la orden referida ya tiene un pago `succeeded` o `captured`, y el mensaje nombra el número de orden
-  - [ ] `pos-shipping-step.component.ts` declara `editingOrderId` como `input<number | null>(null)` y el shell se lo pasa
-  - [ ] `processShippingSale` envía `order_id` cuando el carrito está adoptado y lo omite cuando no lo está
-  - [ ] El fiado (`:717`) y el fiado con plazos (`:801`) dejan de responder 400 y registran la cuenta por cobrar
-  - [ ] Cobrar un borrador reabierto no incrementa el conteo de filas de `orders`, verificado por SQL antes/después
-  - [ ] `payments.order_id` del cobro apunta a la orden preexistente, no a una nueva
-  - [ ] Hay un test que falla antes del fix y que fija `errorCode` (no solo `toBeInstanceOf(VendixHttpException)`)
-  - [ ] `error-messages.ts` mapea `POS_DRAFT_DUPLICATE_ORDER_001` y `POS_DRAFT_REQUIRES_PAYMENT_001` a texto accionable en español
-  - [ ] Ningún carril de este paso termina en 500: las evidencias no contienen `SYS_INTERNAL_001`
-  - [ ] Las filas FB-01, FB-02, ERR-34, ERR-35, DB-02 y DB-14 quedan marcadas con su evidencia enlazada
-- **Status:** in-progress
+  - [x] `CreatePosPaymentDto` declara `order_id?: number` con `@IsOptional() @IsInt() @Min(1) @Type(() => Number)`
+  - [x] La orden referida por `order_id` se resuelve dentro del scope de tienda; una orden ajena devuelve 404 sin filtrar datos
+  - [x] Con `order_id` presente, `createOrUpdateOrderFromPos` liquida esa orden y NO llama a la rama de venta fresca
+  - [x] `POS_DRAFT_DUPLICATE_ORDER_001` está registrado en `error-codes.ts` con HTTP 409 y se lanza con `VendixHttpException`
+  - [x] El guard rechaza cuando la orden referida ya tiene un pago `succeeded` o `captured`, y el mensaje nombra el número de orden
+  - [x] `pos-shipping-step.component.ts` declara `editingOrderId` como `input<number | null>(null)` y el shell se lo pasa
+  - [x] `processShippingSale` envía `order_id` cuando el carrito está adoptado y lo omite cuando no lo está
+  - [x] El fiado (`:717`) y el fiado con plazos (`:801`) dejan de responder 400 y registran la cuenta por cobrar
+  - [x] Cobrar un borrador reabierto no incrementa el conteo de filas de `orders`, verificado por SQL antes/después
+  - [x] `payments.order_id` del cobro apunta a la orden preexistente, no a una nueva
+  - [x] Hay un test que falla antes del fix y que fija `errorCode` (no solo `toBeInstanceOf(VendixHttpException)`)
+  - [x] `error-messages.ts` mapea `POS_DRAFT_DUPLICATE_ORDER_001` y `POS_DRAFT_REQUIRES_PAYMENT_001` a texto accionable en español
+  - [x] Ningún carril de este paso termina en 500: las evidencias no contienen `SYS_INTERNAL_001`
+  - [x] Las filas FB-01, FB-02, ERR-34, ERR-35, DB-02 y DB-14 quedan marcadas con su evidencia enlazada
+- **Status:** done · mosk 2026-09-24 · 14/14; FB-01/02 ERR-34/35 DB-02/14 [x]. Previo (Fabio): UI #1153/#1155 misma orden, fiados CxC única, replay 409 (`A1-same-order-api.md`, `A1-ui-full-recorrido-1153.md`, `A1-edited-total-1155.md`). Cierre: DB-02/14 por corte be9015d3d, 10 hist=I.1, Q2/Q3=0 (`A1-db02-db14-closure-20260924.md`); backend lectura, frontend 44/44 (`A1-*-regression-20260924.md`). Deuda: CxC #110/#111 OPEN, sin SQL manual.

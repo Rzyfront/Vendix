@@ -962,6 +962,7 @@ export class EcommerceTablesService {
         tax_amount_item: true,
         price_unit_quantity: true,
         variant_image_url: true,
+        notes: true,
         products: {
           select: {
             product_images: {

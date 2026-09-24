@@ -1,0 +1,54 @@
+F.2 SA1 — alias + doble escritura transaccional (DB-25) — 2026-09-24 UTC
+Entorno: local (api.vendix.com → 127.0.0.1), tienda 10 (roku), 1 solo login.
+Cuenta: owner@roku.vendix.com / slug roku. Endpoint: POST /api/store/payments/pos.
+
+(a) POS alias VÁLIDO → HTTP 201 (F.2-SA1-alias-201.json)
+Body: customer_alias='Portería torre B', delivery_type=home_delivery,
+shipping_method_id=9 (Entrega Rápida Local), shipping_rate_id=12,
+shipping_cost=6000, snapshot {address_line1, city Bogotá, CO, coords},
+items=[{product_id 317 x1 @20000}], store_payment_method_id=25 (contra entrega).
+Resp: order id 1226 POS-2026-0361, customer_alias='Portería torre B',
+status pending_payment (on-delivery), payment id 879.
+
+Q1 — orden guarda FK + snapshot + alias sin customer formal:
+SELECT o.id,o.order_number,o.customer_id,o.customer_alias,o.delivery_type,
+  o.shipping_method_id,o.shipping_address_id,
+  o.shipping_address_snapshot IS NOT NULL AS has_snapshot,o.state
+FROM orders o WHERE o.id=1226;
+  id  | order_number  | customer_id |  customer_alias  | delivery_type | shipping_method_id | shipping_address_id | has_snapshot |      state
+------+---------------+-------------+------------------+---------------+--------------------+---------------------+--------------+-----------------
+ 1226 | POS-2026-0361 |             | Portería torre B | home_delivery |                  9 |                 540 | t            | pending_payment
+
+Q2 — la FK apunta a fila huérfana (user_id NULL, is_primary false):
+SELECT a.id,a.store_id,a.user_id,a.is_primary,a.type,a.address_line1,a.city,
+  a.country_code,a.latitude,a.longitude FROM addresses a WHERE a.id=540;
+ id  | store_id | user_id | is_primary |   type   |       address_line1       |  city  | country_code |  latitude  | longitude
+-----+----------+---------+------------+----------+---------------------------+--------+--------------+------------+-----------
+ 540 |       10 |         | f          | shipping | Calle 45 # 12-30 Apto 501 | Bogotá | CO           | 4.64860000 | -74.06280000
+
+Código (sin POST separado): aliasShippingAddressData (payments.service.ts:4290,
+retorna user_id NULL + is_primary false) → tx.addresses.create (:4781) +
+tx.orders.update shipping_address_id (:4787), todo dentro del $transaction de
+processPosPayment (:904). El snapshot queda en orders.shipping_address_snapshot (:4671).
+
+(b) POS alias FALLIDO → HTTP 400 PAY_METHOD_DISABLED_001
+(F.2-SA1-alias-fail.json). Mismo body con store_payment_method_id=99999.
+El throw sale de resolvePosPaymentRoute (:3580, reason payment_method_not_found)
+llamado en :919 DENTRO del $transaction — es decir, DESPUÉS de crear la fila
+huérfana en-tx, por lo que el rollback es real (no trivial):
+stack: resolvePosPaymentRoute (payments.service.ts:3580) ← $transaction
+callback (:919) ← processPosPayment (:904).
+
+Q3 — huérfanas sin orden antes/después (DB-25):
+SELECT count(*) FROM addresses a WHERE a.store_id=10 AND a.user_id IS NULL
+  AND NOT EXISTS (SELECT 1 FROM orders o
+    WHERE o.shipping_address_id=a.id OR o.billing_address_id=a.id);
+BEFORE (tras (a), antes de (b)): 3
+AFTER  (tras (b) fallido):        3
+DELTA: 0. Además max(orders.id) tienda 10 sigue 1226: el intento fallido no
+dejó orden ni dirección.
+
+(c) ERR-25: grep POS_CUSTOMER_REQUIRED_001 → 0 ocurrencias en 201.json y en
+fail.json. La vía alias no dispara el gate de cliente formal.
+
+VEREDICTO: 201 SÍ · FK+snapshot SÍ · delta 0 SÍ · ERR-25 OK.
