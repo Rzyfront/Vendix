@@ -63,3 +63,4 @@
 | 2026-09-24 | mosk | A.4 | Borrador cancelable done 16/16: runtime 7/7 QA#1196-1198; OrdersService 107/107; race SKIP. DB-01→I.4, ERR-38→I.2. | evidence/A4-runtime-matrix-20260924.md; A4-backend-specs-20260924.md |
 | 2026-09-24 | loks | F.1 | Mina is_primary done 13/13: spec OOM→lectura, DB-26 delta 0 nuevas (8 legacy+45 org), t10=11, UX copy OK. Adopción gap sin owner. | evidence/F.1-SA1-db26.txt, F1-* |
 | 2026-09-24 | toss | D.2 | Reuse neto 0 + waste DR5295/CR6135 (skip-row); specs 149/149+29/29; ítem 9 gate release. | evidence/D.2-closeout-20260924.md |
+| 2026-09-24 | boss | D.2 | RULING: ítem 9 [ ] aceptado como gate de release al merge a main (no bloquea done). D.2 AUDIT-PASS 8/9 (desviaciones 1-3 aceptadas; 400→corrobora F-007). DB-11 follow-up→toss (ventana D.3, voltear con evidencia flags). D.3→toss (continuidad D.2); fox=D.4→F.2→F.3. | — |
