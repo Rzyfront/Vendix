@@ -2,7 +2,7 @@
 id: E.5
 title: "Despachar la orden de envío después de finalizarla"
 phase: E
-status: in-progress
+status: done
 owner: loks
 updated: 2026-09-24
 contracts: [FB-20, FB-60, FB-61, DB-07, ERR-04, ERR-19, ERR-20, ERR-21]
@@ -39,5 +39,5 @@ skills: [vendix-backend, vendix-dispatch-routes, vendix-error-handling, vendix-f
   - [x] El gate de estado de la remisión no se relaja y su mensaje nombra el estado real.
   - [x] Una venta con envío y método genera remisión y el badge del detalle la muestra.
   - [x] El conteo de órdenes huérfanas históricas queda registrado como evidencia.
-  - [ ] Ninguna venta con envío nueva queda sin dirección con FK y snapshot.
-- **Status:** in-progress — loks 2026-09-24, 9/10. Fabio 09-23: API 400 tipado, #1119 processing + remisión #226 201/by-order, #1120/#1121 OK, UI± (`E5-ui-*`), gates 4/4. loks: UX copy 3 códigos (spec 23/23), backend OOM→lectura (precedente A.1), huérfanas 0. DB-07 abierto: 4 no-canceladas sin FK/snapshot (#1119,#1144,#1158,#1167), cierra con F.2.
+  - [x] Ninguna venta con envío nueva queda sin dirección con FK y snapshot.
+- **Status:** done — loks 2026-09-24, 10/10. Gate 400 tipado, #1119+#226 201/by-order, mostrador/pickup OK, UI±, gates 4/4, UX copy 23/23, huérfanas 0. DB-07: 0 nuevas (F.2 #1226 FK+snap); ERR-21 no dispara (F.3 #231).
