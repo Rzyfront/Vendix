@@ -49,3 +49,4 @@
 | 2026-09-23 | toss | C.1 | Barridos DB-08/DB-23 (0 postcut) + specs; paso cerrado, ADR-06 accepted. | evidence/C.1-closeout-20260923.md |
 | 2026-09-24 | mosk | A.1 | Guard adoptado done: DB-02/14 por corte (10 hist, 0 post); backend lectura + FE 44/44. | evidence/A1-db02-db14-closure-20260924.md; A1-*-regression-20260924.md |
 | 2026-09-24 | toss | C.2 | Revert live #115→201 + delivered_at NULL; audit postcut 0; censo 3 carriles; F-002 fixed. | evidence/C.2-closeout-20260924.md |
+| 2026-09-24 | mosk | A.3 | Guardas muertas done: mutación→10 rojo, vivo 10/10+policy 46/46; DB-37 0 filas; 2 rojos D.2 intactos. | evidence/A3-guard-specs-20260924.md; A3-db37-closure-20260924.md |

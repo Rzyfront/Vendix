@@ -2,9 +2,9 @@
 id: A.3
 title: "Reparar las dos guardas muertas de cancelación de línea entregada"
 phase: A
-status: in-progress
+status: done
 owner: Fabio
-updated: 2026-09-23
+updated: 2026-09-24
 contracts: [FB-27, ERR-14, ERR-15, ERR-16, DB-02, DB-13, DB-37, DB-44]
 adrs: [ADR-02]
 skills: [vendix-backend, vendix-error-handling, vendix-prisma-scopes, vendix-restaurant-ops, how-to-test]
@@ -40,9 +40,9 @@ skills: [vendix-backend, vendix-error-handling, vendix-prisma-scopes, vendix-res
   - [x] El guard corre ANTES de abrir la transacción del recálculo: un rechazo no escribe nada
   - [x] Cancelar una línea de una orden SIN cobrar sigue funcionando y sigue recalculando totales
   - [x] Hay un test de rechazo que fija el `errorCode`, no solo `toBeInstanceOf(VendixHttpException)`
-  - [ ] Hay un test que falla contra el código actual (la guarda vieja lo dejaría pasar)
+  - [x] Hay un test que falla contra el código actual (la guarda vieja lo dejaría pasar)
   - [x] `error-messages.ts` mapea los dos códigos nuevos con la CTA al reembolso
   - [x] La fila de auditoría `order_item.cancel_delivered` se sigue escribiendo en el camino aceptado
   - [x] El espejo de las mismas dos guardas en `cancelOrderItem` queda declarado como deuda de la fase D, no arreglado aquí
-  - [ ] Las filas FB-27, ERR-14, ERR-15, ERR-16, DB-02, DB-13, DB-37 y DB-44 quedan marcadas con evidencia
-- **Status:** in-progress · Fabio · 2026-09-23 · `evidence/A3-cancel-delivered-matrix.md`: paid #1091, cancelada #1012 y refunded #1093 rechazan 409 sin escribir; UI cobrada muestra CTA Reembolso. Drafts #1160/#1161 aceptan reversa waste, total $0 y auditoría orden+ítem; UI muestra éxito. Jest policy 46/46, OrderFlow 122/122. Pendientes prueba red-before-green documentada y cierre transversal de registros DB-02/13/37/44.
+  - [x] Las filas FB-27, ERR-14, ERR-15, ERR-16, DB-02, DB-13, DB-37 y DB-44 quedan marcadas con evidencia
+- **Status:** done · mosk 2026-09-24 · 14/14; FB-27 ERR-14/15/16 DB-02/13/37/44 [x]. Previo (Fabio): #1091/#1012/#1093 409 sin escribir, #1160/#1161 200 waste+auditoría (`A3-cancel-delivered-matrix.md`). Cierre: mutación guardas muertas → 10 guard-tests rojo, vivo 10/10 + policy 46/46 (`A3-guard-specs-20260924.md`); DB-37 0 filas (`A3-db37-closure-20260924.md`); 2 rojos D.2 intactos.
