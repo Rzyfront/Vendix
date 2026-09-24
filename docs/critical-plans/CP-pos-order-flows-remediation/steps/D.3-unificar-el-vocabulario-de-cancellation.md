@@ -39,4 +39,5 @@ skills: [vendix-restaurant-ops, vendix-validation, vendix-error-handling, how-to
   - [ ] El tipo de la vista de mesa admite el vocabulario ampliado y la mesa muestra el destino elegido.
   - [ ] El docblock del DTO documenta qué carril escribe qué valor y cuál habilita rehacer el plato.
   - [ ] F-003 — AUDIT F-033 - tercer vocabulario de cancellation_type excluido del remake (major)
+  - [ ] F-008 — resend 500 por select cancelled_at inexistente en orders: fix + regresión 201/replay (major)
 - **Status:** pending

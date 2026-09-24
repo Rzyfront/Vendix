@@ -34,4 +34,5 @@ skills: [vendix-business-analysis, vendix-fiscal-scope, vendix-payment-processor
   - [ ] El carril de cobro sobre orden adoptada de la pasarela queda congelado, condicionado a acotar antes su disparador desde la UI
   - [ ] Las seis fichas de origen quedan con dueño, razón y condición escritas: ninguna queda abierta sin dueño
   - [ ] Ninguna línea de código, configuración o esquema cambió en este paso
+  - [ ] F-009 — deep-link /admin/orders/sales/:id muerto: aceptar deuda o planear fix (minor)
 - **Status:** pending
