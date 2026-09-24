@@ -86,3 +86,4 @@
 | 2026-09-24 | loks | E.5 | Cierre 10/10 done: DB-07 0 nuevas (F.2 #1226 FK+snap), ERR-21 no dispara (F.3 #231 201). Autodesbloqueo propio. | evidence/F.2-SA*, F.3-SA1-* |
 | 2026-09-24 | boss | D.4 | PASS D.4 11/12 (1a2dd8b0b, fase D completa 4/4, 34/38). Ítem 9 E2E modal→runner-4. Obs toss mesa-cancel sin audit vs detalle-con-audit→mosk I.5. |
 | 2026-09-24 | boss | D.4 | Verificación indep: specs D.4 3/3 ✓. 14 rojos cancelOrder (egreso caja + kitchenDisposition) = mocks ADR-12 mosk, fuera de D.4 → derivado a mosk. |
+| 2026-09-24 | boss | F.2-UI | E2E Roku PASS: orden #1233 alias+envío, huérfana #543, snapshot+coords, detalle OK, 20 png. Playwright MCP caído→fallback playwright-core. 403 uvt-threshold preexistente→triage I.6. #1233 queda processing (disposición pendiente). |
