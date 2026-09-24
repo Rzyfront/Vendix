@@ -1116,6 +1116,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La mesa no está en un estado válido para esta acción.',
   TABLE_SESSION_ADD_ITEMS_INVALID:
     'No se pudieron agregar los productos a la cuenta de la mesa. Verifica que estén disponibles e intenta de nuevo.',
+  // D.4 / ERR-15 — post-cobro: el plato ya pagado no se cancela, se reembolsa.
+  TABLE_SESSION_ITEM_NOT_REMOVABLE:
+    'La orden ya fue cobrada. Usa Reembolso para devolver el plato; la cancelación no devuelve el dinero.',
   MENU_ITEM_NOT_AVAILABLE_NOW:
     'Este producto no está disponible en este momento (fuera del horario del menú).',
   TABLE_GUEST_COUNT_EXCEEDS_CAPACITY:

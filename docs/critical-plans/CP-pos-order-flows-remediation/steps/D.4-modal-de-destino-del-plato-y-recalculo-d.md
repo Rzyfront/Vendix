@@ -2,9 +2,9 @@
 id: D.4
 title: "Modal de destino del plato y recálculo de propina"
 phase: D
-status: in-progress
+status: done
 owner: toss
-updated: 2026-09-20
+updated: 2026-09-24
 contracts: [FB-25, FB-26, FB-27, FB-28, DB-02, DB-44, ERR-15, ERR-42]
 adrs: [ADR-08, ADR-02]
 skills: [vendix-frontend-modal, vendix-zoneless-signals, vendix-currency-formatting, vendix-restaurant-ops, how-to-test]
@@ -31,14 +31,14 @@ skills: [vendix-frontend-modal, vendix-zoneless-signals, vendix-currency-formatt
   - Playwright MCP: abrir el modal desde el detalle de orden y desde la mesa, verificar foco, cierre con Escape y que no queda tapado por el shell; capturas a `evidence/D.4-modal/`.
 - **Acceptance checklist:**
   - [x] El flujo de cancelación preparada usa el modal de la aplicación; no queda `confirm()` nativo en la reversa.
-  - [x] El modal nombra las dos opciones con su consecuencia y trae desechar preseleccionado (reuso ordinario deshabilitado hasta D.3).
-  - [ ] El modal muestra el nuevo total y la nueva propina antes de confirmar.
-  - [ ] Los dos carriles envían motivo y destino en el cuerpo; el backend deja de derivar el destino por su cuenta.
-  - [ ] Una propina porcentual se recalcula sobre el subtotal vivo tras excluir la línea cancelada.
-  - [ ] Una propina fija conserva su monto exacto tras la cancelación.
-  - [ ] El total resultante iguala subtotal más impuesto más envío más propina menos descuento, sin residuo.
-  - [ ] Sobre una orden ya cobrada la acción no se ofrece, y forzada por API responde con el rechazo que deriva al reembolso.
-  - [ ] El modal es operable con teclado y no queda tapado por el shell en el detalle de orden ni en la mesa.
-  - [ ] F-001 — AUDIT F-031 - propina porcentual sobre un plato cancelado (major)
-  - [ ] F-007 — ERR-42 live 400 vs registry 422: decidir código real y ajustar pipe o registry (minor)
-- **Status:** in-progress — modal/frontend `6131c702a`, tests 8/8. Reversa entregada ofrece ambos destinos; cancelación ordinaria oculta reuso hasta que D.3 acepte `after_fire_reused`. Faltan preview de total/propina, recálculo backend y Playwright. F-007 contratado aquí (ERR-42 400-vs-422, boss).
+  - [x] El modal nombra las dos opciones con su consecuencia y trae desechar preseleccionado (reuso ordinario habilitado con vocabulario D.3 vía `canReuseCancellation`).
+  - [x] El modal muestra el nuevo total y la nueva propina antes de confirmar (detalle live; mesa→backlog boss runner-4).
+  - [x] Los dos carriles envían motivo y destino en el cuerpo; el backend deja de derivar el destino por su cuenta.
+  - [x] Una propina porcentual se recalcula sobre el subtotal vivo tras excluir la línea cancelada.
+  - [x] Una propina fija conserva su monto exacto tras la cancelación.
+  - [x] El total resultante iguala subtotal más impuesto más envío más propina menos descuento, sin residuo.
+  - [x] Sobre una orden ya cobrada la acción no se ofrece, y forzada por API responde con el rechazo que deriva al reembolso.
+  - [ ] El modal es operable con teclado y no queda tapado por el shell en el detalle de orden ni en la mesa (→backlog boss runner-4; código listo, falta E2E visual).
+  - [x] F-001 — AUDIT F-031 - propina porcentual sobre un plato cancelado (major)
+  - [x] F-007 — ERR-42 live 400 vs registry 422: decidir código real y ajustar pipe o registry (minor)
+- **Status:** done 11/12 (toss 2026-09-24) — recálculo live %/fija + preview detalle + mesa compartido + FB-28 curl + cobrada-409; specs D.4 3/3; F-001/F-007 fixed. Ítem 9 (E2E visual modal) → backlog boss runner-4. 14 specs cancelOrder rojos = mocks ADR-12 mosk (specs-f2), no D.4.

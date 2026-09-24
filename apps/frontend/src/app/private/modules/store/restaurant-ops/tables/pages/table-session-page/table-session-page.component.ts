@@ -27,7 +27,10 @@ import {
   DialogService,
   DropdownComponent,
   ModalComponent,
+  ItemCancellationModalComponent,
+  cancellationTypeForDestination,
 } from '../../../../../../../shared/components/index';
+import type { ItemCancellationSubmit } from '../../../../../../../shared/components/index';
 import {
   TimelineStep,
   TimelineVariant,
@@ -119,6 +122,7 @@ interface SecondaryAction {
     SpinnerComponent,
     DropdownComponent,
     ModalComponent,
+    ItemCancellationModalComponent,
     CurrencyPipe,
     AddItemsModalComponent,
     SplitOrderModalComponent,
@@ -188,6 +192,24 @@ export class TableSessionPageComponent implements OnInit {
   readonly isAssigningCustomer = signal(false);
   /** Order-item id currently being removed (drives the per-row spinner). */
   readonly removingItemId = signal<number | null>(null);
+  /**
+   * D.4 — objetivo del modal compartido "Destino del plato" (solo preparados;
+   * el resto conserva el flujo confirm+prompt). `null` = modal cerrado.
+   */
+  readonly cancellationTarget = signal<TableSessionOrderItem | null>(null);
+  /** Error de red del último submit; se muestra dentro del modal sin cerrarlo. */
+  readonly cancellationError = signal<string | null>(null);
+  readonly cancellationModalOpen = computed(() => this.cancellationTarget() !== null);
+  readonly cancellationPreparedFired = computed(
+    () => this.cancellationTarget()?.inventory_consumed_at_fire === true,
+  );
+  /**
+   * D.4 — mesa NO pasa preview: el GET de sesión no trae `order_item_taxes`
+   * por línea ni `tip_*` de la orden, así que el espejo no puede correr
+   * exacto y el modal muestra la nota de total actual. Mismo componente,
+   * sin inventar el impuesto de la línea.
+   */
+  readonly mesaCancellationPreview = signal<null>(null);
 
   /**
    * Clock tick (ms), refreshed every 60s. Drives `elapsedSinceOpen` and
@@ -1052,11 +1074,20 @@ export class TableSessionPageComponent implements OnInit {
    * UX: el motivo se pide con `DialogService.prompt` (PromptModalComponent
    * del design system) tras un `confirm` previo. Distinto copy entre
    * `firedPending` (merma) y resto (exclusión del total).
+   *
+   * D.4: los preparados (`item_type === 'prepared'`) NO pasan por aquí —
+   * usan el modal compartido "Destino del plato" (motivo + destino) vía
+   * `openItemCancellationModal`. Este flujo confirm+prompt queda solo para
+   * ítems que nunca pasan por cocina.
    */
   onRemoveItem(item: TableSessionOrderItem): void {
     const sessionId = this.session()?.id;
     if (!sessionId || this.isClosed()) return;
     if (!this.canRemoveItem(item)) return;
+    if (this.isPrepared(item)) {
+      this.openItemCancellationModal(item);
+      return;
+    }
     const firedPending =
       this.isItemFired(item) && this.kitchenStatusFor(item) === 'pending';
     this.dialogService
@@ -1122,6 +1153,64 @@ export class TableSessionPageComponent implements OnInit {
                 },
               });
           });
+      });
+  }
+
+  /**
+   * D.4 — abre el modal compartido "Destino del plato" para un preparado de
+   * la cuenta. El destino elegido viaja como `cancellation_type` canónico
+   * (`after_fire_waste` / `after_fire_reused`); sin disparo a cocina se omite
+   * y el backend resuelve `before_fire` por `inventory_consumed_at_fire`.
+   */
+  openItemCancellationModal(item: TableSessionOrderItem): void {
+    if (!this.session()?.id || this.cancellationTarget()) return;
+    this.cancellationError.set(null);
+    this.cancellationTarget.set(item);
+  }
+
+  closeItemCancellationModal(): void {
+    if (this.removingItemId() !== null) return;
+    this.cancellationTarget.set(null);
+    this.cancellationError.set(null);
+  }
+
+  /** D.4 — submit del modal compartido: motivo + destino → seam de mesa. */
+  onCancellationConfirmed(result: ItemCancellationSubmit): void {
+    const item = this.cancellationTarget();
+    const sessionId = this.session()?.id;
+    if (!item || !sessionId || this.removingItemId() !== null) return;
+    const reason = result.reason.trim();
+    if (reason.length < 3 || reason.length > 500) {
+      this.cancellationError.set('El motivo debe tener entre 3 y 500 caracteres.');
+      return;
+    }
+    const preparedFired = item.inventory_consumed_at_fire === true;
+    const cancellation_type = cancellationTypeForDestination(result.destination, preparedFired);
+    this.removingItemId.set(item.id);
+    this.cancellationError.set(null);
+    this.tablesService
+      .cancelOrderItem(
+        sessionId,
+        item.id,
+        cancellation_type ? { reason, cancellation_type } : { reason },
+      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (s) => {
+          this.removingItemId.set(null);
+          this.cancellationTarget.set(null);
+          this.session.set(s);
+          this.seedKitchenStateFromOrder(s);
+          this.toastService.success(
+            preparedFired ? 'Plato cancelado como merma' : 'Plato cancelado de la cuenta',
+          );
+        },
+        error: (err: unknown) => {
+          this.removingItemId.set(null);
+          this.cancellationError.set(
+            typeof err === 'string' ? err : 'Error al cancelar el plato',
+          );
+        },
       });
   }
 

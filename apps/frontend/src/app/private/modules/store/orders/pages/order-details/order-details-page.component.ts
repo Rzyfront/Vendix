@@ -96,6 +96,7 @@ import { ShippingMethodsService } from '../../../settings/shipping/services/ship
 import { StoreShippingMethod } from '../../../settings/shipping/interfaces/shipping-methods.interface';
 import { ShippingRate } from '../../../settings/shipping/interfaces/shipping-zones.interface';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
+import { ItemCancellationModalComponent, previewItemCancellation, type ItemCancellationSubmit } from '../../../../../../shared/components';
 import { OrderPaymentModalComponent } from '../../components/order-payment-modal/order-payment-modal.component';
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
@@ -256,6 +257,7 @@ type RefundState =
     DatePipe,
     ModalComponent,
     CurrencyPipe,
+    ItemCancellationModalComponent,
     OrderPaymentModalComponent,
     OrderRefundModalComponent,
     InvoiceDetailComponent,
@@ -4032,7 +4034,11 @@ export class OrderDetailsPageComponent {
         },
         error: (err: unknown) => {
           this.deliveringItemId.set(null);
-          this.toastService.error('No se pudo marcar como entregado');
+          // C.3: passthrough del mensaje mapeado (ERR-12 lleva al KDS).
+          const { userMessage } = parseApiError(err);
+          this.toastService.error(
+            userMessage || 'No se pudo marcar como entregado',
+          );
           console.error('Deliver item failed', err);
         },
       });
@@ -4047,8 +4053,8 @@ export class OrderDetailsPageComponent {
    */
   readonly cancellingItemId = signal<number | null>(null);
   readonly cancellationTarget = signal<{ item: OrderItem; mode: ItemCancellationMode } | null>(null);
-  readonly cancellationReason = signal('');
-  readonly cancellationDestination = signal<ItemCancellationDestination>('waste');
+  // D.4 — motivo/destino viven en el modal compartido (dueño del form);
+  // acá solo quedan target, error de red y preview.
   readonly cancellationError = signal<string | null>(null);
   readonly cancellationModalOpen = computed(() => this.cancellationTarget() !== null);
   readonly cancellationPaid = computed(() => isOrderItemCancellationPaid(this.order()));
@@ -4062,6 +4068,18 @@ export class OrderDetailsPageComponent {
     this.cancellationTarget()?.mode === 'reverse' || this.cancellationPreparedFired(),
   );
 
+  /**
+   * D.4 — preview del modal "Destino del plato": nuevo total y nueva propina
+   * calculados sobre los valores vivos del Order cargado (el payload de
+   * cancelación no trae totales). Espejo exacto del recálculo backend.
+   */
+  readonly cancellationPreview = computed(() => {
+    const order = this.order();
+    const target = this.cancellationTarget();
+    if (!order || !target) return null;
+    return previewItemCancellation(order.order_items ?? [], target.item.id, order);
+  });
+
   private cancellationBlockedByPayment(): boolean {
     if (!isOrderItemCancellationPaid(this.order())) return false;
     this.closeItemCancellationModal();
@@ -4073,8 +4091,6 @@ export class OrderDetailsPageComponent {
   closeItemCancellationModal(): void {
     if (this.cancellingItemId() !== null || this.reversingItemId() !== null) return;
     this.cancellationTarget.set(null);
-    this.cancellationReason.set('');
-    this.cancellationDestination.set('waste');
     this.cancellationError.set(null);
   }
 
@@ -4219,25 +4235,23 @@ export class OrderDetailsPageComponent {
 
   private openItemCancellationModal(item: OrderItem, mode: ItemCancellationMode): void {
     if (!this.order()?.id || this.cancellationTarget()) return;
-    this.cancellationReason.set('');
-    this.cancellationDestination.set('waste');
     this.cancellationError.set(null);
     this.cancellationTarget.set({ item, mode });
   }
 
-  submitItemCancellation(): void {
+  submitItemCancellation(result: ItemCancellationSubmit): void {
     if (this.cancellationBlockedByPayment()) return;
     const target = this.cancellationTarget();
     const orderId = this.order()?.id;
     if (!target || !orderId || this.cancellingItemId() !== null || this.reversingItemId() !== null) return;
-    const reason = this.cancellationReason().trim();
+    const reason = result.reason.trim();
     if (reason.length < 3 || reason.length > 500) {
       this.cancellationError.set('El motivo debe tener entre 3 y 500 caracteres.');
       return;
     }
     let body: ReturnType<typeof cancellationBody>;
     try {
-      body = cancellationBody(target.mode, reason, this.cancellationDestination(),
+      body = cancellationBody(target.mode, reason, result.destination,
         this.cancellationPreparedFired());
     } catch (err) {
       this.cancellationError.set((err as Error).message);

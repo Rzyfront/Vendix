@@ -79,6 +79,17 @@ export interface Order {
   shipping_tax_amount?: number | string;
   discount_amount: number;
   grand_total: number;
+  /**
+   * D.4 CP-pos-order-flows-remediation — propina persistida en `orders`
+   * (`tip_amount`, `tip_type`, `tip_value`). `orders.service.ts:findOne`
+   * devuelve la fila sin `select`, así que YA viajan por el cable; esto
+   * solo declara lo que llega (precedente: `delivered_at`). El preview
+   * del modal "Destino del plato" re-deriva la porcentual sobre la base
+   * viva con el mismo redondeo del backend.
+   */
+  tip_amount?: number | string | null;
+  tip_type?: string | null;
+  tip_value?: number | string | null;
   currency: string;
   payment_form?: string;
   credit_type?: 'free' | 'installments' | null;
@@ -323,6 +334,13 @@ export interface OrderItem {
   final_total_price?: number | null;
   tax_rate?: number;
   tax_amount_item?: number;
+  /**
+   * D.4 — desglose de impuesto PERSISTIDO por línea. `findOne` lo incluye
+   * (`order_item_taxes: true`): cada fila YA es el total de impuesto de
+   * esa línea. Es la única fuente válida para el preview (F-082 prohíbe
+   * sumar `tax_amount_item`, que mezcla convenciones por unidad/línea).
+   */
+  order_item_taxes?: Array<{ tax_amount?: number | string | null } | null> | null;
   applied_price_tier_id?: number | null;
   applied_price_tier_name_snapshot?: string | null;
   stock_units_consumed?: number | null;

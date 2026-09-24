@@ -779,4 +779,18 @@
     (confirmed)="onKitchenConfirmed($event)"
     (cancelled)="onKitchenCancelled()"
   />
+
+  <!-- D.4 — modal compartido "Destino del plato" (mismo componente que detalle de orden). -->
+  <app-item-cancellation-modal
+    [isOpen]="cancellationModalOpen()"
+    (isOpenChange)="!$event && closeItemCancellationModal()"
+    [itemName]="cancellationTarget()?.product_name || ''"
+    [showDestination]="cancellationPreparedFired()"
+    [canReuse]="cancellationPreparedFired()"
+    [inFlight]="removingItemId() !== null"
+    [serverError]="cancellationError()"
+    [currentTotal]="orderTotal()"
+    [preview]="mesaCancellationPreview()"
+    (confirmed)="onCancellationConfirmed($event)"
+  />
 </div>

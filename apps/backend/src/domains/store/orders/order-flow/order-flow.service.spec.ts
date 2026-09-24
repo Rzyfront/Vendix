@@ -2755,6 +2755,97 @@ describe('D.2 — cancelación de una línea prepared ya consumida', () => {
  * 1060 paso 3 — si el finish falla tras el claim, `payOrder` restaura el
  * estado previo al claim (el pago compensado con motivo se conserva).
  */
+describe('D.4 — recálculo de propina al cancelar (F-001)', () => {
+  const ORDER_ID = 5017;
+  const ITEM_ID = 901;
+
+  const buildService = (orderTip: Record<string, unknown>) => {
+    const txMock: any = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: ORDER_ID, state: 'created' }]),
+      payments: { findFirst: jest.fn().mockResolvedValue(null) },
+      order_items: {
+        update: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([
+          { total_price: 20000, order_item_taxes: [{ tax_amount: 3800 }] },
+        ]),
+      },
+      orders: {
+        findFirst: jest.fn().mockResolvedValue({ active_financial_split_id: null }),
+        update: jest.fn().mockResolvedValue({}),
+      },
+    };
+    const prismaMock: any = {
+      order_items: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: ITEM_ID,
+          product_id: 11,
+          product_variant_id: null,
+          quantity: 1,
+          delivered_at: new Date('2026-09-10T12:00:00.000Z'),
+          cancelled_at: null,
+        }),
+      },
+      $transaction: jest.fn((cb: any) => cb(txMock)),
+    };
+    const service = new OrderFlowService(
+      prismaMock as unknown as StorePrismaService,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { updateStock: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      { logCustom: jest.fn() } as any,
+    );
+    jest.spyOn(service as any, 'getOrder').mockResolvedValue({
+      id: ORDER_ID,
+      state: 'created',
+      store_id: 4,
+      payments: [],
+      shipping_cost: 0,
+      discount_amount: 0,
+      ...orderTip,
+    });
+    return { service, txMock };
+  };
+
+  it('porcentual: se re-deriva sobre la base viva y persiste tip_amount', async () => {
+    const { service, txMock } = buildService({
+      tip_type: 'percentage',
+      tip_value: 10,
+      tip_amount: 3000,
+    });
+    await service.cancelDeliveredOrderItem(ORDER_ID, ITEM_ID, 'motivo válido', 'waste');
+    const data = txMock.orders.update.mock.calls[0][0].data;
+    // Base viva 20000+3800 al 10% = 2380 (no los 3000 viejos).
+    expect(Number(data.tip_amount)).toBe(2380);
+    expect(Number(data.grand_total)).toBe(20000 + 3800 + 2380);
+    expect(Number(data.subtotal_amount)).toBe(20000);
+  });
+
+  it('fija: conserva su monto exacto y no re-persiste tip_amount', async () => {
+    const { service, txMock } = buildService({
+      tip_type: 'fixed',
+      tip_value: 2000,
+      tip_amount: 2000,
+    });
+    await service.cancelDeliveredOrderItem(ORDER_ID, ITEM_ID, 'motivo válido', 'waste');
+    const data = txMock.orders.update.mock.calls[0][0].data;
+    expect('tip_amount' in data).toBe(false);
+    expect(Number(data.grand_total)).toBe(20000 + 3800 + 2000);
+  });
+
+  it('rederivePercentageTip: null para fija, sin tipo o porcentaje no positivo', async () => {
+    const { service } = buildService({});
+    const rederive = (service as any).rederivePercentageTip.bind(service);
+    expect(rederive({ tip_type: 'fixed', tip_value: 2000 }, 20000, 3800)).toBeNull();
+    expect(rederive({ tip_type: null, tip_value: null }, 20000, 3800)).toBeNull();
+    expect(rederive({ tip_type: 'percentage', tip_value: 0 }, 20000, 3800)).toBeNull();
+    expect(rederive({ tip_type: 'percentage', tip_value: 10 }, 20000, 3800)).toBe(2380);
+  });
+});
+
 describe('OrderFlowService.payOrder — finish-falla restaura estado (1060 paso 3)', () => {
   const DTO: any = { store_payment_method_id: 1, payment_type: PaymentType.DIRECT };
 

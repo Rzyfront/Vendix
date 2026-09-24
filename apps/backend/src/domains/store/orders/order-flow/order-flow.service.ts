@@ -2563,6 +2563,26 @@ export class OrderFlowService {
    * Devuelve la vista básica de la orden (forma `getOrder`, igual que
    * `deliverOrderItem`) para que el frontend reemplace su estado.
    */
+  /**
+   * D.4 (F-001) — Re-deriva una propina porcentual sobre la base viva
+   * (subtotal + impuesto de las líneas activas, misma base bruta de
+   * E.6/`resolveTip`). La fija (o sin tipo) se respeta tal cual: retorna
+   * null y el caller conserva el monto persistido. Solo corre en órdenes
+   * abiertas (el cobro bloquea la cancelación antes), así que nunca toca
+   * una propina ya cobrada. Redondeo idéntico al del cobro.
+   */
+  private rederivePercentageTip(
+    order: { tip_type?: string | null; tip_value?: number | string | null },
+    subtotal: number,
+    tax: number,
+  ): number | null {
+    if (order.tip_type !== 'percentage') return null;
+    const pct = Number(order.tip_value ?? 0);
+    if (!(pct > 0)) return null;
+    const raw = (Number(subtotal || 0) + Number(tax || 0)) * (pct / 100);
+    return Math.round((raw + Number.EPSILON) * 100) / 100;
+  }
+
   async cancelOrderItem(
     orderId: number,
     orderItemId: number,
@@ -2844,7 +2864,15 @@ export class OrderFlowService {
       // recalcula (no hay línea de envío/propina que tocar aquí), sólo deja
       // de perderlos. Clamp a 0 por paridad con el resto de carriles.
       const shippingCost = Number((order as any).shipping_cost ?? 0);
-      const tipAmount = Number((order as any).tip_amount ?? 0);
+      // D.4 (F-001): la porcentual se re-deriva sobre la base viva; la
+      // fija se respeta. `tip_amount` solo se persiste cuando se re-deriva.
+      const rederivedTip = this.rederivePercentageTip(
+        order as any,
+        subtotal,
+        tax,
+      );
+      const tipAmount =
+        rederivedTip ?? Number((order as any).tip_amount ?? 0);
       const discountAmount = Number((order as any).discount_amount ?? 0);
       const grandTotal = Math.max(
         0,
@@ -2856,6 +2884,9 @@ export class OrderFlowService {
           subtotal_amount: new Prisma.Decimal(subtotal),
           tax_amount: new Prisma.Decimal(tax),
           grand_total: new Prisma.Decimal(grandTotal),
+          ...(rederivedTip != null
+            ? { tip_amount: new Prisma.Decimal(rederivedTip) }
+            : {}),
           updated_at: new Date(),
         },
       });
@@ -3126,7 +3157,15 @@ export class OrderFlowService {
         0,
       );
       const shippingCost = Number((order as any).shipping_cost ?? 0);
-      const tipAmount = Number((order as any).tip_amount ?? 0);
+      // D.4 (F-001): la porcentual se re-deriva sobre la base viva; la
+      // fija se respeta. `tip_amount` solo se persiste cuando se re-deriva.
+      const rederivedTip = this.rederivePercentageTip(
+        order as any,
+        subtotal,
+        tax,
+      );
+      const tipAmount =
+        rederivedTip ?? Number((order as any).tip_amount ?? 0);
       const discountAmount = Number((order as any).discount_amount ?? 0);
       const grandTotal = Math.max(
         0,
@@ -3138,6 +3177,9 @@ export class OrderFlowService {
           subtotal_amount: new Prisma.Decimal(subtotal),
           tax_amount: new Prisma.Decimal(tax),
           grand_total: new Prisma.Decimal(grandTotal),
+          ...(rederivedTip != null
+            ? { tip_amount: new Prisma.Decimal(rederivedTip) }
+            : {}),
           updated_at: new Date(),
         },
       });

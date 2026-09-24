@@ -37,6 +37,19 @@ export { InputButtonsComponent } from './input-buttons/input-buttons.component';
 export { PasswordRequirementsComponent } from './password-requirements/password-requirements.component';
 export { SpinnerComponent } from './spinner/spinner.component';
 export { ModalComponent } from './modal/modal.component';
+export { ItemCancellationModalComponent } from './item-cancellation-modal/item-cancellation-modal.component';
+export type { ItemCancellationSubmit } from './item-cancellation-modal/item-cancellation-modal.component';
+export type {
+  ItemCancellationDestination,
+  ItemCancellationPreview,
+  CancellationPreviewLine,
+  CancellationPreviewOrder,
+} from './item-cancellation-modal/item-cancellation-totals';
+export {
+  previewItemCancellation,
+  rederivePercentageTip,
+  cancellationTypeForDestination,
+} from './item-cancellation-modal/item-cancellation-totals';
 export { ProductPickerModalComponent } from './product-picker-modal';
 export type { ProductPickerOption } from './product-picker-modal';
 export { TaxSelectorComponent } from './tax-selector';
