@@ -37,4 +37,5 @@ skills: [vendix-business-analysis, vendix-fiscal-scope, vendix-payment-processor
   - [ ] F-009 — deep-link /admin/orders/sales/:id muerto: aceptar deuda o planear fix (minor)
   - [ ] Deudas C.3: FB-41 force-take + raza S2-mesa/ready→revert + hueco in_preparation: aceptar con dueño/razón o planear fix
   - [ ] 403 preexistente GET uvt-threshold en cada carga POS (F.2-UI): aceptar como deuda ajena o planear fix
+  - [ ] NG0100 ExpressionChanged ×5 en recibo POS (E.5-UI, probable bug zoneless preexistente): aceptar o planear fix
 - **Status:** pending

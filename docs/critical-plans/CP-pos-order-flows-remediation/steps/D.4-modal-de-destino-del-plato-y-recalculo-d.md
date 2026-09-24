@@ -38,7 +38,7 @@ skills: [vendix-frontend-modal, vendix-zoneless-signals, vendix-currency-formatt
   - [x] Una propina fija conserva su monto exacto tras la cancelación.
   - [x] El total resultante iguala subtotal más impuesto más envío más propina menos descuento, sin residuo.
   - [x] Sobre una orden ya cobrada la acción no se ofrece, y forzada por API responde con el rechazo que deriva al reembolso.
-  - [ ] El modal es operable con teclado y no queda tapado por el shell en el detalle de orden ni en la mesa (→backlog boss runner-4; código listo, falta E2E visual).
+  - [x] El modal es operable con teclado y no queda tapado por el shell en el detalle de orden ni en la mesa (runner-4 Roku PASS: Tab trap + Escape + no tapado en ambos carriles; preview en detalle, nota en mesa por diseño).
   - [x] F-001 — AUDIT F-031 - propina porcentual sobre un plato cancelado (major)
   - [x] F-007 — ERR-42 live 400 vs registry 422: decidir código real y ajustar pipe o registry (minor)
-- **Status:** done 11/12 (toss 2026-09-24) — recálculo live %/fija + preview detalle + mesa compartido + FB-28 curl + cobrada-409; specs D.4 3/3; F-001/F-007 fixed. Ítem 9 (E2E visual modal) → backlog boss runner-4. 14 specs cancelOrder rojos = mocks ADR-12 mosk (specs-f2), no D.4.
+- **Status:** done 12/12 (toss código + boss runner-4 E2E 2026-09-24) — recálculo live %/fija + preview detalle + mesa compartido + FB-28 curl + cobrada-409; specs D.4 3/3; F-001/F-007 fixed. Ítem 9 E2E modal PASS (teclado + no tapado detalle/mesa). 14 specs cancelOrder rojos = mocks ADR-12 mosk (specs-f2), no D.4.
