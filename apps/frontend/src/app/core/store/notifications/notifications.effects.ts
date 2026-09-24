@@ -56,6 +56,21 @@ export class NotificationsEffects {
   }
 
   /**
+   * QUI-854 — el Web Push solo aplica a paneles staff (admin). En el
+   * storefront (STORE_ECOMMERCE/CUSTOMER) el bell es solo in-app (SSE/poll);
+   * registrar un service worker push desde ahí golpearía
+   * /store/notifications/push/* que el DomainScopeGuard ya 403a al customer.
+   */
+  private isStaffApp(): boolean {
+    const appType = this.authFacade.selectedAppType();
+    return (
+      appType === 'STORE_ADMIN' ||
+      appType === 'ORG_ADMIN' ||
+      appType === 'VENDIX_ADMIN'
+    );
+  }
+
+  /**
    * Fires once when NgRx effects initialize.
    * Covers page-reload where hydrateAuthState() already populated auth
    * but no login action was dispatched.
@@ -223,6 +238,8 @@ export class NotificationsEffects {
     () =>
       this.actions$.pipe(
         ofType(NotificationsActions.sseConnected),
+        // QUI-854: Web Push es staff-only; el customer no registra push SW.
+        filter(() => this.isStaffApp()),
         tap(() => {
           if (
             this.pushService.isSupported &&
