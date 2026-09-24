@@ -71,3 +71,4 @@
 | 2026-09-24 | boss | D.3 | Re-probe remake: 201 ticket#126 + replay 422 NOT_RESENDABLE ✅ ítem 3. RULINGS: FB-28→D.4 mesa-live (D.3 cierra estructural); F-007 registry→400 en D.4. toss: flip FB-30/40 ERR-17 F-003/008. | evidence/D.3-remake.json |
 | 2026-09-24 | boss | E.1 | E2E 4 carriles PASS runner-2 (4/4 direct_delivery, DB-05 0 implícitas, DB-10 inv, 0 JS). Ítem 10/10 cerrado. loks: volcar step+log+commit. | evidence/E.1-lanes-runner2-20260924.md |
 | 2026-09-24 | boss | B.3 | Re-verify session_paid PASS runner-2 (#134 Pagada live+snapshot, whitelist OK, 0 JS). Batch-2 E2E 3/3. Runner-2b duplicado cancelado (interfería). | evidence/B3-reverify-runner2-20260924.md |
+| 2026-09-24 | boss | — | Cleanup 2b: sesiones #133/#135 cerradas (201), mesas #32/#33→cleaning, 0 abiertas. #1223 finished. | — |
